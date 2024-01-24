@@ -353,10 +353,48 @@ PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   THPVariable* a = reinterpret_cast<THPVariable*>(a_);
   THPVariable* b = reinterpret_cast<THPVariable*>(b_);
 
+  TORCH_CHECK(
+      a->cdata->use_count() == 1,
+      "Expected single reference to a's Tensor object but got ",
+      a->cdata->use_count());
+  TORCH_CHECK(
+      b->cdata->use_count() == 1,
+      "Expected single reference to b's Tensor object but got ",
+      b->cdata->use_count());
+  // weak_use_count() adds 1 if use_count is non-zero
+  TORCH_CHECK(
+      a->cdata->weak_use_count() == 1,
+      "Expected no weakrefs to a's Tensor object but got  ",
+      a->cdata->weak_use_count() - 1);
+  TORCH_CHECK(
+      b->cdata->weak_use_count() == 1,
+      "Expected no weakrefs to b's Tensor object but got  ",
+      b->cdata->weak_use_count() - 1);
+
   // Swap the Tensor Impl
   c10::MaybeOwned<at::Tensor> tmp = a->cdata;
+
+  // The TensorImpls contain PyObjectSlots that have a reference to the PyObject
+  // associated with the TensorImpl. Swap this field as well.
+  c10::optional<PyObject*> mb_obj_a =
+      a->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
+          getPyInterpreter(), /*ignore_hermetic_tls=*/false);
+  c10::optional<PyObject*> mb_obj_b =
+      b->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
+          getPyInterpreter(), /*ignore_hermetic_tls=*/false);
+  TORCH_INTERNAL_ASSERT(
+      mb_obj_a.has_value() && mb_obj_b.has_value(),
+      "Both tensors should have PyObjects tagged by the current python interpreter");
+  TORCH_CHECK(mb_obj_a.value() == a_);
+  TORCH_CHECK(mb_obj_b.value() == b_);
+
   a->cdata = b->cdata;
   b->cdata = tmp;
+
+  a->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(
+      getPyInterpreter(), a_, c10::impl::PyInterpreterStatus::TAGGED_BY_US);
+  b->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(
+      getPyInterpreter(), b_, c10::impl::PyInterpreterStatus::TAGGED_BY_US);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -687,24 +725,6 @@ PyObject* THPModule_userEnabledMathSDP(PyObject* _unused, PyObject* noargs) {
   else
     Py_RETURN_FALSE;
 }
-PyObject* THPModule_setSDPUseCuDNN(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      PyBool_Check(arg),
-      "set_sdp_use_cudnn expects a bool, "
-      "but got %s",
-      THPUtils_typename(arg));
-  at::globalContext().setSDPUseCuDNN(arg == Py_True);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-PyObject* THPModule_userEnabledCuDNNSDP(PyObject* _unused, PyObject* noargs) {
-  if (at::globalContext().userEnabledCuDNNSDP())
-    Py_RETURN_TRUE;
-  else
-    Py_RETURN_FALSE;
-}
-
 PyObject* THPModule_setUserEnabledCuDNN(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -1256,11 +1276,6 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      METH_NOARGS,
      nullptr},
     {"_set_sdp_use_math", THPModule_setSDPUseMath, METH_O, nullptr},
-    {"_get_cudnn_sdp_enabled",
-     THPModule_userEnabledCuDNNSDP,
-     METH_NOARGS,
-     nullptr},
-    {"_set_sdp_use_cudnn", THPModule_setSDPUseCuDNN, METH_O, nullptr},
     {"_get_cudnn_enabled", THPModule_userEnabledCuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_enabled", THPModule_setUserEnabledCuDNN, METH_O, nullptr},
     {"_get_mkldnn_enabled", THPModule_userEnabledMkldnn, METH_NOARGS, nullptr},
@@ -1798,8 +1813,7 @@ Call this whenever a new thread is created in order to propagate values from
       .value("ERROR", sdp::SDPBackend::error)
       .value("MATH", sdp::SDPBackend::math)
       .value("FLASH_ATTENTION", sdp::SDPBackend::flash_attention)
-      .value("EFFICIENT_ATTENTION", sdp::SDPBackend::efficient_attention)
-      .value("CUDNN_ATTENTION", sdp::SDPBackend::cudnn_attention);
+      .value("EFFICIENT_ATTENTION", sdp::SDPBackend::efficient_attention);
 
   py_module.def(
       "_can_use_flash_attention",
