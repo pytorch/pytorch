@@ -23,6 +23,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import textwrap
 import threading
 import warnings
 import weakref
@@ -32,7 +33,6 @@ from copy import copy
 from ctypes import c_void_p, cdll, CDLL
 from dataclasses import field
 from functools import partial
-from importlib import abc
 from pathlib import Path
 from threading import Thread
 from time import sleep, time
@@ -45,7 +45,7 @@ from torch._dynamo.device_interface import (
     get_interface_for_device,
     get_registered_device_interfaces,
 )
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.utils import cache_dir, developer_warning, is_linux
@@ -64,6 +64,7 @@ from torch.hub import _Faketqdm, tqdm
 
 _HERE = os.path.abspath(__file__)
 _TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
+_LINKER_SCRIPT = os.path.join(_TORCH_PATH, "_inductor/script.ld")
 
 if config.is_fbcode():
     from triton.fb import build_paths
@@ -418,11 +419,11 @@ def _reduce_tensor(t):
     """
     See FxGraphCachePickler. Custom reducer to pickle Tensors.
     """
-    # If we see tensors, we know they're contstants stored as attributes on
+    # If we see tensors, we know they're constants stored as attributes on
     # the GraphModule. See tensor lowering; small constants are inlined. If
     # we see a small tensor, therefore, no reference will ultimately remain
     # in the generated code. So we need to include its value in the cache key.
-    # Large constannts are effectively treated as inputs and we consider only
+    # Large constants are effectively treated as inputs and we consider only
     # their metadata.
     metadata = extract_tensor_metadata(t)
     if len(t.shape) == 0 or torch._inductor.graph.GraphLowering.can_inline_constant(t):
@@ -797,11 +798,14 @@ class CompiledFxGraph:
 
     _boxed_call: Optional[bool] = None
 
+    disabled_cudagraphs_reason: Optional[str] = None
+
     def __init__(
         self,
         compiled_artifact: Optional[Callable[..., Any]],
         graph: GraphLowering,
         output_strides: List[Optional[Tuple[int, ...]]],
+        disabled_cudagraphs_reason: Optional[str],
     ):
         self.compiled_artifact = compiled_artifact
         self.cache_key = graph.cache_key
@@ -814,6 +818,7 @@ class CompiledFxGraph:
         self.constants = graph.constants
         self.output_strides = output_strides
         self.guards_expr = None
+        self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
 
     def __call__(self, inputs: List[Any]) -> Any:
         return self.get_current_callable()(inputs)
@@ -1123,7 +1128,13 @@ def get_compile_only(compile_only: bool = True) -> str:
 
 
 def get_shared(shared: bool = True) -> str:
-    return "-shared -fPIC" if shared else ""
+    if not shared:
+        return ""
+    if platform.system() == "Darwin" and "clang" in cpp_compiler():
+        # This causes undefined symbols to behave the same as linux
+        return "-shared -fPIC -undefined dynamic_lookup"
+    else:
+        return "-shared -fPIC"
 
 
 def get_warning_all_flag(warning_all: bool = True) -> str:
@@ -1418,14 +1429,17 @@ def cpp_compile_command(
         if aot_mode and not use_absolute_path:
             inp_name = input
             out_name = output
+            linker_script = _LINKER_SCRIPT
         else:
             # We need to copy any absolute-path torch includes
             inp_name = [os.path.basename(i) for i in input]
             out_name = os.path.basename(output)
+            linker_script = os.path.basename(_LINKER_SCRIPT)
         assert is_clang()
         # Use clang runtime instead of libgcc
         clang_flags += " --rtlib=compiler-rt"
         clang_flags += " -fuse-ld=lld"
+        clang_flags += f" -Wl,--script={linker_script}"
         linker_paths = "-B" + build_paths.glibc_lib()
         linker_paths += " -L" + build_paths.glibc_lib()
     else:
@@ -1686,6 +1700,7 @@ def cpp_prefix() -> str:
 
 # Given a path to an input cpp file and an output path,
 # Attempts to compile the file, storing the output in "output_path"
+@dynamo_timed
 def compile_file(
     input_path: Union[str, List[str]], output_path: str, cmd: List[str]
 ) -> None:
@@ -1702,12 +1717,11 @@ def compile_file(
             # When we build remotely, we need to make sure to carefully copy any files
             # that are required during the compilation process into our build directly.
             # This is where all of the ATen/c10/Torch includes come from.
-            torch_includes_path = os.path.join(
-                torch.utils.cpp_extension._TORCH_PATH, "include"
-            )
+            torch_includes_path = os.path.join(_TORCH_PATH, "include")
             with tempfile.TemporaryDirectory() as tmp_dir:
                 # Copy everything to tmp compilation folder
                 shutil.copy(header_path, os.path.join(tmp_dir, header_name))
+                shutil.copy(_LINKER_SCRIPT, os.path.join(tmp_dir, "script.ld"))
                 for p, f in zip(input_paths, input_files):
                     shutil.copy(p, os.path.join(tmp_dir, f))
                 dest_include_path = os.path.join(tmp_dir, "include")
@@ -1741,19 +1755,24 @@ _libgomp: Optional[CDLL] = None
 
 
 class CppCodeCache:
-    cache: Dict[str, CDLL] = dict()
+    cache: Dict[str, Union[CDLL, ModuleType]] = {}
     clear = staticmethod(cache.clear)
+    cpp_compile_command_flags: Dict[str, Any] = {}
 
     @staticmethod
-    def _load_library(path: str) -> CDLL:
+    def _load_library_inner(path: str, key: str) -> Union[CDLL, ModuleType]:
+        return cdll.LoadLibrary(path)
+
+    @classmethod
+    def _load_library(cls, path: str, key: str) -> Union[CDLL, ModuleType]:
         try:
-            return cdll.LoadLibrary(path)
-        except OSError as e:
+            return cls._load_library_inner(path, key)
+        except (ImportError, OSError) as e:
             if "gomp" in str(e) and os.path.exists("/usr/lib64/libgomp.so.1"):
                 # hacky workaround for fbcode/buck
                 global _libgomp
                 _libgomp = cdll.LoadLibrary("/usr/lib64/libgomp.so.1")
-                return cdll.LoadLibrary(path)
+                return cls._load_library_inner(path, key)
             if "failed to map segment from shared object" in str(e):
                 raise OSError(
                     f"{e}.  The most common reason this may occur is if the {tempfile.gettempdir()} folder "
@@ -1764,9 +1783,14 @@ class CppCodeCache:
             raise
 
     @classmethod
-    def load(cls, source_code: str) -> CDLL:
+    def load(cls, source_code: str, cuda: bool = False) -> Union[CDLL, ModuleType]:
+        cls.cpp_compile_command_flags.update({"cuda": cuda})
         picked_vec_isa = pick_vec_isa()
-        cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))
+        cpp_command = repr(
+            cpp_compile_command(
+                "i", "o", vec_isa=picked_vec_isa, **cls.cpp_compile_command_flags
+            )
+        )
         key, input_path = write(source_code, "cpp", extra=cpp_command)
         if key not in cls.cache:
             from filelock import FileLock
@@ -1778,14 +1802,155 @@ class CppCodeCache:
                 if not os.path.exists(output_path):
                     cmd = shlex.split(
                         cpp_compile_command(
-                            input=input_path, output=output_path, vec_isa=picked_vec_isa
+                            input=input_path,
+                            output=output_path,
+                            vec_isa=picked_vec_isa,
+                            **cls.cpp_compile_command_flags,
                         )
                     )
                     compile_file(input_path, output_path, cmd)
-                cls.cache[key] = cls._load_library(output_path)
-                cls.cache[key].key = key  # type: ignore[attr-defined]
+                cls.cache[key] = cls._load_library(output_path, key)
+                cls.cache[key].key = key  # type: ignore[union-attr]
 
         return cls.cache[key]
+
+
+class CppPythonBindingsCodeCache(CppCodeCache):
+    cache: Dict[str, Union[CDLL, ModuleType]] = {}
+    clear = staticmethod(cache.clear)
+    cpp_compile_command_flags = {
+        "include_pytorch": True,
+        "shared": True,
+    }
+    entry_function = "kernel"
+    call_entry_function = "kernel(%s);Py_RETURN_NONE;"
+    extra_parse_arg = ""
+    suffix_template = textwrap.dedent(
+        """
+        // Python bindings to call %s():
+        #define PY_SSIZE_T_CLEAN
+        #include <Python.h>
+        #include <sstream>
+        #include <cstdlib>
+
+        // This is defined in guards.cpp so we don't need to import PyTorch headers that are slooow.
+        // We manually link it below to workaround issues with fbcode build.
+        static void* (*_torchinductor_pyobject_tensor_data_ptr)(PyObject* obj);
+
+        template <typename T> static inline T parse_arg(PyObject* args, size_t n) {
+            static_assert(std::is_pointer<T>::value, "arg type must be pointer or long");
+            return static_cast<T>(_torchinductor_pyobject_tensor_data_ptr(PyTuple_GET_ITEM(args, n)));
+        }
+        template <> inline long parse_arg<long>(PyObject* args, size_t n) {
+            auto result = PyLong_AsSsize_t(PyTuple_GET_ITEM(args, n));
+            if(result == -1 && PyErr_Occurred())
+                [[unlikely]] throw std::runtime_error("expected int arg");
+            return result;
+        }
+
+        %s
+
+        static PyObject* %s_py(PyObject* self, PyObject* args) {
+            try {
+                if(!PyTuple_CheckExact(args))
+                    [[unlikely]] throw std::runtime_error("tuple args required");
+                if(PyTuple_GET_SIZE(args) != %s)
+                    [[unlikely]] throw std::runtime_error("requires %s args");
+                %s
+            } catch(std::exception const& e) {
+                PyErr_SetString(PyExc_RuntimeError, e.what());
+                return nullptr;
+            } catch(...) {
+                PyErr_SetString(PyExc_RuntimeError, "unhandled error");
+                return nullptr;
+            }
+        }
+
+        static PyMethodDef py_methods[] = {
+            {"%s", %s_py, METH_VARARGS, ""},
+            {NULL, NULL, 0, NULL}};
+
+        static struct PyModuleDef py_module =
+            {PyModuleDef_HEAD_INIT, "%s", NULL, -1, py_methods};
+
+        PyMODINIT_FUNC PyInit_%s(void) {
+            const char* str_addr = std::getenv("_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR");
+            if(!str_addr) {
+                PyErr_SetString(PyExc_RuntimeError, "_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR must be set");
+                return nullptr;
+            }
+            std::istringstream iss(str_addr);
+            uintptr_t addr = 0;
+            iss >> addr;
+            _torchinductor_pyobject_tensor_data_ptr =
+                reinterpret_cast<decltype(_torchinductor_pyobject_tensor_data_ptr)>(addr);
+            return PyModule_Create(&py_module);
+        }
+        """
+    )
+
+    @classmethod
+    def _load_library_inner(cls, path: str, key: str) -> ModuleType:
+        os.environ["_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR"] = str(
+            torch._C._dynamo.guards._torchinductor_pyobject_tensor_data_ptr  # type: ignore[attr-defined]
+        )
+        return importlib.machinery.ExtensionFileLoader(
+            f"{key}.{cls.entry_function}", path
+        ).load_module()  # type: ignore[call-arg]
+
+    @classmethod
+    def load_pybinding(
+        cls, argtypes: List[str], source_code: str, cuda: bool = False
+    ) -> Any:
+        """
+        Wrap a C++ function in fast Python bindings.
+
+        Args:
+            argtypes: The types of args to ENTRY_FUNCTION(), e.g. ["float*", "long"]
+            source_code: C++ source code containing a ENTRY_FUNCTION() function
+
+        Returns:
+            A python version of ENTRY_FUNCTION()
+        """
+        parseargs = ", ".join(
+            f"parse_arg<{argtype.replace('const ', '')}>(args, {n})"
+            for n, argtype in enumerate(argtypes)
+        )
+        suffix = cls.suffix_template % (
+            cls.entry_function,
+            cls.extra_parse_arg,
+            cls.entry_function,
+            len(argtypes),
+            len(argtypes),
+            cls.call_entry_function % parseargs,
+            cls.entry_function,
+            cls.entry_function,
+            cls.entry_function,
+            cls.entry_function,
+        )
+        result = cls.load(source_code + suffix, cuda)
+        assert isinstance(result, ModuleType)
+        return getattr(result, cls.entry_function)
+
+
+class CppWrapperCodeCache(CppPythonBindingsCodeCache):
+    cache: Dict[str, Union[CDLL, ModuleType]] = {}
+    clear = staticmethod(cache.clear)
+    cpp_compile_command_flags = {
+        "include_pytorch": True,
+        "shared": True,
+    }
+    entry_function = "inductor_entry_cpp"
+    call_entry_function = "return THPVariable_WrapList(inductor_entry_cpp(%s));"
+    extra_parse_arg = textwrap.dedent(
+        """
+        #include <torch/csrc/autograd/python_variable.h>
+
+        template <> inline std::vector<at::Tensor> parse_arg<std::vector<at::Tensor>>(PyObject* args, size_t n) {
+            return THPVariable_UnpackList(PyTuple_GET_ITEM(args, n));
+        }
+        """
+    )
 
 
 class PyCodeCache:
@@ -1869,81 +2034,6 @@ class PyCodeCache:
             ]
 
         return parse_stack_trace(entry)
-
-
-class CppWrapperCodeCache:
-    cache: Dict[str, CDLL] = dict()
-    clear = staticmethod(cache.clear)
-
-    @classmethod
-    def load(cls, source_code: str, func_name: str, key: str, cuda: bool) -> CDLL:
-        name = f"inline_extension_{key}"
-        cpp_wrapper_dir = cpp_wrapper_cache_dir(name)
-        os.makedirs(cpp_wrapper_dir, exist_ok=True)
-
-        ext = "so"
-        filepath = os.path.join(cpp_wrapper_dir, f"{name}.{ext}")
-        log.debug("Cpp wrapper code path %s", filepath)
-
-        if key not in cls.cache:
-            log.debug("Cpp wrapper cache miss for %s", filepath)
-            from filelock import FileLock
-
-            lock_dir = get_lock_dir()
-            lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
-            with lock:
-                if not os.path.exists(filepath):
-                    log.debug("Cpp wrapper building %s", filepath)
-
-                    _cpp_flags = cpp_flags()
-                    _opt_flags = optimization_flags()
-                    _shared = get_shared()
-                    _warning_all_flag = get_warning_all_flag()
-                    (
-                        _ipaths,
-                        _lpaths,
-                        _libs,
-                        _macros,
-                        _build_arch_flags,
-                    ) = get_include_and_linking_paths(
-                        vec_isa=pick_vec_isa(),
-                        cuda=cuda,
-                    )
-                    _use_custom_generated_macros = use_custom_generated_macros()
-                    _cpp_wrapper_flags = cpp_wrapper_flags()
-
-                    extra_cflags = f"{_cpp_flags} {_opt_flags} {_warning_all_flag} {_build_arch_flags} {_macros} \
-                    {_cpp_wrapper_flags} {_use_custom_generated_macros}"
-                    # For CPP wrapper, add -ffast-math during linking to make CPU flush denormals.
-                    # CPP wrapper leverages cpp_extension which will do the compilation and linking in two stages.
-                    # We need to explicitly add -ffast-math as a linking flag.
-                    # For the default python wrapper, the compilation and linking are done in one command thus -ffast-math
-                    # will take effect in both compilation and linking.
-                    extra_ldflags = f"{_shared} {_lpaths} {_libs} -ffast-math"
-
-                    mod = torch.utils.cpp_extension.load_inline(
-                        name=name,
-                        build_directory=cpp_wrapper_dir,
-                        cpp_sources=[source_code],
-                        functions=[func_name],
-                        extra_cflags=[extra_cflags],
-                        extra_ldflags=[extra_ldflags],
-                        extra_include_paths=_ipaths,
-                        use_pch=True,
-                    )
-                    log.debug("Cpp wrapper done building %s", filepath)
-                else:
-                    log.debug("Found target .so, cpp wrapper loading %s", filepath)
-                    spec = importlib.util.spec_from_file_location(name, filepath)  # type: ignore[attr-defined]
-                    assert spec is not None
-                    mod = importlib.util.module_from_spec(spec)  # type: ignore[attr-defined]
-                    assert isinstance(spec.loader, abc.Loader)
-                    spec.loader.exec_module(mod)
-                    log.debug("Cpp wrapper done loading %s", filepath)
-
-                cls.cache[key] = mod
-
-        return cls.cache[key]
 
 
 class TritonCodeCache:
@@ -2287,6 +2377,17 @@ def _async_compile_initializer(orig_ppid) -> None:
 
 _watchdog_thread: Optional[Thread] = None
 
+# Used to keep track of all process pools invoked so far.
+_pool_set: Set[ProcessPoolExecutor] = set()
+
+
+def shutdown_compile_workers() -> None:
+    """Shut down all outstanding compile-worker pools."""
+    global _pool_set
+    for pool in _pool_set:
+        pool.shutdown()
+    _pool_set = set()
+
 
 class AsyncCompile:
     def __init__(self) -> None:
@@ -2313,6 +2414,10 @@ class AsyncCompile:
             mp_context=ctx,
             initializer=partial(_async_compile_initializer, orig_ppid),
         )
+
+        global _pool_set
+        _pool_set.add(pool)
+
         # when this pool is created in a subprocess object, the normal exit handler
         # doesn't run, and we need to register our own handler.
         # exitpriority has to be high, because another one of the finalizers will
@@ -2378,11 +2483,30 @@ class AsyncCompile:
         else:
             return _load_kernel(kernel_name, source_code)
 
+    def multi_kernel(self, *args, **kwargs) -> ModuleType:
+        """
+        Async compile the python shim for multi-kernel.
+        """
+
+        def task():
+            from torch._inductor.codegen.multi_kernel import MultiKernelCall
+
+            return MultiKernelCall(*args, **kwargs)
+
+        return self.submit(task)
+
     def cpp(self, source_code: str) -> ModuleType:
         def task():
             return CppCodeCache.load(source_code).kernel
 
         return self.submit(task)
+
+    def cpp_pybinding(self, argtypes: List[str], source_code: str) -> ModuleType:
+        return self.submit(
+            functools.partial(
+                CppPythonBindingsCodeCache.load_pybinding, argtypes, source_code
+            )
+        )
 
     def cuda(self, source_code, dst_file_ext):
         def task():
