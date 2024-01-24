@@ -3054,6 +3054,30 @@ class TestNestedTensorSubclass(TestCase):
 
         gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
 
+    def test_unary_pointwise_transposed_inputs(self, device):
+        a, b, c = (
+            torch.randn(i + 2, 5, requires_grad=True, dtype=torch.float64, device=device) for i in range(3)
+        )
+
+        nt, _ = jagged_from_list([a.detach(), b.detach(), c.detach()], None)
+        nt_t = nt.transpose(1, 2)
+        out = torch.nn.functional.silu(nt_t.sin().cos())
+
+        self.assertEqual(nt_t.shape, out.shape)
+
+        a, b, c = (
+            torch.randn(i + 2, 5, requires_grad=True, dtype=torch.float64, device=device) for i in range(3)
+        )
+
+        def grad_test_func(a, b, c):
+            nt, _ = jagged_from_list([a, b, c], None)
+            nt_t = nt.transpose(1, 2)
+            out = torch.nn.functional.silu(nt_t.sin().cos())
+            return buffer_from_jagged(out)
+
+        gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
+
+
     def test_binary_pointwise(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
@@ -3074,6 +3098,41 @@ class TestNestedTensorSubclass(TestCase):
             nt1, offsets = jagged_from_list([a, b, c], None)
             nt2, offsets = jagged_from_list([a, b, c], offsets)
             out = nt1 * nt2
+            return buffer_from_jagged(out)
+
+        gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
+
+    def test_binary_pointwise_transposed(self, device):
+        a, b, c = (
+            torch.randn(i + 2, 5, dtype=torch.float64, device=device) for i in range(3)
+        )
+
+        nt1, offsets = jagged_from_list([a, b, c], None)
+        nt2, offsets = jagged_from_list([a, b, c], offsets)
+
+        nt1_t = nt1.transpose(1, 2)
+        nt2_t = nt2.transpose(1, 2)
+
+        out = nt1_t * nt2_t
+        self.assertEqual(out.shape, nt1_t.shape)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "cannot call binary pointwise function mul.Tensor with inputs of shapes",
+            lambda: nt1 * nt2_t,
+        )
+
+        a, b, c = (
+            torch.randn(i + 2, 5, requires_grad=True, dtype=torch.float64, device=device) for i in range(3)
+        )
+
+        # Correct usage: chain the calls using the same offsets tensor object
+        def grad_test_func(a, b, c):
+            nt1, offsets = jagged_from_list([a, b, c], None)
+            nt2, offsets = jagged_from_list([a, b, c], offsets)
+            nt1_t = nt1.transpose(1, 2)
+            nt2_t = nt2.transpose(1, 2)
+            out = nt1_t * nt2_t
             return buffer_from_jagged(out)
 
         gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
@@ -3679,6 +3738,35 @@ class TestNestedTensorSubclass(TestCase):
             if not (str(device).startswith("cuda") and dtype == torch.bfloat16):
                 check_forward_backward()
 
+    # @onlyCUDA
+    def test_sdpa_input_validation(self, device):
+        batch_size = 2
+        emb_dims = 1024
+        n_heads = 8
+        head_dims = emb_dims // n_heads
+        dtype = torch.float32
+
+        sen1 = torch.randn(11, emb_dims, dtype=dtype, device=device)
+        sen2 = torch.randn(13, emb_dims, dtype=dtype, device=device)
+
+        query = torch.nn.Linear(emb_dims, emb_dims, bias=False, device=device, dtype=dtype)
+        key = torch.nn.Linear(emb_dims, emb_dims, bias=False, device=device, dtype=dtype)
+        value = torch.nn.Linear(emb_dims, emb_dims, bias=False, device=device, dtype=dtype)
+
+        x_nt = torch.nested.as_nested_tensor([sen1, sen2], layout=torch.jagged)
+
+        def get_view(x):
+            return x.view(*x.size()[0:2], n_heads, head_dims).detach().requires_grad_(True).transpose(1, 3)
+
+        q = get_view(query(x_nt))
+        k = get_view(query(x_nt))
+        v = get_view(query(x_nt))
+
+        self.assertRaisesRegex(
+            ValueError,
+            "Expected query, key, and value to have ragged_idx of 1 or 2, but got 3 instead",
+            lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v),
+        )
 
     # This requires NT -> NT views to work in inductor, which is a TODO
     @unittest.expectedFailure  # noqa: E301
