@@ -31,6 +31,19 @@ def fully_shard(
     device: DeviceLikeType = "cuda",
     reshard_after_forward: Union[bool, int] = True,
 ):
+    """
+    Args:
+        reshard_after_forward (Union[bool, int]): This controls the parameter
+            behavior after forward and can trade off memory and communication.
+            - If ``True``, then this reshards parameters after forward and
+            all-gathers in backward.
+            - If ``False``, then this keeps the unsharded parameters in memory
+            after forward and avoids the all-gather in backward.
+            - If an ``int``, then this represents the world size to reshard to
+            after forward. It should be a number between 1 and the ``mesh``
+            shard dimension size exclusive. A common choice may be the
+            intra-node size (i.e. ``torch.cuda.device_count()``).
+    """
     if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
         raise ValueError(
             f"fully_shard does not support containers that do not implement forward: {module}"
