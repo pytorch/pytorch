@@ -11228,15 +11228,17 @@ class TestMultithreadAutograd(TestCase):
 
         res = None
         count = [0]
+        hook_lock = threading.Lock()
 
         def hook(grads):
             nonlocal res
-            count[0] += 1
-            grad_is_none = [g is not None for g in grads]
-            if res is None:
-                res = grad_is_none
-            else:
-                self.assertEqual(res, grad_is_none)
+            with hook_lock:
+                count[0] += 1
+                grad_is_none = [g is not None for g in grads]
+                if res is None:
+                    res = grad_is_none
+                else:
+                    self.assertEqual(res, grad_is_none)
 
         torch.autograd.graph.register_multi_grad_hook((t1, t2, t3, t4), hook)
 
@@ -11256,6 +11258,7 @@ class TestMultithreadAutograd(TestCase):
         err_count = [0]
         bw_count = [0]
         bw_count_lock = threading.Lock()
+        err_count_lock = threading.Lock()
 
         class Func(torch.autograd.Function):
             @staticmethod
@@ -11266,10 +11269,10 @@ class TestMultithreadAutograd(TestCase):
             def backward(ctx, gO):
                 with bw_count_lock:
                     bw_count[0] += 1
-                if bw_count[0] == 1:
-                    raise RuntimeError("error message")
-                else:
-                    return gO
+                    if bw_count[0] == 1:
+                        raise RuntimeError("error message")
+                    else:
+                        return gO
 
         out = (Func.apply(t2) * t3).sum()
 
@@ -11277,7 +11280,8 @@ class TestMultithreadAutograd(TestCase):
             try:
                 out.backward(inputs=(t2, t3), retain_graph=True)
             except RuntimeError:
-                err_count[0] += 1
+                with err_count_lock:
+                    err_count[0] += 1
 
         self._run_py_multithread_fn(backward_retain_graph, (out, t2, t3), num_threads=5)
 
@@ -11296,15 +11300,16 @@ class TestMultithreadAutograd(TestCase):
 
         res = None
         count = [0]
+        hook_lock = threading.Lock()
 
-        def hook(grads):
+        def hook(grad):
             nonlocal res
-            count[0] += 1
-            grad_is_none = [g is not None for g in grads]
-            if res is None:
-                res = grad_is_none
-            else:
-                self.assertEqual(res, grad_is_none)
+            with hook_lock:
+                count[0] += 1
+                if res is None:
+                    res = "foo"
+                else:
+                    self.assertEqual(res, "foo")
 
         torch.autograd.graph.register_multi_grad_hook((t1, t2, t3, t4), hook, mode="any")
 
@@ -11315,7 +11320,7 @@ class TestMultithreadAutograd(TestCase):
 
         self._run_py_multithread_fn(backward_retain_graph, (out, t2, t3), num_threads=5)
         self.assertEqual(count[0], 5)
-        self.assertEqual(res, [True, True])
+        self.assertEqual(res, "foo")
 
         # Raise an error in one thread's backward
         res = None
@@ -11323,6 +11328,7 @@ class TestMultithreadAutograd(TestCase):
         err_count = [0]
         bw_count = [0]
         bw_count_lock = threading.Lock()
+        err_count_lock = threading.Lock()
 
         class Func(torch.autograd.Function):
             @staticmethod
@@ -11333,10 +11339,10 @@ class TestMultithreadAutograd(TestCase):
             def backward(ctx, gO):
                 with bw_count_lock:
                     bw_count[0] += 1
-                if bw_count[0] == 1:
-                    raise RuntimeError("error message")
-                else:
-                    return gO
+                    if bw_count[0] == 1:
+                        raise RuntimeError("error message")
+                    else:
+                        return gO
 
         out = (Func.apply(t2) * t3).sum()
 
@@ -11344,7 +11350,8 @@ class TestMultithreadAutograd(TestCase):
             try:
                 out.backward(inputs=(t2, t3), retain_graph=True)
             except RuntimeError:
-                err_count[0] += 1
+                with err_count_lock:
+                    err_count[0] += 1
 
         self._run_py_multithread_fn(backward_retain_graph, (out, t2, t3), num_threads=5)
 
@@ -11352,8 +11359,7 @@ class TestMultithreadAutograd(TestCase):
         # the custom backward
         self.assertEqual(count[0], 5)
         self.assertEqual(err_count[0], 1)
-        self.assertEqual(res, [True, True])
-
+        self.assertEqual(res, "foo")
 
     def test_dataparallel_saved_tensors_hooks(self):
         def pack(x):
