@@ -23,6 +23,7 @@ struct TORCH_XPU_API XPUEvent {
   XPUEvent(XPUEvent&& other) noexcept {
     moveHelper(std::move(other));
   }
+
   XPUEvent& operator=(XPUEvent&& other) noexcept {
     if (this != &other) {
       moveHelper(std::move(other));
@@ -45,9 +46,11 @@ struct TORCH_XPU_API XPUEvent {
   bool isCreated() const {
     return (event_.get() != nullptr);
   }
+
   DeviceIndex device_index() const {
     return device_index_;
   }
+
   sycl::event& event() const {
     return *event_;
   }
