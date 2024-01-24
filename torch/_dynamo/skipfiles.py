@@ -205,6 +205,7 @@ MOD_INLINELIST = {
     "torch.amp.autocast_mode",
     "torch.ao.nn",
     "torch.autograd.function",
+    "torch.backends.cuda",
     "torch.cuda.amp.autocast_mode",
     "torch.distributions",
     "torch.export.wrapper",

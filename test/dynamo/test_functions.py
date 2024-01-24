@@ -508,6 +508,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x - 1
 
     @make_test
+    def test_cublas_allow_tf32(x):
+        if torch.backends.cuda.matmul.allow_tf32:
+            return x.sin() + 1
+
+        return x.cos() - 1
+
+    @make_test
     def test_get_calculate_correct_fan(x):
         fan_in = torch.nn.init._calculate_correct_fan(x, "fan_in")
         return x + fan_in
