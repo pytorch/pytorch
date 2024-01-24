@@ -43,7 +43,7 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
 from .._dynamo.backends.common import aot_autograd
-from ..fx import use_lazy_graph_module  # type: ignore[attr-defined]
+from ..fx import _use_lazy_graph_module  # type: ignore[attr-defined]
 from ..fx.graph import _PyTreeCodeGen
 from . import config, metrics
 from .debug import DebugContext
@@ -248,9 +248,9 @@ def fake_tensor_prop(
 @time_and_log(attr="compilation time (in seconds)")
 # Need this decorator for compile_fx_inner even if we already have one for
 # compile_fx. The reason is the compilation for backward graph may happen after
-# compile_fx return and we may want to use the LazyGraphModule for compiling
+# compile_fx return and we may want to use the _LazyGraphModule for compiling
 # the backward graph as well.
-@use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
+@_use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
@@ -273,10 +273,11 @@ def compile_fx_inner(
     also update the call to save_args_for_compile_fx_inner below accordingly.
     """
     if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
-        # trigger the real recompilation for LazyGraphModule before returning
+        # trigger the real recompilation for _LazyGraphModule before returning
         # the forward method.
-        if hasattr(gm, "real_recompile"):
-            gm.real_recompile()
+        from torch.fx.lazy_graph_module import _LazyGraphModule
+
+        _LazyGraphModule.force_recompile(gm)
         return make_boxed_func(gm.forward)
 
     assert isinstance(
@@ -953,7 +954,7 @@ def fw_compiler_freezing(
     return wrapper
 
 
-@use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
+@_use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
 def compile_fx(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],

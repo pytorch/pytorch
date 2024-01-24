@@ -51,8 +51,16 @@ specialize_int = False
 # legacy config, does nothing now!
 dynamic_shapes = True
 
+# TODO(shunting)
+# _LazyGraphModule cause failure for tests
+#   PYTORCH_TEST_WITH_DYNAMO=1 python test/torch_np/numpy_tests/core/test_numeric.py -k test_boolean
+# on py3.11. Avoid this python version check once we figure out the root cause.
 use_lazy_graph_module = (
-    os.environ.get("TORCH_COMPILE_USE_LAZY_GRAPH_MODULE", "1") == "1"
+    os.environ.get(
+        "TORCH_COMPILE_USE_LAZY_GRAPH_MODULE",
+        "0" if sys.version_info >= (3, 11) else "1",
+    )
+    == "1"
 )
 
 # This is a temporarily flag, which changes the behavior of dynamic_shapes=True.

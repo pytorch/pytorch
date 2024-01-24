@@ -10,6 +10,7 @@ from torch._dynamo.backends.debugging import ExplainWithBackend
 from torch._dynamo.backends.onnxrt import has_onnxruntime
 from torch._dynamo.backends.tvm import has_tvm
 from torch._dynamo.testing import same
+from torch.fx.lazy_graph_module import force_skip_lazy_graph_module
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
@@ -106,6 +107,7 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_eager(self):
         self._check_backend_works("eager")
 
+    @force_skip_lazy_graph_module()
     def test_torchscript(self):
         self._check_backend_works("ts")
 
@@ -115,16 +117,9 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_aot_eager_decomp_partition(self):
         self._check_backend_works("aot_eager_decomp_partition")
 
+    @force_skip_lazy_graph_module()
     def test_aot_ts(self):
-        from torch.fx import lazy_graph_module
-
-        try:
-            # LazyGraphModule does not work with torchscript well.
-            # Use the vanilla GraphModule instead.
-            lazy_graph_module._force_skip_lazy_graph_module = True
-            self._check_backend_works("aot_ts")
-        finally:
-            lazy_graph_module._force_skip_lazy_graph_module = False
+        self._check_backend_works("aot_ts")
 
     @requires_cuda()
     def test_aot_cudagraphs(self):

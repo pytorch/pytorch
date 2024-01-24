@@ -81,7 +81,7 @@ repository.
 '''
 
 from .graph_module import GraphModule
-from .lazy_graph_module import get_graph_module_cls, use_lazy_graph_module
+from .lazy_graph_module import get_graph_module_cls, _use_lazy_graph_module
 from ._symbolic_trace import symbolic_trace, Tracer, wrap, PH, ProxyableClassMeta
 from .graph import Graph, CodeGen
 from .node import Node, map_arg, has_side_effect

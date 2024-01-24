@@ -5,35 +5,66 @@ from torch.fx.graph_module import _format_import_block, reduce_graph_module
 from torch.package import sys_importer
 from ._compatibility import compatibility
 
-_use_lazy_graph_module = False
-_force_skip_lazy_graph_module = False  # used in unit test to skip lazy graph module
+_use_lazy_graph_module_flag = False
+_force_skip_lazy_graph_module_flag = False
 
 
 @compatibility(is_backward_compatible=False)
 @contextmanager
-def use_lazy_graph_module(should_use: bool):
+def force_skip_lazy_graph_module():
+    """
+    Skip using lazy graph module disregarding the setting of _use_lazy_graph_module.
+    Use to skip _LazyGraphModule when testing inductor torchscript related backend.
+
+    torch.jit.script a _LazyGraphModule results in following error:
+        https://gist.github.com/shunting314/5143654c8084aed84ecd19b818258a69
+    """
     try:
-        global _use_lazy_graph_module
-        prior = _use_lazy_graph_module
-        _use_lazy_graph_module = should_use and not _force_skip_lazy_graph_module
+        global _force_skip_lazy_graph_module_flag
+        prior = _force_skip_lazy_graph_module_flag
+        _force_skip_lazy_graph_module_flag = True
         yield
     finally:
-        _use_lazy_graph_module = prior
+        _force_skip_lazy_graph_module_flag = prior
+
+
+@compatibility(is_backward_compatible=False)
+@contextmanager
+def _use_lazy_graph_module(should_use: bool):
+    try:
+        global _use_lazy_graph_module_flag
+        prior = _use_lazy_graph_module_flag
+        _use_lazy_graph_module_flag = (
+            should_use and not _force_skip_lazy_graph_module_flag
+        )
+        yield
+    finally:
+        _use_lazy_graph_module_flag = prior
 
 
 @compatibility(is_backward_compatible=False)
 def get_graph_module_cls():
-    return LazyGraphModule if _use_lazy_graph_module else GraphModule
+    return _LazyGraphModule if _use_lazy_graph_module_flag else GraphModule
 
 
 @compatibility(is_backward_compatible=False)
-class LazyGraphModule(GraphModule):
+class _LazyGraphModule(GraphModule):
     @classmethod
     def from_graphmodule(cls, gm: GraphModule):
-        if isinstance(gm, LazyGraphModule):
+        if isinstance(gm, _LazyGraphModule):
             return gm
         else:
-            return LazyGraphModule(gm, gm.graph)
+            return _LazyGraphModule(gm, gm.graph)
+
+    @staticmethod
+    def force_recompile(gm):
+        """
+        Sometimes we need force a recompile as a workaround
+        - we want to do the real recompilation before symbolic_trace to avoid error:
+            https://gist.github.com/shunting314/75549c2e82ae07ac1139c94a3583d259
+        """
+        if isinstance(gm, _LazyGraphModule):
+            gm.real_recompile()
 
     def real_recompile(self):
         if self._needs_recompile():
@@ -61,7 +92,7 @@ class LazyGraphModule(GraphModule):
     def __reduce__(self):
         """
         Follow GraphModule.__reduce__ but call 'self._real_recompile' rather
-        than 'self.recompile' since for a LazyGraphModule, self.recompile just
+        than 'self.recompile' since for a _LazyGraphModule, self.recompile just
         mark the need of recompilation and does not return the PythonCode object.
         """
         python_code = self._real_recompile()

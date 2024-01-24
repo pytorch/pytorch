@@ -8,17 +8,17 @@ import torch
 import torch._export
 from torch import fx
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.lazy_graph_module import LazyGraphModule
+from torch.fx.lazy_graph_module import _LazyGraphModule
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-class TestLazyRecompile(TestCase):
+class TestLazyGraphModule(TestCase):
     exit_stack = None
 
     @classmethod
     def setUpClass(cls):
         cls.exit_stack = contextlib.ExitStack()
-        cls.exit_stack.enter_context(fx.use_lazy_graph_module(True))
+        cls.exit_stack.enter_context(fx._use_lazy_graph_module(True))
 
     @classmethod
     def tearDownClass(cls):
@@ -45,7 +45,7 @@ class TestLazyRecompile(TestCase):
         self.assertTrue(torch.allclose(expected, actual))
         code = gm.print_readable(False)
         self.assertTrue("cos()" in code)
-        self.assertTrue(isinstance(gm, LazyGraphModule))
+        self.assertTrue(isinstance(gm, _LazyGraphModule))
 
     def test_call_forward_directly(self):
         def f(x):
@@ -53,7 +53,7 @@ class TestLazyRecompile(TestCase):
 
         x = torch.randn(2, 3)
         gm = fx.symbolic_trace(f)
-        self.assertTrue(isinstance(gm, LazyGraphModule))
+        self.assertTrue(isinstance(gm, _LazyGraphModule))
         self.replace_sin_with_cos(gm)
         gm.recompile()
         expected = x.cos()
@@ -70,7 +70,7 @@ class TestLazyRecompile(TestCase):
             return x.sin()
 
         gm = fx.symbolic_trace(f)
-        self.assertTrue(isinstance(gm, LazyGraphModule))
+        self.assertTrue(isinstance(gm, _LazyGraphModule))
         self.assertTrue(gm._needs_recompile())
         gm(torch.randn(2, 3))
         self.assertFalse(gm._needs_recompile())
@@ -84,7 +84,7 @@ class TestLazyRecompile(TestCase):
             return x.sin()
 
         gm = fx.symbolic_trace(f)
-        self.assertTrue(isinstance(gm, LazyGraphModule))
+        self.assertTrue(isinstance(gm, _LazyGraphModule))
         self.assertTrue(gm._needs_recompile())
         x = torch.randn(2, 3)
         # trigger the first recompilation
@@ -109,7 +109,7 @@ class TestLazyRecompile(TestCase):
             return x.sin()
 
         gm = fx.symbolic_trace(f)
-        self.assertTrue(isinstance(gm, LazyGraphModule))
+        self.assertTrue(isinstance(gm, _LazyGraphModule))
         self.assertTrue(gm._needs_recompile())
         # should trigger a recompilation
         code = gm.code
@@ -121,7 +121,7 @@ class TestLazyRecompile(TestCase):
             return x.sin()
 
         gm = fx.symbolic_trace(f)
-        self.assertTrue(isinstance(gm, LazyGraphModule))
+        self.assertTrue(isinstance(gm, _LazyGraphModule))
         self.assertTrue("sin" in str(gm))
 
     def test_recapture_with_make_fx(self):
@@ -129,10 +129,10 @@ class TestLazyRecompile(TestCase):
             return x.sin()
 
         gm = fx.symbolic_trace(f)
-        self.assertTrue(isinstance(gm, LazyGraphModule))
+        self.assertTrue(isinstance(gm, _LazyGraphModule))
         self.assertTrue(gm._needs_recompile())
         gm2 = make_fx(gm)(torch.randn(2, 3))
-        self.assertTrue(isinstance(gm2, LazyGraphModule))
+        self.assertTrue(isinstance(gm2, _LazyGraphModule))
         self.assertTrue(gm2._needs_recompile())
 
         # make_fx will cal foward method of gm. That clears the _needs_recompile()
@@ -144,7 +144,7 @@ class TestLazyRecompile(TestCase):
             return x.sin()
 
         gm = fx.symbolic_trace(f)
-        self.assertTrue(isinstance(gm, LazyGraphModule))
+        self.assertTrue(isinstance(gm, _LazyGraphModule))
         self.assertTrue(gm._needs_recompile())
         gm2 = fx.symbolic_trace(gm)
 
@@ -159,7 +159,7 @@ class TestLazyRecompile(TestCase):
             return x.sin()
 
         gm = fx.symbolic_trace(f)
-        self.assertTrue(isinstance(gm, LazyGraphModule))
+        self.assertTrue(isinstance(gm, _LazyGraphModule))
         self.assertTrue(gm._needs_recompile())
         torch.compile(gm)(torch.rand(2, 3))
 
@@ -186,7 +186,7 @@ class TestLazyRecompile(TestCase):
 
         with patch.object(fx.GraphModule, "recompile", mock_gm_recompile):
             gm = fx.symbolic_trace(f)
-            self.assertTrue(isinstance(gm, LazyGraphModule))
+            self.assertTrue(isinstance(gm, _LazyGraphModule))
             saved_fwd = gm.forward
 
             x = torch.rand(2, 3)
@@ -197,17 +197,17 @@ class TestLazyRecompile(TestCase):
 
     def test_pickle(self):
         """
-        Fx graph cache need the ability to pickle GraphModule/LazyGraphModule.
+        Fx graph cache need the ability to pickle GraphModule/_LazyGraphModule.
         """
 
         def f(x):
             return x.sin()
 
         gm = fx.symbolic_trace(f)
-        self.assertTrue(isinstance(gm, LazyGraphModule))
+        self.assertTrue(isinstance(gm, _LazyGraphModule))
         serialized = pickle.dumps(gm)
         gm2 = pickle.loads(serialized)
-        self.assertTrue(isinstance(gm2, LazyGraphModule))
+        self.assertTrue(isinstance(gm2, _LazyGraphModule))
         self.assertTrue("sin" in gm2.code)
 
 
