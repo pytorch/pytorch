@@ -620,7 +620,7 @@ def run_test(
     )
     timeout = (
         None
-        if not options.set_timeout
+        if not options.enable_timeout
         else THRESHOLD * 6
         if is_slow
         else THRESHOLD * 3
@@ -1258,7 +1258,7 @@ def parse_args():
         default=IS_CI and not strtobool(os.environ.get("VERBOSE_TEST_LOGS", "False")),
     )
     parser.add_argument(
-        "--set-timeout",
+        "--enable-timeout",
         action="store_true",
         help="Set a timeout based on the test times json file.  Only works if there are test times available",
         default=IS_CI and not strtobool(os.environ.get("NO_TEST_TIMEOUT", "False")),
