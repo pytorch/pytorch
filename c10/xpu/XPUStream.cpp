@@ -194,7 +194,7 @@ sycl::queue& XPUStream::queue() const {
 }
 
 // Returns a stream from the requested pool
-// Note: The stream pools will be initialized if needed, at the first vocation
+// Note: The stream pools will be initialized if needed, at the first invocation
 // to this function.
 XPUStream getStreamFromPool(const int priority, DeviceIndex device) {
   initXPUStreamsOnce();
@@ -222,7 +222,7 @@ XPUStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
   return getStreamFromPool(priority, device);
 }
 
-// Note: The stream pools will be initialized if needed, at the first vocation
+// Note: The stream pools will be initialized if needed, at the first invocation
 // to this function.
 XPUStream getCurrentXPUStream(DeviceIndex device) {
   initXPUStreamsOnce();
@@ -235,7 +235,7 @@ XPUStream getCurrentXPUStream(DeviceIndex device) {
   return XPUStreamForId(device, current_streams[device]);
 }
 
-// Note: The stream pools will be initialized if needed, at the first vocation
+// Note: The stream pools will be initialized if needed, at the first invocation
 // to this function.
 void setCurrentXPUStream(XPUStream stream) {
   initXPUStreamsOnce();
@@ -246,7 +246,7 @@ std::ostream& operator<<(std::ostream& stream, const XPUStream& s) {
   return stream << s.unwrap();
 }
 
-// Note: The stream pools will be initialized if needed, at the first vocation
+// Note: The stream pools will be initialized if needed, at the first invocation
 // to this function.
 void syncStreamsOnDevice(DeviceIndex device) {
   initXPUStreamsOnce();
