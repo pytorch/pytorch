@@ -6,7 +6,19 @@ import logging
 import threading
 import weakref
 from collections import defaultdict, namedtuple
-from typing import Any, Callable, Deque, Dict, List, Optional, Sequence, Set, Tuple
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Deque,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
 
 import torch
 from torch.autograd.variable import Variable
@@ -372,7 +384,10 @@ def disable_saved_tensors_hooks(error_message):
 
 def register_multi_grad_hook(
     tensors: Sequence[torch.Tensor],
-    fn: Callable[[Sequence[Optional[torch.Tensor]]], None],
+    fn: Union[
+        Callable[[Sequence[Optional[torch.Tensor]]], None],
+        Callable[[torch.Tensor], None],
+    ],
     *,
     mode: str = "all",
 ):
@@ -452,7 +467,7 @@ def register_multi_grad_hook(
 
         def get_inner_hook(idx):
             def inner_hook(grad: torch.Tensor):
-                nonlocal count, nb_calls, buffer
+                nonlocal count, nb_calls, buffer, fn
                 id = torch._C._current_graph_task_id()
                 assert (
                     id != -1
@@ -468,6 +483,7 @@ def register_multi_grad_hook(
                 count[id] += 1
 
                 if count[id] == nb_calls:
+                    fn = cast(Callable[[Sequence[Optional[torch.Tensor]]], None], fn)
                     fn(buffer[id])
                     del count[id]
                     del buffer[id]
@@ -478,6 +494,7 @@ def register_multi_grad_hook(
             t.register_hook(get_inner_hook(i)) for i, t in enumerate(tensors)
         )
     elif mode == "any":
+        fn = cast(Callable[[torch.Tensor], None], fn)
         lock = threading.Lock()
         ran_hook: Dict[int, bool] = defaultdict(bool)
 
