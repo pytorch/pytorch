@@ -1047,10 +1047,10 @@ def handle_log_file(
         return
 
     # otherwise: print entire file
-    print_to_stderr(f"\nPRINTING LOG FILE of {test} ({file_path})")
+    print_to_stderr(f"\nPRINTING LOG FILE of {test} ({new_file})")
     for line in full_text.splitlines():
         print_to_stderr(line.rstrip())
-    print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})\n")
+    print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({new_file})\n")
 
 
 def get_pytest_args(
