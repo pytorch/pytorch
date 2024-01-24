@@ -884,7 +884,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             self.random_values_var = self.new_var("random_values")
             rand_fn_name = unique_id("__gen_rand_values")
             rand_fn = disable(_get_gen_rand_values_fn(tx.random_calls))
-            rand_fn_name = self.install_global_once(rand_fn_name, rand_fn)
+            self.install_global_unsafe(rand_fn_name, rand_fn)
             codegen = PyCodegen(tx, root)
             random_calls_instructions.extend(
                 codegen.load_function_name(rand_fn_name, True)
@@ -1090,7 +1090,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
-        # This is safe because we pre-process name to be unique
         self.install_global_unsafe(name, compiled_fn)
 
         cg = PyCodegen(tx)

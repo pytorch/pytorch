@@ -52,7 +52,7 @@ def _get_subclass_type(var):
 def _get_subclass_type_var(tx, var):
     assert isinstance(var, (TensorWithTFOverrideVariable, UserDefinedObjectVariable))
     if isinstance(var, TensorWithTFOverrideVariable):
-        return var.class_type_var(tx)
+        return var.class_type_var()
     elif isinstance(var, UserDefinedObjectVariable):
         from .builder import SourcelessBuilder, VariableBuilder
 
@@ -156,30 +156,28 @@ class TensorWithTFOverrideVariable(TensorVariable):
             kwargs.pop("class_type") is torch.Tensor
         ), "invalid class type in TensorWithTFOverrideVariable.from_tensor_var"
         var = cls(torch_function_fn=torch_function_fn, class_type=class_type, **kwargs)
-        var.install_global(tx)
+        var.install_global_unsafe(tx)
         return var
 
-    def install_global(self, tx):
+    def install_global_unsafe(self, tx):
         # stash the subclass type to rewrap an output tensor if needed
         # this is needed because the actual type needs to be available
         # each time the compiled artifact is run and outputs a wrapped tensor.
-        if self.global_mangled_class_name(tx) not in tx.output.global_scope:
-            # Safe because global_mangled_class_name figures it out
+        if self.global_mangled_class_name() not in tx.output.global_scope:
             tx.output.install_global_unsafe(
-                self.global_mangled_class_name(tx), self.class_type
+                self.global_mangled_class_name(), self.class_type
             )
 
     def python_type(self):
         return self.class_type
 
-    def class_type_var(self, tx):
+    def class_type_var(self):
         return TensorSubclassVariable(
-            self.class_type, source=GlobalSource(self.global_mangled_class_name(tx))
+            self.class_type, source=GlobalSource(self.global_mangled_class_name())
         )
 
-    def global_mangled_class_name(self, tx):
-        compile_id = tx.output.compile_id
-        return f"__subclass_{self.class_type.__name__}_{id(self.class_type)}_c{id}"
+    def global_mangled_class_name(self):
+        return f"__subclass_{self.class_type.__name__}_{id(self.class_type)}"
 
     def var_getattr(self, tx, name):
         # [Note: __torch_function__] We currently only support attributes that are defined on
@@ -210,7 +208,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
             return self.call_torch_function(
                 tx,
                 get_fn,
-                TupleVariable([self.class_type_var(tx)]),
+                TupleVariable([self.class_type_var()]),
                 [self],
                 {},
             )
@@ -220,7 +218,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
     def call_torch_function(self, tx, fn, types, args, kwargs):
         return call_torch_function(
             tx,
-            self.class_type_var(tx),
+            self.class_type_var(),
             self.torch_function_fn,
             fn,
             types,
