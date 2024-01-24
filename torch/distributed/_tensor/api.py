@@ -261,7 +261,12 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         protocol to inform how to flatten a DTensor to local tensor
         for PT2 tracing
         """
-        return ["_local_tensor"], (self._spec, self.requires_grad)
+        return ["_local_tensor"], {
+            '_spec': self._spec,
+            'requires_grad': self.requires_grad,
+            'placements': self._spec.placements,
+            'mesh': self._spec.mesh,
+        }
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, flatten_spec, outer_size, outer_stride):
@@ -269,7 +274,8 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             flatten_spec is not None
         ), "Expecting spec to be not None from `__tensor_flatten__` return value!"
         local_tensor = inner_tensors["_local_tensor"]
-        spec, requires_grad = flatten_spec
+        spec = flatten_spec['_spec']
+        requires_grad = flatten_spec['requires_grad']
         return DTensor(
             local_tensor,
             spec.mesh,
