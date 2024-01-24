@@ -59,6 +59,22 @@ class C10_API Scalar {
       DEFINE_IMPLICIT_CTOR)
   AT_FORALL_COMPLEX_TYPES(DEFINE_IMPLICIT_CTOR)
 
+  // Helper constructors to allow Scalar creation from long and long long types
+  // As std::is_same_v<long, long long> is false, one needs to provide a
+  // constructor from either long or long long in addition to one from int64_t
+  template <
+      typename T = long long,
+      std::enable_if_t<
+          !std::is_same_v<long long, int64_t> && sizeof(T) == 8U,
+          bool> = true>
+  Scalar(T vv) : Scalar(vv, true) {}
+  template <
+      typename T = long,
+      std::enable_if_t<
+          !std::is_same_v<long, int64_t> && sizeof(T) == 8U,
+          bool> = true>
+  Scalar(T vv) : Scalar(vv, true) {}
+
   Scalar(uint16_t vv) : Scalar(vv, true) {}
   Scalar(uint32_t vv) : Scalar(vv, true) {}
   Scalar(uint64_t vv) {
