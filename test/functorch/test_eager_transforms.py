@@ -25,6 +25,7 @@ from functools import wraps
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU, dtypes, onlyCUDA
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
 from torch.testing._internal.common_cuda import with_tf32_off, SM70OrLater, TEST_CUDA
+from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing import make_tensor
 from torch._dynamo import allow_in_graph
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -2669,7 +2670,6 @@ class TestJvp(TestCase):
         _, y = jvp(lambda x: jvp(f, (x,), (t,))[1], (x,), (t,))
         self.assertEqual(y, 2)
 
-    @xfailIfTorchDynamo
     def test_disable_fwd_grad_mixed(self, device):
         def f(x):
             with fwAD._set_fwd_grad_enabled(False):
@@ -4832,6 +4832,7 @@ def traceable(f):
 
 @markDynamoStrictTest
 class TestCompileTransforms(TestCase):
+    @skipIfRocm(msg="test leaks memory on ROCm")
     @xfailIfTorchDynamo
     # torch.compile is not supported on Windows
     # Triton only supports GPU with SM70 or later.
