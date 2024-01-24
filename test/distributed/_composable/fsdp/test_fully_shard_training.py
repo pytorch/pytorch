@@ -9,13 +9,18 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from _test_fully_shard_common import MLP, patch_all_gather, patch_reduce_scatter
-from torch.distributed._composable import replicate
+from torch.distributed._composable import checkpoint, replicate
 from torch.distributed._composable.fsdp import FSDP, fully_shard
 from torch.distributed._tensor import DTensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, FSDPTestMultiThread
 from torch.testing._internal.common_utils import get_cycles_per_ms, run_tests
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    ModelArgs,
+    Transformer,
+    TransformerBlock,
+)
 
 
 class TestFullyShardForwardInputs(FSDPTestMultiThread):
@@ -259,6 +264,52 @@ class TestFullyShardTrainingCoreParity(FSDPTest):
                         torch.cuda._sleep(int(delay_in_ms * get_cycles_per_ms()))
                     _optim.step()
                 self.assertEqual(losses[0], losses[1])
+
+
+class TestFullyShardSharedParams(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(4, torch.cuda.device_count())
+
+    @skip_if_lt_x_gpu(2)
+    def test_train_parity_with_shared_params(self):
+        self.run_subtests(
+            {
+                "reshard_after_forward": [False, True],
+                "use_activation_checkpointing": [False, True],
+            },
+            self._test_train_shared_params,
+        )
+
+    def _test_train_shared_params(
+        self,
+        reshard_after_forward: bool,
+        use_activation_checkpointing: bool,
+    ):
+        torch.manual_seed(42)
+        model_args = ModelArgs(n_layers=3, dropout_p=0.0, weight_tying=True)
+        model = Transformer(model_args)
+        ref_model = copy.deepcopy(model).cuda()
+        replicate(ref_model, device_ids=[self.rank])
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                if use_activation_checkpointing:
+                    checkpoint(module)
+                fully_shard(module, reshard_after_forward=reshard_after_forward)
+        fully_shard(model, reshard_after_forward=reshard_after_forward)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+        torch.manual_seed(42 + self.rank + 1)
+        for iter_idx in range(10):
+            inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+            losses: List[torch.Tensor] = []
+            for _model, _optim in ((ref_model, ref_optim), (model, optim)):
+                _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+                losses.append(_model(inp).sum())
+                losses[-1].backward()
+                _optim.step()
+            self.assertEqual(losses[0], losses[1])
 
 
 if __name__ == "__main__":
