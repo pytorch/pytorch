@@ -1277,7 +1277,7 @@ def wrap_fx_proxy(tx, proxy, example_value=None, subclass_type=None, **options):
         return wrap_fx_proxy_cls(target_cls=TensorVariable, **kwargs)
     else:
         result = wrap_fx_proxy_cls(target_cls=TensorWithTFOverrideVariable, **kwargs)
-        result.install_global(tx)
+        result.install_global_unsafe(tx)
         return result
 
 
@@ -1507,6 +1507,9 @@ def wrap_fx_proxy_cls(
         torch._utils._element_size,
         torch.seed,
         operator.mod,
+        torch._C._functorch._vmap_increment_nesting,
+        torch._C._functorch._vmap_decrement_nesting,
+        torch._functorch.vmap._validate_and_get_batch_size,
         # some mac builds are missing torch.distributed.get_rank()
         getattr(torch.distributed, "get_rank", _missing),
         getattr(torch.distributed, "get_world_size", _missing),
