@@ -57,11 +57,14 @@ from .eval_frame import set_guard_error_hook
 from .source import (
     AttrSource,
     DefaultsSource,
+    FSDPNNModuleSource,
     GetItemSource,
     GlobalSource,
     GlobalStateSource,
     LocalSource,
     NNModuleSource,
+    NotNNModuleSource,
+    NumpyTensorSource,
     ShapeEnvSource,
     TypeSource,
 )
@@ -146,6 +149,10 @@ def uninteresting_files():
     return {inspect.getfile(m) for m in mods}
 
 
+def from_numpy(a):
+    return torch.as_tensor(a) if isinstance(a, (np.generic, np.ndarray)) else a
+
+
 CLOSURE_VARS = {
     "___check_type_id": check_type_id,
     "___check_obj_id": check_obj_id,
@@ -173,9 +180,8 @@ CLOSURE_VARS = {
     "__load_module": importlib.import_module,
     "utils_device": torch.utils._device,
     "device": torch.device,
-    "___from_numpy":
     # If not numpy array, piggy back on e.g. tensor guards to check type
-    (lambda a: torch.as_tensor(a) if isinstance(a, (np.generic, np.ndarray)) else a),
+    "___from_numpy": from_numpy,
     "torch": torch,
 }
 
@@ -331,41 +337,45 @@ class GuardBuilder(GuardBuilderBase):
     def get_guard_manager(self, guard: Guard):
         # eval_frame calls check_fn with f_locals dict, which is then later
         # wrapped up into a "L" dict.
-        # So,
         root_guard_manager = self.guard_manager.root
 
         # TODO(janimesh) - This should probably to guards object itself with a
         # member function - get_guard_manager. Need to figure out where to put
         # root_guard manager.
         def build(source):
-            if isinstance(source, LocalSource):
+            # Use istype instead of isinstance to check for exact type of source.
+            if istype(source, LocalSource):
                 return root_guard_manager.dict_get_item_manager(source.local_name)
-            elif isinstance(source, GlobalSource):
+            elif istype(source, GlobalSource):
                 global_manager = root_guard_manager.globals_dict_manager(
                     self.scope["G"]
                 )
                 return global_manager.dict_get_item_manager(source.global_name)
-            elif isinstance(source, GlobalStateSource):
+            elif istype(source, GlobalStateSource):
                 # TODO(janimesh) - Revisit this how to insert the global state
                 # guards at the root level. Specifically how is the closure
                 # objects are passed to C++ root.
                 return root_guard_manager
-            elif isinstance(source, (ShapeEnvSource,)):
+            elif istype(source, (ShapeEnvSource,)):
                 # List of sources that don't need accessors are put at the root
                 return root_guard_manager
-            elif isinstance(source, TypeSource):
+            elif istype(source, TypeSource):
                 return build(source.base).type_manager()
-            elif isinstance(source, NNModuleSource):
+            elif istype(
+                source, (NNModuleSource, NotNNModuleSource, FSDPNNModuleSource)
+            ):
                 return build(source.base)
-            elif isinstance(source, AttrSource):
+            elif istype(source, AttrSource):
                 return getattr(build(source.base), source.member)
-            elif isinstance(source, GetItemSource) and not source.index_is_slice:
+            elif istype(source, GetItemSource) and not source.index_is_slice:
                 return build(source.base)[source.index]
-            elif isinstance(source, DefaultsSource):
+            elif istype(source, DefaultsSource):
                 if not source.is_kw:
                     return build(source.base).__defaults__[source.idx_key]
                 else:
                     return build(source.base).__kwdefaults__[str(source.idx_key)]
+            elif istype(source, NumpyTensorSource):
+                return build(source.base).lambda_manager(from_numpy)
             else:
                 raise AssertionError(
                     f"missing guard manager builder {source} - {source.name()}"
@@ -1185,7 +1195,8 @@ class CheckFunctionManager:
             ):
                 continue
 
-            builder.get_guard_manager(guard)
+            if config.enable_cpp_guard_manager:
+                builder.get_guard_manager(guard)
             guard.create(builder)
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
         # Check that the check_fn is True for this frame

@@ -644,6 +644,18 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         foo.__kwdefaults__["c"] = 1
         self.assertFalse(guard_manager.check(foo))
 
+    def test_tuple_iterator_getitem(self):
+        a = (1, 1, 3, 4, 5, 6)
+        foo = iter(a)
+        next(foo)  # foo points at index=1
+
+        guard_manager = RootGuardManager()
+        guard_manager.tuple_iterator_getitem_manager(2).add_equals_match_guard(
+            a[3], "x==4"
+        )
+
+        self.assertTrue(guard_manager.check(foo))
+
     def test_iter(self):
         a = (1, 1, 3, 4, 5, 6)
         foo = iter(a)
