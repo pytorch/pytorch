@@ -279,6 +279,9 @@ numpy_default_int = "int64"
 # use numpy's PRNG if True, pytorch otherwise
 use_numpy_random_stream = False
 
+# TODO(JackCaoG): Do we need to set it to False before merging?
+use_single_step_graph = True
+
 
 def is_fbcode():
     return not hasattr(torch.version, "git_version")

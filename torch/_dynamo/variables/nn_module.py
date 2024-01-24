@@ -7,7 +7,7 @@ from typing import Any, Dict, List
 
 import torch.nn
 
-from .. import skipfiles, variables
+from .. import config, skipfiles, variables
 from ..exc import unimplemented, UnspecializeRestartAnalysis, Unsupported
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import GenerationTracker
@@ -291,8 +291,10 @@ class NNModuleVariable(VariableTracker):
             # If we are tracing the higher order op, we want Dynamo to step
             # inside the module call so that Dynamo can see the underlying
             # parameters and buffers and raise them as inputs to the graph.
-            if tx.output.is_root_tracer() and mod.__module__.startswith(
-                ("torch.nn.", "torch.ao.")
+            if (
+                tx.output.is_root_tracer()
+                and mod.__module__.startswith(("torch.nn.", "torch.ao."))
+                and not config.use_single_step_graph
             ):
                 if nnmodule_has_hooks(
                     mod, check_forward_hooks=True, check_backward_hooks=True
@@ -379,6 +381,52 @@ class NNModuleVariable(VariableTracker):
             # Dynamo inlines `__call__`, includes hooks.
             return self.call_function(tx, args, kwargs)
         elif name == "forward":
+            if config.use_single_step_graph:
+                import torch.utils._pytree as pytree
+                from .builtin import BuiltinVariable
+                from .inline_helper import (
+                    create_functional_call,
+                    decompose_and_inline_function_with_makefx,
+                )
+
+                # For single step graph we want to use make_fx to extract the fx graph
+                # representing the fwd and inline that fx graph.
+                # Dynamo needs to see all inputs and output of each torch function
+                # in case they are saved for the backward.
+                mod = tx.output.get_submodule(self.module_key)
+                fn = mod.forward.__func__
+                # TODO(JackCaoG): considering using source and regualr builder instead of
+                # SourcelessBuilder.
+                fn_source = AttrSource(self.source, "__call__")
+                fn_source = AttrSource(fn_source, "__func__")
+
+                # Create the functional version of the module which also lifted
+                # all parameters as inputs.
+                params = {
+                    **dict(mod.named_parameters(remove_duplicate=False)),
+                    **dict(mod.named_buffers(remove_duplicate=False)),
+                }
+                params_flat, params_spec = pytree.tree_flatten(params)
+                params_flat = list(params_flat)
+                params_len = len(params_flat)
+                functional_call = create_functional_call(mod, params_spec, params_len)
+
+                # Create VariableTrackers for this module's named_parameters and named_buffers.
+                self_params_as_vt = []
+                for name in params_spec.context:
+                    self_params_as_vt.append(
+                        BuiltinVariable(getattr).call_function(
+                            tx, [self, ConstantVariable.create(name)], {}
+                        )
+                    )
+
+                # stich the args togther and pass it to decompose_and_inline_function_with_makefx
+                complete_tensor_variable_args = self_params_as_vt + args
+                res = decompose_and_inline_function_with_makefx(
+                    tx, functional_call, complete_tensor_variable_args, kwargs
+                )
+
+                return res
             # Example: `self.layer.forward(x)`
             # This is used for explicit calling `forward` in a forward function.
             # Dynamo puts `call_method` node in FX, doesn't trigger hooks.

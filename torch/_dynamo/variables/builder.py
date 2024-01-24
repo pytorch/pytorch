@@ -153,6 +153,7 @@ from .torch import TorchInGraphFunctionVariable
 from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
+    SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
 )
@@ -1869,6 +1870,12 @@ class SourcelessBuilder:
             return cls([self(tx, x) for x in value], mutable_local=MutableLocal())
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(value)
+        elif isinstance(value, torch.fx.graph_module.GraphModule):
+            return SourcelessGraphModuleVariable(value)
+        elif isinstance(
+            value, (torch.utils._pytree.TreeSpec, torch.utils._pytree.LeafSpec)
+        ):
+            return UserDefinedObjectVariable(value)
         unimplemented(f"Unexpected type in sourceless builder {type(value)}")
 
     @staticmethod

@@ -322,7 +322,10 @@ def check_file(filename, is_inlined_call=False):
             True,
             "skipped according skipfiles.FBCODE_SKIP_DIRS",
         )
-    if bool(SKIP_DIRS_RE.match(filename)):
+    # TODO(JackCaoG): need a better way to allow inline helper functions
+    if bool(SKIP_DIRS_RE.match(filename)) and not filename.endswith(
+        "variables/inline_helper.py"
+    ):
         return SkipResult(True, "skipped according skipfiles.SKIP_DIRS")
     else:
         return SkipResult(False, "inlined by default")
