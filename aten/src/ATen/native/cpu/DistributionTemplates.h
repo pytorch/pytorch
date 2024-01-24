@@ -123,11 +123,11 @@ void normal_fill_vectorize(const TensorBase &self, const scalar_t mean, const sc
   const Vec mean_vec = Vec(mean);
 
   for (int64_t i = 0; i < size - 15; i += 16) {
-    if(Vec::size()==8){
-    normal_fill_16_vectorize(data + i, two_pi, one, minus_two, mean_vec, var_vec);
+    if(Vec::size()==8) {
+      normal_fill_16_vectorize(data + i, two_pi, one, minus_two, mean_vec, var_vec);
     }
     else{
-    normal_fill_16<scalar_t>(data + i, mean, std);
+      normal_fill_16<scalar_t>(data + i, mean, std);
     }
   }
   if (size % 16 != 0) {
@@ -138,10 +138,10 @@ void normal_fill_vectorize(const TensorBase &self, const scalar_t mean, const sc
       data[i] = uniform(generator);
     }
     if(Vec::size()==8){
-    normal_fill_16_vectorize(data, two_pi, one, minus_two, mean_vec, var_vec);
+      normal_fill_16_vectorize(data, two_pi, one, minus_two, mean_vec, var_vec);
     }
     else{
-    normal_fill_16<scalar_t>(data, mean, std);
+      normal_fill_16<scalar_t>(data, mean, std);
     }
   }
 }
@@ -175,7 +175,6 @@ void normal_kernel(const TensorBase &self, double mean, double std, RNG generato
   auto size = self.numel();
   if (self.scalar_type() == ScalarType::Float && size >= 16 && self.is_contiguous()) {
     normal_fill_vectorize(self, static_cast<float>(mean), static_cast<float>(std), generator);
-
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "normal_kernel_cpu", [&] {
       if (size >= 16 && self.is_contiguous()) {
