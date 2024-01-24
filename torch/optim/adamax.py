@@ -330,11 +330,11 @@ def _multi_tensor_adamax(
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_infs, state_steps])
     for ((grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_infs, grouped_state_steps), _) in grouped_tensors.values():
-        if maximize:
-            grouped_grads = torch._foreach_neg(grouped_grads)
-
         if has_complex:
             _view_as_real(grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_infs)
+
+        if maximize:
+            grouped_grads = torch._foreach_neg(grouped_grads)
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
