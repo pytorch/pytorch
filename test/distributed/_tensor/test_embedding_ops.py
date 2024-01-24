@@ -27,6 +27,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 funcol = torch.ops.c10d_functional
 
+
 class TestEmbeddingOp(DTensorTestBase):
     def _apply_sharding(self, embedding_mod, shard_dim, device_mesh):
         def shard_embedding_fn(name, module, device_mesh):
@@ -181,6 +182,7 @@ class TestEmbeddingOp(DTensorTestBase):
             output.full_tensor()
             self.assertEqual(comm_mode.get_total_counts(), 1)
             self.assertEqual(comm_mode.get_comm_counts()[funcol.all_reduce], 1)
+
 
 if __name__ == "__main__":
     run_tests()
