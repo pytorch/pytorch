@@ -178,9 +178,9 @@ class SymNode:
     def is_singleton(self):
         # Unbacked SymInts cannot be singletons today
         return (
-            self.hint is not None
-            and isinstance(self.hint, SymInt)
-            and self.hint.node.is_singleton()
+            self._hint is not None
+            and isinstance(self._hint, SymInt)
+            and self._hint.node.is_singleton()
         )
 
     def singleton_vec(self):

@@ -37,10 +37,10 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
       py::object pyobj,
       c10::optional<bool> is_singleton = c10::nullopt)
       : c10::SymNodeImpl() {
-    py::gil_scoped_acquire acquire;
     if (is_singleton.has_value()) {
       is_singleton_ = is_singleton.value();
     } else {
+      py::gil_scoped_acquire acquire;
       is_singleton_ = pyobj.attr("is_singleton")().is(py::handle(Py_True));
     }
     pyobj_ = std::make_shared<c10::SafePyObject>(
@@ -106,11 +106,11 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return getPyObj().attr("is_bool")().is(py::handle(Py_True));
   }
 
-  bool is_singleton() override {
+  bool is_singleton() const override {
     return is_singleton_;
   }
 
-  c10::TensorImpl* singleton_vec() override {
+  c10::TensorImpl* singleton_vec() const override {
     py::gil_scoped_acquire acquire;
     return getPyObj()
         .attr("singleton_vec")()
@@ -118,7 +118,7 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
         .unsafeGetTensorImpl();
   }
 
-  int64_t singleton_sum_vec() override {
+  int64_t singleton_sum_vec() const override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("singleton_sum_vec")().cast<int64_t>();
   }
@@ -307,7 +307,7 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return dispatch_common_(__func__);
   }
 
-  py::handle getPyObj() {
+  py::handle getPyObj() const {
     return py::handle(pyobj_->ptr(getPyInterpreter()));
   }
   bool is_singleton_;
