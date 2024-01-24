@@ -1057,6 +1057,19 @@ class TestSerialization(TestCase, SerializationMixin):
         with self.assertRaisesRegex(RuntimeError, 'ZeroTensor is not serializable'):
             _save_load_check(t)
 
+    @parametrize('pickle_protocol', (2, 3, 4, 5))
+    @parametrize('weights_only', (False, True))
+    def test_serialization_pickle_protocol_version(self, pickle_protocol, weights_only):
+        def _save_load_check(t):
+            with BytesIOContext() as f:
+                torch.save(t, f, pickle_protocol=pickle_protocol)
+                f.seek(0)
+                # Unsafe load should work
+                self.assertEqual(torch.load(f, weights_only=weights_only), t)
+
+        t = torch.randn(2, 2, dtype=torch.float)
+        _save_load_check(t)
+
     def test_serialization_byteorder_mark(self):
         lstm = torch.nn.LSTM(3, 3)
         inputs = [torch.randn(1, 3) for _ in range(5)]
