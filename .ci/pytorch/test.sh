@@ -239,11 +239,6 @@ elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
   export ATEN_CPU_CAPABILITY=avx2
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-py3_8-gcc11* ]]; then
-    # Run one test environment without dill
-    pip uninstall -y dill
-fi
-
 test_python_legacy_jit() {
   time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose
   assert_git_not_dirty
