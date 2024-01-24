@@ -145,6 +145,16 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         # TODO(janimesh) - Add more tests for other types
 
+    def test_dict_keys_guard(self):
+        foo = {"a": 1, "b": 2, int: 3, torch.float32: 4}
+        guard = guards.DICT_KEYS(foo, "x.keys() == foo.keys()")
+
+        self.assertTrue(guard(foo))
+        foo_hat = {"a": 2, "b": 3, int: 4, torch.float32: 5}
+        self.assertTrue(guard(foo_hat))
+        self.assertFalse(guard({"a": 1, "b": 2, "c": 3}))
+        self.assertFalse(guard({}))
+
     def test_guard_manager_leaf_guard(self):
         guard_manager = RootGuardManager()
         guard_manager.add_type_match_guard(id_type(5), "type(x) == int")
