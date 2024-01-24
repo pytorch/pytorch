@@ -34,6 +34,7 @@ def set_stack_trace(stack : List[str]):
 
 @compatibility(is_backward_compatible=False)
 def set_grad_fn_seq_nr(seq_nr):
+    print('set_grad_fn_seq_nr')
     global current_meta
 
     if should_preserve_node_meta:
@@ -46,6 +47,7 @@ def set_grad_fn_seq_nr(seq_nr):
 
 @compatibility(is_backward_compatible=False)
 def reset_grad_fn_seq_nr():
+    print('reset_grad_fn_seq_nr')
     # NB: reset state properly, this would be helpful towards supporting
     #     reentrant autograd if we actually wanted to do that.
     global current_meta

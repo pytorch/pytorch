@@ -2800,6 +2800,10 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         if strict_mode:
             torch._dynamo.reset()
 
+        if isinstance(torch.fx.traceback.current_meta.get("grad_fn_seq_nr", None), int):
+            print(torch.fx.traceback.current_meta.get("grad_fn_seq_nr", None))
+            raise RuntimeError("global state pollution")
+
         # Early terminate test if necessary.  If using pytest, use the -x flag instead
         if using_unittest and self._should_stop_test_suite():
             if result.wasSuccessful():
