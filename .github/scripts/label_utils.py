@@ -74,15 +74,23 @@ def gh_get_labels(org: str, repo: str) -> List[str]:
 
 
 def gh_add_labels(
-    org: str, repo: str, pr_num: int, labels: Union[str, List[str]]
+    org: str, repo: str, pr_num: int, labels: Union[str, List[str]], dry_run: bool
 ) -> None:
+    if dry_run:
+        print(f"Dryrun: Adding labels {labels} to PR {pr_num}")
+        return
     gh_fetch_url_and_headers(
         url=f"https://api.github.com/repos/{org}/{repo}/issues/{pr_num}/labels",
         data={"labels": labels},
     )
 
 
-def gh_remove_label(org: str, repo: str, pr_num: int, label: str) -> None:
+def gh_remove_label(
+    org: str, repo: str, pr_num: int, label: str, dry_run: bool
+) -> None:
+    if dry_run:
+        print(f"Dryrun: Removing {label} from PR {pr_num}")
+        return
     gh_fetch_url_and_headers(
         url=f"https://api.github.com/repos/{org}/{repo}/issues/{pr_num}/labels/{label}",
         method="DELETE",

@@ -1119,7 +1119,7 @@ class GitHubPR:
             msg += f"ghstack dependencies: {', '.join([f'#{pr.pr_num}' for pr in ghstack_deps])}\n"
         return msg
 
-    def add_numbered_label(self, label_base: str) -> None:
+    def add_numbered_label(self, label_base: str, dry_run: bool) -> None:
         labels = self.get_labels() if self.labels is not None else []
         full_label = label_base
         count = 0
@@ -1127,7 +1127,7 @@ class GitHubPR:
             if label_base in label:
                 count += 1
                 full_label = f"{label_base}X{count}"
-        gh_add_labels(self.org, self.project, self.pr_num, [full_label])
+        gh_add_labels(self.org, self.project, self.pr_num, [full_label], dry_run)
 
     def merge_into(
         self,
@@ -1157,9 +1157,9 @@ class GitHubPR:
 
         repo.push(self.default_branch(), dry_run)
         if not dry_run:
-            self.add_numbered_label(MERGE_COMPLETE_LABEL)
+            self.add_numbered_label(MERGE_COMPLETE_LABEL, dry_run)
             for pr in additional_merged_prs:
-                pr.add_numbered_label(MERGE_COMPLETE_LABEL)
+                pr.add_numbered_label(MERGE_COMPLETE_LABEL, dry_run)
 
         if comment_id and self.pr_num:
             # When the merge process reaches this part, we can assume that the commit
@@ -1669,7 +1669,19 @@ def get_classifications(
     # going forward. It's preferable to try calling Dr.CI API directly first
     # to get the latest results as well as update Dr.CI PR comment
     drci_classifications = get_drci_classifications(pr_num=pr_num, project=project)
-    print(f"From Dr.CI API: {json.dumps(drci_classifications)}")
+
+    def get_readable_drci_results(drci_classifications: Any) -> str:
+        try:
+            s = f"From Dr.CI API ({pr_num}):\n"
+            for classification, jobs in drci_classifications.items():
+                s += f"  {classification}: \n"
+                for job in jobs:
+                    s += f"    {job['id']} {job['name']}\n"
+            return s
+        except Exception:
+            return f"From Dr.CI API: {json.dumps(drci_classifications)}"
+
+    print(get_readable_drci_results(drci_classifications))
 
     # NB: if the latest results from Dr.CI is not available, i.e. when calling from
     # SandCastle, we fallback to any results we can find on Dr.CI check run summary
@@ -1882,8 +1894,8 @@ def do_revert_prs(
             pr.org, pr.project, pr.pr_num, revert_message, dry_run=dry_run
         )
 
+        pr.add_numbered_label("reverted", dry_run)
         if not dry_run:
-            pr.add_numbered_label("reverted")
             gh_post_commit_comment(pr.org, pr.project, commit_sha, revert_msg)
             gh_update_pr_state(pr.org, pr.project, pr.pr_num)
 
@@ -2053,7 +2065,7 @@ def merge(
     print(f"Attempting merge of {initial_commit_sha} ({pr_link})")
 
     if MERGE_IN_PROGRESS_LABEL not in pr.get_labels():
-        gh_add_labels(pr.org, pr.project, pr.pr_num, [MERGE_IN_PROGRESS_LABEL])
+        gh_add_labels(pr.org, pr.project, pr.pr_num, [MERGE_IN_PROGRESS_LABEL], dry_run)
 
     explainer = TryMergeExplainer(
         skip_mandatory_checks,
@@ -2201,8 +2213,7 @@ def merge(
     # Finally report timeout back
     msg = f"Merged timed out after {timeout_minutes} minutes. Please contact the pytorch_dev_infra team."
     msg += f"The last exception was: {last_exception}"
-    if not dry_run:
-        gh_add_labels(pr.org, pr.project, pr.pr_num, ["land-failed"])
+    gh_add_labels(pr.org, pr.project, pr.pr_num, ["land-failed"], dry_run)
     raise RuntimeError(msg)
 
 
@@ -2329,7 +2340,9 @@ def main() -> None:
         else:
             print("Missing comment ID or PR number, couldn't upload to Rockset")
     finally:
-        gh_remove_label(org, project, args.pr_num, MERGE_IN_PROGRESS_LABEL)
+        gh_remove_label(
+            org, project, args.pr_num, MERGE_IN_PROGRESS_LABEL, args.dry_run
+        )
 
 
 if __name__ == "__main__":
