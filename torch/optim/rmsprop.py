@@ -354,8 +354,6 @@ def _multi_tensor_rmsprop(
             else:
                 grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
 
-        grouped_grads = list(grouped_grads)
-
         torch._foreach_mul_(grouped_square_avgs, alpha)
         torch._foreach_addcmul_(grouped_square_avgs, grouped_grads, grouped_grads, value=1 - alpha)
 
