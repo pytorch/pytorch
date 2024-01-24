@@ -6,9 +6,9 @@ import logging
 import torch
 
 from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.inductor_utils import HAS_GPU, GPU_TYPE
 
 from torch._inductor.utils import do_bench, do_bench_using_profiling
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 log = logging.getLogger(__name__)

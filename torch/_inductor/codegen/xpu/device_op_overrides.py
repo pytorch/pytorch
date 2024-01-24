@@ -1,5 +1,6 @@
 from ..common import DeviceOpOverrides
 
+
 class XPUDeviceOpOverrides(DeviceOpOverrides):
     def import_get_raw_stream_as(self, name):
         return f"from torch._C import _xpu_getCurrentRawStream as {name}"
