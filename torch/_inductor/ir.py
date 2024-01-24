@@ -439,10 +439,6 @@ class Loops(IRNode):
             self.inner_fn, *self.inner_fn_args()
         )
 
-    @cache_on_self
-    def inner_fn_str_len(self):
-        return len(self.inner_fn_str())
-
     def has_large_inner_fn(self):
         return self.inner_fn_opcount() > config.realize_opcount_threshold
 
