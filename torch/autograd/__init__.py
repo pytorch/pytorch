@@ -225,7 +225,7 @@ def backward(
         inputs (Sequence[Tensor] or Tensor or Sequence[GradientEdge], optional): Inputs w.r.t. which the gradient
             be will accumulated into ``.grad``. All other Tensors will be ignored. If
             not provided, the gradient is accumulated into all the leaf Tensors that
-            were used to compute the attr::tensors.
+            were used to compute the :attr:`tensors`.
     """
     if torch._C._are_functorch_transforms_active():
         raise RuntimeError(
