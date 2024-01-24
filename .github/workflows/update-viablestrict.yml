@@ -22,8 +22,7 @@ jobs:
         with:
           repository: pytorch/pytorch
           stable-branch: viable/strict
-          requires: >
-            '["pull", "trunk", "lint", "linux-binary"]'
+          requires: '[\"pull\", \"trunk\", \"lint\", \"linux-binary\"]'
           secret-bot-token: ${{ secrets.MERGEBOT_TOKEN }}
           rockset-api-key: ${{ secrets.ROCKSET_API_KEY }}
           # TODO: Remove these once https://github.com/pytorch/test-infra/pull/4905 lands
