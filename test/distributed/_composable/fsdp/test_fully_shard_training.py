@@ -138,7 +138,7 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             self.assertIsInstance(param, DTensor)
 
 
-class TestFullyShardTrainingCoreParity(FSDPTest):
+class TestFullyShard1DTrainingCore(FSDPTest):
     @property
     def world_size(self) -> int:
         return min(8, torch.cuda.device_count())
@@ -211,8 +211,6 @@ class TestFullyShardTrainingCoreParity(FSDPTest):
             in (2, 3)
         ):
             return
-        if self.rank == 0:
-            print(f"reshard_after_forward: {reshard_after_forward}")
         torch.manual_seed(42)
         lin_dim = 32
         model = nn.Sequential(*[MLP(lin_dim, torch.device("cpu")) for _ in range(3)])
