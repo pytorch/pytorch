@@ -1078,8 +1078,6 @@ elseif(USE_CUDA)
     target_precompile_headers(torch_cuda PRIVATE
         "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
   endif()
-elseif(USE_XPU)
-  add_library(torch_xpu ${Caffe2_XPU_SRCS})
 endif()
 
 if(USE_XPU)
@@ -1543,10 +1541,6 @@ elseif(USE_XPU)
   caffe2_interface_library(torch_xpu torch_xpu_library)
 endif()
 
-if(USE_XPU)
-  caffe2_interface_library(torch_xpu torch_xpu_library)
-endif()
-
 caffe2_interface_library(torch torch_library)
 
 install(TARGETS torch_cpu torch_cpu_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
@@ -1556,10 +1550,6 @@ if(USE_CUDA)
 elseif(USE_ROCM)
   install(TARGETS torch_hip torch_hip_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 elseif(USE_XPU)
-  install(TARGETS torch_xpu torch_xpu_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-endif()
-
-if(USE_XPU)
   install(TARGETS torch_xpu torch_xpu_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()
 
@@ -1616,7 +1606,6 @@ if(USE_CUDA)
   target_link_libraries(torch_cuda PUBLIC torch_cpu_library ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
 endif()
 
-<<<<<<< HEAD
 # ---[ XPU library.
 if(USE_XPU)
   target_link_libraries(torch_xpu INTERFACE torch::xpurt)
@@ -1626,17 +1615,10 @@ if(USE_XPU)
       torch_xpu INTERFACE $<INSTALL_INTERFACE:include>)
   target_include_directories(
       torch_xpu PRIVATE ${Caffe2_XPU_INCLUDE})
+  target_link_libraries(
+      torch_xpu PRIVATE ${Caffe2_XPU_DEPENDENCY_LIBS})
 
   target_link_libraries(torch_xpu PUBLIC torch_cpu_library)
-=======
-if(USE_XPU)
-  target_include_directories(torch_xpu PRIVATE ${Caffe2_XPU_INCLUDE})
-  target_link_libraries(torch_xpu PRIVATE ${Caffe2_XPU_DEPENDENCY_LIBS})
-  target_include_directories(
-    torch_xpu INTERFACE $<INSTALL_INTERFACE:include>)
-
-  target_link_libraries(torch_xpu PUBLIC torch_cpu_library ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
->>>>>>> 6a20c787de4 ([Intel GPU] oneDNN GPU GEMM support)
 endif()
 
 # ---[ Metal(OSX) modification
