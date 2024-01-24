@@ -16,17 +16,15 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, cast
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple
 
 from torch.distributed import PrefixStore, Store
-from torch.distributed.elastic.events import (
-    NodeState,
-    construct_and_record_rdzv_event,
-)
+from torch.distributed.elastic.events import construct_and_record_rdzv_event, NodeState
 
 from .api import (
     RendezvousClosedError,
     RendezvousError,
+    RendezvousGracefulExitError,
     RendezvousHandler,
     RendezvousParameters,
     RendezvousStateError,
@@ -275,6 +273,9 @@ class _RendezvousState:
         wait_list:
             A set of nodes that are waiting to participate in the next round of
             the rendezvous.
+        redundancy_list:
+            A set of nodes that are redundant in the current round and can join
+            the next rendezvous without triggering re-rendezvous.
         last_heartbeats:
             A dictionary containing each node's last heartbeat time.
     """
@@ -285,6 +286,7 @@ class _RendezvousState:
     closed: bool
     participants: Dict[_NodeDesc, int]
     wait_list: Set[_NodeDesc]
+    redundancy_list: Set[_NodeDesc]
     last_heartbeats: Dict[_NodeDesc, datetime]
 
     def __init__(self) -> None:
@@ -294,6 +296,7 @@ class _RendezvousState:
         self.closed = False
         self.participants = {}
         self.wait_list = set()
+        self.redundancy_list = set()
         self.last_heartbeats = {}
 
 
@@ -301,11 +304,18 @@ def _remove_participant_epilogue(state: _RendezvousState, settings: RendezvousSe
     if state.complete:
         # If we do not have any participants left, move to the next round.
         if not state.participants:
+            msg = "No participants left in the rendezvous, marking rendezvous as incomplete"
+            log.debug(msg)
             state.complete = False
 
             state.round += 1
     else:
         if len(state.participants) < settings.min_nodes:
+            msg = (
+                f"Number of participants {len(state.participants)}) less than"
+                f"min_nodes {settings.min_nodes}, clearning deadline in state"
+            )
+            log.debug(msg)
             state.deadline = None
 
 
@@ -457,6 +467,8 @@ class _BackendRendezvousStateHolder(_RendezvousStateHolder):
         participant_removed = False
 
         for dead_node in self._dead_nodes:
+            msg = f"Detected dead node '{dead_node}', removing it from the rendezvous"
+            log.debug(msg)
             del state.last_heartbeats[dead_node]
 
             try:
@@ -468,6 +480,11 @@ class _BackendRendezvousStateHolder(_RendezvousStateHolder):
 
             try:
                 state.wait_list.remove(dead_node)
+            except KeyError:
+                pass
+
+            try:
+                state.redundancy_list.remove(dead_node)
             except KeyError:
                 pass
 
@@ -493,14 +510,16 @@ class _Action(Enum):
     KEEP_ALIVE = 1
     ADD_TO_PARTICIPANTS = 2
     ADD_TO_WAIT_LIST = 3
-    REMOVE_FROM_PARTICIPANTS = 4
-    REMOVE_FROM_WAIT_LIST = 5
-    MARK_RENDEZVOUS_COMPLETE = 6
-    MARK_RENDEZVOUS_CLOSED = 7
-    SYNC = 8
-    ERROR_CLOSED = 9
-    ERROR_TIMEOUT = 10
-    FINISH = 11
+    ADD_TO_REDUNDANCY_LIST = 4
+    REMOVE_FROM_PARTICIPANTS = 5
+    REMOVE_FROM_WAIT_LIST = 6
+    REMOVE_FROM_REDUNDANCY_LIST = 7
+    MARK_RENDEZVOUS_COMPLETE = 8
+    MARK_RENDEZVOUS_CLOSED = 9
+    SYNC = 10
+    ERROR_CLOSED = 11
+    ERROR_TIMEOUT = 12
+    FINISH = 13
 
 
 class _RendezvousContext:
@@ -536,6 +555,7 @@ class _RendezvousOpExecutor(ABC):
         self,
         state_handler: Callable[[_RendezvousContext, float], _Action],
         deadline: float,
+        update_deadline: Optional[Callable[[timedelta], float]] = None,
     ) -> None:
         """Execute a rendezvous operation.
 
@@ -549,6 +569,9 @@ class _RendezvousOpExecutor(ABC):
             deadline:
                 The time, in seconds, at which the operation will be considered
                 timed-out.
+            update_deadline:
+                Function to generate a new operation deadline if the current
+                node may participate in the next rendezvous.
         """
 
 
@@ -596,10 +619,10 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
         self,
         state_handler: Callable[[_RendezvousContext, float], _Action],
         deadline: float,
+        update_deadline: Optional[Callable[[timedelta], float]] = None,
     ) -> None:
         """See base class."""
         action = None
-
         while action != _Action.FINISH:
             # Reads or writes the latest rendezvous state shared by all nodes in
             # the rendezvous. Note that our local changes might get overridden
@@ -648,10 +671,17 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
                     self._add_to_participants()
                 elif action == _Action.ADD_TO_WAIT_LIST:
                     self._add_to_wait_list()
+                elif action == _Action.ADD_TO_REDUNDANCY_LIST:
+                    self._add_to_redundancy_list()
                 elif action == _Action.REMOVE_FROM_PARTICIPANTS:
                     self._remove_from_participants()
                 elif action == _Action.REMOVE_FROM_WAIT_LIST:
                     self._remove_from_wait_list()
+                elif action == _Action.REMOVE_FROM_REDUNDANCY_LIST:
+                    self._remove_from_redundancy_list()
+                    # update deadline since the node may participate in rendezvous process
+                    if update_deadline:
+                        deadline = update_deadline(self._settings.timeout.join)
                 elif action == _Action.MARK_RENDEZVOUS_COMPLETE:
                     self._mark_rendezvous_complete()
                 elif action == _Action.MARK_RENDEZVOUS_CLOSED:
@@ -705,7 +735,21 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
         self._record(message=msg)
         log.debug(msg)
 
+        if self._node in self._state.redundancy_list:
+            self._state.redundancy_list.remove(self._node)
         self._state.wait_list.add(self._node)
+
+        self._keep_alive()
+
+    def _add_to_redundancy_list(self) -> None:
+        msg = (
+            f"The node '{self._node}' added itself to the redundancy list of round "
+            f"{self._state.round + 1} of the rendezvous '{self._settings.run_id}'. Pending sync."
+        )
+        self._record(message=msg)
+        log.debug(msg)
+
+        self._state.redundancy_list.add(self._node)
 
         self._keep_alive()
 
@@ -736,6 +780,18 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
         log.debug(msg)
 
         self._state.wait_list.remove(self._node)
+
+        del self._state.last_heartbeats[self._node]
+
+    def _remove_from_redundancy_list(self) -> None:
+        msg = (
+            f"The node '{self._node}' removed itself from the redunant list of round "
+            f"{self._state.round + 1} of the rendezvous '{self._settings.run_id}'. Pending sync."
+        )
+        self._record(message=msg)
+        log.debug(msg)
+
+        self._state.redundancy_list.remove(self._node)
 
         del self._state.last_heartbeats[self._node]
 
@@ -796,7 +852,25 @@ class _RendezvousJoinOp:
 
         # A closed rendezvous means that it no longer accepts new nodes.
         if state.closed:
+            if ctx.node in state.redundancy_list:
+                msg = f"The rendezvous '{ctx.settings.run_id}' is closed, terminating pending rendezvous."
+                raise RendezvousGracefulExitError(msg)
             return _Action.ERROR_CLOSED
+
+        if ctx.node in state.redundancy_list:
+            msg = f"The node {ctx.node} is in redunancy list"
+            log.debug(msg)
+            # don't apply the timeout logic here, since we want to allow the node to rejoin
+            if len(state.participants) == ctx.settings.max_nodes:
+                if _should_keep_alive(ctx):
+                    return _Action.KEEP_ALIVE
+                else:
+                    return _Action.SYNC
+            else:
+                # transition to waiting state that will respect timeouts.
+                msg = f"The node {ctx.node} is removed from redunancy list"
+                log.debug(msg)
+                return _Action.REMOVE_FROM_REDUNDANCY_LIST
 
         is_participant = ctx.node in state.participants
 
@@ -831,13 +905,28 @@ class _RendezvousJoinOp:
             if len(state.participants) < ctx.settings.max_nodes:
                 if ctx.node not in state.wait_list:
                     return _Action.ADD_TO_WAIT_LIST
+            elif len(state.participants) >= ctx.settings.max_nodes:
+                if ctx.node not in state.redundancy_list and ctx.node not in state.wait_list:
+                    return _Action.ADD_TO_REDUNDANCY_LIST
         elif is_participant:
             # If the rendezvous has enough number of participants including us,
             # check whether we have passed the rendezvous deadline. If yes,
             # complete it.
-            if len(state.participants) >= ctx.settings.min_nodes:
+            if len(state.participants) >= ctx.settings.min_nodes and \
+                    len(state.participants) <= ctx.settings.max_nodes:
                 if cast(datetime, state.deadline) < datetime.utcnow():
+                    msg = (
+                        f"The node '{ctx.node}' marking the rendezvous complete, "
+                        f"quorum established within deadline"
+                    )
+                    log.debug(msg)
                     return _Action.MARK_RENDEZVOUS_COMPLETE
+                else:
+                    msg = f"The node '{ctx.node}' can't complete rendezvous: deadline reached"
+                    log.debug(msg)
+            else:
+                msg = f"The node '{ctx.node}' can't complete rendezvous: not enough participants"
+                log.debug(msg)
         else:
             # The rendezvous is not complete yet and we are not part of it. Try
             # to join.
@@ -1023,9 +1112,11 @@ class DynamicRendezvousHandler(RendezvousHandler):
             join_op = _RendezvousJoinOp()
 
             deadline = self._get_deadline(self._settings.timeout.join)
-
             self._op_executor.run(exit_op, deadline)
-            self._op_executor.run(join_op, deadline)
+            self._op_executor.run(
+                join_op,
+                deadline,
+                self._get_deadline)
 
             self._start_heartbeats()
 
