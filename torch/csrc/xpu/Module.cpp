@@ -173,8 +173,7 @@ PyObject* THXPModule_xpuSynchronize(PyObject* self, PyObject* arg) {
   int device = THPUtils_unpackInt(arg);
   {
     pybind11::gil_scoped_release no_gil;
-    c10::xpu::streams_synchronize_on_device(
-        static_cast<c10::DeviceIndex>(device));
+    c10::xpu::syncStreamsOnDevice(static_cast<c10::DeviceIndex>(device));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
