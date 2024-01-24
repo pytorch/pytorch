@@ -218,6 +218,20 @@ static void apply_triangular_solve_batched(const Tensor& A, const Tensor& B, boo
 }
 
 void triangular_solve_batched_cublas(const Tensor& A, const Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
+  // Workaround the following a bug on CUDA < 12.1
+  // RuntimeError: CUDA error: CUBLAS_STATUS_EXECUTION_FAILED when calling `cublasStrsmBatched
+  // See https://github.com/pytorch/pytorch/issues/79191#issuecomment-1154222580
+#if defined(CUSOLVER_VERSION) && CUSOLVER_VERSION < 12100
+  constexpr auto max_batch_size = 524280;
+  if (B.size(-1) > max_batch_size) {
+    auto n_chunks = (B.size(-1) + max_batch_size - 1) / max_batch_size; // ceildiv
+    auto splits = B.split(n_chunks, /*dim=*/-1);
+    for (const Tensor& b : splits) {
+      triangular_solve_batched_cublas(A, b, left, upper, transpose, unitriangular);
+    }
+    return;
+  }
+#endif
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "triangular_solve_cuda", [&]{
     apply_triangular_solve_batched<scalar_t>(A, B, left, upper, transpose, unitriangular);
   });
