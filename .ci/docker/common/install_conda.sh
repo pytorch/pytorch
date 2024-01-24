@@ -101,7 +101,6 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   fi
 
   #debug display list of libs
-  ls las /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib/
-
+  ls /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib
   popd
 fi
