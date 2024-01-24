@@ -51,7 +51,6 @@ import torch._dynamo
 import torch._dynamo.utils
 import torch._export
 import torch.distributed
-import torch.fx._pytree as fx_pytree
 import torch.multiprocessing as mp
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
@@ -683,7 +682,10 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
                 )
 
     if args.export_profiler_trace:
-        name = args.profiler_trace_name + "_" + model.name + ".json"
+        name = args.profiler_trace_name + "_" + model.name
+        if hasattr(args, "rank"):
+            name += f"_rank_{args.rank}"
+        name += ".json"
         name = os.path.join(torch._dynamo.config.base_dir, name)
         p.export_chrome_trace(name)
     median = np.median(timings, axis=0)
@@ -1123,13 +1125,7 @@ class AOTInductorModelCache:
             _register_dataclass_output_as_pytree(example_outputs)
 
             so_path = torch._export.aot_compile(model, example_args, example_kwargs)
-
-            runner = (
-                torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
-                if device == "cpu"
-                else torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1)
-            )
-            cls.cache[key] = runner
+            cls.cache[key] = torch._export.aot_load(so_path, device)
 
         return cls.cache[key]
 
@@ -1149,19 +1145,11 @@ def export(model, example_inputs):
 
 
 def export_aot_inductor(model, example_inputs, device):
-    runner = AOTInductorModelCache.load(model, example_inputs, device)
-    call_spec = runner.get_call_spec()
-    in_spec = pytree.treespec_loads(call_spec[0])
-    out_spec = pytree.treespec_loads(call_spec[1])
+    optimized = AOTInductorModelCache.load(model, example_inputs, device)
 
     def opt_aot_inductor(_, example_inputs, collect_outputs=False):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-
-        flat_inputs = fx_pytree.tree_flatten_spec(
-            (example_args, example_kwargs), in_spec
-        )
-        flat_outputs = runner.run(flat_inputs)
-        return pytree.tree_unflatten(flat_outputs, out_spec)
+        return optimized(*example_args, **example_kwargs)
 
     return opt_aot_inductor
 
@@ -1994,6 +1982,12 @@ class BenchmarkRunner:
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
             if (name in CI_USE_SGD and self.args.ci) or name in BENCHMARK_USE_SGD:
                 self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
+                # Disable multi_tensor_sgd for benchmarking, there isn't a large performance benefit (~1%) to compiling
+                # this optimizer because it is a single foreach add, and increases compile time.
+                # After autotuning and fake tensor caching lands, we can enable, becuase the compile time impact will be lower.
+                # Fake Tensor caching: https://github.com/pytorch/pytorch/pull/113873
+                # Autotuning: https://github.com/pytorch/pytorch/issues/117447
+                self.optimizer.step = torch._dynamo.disable(self.optimizer.step)
             else:
                 self.optimizer = torch.optim.Adam(
                     params, lr=0.01, capturable=True, foreach=True
@@ -2233,7 +2227,7 @@ class BenchmarkRunner:
 
         return ModuleWrapPolicy(MODEL_FSDP_WRAP[model_name])
 
-    def deepcopy_and_maybe_ddp(self, model):
+    def deepcopy_and_maybe_parallelize(self, model):
         model = self.deepcopy_model(model)
         if self.args.ddp:
             assert (
@@ -2329,7 +2323,7 @@ class BenchmarkRunner:
             inputs_fp64 = None
             try:
                 model_fp64, inputs_fp64 = cast_to_fp64(
-                    self.deepcopy_and_maybe_ddp(model),
+                    self.deepcopy_and_maybe_parallelize(model),
                     clone_inputs(example_inputs),
                 )
                 self.init_optimizer(name, current_device, model_fp64.parameters())
@@ -2363,7 +2357,7 @@ class BenchmarkRunner:
             reset_rng_state()
             model_copy = None
             try:
-                model_copy = self.deepcopy_and_maybe_ddp(model)
+                model_copy = self.deepcopy_and_maybe_parallelize(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
                 correct_result = self.run_n_iterations(
                     model_copy, clone_inputs(example_inputs)
@@ -2384,7 +2378,7 @@ class BenchmarkRunner:
             reset_rng_state()
             model_copy = None
             try:
-                model_copy = self.deepcopy_and_maybe_ddp(model)
+                model_copy = self.deepcopy_and_maybe_parallelize(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
                 correct_rerun_result = self.run_n_iterations(
                     model_copy, clone_inputs(example_inputs)
@@ -2431,7 +2425,7 @@ class BenchmarkRunner:
             torch._dynamo.reset()
             model_copy = None
             try:
-                model_copy = self.deepcopy_and_maybe_ddp(model)
+                model_copy = self.deepcopy_and_maybe_parallelize(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
                 if self.args.export or self.args.export_aot_inductor:
                     # apply export on module directly
@@ -2615,7 +2609,7 @@ class BenchmarkRunner:
         model, example_inputs = self.maybe_cast(model, example_inputs)
 
         # Use distributed wrapping as necessary
-        model = self.deepcopy_and_maybe_ddp(model)
+        model = self.deepcopy_and_maybe_parallelize(model)
 
         self.init_optimizer(name, current_device, model.parameters())
         with self.pick_grad(name, self.args.training):
@@ -3409,12 +3403,6 @@ def run(runner, args, original_dir=None):
             CI, args.backend, training=args.training, dynamic=args.dynamic_shapes
         )
     if args.ddp:
-        # TODO: we could also hook DDP bench up to --speedup bench, _not_ for mgpu e2e perf,
-        # but just to measure impact on singlenode of performing graph-breaks.
-        # Left it as a follow up to keep this PR isolated.
-        assert (
-            args.accuracy
-        ), "DDP benchmark is currently only hooked up to --accuracy bench"
         assert args.training, "DDP benchmark requires --training mode"
         if args.no_optimize_ddp:
             torch._dynamo.config.optimize_ddp = False
