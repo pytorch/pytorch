@@ -1029,14 +1029,14 @@ def handle_log_file(
     with open(file_path, "rb") as f:
         full_text = f.read().decode("utf-8", errors="ignore")
 
+    new_file = "test/test-reports/" + sanitize_file_name(
+        f"{test}_{os.urandom(8).hex()}_.log"
+    )
+    os.rename(file_path, REPO_ROOT / new_file)
+
     if not failed and not was_rerun and "=== RERUNS ===" not in full_text:
         # If success + no retries (idk how else to check for test level retries
-        # other than reparse xml), print only what tests ran, rename the log
-        # file so it doesn't get printed later, and do not remove logs.
-        new_file = "test/test-reports/" + sanitize_file_name(
-            f"{test}_{os.urandom(8).hex()}_.log"
-        )
-        os.rename(file_path, REPO_ROOT / new_file)
+        # other than reparse xml), print only what tests ran
         print_to_stderr(
             f"\n{test} was successful, full logs can be found in artifacts with path {new_file}"
         )
@@ -1045,12 +1045,12 @@ def handle_log_file(
                 print_to_stderr(line.strip())
         print_to_stderr("")
         return
-    # otherwise: print entire file and then remove it
+
+    # otherwise: print entire file
     print_to_stderr(f"\nPRINTING LOG FILE of {test} ({file_path})")
     for line in full_text.splitlines():
         print_to_stderr(line.rstrip())
     print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})\n")
-    os.remove(file_path)
 
 
 def get_pytest_args(
