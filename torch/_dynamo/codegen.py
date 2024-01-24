@@ -237,7 +237,7 @@ class PyCodegen:
     def create_store(self, name) -> Instruction:
         if name in self.cell_and_freevars():
             return create_instruction("STORE_DEREF", argval=name)
-        assert name in self.code_options["co_varnames"], breakpoint()
+        assert name in self.code_options["co_varnames"]
         return create_instruction("STORE_FAST", argval=name)
 
     def create_load_global(self, name, push_null, add=False) -> Instruction:
@@ -311,7 +311,7 @@ class PyCodegen:
             output.append(create_instruction("PUSH_NULL"))
             output.extend(self.rot_n(num_on_stack + 1))
         for var in freevars:
-            assert var in self.cell_and_freevars(), breakpoint()
+            assert var in self.cell_and_freevars()
             output.append(create_instruction("LOAD_CLOSURE", argval=var))
         output.append(create_instruction("BUILD_TUPLE", arg=len(freevars)))
         output.append(self.create_load_const(code))

@@ -695,7 +695,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         last_tracer = tracers[-1]
         if last_tracer.symbolic_result:
             return last_tracer.symbolic_result
-        # new_co_names = list(self.output.global_scope)
 
         # TODO(voz): Actually compute the push properly! Do not land as such. Tracer should
         # smuggle the push a la what it does when it calls create_call_resume_at
@@ -728,13 +727,16 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
             cg = PyCodegen(self)
             for inst in resume_at:
+                if inst.opname == "LOAD_DEREF":
+                    breakpoint()
                 if inst.opname == "LOAD_CLOSURE":
                     assert inst.argval in chain_paths
                     chain = chain_paths[inst.argval]
+                    # breakpoint()
                     if self.f_funcobj:
                         # 3.11 +
                         assert_in_chain(self.f_funcobj, chain)
-                    if len(chain) == 1:
+                    if inst.argval in closure_chain[root_fn_name]:
                         # Top level, already present in closures
                         new_resume.append(inst)
                     else:
@@ -742,11 +744,19 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                         for fn_name in reverse_chain:
                             if fn_name == root_fn_name:
                                 continue
-                            if fn_name in closure_chain[root_fn_name]:
+                            elif fn_name in closure_chain[root_fn_name]:
                                 new_resume.append(
                                     create_instruction("LOAD_DEREF", argval=fn_name)
                                 )
                                 continue
+                            else:
+                                # This is wrong?
+                                new_resume.append(
+                                    create_instruction(
+                                        "LOAD_FAST",
+                                        argval=fn_name,
+                                    )
+                                )
                         new_resume.extend(cg.create_load_attrs("__closure__"))
                         new_resume.append(cg.create_load_const(0))
                         new_resume.append(create_instruction("BINARY_SUBSCR"))
@@ -1512,8 +1522,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             new_code,
         )
 
-        cg.code_options["co_freevars"] = self.cell_and_freevars()
-        self.output.code_options["co_freevars"] = self.cell_and_freevars()
+        # cg.code_options["co_freevars"] = self.cell_and_freevars()
+        # self.output.code_options["co_freevars"] = self.cell_and_freevars()
         print(
             """
 Free vars? {}
