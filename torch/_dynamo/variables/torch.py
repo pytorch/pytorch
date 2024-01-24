@@ -1,3 +1,4 @@
+import functools
 import inspect
 import logging
 
@@ -156,6 +157,12 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
 
     @staticmethod
     def is_matching_cls(value):
+        # Unwrap if it's a functools.lru_cache wrapper
+        if isinstance(value, functools._lru_cache_wrapper):
+            value = value.__wrapped__
+        # We can't do isinstance(value, type) check because some ctx managers
+        # are implemented as a function decorated by contextlib.contextmanager,
+        # E.g., torch._functorch.vmap.vmap_increment_nesting.
         return hashable(value) and value in supported_ctx_manager_classes
 
     def call_function(
