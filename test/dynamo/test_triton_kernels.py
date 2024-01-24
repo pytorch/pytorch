@@ -873,6 +873,23 @@ def forward(self, x_1, output_1):
         compiled_out = torch.compile(f)(inp)
         self.assertEqual(compiled_out, eager_out)
 
+    @requires_cuda()
+    def test_triton_kernel_fallback(self):
+        def f(x, y):
+            out = torch.zeros_like(x)
+            out2 = torch.zeros_like(x)
+            # torch.mm is ExternKernelOut
+            add_kernel[(4,)](x, torch.mm(x, y), out, 4, 16)
+            # torch.sort creates fallback kernel and hence MultiOutput
+            add_kernel[(4,)](x, torch.sort(y).values, out, 4, 16)
+            return out, out2
+
+        x = torch.randn(4, 4, device="cuda")
+        y = torch.randn(4, 4, device="cuda")
+        eager_out = f(x, y)
+        compiled_out = torch.compile(f)(x, y)
+        self.assertEqual(compiled_out, eager_out)
+
 
 class MutationTests(torch._dynamo.test_case.TestCase):
     @requires_cuda()

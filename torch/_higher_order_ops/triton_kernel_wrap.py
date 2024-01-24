@@ -1,9 +1,7 @@
 import dataclasses
-import inspect
 import logging
 import threading
-from types import FunctionType
-from typing import Any, Dict
+from typing import Any, Dict, List, Union
 
 import torch.utils._pytree as pytree
 from torch import Tensor
@@ -16,7 +14,6 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
-from torch.utils._triton import has_triton
 
 log = logging.getLogger("torch._dynamo")
 
@@ -65,141 +62,134 @@ kernel_side_table = KernelSideTable()
 # Mutation Tracker
 
 
-class IdentifyMutationException(Exception):
-    pass
-
-
-@dataclasses.dataclass
-class Proxy:
-    mutated: bool = False
-
-    def __add__(self, o):
-        if isinstance(o, Proxy):
-            raise IdentifyMutationException("Proxy operation with Proxy")
-        return self
-
-
-class Scalar:
-    @staticmethod
-    def check(o):
-        if isinstance(o, Proxy):
-            raise IdentifyMutationException("Proxy operation with Scalar")
-
-    def __radd__(self, o):
-        if isinstance(o, Proxy):
-            return o
-        return self
-
-    def __bool__(self):
-        raise IdentifyMutationException("Casting to bool is not allowed")
-
-
-# This operation is only needed when triton is available
-if has_triton():
-    import triton
-
-    def replacement_fn(self, *args, **kwargs):
-        if len(args) > 0:
-            Scalar.check(args[0])
-        return self
-
-    for name, _ in inspect.getmembers(triton.language.core.tensor, inspect.isfunction):
-        if name in ["__init__", "__radd__", "__bool__"]:
-            continue
-
-        setattr(Scalar, name, replacement_fn)
-
-
 # Given a triton kernel and the arguments for this kernel, this function traces
 # through the triton kernel and identifies which input pointers are mutated.
 # Tracing is done by replacing the input pointers with Proxy objects that
 # track mutation. Each triton language function is monkey patched to
 # either detect the mutation or return a fresh scalar object.
 def identify_mutated_tensors(kernel, kwargs):
-    from triton import language as tl
-    from triton.runtime.autotuner import Autotuner
+    import functools
 
-    # Replace tensor pointers with Proxy object. Do not replace the other
-    # inputs since tl.constexprs can be inspected by the kernel.
-    proxy_kwargs = {
-        key: (Proxy() if isinstance(value, Tensor) else value)
-        for key, value in kwargs.items()
+    import triton
+    from triton.compiler.code_generator import ast_to_ttir
+    from triton.runtime.jit import JITFunction
+
+    assert isinstance(kernel, JITFunction)
+
+    args = [val for key, val in kwargs.items()]
+
+    specialization = kernel._get_config(*args)
+    constants = {i: arg for i, arg in enumerate(args) if not isinstance(arg, Tensor)}
+    debug = None
+    target = None
+
+    # Build kernel signature -- doesn't include constexpr arguments.
+    signature = {
+        i: kernel._type_of(kernel._key_of(arg))
+        for i, arg in enumerate(args)
+        if i not in kernel.constexprs
     }
 
-    if isinstance(kernel, Autotuner):
-        if len(kernel.configs) > 0:
-            # If we are autotuning, then it doesn't matter which version gets
-            # picked for tracing purposes, so lets pick the first one
-            proxy_kwargs = {**proxy_kwargs, **kernel.configs[0].kwargs}
-        kernel = kernel.fn
+    @dataclasses.dataclass(frozen=True)
+    class TensorParam:
+        idx: int
 
-    default_impls: Dict[str, FunctionType] = {}
-    mutation_ops = {
-        "store",
-        "atomic_add",
-        "atomic_cas",
-        "atomic_max",
-        "atomic_min",
-        "atomic_xchg",
-    }
+    @dataclasses.dataclass(frozen=True)
+    class NonTensorParam:
+        source: Any
+        pass
+
+    @dataclasses.dataclass(frozen=True)
+    class Intermediate:
+        idx: int
+
+    mappings: Dict[Any, Union[TensorParam, NonTensorParam, Intermediate]] = dict()
+    next_intermediate = 0
+
+    def convert(arg):
+        if isinstance(arg, triton._C.libtriton.triton.ir.block_argument):
+            if arg not in mappings:
+                mappings[arg] = NonTensorParam(arg)
+            return mappings[arg]
+        if isinstance(arg, triton._C.libtriton.triton.ir.value):
+            if arg not in mappings:
+                nonlocal next_intermediate
+                mappings[arg] = Intermediate(next_intermediate)
+                next_intermediate += 1
+            return mappings[arg]
+        return arg
+
+    # Name of mutation op to mutated parameter indices
+    MUTATION_OPS = {"masked_store": [0]}
+
+    ops: Dict[Union[TensorParam, NonTensorParam, Intermediate], "Op"] = dict()
+    sinks: List["Op"] = []
+
+    @dataclasses.dataclass
+    class Op:
+        name: str
+        args: List[Any]
+        kwargs: Dict[str, Any]
+
+        @staticmethod
+        def create(name, args, kwargs, result):
+            op = Op(name, [convert(a) for a in args], kwargs)
+            ops[convert(result)] = op
+            if name in MUTATION_OPS:
+                sinks.append(op)
+
+    class MutationAnalysisWrapper:
+        def __init__(self, builder):
+            self.builder = builder
+
+        def __getattr__(self, name):
+            def generic_indirection(name, *args, **kwargs):
+                result = getattr(self.builder, name)(*args, **kwargs)
+
+                if name.startswith("create_"):
+                    Op.create(name[len("create_") :], args, kwargs, result)
+                elif name in {"get_int32"}:
+                    Op.create(name[len("get_") :], args, kwargs, result)
+                elif name in {"get_loc", "set_loc"}:
+                    pass
+                else:
+                    pass
+                return result
+
+            return functools.partial(generic_indirection, name)
+
+    original_add_entry_block = triton._C.libtriton.triton.ir.function.add_entry_block
+
+    def custom_add_entry_block(self):
+        result = self.original_add_entry_block()
+        for i, arg in enumerate(args):
+            if isinstance(arg, Tensor):
+                mappings[self.args(i)] = TensorParam(i)
+        return result
+
+    triton._C.libtriton.triton.ir.function.add_entry_block = custom_add_entry_block
+    triton._C.libtriton.triton.ir.function.original_add_entry_block = (
+        original_add_entry_block
+    )
+
+    OriginalCodeGenerator = triton.compiler.code_generator.CodeGenerator
+
+    class CustomCodeGenerator(OriginalCodeGenerator):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.builder = MutationAnalysisWrapper(self.builder)
+
+        def visit_compound_statement(self, *args, **kwargs):
+            super().visit_compound_statement(*args, **kwargs)
+            breakpoint()
+
+    triton.compiler.code_generator.CodeGenerator = CustomCodeGenerator
+
     try:
-        # Monkey patch all triton language functions
-        for name, impl in inspect.getmembers(tl, inspect.isfunction):
-            default_impls[name] = impl
-
-            if name in mutation_ops:
-                # Ops that mutate the first argument tensor pointer
-
-                def fn(pointer, *args, **kwargs):
-                    assert isinstance(pointer, Proxy)
-                    pointer.mutated = True
-                    return Scalar()
-
-            elif name == "make_block_ptr":
-                # Creates indirection to base tensor pointer
-
-                def fn(base, *args, **kwargs):  # type: ignore[misc] # different conditional signatures
-                    assert isinstance(base, Proxy)
-                    return base
-
-            elif name == "inline_asm_elementwise":
-                # If there's inline asm in the kernel, anything can happen.
-                # Do not optimize
-
-                def fn(*args, **kwargs):  # type: ignore[misc] # different conditional signatures
-                    raise IdentifyMutationException("inline_asm_elementwise in kernel")
-
-            else:
-                # Any operation not listed above, do not mutate a kernel
-                # pointer. They either return some sort of scalar or
-                # for the purposes of tracing cause an uninteresting
-                # side effect.
-
-                def fn(*args, **kwargs):  # type: ignore[misc] # different conditional signatures
-                    return Scalar()
-
-            setattr(tl, name, fn)
-
-        kernel.fn(**proxy_kwargs)
-        return [
-            key
-            for key, value in proxy_kwargs.items()
-            if isinstance(value, Proxy) and value.mutated
-        ]
-    except (AttributeError, IdentifyMutationException, RuntimeError, ValueError) as e:
-        # - AttributeError: Triton converts constexpr to special objects
-        #   TODO(oulgen): we also need to wrap them appropriately
-        #
-        # - IdentifyMutationException: An indication for us to not optimize
-        #
-        # - RuntimeError: Throw when the kernel calls another @triton.jit kernel
-        #   "Cannot call @triton.jit'd outside of the scope of a kernel"
-        #   TODO(oulgen): Find a way to monkey patch @triton.jit away
-        #
-        # - ValueError: If triton language function are imported ahead of time,
-        #   we are no longer able to monkey patch them, so the execution throws
-        #   "Did you forget to add @triton.jit ?"
-        #   TODO(oulgen): Find a way to monkey patch this
+        ttir_module = ast_to_ttir(
+            kernel, signature, specialization, constants, debug, target
+        )
+    except Exception as e:
         import traceback
 
         log.debug(
@@ -210,10 +200,39 @@ def identify_mutated_tensors(kernel, kwargs):
                 traceback.TracebackException.from_exception(e).format()  # noqa: G001
             )
         )
-        return [key for key, value in proxy_kwargs.items() if isinstance(value, Proxy)]
+        return [key for key, value in kwargs.items() if isinstance(value, Tensor)]
     finally:
-        for name, impl in default_impls.items():
-            setattr(tl, name, impl)
+        triton._C.libtriton.triton.ir.function.add_entry_block = (
+            original_add_entry_block
+        )
+        triton.compiler.code_generator.CodeGenerator = OriginalCodeGenerator
+
+    stack = []
+    for sink in sinks:
+        for idx in MUTATION_OPS[sink.name]:
+            stack.append(sink.args[idx])
+
+    mutated = [False] * len(kwargs)
+    while len(stack):
+        arg = stack[-1]
+        stack.pop()
+
+        if isinstance(arg, TensorParam):
+            mutated[arg.idx] = True
+        elif isinstance(arg, NonTensorParam):
+            pass
+        elif isinstance(arg, Intermediate):
+            for a in ops[arg].args:
+                stack.append(a)
+        else:
+            # There are some scalar args
+            pass
+
+    return [
+        key
+        for i, (key, value) in enumerate(kwargs.items())
+        if isinstance(value, Tensor) and mutated[i]
+    ]
 
 
 ###############################################################################
