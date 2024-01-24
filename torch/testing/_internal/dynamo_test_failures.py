@@ -1781,7 +1781,6 @@ dynamo_expected_failures = {
     "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float64",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float64",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float64",
-    "TestAssertCloseSparseCOO.test_matching_coalesced",  # test_testing
     "TestImports.test_circular_dependencies",  # test_testing
     "TestAssertCloseSparseCSR.test_mismatching_crow_indices_msg",  # test_testing
     "TestAssertCloseSparseBSC.test_mismatching_row_indices_msg",  # test_testing

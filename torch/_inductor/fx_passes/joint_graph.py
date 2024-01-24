@@ -169,7 +169,7 @@ def remove_redundant_views(gm: torch.fx.GraphModule):
 
 class UniformValueConstantFolder(ConstantFolder):
     """
-    Runs constant folding and replaces tensors that have a unifrom value
+    Runs constant folding and replaces tensors that have a uniform value
     with a tensor constructor call: aten.full([shape], value, ...)
     """
 
@@ -182,6 +182,7 @@ class UniformValueConstantFolder(ConstantFolder):
         # TODO - we could also Tensors which get replaced with arange here
         return (
             t.numel() != 0
+            and not t.is_sparse
             and bool((t == t.flatten()[0]).all())
             and torch._C._has_storage(t)
             and t.layout == torch.strided

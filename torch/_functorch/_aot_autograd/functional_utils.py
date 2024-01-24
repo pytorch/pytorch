@@ -164,10 +164,13 @@ def has_metadata_mutation(f_arg, arg, *, check_only_storage_mutation: bool):
         # it experiences an data mutation, we pessimistically think that the set_()
         # call is necessary here. We could in theory fix this, but this will
         # hopefully never happen in user code, and is not needed for fsdp.
-        same_storages = StorageWeakRef(arg.untyped_storage()) == StorageWeakRef(
-            arg_after.untyped_storage()
-        )
-        has_storage_metadata_mutation = maybe_storage_changed and not same_storages
+        if maybe_storage_changed:
+            same_storages = StorageWeakRef(arg.untyped_storage()) == StorageWeakRef(
+                arg_after.untyped_storage()
+            )
+            has_storage_metadata_mutation = not same_storages
+        else:
+            has_storage_metadata_mutation = False
         if check_only_storage_mutation:
             return has_storage_metadata_mutation
 
