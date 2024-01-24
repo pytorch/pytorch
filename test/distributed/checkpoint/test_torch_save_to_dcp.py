@@ -1,15 +1,17 @@
+# Owner(s): ["oncall: distributed"]
+
 import copy
-import logging
 import os
 import tempfile
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as DCP
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.distributed._shard._utils import narrow_tensor_by_index
-from torch.distributed._tensor import DTensor, Placement, Replicate, Shard
+from torch.distributed._tensor import DTensor, Replicate, Shard
 from torch.distributed.checkpoint.filesystem import FileSystemReader
 from torch.distributed.checkpoint.metadata import (
     ChunkStorageMetadata,
@@ -18,10 +20,10 @@ from torch.distributed.checkpoint.metadata import (
     TensorStorageMetadata,
 )
 from torch.distributed.checkpoint.planner import LoadItemType, LoadPlan, LoadPlanner
-from torch.distributed.checkpoint.serialization import Deserializer, Serializer
-from torch.distributed.checkpoint.storage import StorageReader, StorageWriter
+from torch.distributed.checkpoint.storage import StorageReader
 from torch.distributed.device_mesh import init_device_mesh
 from torch.futures import Future
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_if_lt_x_gpu,
@@ -160,9 +162,6 @@ class ConversionReader(StorageReader):
         else:
             self.reader = TorchSaveReader(fp_name, world_size)
 
-    def set_deserializer(self, deserializer: Deserializer) -> None:
-        self.reader.set_deserializer(deserializer)
-
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         return self.reader.read_data(plan, planner)
 
@@ -196,7 +195,6 @@ class TestTorchSaveToDCP(DTensorTestBase):
                 dist.broadcast_object_list(objects)
                 os.sync()
             fp_name = objects[0]
-            logging.warning(f"{fp_name=}")
 
             # Convert a torch.save checkpoint to a sharded DCP checkpoint.
             _offline_convert(fp_name, self.temp_dir, self.world_size)
@@ -222,7 +220,6 @@ class TestTorchSaveToDCP(DTensorTestBase):
                 dist.broadcast_object_list(objects)
                 os.sync()
             fp_name = objects[0]
-            logging.warning(f"{fp_name=}")
 
             copy_state_dict = copy.deepcopy(model.state_dict())
             state_dict = model.state_dict()

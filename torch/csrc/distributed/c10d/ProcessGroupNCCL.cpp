@@ -655,10 +655,20 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
   // Device synchronize only after we've completed timeout checks.
   if (!barrierTensors_.empty()) {
     // If we use the work to do barrier, we should block here
-    at::cuda::OptionalCUDAGuard gpuGuard;
     for (auto& device : devices_) {
-      gpuGuard.set_index(device.index());
-      AT_CUDA_CHECK(cudaDeviceSynchronize());
+      // `dist.barrier()` only requires all CPU processes to enter this
+      // function, hence we only need to make sure the dummy all-reduce has
+      // completed. So we would only need to sync the **current stream** back to
+      // host, and do not need to synchronize the entire device (which may have
+      // kernels running on other streams).
+      // Using `cudaStreamSynchronize` instead of `cudaDeviceSynchronize` can:
+      // - lower chance of hang;
+      // - CurrentCUDAStream is usually the context of the next operation in
+      // Python, thus blocking current stream would already block the next
+      // compute kernel;
+      // - achieve better barrier performance.
+      auto currentStream = at::cuda::getCurrentCUDAStream(device.index());
+      AT_CUDA_CHECK(cudaStreamSynchronize(currentStream));
     }
   }
 }
@@ -1126,7 +1136,12 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 
   // Abort communicators after all threads have exited to avoid having the
   // threads dying due to aborted communicator and raising a SIGABRT
+  // We need to include PG information in the abort reason so we can tell the
+  // abort order.
   std::string abortReason = c10::str("Process Group destroyed on rank ", rank_);
+  LOG(INFO)
+      << logPrefix()
+      << "ProcessGroupNCCL aborting communicators, check for 'abort finished' logs or look for abort hang";
   abort(abortReason);
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL abort finished.";
 
