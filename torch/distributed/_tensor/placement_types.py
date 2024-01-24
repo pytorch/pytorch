@@ -249,7 +249,7 @@ class Shard(Placement):
     ) -> torch.Tensor:
         """
         transform from replicated tensor to a sharded tensor on
-        the current rank
+        the current rank, which would perform a local chunk
         """
         num_chunks = mesh.size(mesh_dim=mesh_dim)
         shards, _ = self._split_tensor(
