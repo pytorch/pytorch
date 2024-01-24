@@ -238,7 +238,7 @@ class DeviceCachingAllocator {
   bool release_cached_blocks() {
     synchronize_and_free_events();
     // See Note [Safe to Free Blocks on BlockPool]
-    c10::xpu::device_synchronize(device_index);
+    c10::xpu::syncStreamsOnDevice(device_index);
 
     release_blocks(large_blocks);
     release_blocks(small_blocks);
@@ -530,6 +530,10 @@ class XPUAllocator : public Allocator {
 
   void raw_delete(void* ptr) {
     this->free(ptr);
+  }
+
+  void copy_data(void* dest, const void* src, std::size_t count) const final {
+    xpu::getCurrentXPUStream().queue().memcpy(dest, src, count);
   }
 };
 
