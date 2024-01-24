@@ -122,7 +122,7 @@ hf_Reformer,pass,25
 
 
 
-hf_T5_base,OOM,3
+hf_T5_base,eager_2nd_run_OOM,0
 
 
 
@@ -139,6 +139,10 @@ hf_Whisper,pass,5
 
 
 hf_clip,eager_fail_to_run,0
+
+
+
+hf_distil_whisper,model_fail_to_load,0
 
 
 
@@ -282,7 +286,7 @@ vgg16,pass,6
 
 
 
-vision_maskrcnn,pass,34
+vision_maskrcnn,pass,33
 
 
 

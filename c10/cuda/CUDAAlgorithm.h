@@ -4,8 +4,7 @@
 #include <thrust/execution_policy.h>
 #include <thrust/functional.h>
 #endif
-namespace c10 {
-namespace cuda {
+namespace c10::cuda {
 #ifdef THRUST_DEVICE_LOWER_BOUND_WORKS
 template <typename Iter, typename Scalar>
 __forceinline__ __device__ Iter
@@ -29,5 +28,4 @@ __device__ Iter lower_bound(Iter start, Iter end, Scalar value) {
   return end;
 }
 #endif // THRUST_DEVICE_LOWER_BOUND_WORKS
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda

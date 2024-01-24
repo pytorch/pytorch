@@ -401,6 +401,7 @@ def meta_sparse_structured_linear(
     _meta: Tensor,
     bias: Optional[Tensor] = None,
     _activation_opt: Optional[str] = None,
+    out_dtype: Optional[torch.dtype] = None,
 ):
     output_sizes = list(input.shape)
     if bias is not None:
@@ -415,9 +416,13 @@ def meta_sparse_structured_linear(
     assert len(input.shape) == 2, "we can only handle the squashed input case"
     transposed_strides = (1, input.size(0))
 
+    if out_dtype is not None:
+        assert (
+            input.dtype == torch.int8 and out_dtype == torch.int32
+        ), "out_dtype is only supported for i8i8->i32 linear operator"
     output = input.new_empty(
         output_sizes,
-        dtype=input.dtype if input.dtype != torch.int8 else torch.int32,
+        dtype=input.dtype if out_dtype is None else out_dtype,
     ).as_strided(output_sizes, transposed_strides)
 
     return output
@@ -5064,37 +5069,8 @@ def meta__scaled_dot_product_flash(
     num_heads = query.size(1)
     max_seqlen_batch_q = query.size(2)
     head_dim = query.size(3)
-
     max_seqlen_batch_k = key.size(2)
 
-    if device_hint(query) == "cpu":
-        attention = torch.empty(
-            (batch_size, max_seqlen_batch_q, num_heads, head_dim),
-            dtype=query.dtype,
-            device=query.device,
-        ).transpose(1, 2)
-        logsumexp = torch.empty(
-            (
-                batch_size,
-                max_seqlen_batch_q,
-                num_heads,
-            ),
-            dtype=torch.float,
-            device=query.device,
-        ).transpose(1, 2)
-        return (
-            attention,
-            logsumexp,
-            torch.empty((), dtype=torch.int32, device="meta"),
-            torch.empty((), dtype=torch.int32, device="meta"),
-            0,
-            0,
-            torch.empty((), dtype=torch.long, device="meta"),
-            torch.empty((), dtype=torch.long, device="meta"),
-            torch.empty((), dtype=query.dtype, device=query.device),
-        )
-
-    # Cuda Path
     query_t = query.transpose(1, 2)
     attention = torch.empty_like(query_t).transpose(1, 2)
     logsumexp = torch.empty(
@@ -5158,17 +5134,75 @@ def meta__scaled_dot_product_flash_backward(
     philox_offset: Tensor,
     scale: Optional[float] = None,
 ):
-    if device_hint(query) != "cpu":
-        grad_q = torch.empty_like(query.transpose(1, 2)).transpose(1, 2)
-        grad_k = torch.empty_like(key.transpose(1, 2)).transpose(1, 2)
-        grad_v = torch.empty_like(value.transpose(1, 2)).transpose(1, 2)
-        return grad_q, grad_k, grad_v
+    grad_q = torch.empty_like(query.transpose(1, 2)).transpose(1, 2)
+    grad_k = torch.empty_like(key.transpose(1, 2)).transpose(1, 2)
+    grad_v = torch.empty_like(value.transpose(1, 2)).transpose(1, 2)
+    return grad_q, grad_k, grad_v
 
+
+@register_meta(
+    [
+        aten._scaled_dot_product_flash_attention_for_cpu,
+    ]
+)
+def meta__scaled_dot_product_flash_attention_for_cpu(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    attn_mask: Optional[Tensor] = None,
+    scale: Optional[float] = None,
+):
+    batch_size = query.size(0)
+    num_heads = query.size(1)
+    max_seqlen_batch_q = query.size(2)
+    head_dim = query.size(3)
+
+    attention = torch.empty(
+        (batch_size, max_seqlen_batch_q, num_heads, head_dim),
+        dtype=query.dtype,
+        device=query.device,
+    ).transpose(1, 2)
+    logsumexp = torch.empty(
+        (
+            batch_size,
+            max_seqlen_batch_q,
+            num_heads,
+        ),
+        dtype=torch.float,
+        device=query.device,
+    ).transpose(1, 2)
+    return (
+        attention,
+        logsumexp,
+    )
+
+
+@register_meta(
+    [
+        aten._scaled_dot_product_flash_attention_for_cpu_backward,
+    ]
+)
+def meta__scaled_dot_product_flash_attention_for_cpu_backward(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    out: Tensor,
+    logsumexp: Tensor,
+    dropout_p: float,
+    is_causal: bool,
+    attn_mask: Optional[Tensor] = None,
+    scale: Optional[float] = None,
+):
+    # cpus's grad layout is different from cuda's,
+    # i.e. (batch_size, seq_len，num_heads, head_dim）
     batch_size = query.size(0)
     num_heads = query.size(1)
     head_dim = query.size(3)
-    len_q = query.size(2) if device_hint(query) == "cpu" else max_q
-    len_k = key.size(2) if device_hint(query) == "cpu" else max_k
+    len_q = query.size(2)
+    len_k = key.size(2)
 
     grad_q = torch.empty_permuted(
         (batch_size, num_heads, len_q, head_dim),
@@ -5486,7 +5520,12 @@ def meta_scaled_mm(
         return stride[0] == 1 and stride[1] == shape[0]
 
     def is_fp8_type(dtype):
-        return dtype in (torch.float8_e4m3fn, torch.float8_e5m2)
+        return dtype in (
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2fnuz,
+        )
 
     torch._check(
         self.dim() == 2 and mat2.dim() == 2,
@@ -6015,8 +6054,10 @@ def meta_bucketize(self, boundaries, *, out_int32=False, right=False):
     ).contiguous()
 
 
-@register_meta(aten._upsample_bilinear2d_aa.default)
-def meta_upsample_bilinear2d_aa(
+@register_meta(
+    [aten._upsample_bilinear2d_aa.default, aten._upsample_bicubic2d_aa.default]
+)
+def meta_upsample_bimode2d_aa(
     input, output_size, align_corners, scales_h=None, scales_w=None
 ):
     full_output_size = upsample_common_check(
