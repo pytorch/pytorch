@@ -106,9 +106,12 @@ def normalize_outarray(arg, parm=None):
     # almost normalize_ndarray, only return the array, not its tensor
     if arg is None:
         return arg
-
     from ._ndarray import ndarray
 
+    # If dynamo is tracing via a Tensor, we wrap it in an ndarray before
+    # normalizing
+    if isinstance(arg, torch.Tensor):
+        arg = wrap_tensors(arg)
     if not isinstance(arg, ndarray):
         raise TypeError(f"'{parm.name}' must be an array")
     return arg
