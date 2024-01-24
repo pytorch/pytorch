@@ -2,6 +2,8 @@ import sys
 
 import torch
 
+from torch.testing._internal.inductor_utils import GPU_TYPE
+
 
 def first_arg(x, y):
     return x[y]
@@ -38,13 +40,13 @@ if __name__ == "__main__":
     assert dyn_shape in ("True", "False")
     dynamic_shapes = dyn_shape == "True"
 
-    x = torch.randn(shape_x, device="cuda")
-    y = torch.arange(4, device="cuda")
+    x = torch.randn(shape_x, device=GPU_TYPE)
+    y = torch.arange(4, device=GPU_TYPE)
     fn = vars()[fn_name]
     fn = torch.compile(dynamic=dynamic_shapes)(fn)
     if fn_name == "store":
         shape = (y.numel(),) + x.shape[2:]
-        z = torch.randn(shape, device="cuda")
+        z = torch.randn(shape, device=GPU_TYPE)
         fn(x, y, z)
     else:
         fn(x, y)
