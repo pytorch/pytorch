@@ -5513,7 +5513,6 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
         return r
 
 
-
 @register_decomposition(aten.masked_fill_)
 def masked_fill_(
     a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLikeType
