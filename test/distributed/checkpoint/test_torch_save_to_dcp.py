@@ -132,6 +132,9 @@ class TorchSaveReader(StorageReader):
         self.state_dict = state_dict
         self.metadata = metadata
 
+    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+        return
+
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         for req in plan.items:
             if req.type == LoadItemType.BYTE_IO:
