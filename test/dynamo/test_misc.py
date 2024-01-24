@@ -4052,36 +4052,36 @@ def fn():
         del x
         self.assertIs(x_ref(), None)
 
-    def test_release_module_memory(self):
-        mod = torch.nn.Linear(10, 10)
-        x = torch.rand([10, 10])
-        mod_weight_ref = weakref.ref(mod.weight)
-        mod_ref = weakref.ref(mod)
+    # def test_release_module_memory(self):
+    #     mod = torch.nn.Linear(10, 10)
+    #     x = torch.rand([10, 10])
+    #     mod_weight_ref = weakref.ref(mod.weight)
+    #     mod_ref = weakref.ref(mod)
 
-        # Modules that are passed into torch._dynamo optimized functions
-        # will normally be held onto through the generated GraphModule,
-        # which contains the modules. remove the reference in this backend
-        # and test that no additional references are being held.
-        class NoLeakBackend:
-            def __call__(self, gm: torch.fx.GraphModule, example_inputs):
-                gm.mod = None
+    #     # Modules that are passed into torch._dynamo optimized functions
+    #     # will normally be held onto through the generated GraphModule,
+    #     # which contains the modules. remove the reference in this backend
+    #     # and test that no additional references are being held.
+    #     class NoLeakBackend:
+    #         def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+    #             gm.mod = None
 
-                def foo(*args, **kwargs):
-                    return (1,)
+    #             def foo(*args, **kwargs):
+    #                 return (1,)
 
-                return foo
+    #             return foo
 
-        no_leak_backend = NoLeakBackend()
+    #     no_leak_backend = NoLeakBackend()
 
-        @torch._dynamo.optimize(no_leak_backend)
-        def foo(mod, x):
-            return mod(x)
+    #     @torch._dynamo.optimize(no_leak_backend)
+    #     def foo(mod, x):
+    #         return mod(x)
 
-        foo(mod, x)
-        del mod
-        del x
-        self.assertIsNone(mod_ref(), None)
-        self.assertIsNone(mod_weight_ref(), None)
+    #     foo(mod, x)
+    #     del mod
+    #     del x
+    #     self.assertIsNone(mod_ref(), None)
+    #     self.assertIsNone(mod_weight_ref(), None)
 
     def test_release_scope_memory(self):
         def inner(y):

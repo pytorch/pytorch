@@ -95,8 +95,8 @@ def decompose_and_inline_function_with_makefx(tx, fn, args, kwargs):
             fake_value_args, fake_value_kwargs
         )
 
-    print("\nfx code")
-    print(fx_g.code)
+    # print("\nfx code")
+    # print(fx_g.code)
 
     # now inline this fx graph and return the output
     user_fn_variable_with_kwargs = SourcelessBuilder()(
