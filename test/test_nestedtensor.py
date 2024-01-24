@@ -3614,9 +3614,11 @@ class TestNestedTensorSubclass(TestCase):
         nt, _ = jagged_from_list([a, b, c], None)
         # transpose ragged dim
         transposed = nt.transpose(1, 2)
-        # pointwise ops are not supported on ragged dim transposed jagged layout NTs
-        with self.assertRaisesRegex(ValueError, "expected .* to be a contiguous jagged layout"):
-            clone = transposed.clone()
+        clone = transposed.clone()
+        self.assertEqual(clone.values(), transposed.values())
+        self.assertEqual(clone.offsets(), transposed.offsets())
+        self.assertEqual(clone._ragged_idx, transposed._ragged_idx)
+        self.assertEqual(clone.shape, transposed.shape)
 
     # Note 1: Math fallback doesn't work with bfloat16 on CUDA
     # Note 2: ROCm doesn't support flash attention or mem_efficient attention for NT
