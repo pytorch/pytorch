@@ -2332,6 +2332,28 @@ class CPUReproTests(TestCase):
         self.common(fn, (x, y))
         assert metrics.generated_cpp_vec_kernel_count == 2
 
+    def test_transpose_mxn_16_16_bf16_fp16(self):
+        def fn(a, b):
+            c = a * b
+            return c.sum(dim=1)
+
+        for dtype in [torch.bfloat16, torch.float16]:
+            metrics.reset()
+            x = torch.randn(100, 50, 50).to(dtype)
+            y = torch.randn(100, 50, 50).to(dtype).transpose(1, 2)
+            self.common(fn, (x, y))
+            assert metrics.generated_cpp_vec_kernel_count == 2
+
+    def test_transpose_mxn_32_32_bf16_fp16(self):
+        def fn(a):
+            return a.permute(0, 2, 1).contiguous()
+
+        for dtype in [torch.bfloat16, torch.float16]:
+            metrics.reset()
+            x = torch.randn(2, 9216, 9216).to(dtype)
+            self.common(fn, (x,))
+            assert metrics.generated_cpp_vec_kernel_count == 2
+
     def test_transpose_sum2d_cpu_only(self):
         def fn(a, b):
             c = a * b
@@ -2797,6 +2819,22 @@ class CPUReproTests(TestCase):
         shape = [int(dim) for dim in shape.split(",")]
         x = torch.rand(*shape, device="cpu", dtype=dtype)
         self.common(fp8_cast, (x,))
+
+    def test_logical_op_store_to_lowp_data_dtype(self):
+        # https://github.com/pytorch/pytorch/issues/117624
+        # https://github.com/pytorch/pytorch/issues/117627
+        def fn(out1, out2, input, other):
+            o1 = torch.logical_or(out=out1, input=input, other=other)
+            o2 = torch.logical_xor(out=out2, input=input, other=other)
+            return o1, o2
+
+        x = torch.rand([3, 3, 2, 8, 9, 2], dtype=torch.float)
+        y = torch.rand([3, 3, 2, 8, 9, 2], dtype=torch.float)
+        for dtype in _lowp_fp_dtypes:
+            o1 = torch.rand([3, 3, 2, 8, 9, 2], dtype=dtype)
+            o2 = torch.rand([3, 3, 2, 8, 9, 2], dtype=dtype)
+            with torch.no_grad():
+                self.common(fn, (o1, o2, x, y))
 
 
 if __name__ == "__main__":
