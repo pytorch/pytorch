@@ -197,8 +197,13 @@ class TensorVariable(VariableTracker):
                     )
                 else:
                     # attributes in the ctx returned by tensor_flatten are assumed to be constants
-                    from . import ConstantVariable
+                    from . import ConstantVariable, ListVariable, TupleVariable
 
+                    # TODO: figure out a good way to dispatch on all possible variable trackers for constants here.
+                    if isinstance(example_value, list):
+                        return ListVariable([ConstantVariable(x) for x in example_value])
+                    elif isinstance(example_value, tuple):
+                        return TupleVariable([ConstantVariable(x) for x in example_value])
                     return ConstantVariable(example_value)
         if not self.source:
             raise NotImplementedError()
