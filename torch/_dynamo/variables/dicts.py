@@ -44,12 +44,14 @@ def is_hashable(x):
                 variables.ConstantVariable,
                 variables.EnumVariable,
                 variables.user_defined.UserDefinedClassVariable,
+                variables.UserFunctionVariable,
                 variables.misc.SkipFilesVariable,
                 variables.misc.NumpyVariable,
                 variables.NNModuleVariable,
                 variables.MethodWrapperVariable,
                 variables.TorchInGraphFunctionVariable,
                 variables.TypingVariable,
+                variables.FunctoolsPartialVariable,
             ),
         )
 
@@ -80,6 +82,8 @@ class ConstDictVariable(VariableTracker):
                 x = tuple(Hashable(e).underlying_value for e in self.vt.items)
             elif isinstance(self.vt, variables.NNModuleVariable):
                 return self.vt.module
+            elif isinstance(self.vt, variables.UserFunctionVariable):
+                return self.vt.get_function()
             else:
                 x = self.vt.as_python_constant()
             return x
