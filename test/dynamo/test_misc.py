@@ -995,6 +995,17 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         torch._dynamo.testing.standard_test(self, fn, 1, expected_ops=1)
 
+    def test_getattr_dict(self):
+        def fn(x):
+            from torch.masked.maskedtensor._ops_refs import _MASKEDTENSOR_FUNCTION_TABLE
+            return x * len(_MASKEDTENSOR_FUNCTION_TABLE)
+
+        i = torch.randn(5)
+        r1 = fn(i)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        r2 = opt_fn(i)
+        self.assertEqual(r1, r2)
+
     def test_shape_unpack(self):
         def fn(x):
             a, b = x.size()
