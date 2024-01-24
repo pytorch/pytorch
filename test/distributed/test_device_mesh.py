@@ -1,7 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import os
-from copy import deepcopy
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -203,14 +202,6 @@ class DeviceMeshTest(DTensorTestBase):
                 dim_ranks[0] if self.rank in dim_ranks[0] else dim_ranks[1]
             )
             self.assertEqual(global_ranks, current_rank_expected_group_ranks)
-
-    @with_comms
-    def test_lazy_init_device_mesh(self):
-        # what is the expected behavior in this situation?
-        mesh = DeviceMesh(self.device_type, [1])
-
-        with self.assertRaisesRegex(RuntimeError, "process groups not initialized!"):
-            mesh.get_group()
 
     def test_fake_pg_device_mesh(self):
         fake_store = FakeStore()

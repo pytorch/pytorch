@@ -298,7 +298,7 @@ else:
                                     f"in {subgroup_ranks}!"
                                 )
                             dim_group_infos.append(
-                                (not_none(_get_group_tag(dim_group)), subgroup_ranks)
+                                (_get_group_tag(not_none(dim_group)), subgroup_ranks)
                             )
             self._dim_group_infos = dim_group_infos
 
