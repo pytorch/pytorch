@@ -8,8 +8,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 import torch
-import torch.nn.functional as F
 import torch._dynamo as torchdynamo
+import torch.nn.functional as F
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
 from torch._dynamo.test_case import TestCase
@@ -31,13 +31,8 @@ from torch.export._trace import (
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FLASH_ATTENTION,
-)
-from torch.testing._internal.common_device_type import (
-    onlyCPU,
-    onlyCUDA,
-)
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
+from torch.testing._internal.common_device_type import onlyCPU, onlyCUDA
 from torch.testing._internal.common_utils import (
     run_tests,
     TestCase as TorchTestCase,
@@ -56,6 +51,13 @@ from torch.utils._pytree import (
     treespec_dumps,
     treespec_loads,
 )
+
+try:
+    from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
+
+    HAS_TORCHREC = True
+except ImportError:
+    HAS_TORCHREC = False
 
 try:
     from . import testing
@@ -711,7 +713,7 @@ class TestExport(TestCase):
         efoo = export(
             foo,
             inputs,
-            dynamic_shapes={"inputs": DataClass(a={0: batch}, b={0: batch})},
+            dynamic_shapes={"inputs": [{0: batch}, {0: batch}]},
         )
         self.assertEqual(
             [
@@ -721,6 +723,32 @@ class TestExport(TestCase):
             ],
             ["torch.Size([s0, 2, 3])", "torch.Size([s0, 3, 4])"],
         )
+
+        # pass dynamic shapes of inputs [pytree-registered classes]
+        if HAS_TORCHREC:
+            # skipping tests if torchrec not available
+            class Foo(torch.nn.Module):
+                def forward(self, kjt) -> torch.Tensor:
+                    return kjt.values() + 0, kjt.offsets() + 0
+            foo = Foo()
+            kjt = KeyedJaggedTensor(
+                values=torch.Tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]),
+                keys=["index_0", "index_1"],
+                lengths=torch.IntTensor([0, 2, 0, 1, 1, 1, 0, 3]),
+                offsets=torch.IntTensor([0, 0, 2, 2, 3, 4, 5, 5, 8]),
+            )
+            inputs = (kjt,)
+            dim = Dim("dim")
+            dim_plus_one = Dim("dim_plus_one")
+            efoo = torch.export.export(
+                foo,
+                inputs,
+                dynamic_shapes={"kjt": [{0: dim}, None, {0: dim}, {0: dim_plus_one}]},
+            )
+            self.assertEqual(
+                [out.shape for out in efoo(*inputs)],
+                [out.shape for out in foo(*inputs)]
+            )
 
         # pass dynamic shapes of inputs [distinct, error]
         class Foo(torch.nn.Module):
@@ -1342,7 +1370,7 @@ def forward(self, arg_0):
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
         with self.assertRaisesRegex(
-            RuntimeError, r"Deferred runtime assertion failed -i0 <= 0"
+            RuntimeError, r"Deferred runtime assertion failed -u0 <= 0"
         ):
             _ = ep(torch.tensor(-1), torch.randn(4, 5))
 
@@ -1828,7 +1856,7 @@ def forward(self, arg_0):
                     self.assertIsInstance(s, int)
 
         dim0_x_f, dim0_x_p = torch.export.dims("dim0_x_f", "dim0_x_p")
-        dynamic_shapes = {"x": Input(f={0: dim0_x_f}, p={0: dim0_x_p})}
+        dynamic_shapes = {"x": [{0: dim0_x_f}, {0: dim0_x_p}]}
         ep_dynamic = torch.export.export(
             mod, example_inputs, dynamic_shapes=dynamic_shapes
         )
@@ -2891,11 +2919,15 @@ class TestExportCustomClass(TorchTestCase):
                 with ep.graph.inserting_before(node):
                     setattr(ep.graph_module, "custom_obj", custom_obj)
                     getattr_node = ep.graph.get_attr("custom_obj")
+                    # Copy over an nn_module_stack as they are required.
+                    getattr_node.meta["nn_module_stack"] = node.meta["nn_module_stack"]
                     custom_node = ep.graph.call_function(
                         torch.ops._TorchScriptTesting.take_an_instance.default,
                         (getattr_node,),
                     )
                     custom_node.meta["val"] = torch.ones(4, 4)
+                    # Copy over an nn_module_stack as they are required.
+                    custom_node.meta["nn_module_stack"] = node.meta["nn_module_stack"]
                     arg0, _ = node.args
                     node.args = (arg0, custom_node)
 
