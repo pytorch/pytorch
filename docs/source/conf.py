@@ -1299,9 +1299,6 @@ coverage_ignore_functions = [
     # torch.nn.utils.spectral_norm
     "remove_spectral_norm",
     "spectral_norm",
-    # torch.nn.utils.swap
-    "get_swap_module_params_on_conversion",
-    "set_swap_module_params_on_conversion",
     # torch.nn.utils.weight_norm
     "remove_weight_norm",
     "weight_norm",

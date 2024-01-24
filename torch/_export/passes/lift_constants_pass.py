@@ -52,12 +52,12 @@ def lift_constants_pass(
             constant_val = getattr(gm, node.target)
 
             if isinstance(constant_val, torch.ScriptObject):
-                constant_name = f"_lifted_custom_obj{num_custom_obj}"
+                constant_fqn = f"_lifted_custom_obj{num_custom_obj}"
                 constant_kind = InputKind.CUSTOM_OBJ
                 constant_arg_cls = CustomObjArgument  # type: ignore[assignment]
                 num_custom_obj += 1
             elif isinstance(constant_val, torch.Tensor):
-                constant_name = f"_lifted_tensor_constant{num_tensor_constants}"
+                constant_fqn = f"_lifted_tensor_constant{num_tensor_constants}"
                 constant_kind = InputKind.CONSTANT_TENSOR
                 constant_arg_cls = TensorArgument  # type: ignore[assignment]
                 num_tensor_constants += 1
@@ -72,22 +72,9 @@ def lift_constants_pass(
 
             with gm.graph.inserting_before(first_user_input):
                 # Insert the constant node before the first user input
-                const_placeholder_node = gm.graph.placeholder(constant_name)
-
+                const_placeholder_node = gm.graph.placeholder(constant_fqn)
                 for k, v in node.meta.items():
                     const_placeholder_node.meta[k] = v
-
-                # The FQN of the constant tensor in the state dict should
-                # correspond to the module where the constant tensor was
-                # originally used.
-                parent_fqn = list(
-                    const_placeholder_node.meta["nn_module_stack"].values()
-                )[-1][0]
-                if len(parent_fqn) > 0:
-                    constant_fqn = f"{parent_fqn}.{constant_name}"
-                else:
-                    constant_fqn = constant_name
-
                 if isinstance(constant_val, torch.Tensor):
                     const_placeholder_node.meta["val"] = fake_mode.from_tensor(
                         constant_val, static_shapes=True

@@ -815,8 +815,6 @@ class Module:
             else:
                 return False
 
-        should_use_swap_tensors = torch.nn.utils.get_swap_module_params_on_conversion()
-
         for key, param in self._parameters.items():
             if param is None:
                 continue
@@ -825,47 +823,26 @@ class Module:
             # `with torch.no_grad():`
             with torch.no_grad():
                 param_applied = fn(param)
-            p_should_use_set_data = compute_should_use_set_data(param, param_applied)
-            param_grad = param.grad
-            if p_should_use_set_data:
-                if should_use_swap_tensors:
-                    if param_grad is not None:
-                        # Accessing param.grad makes its use_count 2, which will prevent swapping.
-                        # Decrement use count of the gradient by setting to None
-                        param.grad = None
-                    param_applied = torch.nn.Parameter(param_applied, requires_grad=param.requires_grad)
-                    try:
-                        torch.utils.swap_tensors(param, param_applied)
-                    except Exception as e:
-                        raise RuntimeError(f"Couldn't swap {key}") from e
-                    out_param = param
-                else:
-                    param.data = param_applied
-                    out_param = param
+            should_use_set_data = compute_should_use_set_data(param, param_applied)
+            if should_use_set_data:
+                param.data = param_applied
+                out_param = param
             else:
                 assert isinstance(param, Parameter)
                 assert param.is_leaf
                 out_param = Parameter(param_applied, param.requires_grad)
                 self._parameters[key] = out_param
 
-            if param_grad is not None:
+            if param.grad is not None:
                 with torch.no_grad():
-                    grad_applied = fn(param_grad)
-                g_should_use_set_data = compute_should_use_set_data(param_grad, grad_applied)
-                if g_should_use_set_data:
-                    if should_use_swap_tensors:
-                        grad_applied.requires_grad_(param_grad.requires_grad)
-                        try:
-                            torch.utils.swap_tensors(param_grad, grad_applied)
-                        except Exception as e:
-                            raise RuntimeError(f"Couldn't swap {key}.grad") from e
-                        out_param.grad = param_grad
-                    else:
-                        assert out_param.grad is not None
-                        out_param.grad.data = grad_applied
+                    grad_applied = fn(param.grad)
+                should_use_set_data = compute_should_use_set_data(param.grad, grad_applied)
+                if should_use_set_data:
+                    assert out_param.grad is not None
+                    out_param.grad.data = grad_applied
                 else:
-                    assert param_grad.is_leaf
-                    out_param.grad = grad_applied.requires_grad_(param_grad.requires_grad)
+                    assert param.grad.is_leaf
+                    out_param.grad = grad_applied.requires_grad_(param.grad.requires_grad)
 
         for key, buf in self._buffers.items():
             if buf is not None:
@@ -1055,12 +1032,12 @@ class Module:
         return self._apply(lambda t: torch.empty_like(t, device=device), recurse=recurse)
 
     @overload
-    def to(self, device: Optional[DeviceLikeType] = ..., dtype: Optional[dtype] = ...,
+    def to(self, device: Optional[DeviceLikeType] = ..., dtype: Optional[Union[dtype, str]] = ...,
            non_blocking: bool = ...) -> Self:
         ...
 
     @overload
-    def to(self, dtype: dtype, non_blocking: bool = ...) -> Self:
+    def to(self, dtype: Union[dtype, str], non_blocking: bool = ...) -> Self:
         ...
 
     @overload

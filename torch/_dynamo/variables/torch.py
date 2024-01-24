@@ -27,7 +27,6 @@ from ..guards import GuardBuilder
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
-    guard_if_dyn,
     has_torch_function,
     product,
     proxy_args_kwargs,
@@ -141,12 +140,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import (
-            GradModeVariable,
-            InferenceModeVariable,
-            StreamVariable,
-            VmapIncrementNestingCtxManagerVariable,
-        )
+        from . import GradModeVariable, InferenceModeVariable, StreamVariable
 
         if self.value is torch.no_grad:
             if len(args) == 1 and isinstance(
@@ -199,12 +193,6 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         elif self.value is torch._C.DisableTorchFunctionSubclass:
             assert not (args or kwargs)
             return TorchFunctionDisableVariable.create(tx)
-        elif self.value is torch._functorch.vmap.vmap_increment_nesting:
-            assert len(args) == 2
-            return VmapIncrementNestingCtxManagerVariable.create(
-                tx,
-                [guard_if_dyn(x) for x in args],
-            )
 
 
 class TorchInGraphFunctionVariable(BaseTorchVariable):
@@ -250,7 +238,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             ):
                 tx.mark_inconsistent_side_effects()
             return ConstantVariable.create(tracing_state_functions[self.value])
-        elif self.value in (torch._functorch.eager_transforms.grad_impl,):
+        elif self.value in (
+            torch._functorch.vmap.vmap_impl,
+            torch._functorch.eager_transforms.grad_impl,
+        ):
             return TorchHigherOrderOperatorVariable.make(
                 self.value,
                 source=self.source,

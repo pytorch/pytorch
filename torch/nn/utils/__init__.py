@@ -8,7 +8,6 @@ from .memory_format import convert_conv2d_weight_memory_format, convert_conv3d_w
 from . import parametrizations
 from .init import skip_init
 from . import stateless
-from .swap import get_swap_module_params_on_conversion, set_swap_module_params_on_conversion
 
 __all__ = [
     "clip_grad_norm",
@@ -20,13 +19,11 @@ __all__ = [
     "fuse_conv_bn_weights",
     "fuse_linear_bn_eval",
     "fuse_linear_bn_weights",
-    "get_swap_module_params_on_conversion",
     "parameters_to_vector",
     "parametrizations",
     "remove_spectral_norm",
     "remove_weight_norm",
     "rnn",
-    "set_swap_module_params_on_conversion",
     "skip_init",
     "spectral_norm",
     "stateless",

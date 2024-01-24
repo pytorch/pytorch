@@ -84,24 +84,15 @@ class _ToTorchTensor(torch.autograd.Function):
         grad_placements = ctx.grad_placements
         dtensor_meta = dtensor_spec.tensor_meta
 
-        _, tensor_stride = compute_global_tensor_info(
-            grad_output, mesh, dtensor_spec.placements
-        )
-        tensor_stride = tuple(tensor_stride)
         if grad_placements is not None:
-            grad_spec = DTensorSpec(
-                mesh,
-                grad_placements,
-                tensor_meta=TensorMeta(
-                    shape=dtensor_meta.shape,
-                    stride=tensor_stride,
-                    dtype=dtensor_meta.dtype,
-                ),
-            )
+            grad_spec = DTensorSpec(mesh, grad_placements)
             grad_output = redistribute_local_tensor(
                 grad_output, grad_spec, dtensor_spec
             )
 
+        _, tensor_stride = compute_global_tensor_info(
+            grad_output, mesh, dtensor_spec.placements
+        )
         return (
             DTensor(
                 grad_output,
@@ -110,7 +101,7 @@ class _ToTorchTensor(torch.autograd.Function):
                 shape=dtensor_meta.shape,
                 dtype=dtensor_meta.dtype,
                 requires_grad=grad_output.requires_grad,
-                stride=tensor_stride,
+                stride=tuple(tensor_stride),
             ),
             None,
             None,
