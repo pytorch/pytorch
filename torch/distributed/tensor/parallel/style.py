@@ -138,7 +138,7 @@ class ColwiseParallel(ParallelStyle):
 
 class RowwiseParallel(ParallelStyle):
     """
-    Partition a compatible nn.Module in a row-wise fashion. Currently supports nn.Linear only.
+    Partition a compatible nn.Module in a row-wise fashion. Currently supports nn.Linear and nn.Embedding.
     Users can compose it with ColwiseParallel to achieve the sharding of more complicated modules.
     (i.e. MLP, Attention)
 
@@ -179,10 +179,6 @@ class RowwiseParallel(ParallelStyle):
         super().__init__()
         self.input_layouts = (input_layouts or Shard(-1), )
         self.output_layouts = (output_layouts or Replicate(), )
-        # rowwise linear runtime sharding:
-        # 1. shard input on last dim
-        # 2. partial output, to replicate -> allreduce, to shard -> reduce_scatter
-        self.desired_input_layouts = (Shard(-1), )
         self.use_local_output = use_local_output
 
     @staticmethod
@@ -195,32 +191,51 @@ class RowwiseParallel(ParallelStyle):
             input_tensor = input_tensor.redistribute(placements=desired_input_layouts)
         return input_tensor
 
-    def _partition_fn(self, name, module, device_mesh):
-        if isinstance(module, nn.Linear):
-            # Rowwise shard weight to Shard(1), bias to Replicate(), weight be Shard(1)
-            # means Rowwise as Linear is input * weight^T + bias, where
-            # weight would become Shard(0)
-            module.register_parameter("weight", nn.Parameter(
-                distribute_tensor(module.weight, device_mesh, [Shard(1)])
+    def _partition_linear_fn(self, name, module, device_mesh):
+        # Rowwise shard weight to Shard(1), bias to Replicate(), weight be Shard(1)
+        # means Rowwise as nn.Linear is input * weight^T + bias, where
+        # weight would become Shard(0)
+        module.register_parameter("weight", nn.Parameter(
+            distribute_tensor(module.weight, device_mesh, [Shard(1)])
+        ))
+        if module.bias is not None:
+            module.register_parameter("bias", nn.Parameter(
+                distribute_tensor(module.bias, device_mesh, [Replicate()])
             ))
-            if module.bias is not None:
-                module.register_parameter("bias", nn.Parameter(
-                    distribute_tensor(module.bias, device_mesh, [Replicate()])
-                ))
-        else:
-            raise NotImplementedError("RowwiseParallel currently only support nn.Linear!")
+
+    def _partition_embedding_fn(self, name, module, device_mesh):
+        # rowwise shard embedding.weight is Shard(0)
+        for name, param in module.named_parameters():
+            dist_param = nn.Parameter(
+                distribute_tensor(param, device_mesh, [Shard(0)])
+            )
+            module.register_parameter(name, dist_param)
 
     @staticmethod
     def _prepare_output_fn(output_layouts, use_local_output, outputs, device_mesh):
+        # Rowwise sharding produces partial output, depending on output layouts:
+        # 1. to replicate -> allreduce
+        # 2. to shard -> reduce_scatter
         outputs = outputs.redistribute(placements=output_layouts)
         # back to local tensor if use_local_output is True
         return outputs.to_local() if use_local_output else outputs
 
     def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
+        if isinstance(module, nn.Linear):
+            partition_fn = self._partition_linear_fn
+            # rowwise linear runtime sharding requires input tensor shard on last dim
+            self.desired_input_layouts: Tuple[Placement, ...] = (Shard(-1), )
+        elif isinstance(module, nn.Embedding):
+            partition_fn = self._partition_embedding_fn
+            # rowwise embedding runtime sharding requires input tensor replicated
+            self.desired_input_layouts = (Replicate(), )
+        else:
+            raise NotImplementedError("RowwiseParallel currently only support nn.Linear and nn.Embedding!")
+
         return distribute_module(
             module,
             device_mesh,
-            self._partition_fn,
+            partition_fn,
             partial(self._prepare_input_fn, self.input_layouts, self.desired_input_layouts),
             partial(self._prepare_output_fn, self.output_layouts, self.use_local_output),
         )
