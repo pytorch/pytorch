@@ -407,7 +407,8 @@ def register_multi_grad_hook(
     have their gradients computed.
 
     Under the ``"any"`` mode, the hook will be called after the first gradient
-    with respect to a tensor in :attr:`tensors` has been computed.
+    with respect to a tensor in :attr:`tensors` has been computed. The hook
+    will be called with that gradient as its argument.
 
     The hook should not modify its arguments.
 
@@ -500,7 +501,7 @@ def register_multi_grad_hook(
 
         @functools.wraps(fn)
         def wrapped_fn(grad: torch.Tensor):
-            nonlocal lock, ran_hook
+            nonlocal ran_hook
             id = torch._C._current_graph_task_id()
             assert id != -1, "expected this hook to be called inside a backward call"
             with lock:
