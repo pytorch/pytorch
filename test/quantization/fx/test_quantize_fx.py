@@ -191,6 +191,7 @@ from torch.testing._internal.common_quantized import (
 from torch.testing._internal.common_utils import (
     TemporaryFileName,
     IS_ARM64,
+    skipIfTorchDynamo,
 )
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
@@ -2560,7 +2561,7 @@ class TestQuantizeFx(QuantizationTestCase):
         }
 
         with self.assertRaises(ValueError) as context:
-            m = prepare_fx(m, qconfig_dict, example_inputs=(torch.randn(1, 3, 3, 3),))
+            m = prepare_fx(m, qconfig_dict, example_inputs=(torch.randn(1, 3, 3, 3),))  # noqa: F821
         self.assertTrue(
             'Expected qconfig_dict to have the following keys:' in str(context.exception)
         )
@@ -9261,6 +9262,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
                 out = model_quantized(input.to(device_after))
                 self.assertEqual(out.device.type, device_after)
 
+    @skipIfTorchDynamo("too slow")
     @skip_if_no_torchvision
     def test_model_dropout(self):
         from torchvision import models
@@ -9315,8 +9317,8 @@ class TestQuantizeFxModels(QuantizationTestCase):
 
         if mode == 'ddp':
             mp.spawn(run_ddp,
-                     args=(world_size, prepared),
-                     nprocs=world_size,
+                     args=(world_size, prepared),  # noqa: F821
+                     nprocs=world_size,  # noqa: F821
                      join=True)
         elif mode == 'qat':
             assert prepared.training, 'prepared must be in training mode for qat'
@@ -9361,8 +9363,8 @@ class TestQuantizeFxModels(QuantizationTestCase):
             # calibration
             if mode == 'ddp':
                 mp.spawn(run_ddp,
-                         args=(world_size, qeager),
-                         nprocs=world_size,
+                         args=(world_size, qeager),  # noqa: F821
+                         nprocs=world_size,  # noqa: F821
                          join=True)
             elif mode == 'qat':
                 assert qeager.training, 'qeager should be in training mode for qat'
@@ -9526,8 +9528,8 @@ class TestQuantizeFxModels(QuantizationTestCase):
     def test_resnet18_ddp(self):
         from torchvision import models
         from torchvision.models import quantization as quantized_models
-        eager_quantizable_model = quantized_models.__dict__[name](pretrained=False, quantize=False).eval().float()
-        model = models.__dict__[name](pretrained=False).eval().float()
+        eager_quantizable_model = quantized_models.__dict__[name](pretrained=False, quantize=False).eval().float()  # noqa: F821
+        model = models.__dict__[name](pretrained=False).eval().float()  # noqa: F821
         self._test_model_impl(
             'ddp', 'resnet18', model, eager_quantizable_model)
 

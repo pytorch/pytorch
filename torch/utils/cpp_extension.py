@@ -450,10 +450,6 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
             )
 
 
-# See below for why we inherit BuildExtension from object.
-# https://stackoverflow.com/questions/1713038/super-fails-with-error-typeerror-argument-1-must-be-type-not-classobj-when
-
-
 class BuildExtension(build_ext):
     """
     A custom :mod:`setuptools` build extension .
