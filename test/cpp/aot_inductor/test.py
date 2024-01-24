@@ -32,7 +32,7 @@ for device in ["cpu", "cuda"]:
         torch._dynamo.reset()
         with torch.no_grad():
             dim0_x = Dim("dim0_x", min=1, max=1024)
-            dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_x}}
+            dynamic_shapes = {"x": {0: dim0_x}}
             model_so_path = aot_compile(
                 model,
                 (x,),
