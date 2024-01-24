@@ -24,13 +24,14 @@ torch.xpu
     stream
     synchronize
 
-Streams
+Streams and events
 ------------------
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     Stream
+    Event
 
 
 .. This module needs to be documented. Adding here in the meantime
