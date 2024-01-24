@@ -1507,8 +1507,8 @@ def _allgather_orig_param_states(
     all tensor states and restore non-tensor states from ``gathered_state_info``.
     """
     fsdp_state = fsdp_param_info.state
-    if fsdp_state.rank == 0:
-        logger.debug(
+    if fsdp_state.rank == 0 and dist.get_debug_level() == dist.DebugLevel.DETAIL:
+        logger.warning(
             "CUDA Memory Summary before calling to _allgather_orig_param_states %s",
             torch.cuda.memory_summary(),
         )
