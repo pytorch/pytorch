@@ -6,6 +6,7 @@ import inspect
 import operator
 import os
 import re
+import sys
 from itertools import chain, count
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
@@ -15,14 +16,15 @@ from sympy import Expr
 import torch
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
 
+from torch._inductor.codegen.multi_kernel import MultiKernelState
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
 from torch.fx.node import _get_qualified_name
 from torch.utils._sympy.singleton_int import SingletonInt
 
 from .. import codecache, config, ir
 from ..codecache import CudaKernelParamCache
-from ..ir import ComputedBuffer, InputBuffer, ReinterpretView
+from ..ir import ReinterpretView
 from ..triton_heuristics import grid as default_grid
 from ..utils import (
     cache_on_self,
@@ -409,6 +411,7 @@ class WrapperCodeGen(CodeGen):
 
         self.add_import_once = add_import_once
         self._metas = {}
+        self.multi_kernel_state = MultiKernelState()
 
     def write_constant(self, name, hashed):
         self.header.writeline(f"{name} = None  # {hashed}")
@@ -430,6 +433,7 @@ class WrapperCodeGen(CodeGen):
                 from torch import device, empty, empty_strided
                 from {codecache.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
+                from torch._inductor.codegen.multi_kernel import MultiKernelCall
 
                 aten = torch.ops.aten
                 inductor_ops = torch.ops.inductor
@@ -1144,7 +1148,7 @@ class WrapperCodeGen(CodeGen):
             return repr(type(s)(Shim(self.val_to_arg_str(a)) for a in s))
         elif isinstance(s, torch._ops.OpOverload):
             return _get_qualified_name(s)
-        elif isinstance(s, (ComputedBuffer, InputBuffer, ReinterpretView)):
+        elif isinstance(s, (ir.Buffer, ReinterpretView)):
             return s.codegen_reference()
         else:
             return repr(s)
@@ -1450,6 +1454,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
         if config.aot_inductor.abi_compatible:
             self.header.splice("#include <torch/csrc/inductor/aoti_torch/c/shim.h>")
         else:
+            if not V.graph.aot_mode:
+                self.header.splice(
+                    """
+                    #include <pybind11/pybind11.h>
+                    """
+                )
             self.header.splice(
                 """
                 #include <ATen/ATen.h>
@@ -1657,7 +1667,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 else:
                     self.prefix.splice(
                         """
-                            py::gil_scoped_release release;
+                            pybind11::gil_scoped_release release;
                         """
                     )
 
@@ -1696,8 +1706,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
             ), "Expect all constants to be Tensor"
             for idx, constants_key in enumerate(V.graph.constants.keys()):
                 if V.graph.aot_mode:
-                    if constants_key not in V.graph.used_constants:
-                        continue
                     # Weights are stored in constants_ and owned by RAIIAtenTensorHandle there.
                     # Don't call std::move here because it will cause constants_ to lose the ownership.
                     if config.aot_inductor.abi_compatible:
@@ -1766,7 +1774,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.prefix.writeline("  public:")
         declare_kernel = set(self.src_to_kernel.values())
         declare_kernel.update(self.user_defined_kernel_cache.values())
-        declare_kernel.update(V.graph.const_kernels)
+        if V.graph.const_module:
+            declare_kernel.update(
+                V.graph.const_module.wrapper_code.src_to_kernel.values()
+            )
         for kernel in declare_kernel:
             self.prefix.writeline(f"    CUfunction {kernel}{{nullptr}};")
         self.prefix.writeline("};")
@@ -1799,8 +1810,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
             f"""
             AOTInductorModel::AOTInductorModel(std::shared_ptr<ConstantMap> constants_map,
                                                std::shared_ptr<std::vector<ConstantHandle>> constants_array,
+                                               const std::string& device_str,
                                                std::optional<std::string> cubin_dir)
-                : AOTInductorModelBase({num_inputs}, {num_outputs}, {num_constants}, cubin_dir) {{
+                : AOTInductorModelBase({num_inputs}, {num_outputs}, {num_constants}, device_str, cubin_dir) {{
             """
         )
 
@@ -2103,11 +2115,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
             return
 
         result.writeline("'''\n)")
-        # get the hash of the wrapper code to name the extension
-        wrapper_call_hash = codecache.code_hash(result.getvalue())
         result.splice(
             f"""
-            module = CppWrapperCodeCache.load(cpp_wrapper_src, '{self.call_func_name}', '{wrapper_call_hash}', {self.cuda})
+            inductor_entry = CppWrapperCodeCache.load_pybinding(["std::vector<at::Tensor>"], cpp_wrapper_src, {self.cuda})
             """
         )
 
@@ -2149,7 +2159,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     {args_str}
                     {return_str}
                 return g
-            call = _wrap_func(module.{self.call_func_name})
+            call = _wrap_func(inductor_entry)
             """
         )
 
@@ -2910,10 +2920,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else:
                 return "true" if val else "false"
         elif isinstance(val, int):
-            return f"{val}L"
+            # uint64_t is long on Linux, but long long on MacOS
+            return f"{val}LL" if sys.platform == "darwin" else f"{val}L"
         elif isinstance(val, str):
             return f'"{val}"'
-        elif isinstance(val, (ComputedBuffer, InputBuffer, ReinterpretView)):
+        elif isinstance(val, (ir.Buffer, ReinterpretView)):
             return val.codegen_reference()
         elif isinstance(val, torch.device):
             return self.codegen_device(val)

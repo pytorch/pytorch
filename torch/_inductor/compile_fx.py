@@ -185,15 +185,16 @@ def split_const_gm(
     """
     from torch._inductor.constant_folding import (
         CONST_MODULE_TAG,
-        get_constant_graph,
+        META_TAG,
         MODULE_TAG,
         replace_node_with_constant,
+        run_and_get_constant_graph,
     )
 
-    const_gm = get_constant_graph(gm)
+    const_gm = run_and_get_constant_graph(gm)
     const_result = const_gm()
 
-    const_names = {
+    const_outputs = {
         x.name: idx for idx, x in enumerate(tuple(const_gm.graph.nodes)[-1].args[0])
     }
 
@@ -201,9 +202,9 @@ def split_const_gm(
     to_replace_node = []
     const_output_index = {}
     for node in gm.graph.nodes:
-        if node.name in const_names:
+        if node.name in const_outputs:
             to_replace_node.append(node)
-        elif node.tag == CONST_MODULE_TAG:
+        elif node.meta[META_TAG] == CONST_MODULE_TAG:
             to_erase_node.append(node)
 
     for node in to_replace_node:
@@ -211,14 +212,14 @@ def split_const_gm(
         replace_node_with_constant(
             gm,
             node,
-            const_result[const_names[node.name]],
+            const_result[const_outputs[node.name]],
             new_const_name,
         )
-        const_output_index[new_const_name] = const_names[node.name]
+        const_output_index[new_const_name] = const_outputs[node.name]
     for node in to_erase_node[::-1]:
         if node.users:
             for n in node.users:
-                assert n.tag == MODULE_TAG, f"node: {node} user not empty."
+                assert n.meta[META_TAG] == MODULE_TAG, f"node: {node} user not empty."
         else:
             gm.graph.erase_node(node)
     gm.recompile()
@@ -384,6 +385,12 @@ def compile_fx_inner(
 
     if aot_mode:
         return compiled_graph
+
+    if cudagraphs and compiled_graph.disabled_cudagraphs_reason:
+        perf_hint_log.warning(
+            "skipping cudagraphs due to %s", compiled_graph.disabled_cudagraphs_reason
+        )
+        BoxedBool.disable(cudagraphs)
 
     if cudagraphs:
         # output args are tuple of first argument
@@ -580,11 +587,6 @@ def fx_codegen_and_compile(
         if aot_mode and config.aot_inductor.use_runtime_constant_folding:
             const_gm, const_output_index = split_const_gm(gm)
 
-            const_names = {
-                x.name: idx
-                for idx, x in enumerate(tuple(const_gm.graph.nodes)[-1].args[0])
-            }
-
             const_graph = GraphLowering(
                 const_gm,
                 example_inputs=[],
@@ -643,13 +645,9 @@ def fx_codegen_and_compile(
             if V.aot_compilation is True:
                 return compiled_fn
 
-            if cudagraphs and graph.disable_cudagraphs:
-                perf_hint_log.warning(
-                    "skipping cudagraphs due to %s", V.graph.disable_cudagraphs_reason
-                )
-                BoxedBool.disable(cudagraphs)
-
-            compiled_graph = CompiledFxGraph(compiled_fn, graph, output_strides)
+            compiled_graph = CompiledFxGraph(
+                compiled_fn, graph, output_strides, V.graph.disable_cudagraphs_reason
+            )
 
     return compiled_graph
 

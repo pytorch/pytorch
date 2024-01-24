@@ -134,6 +134,18 @@ force_fuse_int_mm_with_mul = False
 # Autotune will compare perf with normal cast->then->mm option
 use_mixed_mm = False
 
+# enable runtime numeric check for pre/post grad fx passes
+# floating point provides limited accuracy (about 7 decimal digits for single precision
+# floating point numbers,about 16 decimal digits for double precision floating point numbers)
+# according to PyTorch documentation.
+# https://pytorch.org/docs/stable/notes/numerical_accuracy.html#batched-computations-or-slice-computations
+fx_passes_numeric_check: Dict[str, Any] = {
+    "pre_grad": False,
+    "precision": 1e-4,
+    "num_iterations": 1,
+    "requires_optimizer": True,
+}
+
 # for pattern torch.mm(a, b.to(dtype)) with cuda tensors, always use
 # torch._inductor.kernel.mm.tuned_mixed_mm's fused kernel.
 # Autotune will not compare with normal cast->then->mm option.
@@ -426,7 +438,7 @@ class cpp:
         # "g++-11",
         # "g++-10",
         # "clang++",
-        os.environ.get("CXX", "g++"),
+        os.environ.get("CXX", "clang++" if sys.platform == "darwin" else "g++"),
         # "g++.par",
     )
     # Allow kernel performance profiling via PyTorch profiler
@@ -523,12 +535,26 @@ class triton:
         os.environ.get("TORCHINDUCTOR_PERSISTENT_REDUCTIONS", "1") == "1"
     )
 
+    # 0: disable
+    # 1: enable, use tuning to pick between different subkernels
+    # 2: enable, force using persistent reduction (for debugging)
+    # 3: enable, force using non-persistent reduction (for debugging)
+    multi_kernel = int(os.environ.get("TORCHINDUCTOR_MULTI_KERNEL", "0"))
+
     # hint to Triton when arguments are divisible by 16
     divisible_by_16 = True
 
     # theses are not enforced, but they are used by asserts in triton_heuristics.py
     # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
-    max_block = {"X": 2048, "Y": 1024, "Z": 1024, "R": 4096}
+
+    # Max RBLOCK will be large for multi-kernel since we do more aggressive
+    # persistent reduction.
+    max_block = {
+        "X": 2048,
+        "Y": 1024,
+        "Z": 1024,
+        "R": 4096 * (16 if multi_kernel else 1),
+    }
 
     # Store the generated cubin files for cpp wrapper code to load
     store_cubin = False

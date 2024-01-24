@@ -9,6 +9,7 @@ aten = torch.ops.aten
 # We would like to split modules into two subgraphs for runtime weight updates to work correctly.
 # The use case and more information could be found at:
 # https://docs.google.com/document/d/1inZC-8KarJ6gKB7G9egmYLx1V_dKX_apxon0w4zPC0Q/edit?usp=sharing
+META_TAG = "MODULE_TYPE"
 MODULE_TAG = "_MAIN_MODULE"
 CONST_MODULE_TAG = "_CONST_MODULE"
 
@@ -216,12 +217,12 @@ def constant_graph_tag(gm: torch.fx.GraphModule):
             or node in cf.node_replacements
             or node in cf.replaced_uses
         ):
-            node.tag = CONST_MODULE_TAG
+            node.meta[META_TAG] = CONST_MODULE_TAG
         else:
-            node.tag = MODULE_TAG
+            node.meta[META_TAG] = MODULE_TAG
 
 
-def get_constant_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
+def run_and_get_constant_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     """
     Construct a GraphModule which corresponds to the part which could be
     constant folded in provided gm.
@@ -234,29 +235,30 @@ def get_constant_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
         if node.op == "get_attr":
             used_to_fold = False
             for u in node.users:
-                if u.tag == CONST_MODULE_TAG:
+                if u.meta[META_TAG] == CONST_MODULE_TAG:
                     used_to_fold = True
                     break
             if not used_to_fold:
-                node.tag = MODULE_TAG
+                node.meta[META_TAG] = MODULE_TAG
 
     new_graph = torch.fx.Graph()
 
     node_remapping: Dict[torch.fx.Node, torch.fx.Node] = {}
     output_nodes = []
     for node in gm.graph.nodes:
-        if node.tag == MODULE_TAG:
+        if node.meta[META_TAG] == MODULE_TAG:
             continue
 
         new_node = new_graph.node_copy(node, lambda x: node_remapping[x])
         node_remapping[node] = new_node
 
         for user in node.users:
-            if user.tag == MODULE_TAG:
+            if user.meta[META_TAG] == MODULE_TAG:
                 output_nodes.append(new_node)
                 break
 
     new_graph.output(tuple(output_nodes))
+    new_graph.lint()
     new_gm = torch.fx.GraphModule(gm, new_graph)
 
     return new_gm

@@ -19,7 +19,7 @@ class AOTInductorModelContainer {
  public:
   AOTInductorModelContainer(
       size_t num_models,
-      bool is_cpu = false,
+      const std::string& device_str,
       std::optional<std::string> cubin_dir = std::nullopt) {
     constants_map_ = std::make_shared<ConstantMap>();
     constants_array_ = std::make_shared<std::vector<ConstantHandle>>();
@@ -29,7 +29,7 @@ class AOTInductorModelContainer {
     available_models_.reserve(num_models);
     for (size_t i = 0; i < num_models; ++i) {
       models_.push_back(AOTInductorModel::Create(
-          constants_map_, constants_array_, cubin_dir));
+          constants_map_, constants_array_, device_str, cubin_dir));
       available_models_.push_back(models_.back().get());
     }
 
@@ -54,7 +54,7 @@ class AOTInductorModelContainer {
       output_names_.push_back(model->output_name(i));
     }
 
-    model->load_constants(is_cpu);
+    model->load_constants();
 #ifdef USE_CUDA
     constant_blob_ = model->release_constant_blob();
     constants_internal_offset_.resize(model->num_constants());

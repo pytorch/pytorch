@@ -51,6 +51,18 @@ AOTIRuntimeError AOTInductorModelContainerCreate(
     size_t num_models,
     bool is_cpu,
     const char* cubin_dir) {
+      return AOTInductorModelContainerCreateWithDevice(
+        container_handle,
+        num_models,
+        is_cpu ? "cpu" : "cuda",
+        cubin_dir);
+}
+
+AOTIRuntimeError AOTInductorModelContainerCreateWithDevice(
+    AOTInductorModelContainerHandle* container_handle,
+    size_t num_models,
+    const char* device_str,
+    const char* cubin_dir) {
   if (num_models == 0) {
     std::cerr << "Error: num_models must be positive, but got 0" << std::endl;
     return AOTI_RUNTIME_FAILURE;
@@ -61,7 +73,7 @@ AOTIRuntimeError AOTInductorModelContainerCreate(
       cubin_dir_opt.emplace(cubin_dir);
     }
     auto* container = new torch::aot_inductor::AOTInductorModelContainer(
-        num_models, is_cpu, cubin_dir_opt);
+        num_models, std::string(device_str), cubin_dir_opt);
     *container_handle =
         reinterpret_cast<AOTInductorModelContainerHandle>(container);
   })
@@ -263,6 +275,7 @@ AOTIRuntimeError AOTInductorModelCreate(
       auto model = new torch::aot_inductor::AOTInductorModel(
           constant_map,
           constant_array,
+          "cpu", // device_str is hardcoded, as AOTInductorModelCreate is only use for CPU models
           ""
       );
 
@@ -271,7 +284,7 @@ AOTIRuntimeError AOTInductorModelCreate(
           constant_map->emplace(kv.first, kv.second);
         }
       } else {
-        model->load_constants(/*is_cpu*/true);
+        model->load_constants();
       }
 
       *model_handle = reinterpret_cast<AOTInductorModelHandle>(model);

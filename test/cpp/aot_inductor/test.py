@@ -1,6 +1,7 @@
 
 import torch
-from torch._export import aot_compile, dynamic_dim
+from torch._export import aot_compile
+from torch.export import Dim
 
 torch.manual_seed(1337)
 
@@ -30,14 +31,12 @@ for device in ["cpu", "cuda"]:
 
         torch._dynamo.reset()
         with torch.no_grad():
-            constraints = [
-                dynamic_dim(x, 0) >= 1,
-                dynamic_dim(x, 0) <= 1024,
-            ]
+            dim0_x = Dim("dim0_x", min=1, max=1024)
+            dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_x}}
             model_so_path = aot_compile(
                 model,
                 (x,),
-                constraints=constraints,
+                dynamic_shapes=dynamic_shapes,
                 options={"aot_inductor.use_runtime_constant_folding": use_runtime_constant_folding})
 
         suffix = f"{device}"
