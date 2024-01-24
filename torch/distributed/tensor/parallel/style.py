@@ -50,15 +50,15 @@ class ColwiseParallel(ParallelStyle):
     Example::
         >>> # xdoctest: +SKIP(failing)
         >>> from torch.distributed.tensor.parallel import parallelize_module, ColwiseParallel
-        >>> from torch.distributed.device_mesh import init_device_mesh
         >>> ...
-        >>> m = Model(...)  # m is a nn.Module that contains a "w1" nn.Linear submodule
-        >>> tp_mesh = init_device_mesh("cuda", (8,))
-        >>>
-        >>> # By default, the input of the "w1" Linear will be converted to Replicated DTensor
+        >>> # By default, the input of the "w1" Linear will be annotated to Replicated DTensor
         >>> # and the output of "w1" will return :class:`torch.Tensor` that shards on the last dim.
-        >>>
-        >>> sharded_mod = parallelize_module(m, tp_mesh, {"w1": ColwiseParallel()})
+        >>>>
+        >>> parallelize_module(
+        >>>     module=block, # this can be a submodule or module
+        >>>     ...,
+        >>>     parallelize_plan={"w1": ColwiseParallel()},
+        >>> )
         >>> ...
 
     .. note:: By default ``ColwiseParallel`` output is sharded on the last dimension if the ``output_layouts`` not
@@ -157,15 +157,15 @@ class RowwiseParallel(ParallelStyle):
     Example::
         >>> # xdoctest: +SKIP(failing)
         >>> from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
-        >>> from torch.distributed.device_mesh import init_device_mesh
         >>> ...
-        >>> m = Model(...)  # m is a nn.Module that contains a "w2" nn.Linear submodule
-        >>> tp_mesh = init_device_mesh("cuda", (8,))
-        >>>
-        >>> # By default, the input of the "w2" Linear will be converted to DTensor that shards on the last dim
+        >>> # By default, the input of the "w2" Linear will be annotated to DTensor that shards on the last dim
         >>> # and the output of "w2" will return a replicated :class:`torch.Tensor`.
         >>>
-        >>> sharded_mod = parallelize_module(m, tp_mesh, {"w2": RowwiseParallel()}),
+        >>> parallelize_module(
+        >>>     module=block, # this can be a submodule or module
+        >>>     ...,
+        >>>     parallelize_plan={"w2": RowwiseParallel()},
+        >>> )
         >>> ...
     """
 
@@ -247,16 +247,12 @@ class PrepareModuleInput(ParallelStyle):
     Example::
         >>> # xdoctest: +SKIP(failing)
         >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleInput
-        >>> from torch.distributed.device_mesh import init_device_mesh
         >>> ...
-        >>> block = TransformerBlock(...)  # block is a nn.Module that contains an "attn" Attention submodule
-        >>> tp_mesh = init_device_mesh("cuda", (8,))
-        >>>
         >>> # According to the style specified below, the first input of attn will be annotated to Sharded DTensor
         >>> # and then redistributed to Replicated DTensor.
         >>> parallelize_module(
-        >>>     block, # this can be a submodule or module
-        >>>     tp_mesh,
+        >>>     module=block, # this can be a submodule or module
+        >>>     ...,
         >>>     parallelize_plan={
         >>>         "attn": PrepareModuleInput(
         >>>             input_layouts=(Shard(0), None, None, ...),
@@ -328,20 +324,18 @@ class PrepareModuleOutput(ParallelStyle):
     Example::
         >>> # xdoctest: +SKIP(failing)
         >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleOutput
-        >>> from torch.distributed.device_mesh import init_device_mesh
         >>> ...
-        >>> block = TransformerBlock(...)  # block is a nn.Module that contains an "attn" Attention submodule
-        >>> tp_mesh = init_device_mesh("cuda", (8,))
-        >>>
-        >>> # According to the style specified below, the output of the TransformerBlock will be converted to Replicated DTensor
-        >>> # and then redistributed to Sharded DTensor.
+        >>> # According to the style specified below, the first input of attn will be annotated to Sharded DTensor
+        >>> # and then redistributed to Replicated DTensor.
         >>> parallelize_module(
-        >>>     block, # this can be a submodule or module
-        >>>     tp_mesh,
-        >>>     parallelize_plan = PrepareModuleOutput(
-        >>>         output_layouts=Replicate(),
-        >>>         desired_output_layouts=Shard(0)
-        >>>     )
+        >>>     module=block, # this can be a submodule or module
+        >>>     ...,
+        >>>     parallelize_plan={
+        >>>         "submodule": PrepareModuleOutput(
+        >>>             output_layouts=Replicate(),
+        >>>             desired_output_layouts=Shard(0)
+        >>>         ),
+        >>>     }
         >>> )
     """
     def __init__(

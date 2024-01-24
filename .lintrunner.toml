@@ -2353,7 +2353,6 @@ exclude_patterns = [
     'torch/nn/utils/prune.py',
     'torch/nn/utils/rnn.py',
     'torch/nn/utils/spectral_norm.py',
-    'torch/nn/utils/swap.py',
     'torch/nn/utils/weight_norm.py',
     'torch/optim/__init__.py',
     'torch/optim/_functional.py',

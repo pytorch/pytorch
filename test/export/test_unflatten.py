@@ -30,16 +30,7 @@ from torch._export.utils import (
 from torch.export import Constraint, Dim, export
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import (
-    run_tests,
-    TestCase,
-    IS_FBCODE,
-    IS_MACOS,
-    IS_SANDCASTLE,
-    IS_WINDOWS,
-    find_library_location,
-    skipIfTorchDynamo,
-)
+from torch.testing._internal.common_utils import skipIfTorchDynamo, run_tests, TestCase
 from torch.utils._pytree import (
     LeafSpec,
     tree_flatten,
@@ -491,64 +482,6 @@ class TestUnflatten(TestCase):
                     if sub_node.op == "placeholder" or sub_node.op == "get_attr":
                         call_module_input_order.append(sub_node.op)
         self.assertEqual(call_module_input_order, ["placeholder", "get_attr", "get_attr"])
-
-    def test_unflatten_constant_tensor(self):
-        class SubMod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.initializer = 0.1
-
-            def forward(self, x):
-                return x + torch.tensor(self.initializer)
-
-        class Mod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.submod = SubMod()
-
-            def forward(self, x):
-                return x + self.submod(x)
-
-        export_module = torch.export.export(Mod(), (torch.randn((2, 3)),))
-        unflattened = unflatten(export_module)
-
-        self.compare_outputs(export_module, unflattened, (torch.randn((2, 3)),))
-
-    @skipIfTorchDynamo("custom objects not supported in dynamo yet")
-    def test_unflatten_constant_obj(self):
-        if IS_MACOS:
-            raise unittest.SkipTest("non-portable load_library call used in test")
-        elif IS_SANDCASTLE or IS_FBCODE:
-            torch.ops.load_library(
-                "//caffe2/test/cpp/jit:test_custom_class_registrations"
-            )
-        elif IS_WINDOWS:
-            lib_file_path = find_library_location("torchbind_test.dll")
-            torch.ops.load_library(str(lib_file_path))
-        else:
-            lib_file_path = find_library_location("libtorchbind_test.so")
-            torch.ops.load_library(str(lib_file_path))
-
-        class SubMod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
-
-            def forward(self, x):
-                return x + self.attr.add_tensor(x)
-
-        class Mod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.submod = SubMod()
-
-            def forward(self, x):
-                return x + self.submod(x)
-
-        export_module = torch.export.export(Mod(), (torch.randn((2, 3)),), strict=False)
-        unflattened = unflatten(export_module)
-
-        self.compare_outputs(export_module, unflattened, (torch.randn((2, 3)),))
 
 if __name__ == "__main__":
     run_tests()

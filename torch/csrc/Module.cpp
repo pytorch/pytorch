@@ -353,48 +353,10 @@ PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   THPVariable* a = reinterpret_cast<THPVariable*>(a_);
   THPVariable* b = reinterpret_cast<THPVariable*>(b_);
 
-  TORCH_CHECK(
-      a->cdata->use_count() == 1,
-      "Expected single reference to a's Tensor object but got ",
-      a->cdata->use_count());
-  TORCH_CHECK(
-      b->cdata->use_count() == 1,
-      "Expected single reference to b's Tensor object but got ",
-      b->cdata->use_count());
-  // weak_use_count() adds 1 if use_count is non-zero
-  TORCH_CHECK(
-      a->cdata->weak_use_count() == 1,
-      "Expected no weakrefs to a's Tensor object but got  ",
-      a->cdata->weak_use_count() - 1);
-  TORCH_CHECK(
-      b->cdata->weak_use_count() == 1,
-      "Expected no weakrefs to b's Tensor object but got  ",
-      b->cdata->weak_use_count() - 1);
-
   // Swap the Tensor Impl
   c10::MaybeOwned<at::Tensor> tmp = a->cdata;
-
-  // The TensorImpls contain PyObjectSlots that have a reference to the PyObject
-  // associated with the TensorImpl. Swap this field as well.
-  c10::optional<PyObject*> mb_obj_a =
-      a->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          getPyInterpreter(), /*ignore_hermetic_tls=*/false);
-  c10::optional<PyObject*> mb_obj_b =
-      b->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          getPyInterpreter(), /*ignore_hermetic_tls=*/false);
-  TORCH_INTERNAL_ASSERT(
-      mb_obj_a.has_value() && mb_obj_b.has_value(),
-      "Both tensors should have PyObjects tagged by the current python interpreter");
-  TORCH_CHECK(mb_obj_a.value() == a_);
-  TORCH_CHECK(mb_obj_b.value() == b_);
-
   a->cdata = b->cdata;
   b->cdata = tmp;
-
-  a->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(
-      getPyInterpreter(), a_, c10::impl::PyInterpreterStatus::TAGGED_BY_US);
-  b->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(
-      getPyInterpreter(), b_, c10::impl::PyInterpreterStatus::TAGGED_BY_US);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

@@ -9950,14 +9950,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(t1_moved, new_t2_moved)
         self.assertEqual(t2_moved, new_t1_moved)
 
-        # tests that PyObject slots on TensorImpl are correctly swapped by
-        # checking that when the function applied on a swapped tensor is
-        # returns doesn't change the TensorImpl, the returned value (which is
-        # given by returning the reference to the PyObject in the TensorImpl's
-        # PyObjectSlot) is still correct
-        self.assertEqual(id(t1.fill_(0.5)), id(t1))
-        self.assertEqual(id(t2.fill_(0.5)), id(t2))
-
     @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo adds weakrefs")
     def test_swap_basic(self):
         ts = [
@@ -9979,20 +9971,9 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self.assertIs(holder[0], t1)
             self.assertEqual(t1.foo, "bar")
 
-            if t1.is_floating_point():
-                t3 = t1.clone().detach().requires_grad_(True)
-                out = t3 * 2
-                with self.assertRaisesRegex(RuntimeError, "Expected single reference to a's"):
-                    torch.utils.swap_tensors(t3, t2)
-                del out
-                # Now succeeds
-                torch.utils.swap_tensors(t3, t2)
-                torch.utils.swap_tensors(t1, t2)
-
             wr = weakref.ref(t1)
             with self.assertRaisesRegex(RuntimeError, "has weakref"):
                 torch.utils.swap_tensors(t1, t2)
-
 
     @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo adds weakrefs")
     def test_swap_fail_slots(self):

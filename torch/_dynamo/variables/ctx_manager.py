@@ -148,48 +148,6 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
         return x
 
 
-class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
-    """represents torch VMap increment/decrement nesting"""
-
-    # A guard is needed as the vmap level is baked into the torch FX graph
-    # generated. This is fine if vmap is only called from within the function
-    # being compiled. But the FX graph may be invalid in the case of a vmap
-    # call from eager that calls the compiled function, as the vmap levels
-    # may be different.
-    _guards_singleton = Guard(
-        GlobalStateSource(), GuardBuilder.FUNCTORCH_CURRENT_LEVEL_MATCH
-    )
-
-    @staticmethod
-    def create(tx, target_values, **kwargs):
-        var = VmapIncrementNestingCtxManagerVariable(
-            target_values=target_values,
-            initial_values=None,
-            **kwargs,
-        )
-        return var
-
-    def enter(self, tx):
-        install_guard(self._guards_singleton)
-        batch_size, randomness = self.target_values
-        vmap_level = torch._C._functorch._vmap_increment_nesting(batch_size, randomness)
-        self.set_cleanup_hook(tx, lambda: torch._C._functorch._vmap_decrement_nesting())
-        self.state.proxy = tx.output.create_node(
-            "call_function",
-            torch._C._functorch._vmap_increment_nesting,
-            (batch_size, randomness),
-            {},
-        )
-        return variables.ConstantVariable.create(vmap_level)
-
-    def exit(self, tx, *args):
-        self.state.cleanup()
-        tx.output.create_node(
-            "call_function", torch._C._functorch._vmap_decrement_nesting, (), {}
-        )
-        return variables.ConstantVariable.create(None)
-
-
 class GradModeVariable(ContextWrappingVariable):
     """represents torch.{no_grad,enable_grad,set_grad_mode}()"""
 
