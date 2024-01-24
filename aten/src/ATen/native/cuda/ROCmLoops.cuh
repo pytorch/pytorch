@@ -299,6 +299,33 @@ static void launch_kernel(int64_t N, const func_t& f, array_t data) {}
 
 
 template <typename func_t>
+void gpu_kernel_impl_nocast(TensorIteratorBase& iter, const func_t& f) {
+  using traits = function_traits<func_t>;
+  using arg0_t = typename traits::result_type;
+  constexpr int ntensors = traits::arity + 1;
+
+  TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
+  TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
+  TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
+  TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
+
+  at::detail::Array<char*, ntensors> data;
+  for (int i = 0; i < ntensors; i++) {
+    data[i] = (char*)iter.data_ptr(i);
+  }
+
+  int64_t numel = iter.numel();
+
+  auto offset_calc = ::make_offset_calculator<traits::arity + 1>(iter);
+  constexpr int unroll_factor = sizeof(arg0_t) >= 4 ? 2 : 4;
+  legacy::launch_kernel<128, unroll_factor>(numel, [=] GPU_LAMBDA(int idx) {
+    auto offsets = offset_calc.get(idx);
+    arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
+    *out = legacy::invoke(f, &data.data[1], &offsets.data[1], 1);
+  });
+}
+
+template <typename func_t>
 void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
   using traits = function_traits<func_t>;
   using arg0_t = typename traits::result_type;
