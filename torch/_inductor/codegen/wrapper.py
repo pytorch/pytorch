@@ -1352,7 +1352,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.closed_bracket = "}"
         self.comment = "//"
         self.namespace = "at::"
-        self.none_str = "at::Tensor()"
+        self.none_str = (
+            "nullptr" if config.aot_inductor.abi_compatible else "at::Tensor()"
+        )
         self.extern_call_ops = set()
         self.size = "sizes()"
         self.stride = "strides()"
