@@ -1175,7 +1175,6 @@ class CheckFunctionManager:
         # Check that the check_fn is True for this frame
         assert self.check_fn(output_graph.local_scope)
         if config.enable_cpp_guard_manager:
-            breakpoint()
             print(self.guard_manager)
             debug_guard_check = self.guard_manager.root.check_verbose(
                 output_graph.local_scope
