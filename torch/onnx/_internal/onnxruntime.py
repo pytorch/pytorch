@@ -826,6 +826,7 @@ class OrtBackend:
         else:
             # It's first time seeing such as graph. Let's make a new session
             # (type: onnxruntime.InferenceSession) for it.
+            original_module = graph_module
 
             graph_module = torch.onnx._internal.fx.passes.MovePlaceholderToFront(
                 self._resolved_onnx_exporter_options.diagnostic_context,
@@ -836,6 +837,31 @@ class OrtBackend:
             #
             # WARNING: The downstream code should not change prim_outputs and
             # this backend should always produces output with schema identical to prim_outputs'.
+
+            # Apply decomposition table to the input graph
+            # so that torch.relu becomes torch.ops.aten.relu.
+            graph_module = torch.onnx._internal.fx.passes.Decompose(
+                self._resolved_onnx_exporter_options.diagnostic_context,
+                graph_module,
+                self._resolved_onnx_exporter_options.decomposition_table,
+                enable_dynamic_axes=self._resolved_onnx_exporter_options.dynamic_shapes,
+                allow_fake_constant=self._resolved_onnx_exporter_options.fake_context is not None,
+            ).run(*args)
+
+            # Remove in-place ops since ONNX is a single-static-assignment language.
+            graph_module = torch.onnx._internal.fx.passes.Functionalize(
+                self._resolved_onnx_exporter_options.diagnostic_context,
+                graph_module,
+                enable_dynamic_axes=self._resolved_onnx_exporter_options.dynamic_shapes,
+                allow_fake_constant=self._resolved_onnx_exporter_options.fake_context is not None,
+            ).run(*args)
+
+            # Input mutations are detected and distilled after `Functionalize` pass.
+            # Remove them since ONNX inference does not need them.
+            graph_module = torch.onnx._internal.fx.passes.RemoveInputMutation(
+                self._resolved_onnx_exporter_options.diagnostic_context,
+                graph_module,
+            ).run(*args)
 
             if self._resolved_onnx_exporter_options.dynamic_shapes:
                 # No pre-allocation when dynamic shape is enabled.
@@ -933,7 +959,7 @@ class OrtBackend:
             )
 
             self._all_ort_execution_info.cache_session_execution_info(
-                graph_module, execution_info_per_session
+                original_module, execution_info_per_session
             )
 
         self.execution_count += 1
