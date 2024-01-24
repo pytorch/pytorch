@@ -695,7 +695,10 @@ class Tracer(TracerBase):
         try:
             if isinstance(root, torch.nn.Module):
 
-                # do real recompilation for LazyGraphModule before retracing
+                # do real recompilation for LazyGraphModule before retracing since the trace
+                # method can not trace the _lazy_forward method. Got error:
+                #   https://gist.github.com/shunting314/75549c2e82ae07ac1139c94a3583d259
+                # without this.
                 from torch.fx.lazy_graph_module import LazyGraphModule
                 if isinstance(root, LazyGraphModule):
                     root.real_recompile()

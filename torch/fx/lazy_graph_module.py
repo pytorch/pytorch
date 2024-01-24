@@ -1,6 +1,8 @@
 from contextlib import contextmanager
 
 from torch.fx import GraphModule
+from torch.fx.graph_module import _format_import_block, reduce_graph_module
+from torch.package import sys_importer
 from ._compatibility import compatibility
 
 _use_lazy_graph_module = False
@@ -55,6 +57,18 @@ class LazyGraphModule(GraphModule):
         return self(*args, **kwargs)
 
     forward = _lazy_forward
+
+    def __reduce__(self):
+        """
+        Follow GraphModule.__reduce__ but call 'self._real_recompile' rather
+        than 'self.recompile' since for a LazyGraphModule, self.recompile just
+        mark the need of recompilation and does not return the PythonCode object.
+        """
+        python_code = self._real_recompile()
+        dict_without_graph = self.__dict__.copy()
+        import_block = _format_import_block(python_code.globals, sys_importer)
+        del dict_without_graph["_graph"]
+        return (reduce_graph_module, (dict_without_graph, import_block))
 
     def _real_recompile(self):
         return super().recompile()

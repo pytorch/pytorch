@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: fx"]
 
 import contextlib
+import pickle
 from unittest.mock import patch
 
 import torch
@@ -193,6 +194,21 @@ class TestLazyRecompile(TestCase):
                 saved_fwd(x)
 
         self.assertEqual(recompile_count, 1)
+
+    def test_pickle(self):
+        """
+        Fx graph cache need the ability to pickle GraphModule/LazyGraphModule.
+        """
+
+        def f(x):
+            return x.sin()
+
+        gm = fx.symbolic_trace(f)
+        self.assertTrue(isinstance(gm, LazyGraphModule))
+        serialized = pickle.dumps(gm)
+        gm2 = pickle.loads(serialized)
+        self.assertTrue(isinstance(gm2, LazyGraphModule))
+        self.assertTrue("sin" in gm2.code)
 
 
 if __name__ == "__main__":
