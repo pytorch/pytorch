@@ -8,6 +8,7 @@ from .optimizer import (
     Optimizer,
     _default_to_fused_or_foreach,
     _differentiable_doc,
+    _capturable_doc,
     _dispatch_sqrt,
     _foreach_doc,
     _get_scalar_dtype,
@@ -208,6 +209,7 @@ RAdam.__doc__ = r"""Implements RAdam algorithm.
             decay as in AdamW to obtain RAdamW (default: False)
         {_foreach_doc}
         {_differentiable_doc}
+        {_capturable_doc}
 
     .. _On the variance of the adaptive learning rate and beyond:
         https://arxiv.org/abs/1908.03265
