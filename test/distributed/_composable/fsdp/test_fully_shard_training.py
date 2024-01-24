@@ -100,8 +100,12 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             root_params = list(model.parameters(recurse=False))
             if reshard_after_forward is True:
                 self._assert_dtensor_params(non_root_params)
-            else:
+            elif reshard_after_forward is False:
                 self._assert_tensor_params(non_root_params)
+            else:
+                # Do not register the sharded post-forward parameters
+                self.assertEqual(len(non_root_params), 0)
+                self.assertEqual(len(root_params), 0)
             self._assert_tensor_params(root_params)
             for module in model.modules():
                 if isinstance(module, FSDP):
