@@ -1,4 +1,4 @@
-# Owner(s): ["module: xpu"]
+# Owner(s): ["module: intel"]
 
 import unittest
 
@@ -10,13 +10,13 @@ from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 # not torch.backends.xpu.is_avaliable
 @unittest.skipIf(IS_WINDOWS, "XPU operators testing is disabled")
 class TestXPUOperators(TestCase):
-    def test_tensor_factory(self):
+    def test_empty_tensor(self):
         # empty
         dtypes = [torch.float, torch.bfloat16]
         shapes = [(1, 3, 3, 3)]
         mformats = [torch.channels_last, torch.contiguous_format]
 
-        def test_empty(dtype, shape, mformat):
+        def test_empty_tensor_(dtype, shape, mformat):
             xpu_tensor = torch.empty(
                 shape, dtype=dtype, device=torch.device("xpu"), memory_format=mformat
             )
@@ -28,15 +28,16 @@ class TestXPUOperators(TestCase):
 
         for dtype in dtypes:
             for shape in shapes:
-                for mformat in memory_formats:
-                    test_empty(dtype, shape, mformat)
+                for mformat in mformats:
+                    test_empty_tensor_(dtype, shape, mformat)
 
+    def test_empty_strided(self):
         # empty_strided
         dtypes = [torch.float, torch.bfloat16]
         shapes = [(1, 3, 3, 3)]
         strides = [(9, 9, 3, 1), (1, 1, 1, 1)]
 
-        def test_empty_strided(dtype, shape, stride):
+        def test_empty_strided_(dtype, shape, stride):
             xpu_tensor = torch.empty_strided(
                 shape, stride, dtype=dtype, device=torch.device("xpu")
             )
@@ -49,7 +50,7 @@ class TestXPUOperators(TestCase):
         for dtype in dtypes:
             for shape in shapes:
                 for stride in strides:
-                    test_empty_strided(dtype, shape, stride)
+                    test_empty_strided_(dtype, shape, stride)
 
 
 instantiate_device_type_tests(TestXPUOperators, globals(), only_for=("xpu",))
