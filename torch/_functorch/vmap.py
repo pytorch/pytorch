@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import torch
+import contextlib
 import functools
 import threading
 from torch import Tensor
@@ -274,17 +275,10 @@ def vmap_impl(func, in_dims, out_dims, randomness, chunk_size, *args, **kwargs):
         return _chunked_vmap(func, flat_in_dims, chunks_flat_args,
                              args_spec, out_dims, randomness, **kwargs)
 
-    from torch._dynamo import disable
-
-    # remove @disable once #114306 is fixed
-    @disable
-    def wrapper():
-        # If chunk_size is not specified.
-        return _flat_vmap(
-            func, batch_size, flat_in_dims, flat_args, args_spec, out_dims, randomness, **kwargs
-        )
-
-    return wrapper()
+    # If chunk_size is not specified.
+    return _flat_vmap(
+        func, batch_size, flat_in_dims, flat_args, args_spec, out_dims, randomness, **kwargs
+    )
 
 def get_chunk_sizes(total_elems, chunk_size):
     n_chunks = n_chunks = total_elems // chunk_size
@@ -390,15 +384,22 @@ def _check_randomness_arg(randomness):
         raise RuntimeError(f"Only allowed values for randomness are 'error', 'different', or 'same'. Got {randomness}")
 
 
+@contextlib.contextmanager
+def vmap_increment_nesting(batch_size, randomness):
+    try:
+        vmap_level = _vmap_increment_nesting(batch_size, randomness)
+        yield vmap_level
+    finally:
+        _vmap_decrement_nesting()
+
+
 @doesnt_support_saved_tensors_hooks
 def _flat_vmap(func, batch_size, flat_in_dims, flat_args, args_spec, out_dims, randomness, **kwargs):
-    vmap_level = _vmap_increment_nesting(batch_size, randomness)
-    try:
+
+    with vmap_increment_nesting(batch_size, randomness) as vmap_level:
         batched_inputs = _create_batched_inputs(flat_in_dims, flat_args, vmap_level, args_spec)
         batched_outputs = func(*batched_inputs, **kwargs)
         return _unwrap_batched(batched_outputs, out_dims, vmap_level, batch_size, func)
-    finally:
-        _vmap_decrement_nesting()
 
 
 # `restore_vmap` is a private helper function. It is vmap but has the following
@@ -424,13 +425,10 @@ def _flat_vmap(func, batch_size, flat_in_dims, flat_args, args_spec, out_dims, r
 @doesnt_support_saved_tensors_hooks
 def restore_vmap(func, in_dims, batch_size, randomness):
     def inner(*args, **kwargs):
-        vmap_level = _vmap_increment_nesting(batch_size, randomness)
-        try:
+        with vmap_increment_nesting(batch_size, randomness) as vmap_level:
             batched_inputs = wrap_batched(args, in_dims, vmap_level)
             batched_outputs = func(*batched_inputs, **kwargs)
             return unwrap_batched(batched_outputs, vmap_level)
-        finally:
-            _vmap_decrement_nesting()
     return inner
 
 
