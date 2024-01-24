@@ -79,9 +79,9 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
     @requires_dill
     def test_unsuccessful_inline(self):
         def level2():
-            z = torch.ones(2, 2)
-            a = {z: 10}  # Error here, tensor as key to dict
-            return a[z] * torch.ones(1)
+            a = {10}
+            z = a['z']  # RuntimeError, Illegal to getitem on a set
+            return z * torch.ones(1)
 
         def level1():
             y = torch.ones(1, 1)
@@ -91,7 +91,7 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
             x = torch.ones(1, 1)
             return level1() + x
 
-        self.check_replay(level0, exp_exc_name="AssertionError")
+        self.check_replay(level0, exp_exc_name="RuntimeError")
 
     @requires_dill
     def test_successful_inline(self):
