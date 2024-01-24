@@ -146,6 +146,7 @@ class CachingAutotuner(KernelInterface):
     ):
         super().__init__()
 
+        assert len(configs) > 0, "Non-empty TritonConfig list required for compiling"
         self.fn = fn
         self.triton_meta = triton_meta
         self.inductor_meta = {} if inductor_meta is None else inductor_meta
@@ -369,7 +370,19 @@ class CachingAutotuner(KernelInterface):
         scope["cta_args"] = (
             (binary.num_ctas, *get_first_attr(binary, "cluster_dims", "clusterDims"))
             if hasattr(binary, "num_ctas")
-            else ()
+            else (
+                (binary.metadata.num_ctas, *binary.metadata.cluster_dims)
+                if hasattr(binary, "metadata")
+                else ()
+            )
+        )
+        scope["num_warps"] = (
+            binary.num_warps
+            if hasattr(binary, "num_warps")
+            else binary.metadata.num_warps
+        )
+        scope["shared"] = (
+            binary.shared if hasattr(binary, "shared") else binary.metadata.shared
         )
 
         exec(
@@ -380,8 +393,8 @@ class CachingAutotuner(KernelInterface):
                 else:
                     grid_0, grid_1, grid_2 = grid
 
-                runner(grid_0, grid_1, grid_2, bin.num_warps,
-                            *cta_args, bin.shared,
+                runner(grid_0, grid_1, grid_2, num_warps,
+                            *cta_args, shared,
                             stream, function, None, None, None,
                             {', '.join(call_args)})
                 return bin
@@ -496,15 +509,21 @@ class CachingAutotuner(KernelInterface):
         key = self.inductor_meta.get("kernel_name", None)  # unique kernel name
         assert key is not None, "kernel_name can not be None"
         params = {
-            "mangled_name": launcher.bin.metadata["name"],
+            "mangled_name": launcher.bin.metadata.name
+            if hasattr(launcher.bin.metadata, "name")
+            else launcher.bin.metadata["name"],
             "grid_x": grid_x,
             "grid_y": grid_y,
             "grid_z": grid_z,
             "x_block": launcher.config.kwargs.get("XBLOCK", 1),
             "y_block": launcher.config.kwargs.get("YBLOCK", None),
             "z_block": launcher.config.kwargs.get("ZBLOCK", None),
-            "num_warps": launcher.bin.num_warps,
-            "shared_mem": launcher.bin.shared,
+            "num_warps": launcher.bin.num_warps
+            if hasattr(launcher.bin, "num_warps")
+            else launcher.bin.metadata.num_warps,
+            "shared_mem": launcher.bin.shared
+            if hasattr(launcher.bin, "shared")
+            else launcher.bin.metadata.shared,
             "stream": stream,
             # User defined triton kernels will have arbitrary kwarg names
             "meta": launcher.config.kwargs,
@@ -1162,6 +1181,7 @@ def reduction(
 ):
     """args to @triton.heuristics()"""
     inductor_meta = {} if inductor_meta is None else inductor_meta
+    inductor_meta["reduction_hint"] = reduction_hint
     if inductor_meta.get("no_x_dim"):
         size_hints = [1, *size_hints[1:]]
 
@@ -1241,14 +1261,17 @@ def persistent_reduction(
     filename=None,
     inductor_meta=None,
 ):
-    if inductor_meta and inductor_meta.get("no_x_dim"):
+    inductor_meta = {} if inductor_meta is None else inductor_meta
+    inductor_meta["reduction_hint"] = reduction_hint
+    if inductor_meta.get("no_x_dim"):
         size_hints = [1, *size_hints[1:]]
+
     xnumel, rnumel = size_hints
 
     configs = [
         triton_config_reduction(size_hints, xblock, rnumel)
         for xblock in (1, 8, 32, 128)
-        if rnumel * xblock <= 4096 and xblock <= xnumel
+        if xblock == 1 or (rnumel * xblock <= 4096 and xblock <= xnumel)
     ]
 
     # TODO(jansel): we should be able to improve these heuristics
