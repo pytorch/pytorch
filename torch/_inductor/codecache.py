@@ -1127,9 +1127,11 @@ def get_compile_only(compile_only: bool = True) -> str:
     return "-c" if compile_only else ""
 
 
-def get_shared(shared: bool = True) -> str:
+def get_shared(shared: bool = True, compile_only: bool = False) -> str:
     if not shared:
         return ""
+    if compile_only:
+        return "-fPIC"
     if platform.system() == "Darwin" and "clang" in cpp_compiler():
         # This causes undefined symbols to behave the same as linux
         return "-shared -fPIC -undefined dynamic_lookup"
@@ -1446,12 +1448,14 @@ def cpp_compile_command(
         inp_name = input
         out_name = output
         linker_paths = ""  # let the compiler pick
+    if compile_only:
+        libs, lpaths = "", ""
     inp_name_str = " ".join(inp_name)
     return re.sub(
         r"[ \n]+",
         " ",
         f"""
-            {cpp_compiler()} {inp_name_str} {get_shared(shared)}
+            {cpp_compiler()} {inp_name_str} {get_shared(shared, compile_only)}
             {get_warning_all_flag(warning_all)} {cpp_flags()}
             {get_glibcxx_abi_build_flags()}
             {ipaths_str} {lpaths} {libs} {build_arch_flags}
