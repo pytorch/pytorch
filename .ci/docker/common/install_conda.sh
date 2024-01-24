@@ -52,7 +52,9 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
 
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
   CONDA_COMMON_DEPS="astunparse pyyaml mkl=2021.4.0 mkl-include=2021.4.0 setuptools"
-  if [ "$ANACONDA_PYTHON_VERSION" = "3.11" ] || [ "$ANACONDA_PYTHON_VERSION" = "3.12" ]; then
+  if [ "$ANACONDA_PYTHON_VERSION" = "3.12" ]; then
+    conda_install numpy=1.26.0 astunparse pyyaml mkl=2023.1.0 mkl-include=2023.1.0 setuptools
+  elif [ "$ANACONDA_PYTHON_VERSION" = "3.11" ]; then
     conda_install numpy=1.26.0 ${CONDA_COMMON_DEPS}
   else
     conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS}
@@ -97,6 +99,9 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   if grep -e [12][82].04.[623] /etc/issue >/dev/null; then
     rm /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib/libstdc++.so.6
   fi
+
+  #debug display list of libs
+  ls las /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib/
 
   popd
 fi
