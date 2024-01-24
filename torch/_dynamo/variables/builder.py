@@ -38,12 +38,6 @@ from torch.nested._internal.nested_tensor import NestedTensor
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef
 from .. import config, mutation_guard, replay_record, skipfiles, trace_rules
-from ..allowed_functions import (
-    is_allowed,
-    is_builtin_callable,
-    is_numpy,
-    is_user_defined_allowed,
-)
 
 from ..device_interface import get_registered_device_interfaces
 from ..exc import InternalTorchDynamoError, unimplemented
@@ -52,9 +46,9 @@ from ..side_effects import SideEffects
 from ..source import (
     AttrSource,
     ConstantSource,
+    ConstDictKeySource,
     ConvertIntSource,
     GetItemSource,
-    GlobalWeakRefSource,
     is_constant_source,
     LocalSource,
     NumpyTensorSource,
@@ -62,12 +56,14 @@ from ..source import (
     Source,
     TupleIteratorGetItemSource,
 )
+from ..trace_rules import is_builtin_callable, is_callable_allowed, is_numpy
 from ..utils import (
     build_checkpoint_variable,
     clone_input,
+    common_constant_types,
     get_fake_value,
     get_static_address_type,
-    global_key_name,
+    is_function,
     is_namedtuple,
     is_typing,
     is_utils_checkpoint,
@@ -88,6 +84,7 @@ from .ctx_manager import (
     AutocastModeVariable,
     EventVariable,
     NullContextVariable,
+    StreamContextVariable,
     StreamVariable,
 )
 from .dicts import (
@@ -95,6 +92,7 @@ from .dicts import (
     DataClassVariable,
     DefaultDictVariable,
     HFPretrainedConfigVariable,
+    is_hashable_python_var,
     PythonSysModulesVariable,
     SetVariable,
 )
@@ -140,9 +138,10 @@ from .misc import (
     SkipFilesVariable,
     TypingVariable,
 )
-
 from .nn_module import FSDPManagedNNModuleVariable, UnspecializedNNModuleVariable
 from .optimizer import OptimizerVariable
+
+from .sdpa import SDPAParamsVariable
 from .tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
@@ -150,7 +149,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import torch_special_class_types, TorchVariable
+from .torch import TorchInGraphFunctionVariable
 from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
@@ -306,22 +305,13 @@ class VariableBuilder:
                 ),
                 cls.wrap_tensor,
             ),
-            ((tuple, list, odict_values, collections.deque), cls.wrap_listlike),
+            (
+                (tuple, list, odict_values, collections.deque, torch.Size),
+                cls.wrap_listlike,
+            ),
             (tuple_iterator, cls.wrap_tuple_iterator),
             ((slice, range), cls.wrap_slice_range),
-            (
-                (
-                    int,
-                    float,
-                    bool,
-                    type(None),
-                    str,
-                    torch.Size,
-                    torch.device,
-                    torch.dtype,
-                ),
-                cls.wrap_literal,
-            ),
+            (tuple(common_constant_types), cls.wrap_literal),
         ]
 
         if config.trace_numpy and np:
@@ -410,23 +400,18 @@ class VariableBuilder:
             # under the assumption that the values themselves don't change.
             self.install_guards(GuardBuilder.DICT_VERSION)
             result = {
-                k: UserDefinedObjectVariable(
-                    value[k],
+                ConstantVariable.create(k): UserDefinedObjectVariable(
+                    v,
                     source=GetItemSource(self.get_source(), k),
                 )
-                for k in value.keys()
+                for k, v in value.items()
             }
             return ConstDictVariable(result, type(value))
         elif value is sys.modules:
             return PythonSysModulesVariable(source=self.source)
         elif istype(
             value, (dict, collections.defaultdict, collections.OrderedDict)
-        ) and all(
-            ConstantVariable.is_literal(k)
-            or self.tensor_can_be_dict_key(k)
-            or isinstance(k, enum.Enum)
-            for k in value.keys()
-        ):
+        ) and all(is_hashable_python_var(k) for k in value.keys()):
             if not value and self.get_source().is_nn_module():
                 # It is faster to guard on 'false' property than to guard
                 # on actual dict keys, but we can't do this fast guard in general because
@@ -439,24 +424,24 @@ class VariableBuilder:
             else:
                 self.install_guards(GuardBuilder.DICT_KEYS)
 
-            # store key variables in global location for reconstruction
-            for key in value.keys():
-                if self.tensor_can_be_dict_key(key):
-                    self.tx.store_global_weakref(global_key_name(key), key)
+            idx = 0
 
-            def index_source(key):
-                if self.tensor_can_be_dict_key(key):
-                    return GlobalWeakRefSource(global_key_name(key))
+            def build_key_value(k, v):
+                nonlocal idx
+                if ConstantVariable.is_literal(k):
+                    key = ConstantVariable.create(k)
+                    source_key = k
                 else:
-                    return key
+                    source_key = ConstDictKeySource(self.get_source(), idx)
+                    key = VariableBuilder(self.tx, source_key)(k)
 
-            result = {
-                k: LazyVariableTracker.create(
-                    value[k],
-                    source=GetItemSource(self.get_source(), index_source(k)),
-                )
-                for k in value.keys()
-            }
+                source_value = GetItemSource(self.get_source(), source_key)
+                value = LazyVariableTracker.create(v, source_value)
+
+                idx += 1
+                return key, value
+
+            result = dict(build_key_value(k, v) for k, v in value.items())
 
             if istype(value, collections.defaultdict):
                 result = DefaultDictVariable(
@@ -466,7 +451,7 @@ class VariableBuilder:
                     source=self.source,
                 )
             else:
-                result = ConstDictVariable(result, type(value))
+                result = ConstDictVariable(result, type(value), source=self.source)
 
             return self.set_source_and_track_mutable(value, result)
         elif isinstance(value, torch.nn.Module):
@@ -474,7 +459,7 @@ class VariableBuilder:
         elif ConstantVariable.is_literal(value):  # non-atomic literals
             return self.wrap_literal(value)
         elif istype(value, frozenset) and (
-            all(is_allowed(x) or ConstantVariable.is_literal(x) for x in value)
+            ConstantVariable.is_literal(x) for x in value
         ):
             # For frozenset, we can guard by object ID instead of value
             # equality, this allows us to handle non-literal values
@@ -573,7 +558,9 @@ class VariableBuilder:
             # handle aliased autograd function `apply` calls
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return GetAttrVariable(
-                AutogradFunctionVariable(value.__self__, source=self.source),
+                AutogradFunctionVariable(
+                    value.__self__, source=AttrSource(self.source, member="__self__")
+                ),
                 "apply",
             )
         elif np and isinstance(value, np.number):
@@ -587,21 +574,22 @@ class VariableBuilder:
         elif isinstance(value, HigherOrderOperator):
             self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH)
             return TorchHigherOrderOperatorVariable.make(value, source=self.source)
-        elif type(value).__name__ == "builtin_function_or_method" and isinstance(
-            value.__self__, torch_special_class_types
-        ):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return TorchVariable(
-                value,
-            )
+        elif isinstance(value, torch.cuda.StreamContext):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            stream_source = AttrSource(self.source, "stream")
+            stream_var = VariableBuilder(self.tx, stream_source)(value.stream)
+            return StreamContextVariable.create(self.tx, stream_var)
         elif isinstance(value, _StreamBase):
             self.install_guards(GuardBuilder.ID_MATCH)
             return StreamVariable(
                 None,
                 value,
-                value.device.type,
+                value.device,
                 source=self.source,
             )
+        elif isinstance(value, torch._C._SDPAParams):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return SDPAParamsVariable.create(self.tx, value, self.source)
         elif isinstance(value, _EventBase):
             self.install_guards(GuardBuilder.ID_MATCH)
             return EventVariable(
@@ -710,25 +698,22 @@ class VariableBuilder:
                 source=self.source,
             )
         elif trace_rules.lookup(value) is not None:
-            if is_user_defined_allowed(value):
+            if is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup(value).create_with_source(
                 value, source=self.source
             )
-        elif istype(value, (types.ModuleType, replay_record.DummyModule)):
+        # Don't use istype, since some python modules are not subclasses of types.ModuleType directly.
+        # E.g, type(torch.ops) -> <class 'torch._ops._Ops'>,
+        # type(torch.backends.cudnn) -> <class 'torch.backends.cudnn.CudnnModule'>
+        elif isinstance(value, (types.ModuleType, replay_record.DummyModule)):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return PythonModuleVariable(
                 value,
                 source=self.source,
             )
-        elif is_allowed(value):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return TorchVariable(
-                value,
-                source=self.source,
-            )
         elif (
-            istype(value, (type, types.FunctionType))
+            is_function(value)
             and skipfiles.check(value, is_inlined_call=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
             and not inspect.getattr_static(value, "__script_if_tracing_wrapper", False)
@@ -746,7 +731,7 @@ class VariableBuilder:
                 source=self.source,
             )
         elif isinstance(value, types.MethodType) and isinstance(
-            value.__self__, torch.nn.Module
+            value.__self__, (torch.nn.Module, torch.utils._pytree.TreeSpec)
         ):
             # don't let MethodTypes fall through to UserDefinedObject,
             # which doesn't support 'CALL_FUNCTION'
@@ -799,6 +784,7 @@ class VariableBuilder:
                 ),
             )
         else:
+            # breakpoint()
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = UserDefinedObjectVariable(value, source=self.source)
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
@@ -806,36 +792,10 @@ class VariableBuilder:
                 return result
             return self.tx.output.side_effects.track_object_existing(value, result)
 
-    def tensor_can_be_dict_key(self, value):
-        # only allow Parameter and another specific Tensor can be used as dict key
-        return (
-            isinstance(value, torch.nn.Parameter)
-            or isinstance(self.source, AttrSource)
-            and self.source.member == "state"
-            and isinstance(self.source.base, LocalSource)
-        )
-
-    def tensor_should_specialize(self):
-        return (
-            self.source
-            and isinstance(self.source, GetItemSource)
-            and isinstance(self.source.base, GetItemSource)
-            and self.source.base.index == "params"
-            and isinstance(self.source.base.base, GetItemSource)
-            and isinstance(self.source.base.base.base, AttrSource)
-            and self.source.base.base.base.member == "param_groups"
-            and isinstance(self.source.base.base.base.base, LocalSource)
-            and (
-                isinstance(
-                    self.tx.f_locals[self.source.base.base.base.base.local_name],
-                    torch.optim.Optimizer,
-                )
-                if self.source.base.base.base.base.local_name in self.tx.f_locals.keys()
-                else True
-            )
-        )
-
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
+        if config.specialize_int and type(value) is torch.Size:
+            self.install_guards(GuardBuilder.CONSTANT_MATCH)
+            return ConstantVariable.create(value=value)
         # One can index a tensor with a list/tuple. Therefore, we need to
         # have a stricter match.
         self.install_guards(GuardBuilder.LIST_LENGTH)
@@ -845,9 +805,10 @@ class VariableBuilder:
                 unimplemented("list elements are pointing to the list itself")
 
         output = [
-            VariableBuilder(self.tx, GetItemSource(self.get_source(), i))(item)
+            LazyVariableTracker.create(item, source=GetItemSource(self.get_source(), i))
             for i, item in enumerate(value)
         ]
+
         result = BaseListVariable.cls_for_instance(value)(
             output, mutable_local=MutableLocal()
         )
@@ -946,15 +907,7 @@ class VariableBuilder:
 
     def wrap_literal(self, value):
         unspec = not config.specialize_int
-        if unspec and type(value) is torch.Size:
-            self.install_guards(GuardBuilder.LIST_LENGTH)
-            return SizeVariable(
-                [
-                    VariableBuilder(self.tx, GetItemSource(self.get_source(), i))(v)
-                    for i, v in enumerate(value)
-                ]
-            )
-        elif unspec and type(value) is int:
+        if unspec and type(value) is int:
             # unspecializing int by default, but still
             # specialize for the following conditions
             if not TracingContext.get().force_unspec_int_unbacked_size_like and (
@@ -1076,7 +1029,6 @@ class VariableBuilder:
             tx=self.tx,
             proxy=tensor_proxy,
             example_value=value,
-            should_specialize=self.tensor_should_specialize(),
             subclass_type=subclass_type,
             source=source,
             **options,
@@ -1325,7 +1277,7 @@ def wrap_fx_proxy(tx, proxy, example_value=None, subclass_type=None, **options):
         return wrap_fx_proxy_cls(target_cls=TensorVariable, **kwargs)
     else:
         result = wrap_fx_proxy_cls(target_cls=TensorWithTFOverrideVariable, **kwargs)
-        result.install_global(tx)
+        result.install_global_unsafe(tx)
         return result
 
 
@@ -1445,11 +1397,6 @@ def wrap_fx_proxy_cls(
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)
-        should_specialize = options.pop("should_specialize", False)
-        if is_parameter or should_specialize:
-            specialized_value = initial_example_value
-        else:
-            specialized_value = None
 
         # NB: In most (all?) cases, this does not actually do a clone.
         # (WARNING: this means that if we mutate metadata on the fake
@@ -1467,8 +1414,6 @@ def wrap_fx_proxy_cls(
                 torch.nn.Parameter if is_parameter else tensor_type
             )
 
-        specialized_props["specialized_value"] = specialized_value
-
         options.update(specialized_props)
         return target_cls(proxy, **options)
     elif (
@@ -1477,7 +1422,7 @@ def wrap_fx_proxy_cls(
         and isinstance(proxy.node.target.__self__, torch._C.Generator)
         or proxy.node.target == torch.random.set_rng_state
     ):
-        return TorchVariable(proxy.node.target)
+        return TorchInGraphFunctionVariable(proxy.node.target)
     elif (
         proxy.node.target == torch._C._DisableFuncTorch
         or proxy.node.target == torch.cuda._is_in_bad_fork
@@ -1488,7 +1433,7 @@ def wrap_fx_proxy_cls(
     ):
         sizes = [ConstantVariable.create(x) for x in example_value]
         return SizeVariable(sizes, **options)
-    elif isinstance(example_value, (tuple, list, set)):
+    elif isinstance(example_value, (tuple, list)):
         proxy.node.meta["example_value"] = example_value
         unpacked = []
         for i, val in enumerate(example_value):
@@ -1517,8 +1462,6 @@ def wrap_fx_proxy_cls(
             return TupleVariable(unpacked, **options)
         elif istype(example_value, (list, immutable_list)):
             return ListVariable(unpacked, mutable_local=MutableLocal(), **options)
-        elif istype(example_value, set):
-            return SetVariable(unpacked, mutable_local=MutableLocal(), **options)
         else:
             assert example_value.__class__.__module__ == "torch.return_types" or hasattr(
                 example_value, "_fields"
@@ -1537,9 +1480,7 @@ def wrap_fx_proxy_cls(
         for _, device_interface in get_registered_device_interfaces()
     ]:
         proxy.node.meta["example_value"] = example_value
-        return StreamVariable(
-            proxy, example_value, example_value.device.type, **options
-        )
+        return StreamVariable(proxy, example_value, example_value.device, **options)
     elif (
         inspect.isclass(proxy.node.target) and issubclass(proxy.node.target, _EventBase)
     ) or proxy.node.target in [
@@ -1566,6 +1507,9 @@ def wrap_fx_proxy_cls(
         torch._utils._element_size,
         torch.seed,
         operator.mod,
+        torch._C._functorch._vmap_increment_nesting,
+        torch._C._functorch._vmap_decrement_nesting,
+        torch._functorch.vmap._validate_and_get_batch_size,
         # some mac builds are missing torch.distributed.get_rank()
         getattr(torch.distributed, "get_rank", _missing),
         getattr(torch.distributed, "get_world_size", _missing),
@@ -1576,6 +1520,11 @@ def wrap_fx_proxy_cls(
     ]:
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable.create(example_value, **options)
+    elif isinstance(example_value, torch.backends.cuda.SDPAParams):
+        from .sdpa import SDPAParamsVariable
+
+        proxy.node.meta["example_value"] = example_value
+        return SDPAParamsVariable(proxy, **options)
     else:
         unimplemented(
             "torch.* op returned non-Tensor "
@@ -1897,10 +1846,10 @@ class SourcelessBuilder:
             return SourcelessBuilder.wrap_constant_literal(value)
         elif is_builtin_callable(value):
             return BuiltinVariable(value)
-        elif is_allowed(value):
-            if is_user_defined_allowed(value):
+        elif trace_rules.lookup(value) is not None:
+            if is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
-            return TorchVariable(value)
+            return trace_rules.lookup(value)(value)
         elif isinstance(value, types.FunctionType):
             return UserFunctionVariable(value)
         elif isinstance(value, enum.Enum):
@@ -1908,12 +1857,10 @@ class SourcelessBuilder:
         elif isinstance(value, (type, abc.ABCMeta)):
             return UserDefinedClassVariable(value)
         elif isinstance(value, dict):
-            return ConstDictVariable(
-                {k: self(tx, v) for k, v in value.items()},
-                dict,
-                mutable_local=MutableLocal(),
-            )
+            items = {self(tx, k): self(tx, v) for k, v in value.items()}
+            return ConstDictVariable(items, mutable_local=MutableLocal())
         elif isinstance(value, set):
+            # Nb. value is a set here so the iteration below is non-deterministic!
             return SetVariable(
                 [self(tx, x) for x in value], mutable_local=MutableLocal()
             )

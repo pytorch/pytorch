@@ -1,15 +1,18 @@
 import warnings
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Optional
 
 import torch
 import torch.distributed as dist
+from torch.distributed._state_dict_utils import _offload_state_dict_to_cpu
 from torch.distributed.checkpoint.stateful import Stateful
 
 from .default_planner import DefaultSavePlanner
 from .metadata import Metadata, STATE_DICT_TYPE
 from .planner import SavePlanner
 from .storage import StorageWriter
-from .utils import _DistWrapper
+from .utils import _DistWrapper, _profile
+
 
 __all__ = ["save_state_dict", "save"]
 
@@ -24,13 +27,20 @@ def save_state_dict(
 ) -> Metadata:
     """This method is deprecated. Please switch to 'save'."""
     warnings.warn(
-        "'save_state_dict' is deprecated and will be removed in future versions. Please use 'save' instead."
+        "'save_state_dict' is deprecated and will be removed in future versions."
+        "Please use 'save' instead."
     )
 
     # TODO: test returning `save` here instead.
-    return _save_state_dict(
-        state_dict, storage_writer, process_group, coordinator_rank, no_dist, planner
-    )
+    with _profile():
+        return _save_state_dict(
+            state_dict,
+            storage_writer,
+            process_group,
+            coordinator_rank,
+            no_dist,
+            planner,
+        )
 
 
 def save(
@@ -105,20 +115,80 @@ def save(
     """
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save")
 
-    dumpable_state_dict = {}
-    for key, elem in state_dict.items():
-        dumpable_state_dict[key] = (
-            elem.state_dict() if isinstance(elem, Stateful) else elem
+    with _profile():
+        dumpable_state_dict = {}
+        for key, elem in state_dict.items():
+            dumpable_state_dict[key] = (
+                elem.state_dict() if isinstance(elem, Stateful) else elem
+            )
+
+        return _save_state_dict(
+            dumpable_state_dict,
+            storage_writer,
+            process_group,
+            coordinator_rank,
+            no_dist,
+            planner,
         )
 
-    return _save_state_dict(
-        dumpable_state_dict,
+
+def _async_save(
+    state_dict: STATE_DICT_TYPE,
+    storage_writer: StorageWriter,
+    *,
+    process_group: Optional[dist.ProcessGroup] = None,
+    coordinator_rank: int = 0,
+    no_dist: bool = False,
+    planner: Optional[SavePlanner] = None,
+) -> Future:
+    """Asynchronous version of ``save_state_dict``. This code first de-stages the state_dict on CPU, and then calls
+    `save` in a separate thread.
+
+    .. warning::
+        This feature is experimental and subject to removal/change.
+
+    Args:
+        state_dict (Dict[str, Any]): The state_dict to save.
+        storage_writer (StorageWriter):
+            Instance of StorageWrite use to perform writes.
+        process_group (ProcessGroup):
+            ProcessGroup to be used for cross-rank synchronization.
+        coordinator_rank (int): Rank to use to coordinate the checkpoint.
+            rank0 is used by default.
+        no_dist (bool): If ``True``, distributed checkpoint will not save
+            in SPMD style. (Default: ``False``)
+
+    Returns:
+        Future: A future holding the resultant Metadata object from `save`.
+
+    """
+    torch._C._log_api_usage_once("torch.distributed.checkpoint._async_save")
+
+    cpu_state_dict = _offload_state_dict_to_cpu(_stateful_to_state_dict(state_dict))
+
+    executor = ThreadPoolExecutor(max_workers=1)
+    f = executor.submit(
+        _save_state_dict,
+        cpu_state_dict,
         storage_writer,
         process_group,
         coordinator_rank,
         no_dist,
         planner,
     )
+    f.add_done_callback(lambda f: executor.shutdown(wait=False))
+
+    return f
+
+
+def _stateful_to_state_dict(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
+    """Creates a shallow copy of `state_dict` where `state_dict` is called for each Stateful object."""
+    stateful_state_dict = {}
+    for key, elem in state_dict.items():
+        stateful_state_dict[key] = (
+            elem.state_dict() if isinstance(elem, Stateful) else elem
+        )
+    return stateful_state_dict
 
 
 def _save_state_dict(

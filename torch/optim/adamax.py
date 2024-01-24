@@ -1,9 +1,9 @@
 import torch
 from torch import Tensor
 
-from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _stack_if_compiling,
-                        _default_to_fused_or_foreach, _differentiable_doc, _maximize_doc, _foreach_doc,
-                        _view_as_real)
+from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _default_to_fused_or_foreach,
+                        _get_scalar_dtype, _differentiable_doc, _maximize_doc, _foreach_doc, _view_as_real,
+                        _capturable_doc)
 from typing import List, Optional
 
 __all__ = ["Adamax", "adamax"]
@@ -21,6 +21,7 @@ class Adamax(Optimizer):
         *,
         maximize: bool = False,
         differentiable: bool = False,
+        capturable: bool = False,
     ):
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -41,6 +42,7 @@ class Adamax(Optimizer):
             foreach=foreach,
             maximize=maximize,
             differentiable=differentiable,
+            capturable=capturable,
         )
         super().__init__(params, defaults)
 
@@ -50,13 +52,14 @@ class Adamax(Optimizer):
             group.setdefault("foreach", None)
             group.setdefault("maximize", False)
             group.setdefault("differentiable", False)
+            group.setdefault("capturable", False)
         state_values = list(self.state.values())
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(
             state_values[0]["step"]
         )
         if not step_is_tensor:
             for s in state_values:
-                s["step"] = torch.tensor(float(s["step"]), dtype=torch.float32)
+                s["step"] = torch.tensor(float(s["step"]), dtype=_get_scalar_dtype())
 
     def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_infs, state_steps):
         has_complex = False
@@ -73,7 +76,8 @@ class Adamax(Optimizer):
 
             # State initialization
             if len(state) == 0:
-                state["step"] = torch.tensor(0.0, dtype=torch.float32)
+                state['step'] = (torch.zeros((), dtype=_get_scalar_dtype(), device=p.device)
+                                 if group['capturable'] else torch.tensor(0.0, dtype=_get_scalar_dtype()))
                 state["exp_avg"] = torch.zeros_like(
                     p, memory_format=torch.preserve_format
                 )
@@ -84,11 +88,12 @@ class Adamax(Optimizer):
             exp_avgs.append(state["exp_avg"])
             exp_infs.append(state["exp_inf"])
             state_steps.append(state["step"])
+
         return has_complex
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Perform a single optimization step.
+        """Performs a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -113,6 +118,7 @@ class Adamax(Optimizer):
             foreach = group["foreach"]
             maximize = group["maximize"]
             differentiable = group["differentiable"]
+            capturable = group["capturable"]
 
             has_complex = self._init_group(group, params_with_grad, grads, exp_avgs, exp_infs, state_steps)
 
@@ -130,6 +136,7 @@ class Adamax(Optimizer):
                 foreach=foreach,
                 maximize=maximize,
                 differentiable=differentiable,
+                capturable=capturable,
                 has_complex=has_complex,
             )
 
@@ -174,6 +181,7 @@ Adamax.__doc__ = r"""Implements Adamax algorithm (a variant of Adam based on inf
         {_foreach_doc}
         {_maximize_doc}
         {_differentiable_doc}
+        {_capturable_doc}
 
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
@@ -192,6 +200,7 @@ def adamax(
     foreach: Optional[bool] = None,
     maximize: bool = False,
     differentiable: bool = False,
+    capturable: bool = False,
     has_complex: bool = False,
     *,
     eps: float,
@@ -204,6 +213,7 @@ def adamax(
 
     See :class:`~torch.optim.Adamax` for details.
     """
+
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError(
             "API has changed, `state_steps` argument must contain a list of singleton tensors"
@@ -234,6 +244,7 @@ def adamax(
         maximize=maximize,
         differentiable=differentiable,
         has_complex=has_complex,
+        capturable=capturable,
     )
 
 
@@ -251,6 +262,7 @@ def _single_tensor_adamax(
     weight_decay: float,
     maximize: bool,
     differentiable: bool,
+    capturable: bool,
     has_complex: bool,
 ):
 
@@ -275,13 +287,16 @@ def _single_tensor_adamax(
         # Update biased first moment estimate.
         exp_avg.lerp_(grad, 1 - beta1)
         # Update the exponentially weighted infinity norm.
-        norm_buf = torch.cat(
-            [exp_inf.mul_(beta2).unsqueeze(0), grad.abs().add_(eps).unsqueeze_(0)], 0
-        )
-
         if not differentiable:
-            torch.amax(norm_buf, 0, keepdim=False, out=exp_inf)
+            torch.maximum(
+                exp_inf.mul_(beta2),
+                grad.abs().add_(eps),
+                out=exp_inf,
+            )
         else:
+            norm_buf = torch.cat(
+                [exp_inf.mul_(beta2).unsqueeze(0), grad.abs().add_(eps).unsqueeze_(0)], 0
+            )
             exp_inf.copy_(torch.amax(norm_buf, 0, keepdim=False))
 
         bias_correction = 1 - beta1 ** _get_value(step_t)
@@ -304,6 +319,7 @@ def _multi_tensor_adamax(
     eps: float,
     maximize: bool,
     differentiable: bool,
+    capturable: bool,
     has_complex: bool,
 ):
 
@@ -336,19 +352,35 @@ def _multi_tensor_adamax(
             else:
                 grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
 
+
         # Update biased first moment estimate.
         torch._foreach_lerp_(grouped_exp_avgs, grouped_grads, 1 - beta1)
 
         # Update the exponentially weighted infinity norm.
         torch._foreach_mul_(grouped_exp_infs, beta2)
 
-        for exp_inf, grad in zip(grouped_exp_infs, grouped_grads):
-            norm_buf = torch.cat(
-                [exp_inf.unsqueeze(0), grad.abs().add_(eps).unsqueeze_(0)], 0
-            )
-            torch.max(norm_buf, 0, keepdim=False, out=(exp_inf, exp_inf.new().long()))
+        # in this case, we need to introduce a copy of the grads
+        # since one has not been introduced previously
+        if not maximize and weight_decay == 0:
+            grouped_grads = torch._foreach_abs(grouped_grads)
+        else:
+            torch._foreach_abs_(grouped_grads)
 
-        bias_corrections = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
-        clr = _stack_if_compiling([-1 * (lr / bias_correction) for bias_correction in bias_corrections])
+        torch._foreach_add_(grouped_grads, eps)
+        torch._foreach_maximum_(grouped_exp_infs, grouped_grads)
 
-        torch._foreach_addcdiv_(grouped_params, grouped_exp_avgs, grouped_exp_infs, clr)
+        if capturable:
+            bias_corrections = torch._foreach_pow(beta1, grouped_state_steps)
+            # foreach_sub doesn't allow a scalar as the first arg
+            torch._foreach_sub_(bias_corrections, 1)
+
+            # foreach_div doesn't allow a scalar as the first arg
+            torch._foreach_div_(bias_corrections, lr)
+            torch._foreach_reciprocal_(bias_corrections)
+
+            numerator = torch._foreach_mul(grouped_exp_avgs, bias_corrections)
+            torch._foreach_addcdiv_(grouped_params, numerator, grouped_exp_infs)
+        else:
+            bias_corrections = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
+            step_size = [(lr / bc) * -1 for bc in bias_corrections]
+            torch._foreach_addcdiv_(grouped_params, grouped_exp_avgs, grouped_exp_infs, step_size)

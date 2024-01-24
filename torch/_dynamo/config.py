@@ -222,6 +222,12 @@ enforce_cond_guards_match = True
 # about optimize_ddp behavior.
 optimize_ddp = True
 
+# If True, delays DDPOptimizer submodule compilation to 1st run of the model,
+# so that real tensor strides are used in all submodules
+# (instead of using FakeTensor strides which can differ from real tensor strides and causes error in some cases).
+# This feature is not hardened yet and it's known to cause issues to some models, so False by default.
+optimize_ddp_lazy_compile = False
+
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
 
@@ -333,6 +339,16 @@ _autograd_backward_strict_mode_banned_ops.extend(
     [name for name, _ in inspect.getmembers(torch.Tensor) if re.match(r"^is_.*", name)]
 )
 
+# Enables caching of dispatches to fake tensors.
+fake_tensor_cache_enabled = (
+    os.environ.get("TORCH_FAKE_TENSOR_DISPATCH_CACHE", "0" if is_fbcode() else "1")
+    == "1"
+)
+
+# Enables cross checking between the fake tensor cache and dispatch.
+fake_tensor_cache_crosscheck_enabled = (
+    os.environ.get("TORCH_FAKE_TENSOR_DISPATCH_CACHE_CROSSCHECK", "0") == "1"
+)
 
 # support `context_fn` in torch.utils.checkpoint.checkpoint API under torch.compile().
 # WARNING: this is an experimental flag and is subject to change.

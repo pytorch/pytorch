@@ -26,7 +26,7 @@ convit_base,pass,6
 
 
 
-convmixer_768_32,pass,6
+convmixer_768_32,pass,5
 
 
 
@@ -98,7 +98,7 @@ gmlp_s16_224,pass,6
 
 
 
-hrnet_w18,pass,6
+hrnet_w18,pass,5
 
 
 
@@ -150,7 +150,7 @@ pit_b_224,pass,6
 
 
 
-pnasnet5large,pass,6
+pnasnet5large,pass,5
 
 
 

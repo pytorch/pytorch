@@ -1271,6 +1271,7 @@ class TestSparseCSR(TestCase):
                 new_shape = (2, 2)
                 a.resize_(new_shape)
 
+    @skipIfTorchDynamo()
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_sparse_csr_from_dense(self, device, dtype):
         dense = torch.tensor([[4, 5, 0], [0, 0, 0], [1, 0, 0]], dtype=dtype, device=device)
@@ -2109,19 +2110,27 @@ class TestSparseCSR(TestCase):
                 with self.assertRaisesRegex(RuntimeError, re.escape(str(msg))):
                     test(is_sparse=True)
 
+    @sparse_compressed_nonblock_layouts()
     @dtypes(torch.float, torch.double)
-    def test_add(self, device, dtype):
+    def test_add(self, device, layout, dtype):
         def _test_spadd_shape(nnz, shape):
             # sparse.to_dense() uses torch.add internally so if torch.add is wrong,
             # the dense tensor will be wrong but this test would still pass
             # there's a separate test that checks for the correctness of the .to_dense() call
-            x = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=torch.int32)
+            x = self.genSparseCompressedTensor(shape, nnz,
+                                               dtype=dtype,
+                                               device=device,
+                                               index_dtype=torch.int32,
+                                               layout=layout,
+                                               blocksize=())
             y = torch.randn(*shape, dtype=dtype, device=device)
             r = random.random()
 
             res = torch.add(y, x, alpha=r)
             expected = y + r * x.to_dense()
             self.assertEqual(res, expected)
+            res_perm = torch.add(x, y, alpha=r)
+            self.assertEqual(res_perm, expected)
 
             # Non contiguous dense tensor
             s = list(shape)
@@ -2133,8 +2142,11 @@ class TestSparseCSR(TestCase):
 
             res = torch.add(y, x, alpha=r)
             expected = y + r * x.to_dense()
+            res_perm = torch.add(x, y, alpha=r)
 
             self.assertEqual(res, expected)
+            self.assertEqual(res_perm, expected)
+
 
         ns = [2, 5]
         batch_shapes = [(), (2,), (2, 3)]
@@ -2778,6 +2790,10 @@ class TestSparseCSR(TestCase):
 
         for sample in samples:
             a = sample.args[0].relu().to_sparse_csr()
+            if sample.args[0].shape == sample.args[1].shape:
+                import warnings
+                warnings.warn("Broken for square matrices, see https://github.com/pytorch/pytorch/issues/116565")
+                continue
 
             # This path tests the autograd path wrt dense inputs
             for addmm in [torch.addmm, torch.sparse.addmm]:
@@ -3447,7 +3463,7 @@ class TestSparseCompressedTritonKernels(TestCase):
         return d
 
     @onlyCUDA
-    @skipIfRocm
+    @skipIfRocm(msg="test is too slow on ROCm stack")
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
@@ -3483,7 +3499,6 @@ class TestSparseCompressedTritonKernels(TestCase):
     @parametrize("block_size", [16, 32, 64])
     @parametrize("index_dtype", [torch.int32, torch.int64])
     @onlyCUDA
-    @skipIfRocm
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
     @unittest.skipIf((not TEST_WITH_TORCHINDUCTOR) or (IS_FBCODE and IS_REMOTE_GPU) or torch._running_with_deploy(),
@@ -3562,7 +3577,6 @@ class TestSparseCompressedTritonKernels(TestCase):
                 self.assertEqual(res_tri, res_dense)
 
     @onlyCUDA
-    @skipIfRocm
     @dtypes(torch.half)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU or torch._running_with_deploy(),
                      "Skipped for deploy and internal with remote GPUs")
@@ -3772,7 +3786,6 @@ class TestSparseCompressedTritonKernels(TestCase):
 
     @parametrize("blocksize", [2, '2x3', 16, '16x32', 32, 64])
     @onlyCUDA
-    @skipIfRocm
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
