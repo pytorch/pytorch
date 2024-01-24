@@ -178,6 +178,16 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
             test_fn, torch.ones(3, 3), torch.ones(2, 2), exp_exc_name="RuntimeError"
         )
 
+    # Verify that accessing torch.nn works when frame replaying is enabled
+    @skipIfNoDill
+    def test_torch_nn(self):
+        def fn(x):
+            y = torch.nn.functional.pad(x, (10, 10, 10, 10))
+            return y + torch.ones(3, 3)  # dimension mismatch
+
+        x = torch.ones(4, 4, 4, 4)
+        self.check_replay(fn, x, exp_exc_name="RuntimeError")
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
