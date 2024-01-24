@@ -123,10 +123,8 @@ def foreach_reduce_scatter(
     postdivide_factor: float,
 ) -> torch.cuda.Event:
     """
-    Args:
-        unsharded_grads (List[torch.Tensor]): This list owns the references to
-            the unsharded gradients computed by autograd, so clearing this list
-            frees the gradients.
+    ``unsharded_grads`` owns the references to the gradients computed by
+    autograd, so clearing the list frees the gradients.
     """
     grad_dtypes = {grad.dtype for grad in unsharded_grads}
     if len(grad_dtypes) != 1:
