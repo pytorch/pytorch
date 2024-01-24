@@ -419,11 +419,11 @@ def _reduce_tensor(t):
     """
     See FxGraphCachePickler. Custom reducer to pickle Tensors.
     """
-    # If we see tensors, we know they're contstants stored as attributes on
+    # If we see tensors, we know they're constants stored as attributes on
     # the GraphModule. See tensor lowering; small constants are inlined. If
     # we see a small tensor, therefore, no reference will ultimately remain
     # in the generated code. So we need to include its value in the cache key.
-    # Large constannts are effectively treated as inputs and we consider only
+    # Large constants are effectively treated as inputs and we consider only
     # their metadata.
     metadata = extract_tensor_metadata(t)
     if len(t.shape) == 0 or torch._inductor.graph.GraphLowering.can_inline_constant(t):
@@ -1127,9 +1127,11 @@ def get_compile_only(compile_only: bool = True) -> str:
     return "-c" if compile_only else ""
 
 
-def get_shared(shared: bool = True) -> str:
+def get_shared(shared: bool = True, compile_only: bool = False) -> str:
     if not shared:
         return ""
+    if compile_only:
+        return "-fPIC"
     if platform.system() == "Darwin" and "clang" in cpp_compiler():
         # This causes undefined symbols to behave the same as linux
         return "-shared -fPIC -undefined dynamic_lookup"
@@ -1446,12 +1448,14 @@ def cpp_compile_command(
         inp_name = input
         out_name = output
         linker_paths = ""  # let the compiler pick
+    if compile_only:
+        libs, lpaths = "", ""
     inp_name_str = " ".join(inp_name)
     return re.sub(
         r"[ \n]+",
         " ",
         f"""
-            {cpp_compiler()} {inp_name_str} {get_shared(shared)}
+            {cpp_compiler()} {inp_name_str} {get_shared(shared, compile_only)}
             {get_warning_all_flag(warning_all)} {cpp_flags()}
             {get_glibcxx_abi_build_flags()}
             {ipaths_str} {lpaths} {libs} {build_arch_flags}

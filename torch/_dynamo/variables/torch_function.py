@@ -178,6 +178,12 @@ class TensorWithTFOverrideVariable(TensorVariable):
         )
 
     def global_mangled_class_name(self, tx):
+        # The global_mangled_class_name should be different for different
+        # invocations of torch.compile. Otherwise, we can run into a situation
+        # where multiple torch.compile invocations re-use the same global name,
+        # but the global's lifetime is tied to the first invocation (and
+        # may be deleted when the first torch.compile invocation is deleted)
+        # We mangle it based off of the output_graph's id.
         compile_id = tx.output.compile_id
         return f"__subclass_{self.class_type.__name__}_{id(self.class_type)}_c{id}"
 

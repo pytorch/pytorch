@@ -330,8 +330,8 @@ class PyCodegen:
         name = re.sub(r"^.*[.]", "", mod.__name__)
         if global_scope.get(name, None) is mod:
             return self.create_load_global(name, push_null, add=True)
-        mangled_name = f"___module_{name}_{id(mod)}"
-        global_name = self.tx.output.install_global_once(mangled_name, mod)
+        prefix = f"___module_{name}"
+        global_name = self.tx.output.install_global_by_id(prefix, mod)
         return self.create_load_global(global_name, push_null, add=True)
 
     def make_call_generated_code(self, fn_name: str) -> None:

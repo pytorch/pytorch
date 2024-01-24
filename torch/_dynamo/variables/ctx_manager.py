@@ -148,6 +148,48 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
         return x
 
 
+class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
+    """represents torch VMap increment/decrement nesting"""
+
+    # A guard is needed as the vmap level is baked into the torch FX graph
+    # generated. This is fine if vmap is only called from within the function
+    # being compiled. But the FX graph may be invalid in the case of a vmap
+    # call from eager that calls the compiled function, as the vmap levels
+    # may be different.
+    _guards_singleton = Guard(
+        GlobalStateSource(), GuardBuilder.FUNCTORCH_CURRENT_LEVEL_MATCH
+    )
+
+    @staticmethod
+    def create(tx, target_values, **kwargs):
+        var = VmapIncrementNestingCtxManagerVariable(
+            target_values=target_values,
+            initial_values=None,
+            **kwargs,
+        )
+        return var
+
+    def enter(self, tx):
+        install_guard(self._guards_singleton)
+        batch_size, randomness = self.target_values
+        vmap_level = torch._C._functorch._vmap_increment_nesting(batch_size, randomness)
+        self.set_cleanup_hook(tx, lambda: torch._C._functorch._vmap_decrement_nesting())
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch._C._functorch._vmap_increment_nesting,
+            (batch_size, randomness),
+            {},
+        )
+        return variables.ConstantVariable.create(vmap_level)
+
+    def exit(self, tx, *args):
+        self.state.cleanup()
+        tx.output.create_node(
+            "call_function", torch._C._functorch._vmap_decrement_nesting, (), {}
+        )
+        return variables.ConstantVariable.create(None)
+
+
 class GradModeVariable(ContextWrappingVariable):
     """represents torch.{no_grad,enable_grad,set_grad_mode}()"""
 
@@ -590,8 +632,8 @@ class StreamVariable(VariableTracker):
         # Normally, we would do this via codegen for the proxy mapping to an output - we cannot do this yet, as we do not
         # yet have a plan for how we want to handle the case where the stream is used as an input or an output. Pending
         # design, to unblock current work, we lift the stream into a global and then codegen bytecode to load it from there.
-        name = f"_stream_{self.device}_{id(self.value)}"
-        name = codegen.tx.output.install_global_once(name, self.value)
+        prefix = f"_stream_{self.device}"
+        name = codegen.tx.output.install_global_by_id(prefix, self.value)
 
         return [codegen.create_load_global(name, push_null=False, add=True)]
 
