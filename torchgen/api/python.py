@@ -988,7 +988,7 @@ def return_type_str_pyi(t: Type) -> str:
 
     if isinstance(t, ListType):
         inner = return_type_str_pyi(t.elem)
-        return f"List[{inner}]"
+        return f"Tuple[{inner}, ...]"
 
     return argument_type_str_pyi(t)
 
