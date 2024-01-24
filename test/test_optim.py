@@ -94,6 +94,7 @@ class TestOptimRenewed(TestCase):
                 self.assertLess(closure().item(), initial_value)
 
 
+    @onlyCUDA
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @optims(optim_db, dtypes=[torch.float32])
     def test_forloop_goes_right_direction_multigpu(self, device, dtype, optim_info):

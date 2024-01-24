@@ -1433,6 +1433,13 @@ optim_db: List[OptimizerInfo] = [
                 "test_forloop_goes_right_direction",
             ),
             DecorateInfo(
+                unittest.skip(
+                    "RAdam does not support capturable single tensor https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction_multigpu",
+            ),
+            DecorateInfo(
                 skipIfTorchDynamo(
                     "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
