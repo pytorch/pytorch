@@ -137,13 +137,17 @@ def check_1d_sharded_parity(
     sharded_module: nn.Module,
     group: Optional[dist.ProcessGroup] = None,
     check_grads: bool = True,
+    prefixes_to_ignore: Tuple[str, ...] = (),
 ):
     group = group or dist.distributed_c10d._get_default_group()
     rank, world_size = group.rank(), group.size()
     for (replicated_name, replicated_param), (sharded_name, sharded_param) in zip(
         replicated_module.named_parameters(), sharded_module.named_parameters()
     ):
-        cls.assertEqual(replicated_name, sharded_name)
+        clean_sharded_name = sharded_name
+        for prefix in prefixes_to_ignore:
+            clean_sharded_name = clean_sharded_name.replace(prefix, "")
+        cls.assertEqual(replicated_name, clean_sharded_name)
         cls.assertIsInstance(sharded_param, DTensor)
         param_chunks = torch.chunk(replicated_param, world_size, dim=0)
         cls.assertEqual(sharded_param._local_tensor, param_chunks[rank])

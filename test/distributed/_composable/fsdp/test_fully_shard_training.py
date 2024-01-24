@@ -17,6 +17,11 @@ from _test_fully_shard_common import (
 from torch.distributed._composable import checkpoint, replicate
 from torch.distributed._composable.fsdp import FSDP, fully_shard
 from torch.distributed._tensor import DTensor, init_device_mesh
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    _CHECKPOINT_PREFIX,
+    apply_activation_checkpointing,
+    CheckpointWrapper,
+)
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -295,7 +300,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         self.run_subtests(
             {
                 "reshard_after_forward": [True, False, 2],
-                "checkpoint_impl": ["utils", "composable"],
+                "checkpoint_impl": ["composable", "utils", "wrapper"],
             },
             self._test_train_parity_with_activation_checkpointing,
         )
@@ -303,8 +308,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
     def _test_train_parity_with_activation_checkpointing(
         self, reshard_after_forward: Union[bool, int], checkpoint_impl: str
     ):
-        assert checkpoint_impl in ("composable", "utils")
-        foreach = True
+        assert checkpoint_impl in ("composable", "utils", "wrapper")
         torch.manual_seed(42)
         vocab_size = 1024
         with torch.device(torch.device("cuda")):
@@ -318,16 +322,28 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             )
             model = Transformer(model_args)
         ref_model = replicate(copy.deepcopy(model), device_ids=[self.rank])
+        foreach = True
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=foreach)
         fully_shard_fn = functools.partial(
             fully_shard,
             reshard_after_forward=reshard_after_forward,
         )
-        for module in model.modules():
-            if isinstance(module, TransformerBlock):
-                if checkpoint_impl == "composable":
-                    checkpoint(module)
-                fully_shard_fn(module)
+        if checkpoint_impl == "wrapper":
+            prefixes_to_ignore = (_CHECKPOINT_PREFIX,)
+            apply_activation_checkpointing(
+                model, check_fn=lambda m: isinstance(m, TransformerBlock)
+            )
+            for module in model.modules():
+                # Apply to `CheckpointWrapper`, which wraps `TransformerBlock`
+                if isinstance(module, CheckpointWrapper):
+                    fully_shard_fn(module)
+        else:
+            prefixes_to_ignore = ()
+            for module in model.modules():
+                if isinstance(module, TransformerBlock):
+                    if checkpoint_impl == "composable":
+                        checkpoint(module)
+                    fully_shard_fn(module)
         fully_shard_fn(model)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=foreach)
 
@@ -335,19 +351,25 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         # Reuse the same input across iterations to avoid loss explosion from
         # trying to learn from random inputs
         inp = torch.randint(0, vocab_size, (3, 64), device="cuda")
-        check_1d_sharded_parity(self, ref_model, model, check_grads=False)
+        check_1d_sharded_parity(
+            self, ref_model, model, prefixes_to_ignore=prefixes_to_ignore
+        )
         for iter_idx in range(10):
             losses: List[torch.Tensor] = []
             for _model in (ref_model, model):
                 torch.manual_seed(iter_idx + 1)  # for dropout determinism
                 losses.append(_model(inp).sum())
                 losses[-1].backward()
-            check_1d_sharded_parity(self, ref_model, model)
+            check_1d_sharded_parity(
+                self, ref_model, model, prefixes_to_ignore=prefixes_to_ignore
+            )
             self.assertEqual(losses[0], losses[1])
             for _optim in (ref_optim, optim):
                 _optim.step()
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
-            check_1d_sharded_parity(self, ref_model, model)
+            check_1d_sharded_parity(
+                self, ref_model, model, prefixes_to_ignore=prefixes_to_ignore
+            )
 
 
 class TestFullyShardSharedParams(FSDPTest):
