@@ -28,6 +28,7 @@ import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
 from pathlib import Path
+from types import MethodWrapperType
 from typing import (
     Any,
     Callable,
@@ -897,10 +898,12 @@ def rot_n_helper(n):
 common_constant_types = {
     int,
     float,
+    complex,
     bool,
     str,
     bytes,
     type(None),
+    Ellipsis.__class__,
     types.CodeType,
     torch.device,
     torch.dtype,
@@ -1062,11 +1065,13 @@ def iter_contains(items, search, tx, check_tensor_identity=False):
     return found
 
 
-def tensor_or_module_to_id(value):
-    return [
-        id(k) if isinstance(k, (torch.Tensor, torch.nn.Module)) else k
-        for k in value.keys()
-    ]
+def key_is_id(k):
+    """Returns whether it indexes dictionaries using its id"""
+    return isinstance(k, (torch.Tensor, torch.nn.Module, MethodWrapperType))
+
+
+def key_to_id(value):
+    return [id(k) if key_is_id(k) else k for k in value.keys()]
 
 
 def const_repr(x, *, local) -> str:
@@ -1605,8 +1610,17 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         elif isinstance(
             cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
         ):
+            op = cause.func
+            import_suggestion = ""
+            if isinstance(op, torch._ops.OpOverload):
+                maybe_pystub = torch._C._dispatch_pystub(
+                    op._schema.name, op._schema.overload_name
+                )
+                if maybe_pystub is not None:
+                    module, ctx = maybe_pystub
+                    import_suggestion = f"you may need to `import {module}` ({ctx}) for support, otherwise "
             unimplemented(
-                f"unsupported operator: {cause.func} (see "
+                f"unsupported operator: {cause.func} ({import_suggestion}see "
                 "https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0"
                 " for how to fix)"
             )
