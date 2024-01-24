@@ -537,7 +537,21 @@ def optim_inputs_func_lbfgs(device=None):
 
 
 def optim_error_inputs_func_lbfgs(device, dtype):
-    return get_error_inputs_for_all_optims(device, dtype)
+    error_inputs = get_error_inputs_for_all_optims(device, dtype)
+    if str(device) == "cpu":
+        complex_param = torch.rand(2, 3, device=device, dtype=torch.complex64)
+        error_inputs += [
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[complex_param],
+                    kwargs=dict(),
+                    desc="complex not supported",
+                ),
+                error_type=ValueError,
+                error_regex="LBFGS doesn't support complex parameters",
+            ),
+        ]
+    return error_inputs
 
 
 # Weird story bro, NAdam and RAdam do not have maximize.
@@ -842,6 +856,15 @@ def optim_error_inputs_func_sparseadam(device, dtype):
                 ),
                 error_type=ValueError,
                 error_regex="SparseAdam requires dense parameter tensors",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[torch.rand(2, 3, device=device, dtype=torch.complex64)],
+                    kwargs=dict(),
+                    desc="complex not supported",
+                ),
+                error_type=ValueError,
+                error_regex="SparseAdam does not support complex parameters",
             ),
         ]
     return error_inputs
