@@ -59,8 +59,10 @@ from .source import (
     DefaultsSource,
     GetItemSource,
     GlobalSource,
+    GlobalStateSource,
     LocalSource,
     NNModuleSource,
+    ShapeEnvSource,
     TypeSource,
 )
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
@@ -329,18 +331,27 @@ class GuardBuilder(GuardBuilderBase):
         # eval_frame calls check_fn with f_locals dict, which is then later
         # wrapped up into a "L" dict.
         # So,
-        root_guard_mananger = self.guard_manager.root
+        root_guard_manager = self.guard_manager.root
 
         # TODO(janimesh) - This should probably to guards object itself with a
         # member function - get_guard_manager. Need to figure out where to put
         # root_guard manager.
         def build(source):
             if isinstance(source, LocalSource):
-                return root_guard_mananger.dict_get_item_manager(source.local_name)
+                return root_guard_manager.dict_get_item_manager(source.local_name)
             elif isinstance(source, GlobalSource):
-                return root_guard_mananger.globals_dict_manager(
+                global_manager = root_guard_manager.globals_dict_manager(
                     self.scope["G"]
-                ).dict_get_item_manager(source.global_name)
+                )
+                return global_manager.dict_get_item_manager(source.global_name)
+            elif isinstance(source, GlobalStateSource):
+                # TODO(janimesh) - Revisit this how to insert the global state
+                # guards at the root level. Specifically how is the closure
+                # objects are passed to C++ root.
+                return root_guard_manager
+            elif isinstance(source, (ShapeEnvSource,)):
+                # List of sources that don't need accessors are put at the root
+                return root_guard_manager
             elif isinstance(source, TypeSource):
                 return build(source.base).type_manager()
             elif isinstance(source, NNModuleSource):
@@ -661,17 +672,23 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard.name)
         t = type(value)
 
+        self.TYPE_MATCH(guard)
+
         code = list()
-        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         any_key_is_id = any(key_is_id(k) for k in value.keys())
         const_keys_repr = dict_keys_repr(
             key_to_id(value),
             local=is_from_local_source(guard.originating_source),
         )
         if any_key_is_id:
+            if config.enable_cpp_guard_manager:
+                assert False, "DICT_KEYS NOT FULLY SUPPORTED"
             code.append(f"___key_to_id({ref}) == {const_keys_repr}")
         else:
             code.append(f"list({ref}.keys()) == {const_keys_repr}")
+            self.get_guard_manager(guard).add_dict_keys_guard(
+                value, self.get_guard_str(guard, code)
+            )
 
         self._produce_guard_code(guard, code)
 
@@ -1152,16 +1169,18 @@ class CheckFunctionManager:
             ):
                 continue
 
+            builder.get_guard_manager(guard)
             guard.create(builder)
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
         # Check that the check_fn is True for this frame
         assert self.check_fn(output_graph.local_scope)
-        # breakpoint()
-        print(self.guard_manager)
-        debug_guard_check = self.guard_manager.root.check_verbose(
-            output_graph.local_scope
-        )
-        assert debug_guard_check.result
+        if config.enable_cpp_guard_manager:
+            breakpoint()
+            print(self.guard_manager)
+            debug_guard_check = self.guard_manager.root.check_verbose(
+                output_graph.local_scope
+            )
+            assert debug_guard_check.result
 
         self._weakrefs.clear()
         # Keep track of weak references of objects with ID_MATCH guard. This
