@@ -1,12 +1,11 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/Resize.h>
 #include "BlasImpl.h"
+#include <torch/library.h>
 
 namespace at {
 namespace native {
 namespace xpu {
-
-using namespace impl;
 
 // result = beta * self + alpha * (mat1 * mat2)
 Tensor& addmm_out(
@@ -137,7 +136,6 @@ Tensor& mm_out(const Tensor& self, const Tensor& mat2, Tensor& result) {
     AT_ERROR(
         "Double and complex datatype matmul is not supported in oneDNN");
   }
-
 
   onednn::matmul(result, self, mat2, Tensor(), true, onednn::Attr());
   return result;
@@ -399,9 +397,6 @@ Tensor& tensordot_out(
   return result;
 }
 
-
-} // namespace xpu
-
 TORCH_LIBRARY_IMPL(aten, XPU, m){
   m.impl("admm.out", TORCH_FN(addmm_out));
   m.impl("_addmm_activation.out", TORCH_FN(_addmm_activation_out));
@@ -418,5 +413,9 @@ TORCH_LIBRARY_IMPL(aten, XPU, m){
   m.impl("addmv.out", TORCH_FN(addmv_out));
   m.impl("tensordot.out", TORCH_FN(tensordot_out));
 }
+
+} // namespace xpu
+
+
 } // namespace native
 } // namespace at
