@@ -86,7 +86,7 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
     return false;
   }
 
-  bool is_singleton() override {
+  bool is_singleton() const override {
     return true;
   }
 
@@ -184,11 +184,11 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
   // return normal Tensor. The workaround here is to return a pointer instead.
   // Instead of using this method directly, please use get_singleton_vec, if you
   // need a regular Tensor.
-  c10::TensorImpl* singleton_vec() override {
+  c10::TensorImpl* singleton_vec() const override {
     return vec_.unsafeGetTensorImpl();
   }
 
-  int64_t singleton_sum_vec() override {
+  int64_t singleton_sum_vec() const override {
     TORCH_INTERNAL_ASSERT(type_ == SingletonVariant::PYTHON);
     return sum_vec_;
   }
@@ -239,6 +239,6 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
   SingletonVariant type_;
 };
 
-TORCH_API at::Tensor get_singleton_vec(const c10::SymNode& node);
+TORCH_API at::Tensor get_singleton_vec(const c10::SymNodeImpl* node);
 
 } // namespace c10

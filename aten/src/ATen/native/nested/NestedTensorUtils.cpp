@@ -170,27 +170,17 @@ std::vector<Tensor> split_with_sizes_nested(
 }
 
 Tensor get_nested_sizes_from_sym_sizes(SymIntArrayRef size) {
-  c10::SymNode node = nullptr;
-  int64_t singleton_idx = -1;
-  for (const auto i : c10::irange(size.size())) {
-    if (size[i].is_heap_allocated() && size[i].toSymNode()->is_singleton()) {
-      node = size[i].toSymNode();
-      singleton_idx = static_cast<int64_t>(i);
-      // TODO: Handle multiple singletons
-      break;
-    }
-  }
-  TORCH_INTERNAL_ASSERT(node != nullptr);
-  auto vec = c10::get_singleton_vec(node);
-
-  auto nt_sizes = at::empty({vec.size(0), static_cast<int64_t>(size.size() - 1)},
+  const int64_t B = static_cast<int64_t>(size[0].expect_int());
+  auto nt_sizes = at::empty({B, static_cast<int64_t>(size.size() - 1)},
                             TensorOptions().dtype(at::kLong));
   for (const auto i : c10::irange(size.size())) {
-    if (i == 0) {
+    int64_t idx = static_cast<int64_t>(i);
+    if (idx == 0) {
       continue;
     }
-    int64_t idx = static_cast<int64_t>(i);
-    if (idx == singleton_idx) {
+    if (size[idx].is_heap_allocated() && size[idx].toSymNodeImplUnowned()->is_singleton()) {
+      auto vec = c10::get_singleton_vec(size[idx].toSymNodeImplUnowned());
+      TORCH_INTERNAL_ASSERT(vec.size(0) == B);
       nt_sizes.select(1, idx - 1).copy_(vec);
     } else {
       nt_sizes.select(1, idx - 1).fill_(size[i]);

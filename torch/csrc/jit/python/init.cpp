@@ -1299,7 +1299,7 @@ void initJITBindings(PyObject* module) {
           "singleton_vec",
           [](const c10::SymNode& node) {
             TORCH_CHECK(node->is_singleton());
-            return c10::get_singleton_vec(node);
+            return c10::get_singleton_vec(node.get());
           })
       .def(
           "singleton_sum_vec",

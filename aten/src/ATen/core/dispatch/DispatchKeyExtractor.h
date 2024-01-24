@@ -51,7 +51,7 @@ static inline DispatchKeySet computeDispatchKeySet(
 inline void updateDispatchKeySetFromSize(DispatchKeySet& ks, c10::SymIntArrayRef sizes) {
   for (const auto& x : sizes) {
     if (x.is_heap_allocated()) {
-      ks = ks | x.toSymNode()->key_set_;
+      ks = ks | x.toSymNodeImplUnowned()->key_set_;
     }
   }
 }
@@ -168,9 +168,9 @@ public:
           ks = ks | tensor.key_set();
         }
       } else if (C10_UNLIKELY(ivalue.isSymIntList())) {
-        for (const auto& elt : ivalue.toSymIntVector()) {
-          if (elt.is_heap_allocated()) {
-            ks = ks | elt.toSymNode()->key_set_;
+        for (const auto& elt : ivalue.toListRef()) {
+          if (elt.isSymInt()) {
+            ks = ks | elt.toSymNodeImpl()->key_set_;
           }
         }
       }

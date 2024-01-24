@@ -93,9 +93,6 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
       }
     } else if (ivalue.isSymIntList()) {
       for (const auto& nv : ivalue.toListRef()) {
-        if (nv.isNone()) {
-          continue;
-        }
         // IValues tagged SymInt are guaranteed to be heap_allocated
         if (nv.isSymInt() && nv.toSymNodeImpl()->key_set_.has(c10::DispatchKey::Python)) {
           (*c10::impl::get_global_pyinterpreter())->dispatch(op, stack);
