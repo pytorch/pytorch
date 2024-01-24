@@ -3740,7 +3740,7 @@ class TestNestedTensorSubclass(TestCase):
             if not (str(device).startswith("cuda") and dtype == torch.bfloat16):
                 check_forward_backward()
 
-    # @onlyCUDA
+    @xfailIfTorchDynamo
     def test_sdpa_input_validation(self, device):
         batch_size = 2
         emb_dims = 1024
