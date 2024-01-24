@@ -128,6 +128,7 @@ class TestOptimRenewed(TestCase):
                 self.assertLess(closure().item(), initial_value)
 
 
+    @skipMPS
     @optims(optim_db, dtypes=[torch.complex64])
     def test_complex(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
