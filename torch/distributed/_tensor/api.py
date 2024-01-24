@@ -226,7 +226,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             already have tensor initialized and want to shard this tensor),
             consider using `distribute_tensor`.
         """
-        if requires_grad != local_tensor.requires_grad:
+        if local_tensor.requires_grad and not requires_grad:
             warnings.warn(
                 "To construct DTensor from torch.Tensor, it's recommended to "
                 "use local_tensor.detach() and make requires_grad consistent."
