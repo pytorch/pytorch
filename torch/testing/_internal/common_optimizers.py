@@ -1312,6 +1312,16 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
             ),
+            DecorateInfo(
+                toleranceOverride(
+                    {  # previously atol=5-05, rtol=0.001, https://github.com/pytorch/pytorch/issues/116202
+                        torch.float32: tol(atol=5e-04, rtol=0.01),
+                    }
+                ),
+                "TestOptimRenewed",
+                "test_mixed_device_dtype",
+                active_if=TEST_WITH_TORCHDYNAMO,
+            ),
         ),
     ),
     OptimizerInfo(
