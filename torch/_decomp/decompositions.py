@@ -1361,6 +1361,54 @@ def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1
     return out + beta * self
 
 
+@register_decomposition(aten.pixel_shuffle)
+@out_wrapper()
+@pw_cast_for_opmath
+def pixel_shuffle(self: Tensor, upscale_factor: int):
+    batch = self.shape[:-3]
+    C_out = self.shape[-3] // upscale_factor**2
+    HW_out = (self.shape[-2] * upscale_factor, self.shape[-1] * upscale_factor)
+    n = len(batch)
+    return (
+        self.view(
+            *batch,
+            C_out,
+            upscale_factor,
+            self.shape[-2],
+            upscale_factor,
+            self.shape[-1],
+        )
+        .transpose(n + 1, n + 3)
+        .transpose(n + 2, n + 3)
+        .transpose(n + 3, n + 4)
+        .reshape(*batch, C_out, *HW_out)
+    )
+
+
+@register_decomposition(aten.pixel_unshuffle)
+@out_wrapper()
+@pw_cast_for_opmath
+def pixel_unshuffle(self: Tensor, downscale_factor: int):
+    batch = self.shape[:-3]
+    C_out = self.shape[-3] * downscale_factor**2
+    HW_out = (self.shape[-2] // downscale_factor, self.shape[-1] // downscale_factor)
+    n = len(batch)
+    return (
+        self.view(
+            *batch,
+            self.shape[-3],
+            downscale_factor,
+            downscale_factor,
+            HW_out[1],
+            HW_out[0],
+        )
+        .transpose(n + 3, n + 4)
+        .transpose(n + 2, n + 3)
+        .transpose(n + 1, n + 3)
+        .reshape(*batch, C_out, *HW_out)
+    )
+
+
 @register_decomposition(aten.native_group_norm_backward.default)
 @pw_cast_for_opmath
 def native_group_norm_backward(
