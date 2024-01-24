@@ -18,7 +18,7 @@ import textwrap
 import types
 import weakref
 from inspect import currentframe, getframeinfo
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from weakref import ReferenceType
 
 
@@ -30,7 +30,6 @@ except ModuleNotFoundError:
 import torch
 import torch.utils._device
 from torch._dynamo.source import (
-    ConstDictKeySource,
     is_from_local_source,
     TensorProperty,
     TensorPropertySource,
@@ -42,7 +41,6 @@ from torch._guards import (
     GuardBuilderBase,
     GuardEnvExpr,
     GuardSource,
-    GuardsSet,
     Source,
 )
 from torch.fx.experimental.symbolic_shapes import (
@@ -60,7 +58,6 @@ from .source import DefaultsSource, LocalSource, TypeSource
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     common_constant_types,
-    dict_keys_getitem,
     dict_keys_repr,
     guard_failures,
     istype,
@@ -100,22 +97,10 @@ def uninteresting_files():
 CLOSURE_VARS = {
     "___check_type_id": check_type_id,
     "___check_obj_id": check_obj_id,
-    "___current_backend": (
-        lambda: torch._dynamo.eval_frame.guarded_backend_cache.current_backend
-    ),
-    "___lookup_backend": (
-        lambda backend_obj_id: torch._dynamo.eval_frame.cached_backends.get(
-            backend_obj_id, None
-        )
-    ),
-    "___skip_backend_check": (
-        lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode
-    ),
     "___odict_getitem": collections.OrderedDict.__getitem__,
     "___key_to_id": key_to_id,
     "___dict_version": dict_version,
     "___dict_contains": lambda a, b: a in b,
-    "___dict_keys_getitem": dict_keys_getitem,
     "___tuple_iterator_len": tuple_iterator_len,
     "___tuple_iterator_getitem": tuple_iterator_getitem,
     "__math_isnan": math.isnan,
@@ -610,9 +595,7 @@ class GuardBuilder(GuardBuilderBase):
         backend_id = (
             f"{id(torch._dynamo.eval_frame.guarded_backend_cache.current_backend)}"
         )
-        code = [
-            f"(___skip_backend_check() or ___current_backend() == ___lookup_backend({backend_id}))"
-        ]
+        code = [f"___check_current_backend({backend_id})"]
         self._produce_guard_code(guard, code)
 
     def SHAPE_ENV(self, guard: Guard):
@@ -1002,7 +985,6 @@ class CheckFunctionManager:
 
         # Break retain cycle. See test_release_input_memory
         w_builder = weakref.ref(builder, cleanup_builder)
-        guards = self.fuse_dict_guards(builder, guards)
 
         for guard in sorted(guards or [], key=Guard.sort_key):
             if (
@@ -1028,39 +1010,6 @@ class CheckFunctionManager:
         # queryable data structure such that this information is already present
         # in some form.
         self.check_fn.id_matched_objs = builder.id_matched_objs
-
-    @staticmethod
-    def fuse_dict_guards(builder, guards):
-        # Rather than creating n contant guards, each of them costing O(n)
-        # (ConstDictKeySource.reconstruct is O(n)), we just place a guard
-        # on all the keys and their types
-        dicts: Dict[Source, Tuple[Guard, int, Set[Guard]]] = {}
-        for guard in sorted(guards or [], key=Guard.sort_key):
-            if guard.create_fn == GuardBuilder.LIST_LENGTH and isinstance(
-                d := builder.get(guard.name), dict
-            ):
-                dicts[guard.originating_source] = (guard, len(d), set())
-            elif (
-                isinstance(guard.originating_source, ConstDictKeySource)
-                and guard.create_fn == GuardBuilder.CONSTANT_MATCH
-            ):
-                # TODO CONSTANT_MATCH can be relaxed
-                dict_source = guard.originating_source.base
-                assert dict_source in dicts
-                dicts[dict_source][2].add(guard)
-        remove_guards = set()
-        add_guards = set()
-        for guard, n_elem, elem_guards in dicts.values():
-            # TODO This condition can be relaxed generalizing DICT_KEYS
-            if len(elem_guards) == n_elem:
-                add_guards.add(
-                    guard.originating_source.make_guard(GuardBuilder.DICT_KEYS)
-                )
-                remove_guards.update(elem_guards)
-                remove_guards.add(guard)
-        ret = GuardsSet(guards.inner - remove_guards)
-        ret.update(add_guards)
-        return ret
 
     def compile_check_fn(self, builder, guards_out, guard_fail_fn):
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
@@ -1206,6 +1155,7 @@ class CheckFunctionManager:
             "___check_tensors": check_tensors_fn,
             "___check_tensors_verbose": check_tensors_verbose_fn,
             "___check_global_state": global_state.check,
+            "___check_current_backend": torch._dynamo.eval_frame.check_current_backend,
             "tensor_check_names": tensor_check_names,
             **SYMPY_INTERP,
             **CLOSURE_VARS,

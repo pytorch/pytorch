@@ -998,6 +998,7 @@ utils_device.CURRENT_DEVICE == None""".split(
     def test_getattr_dict(self):
         def fn(x):
             from torch.masked.maskedtensor._ops_refs import _MASKEDTENSOR_FUNCTION_TABLE
+
             return x * len(_MASKEDTENSOR_FUNCTION_TABLE)
 
         i = torch.randn(5)
