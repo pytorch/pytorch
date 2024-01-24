@@ -23,3 +23,16 @@ torch.xpu
     set_stream
     stream
     synchronize
+
+Streams
+------------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    Stream
+
+
+.. This module needs to be documented. Adding here in the meantime
+.. for tracking purposes
+.. py:module:: torch.cuda.streams
