@@ -180,13 +180,13 @@ TEST(XPUStreamTest, StreamFunction) {
 
   // H2D
   asyncMemCopy(stream, deviceData, hostData, sizeof(int) * numel);
-  c10::xpu::streams_synchronize_on_device();
+  c10::xpu::syncStreamsOnDevice();
 
   clearHostData(hostData, numel);
 
   // D2H
   asyncMemCopy(stream, hostData, deviceData, sizeof(int) * numel);
-  c10::xpu::streams_synchronize_on_device();
+  c10::xpu::syncStreamsOnDevice();
 
   validateHostData(hostData, numel);
 
@@ -196,7 +196,7 @@ TEST(XPUStreamTest, StreamFunction) {
 
   // D2H
   asyncMemCopy(stream, hostData, deviceData, sizeof(int) * numel);
-  c10::xpu::streams_synchronize_on_device();
+  c10::xpu::syncStreamsOnDevice();
 
   validateHostData(hostData, numel);
   sycl::free(deviceData, c10::xpu::get_device_context());
