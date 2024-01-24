@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.testing import rand_strided
 from torch._inductor import config
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.utils import fresh_inductor_cache
@@ -39,7 +40,7 @@ class TestKernelBenchmark(TestCase):
         self.assertTrue(compiled_module is not None)
         return compiled_module
 
-    def verify_compiled_kernels(self):
+    def verify_compiled_kernels(self, GB_count=1, check_grid=False):
         compiled_module = self.get_compiled_module()
 
         # now run the compiled module in subprocess and check its output
@@ -51,9 +52,18 @@ class TestKernelBenchmark(TestCase):
         # make sure we have the bandwidth information in the output
         FileCheck().check_count(
             "GB/s",
-            1,
+            GB_count,
             exactly=1,
         ).run(bench_out)
+        # make sure we correctly generate the grid info
+        if check_grid:
+            with open(compiled_module.__file__) as f:
+                source_code = f.read()
+            FileCheck().check_count(
+                "grid=(608, 1, 1)",
+                2,
+                exactly=1,
+            ).run(source_code)
 
     def test_pw_kernel_benchmark(self):
         @torch.compile
@@ -79,6 +89,25 @@ class TestKernelBenchmark(TestCase):
 
         f(a, b)
         self.verify_compiled_kernels()
+
+    @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    @fresh_inductor_cache()
+    def test_mm_triton_kernel_benchmark(self):
+        M = 2048
+        N = 2432
+        K = 1949
+        K_2 = 3581
+        a = rand_strided((M, K_2), (K_2, 1), device="cuda", dtype=torch.float16)
+        b = rand_strided((K, N), (1, K), device="cuda", dtype=torch.float16)
+
+        @torch.compile
+        def f(a, b):
+            a_1 = torch.narrow(a, 1, 0, K)
+            c = torch.mm(a_1, b)
+            return c
+
+        f(a, b)
+        self.verify_compiled_kernels(GB_count=3, check_grid=True)
 
     def test_bandwidth_computation(self):
         """
