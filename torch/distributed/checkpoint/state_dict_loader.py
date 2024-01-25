@@ -45,7 +45,7 @@ def load_state_dict(
 def load(
     state_dict: Dict[str, Any],
     *,
-    checkpoint_id: Union[str, os.PathLike] = "",
+    checkpoint_id: Union[str, os.PathLike, None] = None,
     storage_reader: Optional[StorageReader] = None,
     planner: Optional[LoadPlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
@@ -80,15 +80,26 @@ def load(
         by passing ``no_dist=True`` and by using Tensors instead of ShardedTensors.
 
     Args:
-        state_dict (Dict[str, Any]) : The state_dict to load. Note that this
-            state dict will updated in place.
-        storage_reader (StorageReader): StorageReader used to load data from.
-        process_group (ProcessGroup):
+        state_dict (Dict[str, Any]): The state_dict to save.
+        checkpoint_id (Union[str, os.PathLike, None]):
+            The ID of this checkpoint instance. The meaning of the checkpoint_id
+            depends on the storage. It can be a path to a folder or to a file.
+            It can also be a key if the storage is a key-value store.
+            (Default: ``None``)
+        storage_reader (Optional[StorageReader]):
+            Instance of StorageWriter used to perform reads. If this is not
+            specified, DCP will automatically infer the reader based on the
+            checkpoint_id. If checkpoint_id is also None, an exception will
+            be raised. (Default: ``None``)
+        planner (Optional[LoadPlanner]):
+            Instance of LoadPlanner. If this is not specificed, the default
+            planner will be used. (Default: ``None``)
+        process_group (Optional[ProcessGroup]):
             ProcessGroup to be used for cross-rank synchronization.
-        coordinator_rank (int):
-            Rank to use to coordinate the checkpoint.
-            rank0 is used by default.
-        no_dist (bool): If ``True``, distributed checkpoint will not load
+            (Default: ``None``)
+        coordinator_rank (int): Rank to use to coordinate the checkpoint.
+            rank0 is used by default. (Default: ``0``)
+        no_dist (bool): If ``True``, distributed checkpoint will not save
             in SPMD style. (Default: ``False``)
 
     Returns:
