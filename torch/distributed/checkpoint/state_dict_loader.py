@@ -119,7 +119,7 @@ def load(
         if no_dist:
             keys = list(state_dict.keys())
         else:
-            keys = _all_gather_keys(state_dict)
+            keys = _all_gather_keys(state_dict, process_group)
             if keys != sorted(state_dict.keys()):
                 warnings.warn(
                     "Detected mismatched keys in state dict after all gather!"
