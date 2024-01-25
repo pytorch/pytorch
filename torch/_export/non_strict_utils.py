@@ -14,7 +14,7 @@ from torch._export.passes.add_runtime_assertions_for_constraints_pass import Inp
 from torch._guards import Source
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
-from torch.export.custom_obj import ScriptObjectMeta
+from torch.export.graph_signature import CustomObjArgument
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
@@ -157,7 +157,7 @@ def make_constraints(fake_mode, src_equalities, original_signature, gm):
     for node in gm.graph.nodes:
         if node.op != "placeholder":
             continue
-        if node.meta["val"] is None or isinstance(node.meta["val"], ScriptObjectMeta):
+        if node.meta["val"] is None or isinstance(node.meta["val"], CustomObjArgument):
             continue
         for i, d in enumerate(node.meta["val"].shape):
             if isinstance(d, torch.SymInt):

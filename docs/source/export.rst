@@ -583,4 +583,3 @@ API Reference
     :members:
 
 .. automodule:: torch.export.custom_obj
-.. autoclass:: torch.export.custom_obj.ScriptObjectMeta
