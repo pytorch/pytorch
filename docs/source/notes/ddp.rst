@@ -220,6 +220,6 @@ See `this blog post <https://dev-discuss.pytorch.org/t/torchdynamo-update-9-maki
 a more in-depth explanation and experimental results, or read the docs and code at
 `torch/_dynamo/optimizations/distributed.py <https://github.com/pytorch/pytorch/blob/bbc39b7bb48d28d67e3253a89cc82df3687ddd1b/torch/_dynamo/backends/distributed.py#L124>`_
 
-To Debug DDPOptimizer, set `TORCH_LOGS='ddp_graphs'` for full graph dumps. For lighter weight debug prints, add any of 'dynamo', 'distributed', or 'dist_ddp' to  `TORCH_LOGS`
+To Debug DDPOptimizer, set `TORCH_LOGS='ddp_graphs'` for full graph dumps. For logs without graphs, add any of 'dynamo', 'distributed', or 'dist_ddp' to  `TORCH_LOGS`
 (for basic info about bucket boundaries).  To disable DDPOptimizer, set `torch._dynamo.config.optimize_ddp=False`.
 DDP and TorchDynamo should still work correctly without DDPOptimizer, but with performance degradation.
