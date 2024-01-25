@@ -4412,8 +4412,6 @@ class DynamicScalar(ExternKernel):
             self.sym = sym.args[0]
             self.is_bool = True
 
-        V.graph.symbol_to_dtype[self.sym] = data.get_dtype()
-
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return {self.sym}
 

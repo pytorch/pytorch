@@ -1856,40 +1856,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
     ):
         self.header.splice(f"\n{kernel}\n")
 
-    def codegen_scalar_to_tensor(self, buffer: ir.ShapeAsConstantBuffer):
-        expr = buffer.shape
-        candidate_dtypes = set()
-        for sym in expr.free_symbols:
-            if sym in V.graph.symbol_to_dtype:
-                new_dtype = V.graph.symbol_to_dtype[sym]
-                assert new_dtype in (
-                    torch.float64,
-                    torch.float32,
-                    torch.int64,
-                    torch.int32,
-                ), "codegen_scalar_to_tensor needs to support" + str(new_dtype)
-                candidate_dtypes.add(V.graph.symbol_to_dtype[sym])
-        dtype = None
-        # very limited dtype promotion rules
-        for t in [
-            torch.float64,
-            torch.float32,
-            torch.int64,
-            torch.int32,
-        ]:
-            if t in candidate_dtypes:
-                dtype = t
-                break
-
-        assert dtype, "Not able to decide the dtype from " + str(expr)
-        dtype_str = str(dtype).split(".")[-1]
-
+    def codegen_scalar_to_tensor(self, output: str):
         name = f"scalar_to_tensor_{next(self.scalar_to_tensor_id)}"
-        self.wrapper_call.writeline(f"AtenTensorHandle {name}_handle;")
         self.wrapper_call.writeline(
-            f"aoti_torch_scalar_to_tensor_{dtype_str}({buffer.codegen_reference()}, &{name}_handle);"
+            f"RAIIAtenTensorHandle {name} = scalar_to_tensor_handle({output});"
         )
-        self.wrapper_call.writeline(f"RAIIAtenTensorHandle {name}({name}_handle);")
         return name
 
     @cache_on_self
@@ -1897,6 +1868,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         return [
             f"at::scalar_tensor({x.codegen_reference(self.wrapper_call)})"
             if isinstance(x, ir.ShapeAsConstantBuffer)
+            and not config.aot_inductor.abi_compatible
             else x.codegen_reference(self.wrapper_call)
             for x in V.graph.graph_outputs
         ]
@@ -1945,8 +1917,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 if config.aot_inductor.abi_compatible:
                     output_buffer = V.graph.graph_outputs[idx]
                     if isinstance(output_buffer, ir.ShapeAsConstantBuffer):
-                        # Need to wrap scalar into tensor as the output is vector of tensors
-                        output_tensor = self.codegen_scalar_to_tensor(output_buffer)
+                        # Need to wrap scalar into tensor as the main function returns a vector of tensors
+                        output_tensor = self.codegen_scalar_to_tensor(output)
                         self.wrapper_call.writeline(
                             f"output_handles[{idx}] = {output_tensor}.release();"
                         )
