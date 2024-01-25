@@ -13,6 +13,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/detail/PrivateUse1HooksInterface.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -713,7 +714,7 @@ void GraphTask::exec_post_processing() {
           *caller_current_streams_[leaf_stream.device_index()];
 
       if (caller_current_stream != leaf_stream) {
-        auto event = c10::Event{c10::DeviceType::CUDA};
+        auto event = c10::Event{leaf_stream.device_type()};
         event.record(leaf_stream);
         caller_current_stream.wait(event);
       }
@@ -972,7 +973,10 @@ void Engine::evaluate_function(
   // ensure they're safe to consume in the context of the present
   // func's stream (if applicable). So we guard onto that stream
   // before working with the grads in any capacity.
-  const auto opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
+  auto opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
+  if (!opt_parent_stream.has_value()) {
+    opt_parent_stream = (*func).stream(c10::DeviceType::PrivateUse1);
+  }
   c10::OptionalStreamGuard parent_stream_guard{opt_parent_stream};
 
   // If exec_info_ is not empty, we have to instrument the execution
@@ -990,7 +994,10 @@ void Engine::evaluate_function(
           *func, InputBuffer::variables(std::move(inputs)));
     }
     if (auto* capture_vec = fn_info.captures_.get()) {
-      const auto opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
+      auto opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
+      if (!opt_parent_stream.has_value()) {
+        opt_parent_stream = (*func).stream(c10::DeviceType::PrivateUse1);
+      }
       // Lock mutex for writing to graph_task->captured_vars_.
       std::lock_guard<std::mutex> lock(graph_task->mutex_);
       for (const auto& capture : *capture_vec) {
@@ -1082,7 +1089,10 @@ void Engine::evaluate_function(
       InputBuffer input_buffer(next.function->num_inputs());
 
       // Accumulates into buffer
-      const auto opt_next_stream = next.function->stream(c10::DeviceType::CUDA);
+      auto opt_next_stream = next.function->stream(c10::DeviceType::CUDA);
+      if (!opt_next_stream.has_value()) {
+        opt_next_stream = next.function->stream(c10::DeviceType::PrivateUse1);
+      }
       input_buffer.add(
           next.input_nr, std::move(output), opt_parent_stream, opt_next_stream);
 
@@ -1098,7 +1108,10 @@ void Engine::evaluate_function(
       auto& input_buffer = not_ready_it->second;
 
       // Accumulates into buffer
-      const auto opt_next_stream = next.function->stream(c10::DeviceType::CUDA);
+      auto opt_next_stream = next.function->stream(c10::DeviceType::CUDA);
+      if (!opt_next_stream.has_value()) {
+        opt_next_stream = next.function->stream(c10::DeviceType::PrivateUse1);
+      }
       input_buffer.add(
           next.input_nr, std::move(output), opt_parent_stream, opt_next_stream);
       if (is_ready) {
@@ -1131,7 +1144,9 @@ auto Engine::compute_dependencies(
   // Computes the number of dependencies for each function which requires grad
   std::vector<Node*> queue{root};
   bool might_use_cuda = at::globalContext().hasCUDA();
+  bool might_use_privateuse1 = at::isPrivateUse1HooksRegistered();
   bool will_use_cuda = false;
+  bool will_use_privateuse1 = false;
 
   // Queue contains all nodes that will start propagating gradients.
   // We no longer have to expand functions that don't require grad.
@@ -1144,6 +1159,10 @@ auto Engine::compute_dependencies(
     }
     if (might_use_cuda && !will_use_cuda) {
       will_use_cuda = fn->stream(c10::DeviceType::CUDA).has_value();
+    }
+    if (might_use_privateuse1 && !will_use_privateuse1) {
+      will_use_privateuse1 =
+          fn->stream(c10::DeviceType::PrivateUse1).has_value();
     }
     for (const auto& edge : fn->next_edges()) {
       if (auto next_ptr = edge.function.get()) {
@@ -1159,6 +1178,16 @@ auto Engine::compute_dependencies(
     // Collects current streams for devices where this process has a context,
     // so GraphTask::exec_post_processing can sync them with leaf_streams.
     task.stash_current_streams();
+  }
+
+  // Assume that two devices will not be used simultaneously.
+  TORCH_CHECK(
+      !(will_use_cuda && will_use_privateuse1),
+      "CUDA and privateuse1 cannot be used simultaneously in streaming backwards");
+
+  if (will_use_privateuse1) {
+    // Collects current streams for privateuse1.
+    task.stash_current_privateuse1_streams();
   }
 }
 
@@ -1248,8 +1277,12 @@ auto Engine::execute(
     auto input = inputs.at(0);
 
     const auto input_stream = InputMetadata(input).stream();
-    const auto opt_next_stream =
+    auto opt_next_stream =
         root_edges.at(0).function->stream(c10::DeviceType::CUDA);
+    if (!opt_next_stream.has_value()) {
+      opt_next_stream =
+          root_edges.at(0).function->stream(c10::DeviceType::PrivateUse1);
+    }
     input_buffer.add(
         root_edges.at(0).input_nr,
         std::move(input),
@@ -1538,6 +1571,24 @@ void GraphTask::stash_current_streams() {
 #endif
         caller_current_streams_[idx] =
             guard.getStream({c10::DeviceType::CUDA, idx});
+      } else {
+        caller_current_streams_[idx] = c10::nullopt;
+      }
+    }
+  }
+}
+
+// Remembers current streams on all devices where a context has been created for
+// privateuse1
+void GraphTask::stash_current_privateuse1_streams() {
+  const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::PrivateUse1};
+  auto num_devices = guard.deviceCount();
+  caller_current_streams_.resize(num_devices);
+  if (num_devices > 0) {
+    for (c10::DeviceIndex idx = 0; idx < num_devices; idx++) {
+      if (at::GetPrivateUse1HooksInterface()->hasPrimaryContext(idx)) {
+        caller_current_streams_[idx] =
+            guard.getStream({c10::DeviceType::PrivateUse1, idx});
       } else {
         caller_current_streams_[idx] = c10::nullopt;
       }

@@ -28,7 +28,7 @@ namespace {
 // TODO: clean this up when https://github.com/pytorch/pytorch/issues/60306 is
 // improved
 void record_stream_any_impl(Variable& var, c10::Stream& stream) {
-  const auto guard = c10::impl::VirtualGuardImpl(c10::DeviceType::CUDA);
+  const auto guard = c10::impl::VirtualGuardImpl(device_of(var).value().type());
 
   if (C10_UNLIKELY(at::isBatchedTensor(var))) {
     auto* impl = at::maybeGetBatchedImpl(var);
@@ -160,8 +160,9 @@ void InputBuffer::add(
 
   TORCH_INTERNAL_ASSERT(device_of(var));
   c10::optional<c10::Stream> opt_accumulate_stream = c10::nullopt;
+  const auto device_type = device_of(var).value().type();
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  if (device_of(var)->is_cuda()) {
+  if (device_of(var)->is_cuda() || device_of(var)->is_privateuseone()) {
     const auto on_producer =
         opt_producer_stream && device_of(var) == opt_producer_stream->device();
     const auto on_consumer =
@@ -172,14 +173,14 @@ void InputBuffer::add(
       opt_accumulate_stream = opt_consumer_stream;
       if (opt_accumulate_stream != opt_producer_stream) {
         // (2b)
-        auto event = c10::Event{c10::DeviceType::CUDA};
+        auto event = c10::Event{device_type};
         event.record(*opt_producer_stream);
         opt_accumulate_stream->wait(event);
         record_stream_any_impl(var, *opt_accumulate_stream);
       }
     } else {
       c10::optional<c10::Stream> opt_sync_stream = c10::nullopt;
-      const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
+      const auto guard = c10::impl::VirtualGuardImpl{device_type};
       if (on_consumer && !on_producer) {
         // (3a)
         opt_accumulate_stream = opt_consumer_stream;
@@ -197,10 +198,10 @@ void InputBuffer::add(
       if (opt_sync_stream && (opt_accumulate_stream != opt_sync_stream)) {
         // (3b), (4b)
         c10::OptionalDeviceGuard device_guard{opt_sync_stream->device()};
-        auto event = c10::Event{c10::DeviceType::CUDA};
+        auto event = c10::Event{device_type};
         event.record(*opt_sync_stream);
         opt_accumulate_stream->wait(event);
-        const auto guard = c10::impl::VirtualGuardImpl(c10::DeviceType::CUDA);
+        const auto guard = c10::impl::VirtualGuardImpl(device_type);
         record_stream_any_impl(var, *opt_accumulate_stream);
       }
     }

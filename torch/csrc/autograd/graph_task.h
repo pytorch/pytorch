@@ -134,6 +134,9 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
   // Collects caller_current_streams_
   void stash_current_streams();
 
+  // Collects caller_current_streams_ for privateuse1.
+  void stash_current_privateuse1_streams();
+
   void init_to_execute(
       Node& graph_root,
       const edge_list& outputs,
