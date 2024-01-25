@@ -1781,10 +1781,11 @@ def wrap_to_fake_tensor_and_record(
             symbolic_context = parent_context.inner_contexts[inner_context_name]
 
         log.debug(
-            "wrap_to_fake %s %s %s",
+            "wrap_to_fake %s %s %s %s",
             source.name(),
             tuple(e.shape),
             symbolic_context,
+            type(e),
         )
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
