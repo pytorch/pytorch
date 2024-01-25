@@ -301,8 +301,7 @@ class intrusive_ptr final {
     }
   }
 
-  #pragma GCC diagnostic push
-  #pragma GCC diagnostic ignored "-Wstrict-aliasing"
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wstrict-aliasing")
   void reset_() noexcept {
     if (target_ == NullType::singleton()) {
       return;
@@ -333,7 +332,7 @@ class intrusive_ptr final {
       }
     }
   }
-  #pragma GCC diagnostic pop
+C10_DIAGNOSTIC_POP()
 
   // raw pointer constructors are not public because we shouldn't make
   // intrusive_ptr out of raw pointers except from inside the make_intrusive(),
