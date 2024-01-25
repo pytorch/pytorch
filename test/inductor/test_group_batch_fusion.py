@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 
-import functools
 import unittest
 
 import torch
@@ -18,7 +17,7 @@ except Exception:
     has_fbgemm = False
     pass
 
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 
 class MyModule(torch.nn.Module):
@@ -220,7 +219,7 @@ class TestPoitwiseOps(torch.nn.Module):
         return torch.cat(div, dim=1)
 
 
-@requires_cuda()
+@requires_cuda
 @torch._inductor.config.patch(
     pre_grad_fusion_options={
         "batch_linear": {},
@@ -450,7 +449,7 @@ class TestBMMFusionModule(torch.nn.Module):
         return output
 
 
-@requires_cuda()
+@requires_cuda
 @torch._inductor.config.patch(
     post_grad_fusion_options={"batch_linear_post_grad": {"require_fbgemm": False}}
 )

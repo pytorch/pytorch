@@ -188,7 +188,7 @@ class AOTInductorTestsTemplate:
         )
         self.assertTrue(actual_path == expected_path)
 
-    @requires_cuda()
+    @requires_cuda
     def test_multi_device(self):
         class Model(torch.nn.Module):
             def forward(self, x):
