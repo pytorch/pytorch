@@ -1214,9 +1214,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       // We poll store to see if some ranks have flagged a timeout when
       // we haven't polled for `heartbeat_timeout` seconds and there haven't
       // any work added or removed for `watchdog_timeout` seconds.
-      if (computeDeltaMS(lastWorkListUpdateTime_, currentTime) >=
-              kWatchdogThreadSleepMillis &&
-          computeDeltaMS(lastTimePollStore, currentTime) >=
+      if (computeDeltaMS(lastTimePollStore, currentTime) >=
               coordCheckIntervalMilSec_) {
         lastTimePollStore = currentTime;
         if (globalStore_->check({std::string(TIMEOUT_DUMP)})) {
@@ -1469,7 +1467,6 @@ const int& ProcessGroupNCCL::globalRank() const {
 
 void ProcessGroupNCCL::watchdogHandler() {
   bool done = false;
-  lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
   c10::optional<std::future<bool>> optAsyncDebugDump;
 
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
@@ -1574,7 +1571,6 @@ void ProcessGroupNCCL::watchdogHandler() {
           completedWorkListCV_.notify_one();
         } else {
           it = workMetaList_.erase(it);
-          lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
         }
         at::cuda::CUDAGraph::dec_pending_event_queries();
       } else {
@@ -2283,7 +2279,6 @@ void ProcessGroupNCCL::workEnqueue(
     // needs to be destructed in user thread. Otherwise will
     // get deadlock. Here we enqueue work without outputs_.
     workMetaList_.emplace_back(*work);
-    lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
   }
 }
 
