@@ -2046,7 +2046,7 @@ class Scheduler:
                     return False
 
                 if read.index != write.index or read.size != write.size:
-                    why("fusing a write into a read that with different indexing")
+                    why("fusing a write into a read with different indexing formula")
                     return False
 
         return True
