@@ -89,18 +89,16 @@ class TestUnaryUfuncs(TestCase):
 
         res_out = ufunc(x, out=out)
         res_bcast = ufunc(x_b)
-        # TODO: graph breaks cause issues
-        assert res_out is out
         assert_equal(res_out, res_bcast)
+        assert res_out is out
 
         out = np.empty((1, x.shape[0]))
         x_b = np.broadcast_to(x, out.shape)
 
         res_out = ufunc(x, out=out)
         res_bcast = ufunc(x_b)
-        # TODO: graph breaks cause issues
-        assert res_out is out
         assert_equal(res_out, res_bcast)
+        assert res_out is out
 
 
 ufunc_op_iop_numeric = [
@@ -208,9 +206,8 @@ class TestBinaryUfuncs(TestCase):
         res_out = ufunc(x, y, out=out)
         res_bcast = ufunc(x_b, y_b)
 
-        # TODO: graph breaks cause issues
-        assert res_out is out
         assert_equal(res_out, res_bcast)
+        assert res_out is out
 
 
 dtypes_numeric = [np.int32, np.float32, np.float64, np.complex128]
