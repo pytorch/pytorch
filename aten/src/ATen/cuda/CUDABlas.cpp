@@ -234,7 +234,7 @@ namespace at::cuda::blas {
   } while (0)
 
 template <>
-void bgemm<double>(CUDABLAS_BGEMM_ARGTYPES(double)) {
+void bgemm_internal<double>(CUDABLAS_BGEMM_ARGTYPES(double)) {
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
@@ -247,7 +247,7 @@ void bgemm<double>(CUDABLAS_BGEMM_ARGTYPES(double)) {
 }
 
 template <>
-void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
+void bgemm_internal<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
@@ -260,7 +260,7 @@ void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
 }
 
 template <>
-void bgemm<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>)) {
+void bgemm_internal<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>)) {
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
@@ -275,7 +275,7 @@ void bgemm<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>)) 
 }
 
 template <>
-void bgemm<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>)) {
+void bgemm_internal<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>)) {
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
@@ -290,7 +290,7 @@ void bgemm<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>)) {
 }
 
 template <>
-void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
+void bgemm_internal<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
@@ -337,7 +337,7 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
 }
 
 template <>
-void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
+void bgemm_internal<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   BGEMM_CHECK_ARGVALUES(at::BFloat16);
@@ -361,6 +361,117 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
                                   (int)num_batches,
                                   compute_type,
                                   CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+}
+
+template <typename DType>
+inline void bgemm_tunable(CUDABLAS_BGEMM_ARGTYPES(DType)) {
+  tunable::GemmStridedBatchedParams<DType> params;
+  params.transa = transa;
+  params.transb = transb;
+  params.m = m;
+  params.n = n;
+  params.k = k;
+  params.alpha = alpha;
+  params.a = a;
+  params.lda = lda;
+  params.stride_a = stridea;
+  params.b = b;
+  params.ldb = ldb;
+  params.stride_b = strideb;
+  params.beta = beta;
+  params.c = c;
+  params.ldc = ldc;
+  params.stride_c = stridec;
+  params.batch = num_batches;
+
+  bool transa_ = ((transa != 'n') && (transa != 'N'));
+  bool transb_ = ((transb != 'n') && (transb != 'N'));
+
+  if (transa_ && transb_) {
+    static tunable::GemmStridedBatchedTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::T> bgemm{};
+    bgemm(&params);
+  }
+  else if (transa_ && !transb_) {
+    static tunable::GemmStridedBatchedTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::N> bgemm{};
+    bgemm(&params);
+  }
+  else if (!transa_ && transb_) {
+    static tunable::GemmStridedBatchedTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::T> bgemm{};
+    bgemm(&params);
+  }
+  else if (!transa_ && !transb_) {
+    static tunable::GemmStridedBatchedTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::N> bgemm{};
+    bgemm(&params);
+  }
+  else {
+    TORCH_CHECK(false, "unreachable");
+  }
+}
+
+template <>
+void bgemm<double>(CUDABLAS_BGEMM_ARGTYPES(double)) {
+  auto tuning_ctx = at::cuda::tunable::getTuningContext();
+  if (tuning_ctx->IsTunableOpEnabled()) {
+    bgemm_tunable<double>(CUDABLAS_BGEMM_ARGS(double));
+  }
+  else {
+    bgemm_internal<double>(CUDABLAS_BGEMM_ARGS(double));
+  }
+}
+
+template <>
+void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
+  auto tuning_ctx = at::cuda::tunable::getTuningContext();
+  if (tuning_ctx->IsTunableOpEnabled()) {
+    bgemm_tunable<float>(CUDABLAS_BGEMM_ARGS(float));
+  }
+  else {
+    bgemm_internal<float>(CUDABLAS_BGEMM_ARGS(float));
+  }
+}
+
+template <>
+void bgemm<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>)) {
+  auto tuning_ctx = at::cuda::tunable::getTuningContext();
+  if (tuning_ctx->IsTunableOpEnabled()) {
+    bgemm_tunable<c10::complex<double>>(CUDABLAS_BGEMM_ARGS(c10::complex<double>));
+  }
+  else {
+    bgemm_internal<c10::complex<double>>(CUDABLAS_BGEMM_ARGS(c10::complex<double>));
+  }
+}
+
+template <>
+void bgemm<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>)) {
+  auto tuning_ctx = at::cuda::tunable::getTuningContext();
+  if (tuning_ctx->IsTunableOpEnabled()) {
+    bgemm_tunable<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>));
+  }
+  else {
+    bgemm_internal<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>));
+  }
+}
+
+template <>
+void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
+  auto tuning_ctx = at::cuda::tunable::getTuningContext();
+  if (tuning_ctx->IsTunableOpEnabled()) {
+    bgemm_tunable<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half));
+  }
+  else {
+    bgemm_internal<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half));
+  }
+}
+
+template <>
+void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
+  auto tuning_ctx = at::cuda::tunable::getTuningContext();
+  if (tuning_ctx->IsTunableOpEnabled()) {
+    bgemm_tunable<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
+  }
+  else {
+    bgemm_internal<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
+  }
 }
 
 template <>

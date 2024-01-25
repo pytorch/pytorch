@@ -102,6 +102,46 @@ constexpr hipblasDatatype_t HipBlasDataTypeFor<double>() {
 
 #endif
 
+template <typename T, typename ParamsT>
+int GetBatchFromParams(const ParamsT* params) {
+  return 1;
+}
+
+template <typename T>
+int GetBatchFromParams(const GemmStridedBatchedParams<T>* params) {
+  return params->batch;
+}
+
+template <typename T, typename ParamsT>
+int GetStrideAFromParams(const ParamsT* params) {
+  return 1;
+}
+
+template <typename T>
+int GetStrideAFromParams(const GemmStridedBatchedParams<T>* params) {
+  return params->stride_a;
+}
+
+template <typename T, typename ParamsT>
+int GetStrideBFromParams(const ParamsT* params) {
+  return 1;
+}
+
+template <typename T>
+int GetStrideBFromParams(const GemmStridedBatchedParams<T>* params) {
+  return params->stride_b;
+}
+
+template <typename T, typename ParamsT>
+int GetStrideCFromParams(const ParamsT* params) {
+  return 1;
+}
+
+template <typename T>
+int GetStrideCFromParams(const GemmStridedBatchedParams<T>* params) {
+  return params->stride_c;
+}
+
 static hipblasOperation_t _hipblasOpFromChar(char op) {
   switch (op) {
     case 'n':
@@ -159,11 +199,11 @@ static size_t GetHipblasltWorkspaceSize() {
 }
 
 template <typename T, BlasOp ALayout, BlasOp BLayout, typename ParamsT>
-class HipblasltGemmOp : public Callable<GemmParams<T>> {
+class HipblasltGemmOp : public Callable<ParamsT> {
   public:
     HipblasltGemmOp(hipblasLtMatmulAlgo_t algo) : algo_{algo} {}
 
-    TuningStatus Call(const GemmParams<T>* params) override {
+    TuningStatus Call(const ParamsT* params) override {
       hipblasOperation_t transa_outer = MapLayoutToHipBlasLt(ALayout);
       hipblasOperation_t transb_outer = MapLayoutToHipBlasLt(BLayout);
       auto in_out_datatype = HipBlasDataTypeFor<T>();
@@ -191,6 +231,25 @@ class HipblasltGemmOp : public Callable<GemmParams<T>> {
       }
       TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutCreate(&mat_c, in_out_datatype, params->m, params->n, params->ldc));
       TORCH_HIPBLASLT_CHECK(hipblasLtMatmulDescCreate(&matmul, COMPUTE_TYPE_32, DATA_TYPE_R_32));
+
+      int batch = GetBatchFromParams<T>(params);
+      if (batch > 1) {
+        int64_t stride_a = GetStrideAFromParams<T>(params);
+        int64_t stride_b = GetStrideBFromParams<T>(params);
+        int64_t stride_c = GetStrideCFromParams<T>(params);
+        TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutSetAttribute(
+            mat_a, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batch, sizeof(batch)));
+        TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutSetAttribute(
+            mat_a, HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &stride_a, sizeof(stride_a)));
+        TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutSetAttribute(
+            mat_b, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batch, sizeof(batch)));
+        TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutSetAttribute(
+            mat_b, HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &stride_b, sizeof(stride_b)));
+        TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutSetAttribute(
+            mat_c, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batch, sizeof(batch)));
+        TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutSetAttribute(
+            mat_c, HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &stride_c, sizeof(stride_c)));
+      }
 
       TORCH_HIPBLASLT_CHECK(hipblasLtMatmulDescSetAttribute(
             matmul, HIPBLASLT_MATMUL_DESC_TRANSA, &opa, sizeof(int32_t)));
@@ -289,11 +348,11 @@ auto GetHipBlasLtTypeStringAndOps() {
       });
 
   int returned_algo_count = heuristic_result.size();
-  std::vector<std::pair<std::string, std::unique_ptr<Callable<GemmParams<T>>>>> ret;
+  std::vector<std::pair<std::string, std::unique_ptr<Callable<ParamsT>>>> ret;
   for (int i = 0; i < returned_algo_count; i++) {
     auto algo = heuristic_result[i].algo;
     int algo_index = GETINDEXFROMALGO(algo);
-    auto callable = std::make_unique<HipblasltGemmOp<T, ALayout, BLayout, GemmParams<T>>>(algo);
+    auto callable = std::make_unique<HipblasltGemmOp<T, ALayout, BLayout, ParamsT>>(algo);
     std::string type_string = c10::str(
         "Gemm_Hipblaslt_", _charFromhipblasOp(transa_outer), _charFromhipblasOp(transb_outer), "_", algo_index);
     ret.emplace_back(type_string, std::move(callable));
@@ -305,6 +364,11 @@ auto GetHipBlasLtTypeStringAndOps() {
 template <typename T, BlasOp ALayout, BlasOp BLayout>
 auto GetHipBlasLtGemmTypeStringAndOps() {
   return GetHipBlasLtTypeStringAndOps<T, ALayout, BLayout, GemmParams<T>>();
+}
+
+template <typename T, BlasOp ALayout, BlasOp BLayout>
+auto GetHipBlasLtGemmStridedBatchedTypeStringAndOps() {
+  return GetHipBlasLtTypeStringAndOps<T, ALayout, BLayout, GemmStridedBatchedParams<T>>();
 }
 
 #undef TORCH_HIPBLASLT_CHECK

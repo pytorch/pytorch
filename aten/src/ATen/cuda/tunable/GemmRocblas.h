@@ -202,4 +202,74 @@ auto GetRocBlasGemmTypeStringAndOps() {
   return ret;
 }
 
+template <typename T>
+class RocblasGemmStridedBatchedOp : public Callable<GemmStridedBatchedParams<T>> {
+  public:
+    RocblasGemmStridedBatchedOp(int solution) : solution_{solution} {}
+
+    TuningStatus Call(const GemmStridedBatchedParams<T>* params) override {
+      auto input_output_type = RocBlasDataTypeFor<T>();
+      auto compute_type = RocBlasComputeTypeFor<T>();
+      auto h_a = DoCastForHalfOrBfloat16(params->alpha);
+      auto h_b = DoCastForHalfOrBfloat16(params->beta);
+      auto status = rocblas_gemm_strided_batched_ex(
+          (rocblas_handle)at::cuda::getCurrentCUDABlasHandle(),
+          _rocblasOpFromChar(params->transa),
+          _rocblasOpFromChar(params->transb),
+          params->m, params->n, params->k,
+          &h_a,
+          params->a, input_output_type, params->lda, params->stride_a,
+          params->b, input_output_type, params->ldb, params->stride_b,
+          &h_b,
+          params->c, input_output_type, params->ldc, params->stride_c,
+          params->c, input_output_type, params->ldc, params->stride_c,
+          params->batch,
+          compute_type,
+          rocblas_gemm_algo_solution_index,
+          solution_,
+          rocblas_gemm_flags_none);
+      if (status != rocblas_status_success) {
+        return FAIL;
+      }
+      return OK;
+    }
+
+  private:
+    int solution_;
+};
+
+template <typename T>
+auto GetRocBlasGemmStridedBatchedTypeStringAndOps() {
+  rocblas_handle handle = (rocblas_handle)at::cuda::getCurrentCUDABlasHandle();
+  int solution_size;
+  auto input_output_type = RocBlasDataTypeFor<T>();
+  auto compute_type = RocBlasComputeTypeFor<T>();
+  // Get the number of available solutions
+  TORCH_ROCBLAS_CHECK(rocblas_gemm_ex_get_solutions_by_type(handle,
+                                                            input_output_type,
+                                                            input_output_type,
+                                                            compute_type,
+                                                            rocblas_gemm_flags_none,
+                                                            nullptr,
+                                                            &solution_size));
+  std::vector<int> solutions(solution_size);
+  // Get the list of available solutions
+  TORCH_ROCBLAS_CHECK(rocblas_gemm_ex_get_solutions_by_type(handle,
+                                                            input_output_type,
+                                                            input_output_type,
+                                                            compute_type,
+                                                            rocblas_gemm_flags_none,
+                                                            solutions.data(),
+                                                            &solution_size));
+  // Sort the solutions in ascending order to make the solution vector deterministic across runs
+  std::sort(solutions.begin(), solutions.end());
+
+  std::vector<std::pair<std::string, std::unique_ptr<Callable<GemmStridedBatchedParams<T>>>>> ret;
+  for (size_t i = 0; i < solutions.size(); ++i) {
+    auto callable = std::make_unique<RocblasGemmStridedBatchedOp<T>>(solutions[i]);
+    ret.emplace_back(std::make_pair(c10::str("Gemm_Rocblas_", solutions[i]), std::move(callable)));
+  }
+  return ret;
+}
+
 }  // namespace at::cuda::tunable
