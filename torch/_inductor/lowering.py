@@ -883,10 +883,6 @@ def slice_(x, dim=0, start=0, end=2**63, step=1):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
-    if V.graph.sizevars.evaluate_expr(sympy.Lt(start + dim_size, 0)):
-        start = 0
-    if V.graph.sizevars.evaluate_expr(sympy.Lt(end + dim_size, 0)):
-        end = 0
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
 
 
@@ -2403,14 +2399,8 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
-    if start is not None and V.graph.sizevars.evaluate_expr(sympy.Lt(start, 0)):
-        start = start + dim_size
-    if end is not None and V.graph.sizevars.evaluate_expr(sympy.Lt(end, 0)):
-        end = end + dim_size
-    if start is None:
-        start = 0
-    if end is None or V.graph.sizevars.statically_known_leq(x.get_size()[dim], end):
-        end = dim_size
+
+    start, end = ir.SliceView.normalize_start_end(x, dim, start, end)
 
     src_size = list(x.get_size())
     src_size[dim] = FloorDiv(end - start + (step - 1), step)
@@ -3351,10 +3341,10 @@ def upsample_nearestnd(
     assert len(scales_x) == n
     o_sizes = output_size
 
-    scales = [i / o for i, o in zip(i_sizes, o_sizes)]
+    inv_scales = [i / o for i, o in zip(i_sizes, o_sizes)]
     for i, scale in enumerate(scales_x):
-        if scale:
-            scales[i] = scale
+        if scale is not None:
+            inv_scales[i] = 1.0 / scale
 
     def scale_fn(x, scale, size):
         # Nearest Exact: input_index = round(scale * (output_index + 0.5) - 0.5)
@@ -3371,7 +3361,7 @@ def upsample_nearestnd(
         x = idx[-n:]
         b = idx[:-n]
         return x_loader(
-            [*b, *[scale_fn(i, s, size) for i, s, size in zip(x, scales, i_sizes)]]
+            [*b, *[scale_fn(i, s, size) for i, s, size in zip(x, inv_scales, i_sizes)]]
         )
 
     return Pointwise.create(
@@ -5109,6 +5099,7 @@ minimum = register_pointwise(aten.minimum)
 register_lowering(aten.clamp_min)(maximum)
 register_lowering(aten.clamp_max)(minimum)
 neg = register_pointwise(aten.neg)
+abs = register_pointwise(aten.abs)
 reciprocal = register_pointwise_numeric(aten.reciprocal)
 register_pointwise(aten.remainder)
 sign = register_pointwise(aten.sign, override_fn_when_input_bool="identity")

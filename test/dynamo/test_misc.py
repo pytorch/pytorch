@@ -12,6 +12,7 @@ import math
 import operator
 import os
 import random
+import re
 import sys
 import tempfile
 import threading
@@ -76,6 +77,7 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state,
     IS_FBCODE,
     set_default_dtype,
+    wrapDeterministicFlagAPITest,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -424,6 +426,33 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         finally:
             cleanup_op("mylib::bar3")
             del lib
+
+    def test_auto_functionalize_can_with_default(self):
+        lib = torch.library.Library("mylib", "FRAGMENT")
+        torch.library.define(
+            "mylib::foo",
+            "(Tensor a, int b, Tensor(d!)? c=None, Tensor? d=None, int e=-1) -> ()",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=lib,
+        )
+
+        @torch.library.impl("mylib::foo", "cpu", lib=lib)
+        def foo_impl(a, b, c=None, d=None, e=-1):
+            a + b
+            return
+
+        def f(a, mode):
+            return torch.ops.mylib.foo(
+                a,
+                0,
+            )
+
+        a = torch.tensor([10, 10, 10], dtype=torch.int64)
+
+        torch.compile(f)(a, 0)
+
+        cleanup_op("mylib::foo")
+        del lib
 
     def test_generate_trivial_abstract_impl(self):
         try:
@@ -7644,6 +7673,19 @@ def ___make_guard_fn():
         compiled_out = compiled_fn()
         self.assertTrue(same(fn_out, compiled_out))
 
+    def test_tuple_hasattr(self):
+        def fn(x):
+            if hasattr(x, "foo"):
+                return x[0] + 1
+            return x[1] - 1
+
+        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = (torch.randn(3), torch.randn(3))
+        fn_out = fn(x)
+        compiled_out = compiled_fn(x)
+        self.assertTrue(same(fn_out, compiled_out))
+
     def test_fn_hasattr__name__1(self):
         def fn():
             foo = lambda x: x + 1
@@ -8857,7 +8899,7 @@ ShapeEnv not equal: field values don't match:
 ShapeEnv not equal: field values don't match:
 
 ==> name_to_node: values don't match.
-  >  Left: {f0, i0, i1}
+  >  Left: {f0, u0, u1}
   > Right: {}
 ==> unbacked_symfloat_counter: values don't match.
   >  Left: 1
@@ -8866,7 +8908,7 @@ ShapeEnv not equal: field values don't match:
   >  Left: 2
   > Right: 0
 ==> var_to_range: values don't match.
-  >  Left: {f0: ValueRanges(lower=-oo, upper=oo, is_bool=False), i0: ValueRanges(lower=-9223372036854775808, upper=9223372036854775807, is_bool=False), i1: ValueRanges(lower=0, upper=1, is_bool=False)}
+  >  Left: {f0: ValueRanges(lower=-oo, upper=oo, is_bool=False), u0: ValueRanges(lower=-9223372036854775808, upper=9223372036854775807, is_bool=False), u1: ValueRanges(lower=0, upper=1, is_bool=False)}
   > Right: {}
 """,
         )
@@ -9007,14 +9049,14 @@ ShapeEnv not equal: field values don't match:
 ShapeEnv not equal: field values don't match:
 
 ==> deferred_runtime_asserts: values don't match.
-  >  Left: {i0: [Eq(Mod(i0, 3), 0)]}
+  >  Left: {u0: [Eq(Mod(u0, 3), 0)]}
   > Right: {}
 ==> divisible: values don't match.
-  >  Left: {Mod(i0, 3)}
+  >  Left: {Mod(u0, 3)}
   > Right: {}
 ==> name_to_node: values don't match.
-  >  Left: {_assert, eq, i0, mod}
-  > Right: {i0}
+  >  Left: {_assert, eq, mod, u0}
+  > Right: {u0}
 ==> num_deferred_runtime_asserts: values don't match.
   >  Left: 1
   > Right: 0
@@ -9069,6 +9111,31 @@ ShapeEnv not equal: field values don't match:
                 torch._dynamo.exc.Unsupported, "call_function UserDefinedClassVariable"
             ):
                 print(fn_opt(torch.zeros(1)))
+
+    @wrapDeterministicFlagAPITest
+    def test_backward_deterministic_mode_mismatch_warning(self):
+        @torch.compile
+        def func(a, b):
+            return a + b
+
+        for forward_deterministic, backward_deterministic in itertools.product(
+            [True, False], [True, False]
+        ):
+            torch.use_deterministic_algorithms(forward_deterministic)
+            a = torch.randn(10, requires_grad=True)
+            res = func(a, 1)
+            grad = torch.ones_like(res)
+            torch.use_deterministic_algorithms(backward_deterministic)
+
+            if not forward_deterministic and backward_deterministic:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "^This compiled backward function is being run with torch\.use_deterministic_algorithms",
+                ):
+                    res.backward(grad)
+
+            else:
+                res.backward(grad)
 
     def test_torch_dynamo_codegen_pow(self):
         def pow(x):
