@@ -1,6 +1,7 @@
 import collections
 import logging
 import operator
+from collections import abc, OrderedDict
 from typing import Any, DefaultDict, Deque, Dict, Iterator, List, Optional, Set, Tuple
 
 import torch
@@ -740,46 +741,100 @@ class BatchMulPostGradFusion(BatchPointwiseOpsPostGradFusion):
         super().__init__(aten.mul.Tensor, **kwargs)
 
 
+class _OrderedSet:
+    def __init__(self, param=None):
+        if param:
+            self.rep = OrderedDict({k: None for k in param})
+        else:
+            self.rep = OrderedDict()
+
+    def __contains__(self, o):
+        return o in self.rep
+
+    def __len__(self):
+        return self.rep.__len__()
+
+    def append(self, o):
+        self.rep[o] = None
+
+    def __iter__(self):
+        return self.rep.keys().__iter__()
+
+
 def find_independent_subset_greedy(
-    node_list: List[torch.fx.Node],
+    node_list: abc.Iterable[torch.fx.Node],
     graph_search_options: Dict[str, Any],
-) -> Iterator[List[torch.fx.Node]]:
+) -> Iterator[abc.Iterable[torch.fx.Node]]:
     """
-    Return a list of subset from node_list, all nodes in each subset are independent with each other and can be fused together.
-    The type of subset is list, so we can preserve node's order and benefit from split-cat elimination in later pass.
+    Returns a list of subsets of `node_list` where no element in the subset
+    depends on any other element in the subset. This results in a set of
+    independent nodes which can be fused together.
+
+    The order of `node_list` is preserved within each subset so we can benefit
+    from split-cat elimination in later passes.
+
+    graph_search_options:
+      - min_fuse_set_size: Minimum size of the subset to consider. Subsets below
+        this size will be ignored.
+      - max_fuse_set_size: Maximum size of the subset to consider. Subsets will
+        be broken to be at most this size.
     """
-    visited_node_set: Set[torch.fx.Node] = set()
-    dep_set: Set[torch.fx.Node] = set()
 
-    def find_dependent_nodes(src_node, cur_node):
-        for input_node in cur_node.all_input_nodes:
-            if input_node in node_list:
-                dep_set.add(input_node)
+    # Compute all the children of `node` which are members of
+    # `interesting_nodes`.
+    def find_dependent_nodes(node, interesting_nodes):
+        visited_node_set: Set[torch.fx.Node] = {node}
+        dep_set: Set[torch.fx.Node] = set()
 
-            if input_node not in visited_node_set:
-                visited_node_set.add(input_node)
-                find_dependent_nodes(src_node, input_node)
+        work = [node]
+        while work:
+            node = work.pop()
+            for input_node in node.all_input_nodes:
+                if input_node in interesting_nodes:
+                    dep_set.add(input_node)
 
-    while len(node_list) > 0:
+                if input_node not in visited_node_set:
+                    visited_node_set.add(input_node)
+                    work.append(input_node)
+
+        return dep_set
+
+    min_fuse_set_size = graph_search_options["min_fuse_set_size"]
+    max_fuse_set_size = graph_search_options["max_fuse_set_size"]
+
+    # Cache for the computed dep_sets when we know we're going to need it again.
+    cache: Dict[torch.fx.Node, Set[torch.fx.Node]] = {}
+
+    # node_list needs to be a set because we only track the nodes that are left
+    # in it (and we want to do the `in` on a set, not a list). But we want to
+    # keep the correct order.
+    node_list = _OrderedSet(node_list)
+
+    while node_list:
         subset: List[torch.fx.Node] = []
         subset_deps: Set[torch.fx.Node] = set()
 
+        next_round_node_list = _OrderedSet()
         for node in node_list:
-            if len(subset) >= graph_search_options["max_fuse_set_size"]:
-                break
+            if len(subset) >= max_fuse_set_size or node in subset_deps:
+                next_round_node_list.append(node)
+                continue
 
-            visited_node_set.clear()
-            dep_set.clear()
+            if node in cache:
+                dep_set = cache.pop(node)
+            else:
+                dep_set = find_dependent_nodes(node, node_list)
 
-            find_dependent_nodes(node, node)
-            if not dep_set.intersection(subset) and node not in subset_deps:
+            if not dep_set.intersection(subset):
                 subset.append(node)
                 subset_deps.update(dep_set)
+            else:
+                next_round_node_list.append(node)
+                cache[node] = dep_set
 
-        if len(subset) >= graph_search_options["min_fuse_set_size"]:
+        if len(subset) >= min_fuse_set_size:
             yield subset
 
-        next_round_node_list = [node for node in node_list if node not in subset]
         node_list = next_round_node_list
 
 
@@ -850,7 +905,7 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
                     counters["inductor"]["unknown_group_batch_fusion"] += 1
 
                 log.info(
-                    f"{rule.__class__.__name__}: key = {key}; subset size = {len(subset)}"  # noqa: G004
+                    f"{rule.__class__.__name__}: key = {key}; subset size = {len(list(subset))}"  # noqa: G004
                 )
 
 
