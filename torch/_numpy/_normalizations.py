@@ -106,6 +106,7 @@ def normalize_outarray(arg, parm=None):
     # almost normalize_ndarray, only return the array, not its tensor
     if arg is None:
         return arg
+
     from ._ndarray import ndarray
 
     if not isinstance(arg, ndarray):
