@@ -2033,11 +2033,11 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
 
         from torch._dynamo.eval_frame import tls
-        log.info(
+        log.debug(
             "tracing due to set_eval_frame at:\n%s",
             "".join(tls.eval_frame_stack.format()).rstrip() if tls.eval_frame_stack else "(unknown)"
         )
-        log.info(
+        log.debug(
             "torch.compile wrapper was constructed at:\n%s",
             "".join(tls.context_init_stack.format()).rstrip() if tls.context_init_stack else "(unknown)"
         )
