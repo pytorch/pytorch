@@ -1076,7 +1076,6 @@ class VariableBuilder:
         readonly = not value.flags.writeable
         if readonly:
             value.flags.writeable = True
-
         try:
             tensor_value = _util._try_convert_to_tensor(value)
             if readonly:
