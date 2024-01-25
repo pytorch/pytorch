@@ -96,74 +96,55 @@ guarded_backend_cache = threading.local()
 cached_backends: Dict[int, CompilerFn] = {}
 
 
-def check_current_backend(backend_obj_id: int):
-    """
-    Called from guards to check if we need to recompile due to a backend change
-    """
-    # TODO(jansel): we should move guarded_backend_cache to C++
-    try:
-        if guarded_backend_cache.skip_backend_check_for_run_only_mode:
-            return True
-    except AttributeError:
-        # Go slightly faster next time
+def _maybe_init_guarded_backend_cache():
+    if not hasattr(guarded_backend_cache, "skip_backend_check_for_run_only_mode"):
         guarded_backend_cache.skip_backend_check_for_run_only_mode = False
-    try:
-        current_backend = guarded_backend_cache.current_backend
-    except AttributeError:
-        current_backend = None
-    return (
-        # Avoid the dict lookup in case of exact same object
-        id(current_backend) == backend_obj_id
-        or current_backend == cached_backends.get(backend_obj_id, None)
-    )
+    if not hasattr(guarded_backend_cache, "current_backend"):
+        guarded_backend_cache.current_backend = None
 
 
 def _reset_guarded_backend_cache():
     global cached_backends
+    _maybe_init_guarded_backend_cache()
     guarded_backend_cache.skip_backend_check_for_run_only_mode = False
     guarded_backend_cache.current_backend = None
     for backend in cached_backends.values():
         if hasattr(backend, "reset"):
             backend.reset()
     cached_backends.clear()
+    cached_backends = {}
 
 
-def backend_cache_manager(callback: DynamoCallback):
+@contextlib.contextmanager
+def backend_cache_wrapper(callback: DynamoCallback):
+    _maybe_init_guarded_backend_cache()
+
     # callback is False for RunOnlyContext. RunOnlyContext is used
     # as a way to re-use the previous compiled cache.
     # We therefore skip the check and re-use whatever code that's already cached.
     # Note: the cache that's actually used depends on the caching policy.
     if callback is False:
-
-        def change():
-            try:
-                prev_skip = guarded_backend_cache.skip_backend_check_for_run_only_mode
-            except AttributeError:
-                prev_skip = False
+        try:
+            prev_skip = guarded_backend_cache.skip_backend_check_for_run_only_mode
             guarded_backend_cache.skip_backend_check_for_run_only_mode = True
-
-            def revert():
-                guarded_backend_cache.skip_backend_check_for_run_only_mode = prev_skip
-
-            return revert
-
+            yield None
+        finally:
+            guarded_backend_cache.skip_backend_check_for_run_only_mode = prev_skip
     else:
         backend = innermost_fn(callback)
 
-        def change():
-            cached_backends.setdefault(id(backend), backend)
-            try:
-                prev_backend = guarded_backend_cache.current_backend
-            except AttributeError:
-                prev_backend = None
+        def _set_current_backend(backend: CompilerFn):
+            prev_backend = guarded_backend_cache.current_backend
             guarded_backend_cache.current_backend = backend
+            # Mapping id of a CompilerFn to itself
+            cached_backends[id(backend)] = backend
+            return prev_backend
 
-            def revert():
-                guarded_backend_cache.current_backend = prev_backend
-
-            return revert
-
-    return change
+        prev_backend = _set_current_backend(backend)
+        try:
+            yield backend
+        finally:
+            _set_current_backend(prev_backend)
 
 
 DONT_WRAP_FILES = {
@@ -326,8 +307,6 @@ class _TorchDynamoContext:
         self.export = export
         self.dynamic = dynamic
         self.compiler_config = compiler_config
-        self.set_backend_cache = backend_cache_manager(self.callback)
-        self.cleanup_fns: List[Callable[[], Any]] = []
         patch_fn()
 
     def __enter__(self):
@@ -339,7 +318,8 @@ class _TorchDynamoContext:
             )
         self.on_enter()
         self.prior = set_eval_frame(self.callback)
-        self.cleanup_fns.append(self.set_backend_cache())
+        self.backend_cache_manager = backend_cache_wrapper(self.callback)
+        self.backend_cache_manager.__enter__()
         self.backend_ctx = self.extra_ctx_ctor()
         self.backend_ctx.__enter__()
         self.dynamic_ctx = enable_dynamic(self.dynamic, self.export)
@@ -352,9 +332,7 @@ class _TorchDynamoContext:
         # TODO: This is totally not the right way to chain contexts manually
         self.dynamic_ctx.__exit__(exc_type, exc_val, exc_tb)
         self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
-        for cleanup in self.cleanup_fns:
-            cleanup()
-        self.cleanup_fns.clear()
+        self.backend_cache_manager.__exit__(exc_type, exc_val, exc_tb)
 
     def __call__(self, fn):
         # public api for compiler config/options
@@ -406,8 +384,9 @@ class _TorchDynamoContext:
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
-            if torch.fx._symbolic_trace.is_fx_tracing() and not isinstance(
-                self, DisableContext
+            if (
+                not isinstance(self, DisableContext)
+                and torch.fx._symbolic_trace.is_fx_tracing()
             ):
                 if config.error_on_nested_fx_trace:
                     raise RuntimeError(
@@ -428,7 +407,8 @@ class _TorchDynamoContext:
 
             on_enter()
             prior = set_eval_frame(callback)
-            cleanups = (self.set_backend_cache(),)
+            backend_cache_manager = backend_cache_wrapper(self.callback)
+            backend_cache_manager.__enter__()
             backend_ctx = backend_ctx_ctor()
             backend_ctx.__enter__()
             dynamic_ctx = enable_dynamic(self.dynamic, self.export)
@@ -439,8 +419,7 @@ class _TorchDynamoContext:
                 set_eval_frame(prior)
                 dynamic_ctx.__exit__(None, None, None)
                 backend_ctx.__exit__(None, None, None)
-                for cleanup in cleanups:
-                    cleanup()
+                backend_cache_manager.__exit__(None, None, None)
 
         # hooks to properly handle inlining
         if isinstance(self, DisableContext):
@@ -1555,6 +1534,18 @@ class TorchPatcher:
 
             if hasattr(opt, "_init_group"):
                 opt._init_group = disable(opt._init_group)
+
+            # disable any currently set hooks
+            # Note: we only want to disable the profiling hook
+            # which is the *last* hook applied, we want to keep the no_grad hook
+            hooked = getattr(opt.step, "hooked", False)
+            if hooked:
+                unwrapped_step = getattr(opt.step, "__wrapped__", None)
+                if unwrapped_step:
+                    opt.step = unwrapped_step
+
+            # disable future hooking
+            opt.step.hooked = True  # type: ignore[attr-defined]
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):

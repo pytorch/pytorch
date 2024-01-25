@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 import functools
-import math
 import unittest
 from importlib import import_module
 
@@ -22,13 +21,6 @@ from torch.utils.checkpoint import _pt2_selective_checkpoint_context_fn_gen, che
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 
-def checkpoint_wrapper(fn):
-    def inner(*args):
-        return torch.utils.checkpoint.checkpoint(fn, *args, use_reentrant=True)
-
-    return inner
-
-
 def count_ops(
     gm, args, freq=None, freq_ge=None, op=None, freqs=None, freqs_ge=None, ops=None
 ):
@@ -40,12 +32,12 @@ def count_ops(
                 return node.args[1] == op
         return False
 
-    # assert ((freq or freq_ge) and op) or ((freqs or freqs_ge) and ops)
-    if op is not None:
+    assert ((freq or freq_ge) and op) or ((freqs or freqs_ge) and ops)
+    if op:
         ops = [op]
-    if freq is not None:
+    if freq:
         freqs = [freq]
-    if freq_ge is not None:
+    if freq_ge:
         freqs_ge = [freq_ge]
     if freqs:
         for op, freq in zip(ops, freqs):
@@ -988,72 +980,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x, [y, z])
         self.assertEqual(ref, res)
-
-    @requires_cuda()
-    def test_pattern_matcher(self):
-        # Check that the sdpa op is recomputed in the backward graph
-        # tests percolate_tags
-
-        @checkpoint_wrapper
-        def dot_prod_attention(
-            query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
-        ) -> torch.Tensor:
-            return (
-                torch.matmul(query, key.transpose(-2, -1))
-                .mul(1.0 / math.sqrt(key.shape[-1]))
-                .softmax(dim=-1)
-                .matmul(value)
-            )
-
-        def fn(query, key, value):
-            # Checks that sin is not recomputed in the backward graph
-            return dot_prod_attention(query.sin(), key, value)
-
-        tensor_shape = (4, 2, 16, 32)
-        dtype = torch.float16
-        args1 = [
-            torch.randn(tensor_shape, device="cuda", dtype=dtype, requires_grad=True),
-            torch.randn(tensor_shape, device="cuda", dtype=dtype, requires_grad=True),
-            torch.randn(tensor_shape, device="cuda", dtype=dtype, requires_grad=True),
-        ]
-
-        # Save the AOT graphs
-        aot_graphs = []
-        from torch._inductor import compile_fx
-
-        def debug_compile_fx_inner(graph, example_inputs, *args, **kwargs):
-            aot_graphs.append(graph)
-            return compile_fx.compile_fx_inner(graph, example_inputs, *args, **kwargs)
-
-        backend = functools.partial(
-            compile_fx.compile_fx, inner_compile=debug_compile_fx_inner
-        )
-
-        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
-        opt_fn(*args1).sum().backward()
-
-        fwd_graph = aot_graphs[0]
-        self.assertTrue(
-            count_ops(
-                fwd_graph,
-                [],
-                freq=1,
-                op=torch.ops.aten._scaled_dot_product_flash_attention.default,
-            )
-        )
-
-        bwd_graph = aot_graphs[1]
-        # Check that sin is not recomputed in the backward graph - checks percolate tags
-        self.assertTrue(count_ops(bwd_graph, [], freq=0, op=torch.ops.aten.sin.default))
-        # Check that the sdpa op is recomputed in the backward graph
-        self.assertTrue(
-            count_ops(
-                bwd_graph,
-                [],
-                freq=1,
-                op=torch.ops.aten._scaled_dot_product_flash_attention.default,
-            )
-        )
 
 
 if __name__ == "__main__":

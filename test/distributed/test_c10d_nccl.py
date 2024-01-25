@@ -3697,9 +3697,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
         time.sleep(1)
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
-        ver = t['version']
-        self.assertEqual(ver, "1.0")
-        t = t['entries']
         self.assertEqual(len(t), 2)
         last = t[-1]
         self.assertEqual(last['state'], 'completed')
@@ -3708,7 +3705,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(last['output_sizes'], ((3, 4),))
         self.assertEqual(last['seq_id'], 2)
         now = datetime.now()
-        event_created_time = datetime.fromtimestamp(last['time_created_ns'] / 1000000000)
+        event_created_time = datetime.fromtimestamp(last['time_created_us'] / 1000000)
         before_test = now - timedelta(minutes=1)
         self.assertTrue(before_test < event_created_time < now)
         if timing_enabled:
@@ -3775,7 +3772,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
         f.wait()
         torch.cuda.synchronize(device=device)
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
-        t = t['entries']
         self.assertEqual(len(t), 10)
         first = t[0]
         last = t[-1]
@@ -3810,7 +3806,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 pg.allreduce(a).wait()
             e.synchronize()
             t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
-            t = t['entries']
             if self.rank == 0:
                 self.assertEqual(t[-1]['seq_id'], 1)
                 self.assertEqual(t[-1]['state'], 'completed')
@@ -3852,7 +3847,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 # give the other thread some time to fill the cuda buffer
                 time.sleep(5)
                 t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
-                t = t['entries']
                 if self.rank == 0:
                     self.assertEqual(t[-1]['seq_id'], 1)
                     self.assertEqual(t[-1]['state'], 'completed')
@@ -3922,7 +3916,6 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
             self.assertEqual(self._wait_process(0, timeout=90), -6)
             with open(self._trace_name(rank=0), 'rb') as f:
                 t = pickle.load(f)
-                t = t['entries']
                 self.assertEqual(len(t), 2)
                 self.assertEqual(t[0]['seq_id'], 1)
                 self.assertEqual(t[0]['state'], 'completed')
@@ -3972,11 +3965,9 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
             self.assertTrue(os.path.exists(self._trace_name(rank=0)))
             with open(self._trace_name(rank=0), 'rb') as f:
                 t = pickle.load(f)
-                t = t['entries']
                 self.assertEqual(len(t), 2)
             with open(self._trace_name(rank=1), 'rb') as f:
                 t = pickle.load(f)
-                t = t['entries']
                 self.assertEqual(len(t), 1)
                 self.assertEqual(t[0]['seq_id'], 1)
                 self.assertEqual(t[0]['state'], 'completed')

@@ -114,8 +114,8 @@ class Shard(Placement):
             length=tensor.size(self.dim) - pad_size,
         )
 
-    @staticmethod
     def _local_shard_size_on_dim(
+        self,
         size_on_dim: int,
         num_chunks: int,
         rank: int,
@@ -240,26 +240,6 @@ class Shard(Placement):
             result = self._unpad_tensor(result, unpad_size)
         return result
 
-    def _replicate_to_shard(
-        self,
-        local_tensor: torch.Tensor,
-        mesh: DeviceMesh,
-        mesh_dim: int,
-        shard_index: int,
-    ) -> torch.Tensor:
-        """
-        transform from replicated tensor to a sharded tensor on
-        the current rank
-        """
-        num_chunks = mesh.size(mesh_dim=mesh_dim)
-        shards, _ = self._split_tensor(
-            local_tensor,
-            num_chunks,
-            with_padding=False,
-            contiguous=False,
-        )
-        return shards[shard_index].clone()
-
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Shard):
             return False
@@ -322,23 +302,23 @@ class Replicate(Placement):
 
 @dataclass(frozen=True)
 class _Partial(Placement):
-    # This is a default _Partial placement with element-wise reduce op
-    # _Partial define three contracts:
-    # 1. _reduce_value: reduce the value of the tensor on the mesh dimension
-    # 2. _reduce_shard_value: reduce_scatter the value of the tensor on the mesh dimension
-    # 3. _partition_value: partition the value of a replicated tensor on the mesh dimension
+    # This is a default partial placement with element-wise reduce op
+    # when doing reduction it follows the contract of `_to_replicate`
+    # and `_to_shard` to do the reduction and convert the local tensor
+    # to the corresponding state (replicate or shard)
+    #
     # We can implement custom reductions as needed by subclassing this
     # class and override those contracts.
     reduce_op: c10d.ReduceOp.RedOpType = c10d.ReduceOp.SUM
 
-    def _reduce_value(
+    def _to_replicate(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
         return funcol.all_reduce(
             tensor, reduceOp=self.reduce_op.name, group=(mesh, mesh_dim)
         )
 
-    def _reduce_shard_value(
+    def _to_shard(
         self,
         tensor: torch.Tensor,
         mesh: DeviceMesh,
@@ -348,20 +328,6 @@ class _Partial(Placement):
         # by default call reduce_shard_tensor of the shard_spec.
         shard_spec = cast(Shard, shard_spec)
         return shard_spec._reduce_shard_tensor(tensor, mesh, self.reduce_op, mesh_dim)
-
-    def _partition_value(
-        self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
-    ) -> torch.Tensor:
-        # _partition_value is the conjugate operation of _reduce_value
-        # - i.e. _partition_value on a sum reduce op is just a divison operation
-        # - the _reduce_value on a sum reduce op would just be a sum(allreduce) operation
-        # TODO: if the reduce_op is min/max, etc. the _partition_value should be a
-        # different operation
-        assert (
-            self.reduce_op == c10d.ReduceOp.SUM
-        ), "only support replicate to PartialSUM for now!"
-        num_chunks = mesh.size(mesh_dim=mesh_dim)
-        return tensor / num_chunks
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, _Partial):

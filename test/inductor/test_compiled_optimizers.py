@@ -153,13 +153,13 @@ def compile_opt(opt_compiled, closure=None):
     # run the patcher so that step has the expected structure
     torch._dynamo.eval_frame.TorchPatcher.patch()
 
-    # unwrap step TWICE to avoid a deliberate graph break due to
+    # unwrap step to avoid a deliberate graph break due to
     # a limitation of functionalization/no_grad detection
     # see the [Note on graph break] in optimizer.py
     # This ignores the outer _use_grad_if_differentiable wrapper
     # and instead manually disables grad before calling step, which is fine
     # for now as dynamo does not support differentiable optimizers anyway
-    step_fn = opt_compiled.step.__wrapped__.__wrapped__
+    step_fn = opt_compiled.step.__wrapped__
     if closure is not None:
 
         def fn():
@@ -325,9 +325,6 @@ class CompiledOptimizerTests(TestCase):
 
     @requires_cuda()
     def test_static_address_finalizer(self):
-        import gc
-
-        gc.disable()
         p_ref = None
 
         def fn():
@@ -350,7 +347,6 @@ class CompiledOptimizerTests(TestCase):
         fn()
 
         self.assertTrue(p_ref() is None)
-        gc.enable()
 
 
 for optim_cls, name, kwargs in COMPILED_OPT_KWARG_DB:

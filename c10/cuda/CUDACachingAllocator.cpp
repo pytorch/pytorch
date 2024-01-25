@@ -1046,7 +1046,7 @@ class DeviceCachingAllocator {
       if (C10_UNLIKELY(
               set_fraction &&
               CUDAAllocatorConfig::garbage_collection_threshold() > 0.0)) {
-        garbage_collect_cached_blocks(context);
+        garbage_collect_cached_blocks();
       }
       // Attempt allocate
       // WARNING: alloc_block may release the allocator lock when calling
@@ -1056,7 +1056,7 @@ class DeviceCachingAllocator {
       block_found = alloc_block(params, false, context, lock)
           // Free enough available cached blocks to satisfy alloc and retry
           // alloc.
-          || (release_available_cached_blocks(params, context) &&
+          || (release_available_cached_blocks(params) &&
               alloc_block(params, false, context, lock))
           // Free all non-split cached blocks and retry alloc.
           || (C10_LIKELY(captures_underway.size() == 0) &&
@@ -2294,8 +2294,7 @@ class DeviceCachingAllocator {
     return freed_memory;
   }
 
-  void garbage_collect_cached_blocks(
-      const std::shared_ptr<GatheredContext>& context) {
+  void garbage_collect_cached_blocks() {
     // Free unused cached blocks to reclaim GPU memory.
     // Unlike release_cached_blocks(), this does not enforce synchronization and
     // therefore should be of less overheads.
@@ -2345,7 +2344,7 @@ class DeviceCachingAllocator {
           gc_reclaimed += block->size;
           total_age -= block->gc_count(); // Decrement the age
           freeable_block_count--; // One less block that can be freed
-          release_block(block, context);
+          release_block(block);
         }
       }
     }
@@ -2453,9 +2452,7 @@ class DeviceCachingAllocator {
   /** Free one or more oversize blocks to the system allocator.  But only enough
    * **/
   /** to satisfy the target size **/
-  bool release_available_cached_blocks(
-      const AllocParams& p,
-      const std::shared_ptr<GatheredContext>& context) {
+  bool release_available_cached_blocks(const AllocParams& p) {
     if (CUDAAllocatorConfig::max_split_size() ==
         std::numeric_limits<size_t>::max())
       return false;
@@ -2483,16 +2480,16 @@ class DeviceCachingAllocator {
         totalReleased += (*it)->size;
         if (it != pool.blocks.begin()) {
           --it;
-          release_block(*cur, context);
+          release_block(*cur);
         } else {
-          release_block(*cur, context);
+          release_block(*cur);
           break;
         }
       }
       if (totalReleased < key.size)
         return false;
     } else {
-      release_block(*it, context);
+      release_block(*it);
     }
     return true;
   }
@@ -2503,15 +2500,15 @@ class DeviceCachingAllocator {
     synchronize_and_free_events(context);
 
     // Free all non-split cached blocks to system allocator
-    release_blocks(large_blocks, context);
-    release_blocks(small_blocks, context);
+    release_blocks(large_blocks);
+    release_blocks(small_blocks);
 
     for (auto it = graph_pools_freeable.begin();
          it != graph_pools_freeable.end();) {
       // See notifyCaptureDestroy for the strategy here.
       TORCH_INTERNAL_ASSERT(it->second->use_count == 0);
-      release_blocks(it->second->small_blocks, context);
-      release_blocks(it->second->large_blocks, context);
+      release_blocks(it->second->small_blocks);
+      release_blocks(it->second->large_blocks);
       if (it->second->cudaMalloc_count == 0) {
         auto erase_count = graph_pools.erase(it->first);
         TORCH_INTERNAL_ASSERT(erase_count == 1);
@@ -2540,9 +2537,7 @@ class DeviceCachingAllocator {
     delete block;
   }
 
-  void release_block(
-      Block* block,
-      const std::shared_ptr<GatheredContext>& context) {
+  void release_block(Block* block) {
     TORCH_INTERNAL_ASSERT(!block->expandable_segment_);
     record_trace(
         TraceEntry::SEGMENT_FREE,
@@ -2550,7 +2545,7 @@ class DeviceCachingAllocator {
         block->size,
         block->stream,
         block->device,
-        context ? context : block->context_when_segment_allocated);
+        nullptr);
 
     C10_CUDA_CHECK(cudaFree((void*)block->ptr));
     total_allocated_memory -= block->size;
@@ -2576,9 +2571,7 @@ class DeviceCachingAllocator {
     delete block;
   }
 
-  void unmap_block(
-      Block* block,
-      const std::shared_ptr<GatheredContext>& context) {
+  void unmap_block(Block* block) {
     auto unmapped = block->expandable_segment_->unmap(
         SegmentRange{block->ptr, block->size});
     if (unmapped.size == 0) {
@@ -2632,11 +2625,9 @@ class DeviceCachingAllocator {
         unmapped.size,
         block->stream,
         block->device,
-        context ? context : block->context_when_segment_allocated);
+        nullptr);
   }
-  void release_blocks(
-      BlockPool& pool,
-      const std::shared_ptr<GatheredContext>& context) {
+  void release_blocks(BlockPool& pool) {
     std::vector<Block*> to_unmap;
     // Frees all non-split blocks
     auto it = pool.blocks.begin();
@@ -2649,11 +2640,11 @@ class DeviceCachingAllocator {
         // to avoid invalidating the iterator
         to_unmap.push_back(block);
       } else if (!block->prev && !block->next) {
-        release_block(block, context);
+        release_block(block);
       }
     }
     for (Block* block : to_unmap) {
-      unmap_block(block, context);
+      unmap_block(block);
       if (!block->prev && !block->next) {
         release_expandable_segment(block);
       }

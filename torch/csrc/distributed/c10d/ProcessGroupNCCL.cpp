@@ -655,20 +655,10 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
   // Device synchronize only after we've completed timeout checks.
   if (!barrierTensors_.empty()) {
     // If we use the work to do barrier, we should block here
+    at::cuda::OptionalCUDAGuard gpuGuard;
     for (auto& device : devices_) {
-      // `dist.barrier()` only requires all CPU processes to enter this
-      // function, hence we only need to make sure the dummy all-reduce has
-      // completed. So we would only need to sync the **current stream** back to
-      // host, and do not need to synchronize the entire device (which may have
-      // kernels running on other streams).
-      // Using `cudaStreamSynchronize` instead of `cudaDeviceSynchronize` can:
-      // - lower chance of hang;
-      // - CurrentCUDAStream is usually the context of the next operation in
-      // Python, thus blocking current stream would already block the next
-      // compute kernel;
-      // - achieve better barrier performance.
-      auto currentStream = at::cuda::getCurrentCUDAStream(device.index());
-      AT_CUDA_CHECK(cudaStreamSynchronize(currentStream));
+      gpuGuard.set_index(device.index());
+      AT_CUDA_CHECK(cudaDeviceSynchronize());
     }
   }
 }
@@ -1592,9 +1582,6 @@ void ProcessGroupNCCL::watchdogHandler() {
         // completed.
         ++it;
       }
-      // Increment heartbeat after each work processed,
-      // in case processing is slowed down (but not hung) by cuda api contention
-      heartbeat_++;
     }
     // process a request to dump the trace. only PG uid 0 will respond to dump
     // requests, but this is fine since all PG's feed into the same flight

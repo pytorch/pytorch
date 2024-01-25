@@ -5101,18 +5101,6 @@ class CommonTemplate:
         if self.device != "cpu":
             self.assertTrue(same(arg1, arg2))
 
-    def test_slice_mutation3(self):
-        def fn(a):
-            a[:2, :2].fill_(10)
-
-        opt_fn = torch._dynamo.optimize_assert(compile_fx)(fn)
-
-        x1 = torch.randn(8, 8, device=self.device)
-        x2 = x1.clone()
-        fn(x1)
-        opt_fn(x2)
-        self.assertEqual(x1, x2)
-
     def test_tensor_index_slice(self):
         def fn(a):
             x = torch.tensor([1, 2], device=self.device)
@@ -5513,30 +5501,6 @@ class CommonTemplate:
         args = [torch.tensor([1], dtype=torch.int64), torch.randn(8, 4), torch.randn(4)]
         self.common(fn, args)
 
-    def test_index_put_reinplace(self):
-        def fn(x, idx):
-            src = torch.ones(idx.size(0), device=x.device)
-            x.index_put_((idx,), src)
-            return x.expand((2, x.shape[0]))
-
-        a = torch.randn(1024)
-        idx = torch.arange(10)
-        torch._inductor.metrics.generated_kernel_count = 0
-        self.common(fn, (a, idx))
-        assertGeneratedKernelCountEqual(self, 1)
-
-    def test_index_put_failed_reinplace(self):
-        def fn(x, idx):
-            src = torch.ones(idx.size(0), device=x.device)
-            y = x.index_put((idx,), src)
-            return x, y
-
-        a = torch.randn(1024)
-        idx = torch.arange(10)
-        torch._inductor.metrics.generated_kernel_count = 0
-        self.common(fn, (a, idx))
-        assertGeneratedKernelCountEqual(self, 2)
-
     def test_adding_tensor_offsets(self):
         @torch.compile(fullgraph=True)
         def fn(x):
@@ -5727,35 +5691,6 @@ class CommonTemplate:
         a = torch.arange(10, dtype=torch.float)
         b = torch.empty(0)
         self.common(fn, [a, b])
-
-    def test_slice_scatter_reinplace(self):
-        class M(nn.Module):
-            def __init__(self, device):
-                super().__init__()
-                self.linear1 = nn.Linear(64, 64, bias=False)
-                self.cache_k = torch.zeros((56, 384, 8, 64), device=device)
-
-            def forward(self, x, start_pos):
-                bsz, seqlen, _, _ = x.shape
-                xk = self.linear1(x)
-                with torch.no_grad():
-                    self.cache_k[:bsz, start_pos : start_pos + seqlen] = xk
-                keys = self.cache_k[:bsz, : start_pos + seqlen]
-                scores = torch.matmul(
-                    xk.transpose(1, 2), keys.transpose(1, 2).transpose(2, 3)
-                )
-                return scores
-
-        kv_cache_module = M(self.device)
-        inp = torch.randn(1, 32, 8, 64)
-
-        # Test that the cache update is reinplaced such that the cache is updated inplace
-        # rather than copy-scatter-copy-back.
-
-        torch._inductor.metrics.generated_kernel_count = 0
-        with torch.no_grad():
-            self.common(kv_cache_module, (inp, 1), check_lowp=False)
-        assertGeneratedKernelCountEqual(self, 1)
 
     def test_scatter1(self):
         def fn(a, dim, index, b):
