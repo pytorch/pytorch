@@ -343,6 +343,14 @@ class _TorchDynamoContext:
 
         # add context containing GraphModule to any GraphModule forward functions
         if isinstance(fn, torch.fx.GraphModule):
+            # Since dynamo will run the forward method for the GraphModule shortly
+            # anyways, it does not hurt to do the real recompilation here if
+            # this is a _LazyGraphModule. This makes it easier for dynamo to
+            # optimize a _LazyGraphModule.
+            from torch.fx.lazy_graph_module import _LazyGraphModule
+
+            _LazyGraphModule.force_recompile(fn)
+
             # Assume that the underlying node metadata of `fn`,
             # a GraphModule instance, accurately represents
             # all instances of type(fn).
