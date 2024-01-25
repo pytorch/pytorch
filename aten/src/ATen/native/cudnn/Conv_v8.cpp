@@ -611,7 +611,7 @@ bool plan_errata_exception(
     return false;
   } else {
     return cudnn_frontend::check_errata(
-        errata_json_handle, executionPlanTag, handle, []() {  return true; });
+        errata_json_handle, executionPlanTag, handle, []() { return true; });
   }
 }
 
