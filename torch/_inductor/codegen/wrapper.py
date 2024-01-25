@@ -1864,9 +1864,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
             arr_iface = config.use_minimal_arrayref_interface  # For brevity.
 
             def use_thread_local_cached_output_tensor(idx, output):
-                if self.cuda:
-                    return
-
                 cached_output_name = f"cached_output_{next(self.cached_output_id)}"
                 cache_type = "Array" if arr_iface else "Tensor"
                 self.wrapper_call.writeline(
