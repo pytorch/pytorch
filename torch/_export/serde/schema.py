@@ -96,7 +96,8 @@ class TensorMeta:
 
 @dataclass
 class ScriptObjectMeta:
-    constant_name: Optional[str]
+    constant_name: str
+    class_fqn: str
 
 
 # In most cases we will use the "as_name" field to store arguments which are
@@ -147,6 +148,7 @@ class GraphArgument:
 @dataclass
 class CustomObjArgument:
     name: str
+    class_fqn: str
 
 
 # This is actually a union type
