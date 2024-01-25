@@ -230,9 +230,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.const_output_index: Dict[str, int] = (
             const_output_index if const_output_index else {}
         )
-        self.const_kernels: Set[str] = (
-            const_module.wrapper_code.src_to_kernel.values() if const_module else set()
-        )
         self.folded_constants: Set[str] = (
             set(const_output_index.keys()) if const_output_index else set()
         )
