@@ -3,18 +3,17 @@ from typing import Any, Optional
 import typing_extensions
 
 import torch.nn as nn
-from torch._prims_common import DeviceLikeType
 
 from torch.distributed._composable import contract
 from torch.distributed._tensor import DeviceMesh
 
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
 from ._fsdp_init import (
+    _get_device_from_mesh,
     _get_managed_modules,
     _get_managed_states,
     _init_default_fully_shard_mesh,
     _move_states_to_device,
-    _normalize_device,
 )
 from ._fsdp_param_group import FSDPParamGroup
 from ._fsdp_state import FSDPState
@@ -27,25 +26,28 @@ def fully_shard(
     module: nn.Module,
     *,
     mesh: Optional[DeviceMesh] = None,
-    device: DeviceLikeType = "cuda",
 ):
+    """
+    Args:
+        mesh (Optional[DeviceMesh]): This mesh defines the sharding and device.
+            If this is a 1D mesh, then this fully shards across the 1D mesh
+            (i.e. FSDP). If this is a 2D mesh, then this shards across the 0th
+            dimension and replicates across the 1st dimension (i.e. HSDP).
+            FSDP/HSDP uses the device given by the mesh's device type. For CUDA
+            or CUDA-like devices, FSDP expects uses the current device.
+    """
     if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
         raise ValueError(
             f"fully_shard does not support containers that do not implement forward: {module}"
         )
-    device = _normalize_device(device)
-    mesh = mesh or _init_default_fully_shard_mesh(device.type)
+    mesh = mesh or _init_default_fully_shard_mesh()
     if mesh.ndim not in (1, 2):
         raise ValueError(f"fully_shard expects a 1D or 2D DeviceMesh but got {mesh}")
     elif mesh.ndim == 1:
         mesh_info = FSDPMeshInfo(mesh, shard_mesh_dim=0)
     elif mesh.ndim == 2:
         mesh_info = HSDPMeshInfo(mesh, shard_mesh_dim=1, replicate_mesh_dim=0)
-    if device.type != "meta" and device.type != mesh.device_type:
-        raise ValueError(
-            f"device and mesh must be of the same type but got {device.type} "
-            f"for device and {mesh.device_type} for mesh"
-        )
+    device = _get_device_from_mesh(mesh)
 
     state = fully_shard.state(module)
     state.init(module, device)
