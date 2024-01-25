@@ -35,7 +35,7 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
                 return x + y + 1
 
         model = ParamlessModule()
-        fully_shard(model, device=device)
+        fully_shard(model)
         x = torch.randn((3,))
         ys = (torch.randn((3,)), torch.randn((3,)))
         self.assertEqual(x.device, torch.device("cpu"))
