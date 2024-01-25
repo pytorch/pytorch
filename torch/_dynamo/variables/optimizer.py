@@ -6,7 +6,7 @@ from ..decorators import mark_static_address
 
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, ConstDictKeySource, GetItemSource, GlobalWeakRefSource
-from ..utils import global_key_name
+from ..utils import GLOBAL_KEY_PREFIX
 
 from .base import VariableTracker
 from .constant import ConstantVariable
@@ -70,7 +70,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 ).recursive_realize()
                 # stash a weak_ptr to optimizer to invalidate code
                 # if the optimizer object dies
-                tx.store_global_weakref(self.get_global_name(), self.value)
+                mangled_name = f"__optimizer_{id(self.value)}"
+                tx.store_global_weakref_by_id(mangled_name, self.value)
                 self.create_finalizer(tx)
 
                 # This is currently safe only because the only actual `ret_val`s returned
@@ -135,7 +136,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         state_source = AttrSource(self.source, "state")
         install_guard(state_source.make_guard(GuardBuilder.DICT_KEYS))
         for idx, (p, value) in enumerate(self.value.state.items()):
-            tx.store_global_weakref(global_key_name(p), p)
+            tx.store_global_weakref_by_id(GLOBAL_KEY_PREFIX, p)
             p_state_source = GetItemSource(
                 state_source, ConstDictKeySource(state_source, idx)
             )
@@ -176,10 +177,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
             # mark these tensors as static for cudagraphs
             mark_static_address(tensor_value, guard=False)
 
-            tx.store_global_weakref(global_key_name(tensor_value), tensor_value)
-            builder = VariableBuilder(
-                tx, GlobalWeakRefSource(global_key_name(tensor_value))
-            )
+            global_name = tx.store_global_weakref_by_id(GLOBAL_KEY_PREFIX, tensor_value)
+            builder = VariableBuilder(tx, GlobalWeakRefSource(global_name))
             self.static_tensor_names.add(tx.output.module_key_name(builder.name))
 
         result = builder(tensor_value)
@@ -222,6 +221,3 @@ class OptimizerVariable(UserDefinedObjectVariable):
             weakref.finalize(value, clear_static_tensor_refs)
 
         tx.output.add_graph_finalizer(init_finalizer)
-
-    def get_global_name(self):
-        return f"__optimizer_{id(self.value)}"
