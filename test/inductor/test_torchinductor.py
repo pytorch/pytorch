@@ -363,7 +363,7 @@ def check_model(
     #         print("Graph", graph)
     if check_has_compiled:
         assert called, "Ran graph without calling compile_fx"
-    assert type(actual) == type(correct)
+    assert type(actual) == type(correct), f"{type(actual)} != {type(correct)}"
 
     correct_flat, correct_spec = tree_flatten(correct)
     actual_flat = pytree.tree_leaves(actual)
@@ -4317,20 +4317,16 @@ class CommonTemplate:
             (torch.randn([1024], dtype=torch.float64) + 10,),
         )
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_bitwise(self):
-        def fn(x, y):
-            return (
-                torch.bitwise_not(x),
-                torch.bitwise_or(x, y),
-                torch.bitwise_xor(x, y),
-                torch.bitwise_and(x, y),
-            )
+        def fn():
+            full = torch.full((), 11)
+            i0 = full.item()
+            return torch.full((i0,), 0)
 
         self.common(
             fn,
             (
-                torch.randint(0, 2**30, [64], dtype=torch.int32),
-                torch.randint(0, 2**30, [64], dtype=torch.int32),
             ),
         )
 
