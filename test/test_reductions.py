@@ -1115,6 +1115,13 @@ class TestReductions(TestCase):
         self.assertTrue(x.all())
         self.assertFalse(x.any())
 
+    def test_all_issue117215(self, device):
+        info = torch.iinfo(torch.uint8)
+        a = torch.randint(info.min, info.max, (73, 11, 3, 17), dtype=torch.uint8)
+        b = torch.all(a, dim=0)
+        c = a.to(torch.bool).all(dim=0)
+        self.assertEqual(torch.ne(b, c).sum(), 0)
+
     @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     def test_max_with_inf(self, device, dtype):
