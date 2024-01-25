@@ -829,7 +829,7 @@ def wait_for_process(p, timeout=None):
         else:
             p.kill()
             raise
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as timeout_exception:
         # send SIGINT to give pytest a chance to make xml
         p.send_signal(signal.SIGINT)
         exit_status = None
@@ -843,7 +843,9 @@ def wait_for_process(p, timeout=None):
             return exit_status
         else:
             p.kill()
-        raise
+        # Provide more info about the timeout (specifically that it timed out
+        # after the keyboard interrupt as well)
+        raise RuntimeError(f"Subprocess failed to exit smoothly after timeout {timeout} expired") from timeout_exception
     except:  # noqa: B001,E722, copied from python core library
         p.kill()
         raise
@@ -1243,8 +1245,6 @@ TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_MPS = torch.backends.mps.is_available()
-# TODO change it when torch.backends.xpu.is_avaliable() is ready
-TEST_XPU = False
 TEST_CUDA = torch.cuda.is_available()
 custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name(), None)
 TEST_PRIVATEUSE1 = True if (hasattr(custom_device_mod, "is_available") and custom_device_mod.is_available()) else False
@@ -1567,21 +1567,6 @@ def runOnRocm(fn):
         else:
             raise unittest.SkipTest("test currently only works on the ROCm stack")
     return wrapper
-
-def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
-    def dec_fn(fn):
-        reason = f"skipIfXpu: {msg}"
-
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            if TEST_XPU:
-                raise unittest.SkipTest(reason)
-            else:
-                return fn(*args, **kwargs)
-        return wrapper
-    if func:
-        return dec_fn(func)
-    return dec_fn
 
 def skipIfMps(fn):
     @wraps(fn)
@@ -2264,7 +2249,6 @@ def check_if_enable(test: unittest.TestCase):
                     "windows": IS_WINDOWS,
                     "linux": IS_LINUX,
                     "rocm": TEST_WITH_ROCM,  # noqa: F821
-                    "xpu": TEST_XPU,  # noqa: F821
                     "asan": TEST_WITH_ASAN,  # noqa: F821
                     "dynamo": TEST_WITH_TORCHDYNAMO,  # noqa: F821
                     "inductor": TEST_WITH_TORCHINDUCTOR,  # noqa: F821
@@ -2820,17 +2804,6 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
 
 
     def run(self, result=None):
-        # Check if enable here as well so we don't have to worry about
-        # subclasses calling super().setUp().   Call it via a wrapper instead of
-        # directly because the skipTest call will raise an uncaught exception
-        def check_if_enable_wrapper(f):
-            @wraps(f)
-            def wrapper(*args, **kwargs):
-                check_if_enable(self)
-                f(*args, **kwargs)
-            return wrapper
-        setattr(self, self._testMethodName, check_if_enable_wrapper(getattr(self, self._testMethodName)))
-
         with contextlib.ExitStack() as stack:
             if TEST_WITH_CROSSREF:  # noqa: F821
                 stack.enter_context(CrossRefMode())
@@ -2839,6 +2812,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
             )
 
     def setUp(self):
+        check_if_enable(self)
         set_rng_seed(SEED)
 
         # Save global check sparse tensor invariants state that can be

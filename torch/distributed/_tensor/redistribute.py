@@ -177,7 +177,7 @@ def redistribute_local_tensor(
             # Case 1: target is Replicate
             if current.is_partial():
                 partial_spec = cast(_Partial, current)
-                new_local_tensor = partial_spec._reduce_value(
+                new_local_tensor = partial_spec._to_replicate(
                     local_tensor, device_mesh, i
                 )
             elif current.is_shard():
@@ -195,14 +195,18 @@ def redistribute_local_tensor(
             target_dim = target_placement.dim
             if current.is_partial():
                 partial_spec = cast(_Partial, current)
-                new_local_tensor = partial_spec._reduce_shard_value(
+                new_local_tensor = partial_spec._to_shard(
                     local_tensor, device_mesh, i, target_placement
                 )
             elif current.is_replicate():
                 # split the tensor and return the corresponding cloned local shard
-                new_local_tensor = target_placement._replicate_to_shard(
-                    local_tensor, device_mesh, i, my_coordinate[i]
+                shards, _ = target_placement._split_tensor(
+                    local_tensor,
+                    num_chunks,
+                    with_padding=False,
+                    contiguous=False,
                 )
+                new_local_tensor = shards[my_coordinate[i]].clone()
             else:
                 # NOTE: we don't support this case efficiently yet, the fallback path we are going here is
                 # to decompose Shard(0) -> Shard(1) into Shard(0) -> Replicate -> Shard(1)
@@ -224,12 +228,11 @@ def redistribute_local_tensor(
                     new_local_tensor = shards[my_coordinate[i]]
         elif target.is_partial():
             if current.is_replicate():
-                partial_spec = cast(_Partial, target)
-                # skip the replicate to partial transformation when we are in backward pass
+                # For replicate -> partial forward pass we perform division to num of chunks
+                # and generate parial, and recover it back when pending sum get cleared.
+                # Skip/pass through when replicate -> partial is in backward pass.
                 new_local_tensor = (
-                    partial_spec._partition_value(local_tensor, device_mesh, i)
-                    if not is_backward
-                    else local_tensor
+                    local_tensor / num_chunks if not is_backward else local_tensor
                 )
             else:
                 raise RuntimeError(

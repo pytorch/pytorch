@@ -156,17 +156,15 @@ class TensorWithTFOverrideVariable(TensorVariable):
             kwargs.pop("class_type") is torch.Tensor
         ), "invalid class type in TensorWithTFOverrideVariable.from_tensor_var"
         var = cls(torch_function_fn=torch_function_fn, class_type=class_type, **kwargs)
-        var.install_global_unsafe(tx)
+        var.install_global(tx)
         return var
 
-    def install_global_unsafe(self, tx):
+    def install_global(self, tx):
         # stash the subclass type to rewrap an output tensor if needed
         # this is needed because the actual type needs to be available
         # each time the compiled artifact is run and outputs a wrapped tensor.
         if self.global_mangled_class_name() not in tx.output.global_scope:
-            tx.output.install_global_unsafe(
-                self.global_mangled_class_name(), self.class_type
-            )
+            tx.output.install_global(self.global_mangled_class_name(), self.class_type)
 
     def python_type(self):
         return self.class_type

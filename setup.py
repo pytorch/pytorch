@@ -1093,8 +1093,6 @@ def main():
         "jinja2",
         "fsspec",
     ]
-    if IS_WINDOWS:
-        install_requires.append("mkl>=2021.1.1,<=2021.4.0")
 
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.

@@ -259,11 +259,6 @@ def save(
     """
     from torch._export import save
 
-    if not isinstance(ep, ExportedProgram):
-        raise TypeError(
-            f"The 'ep' parameter must be an instance of 'ExportedProgram', got '{type(ep).__name__}' instead."
-        )
-
     save(ep, f, extra_files=extra_files, opset_version=opset_version)
 
 

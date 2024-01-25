@@ -113,7 +113,7 @@ class NestedTensor(torch.Tensor):
         self._lengths = lengths
 
         # holds properties that are computed lazily
-        self._metadata_cache = kwargs.get("_metadata_cache") or {}
+        self._metadata_cache = kwargs.get("_metadata_cache", {})
 
         # collapsed ragged dim must always be dynamic
         torch._dynamo.mark_dynamic(self, self._ragged_idx)
@@ -260,21 +260,15 @@ class ViewBufferFromNested(torch.autograd.Function):
 # Not actually a view!
 class ViewNestedFromBuffer(torch.autograd.Function):
     @staticmethod
-    def forward(
-        ctx,
-        values: torch.Tensor,
-        offsets: torch.Tensor,
-        metadata_cache: Optional[Dict[str, Any]] = None,
-    ):  # type: ignore[override]
+    def forward(ctx, values: torch.Tensor, offsets: torch.Tensor):  # type: ignore[override]
         return NestedTensor(
             values.detach(),
             offsets=offsets,
-            _metadata_cache=metadata_cache,
         )
 
     @staticmethod
     def backward(ctx, gO: NestedTensor):  # type: ignore[override]
-        return gO.values(), None, None
+        return gO.values(), None
 
 
 # Not actually a view!

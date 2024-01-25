@@ -18,7 +18,6 @@ from torch.export import (
     unflatten,
     FlatArgsAdapter,
 )
-from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
 from torch._export import capture_pre_autograd_graph
 from torch._export.utils import (
@@ -546,8 +545,7 @@ class TestUnflatten(TestCase):
             def forward(self, x):
                 return x + self.submod(x)
 
-        with enable_torchbind_tracing():
-            export_module = torch.export.export(Mod(), (torch.randn((2, 3)),), strict=False)
+        export_module = torch.export.export(Mod(), (torch.randn((2, 3)),), strict=False)
         unflattened = unflatten(export_module)
 
         self.compare_outputs(export_module, unflattened, (torch.randn((2, 3)),))
