@@ -97,8 +97,8 @@ constexpr auto kProcessGroupNCCLDefaultTimeout =
     std::chrono::milliseconds(10 * 60 * 1000);
 
 // Range of watchdog sleep interval
-constexpr int64_t kWatchdogThreadSleepMaxMillis = 64;
-constexpr int64_t kWatchdogThreadSleepMinMillis = 1;
+constexpr uint64_t kWatchdogThreadSleepMaxMillis = 64;
+constexpr uint64_t kWatchdogThreadSleepMinMillis = 1;
 
 // NoHandling: do not handle asynchronous NCCL errors
 // TearDown: tear down process upon error, see `WorkNCCL::handleException`
@@ -969,7 +969,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Adaptive watchdog sleep interval. This can be automatically adjusted based
   // on length of work queue. Initialized to middle of min and max.
-  int64_t watchdogSleepMillis_ = kWatchdogThreadSleepMaxMillis << 1;
+  uint64_t watchdogSleepMillis_ = kWatchdogThreadSleepMaxMillis << 1;
 
   size_t uid_;
 
