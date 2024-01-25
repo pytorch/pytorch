@@ -20,6 +20,7 @@ from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_quantization import skip_if_no_torchvision
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     IS_CI,
     IS_FBCODE,
     IS_WINDOWS,
@@ -187,7 +188,7 @@ class AOTInductorTestsTemplate:
         )
         self.assertTrue(actual_path == expected_path)
 
-    @requires_cuda()
+    @requires_cuda
     def test_multi_device(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -1324,25 +1325,30 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), inputs)
 
     def test_index_put_fallback(self):
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
+        # index_put falls back in the deterministic mode
+        with DeterministicGuard(True):
 
-            def forward(
-                self,
-                self_tensor: torch.Tensor,
-                indices: Tuple[torch.Tensor],
-                values: torch.Tensor,
-            ):
-                return torch.index_put(self_tensor, indices, values, accumulate=True)
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
 
-        inputs = (
-            torch.ones(4, device=self.device, dtype=torch.int64),
-            (torch.tensor([1, 1, 2, 2], device=self.device, dtype=torch.bool),),
-            torch.ones(4, device=self.device, dtype=torch.int64),
-        )
+                def forward(
+                    self,
+                    self_tensor: torch.Tensor,
+                    indices: Tuple[torch.Tensor],
+                    values: torch.Tensor,
+                ):
+                    return torch.index_put(
+                        self_tensor, indices, values, accumulate=True
+                    )
 
-        self.check_model(Model(), inputs)
+            inputs = (
+                torch.ones(4, device=self.device, dtype=torch.int64),
+                (torch.tensor([1, 1, 2, 2], device=self.device, dtype=torch.bool),),
+                torch.ones(4, device=self.device, dtype=torch.int64),
+            )
+
+            self.check_model(Model(), inputs)
 
     def test_convolution(self):
         class Model(torch.nn.Module):
@@ -1578,6 +1584,43 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), example_inputs)
 
+    @skipIfRocm
+    def test_scaled_dot_product_efficient_attention(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def forward(self, q, k, v, attn_bias):
+                return torch.ops.aten._scaled_dot_product_efficient_attention(
+                    q, k, v, attn_bias, False
+                )[0]
+
+        example_inputs = (
+            torch.randn(4, 4, 36, 36, device="cuda"),
+            torch.randn(4, 4, 36, 36, device="cuda"),
+            torch.randn(4, 4, 36, 36, device="cuda"),
+            torch.randn(4, 4, 36, 36, device="cuda"),
+        )
+        self.check_model(Model(), example_inputs)
+
+    def test_index_put_with_none_index(self):
+        # index_put falls back in the deterministic mode
+        with DeterministicGuard(True):
+
+            class Model(torch.nn.Module):
+                def forward(self, x, i1, i2, y):
+                    return torch.ops.aten.index_put(
+                        x, (None, None, i1, i2), y, accumulate=True
+                    )
+
+            example_inputs = (
+                torch.rand(8, 192, 30, 30, device=self.device),
+                torch.zeros(3, 14, 1, 1, dtype=torch.int64, device=self.device),
+                torch.ones(3, 14, dtype=torch.int64, device=self.device),
+                torch.randn(8, 192, 3, 14, 3, 14, device=self.device),
+            )
+            self.check_model(Model(), example_inputs)
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
@@ -1658,6 +1701,7 @@ CPU_TEST_FAILURES = {
     "test_scatter_fallback": fail_stack_allocation(is_skip=True),
     "test_scatter_reduce_fallback": fail_stack_allocation(is_skip=True),
     "test_index_put_fallback": fail_stack_allocation(is_skip=True),
+    "test_index_put_with_none_index": fail_stack_allocation(is_skip=True),
     # C++ compile error, need for aoti_torch___scaled_dot_product_flash_attention_for_cpu
     "test_sdpa": fail_with_and_without_stack_allocation(is_skip=True),
     "test_sdpa_2": fail_with_and_without_stack_allocation(is_skip=True),
