@@ -844,6 +844,13 @@ class BuiltinVariable(VariableTracker):
         )
         return abs_method.call_function(tx, [], {})
 
+    def call_pos(self, tx, arg: "VariableTracker"):
+        # Call arg.__pos__()
+        pos_method = BuiltinVariable(getattr).call_function(
+            tx, [arg, ConstantVariable.create("__pos__")], {}
+        )
+        return pos_method.call_function(tx, [], {})
+
     def call_round(self, tx, arg, *args, **kwargs):
         # Call arg.__round__()
         round_method = BuiltinVariable(getattr).call_function(
