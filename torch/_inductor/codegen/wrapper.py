@@ -438,6 +438,7 @@ class WrapperCodeGen(CodeGen):
                 aten = torch.ops.aten
                 inductor_ops = torch.ops.inductor
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+                empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
                 alloc_from_pool = torch.ops.inductor._alloc_from_pool
                 reinterpret_tensor = torch.ops.inductor._reinterpret_tensor
                 async_compile = AsyncCompile()
@@ -1162,6 +1163,15 @@ class WrapperCodeGen(CodeGen):
         return self.make_allocation(buffer.get_name(), device, dtype, shape, stride)
 
     def make_allocation(self, name, device, dtype, shape, stride):
+        if device.type == "cpu":
+            # optimized path for faster allocations, saving ~2us versus the stuff below
+            return (
+                f"{name} = empty_strided_cpu("
+                f"{self.codegen_shape_tuple(shape)}, "
+                f"{self.codegen_shape_tuple(stride)}, "
+                f"{dtype})"
+            )
+
         try:
             expected = tuple(ir.make_contiguous_strides_for(shape))
         except Exception:  # cannot determine truth value of Relational
@@ -1352,7 +1362,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.closed_bracket = "}"
         self.comment = "//"
         self.namespace = "at::"
-        self.none_str = "at::Tensor()"
+        self.none_str = (
+            "nullptr" if config.aot_inductor.abi_compatible else "at::Tensor()"
+        )
         self.extern_call_ops = set()
         self.size = "sizes()"
         self.stride = "strides()"
@@ -1989,6 +2001,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
             )  # For brevity.
 
             def use_thread_local_cached_output_tensor(idx, output):
+                if self.cuda:
+                    return
+
                 cached_output_name = f"cached_output_{next(self.cached_output_id)}"
                 cache_type = "Array" if arr_iface else "Tensor"
                 self.wrapper_call.writeline(
@@ -2357,16 +2372,22 @@ class CppWrapperCodeGen(WrapperCodeGen):
         return f"{{{', '.join(parts)}}}"
 
     def codegen_dynamic_scalar(self, node):
-        from .cpp import DTYPE_TO_ATEN
+        from .cpp import DTYPE_TO_ATEN, DTYPE_TO_CPP
 
         (data,) = (t.codegen_reference() for t in node.inputs)
-        if node.is_bool:
-            self.writeline(f"bool {node.sym} = {data}.item() ? 1 : 0;")
+        if config.aot_inductor.abi_compatible:
+            dtype = node.inputs[0].get_dtype()
+            dtype_str = str(dtype).split(".")[-1]
+            self.writeline(f"{DTYPE_TO_CPP[dtype]} {node.sym};")
+            self.writeline(f"aoti_torch_item_{dtype_str}({data}, &{node.sym});")
         else:
-            convert_type = DTYPE_TO_ATEN[node.inputs[0].get_dtype()].replace(
-                "at::k", "to"
-            )
-            self.writeline(f"auto {node.sym} = {data}.item().{convert_type}();")
+            if node.is_bool:
+                self.writeline(f"bool {node.sym} = {data}.item() ? 1 : 0;")
+            else:
+                convert_type = DTYPE_TO_ATEN[node.inputs[0].get_dtype()].replace(
+                    "at::k", "to"
+                )
+                self.writeline(f"auto {node.sym} = {data}.item().{convert_type}();")
 
     def can_stack_allocate_buffer(self, buffer):
         return (

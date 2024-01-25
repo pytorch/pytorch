@@ -377,6 +377,13 @@ def compile_fx_inner(
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
+    # check cudagraph disabling reasons from inductor lowering
+    if cudagraphs and compiled_graph.disabled_cudagraphs_reason:
+        perf_hint_log.warning(
+            "skipping cudagraphs due to %s", compiled_graph.disabled_cudagraphs_reason
+        )
+        BoxedBool.disable(cudagraphs)
+
     # Return the output strides to the caller via TracingContext
     context = torch._guards.TracingContext.try_get()
     if context is not None and context.output_strides is not None:
@@ -385,12 +392,6 @@ def compile_fx_inner(
 
     if aot_mode:
         return compiled_graph
-
-    if cudagraphs and compiled_graph.disabled_cudagraphs_reason:
-        perf_hint_log.warning(
-            "skipping cudagraphs due to %s", compiled_graph.disabled_cudagraphs_reason
-        )
-        BoxedBool.disable(cudagraphs)
 
     if cudagraphs:
         # output args are tuple of first argument
@@ -407,14 +408,13 @@ def compile_fx_inner(
             if isinstance(t, torch.Tensor)
         )
 
-        # doesnt work for non-trees because the warmup run would apply mutation twice
-        if config.triton.cudagraph_trees:
-            # checking if mutation is only on parameters/static inputs
-            has_mutation = not all(
-                idx < num_fixed for idx in compiled_graph.mutated_input_idxs
-            )
-        else:
-            has_mutation = len(compiled_graph.mutated_inputs) != 0
+        from torch._inductor.cudagraph_utils import check_for_mutation
+
+        has_mutation_str = check_for_mutation(gm, compiled_graph, num_fixed)
+        has_mutation = has_mutation_str is not None
+
+        if has_mutation:
+            compiled_graph.disabled_cudagraphs_reason = has_mutation_str
 
         cudagraph_tests = [
             (set(compiled_graph.device_types) == {"cuda"}, "non-cuda device in graph"),
@@ -485,9 +485,14 @@ def compile_fx_inner(
                 compiled_graph.current_callable = compiled_artifact
 
             if "cuda" in compiled_graph.device_types:
-                perf_hint_log.warning(
-                    "skipping cudagraphs due to %s", cudagraph_fail_reasons
-                )
+                # prefer better disable_cudagraphs_reason bc stack trace
+                # TODO: migrate all disable reasons to stack trace, refactor
+                if compiled_graph.disabled_cudagraphs_reason:
+                    perf_hint_log.warning(compiled_graph.disabled_cudagraphs_reason)
+                else:
+                    perf_hint_log.warning(
+                        "skipping cudagraphs due to %s", cudagraph_fail_reasons
+                    )
 
     # cudagraphs does its own aligning of inputs
     if not cudagraphs:
