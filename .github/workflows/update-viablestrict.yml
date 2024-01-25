@@ -13,18 +13,13 @@ jobs:
   do_update_viablestrict:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-20.04
-    # TODO: Remove the env once testing is done
-    environment: ${{ (github.event_name == 'schedule') && 'mergebot' || 'mergebot' }}
+    environment: ${{ (github.event_name == 'schedule') && 'mergebot' || '' }}
     steps:
       - name: Update viable/strict
-        # TODO: Switch back to main once https://github.com/pytorch/test-infra/pull/4905 lands
-        uses: pytorch/test-infra/.github/actions/update-viablestrict@add-update-viable-strict-gha
+        uses: pytorch/test-infra/.github/actions/update-viablestrict@main
         with:
           repository: pytorch/pytorch
           stable-branch: viable/strict
           requires: '[\"pull\", \"trunk\", \"lint\", \"linux-binary\"]'
           secret-bot-token: ${{ secrets.MERGEBOT_TOKEN }}
           rockset-api-key: ${{ secrets.ROCKSET_API_KEY }}
-          # TODO: Remove these once https://github.com/pytorch/test-infra/pull/4905 lands
-          test-infra-repository: pytorch/test-infra
-          test-infra-ref: add-update-viable-strict-gha
