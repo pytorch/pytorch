@@ -259,14 +259,23 @@ class NCCLComm {
       int numRanks,
       int rank,
       ncclUniqueId commId,
-      ncclConfig_t& config) {
+      ncclConfig_t& config,
+      bool eagerMode = false) {
     auto comm = std::make_shared<NCCLComm>();
     if (nccl_use_nonblocking()) {
       config.blocking = 0;
-      C10D_NCCL_CHECK_NONBLOCKING(
+      if (eagerMode) {
+        C10D_NCCL_CHECK_NONBLOCKING(
           ncclCommInitRankConfig(
               &(comm->ncclComm_), numRanks, commId, rank, &config),
           c10::nullopt);
+      } else {
+        C10D_NCCL_CHECK_TIMEOUT(
+           ncclCommInitRankConfig(
+              &(comm->ncclComm_), numRanks, commId, rank, &config),
+          comm->ncclComm_,
+          c10::nullopt);
+      }
     } else {
       C10D_NCCL_CHECK(
           ncclCommInitRankConfig(

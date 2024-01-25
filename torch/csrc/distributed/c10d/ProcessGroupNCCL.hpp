@@ -580,7 +580,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       const std::vector<at::Device>& devices,
       OpType opType,
       int p2pRank = 0,
-      bool isSendRecvSelf = false);
+      bool isSendRecvSelf = false,
+      bool eagerMode = false);
 
   // Wrapper method which can be overridden for tests.
   virtual std::exception_ptr checkForNCCLErrors(

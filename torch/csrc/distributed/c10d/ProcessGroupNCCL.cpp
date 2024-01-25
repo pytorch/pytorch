@@ -897,7 +897,7 @@ void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
   const auto key = getKeyFromDevices(rankDevices);
   LOG(INFO) << logPrefix() << "Eagerly connecting nccl backend with device "
             << device;
-  getNCCLComm(key, rankDevices, OpType::ALLREDUCE);
+  getNCCLComm(key, rankDevices, OpType::ALLREDUCE, 0, false, true);
 }
 
 void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
@@ -1812,7 +1812,8 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     const std::vector<at::Device>& devices,
     OpType opType,
     int p2pRank,
-    bool isSendRecvSelf) {
+    bool isSendRecvSelf,
+    bool eagerMode) {
   // Sanity check
   if (devicesKey.empty()) {
     C10_THROW_ERROR(
