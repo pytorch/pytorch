@@ -1374,15 +1374,15 @@ def pixel_shuffle(self: Tensor, upscale_factor: int):
             *batch,
             C_out,
             upscale_factor,
-            self.shape[-2],
             upscale_factor,
+            self.shape[-2],
             self.shape[-1],
         )
         .transpose(n + 1, n + 3)
         .transpose(n + 2, n + 3)
         .transpose(n + 3, n + 4)
         .reshape(*batch, C_out, *HW_out)
-        .clone(utils.suggest_memory_format(self))
+        .contiguous(memory_format=utils.suggest_memory_format(self))
     )
 
 
@@ -1398,16 +1398,16 @@ def pixel_unshuffle(self: Tensor, downscale_factor: int):
         self.view(
             *batch,
             self.shape[-3],
-            downscale_factor,
+            HW_out[0],
             downscale_factor,
             HW_out[1],
-            HW_out[0],
+            downscale_factor,
         )
         .transpose(n + 3, n + 4)
         .transpose(n + 2, n + 3)
         .transpose(n + 1, n + 3)
         .reshape(*batch, C_out, *HW_out)
-        .clone(utils.suggest_memory_format(self))
+        .contiguous(memory_format=utils.suggest_memory_format(self))
     )
 
 
