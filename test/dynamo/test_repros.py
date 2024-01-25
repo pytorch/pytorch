@@ -4067,6 +4067,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter[0], 12)
         self.assertEqual(cnt.frame_count, torch._dynamo.utils.ifdynstaticdefault(3, 2))
 
+    def test_invalid_seq_unpack(self):
+        def myfn(arg):
+            (a, b) = arg
+
+        def fn():
+            return myfn((1, 2, 3))
+
+        try:
+            torch.compile(fn)()
+        except ValueError:
+            pass
+        else:
+            assert False, "expected exception"
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

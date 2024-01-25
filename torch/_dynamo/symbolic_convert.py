@@ -1493,7 +1493,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             val = seq.unpack_var_sequence(self)
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
-        assert len(val) == inst.argval
+        if len(val) != inst.argval:
+            unimplemented(f"UNPACK_SEQUENCE length mismatch")
         for i in reversed(val):
             self.push(i)
 
