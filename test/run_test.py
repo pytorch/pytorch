@@ -1026,7 +1026,7 @@ def handle_log_file(
     test: ShardedTest, file_path: str, failed: bool, was_rerun: bool
 ) -> None:
     test = str(test)
-    with open(file_path, "r", errors="ignore") as f:
+    with open(file_path, errors="ignore") as f:
         full_text = f.read()
 
     new_file = "test/test-reports/" + sanitize_file_name(
