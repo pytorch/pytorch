@@ -63,7 +63,7 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
                 return x + y + 1
 
         model = ParamlessModule()
-        fully_shard(model, device=device)
+        fully_shard(model)
         x = torch.randn((3,))
         ys = (torch.randn((3,)), torch.randn((3,)))
         self.assertEqual(x.device, torch.device("cpu"))
@@ -81,13 +81,10 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
     def test_param_registration_after_forward(self):
         """Tests the parameter registration after forward."""
         device = torch.device("cuda", 0)
-        fully_shard_fn = functools.partial(fully_shard, device=device)
         # Single FSDP group
         for reshard_after_forward in (True, False, 2):
             model = MLP(8, device)
-            fully_shard_fn(
-                model, reshard_after_forward=reshard_after_forward
-            )  # root only
+            fully_shard(model, reshard_after_forward=reshard_after_forward)  # root only
             inp = torch.randn((2, 8), device="cuda")
             self._assert_dtensor_params(model.parameters())
             model(inp)  # root does not reshard after forward
@@ -98,9 +95,9 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
         # Multiple FSDP groups
         for reshard_after_forward in (True, False, 2):
             model = MLP(8, device)
-            fully_shard_fn(model.in_proj, reshard_after_forward=reshard_after_forward)
-            fully_shard_fn(model.out_proj, reshard_after_forward=reshard_after_forward)
-            fully_shard_fn(model, reshard_after_forward=reshard_after_forward)
+            fully_shard(model.in_proj, reshard_after_forward=reshard_after_forward)
+            fully_shard(model.out_proj, reshard_after_forward=reshard_after_forward)
+            fully_shard(model, reshard_after_forward=reshard_after_forward)
 
             self._assert_dtensor_params(model.parameters())
             model(inp)
@@ -126,7 +123,7 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
     def test_param_registration_after_backward(self):
         """Tests the parameter registration after backward."""
         device = torch.device("cuda", 0)
-        fully_shard_fn = functools.partial(fully_shard, device=device)
+        fully_shard_fn = functools.partial(fully_shard)
         # Single FSDP group
         for reshard_after_forward in (True, False, 2):
             model = MLP(8, device)
@@ -243,7 +240,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         fully_shard_fn = functools.partial(
             fully_shard,
-            device=device,
             reshard_after_forward=reshard_after_forward,
         )
         for mlp in model:
