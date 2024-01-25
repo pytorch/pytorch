@@ -1249,6 +1249,20 @@ class CommonTemplate:
         # Non-persistent reduction
         self.common(fn, (torch.rand(100, 4000),), check_lowp=not TEST_WITH_ROCM)
 
+    def test_cumsum_zero_dim(self):
+        def fn(x):
+            return x.cumsum(0), x.cumsum(-1)
+
+        a = torch.rand(())
+        self.common(fn, (a,))
+
+    def test_cumprod_zero_dim(self):
+        def fn(x):
+            return x.cumprod(0), x.cumprod(-1)
+
+        a = torch.rand(())
+        self.common(fn, (a,))
+
     def test_clamp(self):
         def fn(a, b):
             return (a.clamp(-0.1, 0.1), b.clamp(0), torch.clamp(a + b, max=0))
