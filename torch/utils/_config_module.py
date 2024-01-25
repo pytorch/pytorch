@@ -268,6 +268,37 @@ class ConfigModule(ModuleType):
 
         return ConfigPatch()
 
+    def _make_closure_patcher(self, **changes):
+        """
+        A lower-overhead version of patch() for things on the critical path.
+
+        Usage:
+
+            # do this off the critical path
+            change_fn = config.make_closure_patcher(foo=True)
+
+            ...
+
+            revert = change_fn()
+            try:
+              ...
+            finally:
+                revert()
+
+        """
+        config = self._config
+
+        def change():
+            prior = {k: config[k] for k in changes}
+            config.update(changes)
+
+            def revert():
+                config.update(prior)
+
+            return revert
+
+        return change
+
 
 class ContextDecorator(contextlib.ContextDecorator):
     """

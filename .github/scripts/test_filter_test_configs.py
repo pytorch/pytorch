@@ -662,14 +662,14 @@ class TestConfigFilter(TestCase):
             {
                 "labels": {},
                 "test_matrix": '{include: [{config: "default"}]}',
-                "job_name": "macos-12-py3-arm64 / test (default, 1, 3, macos-m1-12, unstable)",
+                "job_name": "macos-12-py3-arm64 / test (default, 1, 3, macos-m1-stable, unstable)",
                 "expected": "keep-going=False\nis-unstable=True\nreenabled-issues=\n",
                 "description": "Unstable job",
             },
             {
                 "labels": {},
                 "test_matrix": '{include: [{config: "default"}]}',
-                "job_name": "macos-12-py3-arm64 / test (default, 1, 3, macos-m1-12, unstable)",
+                "job_name": "macos-12-py3-arm64 / test (default, 1, 3, macos-m1-stable, unstable)",
                 "expected": "keep-going=False\nis-unstable=True\nreenabled-issues=\n",
                 "description": "Unstable job",
             },
