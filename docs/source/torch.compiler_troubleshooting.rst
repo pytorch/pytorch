@@ -171,9 +171,9 @@ As the message suggests you can set
 ``torch._dynamo.config.verbose=True`` to get a full stack trace to both
 the error in TorchDynamo and the user code. In addition to this flag,
 you can also set the ``log_level`` of TorchDynamo through
-``torch._dynamo.config.log_level``. These levels include:
+``torch._logging.set_logs(dynamo = logging.INFO)`` or ``TORCH_LOGS="dynamo"``. These levels include:
 
-- ``logging.DEBUG``: Print every instruction that is
+- ``logging.DEBUG`` or ``TORCH_LOGS="+dynamo"``: Print every instruction that is
   encountered in addition to all the log levels listed below.
 - ``logging.INFO``:
   Print each function that is compiled (original and modified bytecode)
