@@ -6,6 +6,7 @@ import inspect
 import operator
 import os
 import re
+import sys
 from itertools import chain, count
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
@@ -2789,7 +2790,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else:
                 return "true" if val else "false"
         elif isinstance(val, int):
-            return f"{val}L"
+            # uint64_t is long on Linux, but long long on MacOS
+            return f"{val}LL" if sys.platform == "darwin" else f"{val}L"
         elif isinstance(val, str):
             return f'"{val}"'
         elif isinstance(val, (ir.Buffer, ReinterpretView)):
