@@ -497,7 +497,6 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cuda_out(const Tensor& self, co
 }
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, bool train, double momentum, double epsilon) {
-  printf("ANDREW calling batch_norm_cuda\n");
   auto output = at::empty_like(self);
   int64_t n_input = self.size(1);
   auto options = self.options().dtype(
@@ -539,7 +538,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _new_batch_norm_with_update_cuda(
   auto rmean_c = running_mean.defined() ? running_mean.contiguous() : running_mean;
   auto rvar_c = running_var.defined() ? running_var.contiguous() : running_var;
 
-  printf("ANDREW in _new_batch_norm_with_update_cuda, use_cudnn = %d, use_miopen = %d\n", use_cudnn, use_miopen);
   if (use_cudnn) {
     auto input_c = input.contiguous(input.suggest_memory_format());
     std::tie(output, save_mean, save_var, reserve) =
@@ -585,7 +583,6 @@ std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_cuda(
   const Tensor& save_var = c10::value_or_else(save_var_opt, [] {return Tensor();});
   const bool use_cudnn = _use_cudnn(input, weight, dummy_bias, running_mean, running_var, update, eps, /*backward*/true);
   const bool use_miopen = _use_miopen(input, weight, dummy_bias, running_mean, running_var, update, /*backward*/true);
-  printf("ANDREW in _new_batch_norm_backward_cuda, use_cudnn = %d, use_miopen = %d\n", use_cudnn, use_miopen);
 
   if (use_cudnn) {
     return at::cudnn_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var, eps, reserve);
@@ -597,8 +594,6 @@ std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_cuda(
 }
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_out, const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_invstd_opt, bool train, double epsilon, std::array<bool,3> grad_input_mask) {
-  printf("ANDREW calling batch_norm_backward_cuda\n");
-
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight = at::borrow_from_optional_tensor(weight_opt);
   c10::MaybeOwned<Tensor> save_mean = at::borrow_from_optional_tensor(save_mean_opt);

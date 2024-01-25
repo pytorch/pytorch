@@ -1830,6 +1830,42 @@ def _native_batch_norm_legit_functional(
     return output, save_mean, save_rstd, new_running_mean, new_running_var
 
 
+@register_decomposition(aten._new_batch_norm_with_update.default)
+def _new_batch_norm_with_update(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Tensor,
+    running_var: Tensor,
+    momentum: float,
+    eps: float,
+    cudnn_enabled: bool,
+) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+    output, save_mean, save_rstd, _, _ = native_batch_norm_helper(
+        input, weight, bias, running_mean, running_var, True, momentum, eps, False,
+    )
+    # TODO: investigate correct size for reserve tensor, used only in cudnn
+    return output, save_mean, save_rstd, Tensor()
+
+
+@register_decomposition(aten._new_batch_norm_no_update.default)
+def _new_batch_norm_no_update(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Tensor,
+    running_var: Tensor,
+    momentum: float,
+    eps: float,
+    cudnn_enabled: bool,
+) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+    output, save_mean, save_rstd, _, _ = native_batch_norm_helper(
+        input, weight, bias, running_mean, running_var, False, momentum, eps, False,
+    )
+    # TODO: investigate correct size for reserve tensor, used only in cudnn
+    return output, save_mean, save_rstd, Tensor()
+
+
 @register_decomposition(aten._fused_dropout)
 @out_wrapper("out0", "out1")
 @pw_cast_for_opmath
@@ -3821,11 +3857,18 @@ def mv(self, vec):
 def binary_cross_entropy_with_logits(
     self, target, weight=None, pos_weight=None, reduction=Reduction.MEAN.value
 ):
+    max_val = (-self).clamp_min(0)
     if pos_weight is not None:
         log_weight = (pos_weight - 1) * target + 1
-        loss = (1 - target) * self - (log_weight * F.logsigmoid(self))
+        loss = (1 - target) * self + log_weight * (
+            ((-max_val).exp() + (-self - max_val).exp()).log() + max_val
+        )
     else:
-        loss = (1 - target) * self - F.logsigmoid(self)
+        loss = (
+            (1 - target) * self
+            + max_val
+            + ((-max_val).exp() + (-self - max_val).exp()).log()
+        )
 
     if weight is not None:
         loss = loss * weight

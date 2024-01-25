@@ -1,3 +1,4 @@
+import functools
 import inspect
 import logging
 
@@ -27,7 +28,9 @@ from ..guards import GuardBuilder
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
+    guard_if_dyn,
     has_torch_function,
+    hashable,
     product,
     proxy_args_kwargs,
 )
@@ -43,6 +46,21 @@ from .lists import ListVariable, TupleVariable
 from .torch_function import can_dispatch_torch_function, dispatch_torch_function
 
 log = logging.getLogger(__name__)
+
+supported_ctx_manager_classes = {
+    torch.profiler.profiler.profile,
+    torch.autograd.profiler.profile,
+    torch.autograd.profiler.record_function,
+    torch._C.DisableTorchFunctionSubclass,
+    torch._functorch.vmap.vmap_increment_nesting,
+    torch.amp.autocast_mode.autocast,
+    torch.autograd.grad_mode.enable_grad,
+    torch.autograd.grad_mode.inference_mode,
+    torch.autograd.grad_mode.no_grad,
+    torch.autograd.grad_mode.set_grad_enabled,
+    torch.cpu.amp.autocast_mode.autocast,
+    torch.cuda.amp.autocast_mode.autocast,
+}
 
 
 REWRITE_OPS_TO_TENSOR_SIZE_METHOD = [
@@ -137,10 +155,25 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
     def __repr__(self):
         return f"TorchCtxManagerClassVariable({self.value})"
 
+    @staticmethod
+    def is_matching_cls(value):
+        # Unwrap if it's a functools.lru_cache wrapper
+        if isinstance(value, functools._lru_cache_wrapper):
+            value = value.__wrapped__
+        # We can't do isinstance(value, type) check because some ctx managers
+        # are implemented as a function decorated by contextlib.contextmanager,
+        # E.g., torch._functorch.vmap.vmap_increment_nesting.
+        return hashable(value) and value in supported_ctx_manager_classes
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import GradModeVariable, InferenceModeVariable, StreamVariable
+        from . import (
+            GradModeVariable,
+            InferenceModeVariable,
+            StreamVariable,
+            VmapIncrementNestingCtxManagerVariable,
+        )
 
         if self.value is torch.no_grad:
             if len(args) == 1 and isinstance(
@@ -193,6 +226,12 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         elif self.value is torch._C.DisableTorchFunctionSubclass:
             assert not (args or kwargs)
             return TorchFunctionDisableVariable.create(tx)
+        elif self.value is torch._functorch.vmap.vmap_increment_nesting:
+            assert len(args) == 2
+            return VmapIncrementNestingCtxManagerVariable.create(
+                tx,
+                [guard_if_dyn(x) for x in args],
+            )
 
 
 class TorchInGraphFunctionVariable(BaseTorchVariable):
@@ -238,10 +277,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             ):
                 tx.mark_inconsistent_side_effects()
             return ConstantVariable.create(tracing_state_functions[self.value])
-        elif self.value in (
-            torch._functorch.vmap.vmap_impl,
-            torch._functorch.eager_transforms.grad_impl,
-        ):
+        elif self.value in (torch._functorch.eager_transforms.grad_impl,):
             return TorchHigherOrderOperatorVariable.make(
                 self.value,
                 source=self.source,

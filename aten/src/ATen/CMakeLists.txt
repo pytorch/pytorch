@@ -141,6 +141,7 @@ file(GLOB native_sparse_cuda_cpp "native/sparse/cuda/*.cpp")
 file(GLOB native_quantized_cuda_cu "native/quantized/cuda/*.cu")
 file(GLOB native_quantized_cuda_cpp "native/quantized/cuda/*.cpp")
 file(GLOB native_quantized_cudnn_cpp "native/quantized/cudnn/*.cpp")
+file(GLOB native_nested_h "native/nested/*.h")
 file(GLOB native_nested_cuda_cu "native/nested/cuda/*.cu")
 file(GLOB native_nested_cuda_cpp "native/nested/cuda/*.cpp")
 
@@ -585,7 +586,7 @@ configure_file(ATenConfig.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/AT
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
   DESTINATION "${AT_INSTALL_SHARE_DIR}/cmake/ATen")
 
-set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS})
+set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS} ${native_nested_h})
 if(NOT INTERN_BUILD_MOBILE)
   list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${cudnn_h} ${hip_h} ${xpu_h} ${mps_h} ${native_mps_h} ${native_utils_h} ${miopen_h})
   # Metal

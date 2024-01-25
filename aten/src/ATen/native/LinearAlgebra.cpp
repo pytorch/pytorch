@@ -1324,9 +1324,9 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 
 
 #if !defined(C10_MOBILE)
-#define _AT_DISPATCH_ADDMM_TYPES(TYPE, NAME, ...)    \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(      \
-            kBFloat16, kHalf, kFloat8_e5m2, kFloat8_e4m3fn, \
+#define _AT_DISPATCH_ADDMM_TYPES(TYPE, NAME, ...)                                               \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND6(                                                 \
+            kBFloat16, kHalf, kFloat8_e5m2, kFloat8_e4m3fn, kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, \
             TYPE, NAME, __VA_ARGS__)
 #else
 #define _AT_DISPATCH_ADDMM_TYPES(TYPE, NAME, ...)        \
@@ -1757,7 +1757,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
   };
 
   bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
-  if (apply_heur && use_mkldnn_lower_precision_matmul(batch1, batch2, self_or_result)) {
+  if (apply_heur && use_mkldnn_matmul(batch1, batch2, self_or_result)) {
     try {
       mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
       return;
