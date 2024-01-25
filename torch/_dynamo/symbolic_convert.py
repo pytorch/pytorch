@@ -92,10 +92,10 @@ from .variables.ctx_manager import (
 from .variables.dicts import ConstDictVariable, SetVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
+    FunctoolsPartialVariable,
     NestedUserFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
-    FunctoolsPartialVariable,
 )
 from .variables.lists import (
     BaseListVariable,
@@ -727,26 +727,30 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 next_fn = func.__closure__[0].cell_contents
                 assert_in_chain(next_fn, idx[1:])
 
-
             cg = PyCodegen(self)
             loaded = []
+
             def _load(fn_name):
                 if fn_name == root_fn_name:
                     return
                 elif fn_name in closure_chain[root_fn_name]:
-                    new_resume.append(
-                        create_instruction("LOAD_DEREF", argval=fn_name)
-                    )
-                elif fn_name in self.symbolic_locals:
+                    new_resume.append(create_instruction("LOAD_DEREF", argval=fn_name))
+                elif fn_name in self.symbolic_locals and fn_name not in loaded:
                     var = self.symbolic_locals[fn_name]
                     inner_cg = PyCodegen(self)
+                    inner_cg._output = []
                     if isinstance(var, (FunctoolsPartialVariable)):
                         out = var.reconstruct(inner_cg)
                         new_resume.extend(inner_cg._output)
                         new_resume.extend(out)
+                        inner_cg._output = []
+                        loaded.append(fn_name)
                     elif isinstance(var, (NestedUserFunctionVariable)):
                         var.reconstruct(inner_cg)
                         new_resume.extend(inner_cg._output)
+                        inner_cg._output = []
+                        loaded.append(fn_name)
+                        # new_resume.append(create_instruction("STORE_FAST", argval=fn_name))
                         # new_resume.extend(out)
 
             for inst in resume_at:
@@ -764,7 +768,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                         if inst.argval in self.symbolic_locals:
                             var = self.symbolic_locals[inst.argval]
                             inner_cg = PyCodegen(self)
-                            if isinstance(var, (FunctoolsPartialVariable, NestedUserFunctionVariable)):
+                            inner_cg._output = []
+                            if isinstance(var, (FunctoolsPartialVariable)):
                                 out = var.reconstruct(inner_cg)
                                 new_resume.extend(inner_cg._output)
                                 new_resume.extend(out)

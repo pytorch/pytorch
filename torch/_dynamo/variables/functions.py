@@ -645,6 +645,7 @@ class FunctoolsPartialVariable(VariableTracker):
                 *[get_val(arg) for arg in self.args],
                 **{k: get_val(v) for k, v in self.keywords.items()},
             )
+
     def reconstruct(self, codegen):
         codegen.load_import_from("functools", "partial")
         codegen(self.func)

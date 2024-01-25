@@ -1,4 +1,3 @@
-import depyf
 import torch
 import torch._dynamo
 
@@ -36,5 +35,5 @@ def foo():
     assert torch.equal(eager, compiled)
 
 
-with depyf.prepare_debug("./dump_src_dir"):
-    foo()
+# with depyf.prepare_debug("./dump_src_dir"):
+foo()
