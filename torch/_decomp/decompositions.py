@@ -1842,7 +1842,15 @@ def _new_batch_norm_with_update(
     cudnn_enabled: bool,
 ) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
     output, save_mean, save_rstd, _, _ = native_batch_norm_helper(
-        input, weight, bias, running_mean, running_var, True, momentum, eps, False,
+        input,
+        weight,
+        bias,
+        running_mean,
+        running_var,
+        True,  # training
+        momentum,
+        eps,
+        False,  # functional
     )
     # TODO: investigate correct size for reserve tensor, used only in cudnn
     return output, save_mean, save_rstd, Tensor()
@@ -1860,7 +1868,15 @@ def _new_batch_norm_no_update(
     cudnn_enabled: bool,
 ) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
     output, save_mean, save_rstd, _, _ = native_batch_norm_helper(
-        input, weight, bias, running_mean, running_var, False, momentum, eps, False,
+        input,
+        weight,
+        bias,
+        running_mean,
+        running_var,
+        False,  # training
+        momentum,
+        eps,
+        False,  # functional
     )
     # TODO: investigate correct size for reserve tensor, used only in cudnn
     return output, save_mean, save_rstd, Tensor()
