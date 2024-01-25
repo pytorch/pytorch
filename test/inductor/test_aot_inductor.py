@@ -206,7 +206,7 @@ class AOTInductorTestsTemplate:
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
             self.check_model(Model(self.device), example_inputs)
 
-    @requires_cuda()
+    @requires_cuda
     def test_multi_device(self):
         class Model(torch.nn.Module):
             def forward(self, x):
