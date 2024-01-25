@@ -1,6 +1,8 @@
 # Owner(s): ["module: dynamo"]
 import enum
 import functools
+
+import weakref
 from collections import OrderedDict
 
 import torch
@@ -21,6 +23,10 @@ global_pair = {
     "x": torch.randn(4),
     "y": 1,
 }
+
+
+x = torch.tensor(4)
+weakref_x = weakref.ref(x)
 
 
 def equals_match(x, expected):
@@ -644,6 +650,18 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         foo.__kwdefaults__["c"] = 1
         self.assertFalse(guard_manager.check(foo))
 
+    def test_tuple_iterator_getitem(self):
+        a = (1, 1, 3, 4, 5, 6)
+        foo = iter(a)
+        next(foo)  # foo points at index=1
+
+        guard_manager = RootGuardManager()
+        guard_manager.tuple_iterator_getitem_manager(2).add_equals_match_guard(
+            a[3], "x==4"
+        )
+
+        self.assertTrue(guard_manager.check(foo))
+
     def test_iter(self):
         a = (1, 1, 3, 4, 5, 6)
         foo = iter(a)
@@ -692,6 +710,21 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(guard_manager.check(iter((1, 1, 1, 1))))
         self.assertFalse(guard_manager.check(iter((1,))))
         self.assertFalse(guard_manager.check("foo"))
+
+    def test_global_weakref(self):
+        guard_manager = RootGuardManager()
+        weakref_manager = guard_manager.globals_dict_manager(
+            globals()
+        ).global_weakref_manager("weakref_x")
+        weakref_manager.add_lambda_guard(
+            lambda x: isinstance(x, torch.Tensor),
+            "global weakref fail",
+        )
+
+        self.assertTrue(guard_manager.check(None))
+        global x
+        del x
+        self.assertFalse(guard_manager.check(None))
 
 
 if __name__ == "__main__":
