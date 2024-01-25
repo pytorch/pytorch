@@ -45,6 +45,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
+from torch.utils._traceback import CapturedTraceback
 
 from ..fx import GraphModule
 from .backends.registry import CompilerFn, lookup_backend
@@ -303,6 +304,14 @@ def enable_dynamic(enable: Optional[bool] = None, export: bool = False):
             yield
 
 
+class DynamoTLS(threading.local):
+    eval_frame_stack: Optional[CapturedTraceback] = None
+    context_init_stack: Optional[CapturedTraceback] = None
+
+
+tls = DynamoTLS()
+
+
 class _TorchDynamoContext:
     def __init__(
         self,
@@ -329,6 +338,7 @@ class _TorchDynamoContext:
         self.set_backend_cache = backend_cache_manager(self.callback)
         self.cleanup_fns: List[Callable[[], Any]] = []
         patch_fn()
+        self.stack = CapturedTraceback.extract()
 
     def __enter__(self):
         if config.raise_on_ctx_manager_usage:
@@ -339,6 +349,8 @@ class _TorchDynamoContext:
             )
         self.on_enter()
         self.prior = set_eval_frame(self.callback)
+        tls.eval_frame_stack = CapturedTraceback.extract()
+        tls.context_init_stack = self.stack
         self.cleanup_fns.append(self.set_backend_cache())
         self.backend_ctx = self.extra_ctx_ctor()
         self.backend_ctx.__enter__()
@@ -348,6 +360,8 @@ class _TorchDynamoContext:
     def __exit__(self, exc_type, exc_val, exc_tb):
         assert self.prior is not unset
         set_eval_frame(self.prior)
+        tls.eval_frame_stack = CapturedTraceback.extract()
+        tls.context_init_stack = self.stack
         self.prior = unset
         # TODO: This is totally not the right way to chain contexts manually
         self.dynamic_ctx.__exit__(exc_type, exc_val, exc_tb)
@@ -428,6 +442,8 @@ class _TorchDynamoContext:
 
             on_enter()
             prior = set_eval_frame(callback)
+            tls.eval_frame_stack = CapturedTraceback.extract()
+            tls.context_init_stack = self.stack
             cleanups = (self.set_backend_cache(),)
             backend_ctx = backend_ctx_ctor()
             backend_ctx.__enter__()
@@ -437,6 +453,8 @@ class _TorchDynamoContext:
                 return fn(*args, **kwargs)
             finally:
                 set_eval_frame(prior)
+                tls.eval_frame_stack = CapturedTraceback.extract()
+                tls.context_init_stack = self.stack
                 dynamic_ctx.__exit__(None, None, None)
                 backend_ctx.__exit__(None, None, None)
                 for cleanup in cleanups:
