@@ -807,8 +807,7 @@ def replay(filename):
             hooks=Hooks(),
             cache_size=CacheSizeRelevantForFrame(0, 0),
             frame=None,
+            frame_state={},
         )
-    except Exception:
-        pass
     finally:
         config.replay_record_enabled = original_replay_val
