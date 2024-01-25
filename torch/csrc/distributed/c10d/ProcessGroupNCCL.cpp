@@ -1697,7 +1697,10 @@ std::exception_ptr ProcessGroupNCCL::checkForNCCLErrorsInternal(
               *commFailureReason)));
     }
     ncclResult_t ncclAsyncErr = ncclComm->checkForNcclError();
-    if (ncclAsyncErr != ncclSuccess) {
+    // When nonblocking mode is enabled by TORCH_NCCL_USE_COMM_NONBLOCKING,
+    // ncclInProgress could be returned when there are pending NCCL calls.
+    // In this case, no exception should be thrown
+    if (ncclAsyncErr != ncclSuccess && ncclAsyncErr != ncclInProgress) {
       return std::make_exception_ptr(C10_BUILD_ERROR(
           DistBackendError,
           "NCCL error: " + ncclGetErrorWithVersion(ncclAsyncErr) + "\n" +
