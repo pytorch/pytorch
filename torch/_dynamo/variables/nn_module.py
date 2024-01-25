@@ -413,12 +413,14 @@ class NNModuleVariable(VariableTracker):
 
                 # Create VariableTrackers for this module's named_parameters and named_buffers.
                 self_params_as_vt = []
-                for name in params_spec.context:
-                    self_params_as_vt.append(
-                        BuiltinVariable(getattr).call_function(
-                            tx, [self, ConstantVariable.create(name)], {}
+                for full_name in params_spec.context:
+                    current_obj = self
+                    # handle the multi level named_parameter like `mod.y.z`
+                    for name in full_name.split("."):
+                        current_obj = BuiltinVariable(getattr).call_function(
+                            tx, [current_obj, ConstantVariable.create(name)], {}
                         )
-                    )
+                    self_params_as_vt.append(current_obj)
 
                 # stich the args togther and pass it to decompose_and_inline_function_with_makefx
                 complete_tensor_variable_args = self_params_as_vt + args

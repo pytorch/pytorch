@@ -5,6 +5,7 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch.fx import Interpreter
 from torch.nn.utils import stateless
+from .constant import ConstantVariable
 
 
 def dummy_user_function_to_inline_gm(gm, args):
@@ -109,8 +110,14 @@ def decompose_and_inline_function_with_makefx(tx, fn, args, kwargs):
         mutable_local=MutableLocal(),
     )
 
+    # kwarg's key needs to be turn into VariableTracker before passing
+    # to ConstDictVariable.
+    updated_kwargs = {}
+    for k, v in kwargs.items():
+        updated_kwargs[ConstantVariable.create(k)] = v
+
     input_kwargs_variable = ConstDictVariable(
-        kwargs,
+        updated_kwargs,
         dict,
         mutable_local=MutableLocal(),
     )
