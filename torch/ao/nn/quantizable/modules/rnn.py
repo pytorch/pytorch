@@ -325,7 +325,7 @@ class LSTM(torch.nn.Module):
                              self.bias, batch_first=False,
                              bidirectional=self.bidirectional, **factory_kwargs)]
         for layer in range(1, num_layers):
-            layers.append(_LSTMLayer(self.hidden_size *num_directions, 
+            layers.append(_LSTMLayer(self.hidden_size *num_directions,
                                      self.hidden_size,
                                      self.bias, batch_first=False,
                                      bidirectional=self.bidirectional,
