@@ -3620,18 +3620,23 @@ class TestNestedTensorSubclass(TestCase):
         transposed = nt.transpose(1, 2)
         self.assertFalse(transposed.is_contiguous())
         clone = transposed.clone()
+
+        def check_nt_equality(x, y):
+            self.assertEqual(x.values(), y.values())
+            self.assertEqual(x.offsets(), y.offsets())
+            self.assertEqual(x._ragged_idx, y._ragged_idx)
+            self.assertEqual(x.shape, y.shape)
+
         self.assertFalse(clone.is_contiguous())
-        self.assertEqual(clone.values(), transposed.values())
-        self.assertEqual(clone.offsets(), transposed.offsets())
-        self.assertEqual(clone._ragged_idx, transposed._ragged_idx)
-        self.assertEqual(clone.shape, transposed.shape)
+        check_nt_equality(clone, transposed)
 
         clone_contig = transposed.clone(memory_format=torch.contiguous_format)
         self.assertTrue(clone_contig.is_contiguous())
-        self.assertEqual(clone_contig.values(), transposed.values())
-        self.assertEqual(clone_contig.offsets(), transposed.offsets())
-        self.assertEqual(clone_contig._ragged_idx, transposed._ragged_idx)
-        self.assertEqual(clone_contig.shape, transposed.shape)
+        check_nt_equality(clone_contig, transposed)
+
+        detached = transposed.detach()
+        self.assertFalse(clone.is_contiguous())
+        check_nt_equality(detached, transposed)
 
     # Note 1: Math fallback doesn't work with bfloat16 on CUDA
     # Note 2: ROCm doesn't support flash attention or mem_efficient attention for NT
