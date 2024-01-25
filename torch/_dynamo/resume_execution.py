@@ -378,9 +378,7 @@ class ContinueExecutionCache:
                     ] = f"{module_name}.resume_in_{co_name}_at_{lineno}"
             code_options["co_firstlineno"] = lineno
             code_options["co_cellvars"] = tuple()
-            print(f"pre: {id(code_options)} -> {code_options['co_freevars']}")
             code_options["co_freevars"] = freevars
-            print(f"post: {id(code_options)} -> {code_options['co_freevars']}")
             code_options["co_argcount"] = len(args)
             code_options["co_posonlyargcount"] = 0
             code_options["co_kwonlyargcount"] = 0

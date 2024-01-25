@@ -1042,10 +1042,7 @@ def _transform_code_object(code, transformations, safe=False) -> types.CodeType:
     instructions = cleaned_instructions(code, safe)
     propagate_line_nums(instructions)
 
-    print(f"pre transform: {id(code_options)} -> {code_options['co_freevars']}")
     transformations(instructions, code_options)
-    print("transformations:", transformations)
-    print(f"post transform: {id(code_options)} -> {code_options['co_freevars']}")
     return clean_and_assemble_instructions(instructions, keys, code_options)
 
 

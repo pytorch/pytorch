@@ -95,6 +95,7 @@ from .variables.functions import (
     NestedUserFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
+    FunctoolsPartialVariable,
 )
 from .variables.lists import (
     BaseListVariable,
@@ -716,6 +717,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             root_fn_name = self.code_options["co_name"]
             closure_chain[root_fn_name] = self.code_options["co_freevars"]
             chain_paths = invert_dict_with_transitive_relationships(closure_chain)
+
             new_resume = []
 
             def assert_in_chain(func, idx):
@@ -725,49 +727,61 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 next_fn = func.__closure__[0].cell_contents
                 assert_in_chain(next_fn, idx[1:])
 
+
             cg = PyCodegen(self)
+            loaded = []
+            def _load(fn_name):
+                if fn_name == root_fn_name:
+                    return
+                elif fn_name in closure_chain[root_fn_name]:
+                    new_resume.append(
+                        create_instruction("LOAD_DEREF", argval=fn_name)
+                    )
+                elif fn_name in self.symbolic_locals:
+                    var = self.symbolic_locals[fn_name]
+                    inner_cg = PyCodegen(self)
+                    if isinstance(var, (FunctoolsPartialVariable)):
+                        out = var.reconstruct(inner_cg)
+                        new_resume.extend(inner_cg._output)
+                        new_resume.extend(out)
+                    elif isinstance(var, (NestedUserFunctionVariable)):
+                        var.reconstruct(inner_cg)
+                        new_resume.extend(inner_cg._output)
+                        # new_resume.extend(out)
+
             for inst in resume_at:
-                if inst.opname == "LOAD_DEREF":
-                    breakpoint()
                 if inst.opname == "LOAD_CLOSURE":
                     assert inst.argval in chain_paths
                     chain = chain_paths[inst.argval]
-                    # breakpoint()
+                    reverse_chain = list(reversed(chain))
                     if self.f_funcobj:
                         # 3.11 +
                         assert_in_chain(self.f_funcobj, chain)
                     if inst.argval in closure_chain[root_fn_name]:
                         # Top level, already present in closures
                         new_resume.append(inst)
-                    else:
-                        reverse_chain = list(reversed(chain))
+                    elif inst.argval in self.code_options["co_cellvars"]:
+                        if inst.argval in self.symbolic_locals:
+                            var = self.symbolic_locals[inst.argval]
+                            inner_cg = PyCodegen(self)
+                            if isinstance(var, (FunctoolsPartialVariable, NestedUserFunctionVariable)):
+                                out = var.reconstruct(inner_cg)
+                                new_resume.extend(inner_cg._output)
+                                new_resume.extend(out)
+                                continue
                         for fn_name in reverse_chain:
-                            if fn_name == root_fn_name:
-                                continue
-                            elif fn_name in closure_chain[root_fn_name]:
-                                new_resume.append(
-                                    create_instruction("LOAD_DEREF", argval=fn_name)
-                                )
-                                continue
-                            else:
-                                # This is wrong?
-                                new_resume.append(
-                                    create_instruction(
-                                        "LOAD_FAST",
-                                        argval=fn_name,
-                                    )
-                                )
+                            _load(fn_name)
+                        new_resume.append(inst)
+                    else:
+                        for fn_name in reverse_chain:
+                            _load(fn_name)
                         new_resume.extend(cg.create_load_attrs("__closure__"))
                         new_resume.append(cg.create_load_const(0))
                         new_resume.append(create_instruction("BINARY_SUBSCR"))
                         new_resume.extend(cg.create_load_attrs("cell_contents"))
                 else:
                     new_resume.append(inst)
-            print("Func:", cg.code_options["co_name"])
-            print(f"cg: {id(cg.code_options)} -> {cg.code_options['co_freevars']}")
-            print(
-                f"self: {id(self.code_options)} -> {self.code_options['co_freevars']}"
-            )
+
             self.output.add_output_instructions(new_resume)
 
             raise NestedGraphBreak()
@@ -1521,30 +1535,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             new_code.co_firstlineno,
             new_code,
         )
-
-        # cg.code_options["co_freevars"] = self.cell_and_freevars()
-        # self.output.code_options["co_freevars"] = self.cell_and_freevars()
-        print(
-            """
-Free vars? {}
-    self.f_code.co_name: {}
-    self.output.code_options['co_freevars']: {}
-    self.code_options['co_freevars']: {}
-    new_code.co_freevars: {}
-    cg.code_options['co_freevars']: {}
-    self.cell_and_freevars(): {}
-    """.format(
-                id(self),
-                self.f_code.co_name,
-                self.output.code_options["co_freevars"],
-                self.code_options["co_freevars"],
-                new_code.co_freevars,
-                cg.code_options["co_freevars"],
-                self.cell_and_freevars(),
-            )
-        )
-
-        # breakpoint()
 
         # Add original GraphModule context to the resume function to handle
         # the case of a graph break while tracing a GraphModule
