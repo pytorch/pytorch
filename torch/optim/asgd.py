@@ -313,12 +313,11 @@ def _multi_tensor_asgd(
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, axs, mus, etas, state_steps])
     for ((device, _), ((grouped_params, grouped_grads, grouped_axs, grouped_mus,
          grouped_etas, grouped_state_steps), _)) in grouped_tensors.items():
-        if maximize:
-            grouped_grads = torch._foreach_neg(grouped_grads)
-
-        grouped_grads = list(grouped_grads)
         if has_complex:
             _view_as_real(grouped_params, grouped_grads, grouped_axs)
+
+        if maximize:
+            grouped_grads = torch._foreach_neg(grouped_grads)
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over

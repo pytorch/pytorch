@@ -40,7 +40,7 @@ class TestKernelBenchmark(TestCase):
         self.assertTrue(compiled_module is not None)
         return compiled_module
 
-    def verify_compiled_kernels(self, GB_count=1, check_grid=False):
+    def verify_compiled_kernels(self, GB_count=1):
         compiled_module = self.get_compiled_module()
 
         # now run the compiled module in subprocess and check its output
@@ -55,15 +55,6 @@ class TestKernelBenchmark(TestCase):
             GB_count,
             exactly=1,
         ).run(bench_out)
-        # make sure we correctly generate the grid info
-        if check_grid:
-            with open(compiled_module.__file__) as f:
-                source_code = f.read()
-            FileCheck().check_count(
-                "grid=(608, 1, 1)",
-                2,
-                exactly=1,
-            ).run(source_code)
 
     def test_pw_kernel_benchmark(self):
         @torch.compile
@@ -107,7 +98,24 @@ class TestKernelBenchmark(TestCase):
             return c
 
         f(a, b)
-        self.verify_compiled_kernels(GB_count=3, check_grid=True)
+        self.verify_compiled_kernels(GB_count=3)
+
+        # make sure we correctly generate the grid info
+        compiled_module = self.get_compiled_module()
+        with open(compiled_module.__file__) as f:
+            source_code = f.read()
+        lines = source_code.split("\n")
+        meta = [l for l in lines if "meta0 = {" in l]
+        scope = {}
+        from torch._inductor.kernel.mm_common import mm_grid
+
+        exec(meta[0], scope)
+        grid = mm_grid(M, N, scope["meta0"])
+        FileCheck().check_count(
+            f"grid={grid}",
+            2,
+            exactly=1,
+        ).run(source_code)
 
     def test_bandwidth_computation(self):
         """

@@ -3394,7 +3394,7 @@ class TritonScheduling(BaseScheduling):
             node_schedule = [template_node, *epilogue_nodes]
 
             if config.benchmark_kernel:
-                grid_args = [V.graph.sizevars.size_hint(s) for s in kernel.call_sizes]
+                grid_args = V.graph.sizevars.size_hints(kernel.call_sizes)
                 assert kernel.meta is not None, "meta is None"
                 grid = kernel.grid_fn(*grid_args, kernel.meta)
                 src_code = (
