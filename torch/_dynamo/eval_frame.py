@@ -96,55 +96,74 @@ guarded_backend_cache = threading.local()
 cached_backends: Dict[int, CompilerFn] = {}
 
 
-def _maybe_init_guarded_backend_cache():
-    if not hasattr(guarded_backend_cache, "skip_backend_check_for_run_only_mode"):
+def check_current_backend(backend_obj_id: int):
+    """
+    Called from guards to check if we need to recompile due to a backend change
+    """
+    # TODO(jansel): we should move guarded_backend_cache to C++
+    try:
+        if guarded_backend_cache.skip_backend_check_for_run_only_mode:
+            return True
+    except AttributeError:
+        # Go slightly faster next time
         guarded_backend_cache.skip_backend_check_for_run_only_mode = False
-    if not hasattr(guarded_backend_cache, "current_backend"):
-        guarded_backend_cache.current_backend = None
+    try:
+        current_backend = guarded_backend_cache.current_backend
+    except AttributeError:
+        current_backend = None
+    return (
+        # Avoid the dict lookup in case of exact same object
+        id(current_backend) == backend_obj_id
+        or current_backend == cached_backends.get(backend_obj_id, None)
+    )
 
 
 def _reset_guarded_backend_cache():
     global cached_backends
-    _maybe_init_guarded_backend_cache()
     guarded_backend_cache.skip_backend_check_for_run_only_mode = False
     guarded_backend_cache.current_backend = None
     for backend in cached_backends.values():
         if hasattr(backend, "reset"):
             backend.reset()
     cached_backends.clear()
-    cached_backends = {}
 
 
-@contextlib.contextmanager
-def backend_cache_wrapper(callback: DynamoCallback):
-    _maybe_init_guarded_backend_cache()
-
+def backend_cache_manager(callback: DynamoCallback):
     # callback is False for RunOnlyContext. RunOnlyContext is used
     # as a way to re-use the previous compiled cache.
     # We therefore skip the check and re-use whatever code that's already cached.
     # Note: the cache that's actually used depends on the caching policy.
     if callback is False:
-        try:
-            prev_skip = guarded_backend_cache.skip_backend_check_for_run_only_mode
+
+        def change():
+            try:
+                prev_skip = guarded_backend_cache.skip_backend_check_for_run_only_mode
+            except AttributeError:
+                prev_skip = False
             guarded_backend_cache.skip_backend_check_for_run_only_mode = True
-            yield None
-        finally:
-            guarded_backend_cache.skip_backend_check_for_run_only_mode = prev_skip
+
+            def revert():
+                guarded_backend_cache.skip_backend_check_for_run_only_mode = prev_skip
+
+            return revert
+
     else:
         backend = innermost_fn(callback)
 
-        def _set_current_backend(backend: CompilerFn):
-            prev_backend = guarded_backend_cache.current_backend
+        def change():
+            cached_backends.setdefault(id(backend), backend)
+            try:
+                prev_backend = guarded_backend_cache.current_backend
+            except AttributeError:
+                prev_backend = None
             guarded_backend_cache.current_backend = backend
-            # Mapping id of a CompilerFn to itself
-            cached_backends[id(backend)] = backend
-            return prev_backend
 
-        prev_backend = _set_current_backend(backend)
-        try:
-            yield backend
-        finally:
-            _set_current_backend(prev_backend)
+            def revert():
+                guarded_backend_cache.current_backend = prev_backend
+
+            return revert
+
+    return change
 
 
 DONT_WRAP_FILES = {
@@ -269,19 +288,15 @@ def innermost_fn(fn):
     return unaltered_fn
 
 
-@contextlib.contextmanager
-def enable_dynamic(enable: Optional[bool] = None, export: bool = False):
-    if enable is None:
-        yield
-    elif enable:
+def make_set_enable_dynamic(enable: bool):
+    assert isinstance(enable, bool)
+    if enable:
         # Assume everything is dynamic by default
-        with config.patch(assume_static_by_default=False):
-            yield
+        return config._make_closure_patcher(assume_static_by_default=False)
     else:
-        with config.patch(
+        return config._make_closure_patcher(
             automatic_dynamic_shapes=False, assume_static_by_default=True
-        ):
-            yield
+        )
 
 
 class _TorchDynamoContext:
@@ -301,13 +316,32 @@ class _TorchDynamoContext:
         assert callable(callback) or callback is False or callback is None
         self.callback: DynamoCallback = callback
         self.prior: Union[Unset, DynamoCallback] = unset
-        self.on_enter = on_enter
-        self.extra_ctx_ctor = backend_ctx_ctor
         self.first_ctx = first_ctx
         self.export = export
-        self.dynamic = dynamic
         self.compiler_config = compiler_config
+        self.cleanup_fns: List[Callable[[], Any]] = []
+        self.enter_exit_hooks = [backend_cache_manager(self.callback)]
         patch_fn()
+
+        if dynamic is not None:
+            self.enter_exit_hooks.append(make_set_enable_dynamic(dynamic))
+
+        if on_enter is not nothing:
+            # this case is not common
+            def call_on_enter():
+                on_enter()
+                return nothing
+
+            self.enter_exit_hooks.append(call_on_enter)
+
+        if backend_ctx_ctor is not contextlib.nullcontext:
+            # this case is not common
+            def call_backend_ctx():
+                ctx = backend_ctx_ctor()
+                ctx.__enter__()
+                return functools.partial(ctx.__exit__, None, None, None)
+
+            self.enter_exit_hooks.append(call_backend_ctx)
 
     def __enter__(self):
         if config.raise_on_ctx_manager_usage:
@@ -316,23 +350,16 @@ class _TorchDynamoContext:
                 "Please refer to https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html "
                 "to use torch._dynamo.optimize(...) as an annotation/decorator. "
             )
-        self.on_enter()
+        self.cleanup_fns = [enter() for enter in self.enter_exit_hooks]
         self.prior = set_eval_frame(self.callback)
-        self.backend_cache_manager = backend_cache_wrapper(self.callback)
-        self.backend_cache_manager.__enter__()
-        self.backend_ctx = self.extra_ctx_ctor()
-        self.backend_ctx.__enter__()
-        self.dynamic_ctx = enable_dynamic(self.dynamic, self.export)
-        self.dynamic_ctx.__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         assert self.prior is not unset
         set_eval_frame(self.prior)
         self.prior = unset
-        # TODO: This is totally not the right way to chain contexts manually
-        self.dynamic_ctx.__exit__(exc_type, exc_val, exc_tb)
-        self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
-        self.backend_cache_manager.__exit__(exc_type, exc_val, exc_tb)
+        for cleanup in self.cleanup_fns:
+            cleanup()
+        self.cleanup_fns.clear()
 
     def __call__(self, fn):
         # public api for compiler config/options
@@ -379,14 +406,11 @@ class _TorchDynamoContext:
             fn = external_utils.wrap_inline(fn)
 
         callback = self.callback
-        on_enter = self.on_enter
-        backend_ctx_ctor = self.extra_ctx_ctor
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
-            if (
-                not isinstance(self, DisableContext)
-                and torch.fx._symbolic_trace.is_fx_tracing()
+            if torch.fx._symbolic_trace.is_fx_tracing() and not isinstance(
+                self, DisableContext
             ):
                 if config.error_on_nested_fx_trace:
                     raise RuntimeError(
@@ -405,21 +429,14 @@ class _TorchDynamoContext:
                 else:
                     return fn(*args, **kwargs)
 
-            on_enter()
+            cleanups = [enter() for enter in self.enter_exit_hooks]
             prior = set_eval_frame(callback)
-            backend_cache_manager = backend_cache_wrapper(self.callback)
-            backend_cache_manager.__enter__()
-            backend_ctx = backend_ctx_ctor()
-            backend_ctx.__enter__()
-            dynamic_ctx = enable_dynamic(self.dynamic, self.export)
-            dynamic_ctx.__enter__()
             try:
                 return fn(*args, **kwargs)
             finally:
                 set_eval_frame(prior)
-                dynamic_ctx.__exit__(None, None, None)
-                backend_ctx.__exit__(None, None, None)
-                backend_cache_manager.__exit__(None, None, None)
+                for cleanup in cleanups:
+                    cleanup()
 
         # hooks to properly handle inlining
         if isinstance(self, DisableContext):
@@ -1534,18 +1551,6 @@ class TorchPatcher:
 
             if hasattr(opt, "_init_group"):
                 opt._init_group = disable(opt._init_group)
-
-            # disable any currently set hooks
-            # Note: we only want to disable the profiling hook
-            # which is the *last* hook applied, we want to keep the no_grad hook
-            hooked = getattr(opt.step, "hooked", False)
-            if hooked:
-                unwrapped_step = getattr(opt.step, "__wrapped__", None)
-                if unwrapped_step:
-                    opt.step = unwrapped_step
-
-            # disable future hooking
-            opt.step.hooked = True  # type: ignore[attr-defined]
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):
