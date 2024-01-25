@@ -20,61 +20,16 @@ from torch._dynamo.skipfiles import (
 from torch._dynamo.trace_rules import (
     load_object,
     torch_c_binding_in_graph_functions,
-    torch_ctx_manager_classes,
     torch_non_c_binding_in_graph_functions,
 )
 from torch._dynamo.utils import hashable, is_safe_constant, istype
-from torch._dynamo.variables import (
-    TorchCtxManagerClassVariable,
-    TorchInGraphFunctionVariable,
-)
+from torch._dynamo.variables import TorchInGraphFunctionVariable
 
 try:
     from .utils import create_dummy_module_and_function
 except ImportError:
     from utils import create_dummy_module_and_function
 
-
-ignored_ctx_manager_class_names = {
-    "torch.ExcludeDispatchKeyGuard",
-    "torch._C.DisableTorchFunction",
-    "torch._C._AutoDispatchBelowAutograd",
-    "torch._C._DisableAutocast",
-    "torch._C._DisableFuncTorch",
-    "torch._C._DisablePythonDispatcher",
-    "torch._C._DisableTorchDispatch",
-    "torch._C._EnablePreDispatch",
-    "torch._C._EnablePythonDispatcher",
-    "torch._C._EnableTorchFunction",
-    "torch._C._ExcludeDispatchKeyGuard",
-    "torch._C._ForceDispatchKeyGuard",
-    "torch._C._IncludeDispatchKeyGuard",
-    "torch._C._InferenceMode",
-    "torch._C._RestorePythonTLSSnapshot",
-    "torch._C._SetExcludeDispatchKeyGuard",
-    "torch.ao.nn.sparse.quantized.utils.LinearBlockSparsePattern",
-    "torch.autograd.anomaly_mode.detect_anomaly",
-    "torch.autograd.anomaly_mode.set_detect_anomaly",
-    "torch.autograd.forward_ad._set_fwd_grad_enabled",
-    "torch.autograd.forward_ad.dual_level",
-    "torch.autograd.grad_mode._force_original_view_tracking",
-    "torch.autograd.grad_mode._unsafe_preserve_version_counter",
-    "torch.autograd.grad_mode.set_multithreading_enabled",
-    "torch.autograd.graph._CloneArgBeforeMutateMode",
-    "torch.autograd.graph._swap_with_cloned",
-    "torch.autograd.graph.save_on_cpu",
-    "torch.autograd.graph.saved_tensors_hooks",
-    "torch.backends.mkl.verbose",
-    "torch.backends.mkldnn.verbose",
-    "torch.cpu.StreamContext",
-    "torch.cuda.StreamContext",
-    "torch.cuda._DeviceGuard",
-    "torch.cuda.device",
-    "torch.cuda.device_of",
-    "torch.cuda.graphs.graph",
-    "torch.device",  # as constant folding function
-    "torch.sparse.check_sparse_tensor_invariants",
-}
 
 ignored_c_binding_in_graph_function_names = {
     # Ignored because they have manual rules defined at `trace_rules.manual_torch_name_rule_map`.
@@ -129,7 +84,6 @@ class AllowedObjects:
     """
 
     object_ids: Dict[int, str]
-    ctx_mamager_classes: Set[Any]
     c_binding_in_graph_functions: Set[Any]
     non_c_binding_in_graph_functions: Set[Any]
     name_rule_map: Dict[str, Any]
@@ -142,23 +96,9 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
 
     warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed")
     torch_object_ids = dict()
-    ctx_mamager_classes = set()
     c_binding_in_graph_functions = set()
     non_c_binding_in_graph_functions = set()
     torch_name_rule_map = dict()
-
-    # Add obj to ctx_mamager_classes set if it's a torch context manager class.
-    # This is used to generate the ctx manager class list based on heuristic.
-    def heuristic_record_if_ctx_manager(obj, module, name):
-        if (
-            issubclass(type(obj), type)
-            and hasattr(obj, "__enter__")
-            and hasattr(obj, "__exit__")
-        ):
-            torch_name_rule_map[
-                f"{module.__name__}.{name}"
-            ] = TorchCtxManagerClassVariable
-            ctx_mamager_classes.add(obj)
 
     # In some platforms, these functions were loaded as classes instead of functions.
     # To mitigate these weired cases, we need this special check.
@@ -324,12 +264,10 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
                         _find_torch_objects(obj)
                 elif _is_allowed_module_prefix(obj):
                     if record:
-                        heuristic_record_if_ctx_manager(obj, module, name)
                         heuristic_record_if_in_graph_function(obj, module, name)
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                 elif inspect.getmodule(obj) is None and not is_safe_constant(obj):
                     if record:
-                        heuristic_record_if_ctx_manager(obj, module, name)
                         heuristic_record_if_in_graph_function(obj, module, name)
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
 
@@ -338,7 +276,6 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
 
     return AllowedObjects(
         torch_object_ids,
-        ctx_mamager_classes,
         c_binding_in_graph_functions,
         non_c_binding_in_graph_functions,
         torch_name_rule_map,
@@ -395,21 +332,6 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
     def test_torch_name_rule_map_updated(self):
         # Generate the allowed objects based on heuristic defined in `allowed_functions.py`,
         objs = gen_allowed_objs_and_ids(record=True, c_binding_only=True)
-        # Test ctx manager classes are updated in torch_name_rule_map.
-        generated = objs.ctx_mamager_classes
-        used = set()
-        for x in (
-            set(torch_ctx_manager_classes.keys()) | ignored_ctx_manager_class_names
-        ):
-            obj = load_object(x)
-            if obj is not None:
-                used.add(obj)
-        self._check_set_equality(
-            generated,
-            used,
-            "torch_ctx_manager_classes",
-            "ignored_ctx_manager_class_names",
-        )
         # Test C binding in graph functions are updated in torch_name_rule_map.
         generated = objs.c_binding_in_graph_functions
         used = set()

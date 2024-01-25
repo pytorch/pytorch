@@ -31,7 +31,7 @@ BOOL_CONSTANT_C = True
 
 
 class KernelTests(torch._dynamo.test_case.TestCase):
-    @requires_cuda()
+    @requires_cuda
     def test_triton_kernel_with_kernel_param(self):
         @triton.jit
         def pass_kernel(kernel):
@@ -47,7 +47,7 @@ class KernelTests(torch._dynamo.test_case.TestCase):
         # No need to assert anything, the goal is to make sure dynamo does
         # not crash
 
-    @requires_cuda()
+    @requires_cuda
     def test_triton_kernel_higher_order_func(self):
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
@@ -95,7 +95,7 @@ class KernelTests(torch._dynamo.test_case.TestCase):
         # Make sure it is NOT modified
         self.assertEqual(output, torch.zeros_like(t1))
 
-    @requires_cuda()
+    @requires_cuda
     @skipIfRocm
     def test_triton_kernel_functionalize(self):
         from functorch import make_fx
@@ -148,7 +148,7 @@ def forward(self, x_1, output_1):
     return getitem_1""",
         )
 
-    @requires_cuda()
+    @requires_cuda
     @skipIfRocm
     def test_triton_kernel_mutation_type(self):
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
@@ -215,7 +215,7 @@ def forward(self, x_1, output_1):
                 torch._functionalize_are_all_mutations_hidden_from_autograd(x_func.elem)
             )
 
-    @requires_cuda()
+    @requires_cuda
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_with_views(self, dynamic, backend):
@@ -248,7 +248,7 @@ def forward(self, x_1, output_1):
         self.assertEqual(2 * t_view, compiled_func(t).view(16))
         self.assertEqual(2 * t, compiled_func(t))
 
-    @requires_cuda()
+    @requires_cuda
     @common_utils.parametrize("grad_fn", [torch.no_grad, torch.enable_grad])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_with_grad_option(self, grad_fn, backend):
@@ -264,7 +264,7 @@ def forward(self, x_1, output_1):
         compiled_func = torch.compile(call_triton, backend=backend, fullgraph=True)
         self.assertEqual(2 * t, compiled_func(t))
 
-    @requires_cuda()
+    @requires_cuda
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_inner_triton_function(self, backend):
         def f(x: torch.Tensor):
@@ -295,7 +295,7 @@ def forward(self, x_1, output_1):
         # TODO(oulgen): NYI - Support this
         # self.assertEqual(t * t, compiled_func(t))
 
-    @requires_cuda()
+    @requires_cuda
     @common_utils.parametrize("grad", [False, True])
     @common_utils.parametrize("dynamic", [False, True])
     @patch.object(torch._inductor.config, "implicit_fallbacks", False)
@@ -337,7 +337,7 @@ def forward(self, x_1, output_1):
         else:
             self.assertTrue("return (buf0, )" in codes[0])
 
-    @requires_cuda()
+    @requires_cuda
     @skipIfRocm
     def test_triton_kernel_caching(self):
         from torch._inductor.utils import run_and_get_code
@@ -367,7 +367,7 @@ def forward(self, x_1, output_1):
         self.assertEqual(test, 5 * torch.ones(5, device="cuda"))
         self.assertTrue("add_kernel_autotuned_1.run" not in code)
 
-    @requires_cuda()
+    @requires_cuda
     @skipIfRocm
     def test_triton_kernel_caching_duplicate(self):
         from torch._inductor.utils import run_and_get_code
@@ -417,7 +417,7 @@ def forward(self, x_1, output_1):
         self.assertTrue("pass_kernel_0.run" in code)
         self.assertTrue("pass_kernel_1.run" in code)
 
-    @requires_cuda()
+    @requires_cuda
     @skipIfRocm
     def test_triton_kernel_various_args(self):
         @triton.autotune(
@@ -454,7 +454,7 @@ def forward(self, x_1, output_1):
         # Make sure this does not crash
         call_triton(output)
 
-    @requires_cuda()
+    @requires_cuda
     @skipIfRocm
     def test_triton_kernel_dependancies(self):
         def call_triton(
@@ -476,7 +476,7 @@ def forward(self, x_1, output_1):
         compiled_result = torch.compile(call_triton)(t1, t2)
         self.assertEqual(torch_result, compiled_result)
 
-    @requires_cuda()
+    @requires_cuda
     @skipIfRocm
     def test_triton_kernel_reinplace_inplaceable_pass(self):
         def call_triton(
@@ -496,7 +496,7 @@ def forward(self, x_1, output_1):
         compiled_result = torch.compile(call_triton)(t1, t2)
         self.assertEqual(torch_result, compiled_result)
 
-    @requires_cuda()
+    @requires_cuda
     @common_utils.parametrize("grad", [False, True])
     def test_triton_kernel_multi_kernel(self, grad):
         @triton.jit
@@ -573,7 +573,7 @@ def forward(self, x_1, output_1):
         self.assertEqual(float_result, result)
         self.assertEqual(int_result, resulti)
 
-    @requires_cuda()
+    @requires_cuda
     def test_triton_kernel_constants(self):
         @triton.jit
         def mulC_kernel(
@@ -623,7 +623,7 @@ def forward(self, x_1, output_1):
         # reset back
         CONSTANT_C = prev_c
 
-    @requires_cuda()
+    @requires_cuda
     @skipIfRocm
     @common_utils.parametrize("grad", [False, True])
     @common_utils.parametrize("dynamic", [False, True])
@@ -658,7 +658,7 @@ def forward(self, x_1, output_1):
         output2 = torch.zeros_like(t1, requires_grad=grad)
         self.assertEqual(compiled_func(t1, t2, output2), torch_add)
 
-    @requires_cuda()
+    @requires_cuda
     @skipIfRocm
     @common_utils.parametrize("grad", [False, True])
     @common_utils.parametrize("dynamic", [False, True])
@@ -699,7 +699,7 @@ def forward(self, x_1, output_1):
         output2 = torch.zeros_like(t1, requires_grad=grad)
         self.assertEqual(compiled_func(t1, t2, output2), torch_result)
 
-    @requires_cuda()
+    @requires_cuda
     @common_utils.parametrize("grad", [False, True])
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
@@ -761,7 +761,7 @@ def forward(self, x_1, output_1):
         o6 = torch.zeros_like(t1, requires_grad=grad)
         self.assertEqual(compiled_func(t1, t2, o6, 2, 200), torch_add)
 
-    @requires_cuda()
+    @requires_cuda
     def test_triton_kernel_mutation_not_mark_dirty(self):
         @torch.compile
         def f(x):
@@ -775,7 +775,7 @@ def forward(self, x_1, output_1):
         f(x_cloned)
         out.sum().backward()
 
-    @requires_cuda()
+    @requires_cuda
     def test_triton_kernel_matmul_tracking(self):
         @triton.jit
         def ones_kernel(x_ptr, n_elements, BLOCK_SIZE: "tl.constexpr"):
@@ -797,7 +797,7 @@ def forward(self, x_1, output_1):
         python_out = torch.mm(torch.ones(4, 4, device="cuda"), x) + 10
         self.assertEqual(torch_out, python_out)
 
-    @requires_cuda()
+    @requires_cuda
     def test_triton_kernel_strided_input(self):
         def f(inp):
             # left has strides [256, 1]
@@ -821,7 +821,7 @@ def forward(self, x_1, output_1):
         compiled_out = torch.compile(f)(inp)
         self.assertEqual(compiled_out, eager_out)
 
-    @requires_cuda()
+    @requires_cuda
     def test_triton_kernel_strided_input_nonzero_offset(self):
         def f(inp):
             # right has strides [256, 1] and storage offset 128
@@ -845,7 +845,7 @@ def forward(self, x_1, output_1):
         compiled_out = torch.compile(f)(inp)
         self.assertEqual(compiled_out, eager_out)
 
-    @requires_cuda()
+    @requires_cuda
     def test_triton_kernel_slice_and_view_input(self):
         def f(inp):
             # left has strides [256, 1]
@@ -873,7 +873,7 @@ def forward(self, x_1, output_1):
         compiled_out = torch.compile(f)(inp)
         self.assertEqual(compiled_out, eager_out)
 
-    @requires_cuda()
+    @requires_cuda
     def test_triton_kernel_fallback(self):
         def f(x, y):
             out = torch.zeros_like(x)
@@ -892,7 +892,7 @@ def forward(self, x_1, output_1):
 
 
 class MutationTests(torch._dynamo.test_case.TestCase):
-    @requires_cuda()
+    @requires_cuda
     def test_find_mutations(self):
         from torch._higher_order_ops.triton_kernel_wrap import filter_non_mutated
 
