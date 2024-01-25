@@ -1482,6 +1482,14 @@ optim_db: List[OptimizerInfo] = [
                 "test_state_dict_deterministic",
             ),
             DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_can_load_older_state_dict",
+                device_type="cpu",
+            ),
+            DecorateInfo(
                 toleranceOverride(
                     {  # previously atol=5-05, rtol=0.001, https://github.com/pytorch/pytorch/issues/116202
                         torch.float32: tol(atol=5e-04, rtol=0.01),
