@@ -585,19 +585,16 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
   Py_RETURN_TRUE;
 }
 
-inline static size_t unwrap_size_tuple(
-    PyObject* obj,
-    ssize_t* output,
-    size_t limit) {
+template <typename T>
+inline static void unwrap_size_tuple(PyObject* obj, T& output) {
   TORCH_CHECK(PyTuple_CheckExact(obj));
   size_t len = PyTuple_GET_SIZE(obj);
-  TORCH_CHECK(len <= limit);
+  output.reserve(len);
   for (size_t i = 0; i < len; ++i) {
     auto result = PyLong_AsSsize_t(PyTuple_GET_ITEM(obj, i));
     TORCH_CHECK(result >= 0);
-    output[i] = result;
+    output.emplace_back(result);
   }
-  return len;
 }
 
 static PyObject* _empty_strided_cpu(PyObject* dummy, PyObject* args) {
@@ -605,27 +602,25 @@ static PyObject* _empty_strided_cpu(PyObject* dummy, PyObject* args) {
   // version that saves ~2us on every allocation.  Though it is
   // CPU-only, tuple-only, and only supports 8D tensors.
   // These constraints are checked in inductor.
-  try {
-    TORCH_CHECK(PyTuple_CheckExact(args));
-    TORCH_CHECK(PyTuple_GET_SIZE(args) == 3);
+  HANDLE_TH_ERRORS;
 
-    // note PyTuple_GET_ITEM returns a borrowed ref, so no need for refcounts
-    ssize_t sizes[8];
-    size_t ndim1 = unwrap_size_tuple(PyTuple_GET_ITEM(args, 0), sizes, 8);
+  TORCH_CHECK(PyTuple_CheckExact(args));
+  TORCH_CHECK(PyTuple_GET_SIZE(args) == 3);
 
-    ssize_t strides[8];
-    size_t ndim2 = unwrap_size_tuple(PyTuple_GET_ITEM(args, 1), strides, 8);
+  // note PyTuple_GET_ITEM returns a borrowed ref, so no need for refcounts
+  at::SmallVector<ssize_t, 8> sizes;
+  unwrap_size_tuple(PyTuple_GET_ITEM(args, 0), sizes);
 
-    PyObject* py_dtype = PyTuple_GET_ITEM(args, 2);
-    TORCH_CHECK(THPDtype_Check(py_dtype));
-    at::ScalarType dtype = reinterpret_cast<THPDtype*>(py_dtype)->scalar_type;
+  at::SmallVector<ssize_t, 8> strides;
+  unwrap_size_tuple(PyTuple_GET_ITEM(args, 1), strides);
 
-    return THPVariable_Wrap(at::detail::empty_strided_cpu(
-        at::IntArrayRef(sizes, ndim1), at::IntArrayRef(strides, ndim2), dtype));
-  } catch (std::exception const& ex) {
-    PyErr_SetString(PyExc_RuntimeError, ex.what());
-    return nullptr;
-  }
+  PyObject* py_dtype = PyTuple_GET_ITEM(args, 2);
+  TORCH_CHECK(THPDtype_Check(py_dtype));
+  at::ScalarType dtype = reinterpret_cast<THPDtype*>(py_dtype)->scalar_type;
+
+  return THPVariable_Wrap(at::detail::empty_strided_cpu(sizes, strides, dtype));
+
+  END_HANDLE_TH_ERRORS;
 }
 
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)

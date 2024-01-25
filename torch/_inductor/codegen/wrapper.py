@@ -1162,9 +1162,8 @@ class WrapperCodeGen(CodeGen):
         return self.make_allocation(buffer.get_name(), device, dtype, shape, stride)
 
     def make_allocation(self, name, device, dtype, shape, stride):
-        if device.type == "cpu" and len(shape) <= 8:
+        if device.type == "cpu":
             # optimized path for faster allocations, saving ~2us versus the stuff below
-            # TODO(jansel): can we do similar things on the GPU?
             return (
                 f"{name} = empty_strided_cpu("
                 f"{self.codegen_shape_tuple(shape)}, "
