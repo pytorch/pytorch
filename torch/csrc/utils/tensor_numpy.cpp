@@ -107,9 +107,7 @@ static std::vector<int64_t> to_aten_shape(int ndim, npy_intp* values) {
 
 static std::vector<int64_t> seq_to_aten_shape(PyObject* py_seq) {
   int ndim = PySequence_Length(py_seq);
-  if (ndim == -1) {
-    throw TypeError("shape and strides must be sequences");
-  }
+  TORCH_CHECK_TYPE(ndim != -1, "shape and strides must be sequences");
   auto result = std::vector<int64_t>(ndim);
   for (const auto i : c10::irange(ndim)) {
     auto item = THPObjectPtr(PySequence_GetItem(py_seq, i));
@@ -301,7 +299,8 @@ int aten_to_numpy_dtype(const ScalarType scalar_type) {
     case kBool:
       return NPY_BOOL;
     default:
-      throw TypeError("Got unsupported ScalarType %s", toString(scalar_type));
+      TORCH_CHECK_TYPE(
+          false, "Got unsupported ScalarType ", toString(scalar_type));
   }
 }
 
@@ -353,10 +352,12 @@ ScalarType numpy_dtype_to_aten(int dtype) {
   auto pytype = THPObjectPtr(PyArray_TypeObjectFromType(dtype));
   if (!pytype)
     throw python_error();
-  throw TypeError(
-      "can't convert np.ndarray of type %s. The only supported types are: "
-      "float64, float32, float16, complex64, complex128, int64, int32, int16, int8, uint64, uint32, uint16, uint8, and bool.",
-      ((PyTypeObject*)pytype.get())->tp_name);
+  TORCH_CHECK_TYPE(
+      false,
+      "can't convert np.ndarray of type ",
+      ((PyTypeObject*)pytype.get())->tp_name,
+      ". The only supported types are: "
+      "float64, float32, float16, complex64, complex128, int64, int32, int16, int8, uint64, uint32, uint16, uint8, and bool.");
 }
 
 bool is_numpy_int(PyObject* obj) {
@@ -382,17 +383,15 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
       THPObjectPtr(PyObject_GetAttrString(obj, "__cuda_array_interface__"));
   TORCH_INTERNAL_ASSERT(cuda_dict);
 
-  if (!PyDict_Check(cuda_dict.get())) {
-    throw TypeError("`__cuda_array_interface__` must be a dict");
-  }
+  TORCH_CHECK_TYPE(
+      PyDict_Check(cuda_dict.get()),
+      "`__cuda_array_interface__` must be a dict");
 
   // Extract the `obj.__cuda_array_interface__['shape']` attribute
   std::vector<int64_t> sizes;
   {
     PyObject* py_shape = PyDict_GetItemString(cuda_dict, "shape");
-    if (py_shape == nullptr) {
-      throw TypeError("attribute `shape` must exist");
-    }
+    TORCH_CHECK_TYPE(py_shape, "attribute `shape` must exist");
     sizes = seq_to_aten_shape(py_shape);
   }
 
@@ -403,9 +402,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   int dtype_size_in_bytes;
   {
     PyObject* py_typestr = PyDict_GetItemString(cuda_dict, "typestr");
-    if (py_typestr == nullptr) {
-      throw TypeError("attribute `typestr` must exist");
-    }
+    TORCH_CHECK_TYPE(py_typestr, "attribute `typestr` must exist");
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyArray_Descr* descr;
     TORCH_CHECK_VALUE(
@@ -420,12 +417,10 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   void* data_ptr;
   {
     PyObject* py_data = PyDict_GetItemString(cuda_dict, "data");
-    if (py_data == nullptr) {
-      throw TypeError("attribute `shape` data exist");
-    }
-    if (!PyTuple_Check(py_data) || PyTuple_GET_SIZE(py_data) != 2) {
-      throw TypeError("`data` must be a 2-tuple of (int, bool)");
-    }
+    TORCH_CHECK_TYPE(py_data, "attribute `shape` data exist");
+    TORCH_CHECK_TYPE(
+        PyTuple_Check(py_data) && PyTuple_GET_SIZE(py_data) == 2,
+        "`data` must be a 2-tuple of (int, bool)");
     data_ptr = PyLong_AsVoidPtr(PyTuple_GET_ITEM(py_data, 0));
     if (data_ptr == nullptr && PyErr_Occurred()) {
       throw python_error();
@@ -434,10 +429,9 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
     if (read_only == -1) {
       throw python_error();
     }
-    if (read_only) {
-      throw TypeError(
-          "the read only flag is not supported, should always be False");
-    }
+    TORCH_CHECK_TYPE(
+        !read_only,
+        "the read only flag is not supported, should always be False");
   }
 
   // Extract the `obj.__cuda_array_interface__['strides']` attribute
@@ -445,11 +439,11 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   {
     PyObject* py_strides = PyDict_GetItemString(cuda_dict, "strides");
     if (py_strides != nullptr && py_strides != Py_None) {
-      if (PySequence_Length(py_strides) == -1 ||
-          static_cast<size_t>(PySequence_Length(py_strides)) != sizes.size()) {
-        throw TypeError(
-            "strides must be a sequence of the same length as shape");
-      }
+      TORCH_CHECK_TYPE(
+          PySequence_Length(py_strides) != -1 &&
+              static_cast<size_t>(PySequence_Length(py_strides)) ==
+                  sizes.size(),
+          "strides must be a sequence of the same length as shape");
       strides = seq_to_aten_shape(py_strides);
 
       // __cuda_array_interface__ strides use bytes. Torch strides use element
