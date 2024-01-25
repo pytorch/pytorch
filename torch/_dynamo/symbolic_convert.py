@@ -730,11 +730,16 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             cg = PyCodegen(self)
             loaded = []
 
+            def noop_add(*args, **kwargs):
+                breakpoint()
+                pass
+
             def _load(fn_name):
                 if fn_name == root_fn_name:
-                    return
+                    return "LOAD_CLOSURE"
                 elif fn_name in closure_chain[root_fn_name]:
                     new_resume.append(create_instruction("LOAD_DEREF", argval=fn_name))
+                    return "LOAD_CLOSURE"
                 elif fn_name in self.symbolic_locals and fn_name not in loaded:
                     var = self.symbolic_locals[fn_name]
                     inner_cg = PyCodegen(self)
@@ -745,13 +750,19 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                         new_resume.extend(out)
                         inner_cg._output = []
                         loaded.append(fn_name)
+                        new_resume.append(create_instruction("STORE_DEREF", argval=fn_name))
+                        return "LOAD_DEREF"
                     elif isinstance(var, (NestedUserFunctionVariable)):
                         var.reconstruct(inner_cg)
                         new_resume.extend(inner_cg._output)
                         inner_cg._output = []
+                        new_resume.append(create_instruction("STORE_FAST", argval=fn_name))
                         loaded.append(fn_name)
-                        # new_resume.append(create_instruction("STORE_FAST", argval=fn_name))
-                        # new_resume.extend(out)
+                        return "LOAD_FAST"
+                elif fn_name in loaded:
+                    return "LOAD_FAST"
+
+                return "LOAD_CLOSURE"
 
             for inst in resume_at:
                 if inst.opname == "LOAD_CLOSURE":
@@ -765,18 +776,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                         # Top level, already present in closures
                         new_resume.append(inst)
                     elif inst.argval in self.code_options["co_cellvars"]:
-                        if inst.argval in self.symbolic_locals:
-                            var = self.symbolic_locals[inst.argval]
-                            inner_cg = PyCodegen(self)
-                            inner_cg._output = []
-                            if isinstance(var, (FunctoolsPartialVariable)):
-                                out = var.reconstruct(inner_cg)
-                                new_resume.extend(inner_cg._output)
-                                new_resume.extend(out)
-                                continue
+                        load_kind = _load(inst.argval)
+
                         for fn_name in reverse_chain:
                             _load(fn_name)
-                        new_resume.append(inst)
+                        new_resume.append(create_instruction(load_kind, argval=inst.argval))
                     else:
                         for fn_name in reverse_chain:
                             _load(fn_name)
