@@ -65,7 +65,7 @@ def setup_stacktrace_preservation_hooks(roots: List):
         seen = set()
         q = collections.deque()  # type: ignore[var-annotated]
         for node in roots:
-            if node is not None:
+            if node is not None and node not in seen:
                 seen.add(node)
                 q.append(node)
 
