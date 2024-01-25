@@ -1112,8 +1112,7 @@ def dict_keys_repr(const_keys, *, local) -> str:
     return "[" + keys_str + "]"
 
 
-def global_key_name(key):
-    return f"__dict_key_{id(key)}"
+GLOBAL_KEY_PREFIX = "__dict_key"
 
 
 from torch._subclasses import (  # noqa: F401
