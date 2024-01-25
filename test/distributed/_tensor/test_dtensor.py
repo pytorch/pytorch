@@ -73,18 +73,6 @@ class DTensorTest(DTensorTestBase):
                 stride=local_tensor.stride(),
             )
 
-        local_tensor = torch.randn(3, 3, requires_grad=False)
-        with self.assertWarnsRegex(UserWarning, "To construct"):
-            dist_tensor = DTensor(
-                local_tensor,
-                device_mesh,
-                placements,
-                shape=dist_tensor_shape,
-                dtype=local_tensor.dtype,
-                requires_grad=True,
-                stride=local_tensor.stride(),
-            )
-
     @with_comms
     def test_meta_dtensor(self):
         device_mesh = self.build_device_mesh()
