@@ -254,23 +254,19 @@ dynamo_expected_failures = {
     "TestGenericReductions.test_bad_axis_func1",
     "TestGenericCumSumProd.test_bad_axis_func0",
     "TestGenericReductions.test_bad_axis_func9",
-    "TestWritebackIfCopy.test_take_mode_raise",
     "TestArange.test_infinite",
     "TestArrayConstruction.test_array_empty",
     "TestAttributes.test_fill_readonly",
     "TestArrayAttributeDeletion.test_multiarray_writable_attributes_deletion",
-    "TestMatmul.test_out_contiguous",
     "TestMinMax.test_scalar",
     "TestFromBuffer.test_basic_little_dtype2",
     "TestArrayCreationCopyArgument.test_striding_not_ok",
     "TestArange.test_require_range",
     "TestArange.test_nan_step",
-    "TestWritebackIfCopy.test_argmin_with_out",
     "TestArrayAttributeDeletion.test_multiarray_not_writable_attributes_deletion",
     "TestLexsort.test_datetime",
     "TestMinMax.test_axis",
     "TestLexsort.test_mixed",
-    "TestWritebackIfCopy.test_dot_out",
     "TestAttributes.test_fill_struct_array",
     "TestFromBuffer.test_empty",
     "TestAssignment.test_assignment_broadcasting",
@@ -279,12 +275,10 @@ dynamo_expected_failures = {
     "TestStats.test_out",
     "TestScalarIndexing.test_invalid_subscript",
     "TestWhere.test_error",
-    "TestWritebackIfCopy.test_argmax_with_out",
     "TestBool.test_sum_2",
     "TestScalarIndexing.test_invalid_newaxis",
     "TestScalarIndexing.test_invalid_subscript_assignment",
     "TestFromBuffer.test_basic_little_dtype1",
-    "TestWritebackIfCopy.test_choose_mod_raise",
     "TestAttributes.test_fill_max_uint64",
     "TestPutmask.test_byteorder_dtype_<i4",
     "TestPutmask.test_byteorder_dtype_>i4",
@@ -456,7 +450,6 @@ dynamo_expected_failures = {
     "TestRequire.test_require_each",  # torch_np/numpy_tests/core/test_numeric
     "TestClip.test_clip_with_out_simple_int32",  # torch_np/numpy_tests/core/test_numeric
     "TestClip.test_simple_inplace_01",  # torch_np/numpy_tests/core/test_numeric
-    "TestStdVar.test_out_scalar",  # torch_np/numpy_tests/core/test_numeric
     "TestClip.test_simple_int32_inout_casting_unsafe",  # torch_np/numpy_tests/core/test_numeric
     "TestMoveaxis.test_errors",  # torch_np/numpy_tests/core/test_numeric
     "TestNonzeroAndCountNonzero.test_count_nonzero_axis",  # torch_np/numpy_tests/core/test_numeric
@@ -470,11 +463,9 @@ dynamo_expected_failures = {
     "TestRequire.test_C_and_F_simul",  # torch_np/numpy_tests/core/test_numeric
     "TestNonarrayArgs.test_dunder_round_edgecases_val_2147483647_ndigits_-1",  # torch_np/numpy_tests/core/test_numeric
     "TestClip.test_simple_complex",  # torch_np/numpy_tests/core/test_numeric
-    "TestBoolArray.test_logical_not_abs",  # torch_np/numpy_tests/core/test_numeric
     "TestClip.test_simple_out",  # torch_np/numpy_tests/core/test_numeric
     "TestBroadcast.test_broadcast_single_arg",  # torch_np/numpy_tests/core/test_numeric
     "TestRequire.test_unknown_requirement",  # torch_np/numpy_tests/core/test_numeric
-    "TestBoolArray.test_logical_and_or_xor",  # torch_np/numpy_tests/core/test_numeric
     "TestBroadcast.test_broadcast_error_kwargs",  # torch_np/numpy_tests/core/test_numeric
     "TestNonarrayArgs.test_dunder_round_edgecases_val_2147483647_ndigits_-9",  # torch_np/numpy_tests/core/test_numeric
     "TestNonarrayArgs.test_dunder_round_edgecases_val_2147483647_ndigits_-10",  # torch_np/numpy_tests/core/test_numeric
