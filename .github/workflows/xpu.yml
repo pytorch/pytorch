@@ -19,10 +19,10 @@ jobs:
     with:
       build-environment: linux-jammy-xpu-py3.8
       docker-image-name: pytorch-linux-jammy-xpu-2024.0-py3
-      runner: linux.idc.xpu.tmp
+      runner: linux.idc.xpu.internal
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "linux.idc.xpu.tmp" },
+          { config: "default", shard: 1, num_shards: 1, runner: "linux.idc.xpu.internal" },
         ]}
 
   linux-jammy-xpu-py3_8-test:
@@ -37,21 +37,21 @@ jobs:
       docker-image: ${{ needs.linux-jammy-xpu-py3_8-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-xpu-py3_8-build.outputs.test-matrix }}
 
-  Tests-Failure-And-Report:
-    runs-on: linux.idc.xpu.tmp
-    permissions:
-      issues: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-    needs: linux-jammy-xpu-py3_8-build
-    if: always()
-    steps:
-      - name: Report github issue when failure detected
-        if: ${{ needs.linux-jammy-xpu-py3_8-build.result == 'failure' }}
-        run: |
-          build_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          notification_list="${{ secrets.ISSUE_NOTIFICATION_LIST }}"
-          repo="${{ github.repository }}"
-          gh --repo $repo issue comment 7  \
-              --body "XPU Nightly Failed $(date +'%F'), See: $build_url
-                      cc $notification_list"
+  # Tests-Failure-And-Report:
+  #   runs-on: linux.idc.xpu.tmp
+  #   permissions:
+  #     issues: write
+  #   env:
+  #     GH_TOKEN: ${{ github.token }}
+  #   needs: linux-jammy-xpu-py3_8-build
+  #   if: always()
+  #   steps:
+  #     - name: Report github issue when failure detected
+  #       if: ${{ needs.linux-jammy-xpu-py3_8-build.result == 'failure' }}
+  #       run: |
+  #         build_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+  #         notification_list="${{ secrets.ISSUE_NOTIFICATION_LIST }}"
+  #         repo="${{ github.repository }}"
+  #         gh --repo $repo issue comment 7  \
+  #             --body "XPU Nightly Failed $(date +'%F'), See: $build_url
+  #                     cc $notification_list"
