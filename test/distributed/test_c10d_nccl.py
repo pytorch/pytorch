@@ -231,6 +231,9 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
         # self.num_gpus = torch.cuda.device_count()
+        # To test NONBLOCKING NCCL calls
+        # os.environ["TORCH_NCCL_USE_COMM_NONBLOCKING"] = "1"
+        # os.environ["TORCH_NCCL_NONBLOCKING_TIMEOUT"] = "10"
         self._spawn_processes()
 
     def tearDown(self):
