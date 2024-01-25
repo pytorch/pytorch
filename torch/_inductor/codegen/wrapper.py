@@ -1369,6 +1369,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.arg_var_id = count()
         self.used_cached_dtypes = set()
         self.cached_output_id = count()
+        self.scalar_to_tensor_id = count()
 
         from .cpp import cexpr, CppPrinter
 
@@ -1858,6 +1859,23 @@ class CppWrapperCodeGen(WrapperCodeGen):
     ):
         self.header.splice(f"\n{kernel}\n")
 
+    def codegen_scalar_to_tensor(self, output: str):
+        name = f"scalar_to_tensor_{next(self.scalar_to_tensor_id)}"
+        self.wrapper_call.writeline(
+            f"RAIIAtenTensorHandle {name} = scalar_to_tensor_handle({output});"
+        )
+        return name
+
+    @cache_on_self
+    def get_output_refs(self):
+        return [
+            f"at::scalar_tensor({x.codegen_reference(self.wrapper_call)})"
+            if isinstance(x, ir.ShapeAsConstantBuffer)
+            and not config.aot_inductor.abi_compatible
+            else x.codegen_reference(self.wrapper_call)
+            for x in V.graph.graph_outputs
+        ]
+
     def generate_return(self, output_refs):
         if V.graph.aot_mode:
             cst_names = V.graph.constants.keys()
@@ -1897,6 +1915,15 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 )
             for idx, output in enumerate(output_refs):
                 if config.aot_inductor.abi_compatible:
+                    output_buffer = V.graph.graph_outputs[idx]
+                    if isinstance(output_buffer, ir.ShapeAsConstantBuffer):
+                        # Need to wrap scalar into tensor as the main function returns a vector of tensors
+                        output_tensor = self.codegen_scalar_to_tensor(output)
+                        self.wrapper_call.writeline(
+                            f"output_handles[{idx}] = {output_tensor}.release();"
+                        )
+                        continue
+
                     output_is_tensor_handle_expr = (
                         f"std::is_same_v<std::decay_t<decltype({output})>,"
                         "RAIIAtenTensorHandle> || "
