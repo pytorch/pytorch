@@ -1084,7 +1084,7 @@ class AdaptiveMaxPool1d(_AdaptiveMaxPoolNd):
 
     output_size: _size_1_t
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.adaptive_max_pool1d(input, self.output_size, self.return_indices)
 
 
