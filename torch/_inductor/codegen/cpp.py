@@ -281,14 +281,14 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
         f"struct {struct_name} {{size_t index; {DTYPE_TO_CPP[src_dtype]} value;}};",
         f"{struct_name} {tmpvar}{{0, {reduction_init(reduction_type, src_dtype)}}};",
     ]
-    worksharing_init = [
+    local_init = [
         f"{struct_name} {tmpvar}_local{{0, {reduction_init(reduction_type, src_dtype)}}};",
     ]
     tmpvar_per_thd = f"{tmpvar}_arr[{num_threads}]"
     parallel_prefix = [
         f"{struct_name} {tmpvar_per_thd};",
     ]
-    return prefix, parallel_prefix, worksharing_init
+    return prefix, parallel_prefix, local_init
 
 
 def parallel_num_threads():
@@ -1458,7 +1458,6 @@ class CppKernel(Kernel):
         self.reduction_suffix = IndentedBuffer()
         self.parallel_reduction_prefix = IndentedBuffer()
         self.parallel_reduction_suffix = IndentedBuffer()
-        self.parallel_reduction_stores: Dict[str, str] = dict()
         self.local_reduction_init = IndentedBuffer()
         self.local_reduction_stores = IndentedBuffer()
         self.is_reduction = False
@@ -1467,7 +1466,6 @@ class CppKernel(Kernel):
         self.poststores = IndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
         self.reduction_omp_dec: Dict[Tuple[str, str], str] = {}
-        self.max_threads = None
 
     def _gen_parallel_reduction_buffers(
         self,
@@ -1475,20 +1473,18 @@ class CppKernel(Kernel):
         acc_type,
         reduction_type,
         dtype,
-        value,
-        gen_store=True,
         is_vec=False,
     ):
-        if not self.max_threads:
+        if not hasattr(self.parallel_reduction_prefix, "max_threads"):
             self.parallel_reduction_prefix.writeline(
                 "int max_threads = omp_get_max_threads();"
             )
-            self.max_threads = "max_threads"
+            setattr(self.parallel_reduction_prefix, "max_threads", True)  # noqa: B010
         reduction_combine_fn = reduction_combine_vec if is_vec else reduction_combine
         reduction_init_fn = reduction_init_vec if is_vec else reduction_init
         acc_local = f"{acc}_local"
         num_threads = (
-            self.max_threads if config.cpp.dynamic_threads else parallel_num_threads()
+            "max_threads" if config.cpp.dynamic_threads else parallel_num_threads()
         )
         acc_per_thread = f"{acc}_arr[{num_threads}]"
         acc_local_in_array = acc_per_thread.replace(f"[{num_threads}]", "[tid]")
@@ -1504,14 +1500,6 @@ class CppKernel(Kernel):
                 "}",
             ],
         )
-        if gen_store:
-            reduction_store_line = (
-                f"{acc} = {reduction_combine_fn(reduction_type, acc, value)};"
-            )
-            parallel_reduction_store_line = f"{acc_local} = {reduction_combine_fn(reduction_type, acc_local, value)};"
-            self.parallel_reduction_stores[
-                reduction_store_line
-            ] = parallel_reduction_store_line
         self.local_reduction_stores.writelines(
             [
                 f"{acc_local_in_array} = {acc_local};",
@@ -1613,10 +1601,10 @@ class CppKernel(Kernel):
         )
         self.is_reduction = True
         if argmax_or_argmin:
-            prefix, parallel_prefix, worksharing_init = argmax_argmin_prefix(
+            prefix, parallel_prefix, local_init = argmax_argmin_prefix(
                 reduction_type, src_dtype, acc
             )
-            self.local_reduction_init.writelines(worksharing_init)
+            self.local_reduction_init.writelines(local_init)
             self.reduction_prefix.writelines(prefix)
             self.parallel_reduction_prefix.writelines(parallel_prefix)
             compare_op = "<" if reduction_type == "argmax" else ">"
@@ -1624,14 +1612,10 @@ class CppKernel(Kernel):
             index = self.itervars[self.reduction_depth]
             for i in range(self.reduction_depth + 1, len(self.itervars)):
                 index = index * self.ranges[i] + self.itervars[i]
-            reduction_store_line1 = f"if ({acc}.value {compare_op} {value}) {{"
-            reduction_store_line2 = (
-                f"    {acc}.index = {cexpr_index(index)}; {acc}.value = {value};"
-            )
             self.stores.writelines(
                 [
-                    reduction_store_line1,
-                    reduction_store_line2,
+                    f"if ({acc}.value {compare_op} {value}) {{",
+                    f"    {acc}.index = {cexpr_index(index)}; {acc}.value = {value};",
                     "}",
                 ]
             )
@@ -1639,16 +1623,6 @@ class CppKernel(Kernel):
             num_threads = parallel_num_threads()
             acc_per_thread = f"{acc}_arr[{num_threads}]"
             acc_local_in_array = acc_per_thread.replace(f"[{num_threads}]", "[tid]")
-            parallel_reduction_store_line1 = (
-                f"if ({acc_local}.value {compare_op} {value}) {{"
-            )
-            parallel_reduction_store_line2 = f"    {acc_local}.index = {cexpr_index(index)}; {acc_local}.value = {value};"
-            self.parallel_reduction_stores[
-                reduction_store_line1
-            ] = parallel_reduction_store_line1
-            self.parallel_reduction_stores[
-                reduction_store_line2
-            ] = parallel_reduction_store_line2
             self.parallel_reduction_suffix.writelines(
                 [
                     f"for (int tid = 0; tid < {num_threads}; tid++)",
@@ -1673,9 +1647,7 @@ class CppKernel(Kernel):
             self.stores.writeline(
                 f"{acc} = {reduction_combine(reduction_type, acc, value)};"
             )
-            self._gen_parallel_reduction_buffers(
-                acc, acc_type, reduction_type, dtype, value
-            )
+            self._gen_parallel_reduction_buffers(acc, acc_type, reduction_type, dtype)
         result = reduction_project(reduction_type, acc)
         self.reduction_cse.reduction_cache[reduction_key] = result
         return result
@@ -1744,10 +1716,15 @@ class CppKernel(Kernel):
                     if loop.parallel:
                         for kernel in loop.get_kernels():
                             for i, line in enumerate(kernel.stores._lines):
-                                if line in kernel.parallel_reduction_stores.keys():
-                                    kernel.stores._lines[
-                                        i
-                                    ] = kernel.parallel_reduction_stores[line]
+                                if isinstance(line, str):
+                                    m = re.match("tmp_acc[0-9]+", line)
+                                    if m:
+                                        var_name = m.group(0)
+                                        if f"{var_name}_vec" in line:
+                                            var_name = f"{var_name}_vec"
+                                        kernel.stores._lines[i] = line.replace(
+                                            var_name, f"{var_name}_local"
+                                        )
 
             def get_reduction_code_buffer(loops, is_suffix=True):
                 for loop in loops:
@@ -2178,17 +2155,12 @@ class CppVecKernel(CppKernel):
             acc_type,
             reduction_type,
             dtype,
-            value,
-            gen_store=False,
-            is_vec=False,
         )
         self._gen_parallel_reduction_buffers(
             acc_vec,
             acc_type_vec,
             reduction_type,
             dtype,
-            value,
-            gen_store=True,
             is_vec=True,
         )
         tmpvar: Union[str, CSEVariable]
