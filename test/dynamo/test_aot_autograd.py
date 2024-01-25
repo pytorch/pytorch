@@ -885,6 +885,25 @@ SeqNr|OrigAten|SrcFn
             ),
         )
 
+    def test_split_with_sizes_aot_autograd_cleans_up_traceback_meta(self):
+        from torch._functorch.aot_autograd import setup_stacktrace_preservation_hooks
+
+        def fn(result, split_sizes):
+            rs = torch.ops.aten.split_with_sizes(result, split_sizes.tolist())
+            return rs
+
+        example_inputs = (
+            torch.randn(32, requires_grad=True),
+            torch.tensor((7, 16, 9)),
+        )
+        outs = fn(*example_inputs)
+        setup_stacktrace_preservation_hooks([out.grad_fn for out in outs])
+        with fx_traceback.preserve_node_meta():
+            (outs[0].sum() + outs[1].sum() + outs[2].sum()).backward()
+
+        self.assertNotIn("grad_fn_seq_nr", fx_traceback.current_meta)
+        self.assertNotIn("in_grad_fn", fx_traceback.current_meta)
+
     # https://github.com/pytorch/pytorch/issues/110121
     def test_aot_export_joint_simple_repro(self):
         class Mod(torch.nn.Module):
