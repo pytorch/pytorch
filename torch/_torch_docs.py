@@ -9214,14 +9214,21 @@ distribution).
 .. math::
     \text{{out}}_{{i}} \sim \mathcal{{N}}(0, 1)
 
+For complex dtypes, the tensor is i.i.d. sampled from a `complex normal distribution`_ with zero mean and
+unit variance as
+
+.. math::
+    \text{{out}}_{{i}} \sim \mathcal{{CN}}(0, 1)
+
+This is equivalent to separately sampling the real :math:`(\operatorname{{Re}})` and imaginary
+:math:`(\operatorname{{Im}})` part of :math:`\text{{out}}_i` as
+
+.. math::
+    \operatorname{{Re}}(\text{{out}}_{{i}}) \sim \mathcal{{N}}(0, \frac{{1}}{{2}}),\quad
+    \operatorname{{Im}}(\text{{out}}_{{i}}) \sim \mathcal{{N}}(0, \frac{{1}}{{2}})
+
 The shape of the tensor is defined by the variable argument :attr:`size`.
 
-.. note::
-    For complex dtypes, the tensor is i.i.d. sampled from a `complex normal distribution`_ with zero mean and
-    unit variance as :math:`\text{{out}}_{{i}} \sim \mathcal{{CN}}(0, 1)`. This is equivalent to
-    :math:`\mathcal{{R}}(\text{{out}}_{{i}}) \sim \mathcal{{N}}(0, \frac{{1}}{{2}})` and
-    :math:`\mathcal{{I}}(\text{{out}}_{{i}}) \sim \mathcal{{N}}(0, \frac{{1}}{{2}})`, where :math:`\mathcal{{R}}` and
-    :math:`\mathcal{{I}}` are the real and imaginary part of :math:`\text{{out}}_i`.
 
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
