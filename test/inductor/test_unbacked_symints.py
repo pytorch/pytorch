@@ -46,6 +46,20 @@ class TestUnbackedSymints(TorchTestCase):
 
     @skipCUDAIf(not HAS_CUDA, "requires cuda")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    def test_broadcast_tensors(self, device):
+        def fn(x):
+            nz = x.nonzero()
+            a = torch.zeros([nz.size(0), 512])
+            b = torch.ones([nz.size(0), 1])
+            return a * b
+
+        x = torch.randn(32, 4, device=device)
+        actual = torch.compile(fn, fullgraph=True)(x)
+        expected = fn(x)
+        torch.testing.assert_close(actual, expected)
+
+    @skipCUDAIf(not HAS_CUDA, "requires cuda")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_autotuning(self, device):
         def fn(x, y):
             nz = torch.nonzero(x)

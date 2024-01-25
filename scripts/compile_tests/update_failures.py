@@ -9,18 +9,27 @@ from common import (
 )
 
 """
-Usage: update_failures.py dynamo_test_failures.py py38_test_reports_dir/ py311_test_reports_dir/
+Usage: update_failures.py /path/to/dynamo_test_failures.py py38_test_reports_dir/ py311_test_reports_dir/
 
 Best-effort updates the xfail and skip lists in dynamo_test_failures.py
 by parsing test reports.
 
-Each test report directory should have the pytest test reports for their
-respective configurations. You may find the test reports in the HUD:
-- click on a commit
-- find the desired job
-- click on "show artifacts"
-- get the "test report" zip
-- unzip it into the right place
+Instructions:
+- On your PR, add the "keep-going" label to ensure that all the tests are
+  failing (as opposed to CI stopping on the first failure). You may need to
+  restart your test jobs by force-pushing to your branch for CI to pick
+  up the "keep-going" label.
+- Create py38_test_reports_dir/ and py311_test_reports_dir/ directories.
+- Now, download all test reports for the dynamo test jobs. Unzip the test
+  reports for Dynamo py3.8 to py38_test_reports_dir/ and
+  the reports for Dynamo py3.11 to py311_test_reports_dir/
+- You can find the test reports in the HUD, by:
+  1) clicking on a commit
+     (e.g. https://hud.pytorch.org/pr/pytorch/pytorch/116071#20830570884),
+  2) scrolling down to "pull - Job Status", finding the job
+     (e.g. linux-focal-py3.11-clang10 / test (dynamo, 1, 3)),
+  3) click on "show artifacts"
+  4) downloading the test report zip
 
 """
 
