@@ -46,9 +46,7 @@ lib.define("foo(Tensor self) -> Tensor")
 lib.impl("foo", torch.sin, "CPU")
 
 
-requires_cuda = functools.partial(
-    unittest.skipIf, not torch.cuda.is_available(), "requires cuda"
-)
+requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
 
 _GLOBAL_CPU_TENSOR = torch.randn(3)
@@ -959,7 +957,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_model(input), correct))
         return cnt
 
-    @requires_cuda()
+    @requires_cuda
     def test_sub_alpha_scalar_repro(self):
         @torch.compile(backend="aot_eager")
         def f(x):
@@ -2449,7 +2447,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(f(), opt_fn()))
         self.assertEqual(cnt.frame_count, 1)
 
-    @requires_cuda()
+    @requires_cuda
     def test_norm_dtype(self):
         def foo(_stack0):
             getitem = _stack0[(slice(None, None, None), -1)]
@@ -3532,7 +3530,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f(), _GLOBAL_CPU_TENSOR + _GLOBAL_CPU_TENSOR)
 
-    @requires_cuda()
+    @requires_cuda
     def test_guard_default_device(self):
         try:
             torch.set_default_device("cuda")
