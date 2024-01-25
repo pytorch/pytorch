@@ -731,7 +731,10 @@ class SchedulerNode(BaseSchedulerNode):
         assert isinstance(
             self.node, (ir.ComputedBuffer, ir.TemplateBuffer)
         ), f"{type(self.node)=}"
-        return isinstance(self.node.data, ir.SplitScan)
+        return (
+            isinstance(self.node, ir.ComputedBuffer) and
+            isinstance(self.node.data, ir.SplitScan)
+        )
 
     def is_template(self):
         return isinstance(self.node, ir.TemplateBuffer)

@@ -41,6 +41,7 @@ from torch._inductor.utils import (
     run_and_get_triton_code,
 )
 from torch._inductor.virtualized import V
+from torch._prims_common import is_integer_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
@@ -118,6 +119,36 @@ vec_dtypes = [torch.float, torch.bfloat16, torch.float16]
 
 libtest = torch.library.Library("test", "FRAGMENT")
 ids = set()
+
+def _large_cumprod_input(shape, dim, dtype, device):
+    # Construct a cumprod input which guaruntees not to overflow or underflow
+    if is_integer_dtype(dtype):
+        # Large products don't fit in integers, the best we can do
+        # is random +/-1 values to test the sign of the result
+        x = torch.randint(0, 1, shape, dtype=dtype, device=device)
+        return x * 2 - 1
+
+    comp_dtype = torch._prims_common.get_computation_dtype(dtype)
+    batch_size = 256
+    if comp_dtype != dtype:
+        batch_size = math.floor(math.log2(torch.finfo(dtype).max) / 3)
+
+    # Create random values with a uniform magnitude and uniform exponent
+    num_batches = (shape[dim] + 2 * batch_size - 1) // (2 * batch_size)
+    batch_shape = shape[:dim] + (num_batches, batch_size,) + shape[dim + 1:]
+    magnitude = 1 + torch.rand(batch_shape, dtype=comp_dtype, device=device)
+    exponent = torch.randint(-1, 1, batch_shape, device=device).to(comp_dtype)
+    batch = magnitude * exponent.exp2()
+
+    # Alternate each batch of values with their reciprocals so the product
+    # never gets too far away from 1
+    t = torch.cat((batch, batch.reciprocal()), dim=dim + 1)
+    t = t.flatten(dim, dim + 1)
+    t = aten.slice(t, dim=dim, start=0, end=shape[dim])
+
+    # Randomize sign
+    sign = torch.randint(0, 1, shape, device=device) * 2 - 1
+    return (t * sign).to(dtype)
 
 
 def define_custom_op_for_test(id_, fn_cpu, fn_cuda, fn_meta, tags=()):
@@ -1189,30 +1220,20 @@ class CommonTemplate:
             b = b.view(-1)
             return torch.cumsum(a, 0) + torch.cumsum(b, 0)
 
-        for dtype in [torch.float32, torch.float64]:
-            a = make_tensor(10, 3, 352, 352, low=0, dtype=dtype, device=self.device)
-            b = make_tensor(10, 3, 352, 352, low=0, dtype=dtype, device=self.device)
-            self.common(fn, (a, b), rtol=1e-5, atol=1e-5)
+        a = make_tensor(10, 3, 352, 352, low=0, dtype=torch.float32, device=self.device)
+        b = make_tensor(10, 3, 352, 352, low=0, dtype=torch.float64, device=self.device)
+        self.common(fn, (a, b), rtol=1e-5, atol=1e-5)
 
     def test_split_cumprod(self):
         def fn(a):
             return torch.cumprod(a, -1)
 
-        for dtype in [torch.float32, torch.float64]:
-            # Keep exponent small so products don't blow up to infinity
-            inp = make_tensor(
-                10, 10000, low=0.9, high=1.1, dtype=dtype, device=self.device
-            )
-            self.common(fn, (inp.view(-1),), rtol=1e-5, atol=1e-5)
-            self.common(fn, (inp.view(10, -1),), rtol=1e-5, atol=1e-5)
+        for dtype in [torch.float32, torch.float64,
+                      torch.int32, torch.int64]:
+            inp = _large_cumprod_input((10, 10000), dim=1, dtype=dtype, device=self.device)
+            self.common(fn, (inp,), atol=1e-5, rtol=1e-5)
 
-        for dtype in [torch.int32, torch.int64]:
-            # 2^1000 definitely doesn't fit in a 32-bit int, so just a
-            # sanity check
-            inp = torch.ones(10, 10000, dtype=dtype, device=self.device)
-            self.common(fn, (inp.view(-1),), rtol=1e-5, atol=1e-5)
-            self.common(fn, (inp.view(10, -1),), rtol=1e-5, atol=1e-5)
-
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_split_cumprod_low_prec(self):
         if self.device == "cpu":
             raise unittest.SkipTest("ir.Scan nyi on CPU")
@@ -1220,26 +1241,21 @@ class CommonTemplate:
         def fn(a):
             return torch.cumprod(a.view(-1), 0)
 
-        self.common(
-            fn,
-            (torch.rand((10, 3, 352, 352), dtype=torch.float16),),
-            reference_in_float=True,
-        )
+        for dtype in [torch.float16, torch.bfloat16]:
+            inp = _large_cumprod_input((10, 10000), dim=1, dtype=dtype, device=self.device)
+            self.common(
+                fn,
+                (inp,),
+                reference_in_float=True,
+            )
 
     def test_consecutive_split_cumprod(self):
         def fn(a, b):
-            a = a.view(-1)
-            b = b.view(-1)
             return torch.cumprod(a, 0) + torch.cumprod(b, 0)
 
-        for dtype in [torch.float32, torch.float64]:
-            a = make_tensor(
-                10, 3, 352, 352, exclude_zero=True, dtype=dtype, device=self.device
-            )
-            b = make_tensor(
-                10, 3, 352, 352, exclude_zero=True, dtype=dtype, device=self.device
-            )
-            self.common(fn, (a, b), rtol=1e5, atol=1e-5)
+        a = _large_cumprod_input((10000,), dim=0, dtype=torch.float32, device=self.device)
+        b = _large_cumprod_input((10000,), dim=0, dtype=torch.float64, device=self.device)
+        self.common(fn, (a, b), atol=1e-5, rtol=1e-5)
 
     def test_embedding_bag_byte_unpack(self):
         if self.device != "cpu":
