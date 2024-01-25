@@ -5,6 +5,7 @@ from torch._export.verifier import SpecViolationError
 from torch._guards import detect_fake_mode
 from torch.export.custom_obj import ScriptObjectMeta
 from torch.export.exported_program import (
+    ArgumentSpec,
     CustomObjArgument,
     ExportGraphSignature,
     InputKind,
@@ -54,12 +55,10 @@ def lift_constants_pass(
             if isinstance(constant_val, torch.ScriptObject):
                 constant_name = f"_lifted_custom_obj{num_custom_obj}"
                 constant_kind = InputKind.CUSTOM_OBJ
-                constant_arg_cls = CustomObjArgument  # type: ignore[assignment]
                 num_custom_obj += 1
             elif isinstance(constant_val, torch.Tensor):
                 constant_name = f"_lifted_tensor_constant{num_tensor_constants}"
                 constant_kind = InputKind.CONSTANT_TENSOR
-                constant_arg_cls = TensorArgument  # type: ignore[assignment]
                 num_tensor_constants += 1
             elif isinstance(constant_val, torch.fx.GraphModule):
                 continue
@@ -88,15 +87,25 @@ def lift_constants_pass(
                 else:
                     constant_fqn = constant_name
 
+                input_spec_arg: ArgumentSpec
                 if isinstance(constant_val, torch.Tensor):
                     const_placeholder_node.meta["val"] = fake_mode.from_tensor(
                         constant_val, static_shapes=True
                     )
                     const_placeholder_node.meta["val"].constant = constant_val
+                    input_spec_arg = TensorArgument(name=const_placeholder_node.name)
                 elif isinstance(constant_val, torch._C.ScriptObject):
-                    const_placeholder_node.meta["val"] = ScriptObjectMeta(constant_fqn)
+                    class_fqn = constant_val._type().qualified_name()  # type: ignore[attr-defined]
+                    const_placeholder_node.meta["val"] = ScriptObjectMeta(
+                        constant_fqn, class_fqn
+                    )
+                    input_spec_arg = CustomObjArgument(
+                        name=const_placeholder_node.name, class_fqn=class_fqn
+                    )
                 else:
                     const_placeholder_node.meta["val"] = constant_val
+                    # TODO: use of TensorArgument doesn't look right, what's this branch for?
+                    input_spec_arg = TensorArgument(name=const_placeholder_node.name)
 
                 node.replace_all_uses_with(const_placeholder_node)
                 gm.graph.erase_node(node)
@@ -106,7 +115,7 @@ def lift_constants_pass(
                     first_user_input_loc,
                     InputSpec(
                         kind=constant_kind,
-                        arg=constant_arg_cls(name=const_placeholder_node.name),
+                        arg=input_spec_arg,
                         target=constant_fqn,
                     ),
                 )
@@ -133,7 +142,8 @@ def rewrite_script_object_meta(
             continue
 
         old_meta = node.meta["val"]
-        new_meta = ScriptObjectMeta(node.name)
+        class_fqn = old_meta._type().qualified_name()  # type: ignore[attr-defined]
+        new_meta = ScriptObjectMeta(node.name, class_fqn)
         constants[node.name] = old_meta
         node.meta["val"] = new_meta
 
