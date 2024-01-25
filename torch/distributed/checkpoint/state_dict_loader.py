@@ -1,14 +1,16 @@
+import os
 import warnings
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 import torch
 import torch.distributed as dist
 from torch.distributed.checkpoint.stateful import Stateful
 
 from .default_planner import DefaultLoadPlanner
+from .filesystem import FileSystemReader
 from .planner import LoadPlanner
 from .storage import StorageReader
-from .utils import _all_gather_keys, _DistWrapper, _profile
+from .utils import _all_gather_keys, _api_bc_check, _DistWrapper, _profile
 
 __all__ = ["load_state_dict", "load"]
 
@@ -26,6 +28,7 @@ def load_state_dict(
         "'load_state_dict' is deprecated and will be removed in future versions. "
         "Please use 'load' instead."
     )
+    storage_reader.reset()
     with _profile():
         # TODO: test returning `load` here instead.
         return _load_state_dict(
@@ -38,14 +41,16 @@ def load_state_dict(
         )
 
 
+@_api_bc_check
 def load(
     state_dict: Dict[str, Any],
-    storage_reader: StorageReader,
     *,
+    checkpoint_id: Union[str, os.PathLike, None] = None,
+    storage_reader: Optional[StorageReader] = None,
+    planner: Optional[LoadPlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
     coordinator_rank: int = 0,
     no_dist: bool = False,
-    planner: Optional[LoadPlanner] = None,
 ) -> None:
     """
     Load a distributed ``state_dict`` in SPMD style.
@@ -75,15 +80,26 @@ def load(
         by passing ``no_dist=True`` and by using Tensors instead of ShardedTensors.
 
     Args:
-        state_dict (Dict[str, Any]) : The state_dict to load. Note that this
-            state dict will updated in place.
-        storage_reader (StorageReader): StorageReader used to load data from.
-        process_group (ProcessGroup):
+        state_dict (Dict[str, Any]): The state_dict to save.
+        checkpoint_id (Union[str, os.PathLike, None]):
+            The ID of this checkpoint instance. The meaning of the checkpoint_id
+            depends on the storage. It can be a path to a folder or to a file.
+            It can also be a key if the storage is a key-value store.
+            (Default: ``None``)
+        storage_reader (Optional[StorageReader]):
+            Instance of StorageWriter used to perform reads. If this is not
+            specified, DCP will automatically infer the reader based on the
+            checkpoint_id. If checkpoint_id is also None, an exception will
+            be raised. (Default: ``None``)
+        planner (Optional[LoadPlanner]):
+            Instance of LoadPlanner. If this is not specificed, the default
+            planner will be used. (Default: ``None``)
+        process_group (Optional[ProcessGroup]):
             ProcessGroup to be used for cross-rank synchronization.
-        coordinator_rank (int):
-            Rank to use to coordinate the checkpoint.
-            rank0 is used by default.
-        no_dist (bool): If ``True``, distributed checkpoint will not load
+            (Default: ``None``)
+        coordinator_rank (int): Rank to use to coordinate the checkpoint.
+            rank0 is used by default. (Default: ``0``)
+        no_dist (bool): If ``True``, distributed checkpoint will not save
             in SPMD style. (Default: ``False``)
 
     Returns:
@@ -116,6 +132,18 @@ def load(
     """
 
     with _profile():
+        if not storage_reader:
+            if not checkpoint_id:
+                raise RuntimeError(
+                    "`checkpoint_id` must be specificed if storage_reader is None."
+                )
+            # TODO: automatically decide whether to use FSSpecFileSystem
+            # https://github.com/pytorch/pytorch/issues/118033 and
+            # https://github.com/pytorch/pytorch/issues/118036
+            storage_reader = FileSystemReader(checkpoint_id)
+
+        storage_reader.reset(checkpoint_id)
+
         if no_dist:
             keys = list(state_dict.keys())
         else:
