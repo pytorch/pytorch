@@ -528,6 +528,8 @@ class MetaConverter:
                             outer_size=sizes,
                             outer_stride=strides,
                         )
+                        print(f"after transform_subclass: r._is_view(): {r._is_view()}")
+                        print(f"after transform_subclass: t._is_view(): {t._is_view()}")
                     else:
                         r = callback(
                             lambda: torch.empty_strided(
@@ -546,7 +548,9 @@ class MetaConverter:
                                 # preserve_format is the default, but we want to
                                 # emphasize how important it is to preserve
                                 # format here
+                                print(f"here234 before: r._is_view(): {r._is_view()}")
                                 r = r.clone(memory_format=torch.preserve_format)
+                                print(f"here234 after: r._is_view(): {r._is_view()}")
 
                     # Graph-Break for wrapped tensors
                     if not is_batchedtensor(

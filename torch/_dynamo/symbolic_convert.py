@@ -2319,6 +2319,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
         log.debug("INLINING %s%s, %s", code, suffix, result.reason)
 
+        instance_bound_nn_method = None
         if args and isinstance(args[0], NNModuleVariable):
             module = parent.output.get_submodule(args[0].module_key)
             if isinstance(module, torch.fx.GraphModule):
@@ -2331,49 +2332,48 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     "orig_graphmodule"
                 ] = module
             else:
-                # # Detect inline module method calls in order to propagate node metadata,
-                # # by checking if the first argument (self) is a variable tracking a nn.Module
-                # # (`module` is guaranteed to be a nn.Module in this branch).
-                # #
-                # # NOTE: instead of mapping from code object (module instance agnostic) to a module,
-                # # we need to map from module instance bound method to a module,
-                # # to ensure uniqueness and disambiguate between different instances of same NN module class.
-                # instance_bound_method = getattr(module, code.co_name)
-                # code_context.get_context(instance_bound_method)[
+                # Detect inline module method calls in order to propagate node metadata,
+                # by checking if the first argument (self) is a variable tracking a nn.Module
+                # (`module` is guaranteed to be a nn.Module in this branch).
+                #
+                # NOTE: instead of mapping from code object (module instance agnostic) to a module,
+                # we need to map from module instance bound method to a module,
+                # to ensure uniqueness and disambiguate between different instances of same NN module class.
+                instance_bound_nn_method = getattr(module, code.co_name)
+                # code_context.get_context(instance_bound_nn_method)[
                 #     "orig_nnmodule"
                 # ] = module
                 # # Need to do this specially for `forward` method.
                 # code_context.get_context(module.forward)[
                 #     "orig_nnmodule"
                 # ] = module
-                pass
 
-        # # This helps track nested function entry for the `torch.compile(module.func1)` case,
-        # # so that we can do segment mapping for the nested functions.
-        # if args and isinstance(args[0], UnspecializedNNModuleVariable):
-        #     module = args[0].value
-        #     if isinstance(module, torch.nn.Module):
-        #         # Detect inline module method calls in order to propagate node metadata,
-        #         # by checking if the first argument (self) is a variable tracking a nn.Module.
-        #         print(f"code: {code}")
-        #         instance_bound_method = getattr(module, code.co_name)
-        #         code_context.get_context(instance_bound_method)[
-        #             "orig_nnmodule"
-        #         ] = module
-        #         # Need to do this specially for `forward` method.
-        #         code_context.get_context(module.forward.__code__)[
-        #             "orig_nnmodule"
-        #         ] = module
-
+        # This helps track nested function entry for the `torch.compile(module.func1)` case,
+        # so that we can do segment mapping for the nested functions.
+        if args and isinstance(args[0], UnspecializedNNModuleVariable):
+            module = args[0].value
+            assert isinstance(module, torch.nn.Module)
+            # Detect inline module method calls in order to propagate node metadata,
+            # by checking if the first argument (self) is a variable tracking a nn.Module.
+            # print(f"code: {code}")
+            if code.co_name != "_compiled_nn_method_wrapper":
+                instance_bound_nn_method = getattr(module, code.co_name)
+            # code_context.get_context(instance_bound_nn_method)[
+            #     "orig_nnmodule"
+            # ] = module
+            # # Need to do this specially for `forward` method.
+            # code_context.get_context(module.forward.__code__)[
+            #     "orig_nnmodule"
+            # ] = module
 
         tracer: InliningInstructionTranslator
         if is_generator(code):
             tracer = InliningGeneratorInstructionTranslator(
-                parent, code, sub_locals, parent.symbolic_globals, closure_cells, func,
+                parent, code, sub_locals, parent.symbolic_globals, closure_cells, func, instance_bound_nn_method,
             )
         else:
             tracer = InliningInstructionTranslator(
-                parent, code, sub_locals, parent.symbolic_globals, closure_cells, func,
+                parent, code, sub_locals, parent.symbolic_globals, closure_cells, func, instance_bound_nn_method,
             )
 
         strict_ctx: Any = contextlib.nullcontext()
@@ -2418,6 +2418,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         symbolic_globals: Dict[str, VariableTracker],
         closure_cells: Dict[str, VariableTracker],
         funcvar: BaseUserFunctionVariable,
+        instance_bound_nn_method: Any = None,
     ):
         f_globals = funcvar.get_globals()
         f_builtins = f_globals["__builtins__"]
@@ -2443,6 +2444,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.symbolic_result = None
         self.closure_cells = closure_cells
         self.nn_module_stack = parent.nn_module_stack.copy()
+        self.instance_bound_nn_method = instance_bound_nn_method
 
     @property
     def fake_mode(self):

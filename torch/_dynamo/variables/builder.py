@@ -151,6 +151,7 @@ from .torch import TorchInGraphFunctionVariable
 from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
+    AsyncTensorVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
 )
@@ -601,6 +602,9 @@ class VariableBuilder:
             result = KeyedJaggedTensorVariable(value, source=self.source)
             # TODO: this doing it manually is bad
             return self.tx.output.side_effects.track_object_existing(value, result)
+        elif AsyncTensorVariable.is_matching_object(value):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return AsyncTensorVariable(value, source=self.source)
         elif isinstance(value, torch.optim.Optimizer):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return OptimizerVariable(value, source=self.source)
@@ -1371,6 +1375,7 @@ def wrap_fx_proxy_cls(
             # only allow_non_graph_fake in this instance because we handle the non-fake
             # cases properly below.
             example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+            print("hereA1")
 
         # Handle recursive calls here
         elif maybe_get_fake_mode(example_value) is tx.fake_mode:
@@ -1395,15 +1400,19 @@ def wrap_fx_proxy_cls(
             }
             assert "source" in options and options["source"] is not None
             kwargs["source"] = options["source"]
+            if isinstance(example_value, torch._subclasses.async_tensor.AsyncTensor):
+                example_value = example_value._unused_real_tensor
+                print("hereA3")
             example_value = wrap_to_fake_tensor_and_record(
                 example_value, tx=tx, **kwargs
             )
+            print("hereA2")
         if isinstance(example_value, torch.Tensor) and (
             maybe_get_fake_mode(example_value) is not tx.fake_mode
         ):
             raise InternalTorchDynamoError(
                 "`example_value` needs to be a `FakeTensor`"
-                f"wrapped by this instance of Dynamo. Found: {example_value}"
+                f"wrapped by this instance of Dynamo. Found: {example_value} with id: {id(example_value)}"
             )
 
     if isinstance(example_value, torch.Tensor):
@@ -1832,8 +1841,10 @@ def wrap_to_fake_tensor_and_record(
             )
             tx.output.tracked_fakes_id_to_source[id(e)].append(source)
 
+        print("hereB1")
         return fake_e
     else:
+        print("hereB2")
         return e
 
 

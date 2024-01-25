@@ -880,6 +880,26 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
         return super().var_getattr(tx, name)
 
 
+class AsyncTensorVariable(UserDefinedObjectVariable):
+    @staticmethod
+    def is_matching_object(obj):
+        mod = sys.modules.get("torch._subclasses.async_tensor")
+        return mod is not None and type(obj) is mod.AsyncTensor
+
+    def __init__(self, value, **kwargs):
+        from torch._subclasses.async_tensor import AsyncTensor
+
+        assert type(value) is AsyncTensor
+        super().__init__(value, **kwargs)
+
+    def var_getattr(self, tx, name):
+        return super().var_getattr(tx, name)
+
+    # def as_proxy(self):
+    #     breakpoint()
+    #     return self.value._fake
+
+
 class RemovableHandleVariable(VariableTracker):
     def __init__(
         self,

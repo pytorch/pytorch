@@ -7,7 +7,7 @@ from torch._dynamo import disable
 import functools
 import itertools
 from typing import Any, Optional, Dict, Callable, List
-from torch._subclasses.async_tensor import AsyncTensor, fake_mode
+from torch._subclasses.async_tensor import AsyncTensor, fake_mode, TensorContainer
 from collections import defaultdict, OrderedDict
 import weakref
 import threading
@@ -19,16 +19,21 @@ from torch._inductor.compile_fx import compile_fx_inner as inductor_compile_fx_i
 from torch._dynamo.output_graph import GraphCompileReason
 from torch._dynamo.eval_frame import get_compiler_fn
 from functorch.compile import min_cut_rematerialization_partition
+from torch._inductor.codecache import CompiledFxGraph
 
 next_unnamed_segment_id = 0
 unnamed_segment_prefix = "__unnamed_"
 unregistered_named_segment_prefix = "__unregistered_"
 
 
+def is_call_func_node(node):
+  return node.op in ("call_function", "call_method", "call_module")
+
+
 def extract_segment_prefix_from_gm(gm):
   segment_prefix = None
   for node in gm.graph.nodes:
-    if node.op != "placeholder" and node.op != "output":
+    if is_call_func_node(node):
       assert "segment_prefix" in node.meta, f"node.meta: {node.meta}"
       if not segment_prefix:
         segment_prefix = node.meta["segment_prefix"]
@@ -50,29 +55,31 @@ from dataclasses import dataclass
 class Segment:
   name: str
   nn_method: callable
-  is_backward: bool = False
   nth_call: int = 0
+  backend: Any = None
 
 
 def segment_prefix_assignment_fn(gm, method_to_segment_prefix_map):
   global next_unnamed_segment_id
   in_unnamed_segment = False
   for _, node in enumerate(gm.graph.nodes):
-    assert "nn_module_method" in node.meta
-    print(f'node.meta["nn_module_method"]: {node.meta["nn_module_method"]}')
-    print(f'id(node.meta["nn_module_method"]): {id(node.meta["nn_module_method"])}')
-    print(f"method_to_segment_prefix_map: {method_to_segment_prefix_map}")
-    for k, v in method_to_segment_prefix_map.items():
-      print(f"k: {k}, id(k): {id(k)}, v: {v}, id(v): {id(v)}")
-    if node.meta["nn_module_method"] in method_to_segment_prefix_map:
-      if in_unnamed_segment:
-        in_unnamed_segment = False
-        next_unnamed_segment_id += 1
-      node.meta["segment_prefix"] = method_to_segment_prefix_map[node.meta["nn_module_method"]]
-    else:
-      if not in_unnamed_segment:
-        in_unnamed_segment = True
-      node.meta["segment_prefix"] = f"{unnamed_segment_prefix}{str(next_unnamed_segment_id)}"
+    if is_call_func_node(node):
+      assert "nn_module_method" in node.meta
+      print(f'node.meta["nn_module_method"]: {node.meta["nn_module_method"]}')
+      print(f'id(node.meta["nn_module_method"]): {id(node.meta["nn_module_method"])}')
+      print(f"method_to_segment_prefix_map: {method_to_segment_prefix_map}")
+      print(f"id(method_to_segment_prefix_map): {id(method_to_segment_prefix_map)}")
+      for k, v in method_to_segment_prefix_map.items():
+        print(f"k: {k}, id(k): {id(k)}, v: {v}, id(v): {id(v)}")
+      if node.meta["nn_module_method"] in method_to_segment_prefix_map:
+        if in_unnamed_segment:
+          in_unnamed_segment = False
+          next_unnamed_segment_id += 1
+        node.meta["segment_prefix"] = method_to_segment_prefix_map[node.meta["nn_module_method"]]
+      else:
+        if not in_unnamed_segment:
+          in_unnamed_segment = True
+        node.meta["segment_prefix"] = f"{unnamed_segment_prefix}{str(next_unnamed_segment_id)}"
 
 
 def apply_segment_prefix(gm, segment_prefix):
@@ -94,16 +101,40 @@ class AsyncFuncHandle:
     self.segment = segment
     self.is_going_to_be_scheduled = False
     self._scheduler = weakref.ref(scheduler)
+    assert not any(arg is None for arg in args)
 
   def schedule(self):
     # make sure to schedule only once
     if self.is_going_to_be_scheduled:
+      print(f"handle is already scheduled! segment: {self.segment}")
       return
     self.is_going_to_be_scheduled = True
+    assert not any(arg is None for arg in self.args)
     AsyncTensor.wait_until_materialized(self.args)
-    args_materialized = pytree.tree_map_only(AsyncTensor, lambda x: x._materialized_tensor, pytree.tree_map(lambda x: x.detach(), self.args))
+    assert not any(arg is None for arg in self.args)
+    args_materialized = pytree.tree_map(
+      lambda x: x.detach(),
+      pytree.tree_map_only(AsyncTensor, lambda x: x.get_materialized_tensor(), self.args)
+    )
     self._scheduler().add_to_recorded_exec_order(self.segment)
-    self.outs = self.fn(*args_materialized)
+    # print(f"args_materialized: {args_materialized}")
+    if isinstance(self.fn, CompiledFxGraph):
+      outs = self.fn(list(args_materialized))
+      self.outs = []
+      for out in outs:
+        if isinstance(out, AsyncTensor):
+          self.outs.append(out.get_materialized_tensor())
+        else:
+          self.outs.append(out)
+    else:
+      # TODO: when do we hit this case?
+      outs = self.fn(args_materialized)
+      self.outs = []
+      for out in outs:
+        if isinstance(out, AsyncTensor):
+          self.outs.append(out.get_materialized_tensor())
+        else:
+          self.outs.append(out)
     self.cuda_event.record()
 
   def wait_for_completion(self):
@@ -111,6 +142,11 @@ class AsyncFuncHandle:
     for out, out_async in zip(self.outs, self.outs_async):
       # Set the output AsyncTensor's underlying materialized tensor
       # to be the actual output tensor.
+      # if isinstance(out, AsyncTensor):
+      #   AsyncTensor.wait_until_materialized([out])
+      #   out_async.materialize_with_value(out.get_materialized_tensor())
+      # else:
+      assert isinstance(out, torch.Tensor) and not isinstance(out, AsyncTensor), f"out: {out}, type(out): {type(out)}"
       out_async.materialize_with_value(out)
 
   def is_completed(self):
@@ -125,8 +161,8 @@ class AsyncFuncHandle:
 def split_module_based_on_segment_info(gm: torch.fx.GraphModule):
   known_segments = []
   for node in gm.graph.nodes:
-    if len(known_segments) == 0 or node.meta["segment_prefix"] != known_segments[-1]:
-      known_segments.append(node.meta["segment_prefix"])
+    if is_call_func_node(node) and (len(known_segments) == 0 or node.meta["segment_prefix"] != known_segments[-1]):
+        known_segments.append(node.meta["segment_prefix"])
 
   def split_callback(node):
     return known_segments.index(node.meta["segment_prefix"])
@@ -144,7 +180,7 @@ def split_module_based_on_segment_info(gm: torch.fx.GraphModule):
   for _, sub_gm in gm_after_split.named_children():
     nn_module_method = None
     for node in sub_gm.graph.nodes:
-      if node.op != "placeholder" and node.op != "output":
+      if is_call_func_node(node):
         assert "segment_prefix" in node.meta
         if not node.meta["segment_prefix"].startswith(unnamed_segment_prefix):
           if not nn_module_method:
@@ -163,34 +199,116 @@ class LazySchedulerGraphModule(torch.nn.Module):
   Instead, it calls the scheduler's maybe_run method, which decides
   whether to run the graph module based on the schedule.
   """
-  def __init__(self, scheduler, segment, gm, compiled_fn):
+  def __init__(self, segment, gm, compiled_fn):
     super().__init__()
-    self.scheduler = scheduler
     self.segment = segment
     self.gm = gm
     self.compiled_fn = compiled_fn
 
   def __call__(self, *args):
     assert self.compiled_fn is not None
-    return self.scheduler.maybe_run(self.gm, self.compiled_fn, self.segment, *args)
+    return LazyScheduler._current_scheduler.maybe_run(self.gm, self.compiled_fn, self.segment, *args)
 
 
-def compiled_method(mod, *args, **kwargs):
-  segment_nn_method = kwargs["segment_nn_method"]
-  del kwargs["segment_nn_method"]
-  compile_fx_fn = kwargs["compile_fx_fn"]
-  del kwargs["compile_fx_fn"]
-  return torch.compile(
-    segment_nn_method,
-    fullgraph=False,
-    backend=functools.partial(compile_fx_fn, backend="aot_eager"),
-  )(mod, *args, **kwargs)
+# def _compiled_nn_method(mod, *args, **kwargs):
+#   print(f"here2 _compiled_nn_method is called")
+#   segment = kwargs["segment"]
+#   del kwargs["segment"]
+#   print(f"_compiled_nn_method: segment: {segment}")
+#   segment_nn_method = kwargs["segment_nn_method"]
+#   del kwargs["segment_nn_method"]
+#   compile_fx_fn = kwargs["compile_fx_fn"]
+#   del kwargs["compile_fx_fn"]
+#   return torch.compile(
+#     segment_nn_method,
+#     fullgraph=False,
+#     backend=functools.partial(compile_fx_fn, backend="aot_eager"),
+#   )(mod, *args, **kwargs)
+
+
+def _compile_fx_inner_for_graph_in_segment(
+  gm: torch.fx.GraphModule,
+  *args,
+  **kwargs,
+):
+  global next_unnamed_segment_id
+  """
+  Compiles a graph module for this graph (which is from a segment),
+  and wraps the output compiled_fn in a LazySchedulerGraphModule to be called later.
+
+  NOTE: this function might be cached and is not guaranteed to re-run in subsequent calls.
+  """
+  assert isinstance(gm, torch.fx.GraphModule)
+
+  assert "segment_prefix" in kwargs
+  segment_prefix = kwargs["segment_prefix"]
+  del kwargs["segment_prefix"]
+
+  lazy_scheduler = LazyScheduler._current_scheduler
+
+  is_backward = kwargs.get("is_backward", False)
+
+  segment_name = compute_segment_name(segment_prefix, is_backward)
+  if (not segment_prefix.startswith(unnamed_segment_prefix)) and (segment_name not in lazy_scheduler._user_specified_segment_names):
+    # NOTE: if the segment prefix is not equal to `unnamed_segment_prefix`, and the segment name is also not specified by user,
+    # it means this segment is the named forward segment's corresponding backward segment, or
+    # the named backward segment's corresponding forward segment.
+    # In this case, since user doesn't care about this corresponding (fwd or bwd) segment's execution order,
+    # we give it a special "unregistered but named" segment name.
+    segment_prefix = f"{unregistered_named_segment_prefix}{segment_prefix}"
+    apply_segment_prefix(gm, segment_prefix=segment_prefix)
+    next_unnamed_segment_id += 1
+    segment_name = compute_segment_name(segment_prefix, is_backward)
+
+  # NOTE: `gm` in this function is the post-AOTAutograd fwd or bwd GraphModule,
+  # each node in `gm` originally does not have segment info, and we need to re-populate it here.
+  for node in gm.graph.nodes:
+    node.meta["segment"] = segment_name
+
+  assert "inner_compile_orig" in kwargs
+  inner_compile_orig = kwargs["inner_compile_orig"]
+  del kwargs["inner_compile_orig"]
+
+  # Call the user-specified original compiler
+  compiled_fn = inner_compile_orig(gm, *args, **kwargs)
+
+  lazy_gm = LazySchedulerGraphModule(
+    segment_name,
+    gm,
+    compiled_fn,
+  )
+
+  # Build segment -> GMs mapping
+  if segment_name not in lazy_scheduler._segment_to_gms_map:
+    lazy_scheduler._segment_to_gms_map[segment_name] = []
+  print(f"here123: segment_name: {segment_name}")
+  lazy_scheduler._segment_to_gms_map[segment_name].append(gm)
+  print(f"here123: id(lazy_scheduler): {id(lazy_scheduler)}")
+  print(f"here123: lazy_scheduler._segment_to_gms_map: {lazy_scheduler._segment_to_gms_map}")
+  print(f"here123: id(lazy_scheduler._segment_to_gms_map): {id(lazy_scheduler._segment_to_gms_map)}")
+
+  return lazy_gm
+
+
+def _compile_fx_inner_boxed_nop(gm, example_inputs, **kwargs):
+    def run(args):
+        return torch.fx.Interpreter(gm).boxed_run(list(args))
+
+    run._boxed_call = True
+    return run
 
 
 class LazyScheduler:
   """
   LazyScheduler is used to decide when to schedule the execution of a graph module (based on the schedule).
   """
+
+  # Assumption: we only run one instance of LazyScheduler per process.
+  # NOTE: this is not a hard requirement, but to implement multi-LazyScheduler,
+  # we need to be careful of _compile_fx_inner_for_graph_in_segment caching by torch.compile
+  # and make sure we don't reuse old LazyScheduler instance.
+  _current_scheduler = None
+
   def __init__(self, module, *, segments=[], schedule=[], compile_options=None):
     self._module = module
     self._segments = segments
@@ -198,20 +316,53 @@ class LazyScheduler:
     # If `schedule` is empty list, it means we don't enforce the execution order.
     self._schedule = schedule
     self._compile_options = compile_options
-
-    # Runtime states
+    # defaults to aot_eager for eager mode LazyScheduler segment backend
+    self._default_backend = compile_options["backend"] if compile_options is not None else "aot_eager"
+    self._segment_prefix_to_backend = {}
     self._registered_segment_prefixes = set()
     self._method_to_segment_prefix_map = {}
     self._gm_to_handle_map = OrderedDict()
-    self._handle_to_gm_map = OrderedDict()
-    self._segment_to_gms_map = defaultdict(list)
+    self._segment_to_gms_map = OrderedDict()
     self._recorded_exec_order = []
+    self._compile_starting_point_nn_method = None
+    LazyScheduler._current_scheduler = self
+    # TODO: reset `next_unnamed_segment_id` to 0 after every iteration
 
-  def _populate_method_to_segment_prefix_map(self):
+  # TODO: why do we need `_method_to_segment_prefix_map` to be an instance attribute instead of a local var?
+  def _prepare_segments(self, compile_options):
+    segment_name_to_segment = {}
     for segment in self._segments:
-      assert not segment.name.startswith(unnamed_segment_prefix), f"User-defined segment name {segment.name} should not start with '{unnamed_segment_prefix}' (it's a reserved prefix), please rename it."
-      assert segment.name.endswith("_fwd") or segment.name.endswith("_bwd")
+      if segment.backend is None:
+        segment.backend = self._default_backend
+      segment_name_to_segment[segment.name] = segment
+
+    for segment in self._segments:
+      assert not segment.name.startswith(unnamed_segment_prefix), \
+        f"User-defined segment name {segment.name} should not start with '{unnamed_segment_prefix}' (it's a reserved prefix), please rename it."
+      assert not segment.name.startswith(unregistered_named_segment_prefix), \
+        f"User-defined segment name {segment.name} should not start with '{unregistered_named_segment_prefix}' (it's a reserved prefix), please rename it."
+      assert segment.name.endswith("_fwd") or segment.name.endswith("_bwd"), \
+        f"Segment name must end with '_fwd' or '_bwd'. Violating segment name: {segment.name}."
       segment_prefix = segment.name[:-4]
+
+      # Check backend compatibility
+      if segment.backend == "eager":
+        assert segment.name.endswith("_fwd"), f"`{segment.name}` tries to use 'eager' backend, but only forward segment can use 'eager' backend."
+        assert f"{segment_prefix}_bwd" not in segment_name_to_segment, f"""
+If forward segment `{segment.name}` uses 'eager' backend, this segment must be forward-only and cannot have a corresponding backward segment.
+But we found a backward segment `{segment_prefix}_bwd` for this forward segment.
+"""
+      else:
+        fwd_segment_name = f"{segment_prefix}_fwd"
+        bwd_segment_name = f"{segment_prefix}_bwd"
+        if fwd_segment_name in segment_name_to_segment and bwd_segment_name in segment_name_to_segment:
+          assert segment_name_to_segment[fwd_segment_name].backend == segment_name_to_segment[bwd_segment_name].backend, f"""
+If both forward and backward segments are registered for an NN method, both segments must use the same backend.
+Violating segments:
+- `{fwd_segment_name}` (uses `{segment_name_to_segment[fwd_segment_name].backend}` backend)
+- `{bwd_segment_name}` (uses `{segment_name_to_segment[bwd_segment_name].backend}` backend)
+"""
+
       if segment.nn_method in self._method_to_segment_prefix_map:
         assert self._method_to_segment_prefix_map[segment.nn_method] == segment_prefix, f"""
 Attempted to register {segment.nn_method} function with segment prefix `{segment_prefix}`,
@@ -220,159 +371,148 @@ Please do not register the same function with different segment prefixes.
 """
       else:
         self._method_to_segment_prefix_map[segment.nn_method] = segment_prefix
+      self._segment_prefix_to_backend[segment_prefix] = segment.backend
 
   def _register_segment(self, segment):
     # NOTE: this code path is only invoked in eager mode
 
     # For each method, swap the original function with a patched function that maybe schedule the execution.
     # Solutions how to hook into the backward pass of this segment:
-    # Approach 1. [Preferred] Use torch.compile (e.g. with "eager" backend) for this segment.
+    # Approach 1. [Preferred] Use torch.compile (e.g. with "eager" or "aot_eager" backend) for this segment.
     #   Pros:
     #   (1) Better for handling control flow.
     #   (2) More shared code with compile mode code path.
-    #   (3) Still works with graph-break FSDP since we are only tracing a single (comm) op in FSDP case.
-    #   (4) Also we have to Dynamo trace to detect (and ban) global side-effects anyway.
-    #   How to make nested segment work:
-    #   (1) For nested compile, outer compile doesn't respect the inner compile result (it overwrite it, see https://gist.github.com/yf225/16d97499e2ecebf7e8867e9fae05e891).
-    #   One way to support nested in eager is to "re-compile and split graph" when compiling the outer method. This works regardless of segment registration order.
-    #   To make this possible, compiled segment needs to keep eager path so that outer compile can use it (it seems to already be the default behavior, see https://gist.github.com/yf225/16d97499e2ecebf7e8867e9fae05e891).
+    #   (3) Lower runtime overhead than tensor subclass approach
     # Approach 2. Annotate segment for a method using tensor subclass context manager (see test_subclass.py example).
 
-    def _compiled_method_wrapper(_, mod, *args, **kwargs):
-      kwargs["segment_nn_method"] = segment.nn_method
-      kwargs["compile_fx_fn"] = self._compile_fx_for_segment
-      return compiled_method(mod, *args, **kwargs)
+    method_name = segment.nn_method.__name__
+    stashed_eager_method_name = f"{method_name}_eager"
+
+    def _compiled_nn_method_wrapper(mod, *args, **kwargs):
+      # print(f"unknown_arg: {unknown_arg}, mod: {mod}, args: {args}, kwargs: {kwargs}")
+      # return _compiled_nn_method(mod, segment=segment, segment_nn_method=segment.nn_method, compile_fx_fn=self._compile_fx_for_graph_in_segment, *args, **kwargs)
+      nn_method = getattr(mod, method_name)
+      if self._compile_starting_point_nn_method is None:
+        # If we are calling this method directly in eager mode (and not from an outer method being compiled),
+        # then we compile this method.
+        print(f"_compiled_nn_method_wrapper start compile from this method")
+        self._compile_starting_point_nn_method = nn_method
+        out = torch.compile(
+          segment.nn_method,
+          fullgraph=False,
+          backend=self._compile_fx_for_graph_in_segment,
+        )(*args, **kwargs)
+        self._compile_starting_point_nn_method = None
+        return out
+      else:
+        # Otherwise, if we are calling this method from an outer method being compiled,
+        # then we take the eager mode path for this method so that outer method compile can continue successfully.
+        return getattr(mod, stashed_eager_method_name)(*args, **kwargs)
+
+    # NOTE: How to do nested segments
+    # Fact: If we put a compiled region within a compiled region, outer compile doesn't respect the inner compile result (it overwrite it, see https://gist.github.com/yf225/16d97499e2ecebf7e8867e9fae05e891).
+    # One way to support nested in eager is to "re-compile and split graph" when compiling the outer method. This works regardless of segment registration order.
+    # To make this possible, compiled segment needs to keep eager path so that outer compile can use it (it seems to already be the default behavior, see https://gist.github.com/yf225/16d97499e2ecebf7e8867e9fae05e891).
 
     assert segment.name.endswith("_fwd") or segment.name.endswith("_bwd")
     segment_prefix = segment.name[:-4]
+    # NOTE: Only register (including doing method swapping) if the segment has not been registered yet.
     if segment_prefix not in self._registered_segment_prefixes:
+      print(f"registering segment: {segment}")
       nn_module = segment.nn_method.__self__
-      method_name = segment.nn_method.__name__
-      # TODO: where do we enforce each segment contains no graph break (except for nested segment)?
-      # Maybe compile twice, first-time enforce `fullgraph=True`, and then do the actual split+compile?
-      setattr(nn_module, method_name, types.MethodType(_compiled_method_wrapper, nn_module))
+      print(f"nn_module: {nn_module}")
+      print(f"type(nn_module): {type(nn_module)}")
+      print(f"id(nn_module): {id(nn_module)}")
+
+      # TODO: always redo compilation and do not cache previous compiled method from previous iteration? are we already doing this?
+
+      eager_method = getattr(nn_module, method_name)
+      if not hasattr(nn_module, stashed_eager_method_name):
+        setattr(nn_module, stashed_eager_method_name, eager_method)
+      setattr(nn_module, method_name, types.MethodType(_compiled_nn_method_wrapper, nn_module))
       # Put the newly bound (compiled) method into the segment prefix map.
+      bound_nn_method = getattr(nn_module, method_name)
+      print(f"bound_nn_method: {bound_nn_method}")
+      print(f"id(bound_nn_method): {id(bound_nn_method)}")
       self._method_to_segment_prefix_map[getattr(nn_module, method_name)] = segment_prefix
       self._registered_segment_prefixes.add(segment_prefix)
+      print(f"self._registered_segment_prefixes: {self._registered_segment_prefixes}")
+    else:
+      print(f"already registered segment: {segment}")
 
   def __call__(self, *args, **kwargs):
-    self._populate_method_to_segment_prefix_map()
+    self._prepare_segments(self._compile_options)
     with torch._dynamo.config.patch(
       "lazy_scheduler_compile_fn",
       functools.partial(
         self._split_segments_and_compile,
+        # TODO: avoid caching `method_to_segment_prefix_map` here too! use LazyScheduler singleton.
         segment_prefix_assignment_fn=functools.partial(segment_prefix_assignment_fn, method_to_segment_prefix_map=self._method_to_segment_prefix_map),
       )
     ):
       if self._compile_options is not None:  # compile mode
         # TODO: add unit test for `torch.compile(..., backend=functools.partial(inductor_compile_fx, inner_compile=...))` for inner_compile customization.
-        self._compile_options["backend"] = functools.partial(self._compile_fx_for_segment, backend=self._compile_options["backend"])
-        return torch.compile(self._module, **self._compile_options)(*args, **kwargs)
+        # TODO: allow calling "eager" (fwd only) or "aot_eager" (fwd and bwd) region within the "inductor" region, under compile mode. (How to do this during graph splitting?)
+        compile_options_without_backend = {k: v for k, v in self._compile_options.items() if k != "backend"}
+        return torch.compile(self._module, backend=self._compile_fx_for_graph_in_segment, **compile_options_without_backend)(*args, **kwargs)
       else:  # eager mode
         for segment in self._segments:
           self._register_segment(segment)
+          print(f"here3 we are here")
+          print(f"here3 type(self._module): {type(self._module)}")
+          print(f"here3 id(self._module): {id(self._module)}")
+          if hasattr(self._module, "func1"):
+            print(f"here3 self._module.func1: {self._module.func1}")
         return self._module(*args, **kwargs)
 
   def add_to_recorded_exec_order(self, segment):
+    print(f"Adding segment {segment} to recorded exec order.")
     if len(self._recorded_exec_order) > 0 and self._recorded_exec_order[-1] == segment:
+      print("add_to_recorded_exec_order early return")
       return
+    print("add_to_recorded_exec_order add to _recorded_exec_order list")
+    print(f"id(self._recorded_exec_order): {id(self._recorded_exec_order)}")
+    print(f"id(self): {id(self)}")
     self._recorded_exec_order.append(segment)
 
-  def reset_recorded_exec_order(self):
-    self._recorded_exec_order = []
-
-  def _compile_fx_inner_nop(self, gm, fake_tensor_inputs, **kwargs):
-    def inner(*args):
-      return torch.fx.Interpreter(gm).run(*args)
-
-    return inner
-
-  def _compile_fx_inner_for_segment(
-    self,
-    gm: torch.fx.GraphModule,
-    *args,
-    **kwargs,
-  ):
-    global next_unnamed_segment_id
-    """
-    Compiles a graph module using Inductor compile_fx_inner,
-    and wraps the output compiled_fn in a LazySchedulerGraphModule to be called later.
-    """
-    assert isinstance(gm, torch.fx.GraphModule)
-
-    assert "segment_prefix" in kwargs
-    segment_prefix = kwargs["segment_prefix"]
-    del kwargs["segment_prefix"]
-
-    is_backward = kwargs.get("is_backward", False)
-
-    segment_name = compute_segment_name(segment_prefix, is_backward)
-    if (not segment_prefix.startswith(unnamed_segment_prefix)) and (segment_name not in self._user_specified_segment_names):
-      # NOTE: if the segment prefix is not unnamed_segment_prefix, and the segment name is also not specified by user,
-      # it means this segment is the named forward segment's corresponding (unnamed) backward segment, or
-      # the named backward segment's corresponding (unnamed) forward segment.
-      # In this case, since user doesn't care about this (fwd or bwd) segment's execution order,
-      # we give it a special "unregistered but named" segment name.
-      segment_prefix = f"{unregistered_named_segment_prefix}{segment_prefix}"
-      apply_segment_prefix(gm, segment_prefix=segment_prefix)
-      next_unnamed_segment_id += 1
-      segment_name = compute_segment_name(segment_prefix, is_backward)
-
-    # NOTE: `gm` in this function is the post-AOTAutograd fwd or bwd GraphModule,
-    # each node in `gm` originally does not have segment info, and we need to re-populate it here.
-    for node in gm.graph.nodes:
-      node.meta["segment"] = segment_name
-
-    assert "inner_compile_orig" in kwargs
-    inner_compile_orig = kwargs["inner_compile_orig"]
-    del kwargs["inner_compile_orig"]
-    # Call the user-specified original compiler
-    compiled_fn = inner_compile_orig(gm, *args, **kwargs)
-
-    lazy_gm = LazySchedulerGraphModule(
-      self,
-      segment_name,
-      gm,
-      compiled_fn,
-    )
-
-    # Build segment -> GMs mapping
-    self._segment_to_gms_map[segment_name].append(gm)
-
-    return lazy_gm
-
-  def _compile_fx_for_segment(
+  def _compile_fx_for_graph_in_segment(
     self,
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
-    backend="inductor",
     **kwargs,
   ):
     segment_prefix = extract_segment_prefix_from_gm(gm)
+    backend = self._segment_prefix_to_backend.get(segment_prefix, self._default_backend)
     compiler_fn = None
-    assert backend == "aot_eager"
-    if backend == "aot_eager":
-      inner_compile_orig = self._compile_fx_inner_nop
+    if backend == "eager":
+      inner_compile_orig = _compile_fx_inner_boxed_nop
+      compiler_fn = functools.partial(_compile_fx_inner_for_graph_in_segment, segment_prefix=segment_prefix, inner_compile_orig=inner_compile_orig)
+    elif backend == "aot_eager":
+      inner_compile_orig = _compile_fx_inner_boxed_nop
       compiler_fn = aot_autograd(
-        fw_compiler=functools.partial(self._compile_fx_inner_for_segment, segment_prefix=segment_prefix, inner_compile_orig=inner_compile_orig),
-        bw_compiler=functools.partial(self._compile_fx_inner_for_segment, segment_prefix=segment_prefix, inner_compile_orig=inner_compile_orig, is_backward=True),
+        fw_compiler=functools.partial(_compile_fx_inner_for_graph_in_segment, segment_prefix=segment_prefix, inner_compile_orig=inner_compile_orig),
+        bw_compiler=functools.partial(_compile_fx_inner_for_graph_in_segment, segment_prefix=segment_prefix, inner_compile_orig=inner_compile_orig, is_backward=True),
         partition_fn=min_cut_rematerialization_partition,
       )
-    else:
+    elif backend == "inductor":
       # `inner_compile` can be passed in via `torch.compile(m, functools.partial(inductor_compile_fx, inner_compile=...))`.
       # It's the custom compiler for each fwd or bwd GraphModule. Default is inductor_compile_fx_inner.
       inner_compile_orig = kwargs.get("inner_compile", inductor_compile_fx_inner)
       kwargs.update({
-        "inner_compile": functools.partial(self._compile_fx_inner_for_segment, segment_prefix=segment_prefix, inner_compile_orig=inner_compile_orig)
+        "inner_compile": functools.partial(_compile_fx_inner_for_graph_in_segment, segment_prefix=segment_prefix, inner_compile_orig=inner_compile_orig)
       })
-      compiler_fn = get_compiler_fn(backend)
+      compiler_fn = get_compiler_fn("inductor")
+    else:
+      raise RuntimeError(f"Unsupported backend: {backend}")
 
+    print(f"here4: _compile_fx_for_graph_in_segment: segment_prefix: {segment_prefix}")
+    print(f"here4: _compile_fx_for_graph_in_segment: gm: {gm}")
     return compiler_fn(gm, example_inputs, **kwargs)
 
   def _split_segments_and_compile(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor], backend_compile_fn, segment_prefix_assignment_fn):
     # Do segment prefix assignment, and then split the graph module based on segment prefix.
-    for node in gm.graph.nodes:
-      assert "nn_module_method" in node.meta
+    # for node in gm.graph.nodes:
+    #   assert "nn_module_method" in node.meta
 
     segment_prefix_assignment_fn(gm)
     split_gm = split_module_based_on_segment_info(gm)
@@ -391,6 +531,7 @@ Please do not register the same function with different segment prefixes.
     when the graph module is eventually executed.
     """
     # Create the handle and the async tensors
+    assert not any(arg is None for arg in args)
     args_fake = []
     for arg in args:
       if isinstance(arg, AsyncTensor):
@@ -400,13 +541,12 @@ Please do not register the same function with different segment prefixes.
     with fake_mode:
       outs_fake = gm(*args_fake)
 
-    outs_async = tuple(AsyncTensor(fake_tensor=out_fake) for out_fake in outs_fake)
+    outs_async = tuple(AsyncTensor(unused_real_tensor=None, fake_tensor=out_fake, handle=None, materialized_tensor_container=TensorContainer()) for out_fake in outs_fake)
     if gm in self._gm_to_handle_map:
       cur_handle = self._gm_to_handle_map[gm]
     else:
       cur_handle = AsyncFuncHandle(compiled_fn, segment, args=args, outs_async=outs_async, scheduler=self)
       self._gm_to_handle_map[gm] = cur_handle
-      self._handle_to_gm_map[cur_handle] = gm
     for out_async in outs_async:
       out_async.set_handle(cur_handle)
 
@@ -499,6 +639,7 @@ class SubmoduleReplacer(torch.fx.interpreter.Interpreter):
           sn.args = (sn.args,)
 
     input_mod.recompile()
+    # TODO: this doesn't seem to show in log, need to figure out why.
     input_mod.compile_subgraph_reason = GraphCompileReason(
       "LazyScheduler intentional graph-break (See Note [LazyScheduler] TODO)."
       " Set `torch._dynamo.config.lazy_scheduler_compile_fn = None` to disable.",

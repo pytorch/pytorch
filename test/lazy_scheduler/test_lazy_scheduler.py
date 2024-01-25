@@ -1,16 +1,16 @@
 """
-# pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_single___unnamed_segment
-pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_single_segment_prefix_fwd
-pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_single_segment_prefix_fwd_bwd
-pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_split_module_dep_segments
-pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_split_module_non_dep_segments
-pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_segment_tagging
-pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_explicit_schedule
-pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_explicit_schedule_reordering
-pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_register_segment_hook
+CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_single_segment_prefix_fwd && \
+CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_single_segment_prefix_fwd_bwd && \
+CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_nested_segments_dep && \
+CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_nested_segments_non_dep && \
+CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_explicit_schedule_reordering && \
+CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_segment_compiled_with_different_backend && \
+CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_graph_break_within_segment
+ >output.log 2>&1
 """
 
 import types
+import copy
 import torch
 import torch.utils._pytree as pytree
 from torch.testing._internal.common_utils import TestCase as TorchTestCase
@@ -40,6 +40,31 @@ class TestCase(TorchTestCase):
     torch._dynamo.reset()
 
 
+def extract_ops_from_gm(gm):
+    ops = []
+    for node in gm.graph.nodes:
+      if node.op == "call_function":
+        ops.append(node.target.__name__)
+      elif node.op == "call_method":
+        ops.append(node.target)
+    return ops
+
+
+def check_segment(lazy_scheduler, segment_name_to_expected_ops_in_gms, is_compile):
+  segment_to_gms_map = lazy_scheduler._segment_to_gms_map
+  for segment_name, expected_ops_in_gms in segment_name_to_expected_ops_in_gms.items():
+    assert segment_name in segment_to_gms_map, f"{segment_name} should exist in segment_to_gms_map but it doesn't."
+    assert len(segment_to_gms_map[segment_name]) == len(expected_ops_in_gms)
+    for gm, expected_ops_dict_or_list in zip(segment_to_gms_map[segment_name], expected_ops_in_gms):
+      if isinstance(expected_ops_dict_or_list, dict):
+        expected_ops = expected_ops_dict_or_list["compiled"] if is_compile else expected_ops_dict_or_list["eager"]
+      else:
+        expected_ops = expected_ops_dict_or_list
+      ops_from_gm = extract_ops_from_gm(gm)
+      print(f"ops_from_gm: {ops_from_gm}")
+      assert ops_from_gm == expected_ops
+
+
 class TestDepSegmentModule(torch.nn.Module):
   """
   Dependency chain:
@@ -59,6 +84,24 @@ class TestDepSegmentModule(torch.nn.Module):
     z2 = self.func2(x, z1)
     z = z1 * z2
     return z
+
+
+def check_segment_for_TestDepSegmentModule_fwd_bwd(lazy_scheduler, is_compile=False):
+  return check_segment(
+    lazy_scheduler,
+    {
+      "func1_fwd": [{
+        "eager": ['mm.default', 't.default', 't.default'],
+        "compiled": ['mm.default', 'permute.default', 'permute.default'],
+      }],
+      "func2_fwd": [['add.Tensor']],
+      "forward_fwd": [['mul.Tensor']],
+      "forward_bwd": [['mul.Tensor', 'mul.Tensor']],
+      "func2_bwd": [[]],
+      "func1_bwd": [['mm.default', 'mm.default']],
+    },
+    is_compile=is_compile,
+  )
 
 
 class TestNonDepSegmentModule(torch.nn.Module):
@@ -84,39 +127,73 @@ class TestNonDepSegmentModule(torch.nn.Module):
     return z
 
 
+def check_segment_for_TestNonDepSegmentModule_fwd_bwd(lazy_scheduler, is_compile=False):
+  return check_segment(
+    lazy_scheduler,
+    {
+      "func1_fwd": [{
+        "eager": ['mm.default', 't.default', 't.default'],
+        "compiled": ['mm.default', 'permute.default', 'permute.default'],
+      }],
+      "func2_fwd": [['add.Tensor']],
+      "forward_fwd": [['mul.Tensor']],
+      "forward_bwd": [['mul.Tensor', 'mul.Tensor']],
+      "func2_bwd": [[]],
+      "func1_bwd": [['mm.default', 'mm.default']],
+    },
+    is_compile=is_compile,
+  )
+
+
 class TestLazyScheduler(TestCase):
-  def _validate(self, orig_eager_fn, lazy_scheduler_gen, expected_exec_order, inps, skip_check=False, test_eager=True, test_compile=True):
+  def _validate(self, eager_module, lazy_scheduler_gen, expected_exec_order, inps, fwd_only=False, skip_check=False, test_eager=True, test_compile=True, additional_check=None):
     def _clone_inps():
       cloned_inps = []
       for inp in inps:
         cloned_inps.append(inp.clone().detach().requires_grad_(inp.requires_grad))
       return cloned_inps
 
-    def _compare_output_and_grad(orig_fn, lazy_scheduler):
+    def _compare_output_and_grad(eager_module, lazy_scheduler_gen, is_compile=False, additional_check=None):
       inps_no_ls = _clone_inps()
       inps_ls = _clone_inps()
 
-      # Original function, 1st iter
-      torch.manual_seed(0)
-      expected = orig_fn(*inps_no_ls)
-      expected.sum().backward()
+      if is_compile:
+        baseline_fn = torch.compile(eager_module, fullgraph=False, backend="inductor")
+      else:
+        baseline_fn = eager_module
 
-      # Original function, 2nd iter
-      torch.manual_seed(0)
-      expected = orig_fn(*inps_no_ls)
-      expected.sum().backward()
+      num_iterations = 1  # 2
 
-      # LazyScheduler function, 1st iter
-      torch.manual_seed(0)
-      result = lazy_scheduler(*inps_ls)
-      result.sum().backward()
+      # Original function, 2 iterations
+      for i in range(num_iterations):
+        print(f"------------------ eager iter: {i} ------------------")
+        torch.manual_seed(0)
+        expected = baseline_fn(*inps_no_ls)
+        if not fwd_only:
+          expected.sum().backward()
 
-      # LazyScheduler function, 2nd iter
-      torch.manual_seed(0)
-      # Reset state so that we only track the execution order of the 2nd iter
-      lazy_scheduler.reset_recorded_exec_order()
-      result = lazy_scheduler(*inps_ls)
-      result.sum().backward()
+      # LazyScheduler function, 2 iterations
+      lazy_scheduler = None
+      for i in range(num_iterations):
+        print(f"------------------ LazyScheduler iter: {i} ------------------")
+        torch.manual_seed(0)
+        # TODO: currently we re-create LazyScheduler for every iteration, so that the scheduler state is always fresh.
+        # If this is a lot of runtime overhead, we can explore reusing old LazyScheduler instance.
+        lazy_scheduler = lazy_scheduler_gen(eager_module, is_compile=is_compile)
+        result = lazy_scheduler(*inps_ls)
+        if not fwd_only:
+          result.sum().backward()
+        print(f"here1 lazy_scheduler._recorded_exec_order: {lazy_scheduler._recorded_exec_order}")
+        print(f"here1 id(lazy_scheduler): {id(lazy_scheduler)}")
+        print(f"here1 lazy_scheduler._registered_segment_prefixes: {lazy_scheduler._registered_segment_prefixes}")
+        print(f"here1 lazy_scheduler._segment_to_gms_map: {lazy_scheduler._segment_to_gms_map}")
+        print(f"here1 id(lazy_scheduler._segment_to_gms_map): {id(lazy_scheduler._segment_to_gms_map)}")
+        if hasattr(eager_module, "func1"):
+          print(f"here1 id(eager_module.func1): {id(eager_module.func1)}")
+        if hasattr(eager_module, "func2"):
+          print(f"here1 id(eager_module.func2): {id(eager_module.func2)}")
+        if hasattr(eager_module, "forward"):
+          print(f"here1 id(eager_module.forward): {id(eager_module.forward)}")
 
       if not skip_check:
         self.assertEqual(
@@ -124,64 +201,70 @@ class TestLazyScheduler(TestCase):
           expected,
           msg="Output mismatch between torch.compile and eager versions",
         )
-        for inp, cloned_inp in zip(inps_no_ls, inps_ls):
-          self.assertEqual(
-            inp.grad,
-            cloned_inp.grad,
-            msg=f"Gradient mismatch between torch.compile and eager versions. inp.grad: {inp.grad}, cloned_inp.grad: {cloned_inp.grad}",
-          )
+        if not fwd_only:
+          for inp, cloned_inp in zip(inps_no_ls, inps_ls):
+            self.assertEqual(
+              inp.grad,
+              cloned_inp.grad,
+              msg=f"Gradient mismatch between torch.compile and eager versions. inp.grad: {inp.grad}, cloned_inp.grad: {cloned_inp.grad}",
+            )
 
-    def _compare_exec_order(recorded_exec_order, expected_exec_order):
+      if additional_check is not None:
+        if not isinstance(additional_check, list):
+          additional_check = [additional_check]
+        for check in additional_check:
+          check(lazy_scheduler, is_compile=is_compile)
+
+      recorded_exec_order = lazy_scheduler._recorded_exec_order
       err_msg = f"""
 Expected execution order to be:
 {expected_exec_order},
 
 but got:
-{lazy_scheduler._recorded_exec_order}
+{recorded_exec_order}
 """
-      self.assertEqual(len(recorded_exec_order), len(expected_exec_order), msg=err_msg)
-      self.assertEqual(lazy_scheduler._recorded_exec_order, expected_exec_order, msg=err_msg)
+      # NOTE: We don't care about the execution order of unnamed segments.
+      recorded_exec_order_without_unnamed_segments = [s for s in recorded_exec_order if not s.startswith("__unnamed_")]
+      self.assertEqual(len(recorded_exec_order_without_unnamed_segments), len(expected_exec_order), msg=err_msg)
+      self.assertEqual(recorded_exec_order_without_unnamed_segments, expected_exec_order, msg=err_msg)
 
     if test_eager:
-      lazy_scheduler = lazy_scheduler_gen()
-      _compare_output_and_grad(orig_eager_fn, lazy_scheduler)
-      # NOTE: In eager mode LazyScheduler, unnamed segment is not annotated with prefix "__unnamed_" (they are not annotated at all).
-      # TODO: need to differentiate between "known backward segment's unknown forward segment" and "truly unknown segment".
-      # expected_exec_order_without_unnamed_segments = [s for s in expected_exec_order if not s.startswith("__unnamed_")]
-      # _compare_exec_order(lazy_scheduler._recorded_exec_order, expected_exec_order_without_unnamed_segments)
-      _compare_exec_order(lazy_scheduler._recorded_exec_order, expected_exec_order)
+      _compare_output_and_grad(copy.deepcopy(eager_module), lazy_scheduler_gen, is_compile=False, additional_check=additional_check)
+      torch._dynamo.reset()
+      print(f"Eager mode test done!")
 
     if test_compile:
-      lazy_scheduler = lazy_scheduler_gen()
-      _compare_output_and_grad(
-        torch.compile(orig_eager_fn, fullgraph=False, backend="inductor"),
-        torch.compile(lazy_scheduler, fullgraph=False, backend="inductor"),
-      )
-      _compare_exec_order(lazy_scheduler._recorded_exec_order, expected_exec_order)
+      _compare_output_and_grad(copy.deepcopy(eager_module), lazy_scheduler_gen, is_compile=True, additional_check=additional_check)
+      torch._dynamo.reset()
+      print(f"Compile mode test done!")
 
   def test_single_segment_prefix_fwd(self):
     # Check that output and gradients are correct when there is
     # only one unnamed segment in the model.
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda"
     m = TestDepSegmentModule()
     m = m.to(device)
     x = torch.randn(4, 4, requires_grad=True, device=device)
     y = torch.randn(4, 4, requires_grad=True, device=device)
 
-    lazy_scheduler_gen = lambda: LazyScheduler(
-      m,
-      segments=[
-        Segment("func1_fwd", m.func1),
-      ],
-      schedule=[
-        "func1_fwd",
-      ],
-    )
+    def lazy_scheduler_gen(module, is_compile=False):
+      return LazyScheduler(
+        module,
+        segments=[
+          Segment("func1_fwd", module.func1),
+        ],
+        schedule=[
+          "func1_fwd",
+        ],
+        compile_options=None if not is_compile else {
+          "fullgraph": False,
+          "backend": "inductor",
+        }
+      )
 
     self._validate(
       m,
       lazy_scheduler_gen,
-      # lazy_scheduler._compile_fx,
       expected_exec_order=[
         "func1_fwd",
         "__unregistered_func1_bwd",
@@ -192,28 +275,32 @@ but got:
   def test_single_segment_prefix_fwd_bwd(self):
     # Check that output and gradients are correct when there is
     # only one unnamed segment in the model.
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda"
     m = TestDepSegmentModule()
     m = m.to(device)
     x = torch.randn(4, 4, requires_grad=True, device=device)
     y = torch.randn(4, 4, requires_grad=True, device=device)
 
-    lazy_scheduler_gen = lambda: LazyScheduler(
-      m,
-      segments=[
-        Segment("func1_fwd", m.func1),
-        Segment("func1_bwd", m.func1, is_backward=True),
-      ],
-      schedule=[
-        "func1_fwd",
-        "func1_bwd",
-      ],
-    )
+    def lazy_scheduler_gen(module, is_compile=False):
+      return LazyScheduler(
+        module,
+        segments=[
+          Segment("func1_fwd", module.func1),
+          Segment("func1_bwd", module.func1),
+        ],
+        schedule=[
+          "func1_fwd",
+          "func1_bwd",
+        ],
+        compile_options=None if not is_compile else {
+          "fullgraph": False,
+          "backend": "inductor",
+        }
+      )
 
     self._validate(
       m,
       lazy_scheduler_gen,
-      # lazy_scheduler._compile_fx,
       expected_exec_order=[
         "func1_fwd",
         "func1_bwd",
@@ -221,256 +308,357 @@ but got:
       inps=[x, y],
     )
 
-  def test_split_module_dep_segments(self):
+  def test_nested_segments_dep(self):
     # Check that GraphModule produced by Dynamo is correctly split
     # (each submodule only contains one segment)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda"
     m = TestDepSegmentModule()
     m = m.to(device)
     x = torch.randn(4, 4, requires_grad=True, device=device)
     y = torch.randn(4, 4, requires_grad=True, device=device)
-    # lazy_scheduler = LazyScheduler(schedule=[])
 
-    # def segment_prefix_assignment_fn(gm):
-    #   for node in gm.graph.nodes:
-    #     assert "nn_module_method" in node.meta
-    #     # One NN module method maps to one named segment
-    #     node.meta["segment_prefix"] = str(node.meta["nn_module_method"])
+    expected_exec_order = [
+      "func1_fwd",
+      "func2_fwd",
+      "forward_fwd",
+      "forward_bwd",
+      "func2_bwd",
+      "func1_bwd",
+    ]
 
-    # torch._dynamo.config.lazy_scheduler_compile_fn = functools.partial(
-    #   lazy_scheduler._compile_fn,
-    #   segment_prefix_assignment_fn=segment_prefix_assignment_fn
-    # )
-
-    lazy_scheduler_gen = lambda: LazyScheduler(
-      m,
-      segments=[
-        Segment("func1_fwd", m.func1),
-        Segment("func2_fwd", m.func2),
-        Segment("forward_fwd", m.forward),
-        Segment("func1_bwd", m.func1, is_backward=True),
-        Segment("func2_bwd", m.func2, is_backward=True),
-        Segment("forward_bwd", m.forward, is_backward=True),
-      ],
-      schedule=[
-        "func1_fwd",
-        "func2_fwd",
-        "forward_fwd",
-        "forward_bwd",
-        "func2_bwd",
-        "func1_bwd",
-      ],
-    )
+    def lazy_scheduler_gen(module, is_compile=False):
+      return LazyScheduler(
+        module,
+        segments=[
+          Segment("func1_fwd", module.func1),
+          Segment("func2_fwd", module.func2),
+          Segment("forward_fwd", module.forward),
+          Segment("func1_bwd", module.func1),
+          Segment("func2_bwd", module.func2),
+          Segment("forward_bwd", module.forward),
+        ],
+        schedule=expected_exec_order,
+        compile_options=None if not is_compile else {
+          "fullgraph": False,
+          "backend": "inductor",
+        },
+      )
 
     self._validate(
       m,
       lazy_scheduler_gen,
-      # lazy_scheduler._compile_fx,
-      expected_exec_order=[
-        "func1_fwd",
-        "func2_fwd",
-        "forward_fwd",
-        "forward_bwd",
-        "func2_bwd",
-        "func1_bwd",
-      ],
+      expected_exec_order=expected_exec_order,
       inps=[x, y],
+      additional_check=check_segment_for_TestDepSegmentModule_fwd_bwd,
     )
 
-  def test_split_module_non_dep_segments(self):
+  def test_nested_segments_non_dep(self):
     # Check that GraphModule produced by Dynamo is correctly split
     # (each submodule only contains one segment)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda"
     m = TestNonDepSegmentModule()
     m = m.to(device)
     x = torch.randn(4, 4, requires_grad=True, device=device)
     y = torch.randn(4, 4, requires_grad=True, device=device)
-    # lazy_scheduler = LazyScheduler(schedule=[])
 
-    # def segment_prefix_assignment_fn(gm):
-    #   for node in gm.graph.nodes:
-    #     assert "nn_module_method" in node.meta
-    #     # One NN module method maps to one named segment
-    #     node.meta["segment_prefix"] = str(node.meta["nn_module_method"])
+    expected_exec_order = [
+      "func1_fwd",
+      "func2_fwd",
+      "forward_fwd",
+      "forward_bwd",
+      "func2_bwd",
+      "func1_bwd",
+    ]
 
-    # torch._dynamo.config.lazy_scheduler_compile_fn = functools.partial(
-    #   lazy_scheduler._compile_fn,
-    #   segment_prefix_assignment_fn=segment_prefix_assignment_fn
-    # )
-
-    lazy_scheduler_gen = lambda: LazyScheduler(
-      m,
-      segments={
-        Segment("func1_fwd", m.func1),
-        Segment("func2_fwd", m.func2),
-        Segment("forward_fwd", m.forward),
-        Segment("func1_bwd", m.func1, is_backward=True),
-        Segment("func2_bwd", m.func2, is_backward=True),
-        Segment("forward_bwd", m.forward, is_backward=True),
-      },
-      schedule=[
-        "func1_fwd",
-        "func2_fwd",
-        "forward_fwd",
-        "forward_bwd",
-        "func2_bwd",
-        "func1_bwd",
-      ],
-    )
+    def lazy_scheduler_gen(module, is_compile=False):
+      return LazyScheduler(
+        module,
+        segments=[
+          Segment("func1_fwd", module.func1),
+          Segment("func2_fwd", module.func2),
+          Segment("forward_fwd", module.forward),
+          Segment("func1_bwd", module.func1),
+          Segment("func2_bwd", module.func2),
+          Segment("forward_bwd", module.forward),
+        ],
+        schedule=expected_exec_order,
+        compile_options=None if not is_compile else {
+          "fullgraph": False,
+          "backend": "inductor",
+        },
+      )
 
     self._validate(
       m,
       lazy_scheduler_gen,
-      # lazy_scheduler._compile_fx,
-      expected_exec_order=[
-        "func1_fwd",
-        "func2_fwd",
-        "forward_fwd",
-        "forward_bwd",
-        "func2_bwd",
-        "func1_bwd",
-      ],
+      expected_exec_order=expected_exec_order,
       inps=[x, y],
+      additional_check=check_segment_for_TestNonDepSegmentModule_fwd_bwd,
     )
 
-  def test_segment_tagging(self):
-    def _run_test(orig_fn, ls_fn, expected_exec_order):
-      # torch._dynamo.config.lazy_scheduler_compile_fn = functools.partial(
-      #   lazy_scheduler._compile_fn,
-      #   segment_prefix_assignment_fn=functools.partial(segment_prefix_assignment_fn, segment_dict=segment_dict),
-      # )
+  def test_explicit_schedule_reordering(self):
+    device = "cuda"
+    m = TestNonDepSegmentModule()
+    m = m.to(device)
+    x = torch.randn(4, 4, requires_grad=True, device=device)
+    y = torch.randn(4, 4, requires_grad=True, device=device)
 
-      # self._validate(
-      #   m,
-      #   lazy_scheduler._compile_fx,
-      #   x,
-      #   y,
-      # )
+    expected_exec_order = [
+      "func2_fwd",
+      "func1_fwd",
+      "forward_fwd",
+      "forward_bwd",
+      "func2_bwd",
+      "func1_bwd",
+    ]
 
+    def lazy_scheduler_gen(module, is_compile=False):
+      return LazyScheduler(
+        module,
+        segments=[
+          Segment("func1_fwd", module.func1),
+          Segment("func2_fwd", module.func2),
+          Segment("forward_fwd", module.forward),
+          Segment("func1_bwd", module.func1),
+          Segment("func2_bwd", module.func2),
+          Segment("forward_bwd", module.forward),
+        ],
+        schedule=expected_exec_order,
+        compile_options=None if not is_compile else {
+          "fullgraph": False,
+          "backend": "inductor",
+        },
+      )
+
+    self._validate(
+      m,
+      lazy_scheduler_gen,
+      expected_exec_order=expected_exec_order,
+      inps=[x, y],
+      additional_check=check_segment_for_TestNonDepSegmentModule_fwd_bwd,
+    )
+
+  def test_segment_compiled_with_different_backend(self):
+    def _run_test(lazy_scheduler_gen, expected_exec_order, additional_check, fwd_only=False):
+      device = "cuda"
+      m = TestNonDepSegmentModule()
+      m = m.to(device)
       x = torch.randn(4, 4, requires_grad=True, device=device)
       y = torch.randn(4, 4, requires_grad=True, device=device)
 
       self._validate(
-        orig_fn,
-        ls_fn,
-        # lazy_scheduler._compile_fx,
+        m,
+        lazy_scheduler_gen,
         expected_exec_order=expected_exec_order,
         inps=[x, y],
+        fwd_only=fwd_only,
+        additional_check=additional_check,
       )
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    def segment_use_dynamo_eager_fwd_only():
+      expected_exec_order = [
+        "func2_fwd",
+        "func1_fwd",
+        "forward_fwd",
+      ]
+      def check_segment_fwd_only(lazy_scheduler, is_compile=False):
+        return check_segment(
+          lazy_scheduler,
+          {
+            "func1_fwd": [['matmul']],
+            "func2_fwd": [['add.Tensor']],
+            "forward_fwd": [['mul.Tensor']],
+          },
+          is_compile=is_compile,
+        )
+      def _lazy_scheduler_gen(module, is_compile=False):
+        return LazyScheduler(
+          module,
+          segments=[
+            Segment("func1_fwd", module.func1, backend="eager"),
+            Segment("func2_fwd", module.func2, backend="aot_eager"),
+            Segment("forward_fwd", module.forward, backend="inductor"),
+          ],
+          schedule=expected_exec_order,
+          compile_options=None if not is_compile else {
+            "fullgraph": False,
+            "backend": "inductor",
+          },
+        )
+      return _lazy_scheduler_gen, expected_exec_order, check_segment_fwd_only
 
-    # Tag fwd segments
-    m = TestNonDepSegmentModule()
-    m = m.to(device)
-    lazy_scheduler_gen = lambda: LazyScheduler(m, segments=[Segment("func2_fwd", m.func2)])
-    _run_test(m, lazy_scheduler_gen, expected_exec_order=['__unnamed_0_fwd', 'func2_fwd', '__unnamed_1_fwd', '__unnamed_1_bwd', '__unnamed_2_bwd', '__unnamed_0_bwd'])
+    def segment_use_dynamo_aot_eager_fwd_bwd():
+      expected_exec_order = [
+        "func2_fwd",
+        "func1_fwd",
+        "forward_fwd",
+        "forward_bwd",
+        "func2_bwd",
+        "func1_bwd",
+      ]
+      def check_segment_fwd_bwd(lazy_scheduler, is_compile=False):
+        return check_segment(
+          lazy_scheduler,
+          {
+            "func1_fwd": [['mm.default', 't.default', 't.default']],
+            "func2_fwd": [['add.Tensor']],
+            "forward_fwd": [['mul.Tensor']],
+            "forward_bwd": [['mul.Tensor', 'mul.Tensor']],
+            "func2_bwd": [[]],
+            "func1_bwd": [['mm.default', 'mm.default']],
+          },
+          is_compile=is_compile,
+        )
+      def _lazy_scheduler_gen(module, is_compile=False):
+        return LazyScheduler(
+          module,
+          segments=[
+            Segment("func1_fwd", module.func1, backend="aot_eager"),
+            Segment("func2_fwd", module.func2, backend="aot_eager"),
+            Segment("forward_fwd", module.forward, backend="inductor"),
+            Segment("func1_bwd", module.func1, backend="aot_eager"),
+            Segment("func2_bwd", module.func2, backend="aot_eager"),
+            Segment("forward_bwd", module.forward, backend="inductor"),
+          ],
+          schedule=expected_exec_order,
+          compile_options=None if not is_compile else {
+            "fullgraph": False,
+            "backend": "inductor",
+          },
+        )
+      return _lazy_scheduler_gen, expected_exec_order, check_segment_fwd_bwd
 
-    m = TestNonDepSegmentModule()
-    m = m.to(device)
-    lazy_scheduler_gen = lambda: LazyScheduler(
-      m,
-      segments=[
-        Segment("func1_fwd", m.func1),
-        Segment("func2_fwd", m.func2),
-      ],
-    )
-    _run_test(m, lazy_scheduler_gen, expected_exec_order=['func1_fwd', 'func2_fwd', '__unnamed_0_fwd', '__unnamed_0_bwd', '__unnamed_1_bwd', '__unnamed_2_bwd'])
+    _run_test(*segment_use_dynamo_eager_fwd_only(), fwd_only=True)
+    _run_test(*segment_use_dynamo_aot_eager_fwd_bwd(), fwd_only=False)
 
-    # Tag bwd segments
-    m = TestNonDepSegmentModule()
-    m = m.to(device)
-    lazy_scheduler_gen = lambda: LazyScheduler(m, segments=[Segment("func2_bwd", m.func2, is_backward=True)])
-    _run_test(m, lazy_scheduler_gen, expected_exec_order=['__unnamed_0_fwd', '__unnamed_1_fwd', '__unnamed_2_fwd', '__unnamed_2_bwd', 'func2_bwd', '__unnamed_0_bwd'])
 
-    m = TestNonDepSegmentModule()
-    m = m.to(device)
-    lazy_scheduler_gen = lambda: LazyScheduler(
-      m,
-      segments=[
-        Segment("func1_bwd", m.func1, is_backward=True),
-        Segment("func2_bwd", m.func2, is_backward=True),
-      ],
-    )
-    _run_test(m, lazy_scheduler_gen, expected_exec_order=['__unnamed_0_fwd', '__unnamed_1_fwd', '__unnamed_2_fwd', '__unnamed_2_bwd', 'func2_bwd', 'func1_bwd'])
+  def test_graph_break_within_segment(self):
+    """
+    - Unit test: graph break within segment (i.e. multiple graphs per segment), either in the delayed segment or in the anchored segment
+      - In the delayed segment case, also add output usage within the graph break eager region, to trigger the immediate materialization of AsyncTensor output
+      - Make sure to assert that each GM contains the ops you expect.
+    """
+    # TODO: maybe unify with other `_run_test` functions
+    def _run_test(lazy_scheduler_gen=None, expected_exec_order=None, mod_class=None, additional_check=None):
+      device = "cuda"
+      m = mod_class()
+      m = m.to(device)
+      x = torch.randn(4, 4, requires_grad=True, device=device)
+      y = torch.randn(4, 4, requires_grad=True, device=device)
 
-  def test_explicit_schedule(self):
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    m = TestNonDepSegmentModule()
-    m = m.to(device)
-    x = torch.randn(4, 4, requires_grad=True, device=device)
-    y = torch.randn(4, 4, requires_grad=True, device=device)
+      self._validate(
+        m,
+        lazy_scheduler_gen,
+        expected_exec_order=expected_exec_order,
+        inps=[x, y],
+        additional_check=additional_check,
+      )
 
-    lazy_scheduler = LazyScheduler(
-      m,
-      segments=[
-        Segment("func1_fwd", m.func1),
-        Segment("func2_fwd", m.func2),
-        Segment("func1_bwd", m.func1, is_backward=True),
-        Segment("func2_bwd", m.func2, is_backward=True),
-      ],
-      # This is the explicit schedule (i.e. execution order)
-      schedule=["func1_fwd", "func2_fwd", "func2_bwd", "func1_bwd"],
-    )
+    expected_exec_order = [
+      "func2_fwd",
+      "func1_fwd",
+      "forward_fwd",
+      "forward_bwd",
+      "func2_bwd",
+      "func1_bwd",
+    ]
+    def check_segment_fwd_bwd(lazy_scheduler, is_compile=False):
+      return check_segment(
+        lazy_scheduler,
+        {
+          "func1_fwd": [['mm.default', 't.default', 't.default']],
+          "func2_fwd": [['add.Tensor']],
+          "forward_fwd": [['mul.Tensor']],
+          "forward_bwd": [['mul.Tensor', 'mul.Tensor']],
+          "func2_bwd": [[]],
+          "func1_bwd": [['mm.default', 'mm.default']],
+        },
+        is_compile=is_compile,
+      )
+    def _lazy_scheduler_gen(module, is_compile=False):
+      return LazyScheduler(
+        module,
+        segments=[
+          Segment("func1_fwd", module.func1, backend="aot_eager"),
+          Segment("func2_fwd", module.func2, backend="aot_eager"),
+          Segment("forward_fwd", module.forward, backend="inductor"),
+          Segment("func1_bwd", module.func1, backend="aot_eager"),
+          Segment("func2_bwd", module.func2, backend="aot_eager"),
+          Segment("forward_bwd", module.forward, backend="inductor"),
+        ],
+        schedule=expected_exec_order,
+        compile_options=None if not is_compile else {
+          "fullgraph": False,
+          "backend": "inductor",
+        },
+      )
 
-    # register_segment(segment_dict, m.func1, "func1")
-    # register_segment(segment_dict, m.func2, "func2")
+    def segment_has_graph_break_not_using_async_tensor_output():
+      class TestModule(torch.nn.Module):
+        def __init__(self):
+          super().__init__()
 
-    # torch._dynamo.config.lazy_scheduler_compile_fn = functools.partial(
-    #   lazy_scheduler._compile_fn,
-    #   segment_prefix_assignment_fn=functools.partial(segment_prefix_assignment_fn, segment_dict=segment_dict),
-    # )
+        def func1(self, x, y):
+          y2 = torch.matmul(x, y)
+          print("y2")  # guaranteed graph-break
+          return torch.matmul(x, y2)
 
-    self._validate(
-      m,
-      lazy_scheduler,
-      # lazy_scheduler._compile_fx,
-      expected_exec_order=['func1_fwd', 'func2_fwd', '__unnamed_0_fwd', '__unnamed_0_bwd', 'func2_bwd', 'func1_bwd'],
-      inps=[x, y],
-    )
+        def func2(self, x, y):
+          y3 = torch.add(x, y)
+          print("y3")  # guaranteed graph-break
+          return torch.add(x, y3)
 
-  def test_explicit_schedule_reordering(self):
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    m = TestNonDepSegmentModule()
-    m = m.to(device)
-    x = torch.randn(4, 4, requires_grad=True, device=device)
-    y = torch.randn(4, 4, requires_grad=True, device=device)
+        def forward(self, x, y):
+          z1 = self.func1(x, y)
+          z2 = self.func2(x, y)
+          z = z1 * z2
+          return z
 
-    # # This is roughly how the official register_segment function will look like
-    # def register_segment(segment_dict, method, name):
-    #   segment_dict[method] = name
+      return {
+        "mod_class": TestModule,
+        "additional_check": None,
+      }
 
-    # segment_dict = {}
-    # register_segment(segment_dict, m.func1, "func1")
-    # register_segment(segment_dict, m.func2, "func2")
+    def segment_has_graph_break_using_async_tensor_output():
+      global_dict = {}
+      class TestModule(torch.nn.Module):
+        def __init__(self):
+          super().__init__()
 
-    # torch._dynamo.config.lazy_scheduler_compile_fn = functools.partial(
-    #   lazy_scheduler._compile_fn,
-    #   segment_prefix_assignment_fn=functools.partial(segment_prefix_assignment_fn, segment_dict=segment_dict),
-    # )
+        def func1(self, x, y):
+          global global_dict
+          y2 = torch.matmul(x, y)
+          global_dict["y2_sum"] = y2.sum()
+          print(global_dict["y2_sum"])  # guaranteed graph-break
+          return torch.matmul(x, y2)
 
-    lazy_scheduler = LazyScheduler(
-      m,
-      segments=[
-        Segment("func1_fwd", m.func1),
-        Segment("func2_fwd", m.func2),
-        Segment("func1_bwd", m.func1, is_backward=True),
-        Segment("func2_bwd", m.func2, is_backward=True),
-      ],
-      # This is the explicit schedule (i.e. execution order).
-      # Notice we force func2_fwd to run before func1_fwd.
-      schedule=["func2_fwd", "func1_fwd", "func2_bwd", "func1_bwd"],
-    )
+        def func2(self, x, y):
+          global global_dict
+          y3 = torch.add(x, y)
+          global_dict["y3_sum"] = y3.sum()
+          print(global_dict["y3_sum"])  # guaranteed graph-break
+          return torch.add(x, y3)
 
-    self._validate(
-      m,
-      lazy_scheduler,
-      # lazy_scheduler._compile_fx,
-      expected_exec_order=['func2_fwd', 'func1_fwd', '__unnamed_0_fwd', '__unnamed_0_bwd', 'func2_bwd', 'func1_bwd'],
-      inps=[x, y],
-    )
+        def forward(self, x, y):
+          z1 = self.func1(x, y)
+          z2 = self.func2(x, y)
+          z = z1 * z2
+          return z
 
-  def DISABLED_test_register_segment_hook(self):
+      def check_async_tensor_is_early_scheduled(lazy_scheduler, is_compile=False):
+        # TODO how to check that AsyncTensor is early scheduled? maybe check the recorded execution order?
+        pass
+
+      return {
+        "mod_class": TestModule,
+        "additional_check": check_async_tensor_is_early_scheduled,
+      }
+
+    _run_test(_lazy_scheduler_gen, expected_exec_order, **segment_has_graph_break_not_using_async_tensor_output())
+    _run_test(_lazy_scheduler_gen, expected_exec_order, **segment_has_graph_break_using_async_tensor_output())
+
+
+  def DISABLED_example_usage(self):
     # Use segment hook instead of explicit schedule to specify the execution order
     """
     class SDDModule(nn.Module):
@@ -508,7 +696,7 @@ but got:
       # Create NN module method to segment mapping.
       segments=[
         Segment("sdd_fwd", model.sdd.forward, nth_call=0),
-        Segment("overarch_func2_bwd", model.overarch.func2, is_backward=True, nth_call=0),
+        Segment("overarch_func2_bwd", model.overarch.func2, nth_call=0),
       ],
       # Run "sdd_fwd" right before "overarch_func2_bwd".
       schedule=["sdd_fwd", "overarch_func2_bwd"],
@@ -520,7 +708,7 @@ but got:
       model,
       segments=[
         Segment("sdd_fwd", model.sdd.forward, nth_call=0),
-        Segment("overarch_func2_bwd", model.overarch.func2, is_backward=True, nth_call=0),
+        Segment("overarch_func2_bwd", model.overarch.func2, nth_call=0),
       ],
       schedule=["sdd_fwd", "overarch_func2_bwd"],
       compile_options={
@@ -534,19 +722,21 @@ but got:
 
 """
 TODO:
-- Eager mode prototype, merge with compile mode prototype. Combine the unit tests. (use https://docs.google.com/document/d/1vv0H5IMGwUMyzmJKnksJOnRSult1B4YlbBSs_MeAvXM/edit?usp=sharing as design source of truth)
-- Support user calling a method multiple times and only tag a specific call as segment (i.e. make `nth_call=X` work)
-- Unit test: graph break within segment (i.e. multiple graphs per segment)
+Design doc: https://docs.google.com/document/d/1vv0H5IMGwUMyzmJKnksJOnRSult1B4YlbBSs_MeAvXM/edit?usp=sharing
+- Unit test: graph break within segment (i.e. multiple graphs per segment), either in the delayed segment or in the anchored segment
+  - In the delayed segment case, also add output usage within the graph break eager region, to trigger the immediate materialization of AsyncTensor output
+  - Make sure to assert that each GM contains the ops you expect.
 - Unit test: in-place op in named segment
+- Make debug_mode work
+- Support user calling a method multiple times and only tag a specific call as segment (i.e. make `nth_call=X` work)
 - For named segments, show its segment ID (prefix + fwd/bwd + nth_call) in profiler annotation in GPU trace
 - Integration with DDPOptimizer
-- Integration with FSDP (graph break, not tracing)
-- Integration with activation checkpointing
-- Implement "fall back when there is side effect in delayed region detected by Dynamo”
-- what if a segment is in the schedule but is never run due to dynamic control flow change? we should gracefully fall back to no-scheduler mode
+- Integration with FSDP (graph break version, not tracing)
+- Integration with (selective) activation checkpointing
+- What if a segment is in the schedule but is never run due to dynamic control flow change? we should either throw error or gracefully fall back to no-scheduler mode
 - Try on Ads model: https://docs.google.com/document/d/1tFLUh4Xe4_eGKOtgpj08kfNDhy7Fqp-dSq0d7lejdZU/edit#bookmark=id.wds06wiqwjh2 figure out integration point with trainer loop
 - (Later) Integration with compiled autograd
-- Logging for better user debugging (what is scheduled and when, and the compile output). Look at the generated graph and the original code.
+- Logging for better user debugging (what is scheduled and when, and the compilation output). Look at the generated graph and the original code.
 - Also log memory usage, how much memory I am keeping above.
 
 NOTE:
@@ -556,6 +746,7 @@ AsyncTensor specific:
 - Support kwargs in AsyncTensor ops
 - Support tuple / list / etc. in AsyncTensor op args
 - Support all factory functions in AsyncTensor dispatch
+- Add unit tests to cover all common usage
 """
 
 if __name__ == "__main__":

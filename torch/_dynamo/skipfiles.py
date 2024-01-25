@@ -177,6 +177,7 @@ LEGACY_MOD_INLINELIST = {
     "torch.ao.quantization.pt2e.utils",
     "torch.ao.quantization.quantizer.xnnpack_quantizer",
     "torch.optim",
+    "torch._lazy_scheduler",
 }
 
 if torch.distributed.is_available():

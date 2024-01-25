@@ -1724,7 +1724,7 @@ class SubgraphTracer(fx.Tracer):
         # Store the corresponding nn.Module instance bound method for this node,
         # so that we can use it later to determine whether this node comes from
         # a specific NN method.
-        if len(self.output_graph._current_tx) > 0:
+        if node.op in ("call_function", "call_method", "call_module") and len(self.output_graph._current_tx) > 0:
             f_code = self.output_graph._current_tx[-1].f_code
             # breakpoint()
             """
@@ -1738,9 +1738,22 @@ class SubgraphTracer(fx.Tracer):
             #     method_name = f_code.co_name
             #     node.meta['nn_module_method'] = getattr(module, method_name)
             #     print(f"node.meta['nn_module_method']: {node.meta['nn_module_method']}")
-            method_name = f_code.co_name
-            module = self.output_graph._current_tx[-1].f_locals['self']
-            node.meta['nn_module_method'] = getattr(module, method_name)
+            # print(f"self.output_graph._current_tx[-1].f_locals.keys(): {self.output_graph._current_tx[-1].f_locals.keys()}")
+            # breakpoint()
+            if "self" in self.output_graph._current_tx[-1].f_locals.keys():
+                module = self.output_graph._current_tx[-1].f_locals['self']
+                method_name = f_code.co_name
+                instance_bound_nn_method = getattr(module, method_name)
+            else:
+                try:
+                    instance_bound_nn_method = self.output_graph._current_tx[-1].instance_bound_nn_method
+                except Exception as e:
+                    TODO: `AttributeError: 'InstructionTranslator' object has no attribute 'instance_bound_nn_method'` is a legit error that we need to fix.
+                    find a way to store instance_bound_nn_method in InstructionTranslator.
+                    print(f"node: {node}, node.op: {node.op}, node.target: {node.target}, node.args: {node.args}, node.kwargs: {node.kwargs}")
+                    raise
+            assert instance_bound_nn_method is not None
+            node.meta['nn_module_method'] = instance_bound_nn_method
             # print(f"node.meta['nn_module_method']: {node.meta['nn_module_method']}")
         return node
 
