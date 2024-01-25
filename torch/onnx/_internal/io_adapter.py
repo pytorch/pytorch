@@ -160,7 +160,7 @@ def _replace_tuple_with_list(spec: pytree.TreeSpec) -> pytree.TreeSpec:
 
 
 def _open_top_level_list_if_single_element(spec: pytree.TreeSpec) -> pytree.TreeSpec:
-    if spec.type == list and len(spec.children_specs) == 1:
+    if spec.type == list and spec.num_children == 1:
         return spec.children_specs[0]
     return spec
 
@@ -315,7 +315,7 @@ class ConvertComplexToRealRepresentationInputStep(InputAdaptStep):
         """
         return (
             tuple(
-                torch.view_as_real(arg)
+                torch.view_as_real(arg.resolve_conj())
                 if isinstance(arg, torch.Tensor) and arg.is_complex()
                 else arg
                 for arg in model_args
@@ -531,7 +531,7 @@ class ConvertComplexToRealRepresentationOutputStep(OutputAdaptStep):
             A tuple of the model output.
         """
         return [
-            torch.view_as_real(output)
+            torch.view_as_real(output.resolve_conj())
             if isinstance(output, torch.Tensor) and torch.is_complex(output)
             else output
             for output in model_outputs
@@ -615,7 +615,7 @@ class PrependParamsBuffersConstantAotAutogradInputStep(InputAdaptStep):
             model.state_dict[name] for name in model.graph_signature.buffers  # type: ignore[union-attr,index]
         )
         ordered_constant_tensors = tuple(
-            getattr(model.module(), name) for name in model.graph_signature.lifted_tensor_constants  # type: ignore[union-attr,index]
+            model.constants[fqn] for fqn in model.graph_signature.lifted_tensor_constants  # type: ignore[union-attr,index]
         )
 
         # NOTE: calling convention is first params, then buffers, then args as user supplied them.

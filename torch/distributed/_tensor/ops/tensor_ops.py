@@ -34,9 +34,27 @@ from torch.distributed.device_mesh import DeviceMesh
 aten = torch.ops.aten
 
 
-@register_op_strategy(
+def default_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+    # Default strategy by default just propagate the first input strategy
+    select_strategy = op_schema.args_schema[0]
+    assert isinstance(select_strategy, OpStrategy)
+    default_strategy = []
+    for strategy in select_strategy.strategies:
+        # we create new DTensorSpecs even for default strategy to assure that
+        # the tensor metas are distinct between the arguments and outputs
+        default_strategy.append(
+            PlacementStrategy(
+                output_specs=DTensorSpec(
+                    mesh=strategy.output_spec.mesh,
+                    placements=strategy.output_spec.placements,
+                )
+            )
+        )
+    return OpStrategy(default_strategy)
+
+
+register_op_strategy(
     [
-        aten._to_copy.default,
         aten.clone.default,
         aten.contiguous.default,
         aten.copy_.default,
@@ -44,17 +62,11 @@ aten = torch.ops.aten
         aten.fill_.Scalar,
         aten.zero_.default,
     ]
-)
-def default_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
-    # Default strategy by default just propagate the first input strategy
-    select_strategy = op_schema.args_schema[0]
-    assert isinstance(select_strategy, OpStrategy)
-    return OpStrategy(
-        [
-            PlacementStrategy(arg_strategy.output_spec)
-            for arg_strategy in select_strategy.strategies
-        ]
-    )
+)(default_strategy)
+
+register_op_strategy(
+    aten._to_copy.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["dtype"])
+)(default_strategy)
 
 
 @register_op_strategy(
@@ -91,7 +103,9 @@ def equal_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
                     for p in arg_spec.placements
                 ),
             )
-            equal_strategy.strategies.append(PlacementStrategy(output_spec=output_spec))
+            equal_strategy.strategies.append(
+                PlacementStrategy(output_specs=output_spec)
+            )
         else:
             equal_strategy.strategies.append(PlacementStrategy(arg_spec))
     return equal_strategy
@@ -141,7 +155,7 @@ def create_like_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
                 ),
             )
             create_like_strategy.strategies.append(
-                PlacementStrategy(output_spec=output_spec, input_specs=(arg_spec,))
+                PlacementStrategy(output_specs=output_spec, input_specs=(arg_spec,))
             )
 
         else:
@@ -160,11 +174,20 @@ def create_like_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     ],
     schema_info=RuntimeSchemaInfo(1, ["dtype"]),
 )
-def new_factory_strategy(mesh: DeviceMesh, _) -> StrategyType:
+def new_factory_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # TODO: maybe we should generate all possible shardings intead of just stay
     # replicated for new factory methods
-    replica_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
-    return OpStrategy([PlacementStrategy(replica_spec)])
+    input_strategy = op_schema.args_schema[0]
+    new_factory_strategy = OpStrategy([])
+    assert isinstance(input_strategy, OpStrategy)
+    for arg_strategy in input_strategy.strategies:
+        input_spec = arg_strategy.output_spec
+        replica_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
+        new_factory_strategy.strategies.append(
+            PlacementStrategy(output_specs=replica_spec, input_specs=(input_spec,))
+        )
+
+    return new_factory_strategy
 
 
 @register_op_strategy(aten.bucketize.Tensor)
@@ -178,7 +201,7 @@ def gen_bucketize_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyTyp
         replica_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
         bucketize_strategy.strategies.append(
             PlacementStrategy(
-                output_spec=arg_spec, input_specs=(arg_spec, replica_spec)
+                output_specs=arg_spec, input_specs=(arg_spec, replica_spec)
             )
         )
 
@@ -218,7 +241,7 @@ def gen_slice_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
         if not is_tensor_dim_sharded(arg_spec, dim=slice_dim) or redundant_slice:
             # only add the strategy if the slice dim is not sharded
             out_spec = DTensorSpec(mesh, arg_spec.placements)
-            slice_strategy.strategies.append(PlacementStrategy(output_spec=out_spec))
+            slice_strategy.strategies.append(PlacementStrategy(output_specs=out_spec))
     if not slice_strategy.strategies:
         # if all strategies are filtered out, unsharding all specs on slice dim
         # of the input strategy, and use that as the op strategy
@@ -228,7 +251,7 @@ def gen_slice_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
                 mesh, unshard_tensor_dim(arg_spec.placements, dim=slice_dim)
             )
             slice_strategy.strategies.append(
-                PlacementStrategy(output_spec=unshard_spec)
+                PlacementStrategy(output_specs=unshard_spec)
             )
     return slice_strategy
 
@@ -283,7 +306,7 @@ def gen_slice_scatter_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> Strateg
         ):
             # only add the strategy if the slice_scatter dim is not sharded or partial
             slice_scatter_strategy.strategies.append(
-                PlacementStrategy(output_spec=arg_spec)
+                PlacementStrategy(output_specs=arg_spec)
             )
 
     if not slice_scatter_strategy.strategies:
@@ -295,7 +318,7 @@ def gen_slice_scatter_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> Strateg
                 mesh, replicate_tensor_dim(arg_spec.placements, dim=slice_dim)
             )
             slice_scatter_strategy.strategies.append(
-                PlacementStrategy(output_spec=replicate_spec)
+                PlacementStrategy(output_specs=replicate_spec)
             )
     return slice_scatter_strategy
 

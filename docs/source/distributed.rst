@@ -861,7 +861,6 @@ If you are running single node training, it may be convenient to interactively b
 .. py:module:: torch.distributed.argparse_util
 .. py:module:: torch.distributed.c10d_logger
 .. py:module:: torch.distributed.checkpoint.api
-.. py:module:: torch.distributed.checkpoint.checkpointer
 .. py:module:: torch.distributed.checkpoint.default_planner
 .. py:module:: torch.distributed.checkpoint.filesystem
 .. py:module:: torch.distributed.checkpoint.metadata

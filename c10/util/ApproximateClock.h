@@ -2,21 +2,15 @@
 
 #pragma once
 
+#include <c10/macros/Export.h>
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <list>
-#include <string>
-#include <unordered_map>
-#include <vector>
-
-#include <c10/macros/Macros.h>
-#include <c10/util/Optional.h>
-#include <c10/util/hash.h>
-
-#ifndef _WIN32
 #include <ctime>
-#endif
+#include <functional>
+#include <type_traits>
+
 #if defined(C10_IOS) && defined(C10_MOBILE)
 #include <sys/time.h> // for gettimeofday()
 #endif
@@ -40,10 +34,10 @@
 namespace c10 {
 
 using time_t = int64_t;
-using steady_clock_t = std::conditional<
+using steady_clock_t = std::conditional_t<
     std::chrono::high_resolution_clock::is_steady,
     std::chrono::high_resolution_clock,
-    std::chrono::steady_clock>::type;
+    std::chrono::steady_clock>;
 
 inline time_t getTimeSinceEpoch() {
   auto now = std::chrono::system_clock::now().time_since_epoch();
@@ -94,8 +88,8 @@ inline auto getApproximateTime() {
 
 using approx_time_t = decltype(getApproximateTime());
 static_assert(
-    std::is_same<approx_time_t, int64_t>::value ||
-        std::is_same<approx_time_t, uint64_t>::value,
+    std::is_same_v<approx_time_t, int64_t> ||
+        std::is_same_v<approx_time_t, uint64_t>,
     "Expected either int64_t (`getTime`) or uint64_t (some TSC reads).");
 
 // Convert `getCount` results to Nanoseconds since unix epoch.

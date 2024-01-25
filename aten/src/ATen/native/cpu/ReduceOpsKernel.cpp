@@ -291,7 +291,9 @@ static void and_kernel_impl(TensorIterator& iter) {
         iter,
         [=](uint8_t a, uint8_t b) -> uint8_t { return (a && b) ? 1 : 0; },
         [=](Vectorized<uint8_t> a, Vectorized<uint8_t> b) {
-          return a & b;
+          // NB: != returns 0xFF rather than 0x01, so we must negate to get
+          // the desired result
+          return (a != Vectorized<uint8_t>(0)).neg() & (b != Vectorized<uint8_t>(0)).neg();
         },
         /*ident=*/true);
   } else {
@@ -327,7 +329,7 @@ static void or_kernel_impl(TensorIterator& iter) {
         iter,
         [=](uint8_t a, uint8_t b) -> uint8_t { return (a || b) ? 1 : 0; },
         [=](Vectorized<uint8_t> a, Vectorized<uint8_t> b) {
-          return a | b;
+          return (a != Vectorized<uint8_t>(0)).neg() | (b != Vectorized<uint8_t>(0)).neg();
         },
         /*ident=*/false);
   } else {

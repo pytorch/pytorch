@@ -32,7 +32,7 @@ from torch._dynamo import (
     logging as dynamo_logging,
     utils as dynamo_utils,
 )
-from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
+from torch._dynamo.utils import counters, detect_fake_mode, lazy_format_graph_code
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
 
@@ -320,6 +320,13 @@ def compile_fx_inner(
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
+    # check cudagraph disabling reasons from inductor lowering
+    if cudagraphs and compiled_graph.disabled_cudagraphs_reason:
+        perf_hint_log.warning(
+            "skipping cudagraphs due to %s", compiled_graph.disabled_cudagraphs_reason
+        )
+        BoxedBool.disable(cudagraphs)
+
     # Return the output strides to the caller via TracingContext
     context = torch._guards.TracingContext.try_get()
     if context is not None and context.output_strides is not None:
@@ -344,14 +351,13 @@ def compile_fx_inner(
             if isinstance(t, torch.Tensor)
         )
 
-        # doesnt work for non-trees because the warmup run would apply mutation twice
-        if config.triton.cudagraph_trees:
-            # checking if mutation is only on parameters/static inputs
-            has_mutation = not all(
-                idx < num_fixed for idx in compiled_graph.mutated_input_idxs
-            )
-        else:
-            has_mutation = len(compiled_graph.mutated_inputs) != 0
+        from torch._inductor.cudagraph_utils import check_for_mutation
+
+        has_mutation_str = check_for_mutation(gm, compiled_graph, num_fixed)
+        has_mutation = has_mutation_str is not None
+
+        if has_mutation:
+            compiled_graph.disabled_cudagraphs_reason = has_mutation_str
 
         cudagraph_tests = [
             (set(compiled_graph.device_types) == {"cuda"}, "non-cuda device in graph"),
@@ -422,9 +428,14 @@ def compile_fx_inner(
                 compiled_graph.current_callable = compiled_artifact
 
             if "cuda" in compiled_graph.device_types:
-                perf_hint_log.warning(
-                    "skipping cudagraphs due to %s", cudagraph_fail_reasons
-                )
+                # prefer better disable_cudagraphs_reason bc stack trace
+                # TODO: migrate all disable reasons to stack trace, refactor
+                if compiled_graph.disabled_cudagraphs_reason:
+                    perf_hint_log.warning(compiled_graph.disabled_cudagraphs_reason)
+                else:
+                    perf_hint_log.warning(
+                        "skipping cudagraphs due to %s", cudagraph_fail_reasons
+                    )
 
     # cudagraphs does its own aligning of inputs
     if not cudagraphs:
@@ -511,6 +522,10 @@ def fx_codegen_and_compile(
         post_grad_passes(gm, is_inference=is_inference)
         V.debug.fx_graph_transformed(gm, example_inputs)
         post_grad_graphs_log.debug("%s", lazy_format_graph_code("AFTER POST GRAD", gm))
+        log.debug(
+            "counters of inductor dict after apply passes on the input FX graph in the post grad pass: %s",
+            counters["inductor"],
+        )
 
     with V.set_fake_mode(fake_mode):
         graph = GraphLowering(
@@ -518,7 +533,7 @@ def fx_codegen_and_compile(
             # example_inputs will be used by AOTInductor to dry-run the generated code for Triton kernel tuning.
             # For the forward pass, we have the real inputs to be used as example_inputs. For the backward pass,
             # we currently use fake tensors and defake them later.
-            example_inputs=V.real_inputs if is_inference else example_inputs,
+            example_inputs=example_inputs,
             shape_env=shape_env,
             num_static_inputs=num_fixed,
             graph_id=graph_id,
@@ -549,13 +564,9 @@ def fx_codegen_and_compile(
             if V.aot_compilation is True:
                 return compiled_fn
 
-            if cudagraphs and graph.disable_cudagraphs:
-                perf_hint_log.warning(
-                    "skipping cudagraphs due to %s", V.graph.disable_cudagraphs_reason
-                )
-                BoxedBool.disable(cudagraphs)
-
-            compiled_graph = CompiledFxGraph(compiled_fn, graph, output_strides)
+            compiled_graph = CompiledFxGraph(
+                compiled_fn, graph, output_strides, V.graph.disable_cudagraphs_reason
+            )
 
     return compiled_graph
 
@@ -1010,6 +1021,10 @@ def compile_fx(
             )
 
         model_ = pre_grad_passes(model_, example_inputs_)
+        log.debug(
+            "counters of inductor dict after apply passes on the input FX graph in the pre grad pass: %s",
+            counters["inductor"],
+        )
 
     if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
         return flatten_graph_inputs(
@@ -1156,6 +1171,10 @@ def compile_fx(
             model_, example_inputs_, trace_joint=False, decompositions=decompositions
         )
         unlifted_gm = _unlift_graph(model_, gm, graph_signature)
+        if "dynamo_flat_name_to_original_fqn" in model_.meta:
+            unlifted_gm.meta["dynamo_flat_name_to_original_fqn"] = model_.meta[
+                "dynamo_flat_name_to_original_fqn"
+            ]
         with V.set_fake_mode(fake_mode), compiled_autograd.disable():
             return inference_compiler(unlifted_gm, example_inputs_)
 
