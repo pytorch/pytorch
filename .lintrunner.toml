@@ -1392,6 +1392,7 @@ exclude_patterns = [
     'test/nn/test_embedding.py',
     'test/nn/test_init.py',
     'test/nn/test_lazy_modules.py',
+    'test/nn/test_load_state_dict.py',
     'test/nn/test_module_hooks.py',
     'test/nn/test_multihead_attention.py',
     'test/nn/test_packed_sequence.py',
