@@ -68,6 +68,27 @@ class TensorParallelStyleTest(DTensorTestBase):
             self.assertEqual(comm_mode.get_total_counts(), 2)
 
     @with_comms
+    def test_colwise_parallel_embedding(self):
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        comm_mode = CommDebugMode()
+        tensor = torch.arange(8, device=self.device_type).reshape(4, 2)
+        model = nn.Embedding(16, 16, device=self.device_type)
+
+        default_col_parallel = ColwiseParallel()
+        with comm_mode:
+            colwise_mod = parallelize_module(deepcopy(model), mesh, default_col_parallel)
+            out = colwise_mod(tensor)
+            # ensure output shard on the last dim
+            self.assertEqual(out.shape, (4, 2, 16 // self.world_size))
+            # ensure no communication happened in fwd
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+            out.sum().backward()
+            # no comm in bwd
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    @with_comms
     def test_rowwise_parallel_style(self):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 

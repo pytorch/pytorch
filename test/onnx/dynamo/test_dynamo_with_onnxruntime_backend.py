@@ -215,6 +215,32 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         ):
             self.assertEqual(len(onnx_info), expected_number_of_onnx_models)
 
+    def _assert_dynamic_input_and_output_shapes_in_all_onnx_models(self, backend):
+        for (
+            onnx_session_infos
+        ) in backend._all_ort_execution_info.execution_info_per_graph_module.values():
+            for onnx_session_info in onnx_session_infos:
+                inputs_have_dynamic_shapes = False
+                for input in onnx_session_info.input_value_infos:
+                    if hasattr(input.type, "tensor_type") and hasattr(
+                        input.type.tensor_type, "shape"
+                    ):
+                        for dim in input.type.tensor_type.shape.dim:
+                            inputs_have_dynamic_shapes = (
+                                inputs_have_dynamic_shapes or hasattr(dim, "dim_param")
+                            )
+                output_have_dynamic_shapes = False
+                for output in onnx_session_info.output_value_infos:
+                    if hasattr(output.type, "tensor_type") and hasattr(
+                        output.type.tensor_type, "shape"
+                    ):
+                        for dim in output.type.tensor_type.shape.dim:
+                            output_have_dynamic_shapes = (
+                                output_have_dynamic_shapes or hasattr(dim, "dim_param")
+                            )
+                self.assertTrue(inputs_have_dynamic_shapes)
+                self.assertTrue(output_have_dynamic_shapes)
+
     @parameterized.expand(
         [
             (True,),
@@ -442,6 +468,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                 number_of_exported_onnx_models_for_all_graph_modules=(1,)
                 * number_of_captured_graphs,
             )
+            self._assert_dynamic_input_and_output_shapes_in_all_onnx_models(local_ort)
 
     @parameterized.expand(
         [
@@ -531,6 +558,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                 number_of_exported_onnx_models_for_all_graph_modules=(1,)
                 * number_of_captured_graphs,
             )
+            self._assert_dynamic_input_and_output_shapes_in_all_onnx_models(local_ort)
 
     @parameterized.expand(
         [
@@ -615,6 +643,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                 number_of_exported_onnx_models_for_all_graph_modules=(1,)
                 * number_of_captured_graphs,
             )
+            self._assert_dynamic_input_and_output_shapes_in_all_onnx_models(local_ort)
 
 
 if __name__ == "__main__":
