@@ -5,8 +5,8 @@
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
-#include <ATen/native/cpu/int4mm_kernel.h>
 #include <ATen/native/cpu/utils.h>
+#include <ATen/native/LinearAlgebra.h>
 #include <c10/util/irange.h>
 
 #if (defined(_WIN32) || defined(_WIN64))
@@ -18,6 +18,10 @@
 namespace at::native {
 
 namespace {
+
+inline bool is_block_start(int index, int BLOCK_SIZE) {
+  return !(index & (BLOCK_SIZE -1));
+}
 
 #if (defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
 // convert 16x int4 to int8, handle 64 bits at a time

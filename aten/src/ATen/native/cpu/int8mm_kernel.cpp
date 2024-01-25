@@ -5,8 +5,8 @@
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
-#include <ATen/native/cpu/int4mm_kernel.h>
 #include <ATen/native/cpu/utils.h>
+#include <ATen/native/LinearAlgebra.h>
 #include <c10/util/irange.h>
 
 #if (defined(_WIN32) || defined(_WIN64))

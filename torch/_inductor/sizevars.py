@@ -330,7 +330,7 @@ class SizeVarAllocator:
 
     def expect_true(self, expr: Expr, *, msg: str) -> None:
         expr = sympy_subs(expr, self.inv_precomputed_replacements)
-        self.shape_env.defer_runtime_assert(expr, msg, fx_node=V.graph.current_node)
+        self.shape_env.defer_runtime_assert(expr, msg, fx_node=None)
 
     def expect_equals(self, left: Expr, right: Expr, *, msg: str) -> Expr:
         # Prefer returning the expression without unbacked symints
@@ -382,6 +382,13 @@ class SizeVarAllocator:
         else:
             self.guard_leq(right, left)
             return right
+
+    def evaluate_max(self, left: Expr, right: Expr) -> Expr:
+        """return the larger of left and right, and guard on that choice"""
+        # Always choose the opposite of eval min for consistency
+        # This means min(a, b) and max(a, b) produce the same guards
+        min_val = self.evaluate_min(left, right)
+        return right if min_val is left else left
 
     def evaluate_static_shape(self, left: Expr) -> int:
         right = self.size_hint(left)

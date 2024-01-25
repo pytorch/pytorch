@@ -5548,7 +5548,12 @@ def meta_scaled_mm(
         return stride[0] == 1 and stride[1] == shape[0]
 
     def is_fp8_type(dtype):
-        return dtype in (torch.float8_e4m3fn, torch.float8_e5m2)
+        return dtype in (
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2fnuz,
+        )
 
     torch._check(
         self.dim() == 2 and mat2.dim() == 2,
@@ -6077,8 +6082,10 @@ def meta_bucketize(self, boundaries, *, out_int32=False, right=False):
     ).contiguous()
 
 
-@register_meta(aten._upsample_bilinear2d_aa.default)
-def meta_upsample_bilinear2d_aa(
+@register_meta(
+    [aten._upsample_bilinear2d_aa.default, aten._upsample_bicubic2d_aa.default]
+)
+def meta_upsample_bimode2d_aa(
     input, output_size, align_corners, scales_h=None, scales_w=None
 ):
     full_output_size = upsample_common_check(
