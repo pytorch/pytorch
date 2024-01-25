@@ -5,6 +5,7 @@ import itertools
 import os
 import warnings
 from contextlib import contextmanager
+from functools import wraps
 from pstats import Stats
 from typing import Any, Callable, cast, Dict, List, Optional, Sequence, TypeVar, Union
 
@@ -400,6 +401,7 @@ def _profile():
 
 
 def _api_bc_check(func):
+    @wraps(func)
     def inner_func(*args, **kwargs) -> Any:
         if len(args) == 2:
             warnings.warn(

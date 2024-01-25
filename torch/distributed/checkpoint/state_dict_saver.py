@@ -51,7 +51,7 @@ def save_state_dict(
 def save(
     state_dict: STATE_DICT_TYPE,
     *,
-    checkpoint_id: Union[str, os.PathLike] = "",
+    checkpoint_id: Union[str, os.PathLike, None] = None,
     storage_writer: Optional[StorageWriter] = None,
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
@@ -87,12 +87,24 @@ def save(
 
     Args:
         state_dict (Dict[str, Any]): The state_dict to save.
-        storage_writer (StorageWriter):
-            Instance of StorageWrite use to perform writes.
-        process_group (ProcessGroup):
+        checkpoint_id (Union[str, os.PathLike, None]):
+            The ID of this checkpoint instance. The meaning of the checkpoint_id
+            depends on the storage. It can be a path to a folder or to a file.
+            It can also be a key if the storage is a key-value store.
+            (Default: ``None``)
+        storage_writer (Optional[StorageWriter]):
+            Instance of StorageWriter used to perform writes. If this is not
+            specified, DCP will automatically infer the writer based on the
+            checkpoint_id. If checkpoint_id is also None, an exception will
+            be raised. (Default: ``None``)
+        planner (Optional[SavePlanner]):
+            Instance of SavePlanner. If this is not specificed, the default
+            planner will be used. (Default: ``None``)
+        process_group (Optional[ProcessGroup]):
             ProcessGroup to be used for cross-rank synchronization.
+            (Default: ``None``)
         coordinator_rank (int): Rank to use to coordinate the checkpoint.
-            rank0 is used by default.
+            rank0 is used by default. (Default: ``0``)
         no_dist (bool): If ``True``, distributed checkpoint will not save
             in SPMD style. (Default: ``False``)
 
@@ -147,7 +159,7 @@ def save(
 def _async_save(
     state_dict: STATE_DICT_TYPE,
     *,
-    checkpoint_id: Union[str, os.PathLike] = "",
+    checkpoint_id: Union[str, os.PathLike, None] = None,
     storage_writer: Optional[StorageWriter] = None,
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
@@ -162,12 +174,24 @@ def _async_save(
 
     Args:
         state_dict (Dict[str, Any]): The state_dict to save.
-        storage_writer (StorageWriter):
-            Instance of StorageWrite use to perform writes.
-        process_group (ProcessGroup):
+        checkpoint_id (Union[str, os.PathLike, None]):
+            The ID of this checkpoint instance. The meaning of the checkpoint_id
+            depends on the storage. It can be a path to a folder or to a file.
+            It can also be a key if the storage is a key-value store.
+            (Default: ``None``)
+        storage_writer (Optional[StorageWriter]):
+            Instance of StorageWriter used to perform writes. If this is not
+            specified, DCP will automatically infer the writer based on the
+            checkpoint_id. If checkpoint_id is also None, an exception will
+            be raised. (Default: ``None``)
+        planner (Optional[SavePlanner]):
+            Instance of SavePlanner. If this is not specificed, the default
+            planner will be used. (Default: ``None``)
+        process_group (Optional[ProcessGroup]):
             ProcessGroup to be used for cross-rank synchronization.
+            (Default: ``None``)
         coordinator_rank (int): Rank to use to coordinate the checkpoint.
-            rank0 is used by default.
+            rank0 is used by default. (Default: ``0``)
         no_dist (bool): If ``True``, distributed checkpoint will not save
             in SPMD style. (Default: ``False``)
 
