@@ -18,6 +18,7 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mkldnn/Matmul.h>
+#include <c10/core/GradMode.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <variant>
@@ -1323,9 +1324,9 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 
 
 #if !defined(C10_MOBILE)
-#define _AT_DISPATCH_ADDMM_TYPES(TYPE, NAME, ...)    \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(      \
-            kBFloat16, kHalf, kFloat8_e5m2, kFloat8_e4m3fn, \
+#define _AT_DISPATCH_ADDMM_TYPES(TYPE, NAME, ...)                                               \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND6(                                                 \
+            kBFloat16, kHalf, kFloat8_e5m2, kFloat8_e4m3fn, kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, \
             TYPE, NAME, __VA_ARGS__)
 #else
 #define _AT_DISPATCH_ADDMM_TYPES(TYPE, NAME, ...)        \
@@ -1756,7 +1757,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
   };
 
   bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
-  if (apply_heur && use_mkldnn_lower_precision_matmul(batch1, batch2, self_or_result)) {
+  if (apply_heur && use_mkldnn_matmul(batch1, batch2, self_or_result)) {
     try {
       mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
       return;
@@ -1936,7 +1937,7 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2) {
   // of shape [b, n, k] unnacessarily, which may cause a large memory footprint, and in the
   // worst case, an OOM
   bool t2_requires_grad = tensor1_larger ? tensor2.requires_grad() : tensor1.requires_grad();
-  if (t2_requires_grad) {
+  if (t2_requires_grad && at::GradMode::is_enabled()) {
     return true;
   }
 
@@ -1994,6 +1995,15 @@ static Tensor _matmul_impl(
 
 
   const bool has_out = out.defined();
+
+  if (has_out) {
+    // Usually we would rely on the out= kernels we decompose into to check this, but
+    // for matmul there is logic at the composite level that relies on this invariant.
+    TORCH_CHECK(!(tensor1.requires_grad() || tensor2.requires_grad() || out.requires_grad()) || !at::GradMode::is_enabled(),
+      "matmul(): functions with out=... arguments don't support automatic differentiation, "
+      "but one of the arguments requires grad."
+    );
+  }
 
   if (dim_tensor1 == 1 && dim_tensor2 == 1) {
     return has_out ? at::dot_out(out, tensor1, tensor2) : tensor1.dot(tensor2);

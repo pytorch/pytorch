@@ -1,11 +1,9 @@
 #pragma once
 
 #include <c10/util/TypeList.h>
-#include <functional>
 #include <type_traits>
 
-namespace c10 {
-namespace guts {
+namespace c10::guts {
 
 /**
  * Access information about result type or arguments from a function type.
@@ -208,6 +206,7 @@ constexpr auto tuple_slice(Tuple t) {
 namespace detail {
 template <class Mapper, class... Args, size_t... Indices>
 auto tuple_map(
+    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
     std::tuple<Args...>&& tuple,
     const Mapper& mapper,
     std::index_sequence<Indices...>) {
@@ -222,5 +221,4 @@ auto tuple_map(std::tuple<Args...>&& tuple, const Mapper& mapper) {
       std::move(tuple), mapper, std::index_sequence_for<Args...>());
 }
 
-} // namespace guts
-} // namespace c10
+} // namespace c10::guts

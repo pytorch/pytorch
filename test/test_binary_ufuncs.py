@@ -1646,6 +1646,7 @@ class TestBinaryUfuncs(TestCase):
             cpu_out = t.cpu().pow(2)
             self.assertEqual(cpu_out, cuda_out)
 
+    @skipIfTorchDynamo()
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half))
     def test_complex_scalar_pow_tensor(self, device, dtype):
@@ -2980,17 +2981,17 @@ class TestBinaryUfuncs(TestCase):
     @onlyCPU
     @dtypes(torch.float)
     def test_cdiv(self, device, dtype):
-        self._test_cop(torch.div, lambda x, y: x / y, dtype, device)
+        self._test_cop(torch.div, operator.truediv, dtype, device)
 
     @onlyCPU
     @dtypes(torch.float)
     def test_cremainder(self, device, dtype):
-        self._test_cop(torch.remainder, lambda x, y: x % y, dtype, device)
+        self._test_cop(torch.remainder, operator.mod, dtype, device)
 
     @onlyCPU
     @dtypes(torch.float)
     def test_cmul(self, device, dtype):
-        self._test_cop(torch.mul, lambda x, y: x * y, dtype, device)
+        self._test_cop(torch.mul, operator.mul, dtype, device)
 
     @onlyCPU
     @dtypes(torch.float)
@@ -3487,7 +3488,7 @@ class TestBinaryUfuncs(TestCase):
         )
         _test_helper(a, b)
 
-    @skipIfTorchDynamo     # complex infs/nans differ under Dynamo/Inductor
+    @skipIfTorchDynamo()    # complex infs/nans differ under Dynamo/Inductor
     @dtypesIfCUDA(torch.float32, torch.float64, torch.bfloat16)
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.complex64, torch.complex128)
     def test_logaddexp(self, device, dtype):

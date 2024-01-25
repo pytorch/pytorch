@@ -473,9 +473,6 @@ class SparseSemiStructuredTensor(torch.Tensor):
         if self.compressed_tensor_cusparselt is not None:
             raise RuntimeError("Converting to dense is not yet supported by cuSPARSELt backend!")
 
-        if self.sparse_tensor_cutlass is not None and self.sparse_tensor_cutlass.dtype == torch.float32:
-            raise RuntimeError("Converting to dense for torch.float32 datatype is not yet supported by CUTLASS backend!")
-
         from torch.sparse._semi_structured_conversions import (
             sparse_semi_structured_to_dense_cutlass,
         )

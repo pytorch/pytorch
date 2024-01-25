@@ -33,7 +33,8 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoLapack, slowTest, IS_WINDOWS, IS_MACOS,
     disable_gc, gradcheck, gradgradcheck, parametrize,
-    instantiate_parametrized_tests, skipIfMps, set_warn_always_context)
+    instantiate_parametrized_tests, skipIfMps, set_warn_always_context,
+    skipIfTorchDynamo)
 from torch.autograd import Variable, Function, detect_anomaly, kineto_available, _calculate_shape
 from torch.autograd.function import InplaceFunction
 import torch.autograd.forward_ad as fwAD
@@ -1717,6 +1718,24 @@ class TestAutograd(TestCase):
         a.sum().backward()
         self.assertEqual(a.grad, torch.tensor([1.]))
 
+        # When in-place over view is done, the retains_grad hooks should be
+        # moved from base's original grad_fn to the copyslices node.
+        x = torch.tensor([1.], requires_grad=True).clone()
+        x.retain_grad()
+        x_view = x[:]
+        x_view *= 2
+        x *= 2
+        x.sum().backward()
+        # The grad is 1, not 4, because we are computing grad wrt the latest
+        # version of x.
+        self.assertEqual(a.grad, torch.tensor([1.]))
+
+        # If the base did not originally require grad, there should be no hook
+        # to move. Make sure this case runs without error.
+        x = torch.zeros(4)
+        y = x.view(2, 2)
+        y.add_(torch.randn(2, 2, requires_grad=True))
+
     def test_retains_grad_inplace_multiple_outputs(self):
         class DoubleMul(Function):
             @staticmethod
@@ -2132,6 +2151,7 @@ class TestAutograd(TestCase):
         with torch.autograd.grad_mode.no_grad():
             v.grad_fn
 
+    @skipIfTorchDynamo("too slow")
     def test_free_deep_graph(self):
         def scope():
             depth = 150000
@@ -2149,6 +2169,7 @@ class TestAutograd(TestCase):
         # Should not stack overflow
         scope()
 
+    @skipIfTorchDynamo("too slow")
     def test_free_deep_graph_complicated(self):
         def scope():
             depth = 100000
@@ -2179,6 +2200,7 @@ class TestAutograd(TestCase):
         # Should not stack overflow
         scope()
 
+    @skipIfTorchDynamo("too slow")
     def test_free_deep_graph_pyfunction(self):
         class MyOp(Function):
             @staticmethod
@@ -4319,7 +4341,7 @@ Done""")
         ]
         for thread, ranges in threads:
             for range in ranges:
-                assert(len(range) == 3)
+                assert len(range) == 3
                 events.append(
                     FunctionEvent(
                         id=range[2],
@@ -4340,7 +4362,7 @@ Done""")
         def get_children_ids(event):
             return [child.id for child in event.cpu_children]
 
-        assert([get_children_ids(event) for event in events] == res)
+        assert [get_children_ids(event) for event in events] == res
 
     def test_profiler_aggregation_table(self):
         """
@@ -5976,18 +5998,11 @@ for shape in [(1,), ()]:
         a = torch.randn(1, requires_grad=True)
 
         # Passing explicitly should not warn
-        with warnings.catch_warnings(record=True) as w:
-            checkpoint(lambda x: x, a, use_reentrant=False)
-        self.assertEqual(len(w), 0)
+        self.assertNotWarn(lambda: checkpoint(lambda x: x, a, use_reentrant=False))
 
         # Not passing explicitly warns
-        with warnings.catch_warnings(record=True) as w:
+        with self.assertWarnsOnceRegex(UserWarning, ".*the use_reentrant parameter should be passed explicitly.*"):
             checkpoint(lambda x: x, a)
-        self.assertEqual(len(w), 1)
-        self.assertIn(
-            "please pass in use_reentrant=True or use_reentrant=False explicitly",
-            str(w[0].message)
-        )
 
     def test_checkpoint_sequential_warns_if_use_reentrant_not_passed_explcitly(self):
         a = torch.randn(3, requires_grad=True)
@@ -5998,18 +6013,11 @@ for shape in [(1,), ()]:
         ]
 
         # Passing explicitly should not warn
-        with warnings.catch_warnings(record=True) as w:
-            checkpoint_sequential(modules_list, 3, a, use_reentrant=False)
-        self.assertEqual(len(w), 0)
+        self.assertNotWarn(lambda: checkpoint_sequential(modules_list, 3, a, use_reentrant=False))
 
         # Not passing explicitly warns
-        with warnings.catch_warnings(record=True) as w:
+        with self.assertWarnsOnceRegex(UserWarning, ".*the use_reentrant parameter should be passed explicitly.*"):
             checkpoint_sequential(modules_list, 3, a)
-        self.assertEqual(len(w), 1)
-        self.assertIn(
-            "please pass in use_reentrant=True or use_reentrant=False explicitly",
-            str(w[0].message)
-        )
 
     def test_checkpoint_detects_non_determinism(self):
         def save_3_tensors(x):
@@ -7785,6 +7793,21 @@ for shape in [(1,), ()]:
             with self.assertRaisesRegex(RuntimeError, "You should return None at that position instead"):
                 FuncWrong.apply(x_dual, y)
 
+        # returns non-tensor
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone(), object(), x.clone()
+
+            @staticmethod
+            def jvp(ctx, x_tangent):
+                return x_tangent, None, x_tangent
+
+        with fwAD.dual_level():
+            x_dual = fwAD.make_dual(x, x_tangent)
+            out_dual, _, out2_dual = Func.apply(x_dual)
+            self.assertEqual(fwAD.unpack_dual(out_dual).tangent, x_tangent)
+            self.assertEqual(fwAD.unpack_dual(out2_dual).tangent, x_tangent)
 
     def test_custom_function_local_inplace(self):
         class MyFn(torch.autograd.Function):
@@ -8672,25 +8695,91 @@ get_out().sum().backward()
             self.assertTrue(err_msg in e.output.decode("utf-8"))
 
     def test_view_func_replay(self):
-        def _assert_match_metadata(a, b):
-            self.assertEqual(a.size(), b.size())
-            self.assertEqual(a.stride(), b.stride())
-            self.assertEqual(a.storage_offset(), b.storage_offset())
+        with torch.autograd._force_original_view_tracking(True):
+            def _assert_match_metadata(a, b):
+                self.assertEqual(a.size(), b.size())
+                self.assertEqual(a.stride(), b.stride())
+                self.assertEqual(a.storage_offset(), b.storage_offset())
+                self.assertEqual(a.device, b.device)
+                self.assertEqual(a.dtype, b.dtype)
 
-        def _test_op(fn, inp, args):
-            out = fn(inp, *args)
-            self.assertTrue(out._is_view)
-            self.assertTrue(out._base is inp)
+            def _test_fn(fn, inp, *args):
+                outs = fn(inp, *args)
+                # handle functions that return multiple views (e.g. split)
+                if isinstance(outs, torch.Tensor):
+                    outs = [outs]
 
-            new_inp = inp.clone()
-            _assert_match_metadata(new_inp, inp)
-            new_out = out._view_func(new_inp)
-            _assert_match_metadata(new_out, out)
+                for out in outs:
+                    self.assertTrue(out._is_view())
+                    self.assertTrue(out._base is inp)
 
-        _test_op(torch.select, torch.rand(2, 2), (0, 0))
-        _test_op(torch.as_strided, torch.rand(2, 2), ((4,), (1,)))
-        _test_op(torch.view_as_complex, torch.rand(2, 2), ())
-        _test_op(torch.view_as_real, torch.rand(2, 2, dtype=torch.cfloat), ())
+                    # forward view_func
+                    new_inp = inp.clone()
+                    _assert_match_metadata(new_inp, inp)
+                    new_out = out._view_func(new_inp)
+                    _assert_match_metadata(new_out, out)
+
+                    # reverse view_func
+                    new_out = out.detach()
+                    new_inp = out._rev_view_func_unsafe(new_out)
+                    _assert_match_metadata(new_inp, inp)
+                    self.assertTrue(new_inp._is_view())
+                    self.assertTrue(new_inp._base is new_out)
+
+            # test individual view ops
+            _test_fn(torch.ops.aten.alias.default, torch.rand(2, 2))
+            _test_fn(torch.as_strided, torch.rand(2, 2), (4,), (1,))
+            _test_fn(torch.chunk, torch.rand(2, 4), 2, -1)
+            _test_fn(torch.diagonal, torch.rand(4, 4))
+            _test_fn(torch.ops.aten.expand.default, torch.rand(4, 1), (-1, 3))
+            _test_fn(torch.narrow, torch.rand(2, 2), 0, 1, 1)
+            _test_fn(torch.permute, torch.rand(2, 3, 4), (1, 0, 2))
+            _test_fn(torch.select, torch.rand(2, 2), 0, 0)
+            _test_fn(torch.ops.aten.slice.Tensor, torch.rand(2, 2), 1, 1, 2)
+            _test_fn(torch.split, torch.rand(2, 2), 1)
+            _test_fn(torch.split_with_sizes, torch.rand(2, 4), [1, 3], -1)
+            _test_fn(torch.squeeze, torch.rand(2, 1, 4))
+            _test_fn(torch.squeeze, torch.rand(2, 1, 4), 1)
+            _test_fn(torch.squeeze, torch.rand(2, 1, 1, 4), [1, 2])
+            _test_fn(torch.t, torch.rand(2, 4))
+            _test_fn(torch.transpose, torch.rand(2, 4), 0, 1)
+            _test_fn(torch.unbind, torch.rand(1, 5))
+            _test_fn(torch.ops.aten.unfold.default, torch.rand(1, 5), 1, 3, 2)
+            _test_fn(torch.unsqueeze, torch.rand(2, 4), -2)
+            _test_fn(torch.ops.aten.view.default, torch.rand(2, 10), (-1, 5, 2))
+            _test_fn(torch.view_as_complex, torch.rand(2, 2))
+            _test_fn(torch.view_as_real, torch.rand(2, 2, dtype=torch.cfloat))
+
+            # test view chains
+            _test_fn(
+                lambda x: x.unsqueeze(-1).transpose(-1, -2).squeeze(1), torch.randn(2, 4))
+            _test_fn(
+                lambda x: x.chunk(2, -1)[0].transpose(0, 1).unsqueeze(-1), torch.randn(2, 3, 4))
+            _test_fn(
+                lambda x: x.split_with_sizes([1, 3], -1)[0].chunk(2, -1), torch.randn(2, 3, 4))
+
+            # chains with missing view_func()s use as_strided() to cover the gaps
+            def chain_with_only_parent_view_func(x):
+                with torch.autograd._force_original_view_tracking(True):
+                    x = x.split_with_sizes([1, 3], -1)[0]
+
+                with torch.autograd._force_original_view_tracking(False):
+                    x = x.chunk(2, -1)
+
+                return x
+
+            _test_fn(chain_with_only_parent_view_func, torch.randn(2, 3, 4))
+
+            def chain_with_only_current_view_func(x):
+                with torch.autograd._force_original_view_tracking(False):
+                    x = x.split_with_sizes([1, 3], -1)[0]
+
+                with torch.autograd._force_original_view_tracking(True):
+                    x = x.chunk(2, -1)
+
+                return x
+
+            _test_fn(chain_with_only_current_view_func, torch.randn(2, 3, 4))
 
     def test_setup_context_when_forward_has_default_args(self):
         class PowFunction(Function):
@@ -11880,6 +11969,7 @@ class TestAutogradMultipleDispatch(TestCase):
 
 from autograd.test_complex import TestAutogradComplex  # noqa: F401
 from autograd.test_functional import TestAutogradFunctional  # noqa: F401
+from autograd.test_logging import TestAutogradLogging  # noqa: F401
 
 # e.g., TestAutogradDeviceTypeCPU and TestAutogradDeviceTypeCUDA
 instantiate_device_type_tests(

@@ -1,6 +1,7 @@
 import copy
 import dataclasses
 import functools
+import types
 from typing import (
     Any,
     Callable,
@@ -36,6 +37,7 @@ from .graph_signature import (  # noqa: F401
     _sig_to_specs,
     ArgumentSpec,
     ConstantArgument,
+    CustomObjArgument,
     ExportGraphSignature,
     InputKind,
     InputSpec,
@@ -102,16 +104,17 @@ class ExportedProgram:
         graph_signature: ExportGraphSignature,
         state_dict: Dict[str, Union[torch.Tensor, torch.nn.Parameter]],
         range_constraints: "Dict[sympy.Symbol, Any]",
-        equality_constraints: List[Tuple[Any, Any]],
         module_call_graph: List[ModuleCallEntry],
         example_inputs: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None,
         verifier: Optional[Type[Any]] = None,  # TODO Change typing hint to Verifier.
-        tensor_constants: Optional[Dict[str, torch.Tensor]] = None,
+        tensor_constants: Optional[
+            Dict[str, torch.Tensor]
+        ] = None,  # TODO: deprecate this
+        constants: Optional[
+            Dict[str, Union[torch.Tensor, torch._C.ScriptObject]]
+        ] = None,
     ):
         from torch._export.exported_program import _create_graph_module_for_export
-        from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
-            InputDim,
-        )
 
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
@@ -122,13 +125,12 @@ class ExportedProgram:
         self._graph_signature: ExportGraphSignature = graph_signature
         self._state_dict: Dict[str, Any] = state_dict
         self._range_constraints: "Dict[sympy.Symbol, ValueRanges]" = range_constraints
-        self._equality_constraints: List[
-            Tuple[InputDim, InputDim]
-        ] = equality_constraints
+        assert module_call_graph is not None
         self._module_call_graph: List[ModuleCallEntry] = module_call_graph
         self._example_inputs = example_inputs
 
-        self._tensor_constants = tensor_constants or {}
+        self._constants = tensor_constants or constants or {}
+        assert self._constants is not None
 
         from torch._export.verifier import Verifier
 
@@ -200,11 +202,6 @@ class ExportedProgram:
 
     @property
     @compatibility(is_backward_compatible=False)
-    def equality_constraints(self):
-        return self._equality_constraints
-
-    @property
-    @compatibility(is_backward_compatible=False)
     def module_call_graph(self):
         return self._module_call_graph
 
@@ -239,7 +236,12 @@ class ExportedProgram:
     @property
     @compatibility(is_backward_compatible=False)
     def tensor_constants(self):
-        return self._tensor_constants
+        return self._constants
+
+    @property
+    @compatibility(is_backward_compatible=False)
+    def constants(self):
+        return self._constants
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         import torch._export.error as error
@@ -259,27 +261,22 @@ class ExportedProgram:
                     f"{received_spec}"
                 )
 
-        ordered_params = tuple(
-            self.state_dict[name] for name in self.graph_signature.parameters
-        )
-        ordered_buffers = tuple(
-            self.state_dict[name] for name in self.graph_signature.buffers
-        )
-        if hasattr(self.graph_signature, "lifted_tensor_constants"):
-            ordered_tensor_constants = tuple(
-                self.tensor_constants[name]
-                for name in self.graph_signature.lifted_tensor_constants
-            )
-        else:
-            ordered_tensor_constants = ()
+        additional_inputs = []
+        for input_ in self.graph_signature.input_specs:
+            if input_.kind == InputKind.USER_INPUT:
+                continue
+            elif input_.kind in (InputKind.PARAMETER, InputKind.BUFFER):
+                additional_inputs.append(self.state_dict[input_.target])
+            elif input_.kind in (InputKind.CONSTANT_TENSOR, InputKind.CUSTOM_OBJ):
+                additional_inputs.append(self.constants[input_.target])
+        additional_inputs = tuple(additional_inputs)
+
         self._check_input_constraints(*args)
 
         # NOTE: calling convention is first params, then buffers, then args as user supplied them.
         # See: torch/_functorch/aot_autograd.py#L1034
         res = torch.fx.Interpreter(self.graph_module).run(
-            *ordered_params,
-            *ordered_buffers,
-            *ordered_tensor_constants,
+            *additional_inputs,
             *args,
             enable_io_processing=False,
         )
@@ -340,21 +337,26 @@ class ExportedProgram:
             f"    {graph_module}\n"
             f"Graph signature: {self.graph_signature}\n"
             f"Range constraints: {self.range_constraints}\n"
-            f"Equality constraints: {self.equality_constraints}\n"
         )
         return string
 
-    def module(self, *, flat: bool = True) -> torch.nn.Module:
+    def module(self) -> torch.nn.Module:
         """
         Returns a self contained GraphModule with all the parameters/buffers inlined.
         """
-        from torch._export.unflatten import unflatten
         from ._unlift import _unlift_exported_program_lifted_states
 
-        if flat:
-            return _unlift_exported_program_lifted_states(self)
-        else:
-            return unflatten(self)
+        module = _unlift_exported_program_lifted_states(self)
+
+        def _train(self, mode: bool = True):
+            raise NotImplementedError("Calling train() is not supported yet.")
+
+        def _eval(self, mode: bool = True):
+            raise NotImplementedError("Calling eval() is not supported yet.")
+
+        module.train = types.MethodType(_train, module)  # type: ignore[method-assign]
+        module.eval = types.MethodType(_eval, module)  # type: ignore[method-assign]
+        return module
 
     @_disable_prexisiting_fake_mode
     def run_decompositions(
@@ -371,11 +373,8 @@ class ExportedProgram:
         from torch._decomp import core_aten_decompositions
         from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
             _AddRuntimeAssertionsForInlineConstraintsPass,
-            InputDim,
         )
-        from torch._export.passes.lift_constant_tensor_pass import (
-            lift_constant_tensor_pass,
-        )
+        from torch._export.passes.lift_constants_pass import lift_constants_pass
         from torch._export.passes.replace_sym_size_ops_pass import (
             _replace_sym_size_ops_pass,
         )
@@ -416,20 +415,28 @@ class ExportedProgram:
         new_placeholders = _get_placeholders(gm)
         new_outputs = list(gm.graph.nodes)[-1].args[0]
 
+        # To match the output target with correct input for input mutations
+        # need to find the old to new placeholder map
+        old_new_placeholder_map = {
+            spec.arg.name: new_placeholders[i].name
+            for i, spec in enumerate(self.graph_signature.input_specs)
+            if not isinstance(spec.arg, ConstantArgument)
+        }
+
         input_specs = [
             InputSpec(spec.kind, update_arg(spec.arg, new_placeholders[i]), spec.target)
             for i, spec in enumerate(self.graph_signature.input_specs)
         ]
         output_specs = [
-            OutputSpec(spec.kind, update_arg(spec.arg, new_outputs[i]), spec.target)
+            OutputSpec(
+                spec.kind,
+                update_arg(spec.arg, new_outputs[i]),
+                old_new_placeholder_map.get(spec.target, spec.target),
+            )
             for i, spec in enumerate(self.graph_signature.output_specs)
         ]
 
         assert len(new_placeholders) == len(old_placeholders)
-        old_new_placeholder_map = {
-            old_node.name: new_node.name
-            for old_node, new_node in zip(old_placeholders, new_placeholders)
-        }
 
         new_graph_signature = ExportGraphSignature(
             input_specs=input_specs, output_specs=output_specs
@@ -456,39 +463,32 @@ class ExportedProgram:
 
         new_range_constraints = _get_updated_range_constraints(gm)
 
-        new_equality_constraints = [
-            (
-                InputDim(old_new_placeholder_map[inp_dim1.input_name], inp_dim1.dim),
-                InputDim(old_new_placeholder_map[inp_dim2.input_name], inp_dim2.dim),
-            )
-            for inp_dim1, inp_dim2 in self.equality_constraints
-        ]
+        constants = lift_constants_pass(gm, new_graph_signature)
+        for k, v in constants.items():
+            assert k not in self.constants
+            self.constants[k] = v
 
-        lift_constant_tensor_pass(gm, new_graph_signature)
         _replace_sym_size_ops_pass(gm)
         exported_program = ExportedProgram(
-            gm,
-            gm.graph,
-            new_graph_signature,
-            self.state_dict,
-            new_range_constraints,
-            new_equality_constraints,
-            copy.deepcopy(self.module_call_graph),
-            self.example_inputs,
-            self.verifier,
-            self.tensor_constants,
+            root=gm,
+            graph=gm.graph,
+            graph_signature=new_graph_signature,
+            state_dict=self.state_dict,
+            range_constraints=new_range_constraints,
+            module_call_graph=copy.deepcopy(self.module_call_graph),
+            example_inputs=self.example_inputs,
+            verifier=self.verifier,
+            constants=self.constants,
         )
 
-        if len(new_range_constraints) > 0 or len(new_equality_constraints) > 0:
-            exported_program = exported_program._transform(
-                _AddRuntimeAssertionsForInlineConstraintsPass(
-                    new_range_constraints, new_equality_constraints
-                )
+        if len(new_range_constraints) > 0:
+            exported_program = exported_program._transform_do_not_use(
+                _AddRuntimeAssertionsForInlineConstraintsPass(new_range_constraints)
             )
 
         return exported_program
 
-    def _transform(self, *passes: PassType) -> "ExportedProgram":
+    def _transform_do_not_use(self, *passes: PassType) -> "ExportedProgram":
         pm = PassManager(list(passes))
         res = pm(self.graph_module)
         transformed_gm = res.graph_module if res is not None else self.graph_module
@@ -547,16 +547,17 @@ class ExportedProgram:
             return new_signature
 
         transformed_ep = ExportedProgram(
-            transformed_gm,
-            transformed_gm.graph,
-            _get_updated_graph_signature(self.graph_signature, transformed_gm),
-            self.state_dict,
-            _get_updated_range_constraints(transformed_gm),
-            copy.deepcopy(self.equality_constraints),
-            copy.deepcopy(self._module_call_graph),
-            self.example_inputs,
-            self.verifier,
-            self.tensor_constants,
+            root=transformed_gm,
+            graph=transformed_gm.graph,
+            graph_signature=_get_updated_graph_signature(
+                self.graph_signature, transformed_gm
+            ),
+            state_dict=self.state_dict,
+            range_constraints=_get_updated_range_constraints(transformed_gm),
+            module_call_graph=copy.deepcopy(self._module_call_graph),
+            example_inputs=self.example_inputs,
+            verifier=self.verifier,
+            constants=self.constants,
         )
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
@@ -577,6 +578,22 @@ class ExportedProgram:
 
     def _validate(self):
         self.verifier().check(self)
+
+    # TODO(zhxchen17) Formalize this.
+    def _update(
+        self, graph_module, graph_signature, state_dict=None
+    ) -> "ExportedProgram":
+        return ExportedProgram(
+            root=graph_module,
+            graph=graph_module.graph,
+            graph_signature=graph_signature,
+            state_dict=state_dict or self.state_dict,
+            range_constraints=copy.deepcopy(self.range_constraints),
+            module_call_graph=copy.deepcopy(self._module_call_graph),
+            example_inputs=self.example_inputs,
+            verifier=self.verifier,
+            tensor_constants=self.tensor_constants,
+        )
 
 
 def _get_updated_range_constraints(
@@ -605,4 +622,7 @@ def _get_updated_range_constraints(
         for k, v in shape_env.var_to_range.items()
         if k not in shape_env.replacements
     }
+    for k, v in shape_env.runtime_var_to_range.items():
+        if k not in shape_env.replacements:
+            range_constraints[k] = v
     return range_constraints

@@ -150,12 +150,12 @@ def _find_tensors(obj):
     if isinstance(obj, torch.Tensor):
         return [obj]
     if isinstance(obj, (list, tuple)):
-        return itertools.chain(*map(_find_tensors, obj))
+        return itertools.chain.from_iterable(map(_find_tensors, obj))
     if isinstance(obj, dict):
-        return itertools.chain(*map(_find_tensors, obj.values()))
+        return itertools.chain.from_iterable(map(_find_tensors, obj.values()))
     if is_dataclass(obj):
-        return itertools.chain(
-            *map(_find_tensors, (getattr(obj, f.name) for f in fields(obj)))
+        return itertools.chain.from_iterable(
+            map(_find_tensors, (getattr(obj, f.name) for f in fields(obj)))
         )
 
     return []
@@ -292,9 +292,9 @@ class _DDPJoinHook(JoinHook):
         ddp._check_and_sync_module_buffers()
 
         # Check if need to sync in the backward pass
-        work = ddp._check_global_requires_backward_grad_sync(is_joined_rank=True)
-        work.wait()
-        should_sync_backwards = work.result()[0].item() != 0
+        should_sync_backwards = ddp._check_global_requires_backward_grad_sync(
+            is_joined_rank=True
+        )
         # Forward parameter sync is disabled in the next iteration if we
         # are skipping gradient sync this iteration, so set
         # `require_forward_param_sync` accordingly
@@ -871,6 +871,7 @@ class DistributedDataParallel(Module, Joinable):
         # deregistered later if DDP is not compiled.
         self._accum_grad_hooks: List[RemovableHandle] = []
         self._ddp_python_hook = torch._dynamo.config.ddp_python_hook
+        self._force_to_disable_reducer = False
         if self._ddp_python_hook:
             if torch._dynamo.config.optimize_ddp:
                 raise RuntimeError(
@@ -1432,8 +1433,11 @@ class DistributedDataParallel(Module, Joinable):
         self._setup_in_backward_optimizers()
         self._lazy_init_ran = True
 
+    def _should_disable_reducer(self) -> bool:
+        return torch._utils.is_compiling() or self._force_to_disable_reducer
+
     def _pre_forward(self, *inputs, **kwargs):
-        if self._ddp_python_hook and torch._utils.is_compiling():
+        if self._ddp_python_hook and self._should_disable_reducer():
             return inputs, kwargs
 
         # Remove the acc_gradient hooks because we are not compiling DDP.
@@ -1508,7 +1512,7 @@ class DistributedDataParallel(Module, Joinable):
             return inputs, kwargs
 
     def _post_forward(self, output):
-        if self._ddp_python_hook and torch._utils.is_compiling():
+        if self._ddp_python_hook and self._should_disable_reducer():
             return output
 
         if self._delay_all_reduce_all_params:
@@ -1614,7 +1618,18 @@ class DistributedDataParallel(Module, Joinable):
         work = dist.all_reduce(
             requires_sync_tensor, group=self.process_group, async_op=True
         )
-        return work
+
+        # (kwen2501) This if condition is a plain translation of previous
+        # behavior, i.e. in the `is_joined_rank=False` case, `work.wait()`
+        # is not called and it doesn't care about the result. I am guessing
+        # that it just wants to fire a matching all-reduce and does not want
+        # the main stream to wait.
+        if is_joined_rank:
+            work.wait()
+            should_sync_backwards = requires_sync_tensor.item() != 0
+            return should_sync_backwards
+        else:
+            return None  # Return value is not/should not be used.
 
     # When running in join mode, checks and performs sync of module buffers if
     # the models have buffers that should be synchronized in the forward pass.

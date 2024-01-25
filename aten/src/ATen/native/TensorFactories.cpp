@@ -8,6 +8,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/MapAllocator.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/TracerMode.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/NamedTensorUtils.h>
@@ -573,7 +574,7 @@ Tensor& eye_out_cpu(int64_t n, int64_t m, Tensor& result) {
   result.zero_();
 
   int64_t sz = std::min<int64_t>(n, m);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, result.scalar_type(), "eye", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBFloat16, kHalf, kBool, result.scalar_type(), "eye", [&]() -> void {
     scalar_t* result_data = result.data_ptr<scalar_t>();
     at::parallel_for(0, sz, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
       for (const auto i : c10::irange(p_begin, p_end))result_data[i*(result.strides()[0] + result.strides()[1])] = 1;
@@ -1276,14 +1277,51 @@ Tensor triu_indices_cpu(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ zeros ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+static Tensor zeros_sparse_compressed_symint(c10::SymIntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    Layout layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  check_size_nonnegative(size);
+  TORCH_CHECK(size.size() >= 2, "torch.zeros: Only batched sparse compressed (non-block) tensors are supported, but got size ", size);
+  auto size_ = C10_AS_INTARRAYREF_SLOW(size);
+  // torch.zeros cannot be used to create blocked tensors because its
+  // API lacks a method to specify the block size.
+  AT_DISPATCH_SPARSE_COMPRESSED_NONBLOCK_LAYOUTS(layout, "zeros_sparse_compressed", [&]{});
+
+  int64_t nnz = 0;
+  auto compressed_indices_size = DimVector(size_.slice(0, size.size() - 2));
+  auto plain_indices_and_values_size = DimVector(size_.slice(0, size.size() - 2));
+  compressed_indices_size.push_back(size_[at::sparse_csr::compressedDimension(layout, size_)] + 1);
+  plain_indices_and_values_size.push_back(nnz);
+
+  TensorOptions options = TensorOptions().dtype(ScalarType::Long).layout(Layout::Strided).device(device).pinned_memory(pin_memory);
+  auto compressed_indices = at::empty(compressed_indices_size, options);
+  compressed_indices.zero_();
+  auto plain_indices = at::empty(plain_indices_and_values_size, options);
+  auto values = at::empty(plain_indices_and_values_size, options.dtype(dtype));
+
+  return at::_sparse_compressed_tensor_unsafe(compressed_indices,
+                                              plain_indices,
+                                              values,
+                                              size_,
+                                              dtype,
+                                              layout,
+                                              device,
+                                              pin_memory);
+}
+
 Tensor zeros_symint(SymIntArrayRef size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
+  Layout layout_ = layout.value_or(Layout::Strided);
+  if (at::sparse_csr::is_sparse_compressed(layout_)) {
+    return zeros_sparse_compressed_symint(size, dtype, layout_, device, pin_memory);
+  }
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-
   auto result = at::empty_symint(size, options);
   return result.zero_();
 }

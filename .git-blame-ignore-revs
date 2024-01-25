@@ -38,3 +38,5 @@ f70844bec783bfce43c950ccf180dc494e86f2bf
 e6ec0efaf87703c5f889cfc20b29be455885d58d
 # 2023-07-31 [optim][BE] split test file into logical parts: SWA, LR, optim
 a53cda1ddc15336dc1ff0ce1eff2a49cdc5f882e
+# 2024-01-02 clangformat: fused adam #116583
+9dc68d1aa9e554d09344a10fff69f7b50b2d23a0

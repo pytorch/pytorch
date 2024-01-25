@@ -50,15 +50,15 @@ class ColwiseParallel(ParallelStyle):
     Example::
         >>> # xdoctest: +SKIP(failing)
         >>> from torch.distributed.tensor.parallel import parallelize_module, ColwiseParallel
+        >>> from torch.distributed.device_mesh import init_device_mesh
         >>> ...
-        >>> # By default, the input of the "w1" Linear will be annotated to Replicated DTensor
+        >>> m = Model(...)  # m is a nn.Module that contains a "w1" nn.Linear submodule
+        >>> tp_mesh = init_device_mesh("cuda", (8,))
+        >>>
+        >>> # By default, the input of the "w1" Linear will be converted to Replicated DTensor
         >>> # and the output of "w1" will return :class:`torch.Tensor` that shards on the last dim.
-        >>>>
-        >>> parallelize_module(
-        >>>     module=block, # this can be a submodule or module
-        >>>     ...,
-        >>>     parallelize_plan={"w1": ColwiseParallel()},
-        >>> )
+        >>>
+        >>> sharded_mod = parallelize_module(m, tp_mesh, {"w1": ColwiseParallel()})
         >>> ...
 
     .. note:: By default ``ColwiseParallel`` output is sharded on the last dimension if the ``output_layouts`` not
@@ -157,15 +157,15 @@ class RowwiseParallel(ParallelStyle):
     Example::
         >>> # xdoctest: +SKIP(failing)
         >>> from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
+        >>> from torch.distributed.device_mesh import init_device_mesh
         >>> ...
-        >>> # By default, the input of the "w2" Linear will be annotated to DTensor that shards on the last dim
+        >>> m = Model(...)  # m is a nn.Module that contains a "w2" nn.Linear submodule
+        >>> tp_mesh = init_device_mesh("cuda", (8,))
+        >>>
+        >>> # By default, the input of the "w2" Linear will be converted to DTensor that shards on the last dim
         >>> # and the output of "w2" will return a replicated :class:`torch.Tensor`.
         >>>
-        >>> parallelize_module(
-        >>>     module=block, # this can be a submodule or module
-        >>>     ...,
-        >>>     parallelize_plan={"w2": RowwiseParallel()},
-        >>> )
+        >>> sharded_mod = parallelize_module(m, tp_mesh, {"w2": RowwiseParallel()}),
         >>> ...
     """
 
@@ -247,12 +247,16 @@ class PrepareModuleInput(ParallelStyle):
     Example::
         >>> # xdoctest: +SKIP(failing)
         >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleInput
+        >>> from torch.distributed.device_mesh import init_device_mesh
         >>> ...
+        >>> block = TransformerBlock(...)  # block is a nn.Module that contains an "attn" Attention submodule
+        >>> tp_mesh = init_device_mesh("cuda", (8,))
+        >>>
         >>> # According to the style specified below, the first input of attn will be annotated to Sharded DTensor
         >>> # and then redistributed to Replicated DTensor.
         >>> parallelize_module(
-        >>>     module=block, # this can be a submodule or module
-        >>>     ...,
+        >>>     block, # this can be a submodule or module
+        >>>     tp_mesh,
         >>>     parallelize_plan={
         >>>         "attn": PrepareModuleInput(
         >>>             input_layouts=(Shard(0), None, None, ...),
@@ -280,12 +284,14 @@ class PrepareModuleInput(ParallelStyle):
         prepared_inputs = []
         if not isinstance(inputs, tuple):
             inputs = (inputs,)
-        assert len(inputs) == len(self.input_layouts), \
-            "module inputs and input_layouts should have same length!"
+        if len(inputs) != len(self.input_layouts):
+            raise ValueError("module inputs and input_layouts should have same length!")
+
         for inp, input_layout, desired_layout in zip(inputs, self.input_layouts, self.desired_input_layouts):
             if input_layout is not None:
                 if isinstance(inp, DTensor):
-                    assert inp.placements[0] == input_layout
+                    # TODO: re-enable the check once we fix the compile path
+                    # assert inp.placements[0] == input_layout
                     dt_inp = inp
                 else:
                     dt_inp = DTensor.from_local(inp, device_mesh, (input_layout,), run_check=False)
@@ -322,18 +328,20 @@ class PrepareModuleOutput(ParallelStyle):
     Example::
         >>> # xdoctest: +SKIP(failing)
         >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleOutput
+        >>> from torch.distributed.device_mesh import init_device_mesh
         >>> ...
-        >>> # According to the style specified below, the first input of attn will be annotated to Sharded DTensor
-        >>> # and then redistributed to Replicated DTensor.
+        >>> block = TransformerBlock(...)  # block is a nn.Module that contains an "attn" Attention submodule
+        >>> tp_mesh = init_device_mesh("cuda", (8,))
+        >>>
+        >>> # According to the style specified below, the output of the TransformerBlock will be converted to Replicated DTensor
+        >>> # and then redistributed to Sharded DTensor.
         >>> parallelize_module(
-        >>>     module=block, # this can be a submodule or module
-        >>>     ...,
-        >>>     parallelize_plan={
-        >>>         "submodule": PrepareModuleOutput(
-        >>>             output_layouts=Replicate(),
-        >>>             desired_output_layouts=Shard(0)
-        >>>         ),
-        >>>     }
+        >>>     block, # this can be a submodule or module
+        >>>     tp_mesh,
+        >>>     parallelize_plan = PrepareModuleOutput(
+        >>>         output_layouts=Replicate(),
+        >>>         desired_output_layouts=Shard(0)
+        >>>     )
         >>> )
     """
     def __init__(
@@ -354,12 +362,13 @@ class PrepareModuleOutput(ParallelStyle):
         prepared_outputs = []
         if not isinstance(outputs, tuple):
             outputs = (outputs,)
-        assert len(outputs) == len(self.output_layouts), \
-            "module outputs and output_layouts should have same length!"
+        if len(outputs) != len(self.output_layouts):
+            raise ValueError("module outputs and output_layouts should have same length!")
         for out, out_layout, desired_out_layout in zip(outputs, self.output_layouts, self.desired_output_layouts):
             if out_layout is not None:
                 if isinstance(out, DTensor):
-                    assert out.placements[0] == out_layout
+                    # TODO: re-enable the check once we fix the compile path
+                    # assert out.placements[0] == out_layout
                     dt_out = out
                 else:
                     dt_out = DTensor.from_local(out, device_mesh, (out_layout,), run_check=False)

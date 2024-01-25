@@ -679,7 +679,7 @@ def _reduce_scatter_tensor_coalesced_meta(inputs, reduceOp, tag, rankset, group_
 # but then you pass those sizes explicitly, and the all to all itself
 # isn't dynamic, it just follows the specified output splits
 def _all_to_all_single_meta(
-    input, output_split_sizes, input_split_sizes, tag, rankset, group_size
+    input, output_split_sizes, input_split_sizes, *args, **kwargs
 ):
     if output_split_sizes is None:
         return input.new_empty(input.size())
@@ -772,6 +772,7 @@ if not torch._running_with_deploy():
         _reduce_scatter_tensor_coalesced_native_meta,
         "Meta",
     )
+    _c10_lib_impl.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
 else:
     warnings.warn(
         "PyTorch Distributed functional collectives do not work with torch::deploy."
@@ -790,8 +791,8 @@ These schemas intentionally match torch.distributed.distributed_c10d.* ops that 
 
 
 def all_gather_tensor_inplace(
-    output: torch.Tensor,
-    input: torch.Tensor,
+    output_tensor: torch.Tensor,
+    input_tensor: torch.Tensor,
     group,  # TODO add a type,
     async_op: bool = False,
     tag: str = "",
@@ -800,7 +801,7 @@ def all_gather_tensor_inplace(
     assert (
         not async_op
     ), "Can't remap async version of inplace op to functional collective"
-    return output.copy_(all_gather_tensor(input, gather_dim, group, tag))
+    return output_tensor.copy_(all_gather_tensor(input_tensor, gather_dim, group, tag))
 
 
 def reduce_scatter_tensor_inplace(

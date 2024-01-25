@@ -396,6 +396,7 @@ Utility functions to convert Module parameter memory formats.
     :nosignatures:
 
     convert_conv2d_weight_memory_format
+    convert_conv3d_weight_memory_format
 
 Utility functions to apply and remove weight normalization from Module parameters.
 
@@ -526,7 +527,6 @@ Lazy Modules Initialization
 
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
-.. py:module:: torch.nn.attention
 .. py:module:: torch.nn.backends
 .. py:module:: torch.nn.utils.stateless
 .. py:module:: torch.nn.backends.thnn

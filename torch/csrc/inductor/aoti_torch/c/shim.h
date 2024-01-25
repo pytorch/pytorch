@@ -85,6 +85,8 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cuda();
 
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e5m2();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e4m3fn();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e5m2fnuz();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e4m3fnuz();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_bfloat16();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float16();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float32();
@@ -95,6 +97,30 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int16();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int32();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int64();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_bool();
+
+// Functions for converting a single-element tensor to a scalar value
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_float32(AtenTensorHandle tensor, float* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_float64(AtenTensorHandle tensor, double* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_uint8(AtenTensorHandle tensor, uint8_t* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_uint16(AtenTensorHandle tensor, uint16_t* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_uint32(AtenTensorHandle tensor, uint32_t* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_uint64(AtenTensorHandle tensor, uint64_t* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_int8(AtenTensorHandle tensor, int8_t* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_int16(AtenTensorHandle tensor, int16_t* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_int32(AtenTensorHandle tensor, int32_t* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_int64(AtenTensorHandle tensor, int64_t* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_bool(AtenTensorHandle tensor, bool* ret_value);
 
 AOTI_TORCH_EXPORT bool aoti_torch_grad_mode_is_enabled();
 AOTI_TORCH_EXPORT void aoti_torch_grad_mode_set_enabled(bool enabled);
@@ -321,6 +347,23 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scatter_out(
     int64_t dim,
     AtenTensorHandle index,
     AtenTensorHandle src);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scatter_reduce_out(
+    AtenTensorHandle out,
+    AtenTensorHandle self,
+    int64_t dim,
+    AtenTensorHandle index,
+    AtenTensorHandle src,
+    const char* reduce,
+    int32_t include_self);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_index_put_out(
+    AtenTensorHandle out,
+    AtenTensorHandle self,
+    const AtenTensorHandle* indices,
+    const uint32_t num_indices,
+    const AtenTensorHandle values,
+    bool accumulate);
 
 #ifdef USE_CUDA
 

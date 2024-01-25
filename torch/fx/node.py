@@ -31,10 +31,17 @@ Argument = Optional[Union[
     BaseArgumentTypes
 ]]
 
+_side_effectful_need_to_be_preserved_pre_dispatch: Set[Callable] = {
+    torch._C._set_grad_enabled,
+    torch.amp._enter_autocast,
+    torch.amp._exit_autocast,
+}
+
 _side_effectful_functions: Set[Callable] = {
     torch._assert,
     torch._assert_async,
     _ops.aten._assert_async.msg,
+    _ops.aten._assert_scalar.default,
     _ops.aten.copy_.default,
     _ops.aten.sym_constrain_range.default,
     _ops.aten.sym_constrain_range_for_size.default,
@@ -42,7 +49,7 @@ _side_effectful_functions: Set[Callable] = {
     _ops.profiler._record_function_enter_new,
     _ops.profiler._record_function_exit,
     _ops.inductor.accumulate_grad_.default,
-}
+} | _side_effectful_need_to_be_preserved_pre_dispatch
 
 
 @compatibility(is_backward_compatible=False)
@@ -76,7 +83,7 @@ def _type_repr(obj):
             return obj.__qualname__
         return f'{obj.__module__}.{obj.__qualname__}'
     if obj is ...:
-        return('...')
+        return '...'
     if isinstance(obj, types.FunctionType):
         return obj.__name__
     return repr(obj)
@@ -555,6 +562,7 @@ class Node:
                 replace_with.meta[k] = v
         to_process = list(self.users)
         skipped = []
+        m = self.graph.owning_module
         for use_node in to_process:
             if not delete_user_cb(use_node):
                 skipped.append(use_node)
@@ -565,6 +573,9 @@ class Node:
                     return replace_with
                 else:
                     return n
+
+            if getattr(m, "_replace_hook", None):
+                m._replace_hook(old=self, new=replace_with.name, user=use_node)
 
             new_args = map_arg(use_node.args, maybe_replace_node)
             new_kwargs = map_arg(use_node.kwargs, maybe_replace_node)
@@ -655,6 +666,10 @@ class Node:
         def maybe_replace_node(n : Node) -> Node:
             return new_input if n == old_input else n
 
+        m = self.graph.owning_module
+        if getattr(m, "_replace_hook", None):
+            m._replace_hook(old=old_input, new=new_input.name, user=self)
+
         new_args = map_arg(self.args, maybe_replace_node)
         new_kwargs = map_arg(self.kwargs, maybe_replace_node)
         assert isinstance(new_args, tuple)
@@ -667,6 +682,15 @@ class Node:
         name = self.graph._graph_namespace.create_name(candidate, None)
         self.name = name
         self.graph._graph_namespace._rename_object(self, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name == 'name' and hasattr(self, "name"):
+            m = self.graph.owning_module
+            if getattr(m, "_replace_hook", None):
+                assert isinstance(value, str)
+                for user in self.users:
+                    m._replace_hook(old=self, new=value, user=user)
+        object.__setattr__(self, name, value)
 
 
 @compatibility(is_backward_compatible=True)
