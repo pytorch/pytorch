@@ -1157,7 +1157,10 @@ def pointwise(
         )
     raise NotImplementedError(f"size_hints: {size_hints}")
 
-def _reduction_configs(*, size_hints: List[int], inductor_meta: Dict[str, Any]) -> List[Config]:
+
+def _reduction_configs(
+    *, size_hints: List[int], inductor_meta: Dict[str, Any]
+) -> List[Config]:
     reduction_hint = inductor_meta.get("reduction_hint", None)
     assert len(size_hints) == 2
     rnumel = size_hints[-1]
@@ -1178,7 +1181,7 @@ def _reduction_configs(*, size_hints: List[int], inductor_meta: Dict[str, Any]) 
     elif reduction_hint == ReductionHint.OUTER_TINY:
         return [tiny_config]
     if disable_pointwise_autotuning():
-        return [triton_config_reduction(size_hints, 32, 128)],
+        return [triton_config_reduction(size_hints, 32, 128)]
     return [
         contiguous_config,
         outer_config,
