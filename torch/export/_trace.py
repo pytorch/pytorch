@@ -423,7 +423,13 @@ def _export_non_strict(
     is_joint = graph_signature.backward_signature is not None
 
     def make_argument_spec(node) -> ArgumentSpec:
-        assert "val" in node.meta, f"{node} has no 'val' metadata field"
+        if isinstance(node, (int, bool, float, type(None))):
+            # For const outputs we just directly return this
+            return ConstantArgument(value=node)
+
+        assert (
+            "val" in node.meta
+        ), f"{node} is not a constant or a node with a 'val' metadata field"
         val = node.meta["val"]
         if isinstance(val, FakeTensor):
             return TensorArgument(name=node.name)

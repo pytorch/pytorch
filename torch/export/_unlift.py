@@ -42,7 +42,11 @@ def _unlift(
             # In the case that the same node is returned multiple times,
             # node.all_input_nodes will only iterate that node once
             for return_node in pytree.tree_flatten(node.args)[0]:
-                return_node_name = return_node.name
+                return_node_name = (
+                    return_node.name
+                    if isinstance(return_node, torch.fx.Node)
+                    else return_node
+                )
                 # we found a param/buffer mutation
                 if return_node_name in buffers_to_mutate:
                     # TODO Fix situation here to replace dot with underscore...
