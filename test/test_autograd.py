@@ -7797,16 +7797,17 @@ for shape in [(1,), ()]:
         class Func(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
-                return x.clone(), object()
+                return x.clone(), object(), x.clone()
 
             @staticmethod
             def jvp(ctx, x_tangent):
-                return x_tangent, None
+                return x_tangent, None, x_tangent
 
         with fwAD.dual_level():
             x_dual = fwAD.make_dual(x, x_tangent)
-            out_dual, _ = Func.apply(x_dual)
+            out_dual, _, out2_dual = Func.apply(x_dual)
             self.assertEqual(fwAD.unpack_dual(out_dual).tangent, x_tangent)
+            self.assertEqual(fwAD.unpack_dual(out2_dual).tangent, x_tangent)
 
     def test_custom_function_local_inplace(self):
         class MyFn(torch.autograd.Function):
