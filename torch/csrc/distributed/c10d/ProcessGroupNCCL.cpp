@@ -1215,7 +1215,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       // we haven't polled for `heartbeat_timeout` seconds and there haven't
       // any work added or removed for `watchdog_timeout` seconds.
       if (computeDeltaMS(lastTimePollStore, currentTime) >=
-              coordCheckIntervalMilSec_) {
+          coordCheckIntervalMilSec_) {
         lastTimePollStore = currentTime;
         if (globalStore_->check({std::string(TIMEOUT_DUMP)})) {
           errorMsg = c10::str(
