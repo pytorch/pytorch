@@ -144,8 +144,8 @@ def run_model(
         logger.info("compare loss/predict. Numerical result : %s", res)
         # tensor may not have a grad_fn
         try:
-            _ = pred_base[0].sum().backward()
-            _ = pred_control[0].sum().backward()
+            _ = pred_base[0].sum().backward(retain_graph=True)
+            _ = pred_control[0].sum().backward(retain_graph=True)
             res = compare_gradients(model_base, model_control, precision)
             logger.info("compare param grad. Numerical result : %s", res)
         except Exception as e:
