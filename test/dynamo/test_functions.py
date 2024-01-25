@@ -1713,6 +1713,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
                 x = torch.randn(10)
                 self.assertEqual(opt_fn(x), fn(x))
 
+    def test_pos(self):
+        def fn(x, y):
+            return operator.pos(x) * operator.pos(y)
+
+        opt_fn = torch.compile(fullgraph=True, dynamic=True)(fn)
+
+        def test(x, y):
+            self.assertEqual(opt_fn(x, y), fn(x, y))
+
+        test(torch.ones(4), 1)
+        test(1, torch.ones(4))
+        test(-1, -1)
+        test(-1.1, 1.1)
+        test(True, False)
+        test(torch.ones(4, dtype=torch.float32), 1.1)
+
     def test_unary_fold_op(self):
         for op in (operator.abs, abs, operator.neg, operator.pos, operator.truth):
             with self.subTest(op=op):
