@@ -172,8 +172,9 @@ def _gather_state_dict(
             device_mesh=value.device_mesh,
             placements=placements,
         )
-        # Call `wait()` to force the tensor is synchronous with respect
+        # Call `wait()` to force the tensor to be synchronous with respect
         # to the main stream.
+        # See the discussion in https://github.com/pytorch/pytorch/pull/117799.
         return value.to_local().wait()
 
     return _iterate_state_dict(

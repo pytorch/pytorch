@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Dict, Iterator, List, Set, Tuple
 
 import torch
+import torch.distributed as dist
 import torch.distributed.fsdp._flat_param as flat_param_file
 from torch.distributed.fsdp._common_utils import (
     _apply_to_modules,
@@ -55,7 +56,8 @@ class SimpleProfiler:
     def dump_and_reset(cls, msg: str) -> None:
         # This cannot be combined with DETAIL distributed log
         # as the profiling will be very incorrect.
-        logger.debug("%s %s", msg, str(cls.results))
+        if dist.get_rank() == 0 and dist.get_debug_level() == dist.DebugLevel.INFO:
+            logger.warning("%s %s", msg, cls.result)
         cls.reset()
 
 
