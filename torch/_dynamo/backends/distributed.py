@@ -170,7 +170,7 @@ class DDPOptimizer:
     Debugging
      - Generally, it is easiest to debug DDPOptimizer in a single process program, using pdb.
      - In many cases, the log messages are helpful (they show bucket size assignments)-
-       just set TORCH_LOGS env to 'dynamo' or '+dynamo'.
+       just set TORCH_LOGS env to include any of 'dynamo', 'distributed', or 'dist_ddp'.
      - See `benchmarks/dynamo/distributed.py` for a simple harness that will run a toy model or a torchbench model
        in a single process (or with torchrun, in multiple processes)
 

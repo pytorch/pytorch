@@ -219,8 +219,8 @@ enforce_cond_guards_match = True
 # Automatically split model graph into pieces to match DDP bucket sizes
 # to allow DDP comm/compute overlap.  Disable to allow DDP models to
 # run without graph-breaks, but also without comm/compute overlap.
-# set TORCH_LOGS env to 'dynamo' or '+dynamo' for more info
-# about optimize_ddp behavior.
+# set TORCH_LOGS env to include any of 'dynamo', 'distributed', or
+# 'dist_ddp' for more info about optimize_ddp behavior.
 optimize_ddp = True
 
 # If True, delays DDPOptimizer submodule compilation to 1st run of the model,
