@@ -3014,7 +3014,11 @@ def lookup(obj, filename=None, is_inlined_call=True):
     if filename is None:
         filename = getfile(obj)
 
-    if is_function(obj) or obj is None or isinstance(obj, types.MethodType):
+    if (
+        is_function(obj)
+        or obj is None
+        or (isinstance(obj, types.MethodType) and not is_inlined_call)
+    ):
         if torch._dynamo.skipfiles._check_file(filename, is_inlined_call):
             return SkipFilesVariable
         else:

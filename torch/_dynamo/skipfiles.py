@@ -397,7 +397,7 @@ def check_verbose(obj, is_inlined_call=False):
             "inlined according trace_rules.lookup",
         )
     else:
-        assert rule == SkipFilesVariable, breakpoint()
+        assert rule == SkipFilesVariable, rule
         return SkipResult(
             True,
             "skipped according trace_rules.lookup",
