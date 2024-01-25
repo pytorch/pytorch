@@ -311,6 +311,17 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([3.0], device=device))
 
+    @torch._dynamo.config.patch(
+        capture_dynamic_output_shape_ops=True
+    )
+    def test_nonzero_no_realloc(self, device):
+        @torch.compile(fullgraph=True, dynamic=True)
+        def f(x, y, y2):
+            z = x.nonzero()
+            return torch.split(z, [y.size(0), y2.size(0)])
+
+        f(torch.tensor([1, 0, 1, 1, 0, 1, 0]), torch.randn(2), torch.randn(2))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unbacked_index_select(self, device):
         # Tests if unbacked symbols captured by inner_fn are properly tracked

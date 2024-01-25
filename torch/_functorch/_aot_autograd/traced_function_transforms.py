@@ -590,14 +590,21 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
     def run_node(self, n: torch.fx.Node):
         import sympy
 
-        result = super().run_node(n)
-        # TODO: handle Tensor returns
-        if "example_value" in n.meta:
+        def go(result, example_value):
             if isinstance(result, torch.SymInt) and isinstance(
                 result.node.expr, sympy.Symbol
             ):
-                torch._check(result == n.meta["example_value"])
+                torch._check(result == example_value)
+            elif isinstance(result, torch.Tensor):
+                for s0, s1 in zip(result.size(), example_value.size()):
+                    go(s0, s1)
+            elif isinstance(result, (list, tuple)):
+                for r0, r1 in zip(result, example_value):
+                    go(r0, r1)
 
+        result = super().run_node(n)
+        if "example_value" in n.meta:
+            go(result, n.meta["example_value"])
         return result
 
 
