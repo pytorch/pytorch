@@ -556,6 +556,10 @@ class triton:
         "R": 4096 * (16 if multi_kernel else 1),
     }
 
+    # Minimum RBLOCK to be used for a TritonSplitScanKernel
+    # NOTE: This also indirectly controls the size of workspace buffer required
+    min_split_scan_rblock = 256
+
     # Store the generated cubin files for cpp wrapper code to load
     store_cubin = False
 

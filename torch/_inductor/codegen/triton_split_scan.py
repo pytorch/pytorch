@@ -2,7 +2,8 @@ import functools
 
 from typing import Optional, Set
 
-from torch._inductor import ir
+from torch.utils._sympy.functions import CeilDiv
+from torch._inductor import ir, config
 
 from torch._inductor.codegen.triton import (
     IterationRangesRoot,
@@ -84,9 +85,9 @@ class TritonSplitScanKernel(TritonKernel):
 
         assert len(self.numels) == 2, "Unexpected tiling"
         # TODO: Enforce this in split_scan heuristic
-        min_rblock = 256
+        min_rblock = config.triton.min_split_scan_rblock
         max_blocks = (
-            prod(self.numels[:-1]) * (self.numels[-1] + min_rblock - 1) // min_rblock
+            prod(self.numels[:-1]) * CeilDiv(self.numels[-1], min_rblock)
         )
         nbytes = scratch_nbytes_per_block * max_blocks
         scratch_base, offset = self.args.workspace(nbytes=nbytes, zero_fill=True)

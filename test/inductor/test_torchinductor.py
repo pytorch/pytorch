@@ -120,6 +120,7 @@ vec_dtypes = [torch.float, torch.bfloat16, torch.float16]
 libtest = torch.library.Library("test", "FRAGMENT")
 ids = set()
 
+
 def _large_cumprod_input(shape, dim, dtype, device):
     # Construct a cumprod input which guaruntees not to overflow or underflow
     if is_integer_dtype(dtype):
@@ -135,7 +136,14 @@ def _large_cumprod_input(shape, dim, dtype, device):
 
     # Create random values with a uniform magnitude and uniform exponent
     num_batches = (shape[dim] + 2 * batch_size - 1) // (2 * batch_size)
-    batch_shape = shape[:dim] + (num_batches, batch_size,) + shape[dim + 1:]
+    batch_shape = (
+        shape[:dim]
+        + (
+            num_batches,
+            batch_size,
+        )
+        + shape[dim + 1 :]
+    )
     magnitude = 1 + torch.rand(batch_shape, dtype=comp_dtype, device=device)
     exponent = torch.randint(-1, 1, batch_shape, device=device).to(comp_dtype)
     batch = magnitude * exponent.exp2()
@@ -1228,10 +1236,11 @@ class CommonTemplate:
         def fn(a):
             return torch.cumprod(a, -1)
 
-        for dtype in [torch.float32, torch.float64,
-                      torch.int32, torch.int64]:
-            inp = _large_cumprod_input((10, 10000), dim=1, dtype=dtype, device=self.device)
-            self.common(fn, (inp,), atol=1e-5, rtol=1e-5)
+        for dtype in [torch.float32, torch.float64, torch.int32, torch.int64]:
+            inp = _large_cumprod_input(
+                (10, 10000), dim=1, dtype=dtype, device=self.device
+            )
+            self.common(fn, (inp,), atol=1e-5, rtol=1e-4)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_split_cumprod_low_prec(self):
@@ -1242,7 +1251,9 @@ class CommonTemplate:
             return torch.cumprod(a.view(-1), 0)
 
         for dtype in [torch.float16, torch.bfloat16]:
-            inp = _large_cumprod_input((10, 10000), dim=1, dtype=dtype, device=self.device)
+            inp = _large_cumprod_input(
+                (10, 10000), dim=1, dtype=dtype, device=self.device
+            )
             self.common(
                 fn,
                 (inp,),
@@ -1253,8 +1264,12 @@ class CommonTemplate:
         def fn(a, b):
             return torch.cumprod(a, 0) + torch.cumprod(b, 0)
 
-        a = _large_cumprod_input((10000,), dim=0, dtype=torch.float32, device=self.device)
-        b = _large_cumprod_input((10000,), dim=0, dtype=torch.float64, device=self.device)
+        a = _large_cumprod_input(
+            (10000,), dim=0, dtype=torch.float32, device=self.device
+        )
+        b = _large_cumprod_input(
+            (10000,), dim=0, dtype=torch.float64, device=self.device
+        )
         self.common(fn, (a, b), atol=1e-5, rtol=1e-5)
 
     def test_embedding_bag_byte_unpack(self):

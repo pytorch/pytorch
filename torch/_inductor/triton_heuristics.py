@@ -61,9 +61,10 @@ _NUM_THREADS_PER_WARP = 32
 
 
 class HeuristicType(Enum):
+    PERSISTENT_REDUCTION = auto()
     POINTWISE = auto()
     REDUCTION = auto()
-    PERSISTENT_REDUCTION = auto()
+    SPLIT_SCAN = auto()
     TEMPLATE = auto()
     USER_AUTOTUNE = auto()
 
@@ -227,7 +228,7 @@ class CachingAutotuner(KernelInterface):
                     self.configs, compiled_binaries
                 ):
                     assert len(self.size_hints) == 2
-                    xblock = triton_config.kwargs["XBLOCK"]
+                    xblock = triton_config.kwargs.get("XBLOCK", 1)
                     rblock = triton_config.kwargs["RBLOCK"]
                     total_block = (self.size_hints[0] + xblock - 1) // xblock
                     nreg = getattr(compiled_binary, "n_regs", None)
@@ -1156,6 +1157,40 @@ def pointwise(
         )
     raise NotImplementedError(f"size_hints: {size_hints}")
 
+def _reduction_configs(*, size_hints: List[int], inductor_meta: Dict[str, Any]) -> List[Config]:
+    reduction_hint = inductor_meta.get("reduction_hint", None)
+    assert len(size_hints) == 2
+    rnumel = size_hints[-1]
+
+    contiguous_config = triton_config_reduction(
+        size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048)
+    )
+    outer_config = triton_config_reduction(size_hints, 64, 8)
+    tiny_config = triton_config_reduction(
+        size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, 2048)
+    )
+    if config.max_autotune or config.max_autotune_pointwise:
+        pass  # skip all these cases
+    elif reduction_hint == ReductionHint.INNER:
+        return [contiguous_config]
+    elif reduction_hint == ReductionHint.OUTER:
+        return [outer_config]
+    elif reduction_hint == ReductionHint.OUTER_TINY:
+        return [tiny_config]
+    if disable_pointwise_autotuning():
+        return [triton_config_reduction(size_hints, 32, 128)],
+    return [
+        contiguous_config,
+        outer_config,
+        tiny_config,
+        triton_config_reduction(size_hints, 64, 64),
+        triton_config_reduction(size_hints, 8, 512),
+        # halve the XBLOCK/RBLOCK compared to outer_config
+        # TODO: this may only be beneficial when each iteration of the reduction
+        # is quite heavy. E.g. https://gist.github.com/shunting314/189a8ef69f90db9d614a823385147a72
+        triton_config_reduction(size_hints, 64, 4, num_warps=8),
+    ]
+
 
 def reduction(
     size_hints,
@@ -1172,71 +1207,18 @@ def reduction(
 
     assert triton_meta is not None
     rnumel = size_hints[-1]
-    if len(size_hints) == 2:
-        contiguous_config = triton_config_reduction(
-            size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048)
-        )
-        outer_config = triton_config_reduction(size_hints, 64, 8)
-        tiny_config = triton_config_reduction(
-            size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, 2048)
-        )
-        if config.max_autotune or config.max_autotune_pointwise:
-            pass  # skip all these cases
-        elif reduction_hint == ReductionHint.INNER:
-            return cached_autotune(
-                size_hints,
-                [contiguous_config],
-                triton_meta=triton_meta,
-                inductor_meta=inductor_meta,
-                heuristic_type=HeuristicType.REDUCTION,
-                filename=filename,
-            )
-        elif reduction_hint == ReductionHint.OUTER:
-            return cached_autotune(
-                size_hints,
-                [outer_config],
-                triton_meta=triton_meta,
-                inductor_meta=inductor_meta,
-                heuristic_type=HeuristicType.REDUCTION,
-                filename=filename,
-            )
-        elif reduction_hint == ReductionHint.OUTER_TINY:
-            return cached_autotune(
-                size_hints,
-                [tiny_config],
-                triton_meta=triton_meta,
-                inductor_meta=inductor_meta,
-                heuristic_type=HeuristicType.REDUCTION,
-                filename=filename,
-            )
-        if disable_pointwise_autotuning():
-            return cached_autotune(
-                size_hints,
-                [triton_config_reduction(size_hints, 32, 128)],
-                triton_meta=triton_meta,
-                inductor_meta=inductor_meta,
-                heuristic_type=HeuristicType.REDUCTION,
-                filename=filename,
-            )
-        return cached_autotune(
-            size_hints,
-            [
-                contiguous_config,
-                outer_config,
-                tiny_config,
-                triton_config_reduction(size_hints, 64, 64),
-                triton_config_reduction(size_hints, 8, 512),
-                # halve the XBLOCK/RBLOCK compared to outer_config
-                # TODO: this may only be beneficial when each iteration of the reduction
-                # is quite heavy. E.g. https://gist.github.com/shunting314/189a8ef69f90db9d614a823385147a72
-                triton_config_reduction(size_hints, 64, 4, num_warps=8),
-            ],
-            triton_meta=triton_meta,
-            inductor_meta=inductor_meta,
-            filename=filename,
-            heuristic_type=HeuristicType.REDUCTION,
-        )
-    raise NotImplementedError(f"size_hints: {size_hints}")
+    if len(size_hints) != 2:
+        raise NotImplementedError(f"size_hints: {size_hints}")
+
+    configs = _reduction_configs(size_hints=size_hints, inductor_meta=inductor_meta)
+    return cached_autotune(
+        size_hints,
+        configs=configs,
+        triton_meta=triton_meta,
+        inductor_meta=inductor_meta,
+        heuristic_type=HeuristicType.REDUCTION,
+        filename=filename,
+    )
 
 
 def persistent_reduction(
@@ -1287,8 +1269,40 @@ def persistent_reduction(
     )
 
 
-# TODO: custom config for split scan
-split_scan = reduction
+def split_scan(
+    size_hints,
+    reduction_hint=False,
+    triton_meta=None,
+    filename=None,
+    inductor_meta=None,
+):
+    """Heuristic for TritonSplitScanKernel"""
+    inductor_meta = {} if inductor_meta is None else inductor_meta
+    inductor_meta["reduction_hint"] = reduction_hint
+    if inductor_meta.get("no_x_dim"):
+        size_hints = [1, *size_hints[1:]]
+
+    assert triton_meta is not None
+    rnumel = size_hints[-1]
+    if len(size_hints) != 2:
+        raise NotImplementedError(f"size_hints: {size_hints}")
+
+    configs = _reduction_configs(size_hints=size_hints, inductor_meta=inductor_meta)
+
+    # Fixup configs to enforce the minimum RBLOCK size
+    min_rblock = config.triton.min_split_scan_rblock
+    for cfg in configs:
+        if cfg.kwargs["RBLOCK"] < min_rblock:
+            cfg.kwargs["RBLOCK"] = min_rblock
+
+    return cached_autotune(
+        size_hints,
+        configs=configs,
+        triton_meta=triton_meta,
+        inductor_meta=inductor_meta,
+        heuristic_type=HeuristicType.SPLIT_SCAN,
+        filename=filename,
+    )
 
 
 def template(num_stages, num_warps, triton_meta, filename=None, inductor_meta=None):
