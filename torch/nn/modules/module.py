@@ -1032,12 +1032,12 @@ class Module:
         return self._apply(lambda t: torch.empty_like(t, device=device), recurse=recurse)
 
     @overload
-    def to(self, device: Optional[DeviceLikeType] = ..., dtype: Optional[Union[dtype, str]] = ...,
+    def to(self, device: Optional[DeviceLikeType] = ..., dtype: Optional[dtype] = ...,
            non_blocking: bool = ...) -> Self:
         ...
 
     @overload
-    def to(self, dtype: Union[dtype, str], non_blocking: bool = ...) -> Self:
+    def to(self, dtype: dtype, non_blocking: bool = ...) -> Self:
         ...
 
     @overload
