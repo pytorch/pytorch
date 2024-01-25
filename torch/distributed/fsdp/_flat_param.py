@@ -1729,7 +1729,8 @@ class FlatParamHandle:
 
     def _free_unsharded_flat_param(self):
         """
-        Free the padded unsharded flat parameter.
+        Free the padded unsharded flat parameter. We allow this
+        function to be called even when storage is not allocated
 
         The tensor to free depends
         on the calling context since the unshard may have forced full
@@ -1737,7 +1738,6 @@ class FlatParamHandle:
         """
         self._check_sharded_strategy()
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
-        self._check_storage_allocated(unsharded_flat_param)
         self._check_on_compute_device(unsharded_flat_param)
         # Do not free the memory until all ops in the current stream finish
         _no_dispatch_record_stream(
