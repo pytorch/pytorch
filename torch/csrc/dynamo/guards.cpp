@@ -599,9 +599,7 @@ inline static void unwrap_size_tuple(PyObject* obj, T& output) {
 
 static PyObject* _empty_strided_cpu(PyObject* dummy, PyObject* args) {
   // at::empty_strided is surprising slow.  This is a lower-overhead
-  // version that saves ~2us on every allocation.  Though it is
-  // CPU-only, tuple-only, and only supports 8D tensors.
-  // These constraints are checked in inductor.
+  // version that saves ~2us on every allocation.
   HANDLE_TH_ERRORS;
 
   TORCH_CHECK(PyTuple_CheckExact(args));
