@@ -2018,19 +2018,6 @@ class Scheduler:
                 ):
                     computed_deps.add(rd)
 
-        # similar to can_inplace, if we are going to fuse a write subsequent to a read
-        # require that the indexing and size is the same
-        # TODO do the following checks, maybe move to prune deps/elswewhere
-        # len(self.read_writes.writes) == 1 and isinstance(read_dep, dependencies.MemoryDep
-        for write in node2.read_writes.writes:
-            for read in node1.read_writes.reads:
-                if write.name != self.mutation_renames.get(read.name, read.name):
-                    continue
-
-                if read.index != write.index or read.size != write.size:
-                    why("fusing a write into a read that with different indexing")
-                    return False
-
         remaining_deps = {dep.name for dep in node2.unmet_dependencies - computed_deps}
         if remaining_deps & node1_names:
             # MemoryDeps didn't match and read different locations of the same buffer.
@@ -2043,6 +2030,25 @@ class Scheduler:
             if node1_names & self.name_to_fused_node[name].ancestors:
                 why("intermediate nodes between node1 & node2")
                 return False
+
+        # similar to can_inplace, if we are going to fuse a write subsequent to a read
+        # require that the indexing and size is the same
+        for write in node2.read_writes.writes:
+            for read in node1.read_writes.reads:
+                if write.name != self.mutation_renames.get(read.name, read.name):
+                    continue
+
+                # bail on StarDep
+                if not isinstance(read, dependencies.MemoryDep) and not isinstance(
+                    write, dependencies.MemoryDep
+                ):
+                    why("fusing write into read without explicit memory dependency")
+                    return False
+
+                if read.index != write.index or read.size != write.size:
+                    why("fusing a write into a read that with different indexing")
+                    return False
+
         return True
 
     def score_fusion(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
