@@ -1664,6 +1664,8 @@ def remainder(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 
 # reverse sub
+@register_decomposition(aten.rsub)
+@out_wrapper()
 def rsub(
     a: Union[TensorLikeType, NumberType],
     b: Union[TensorLikeType, NumberType],
