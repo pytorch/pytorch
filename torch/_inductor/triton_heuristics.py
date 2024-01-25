@@ -162,7 +162,11 @@ class CachingAutotuner(KernelInterface):
         self.gpu_device = get_interface_for_device(self.device_type)
 
         if log.isEnabledFor(logging.DEBUG):
-            log.debug("CachingAutotuner gets %d configs", len(self.configs))
+            log.debug(
+                "CachingAutotuner gets %d configs for %s",
+                len(self.configs),
+                self.fn.__name__,
+            )
             for c in self.configs:
                 log.debug(c)
 
@@ -480,7 +484,7 @@ class CachingAutotuner(KernelInterface):
             self.coordesc_tuner.cache_benchmark_result(k.config, v)
 
         if log.isEnabledFor(logging.DEBUG):
-            log.debug("Benchmark all input configs get:")
+            log.debug("Benchmark all input configs for %s, get:", self.fn.__name__)
             for k, v in timings.items():
                 log.debug(
                     "%s: %f, nreg %d, nspill %d, #shared-mem %d",
