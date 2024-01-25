@@ -47,11 +47,11 @@ class StorageWriter(abc.ABC):
         a key-value storage.
 
         Args:
-            checkpoint_id (Union[str, os.PathLike, None]): the checkpoint_id
-                the user specifies. The meaning of the checkpoint_id depends
-                on the storage. It can be a path to a folder or to a file.
-                It can also be a key if the storage is more like a key-value
-                store.
+            checkpoint_id (Union[str, os.PathLike, None]):
+                The ID of this checkpoint instance. The meaning of the checkpoint_id
+                depends on the storage. It can be a path to a folder or to a file.
+                It can also be a key if the storage is a key-value store.
+                (Default: ``None``)
         """
         ...
 
@@ -172,11 +172,11 @@ class StorageReader(abc.ABC):
         a key-value storage.
 
         Args:
-            checkpoint_id (Union[str, os.PathLike, None]): the checkpoint_id
-                the user specifies. The meaning of the checkpoint_id depends
-                on the storage. It can be a path to a folder or to a file.
-                It can also be a key if the storage is more like a key-value
-                store.
+            checkpoint_id (Union[str, os.PathLike, None]):
+                The ID of this checkpoint instance. The meaning of the checkpoint_id
+                depends on the storage. It can be a path to a folder or to a file.
+                It can also be a key if the storage is more like a key-value store.
+                (Default: ``None``)
         """
         ...
 
