@@ -1782,6 +1782,7 @@ copy_tests(
 )
 
 
+@unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
 class AOTInductorTestABICompatibleCuda(TestCase):
     device = "cuda"
     abi_compatible = True
@@ -1799,7 +1800,10 @@ copy_tests(
 )
 
 
-@unittest.skipIf(IS_FBCODE, "NonABI mode should not be used in fbcode")
+@unittest.skipIf(
+    IS_FBCODE or sys.platform == "darwin",
+    "NonABI mode should not be used in fbcode nor on MacOS",
+)
 class AOTInductorTestNonABICompatibleCpu(TestCase):
     device = "cpu"
     abi_compatible = False
@@ -1827,7 +1831,10 @@ copy_tests(
 )
 
 
-@unittest.skipIf(IS_FBCODE, "NonABI mode should not be used in fbcode")
+@unittest.skipIf(
+    IS_FBCODE or sys.platform == "darwin",
+    "NonABI mode should not be used in fbcode nor on MacOS",
+)
 class AOTInductorTestNonABICompatibleCuda(TestCase):
     device = "cuda"
     abi_compatible = False
@@ -1849,5 +1856,5 @@ if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
     # cpp_extension N/A in fbcode
-    if HAS_CUDA:
+    if HAS_CUDA or sys.platform == "darwin":
         run_tests(needs="filelock")
