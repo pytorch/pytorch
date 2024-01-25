@@ -1289,7 +1289,7 @@ def tensor_split_tensor_indices_or_sections_py_impl(
     self: Tensor,
     tensor_indices_or_sections: Tensor,
     dim: int = 0,
-) -> List[Tensor]:
+) -> Tuple[Tensor, ...]:
     assert tensor_indices_or_sections.device.type == "cpu"
     assert tensor_indices_or_sections.dtype == torch.int64
     split_dim = tensor_indices_or_sections.dim()
