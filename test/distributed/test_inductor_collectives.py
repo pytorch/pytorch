@@ -19,6 +19,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
 )
+from torch.testing._internal.common_utils import requires_cuda
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch.utils._triton import has_triton
 from torch._inductor.utils import run_and_get_triton_code
@@ -524,6 +525,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
 
 @requires_nccl()
+@requires_cuda
 class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     """
     Prefer single-proc test runner for basic tests as it is easier to work with.
