@@ -344,7 +344,10 @@ def _verify_exported_program_signature(exported_program) -> None:
     # Check outputs
     output_node = list(exported_program.graph.nodes)[-1]
     assert output_node.op == "output"
-    output_nodes = [arg.name for arg in output_node.args[0]]
+    output_nodes = [
+        arg.name if isinstance(arg, torch.fx.Node) else arg
+        for arg in output_node.args[0]
+    ]
 
     if len(output_nodes) != len(gs.output_specs):
         raise SpecViolationError(
