@@ -57,25 +57,17 @@ class ASGD(Optimizer):
             group.setdefault("maximize", False)
             group.setdefault("differentiable", False)
             group.setdefault("capturable", False)
-        state_values = list(self.state.values())
-        step_is_tensor = (len(state_values) != 0) and torch.is_tensor(
-            state_values[0]["step"]
-        )
-        if not step_is_tensor:
-            for s in state_values:
-                s["step"] = torch.tensor(float(s["step"]), dtype=_get_scalar_dtype())
-        eta_is_tensor = (len(state_values) != 0) and torch.is_tensor(
-            state_values[0]["eta"]
-        )
-        if not eta_is_tensor:
-            for s in state_values:
-                s["eta"] = torch.tensor(s["eta"], dtype=_get_scalar_dtype())
-        mu_is_tensor = (len(state_values) != 0) and torch.is_tensor(
-            state_values[0]["mu"]
-        )
-        if not mu_is_tensor:
-            for s in state_values:
-                s["mu"] = torch.tensor(float(s["mu"]), dtype=_get_scalar_dtype())
+            for p in group["params"]:
+                p_state = self.state.get(p, [])
+                if len(p_state) != 0:
+                    if not torch.is_tensor(p_state['step']):
+                        step_val = float(p_state["step"])
+                        p_state["step"] = torch.tensor(step_val, dtype=_get_scalar_dtype(), device=p.device) if group['capturable'] else torch.tensor(step_val, dtype=_get_scalar_dtype())
+                    if not torch.is_tensor(p_state["eta"]):
+                        p_state["eta"] = torch.tensor(p_state["eta"], dtype=_get_scalar_dtype(), device=p.device) if group["capturable"] else torch.tensor(p_state["eta"], dtype=_get_scalar_dtype())
+                    if not torch.is_tensor(p_state["mu"]):
+                        p_state["mu"] = torch.tensor(p_state["mu"], dtype=_get_scalar_dtype(), device=p.device) if group["capturable"] else torch.tensor(p_state["mu"], dtype=_get_scalar_dtype())
+
 
     def _init_group(self, group, params_with_grad, grads, mus, axs, etas, state_steps):
         has_complex = False
