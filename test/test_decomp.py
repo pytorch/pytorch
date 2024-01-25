@@ -13,6 +13,7 @@ from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
+    IS_WINDOWS,
     TestCase,
     skipIfCrossRef,
     suppress_warnings,
@@ -26,6 +27,7 @@ from torch.testing._internal.common_device_type import (
     onlyNativeDeviceTypes,
     ops,
     instantiate_device_type_tests,
+    onlyCPU,
     onlyCUDA,
 )
 from torch.testing._internal.common_methods_invocations import op_db, skip, skipOps, xfail
@@ -535,6 +537,20 @@ class TestDecomp(TestCase):
         res = torch._decomp.decompositions.uniform(x, low=low, high=high)
         self.assertEqual(ref, res)
 
+    def test_broadcasting_index_copy(self, device):
+        x = torch.zeros([1, 10], device=device)
+        xs = torch.ones([2, 10], device=device)
+
+        def index_copy(xs, x):
+            torch._decomp.decompositions.index_copy_(xs, 0, torch.tensor(0).to(device), x)
+
+        index_copy(xs, x)
+
+        xs_two = torch.ones([2, 10], device=device)
+        xs_two[0] = x
+
+        self.assertEqual(xs, xs_two)
+
     def test_rrelu_with_noise(self, device):
         # rrelu_with_noise behavior depends on a) whether elements in the input
         # are <= 0, and b) whether we're in training mode. Cover all cases:
@@ -900,7 +916,7 @@ class DecompOneOffTests(TestCase):
         self.assertTrue(torch.allclose(ref[1], res[1]))
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyNativeDeviceTypes
+    @onlyCPU
     @skipIfCrossRef
     def test_sdpa(self, device):
         from torch.fx.experimental.proxy_tensor import make_fx
@@ -911,9 +927,9 @@ class DecompOneOffTests(TestCase):
             def __init__(self):
                 super().__init__()
 
-            def forward(self, query_layer, key_layer, value_layer):
+            def forward(self, query_layer, key_layer, value_layer, mask=None, is_causal=True):
                 attn_output = F.scaled_dot_product_attention(
-                    query_layer, key_layer, value_layer, None, dropout_p=0.0, is_causal=True
+                    query_layer, key_layer, value_layer, attn_mask=mask, dropout_p=0.0, is_causal=is_causal
                 )
                 return attn_output
 
@@ -921,22 +937,25 @@ class DecompOneOffTests(TestCase):
         query_layer = torch.randn(1, 128, 100, 64, device=device)
         key_layer = torch.randn(1, 128, 100, 64, device=device)
         value_layer = torch.randn(1, 128, 100, 64, device=device)
+        masks = [None, torch.randn(1, 1, 100, 100, device=device)]
 
-        attention = ScaledDotProductAttention()
-        fx_g = make_fx(
-            attention,
-            decomposition_table=get_decompositions(
-                [
-                    torch.ops.aten._scaled_dot_product_flash_attention.default,
-                ]
-            ),
-        )(query_layer, key_layer, value_layer)
+        for mask in masks:
+            is_causal = mask is None
+            attention = ScaledDotProductAttention()
+            fx_g = make_fx(
+                attention,
+                decomposition_table=get_decompositions(
+                    [
+                        torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default,
+                    ]
+                ),
+            )(query_layer, key_layer, value_layer, mask, is_causal)
 
-        compiled_res = fx_g(query_layer, key_layer, value_layer)
-        eager_res = F.scaled_dot_product_attention(
-            query_layer, key_layer, value_layer, None, dropout_p=0.0, is_causal=True
-        )
-        self.assertTrue(torch.allclose(compiled_res, eager_res, atol=1e-6, rtol=1e-5))
+            compiled_res = fx_g(query_layer, key_layer, value_layer, mask, is_causal)
+            eager_res = F.scaled_dot_product_attention(
+                query_layer, key_layer, value_layer, attn_mask=mask, dropout_p=0.0, is_causal=is_causal
+            )
+            self.assertTrue(torch.allclose(compiled_res, eager_res, atol=1e-6, rtol=1e-5))
 
 
 instantiate_device_type_tests(DecompOneOffTests, globals())
@@ -1014,6 +1033,14 @@ class HasDecompTest(TestCase):
         core_decomps = torch._decomp.core_aten_decompositions().keys()
         core_aten_ops = useful_decomps - core_decomps
         self.assertExpected("".join(sorted(op.name() + "\n" for op in core_aten_ops)))
+
+    @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
+    def test_compile_rrelu(self):
+        def f(x):
+            return torch.rrelu(x)
+
+        inp = torch.rand(1, 2, 3)
+        self.assertEqual(f(inp), torch.compile(f)(inp))
 
 
 if __name__ == "__main__":

@@ -28,6 +28,7 @@ import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
 from pathlib import Path
+from types import MethodWrapperType
 from typing import (
     Any,
     Callable,
@@ -422,6 +423,9 @@ def hashable(x):
         hash(x)
         return True
     except TypeError:
+        return False
+    # cannot hash writable memoryview object
+    except ValueError:
         return False
 
 
@@ -894,10 +898,12 @@ def rot_n_helper(n):
 common_constant_types = {
     int,
     float,
+    complex,
     bool,
     str,
     bytes,
     type(None),
+    Ellipsis.__class__,
     types.CodeType,
     torch.device,
     torch.dtype,
@@ -1059,8 +1065,13 @@ def iter_contains(items, search, tx, check_tensor_identity=False):
     return found
 
 
-def tensor_to_id(value):
-    return [id(k) if isinstance(k, torch.Tensor) else k for k in value.keys()]
+def key_is_id(k):
+    """Returns whether it indexes dictionaries using its id"""
+    return isinstance(k, (torch.Tensor, torch.nn.Module, MethodWrapperType))
+
+
+def key_to_id(value):
+    return [id(k) if key_is_id(k) else k for k in value.keys()]
 
 
 def const_repr(x, *, local) -> str:
@@ -1083,7 +1094,15 @@ def const_repr(x, *, local) -> str:
     elif is_builtin_callable(x):
         return x.__name__
     elif isinstance(x, type):
-        return x.__name__
+
+        def fullname(o):
+            klass = o.__class__
+            module = klass.__module__
+            if module == "builtins":
+                return klass.__qualname__  # avoid outputs like 'builtins.str'
+            return module + "." + klass.__qualname__
+
+        return fullname(x)
     else:
         return f"{x!r}"
 
@@ -1093,8 +1112,7 @@ def dict_keys_repr(const_keys, *, local) -> str:
     return "[" + keys_str + "]"
 
 
-def global_key_name(key):
-    return f"__dict_key_{id(key)}"
+GLOBAL_KEY_PREFIX = "__dict_key"
 
 
 from torch._subclasses import (  # noqa: F401
@@ -1591,8 +1609,17 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         elif isinstance(
             cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
         ):
+            op = cause.func
+            import_suggestion = ""
+            if isinstance(op, torch._ops.OpOverload):
+                maybe_pystub = torch._C._dispatch_pystub(
+                    op._schema.name, op._schema.overload_name
+                )
+                if maybe_pystub is not None:
+                    module, ctx = maybe_pystub
+                    import_suggestion = f"you may need to `import {module}` ({ctx}) for support, otherwise "
             unimplemented(
-                f"unsupported operator: {cause.func} (see "
+                f"unsupported operator: {cause.func} ({import_suggestion}see "
                 "https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0"
                 " for how to fix)"
             )
@@ -2415,3 +2442,19 @@ def get_first_attr(obj, *attrs):
             return getattr(obj, attr)
 
     raise AssertionError(f"{obj} does not has any of the attributes: {attrs}")
+
+
+@contextlib.contextmanager
+def maybe_enable_compiled_autograd(should_enable):
+    def compiler_fn(gm):
+        def inner_compiler(gm_, example_inputs_):
+            torch._dynamo.utils.counters["compiled_autograd"]["compiles"] += 1
+            return torch._inductor.compile(gm_, example_inputs_)
+
+        return torch.compile(gm, backend=inner_compiler, fullgraph=True, dynamic=True)
+
+    if should_enable:
+        with torch._dynamo.compiled_autograd.enable(compiler_fn) as ctx:
+            yield ctx
+    else:
+        yield

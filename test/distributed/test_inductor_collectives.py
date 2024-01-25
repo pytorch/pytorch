@@ -19,6 +19,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
 )
+from torch.testing._internal.common_utils import requires_cuda
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch.utils._triton import has_triton
 from torch._inductor.utils import run_and_get_triton_code
@@ -403,7 +404,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
 
             FileCheck() \
-                .check_regex("all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=\\[i\\d+, i\\d+\\], input_split_sizes=\\[i\\d+, i\\d+\\]") \
+                .check_regex("all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=\\[u\\d+, u\\d+\\], input_split_sizes=\\[u\\d+, u\\d+\\]") \
                 .run(code)  # noqa: B950
 
             eager_out = example(*inputs, **trs)
@@ -441,7 +442,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
             FileCheck() \
-                .check_regex("all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=None, input_split_sizes=\\[i\\d+, i\\d+\\]") \
+                .check_regex("all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=None, input_split_sizes=\\[u\\d+, u\\d+\\]") \
                 .run(code)  # noqa: B950
 
             eager_out = example(*inputs, **trs)
@@ -483,7 +484,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
             FileCheck() \
-                .check_regex("all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=\\[i\\d+, i\\d+\\], input_split_sizes=None") \
+                .check_regex("all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=\\[u\\d+, u\\d+\\], input_split_sizes=None") \
                 .run(code)  # noqa: B950
 
             eager_out = example(*inputs, **trs)
@@ -524,6 +525,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
 
 @requires_nccl()
+@requires_cuda
 class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     """
     Prefer single-proc test runner for basic tests as it is easier to work with.
@@ -697,6 +699,33 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 out,
                 inp,
                 pg,
+            )
+        local_size = [4, 4]
+        # single-proc test
+        global_size = local_size
+
+        inputs = torch.ones(local_size, device=self.device)
+        outputs = torch.empty(global_size, device=self.device)
+        correct_outputs = torch.empty(global_size, device=self.device)
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter, fullgraph=True)
+        compiled(inputs, outputs, pg=GroupMember.WORLD)
+        func(inputs, correct_outputs, pg=GroupMember.WORLD)
+        assert counter.frame_count == 1
+
+        # should test more precisely, but the 3 is supposed to be (all_gather, wait, copy_)
+        assert counter.op_count == 3
+        assert same(outputs, correct_outputs)
+
+    def test_dynamo_rewrite_dist_all_gather_args_match(self):
+        # Duplicated most of the structure from test_dynamo_rewrite_dist_all_gather
+        # except uses kwargs to ensure rewrite has matching arg names
+        def func(inp, out, *, pg):
+            torch.distributed.all_gather_into_tensor(
+                output_tensor=out,
+                input_tensor=inp,
+                group=pg,
+                async_op=False,
             )
         local_size = [4, 4]
         # single-proc test

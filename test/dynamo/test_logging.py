@@ -15,7 +15,11 @@ from torch._dynamo.testing import skipIfNotPy311
 
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from torch.testing._internal.common_utils import find_free_port, munge_exc
+from torch.testing._internal.common_utils import (
+    find_free_port,
+    munge_exc,
+    skipIfTorchDynamo,
+)
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.logging_utils import (
     LoggingTestCase,
@@ -23,7 +27,7 @@ from torch.testing._internal.logging_utils import (
     make_settings_test,
 )
 
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
 )
@@ -84,7 +88,7 @@ class LoggingTests(LoggingTestCase):
     test_output_code = multi_record_test(2, output_code=True)
     test_aot_graphs = multi_record_test(2, aot_graphs=True)
 
-    @requires_cuda()
+    @requires_cuda
     @make_logging_test(schedule=True)
     def test_schedule(self, records):
         fn_opt = torch._dynamo.optimize("inductor")(inductor_schedule_fn)
@@ -92,7 +96,7 @@ class LoggingTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 5)
 
-    @requires_cuda()
+    @requires_cuda
     @make_logging_test(fusion=True)
     def test_fusion(self, records):
         fn_opt = torch._dynamo.optimize("inductor")(inductor_schedule_fn)
@@ -113,6 +117,7 @@ class LoggingTests(LoggingTestCase):
     test_dynamo_debug = within_range_record_test(30, 90, dynamo=logging.DEBUG)
     test_dynamo_info = within_range_record_test(2, 10, dynamo=logging.INFO)
 
+    @skipIfTorchDynamo("too slow")
     @make_logging_test(dynamo=logging.DEBUG)
     def test_dynamo_debug_default_off_artifacts(self, records):
         fn_opt = torch._dynamo.optimize("inductor")(example_fn)
@@ -189,7 +194,7 @@ LoweringException: AssertionError:
         exitstack.close()
 
     @requires_distributed()
-    @requires_cuda()
+    @requires_cuda
     @make_logging_test(ddp_graphs=True)
     def test_ddp_graphs(self, records):
         class ToyModel(torch.nn.Module):
@@ -629,6 +634,7 @@ L['zs'][0] == 3.0                                             # for y, z in zip(
             record_str,
         )
 
+    @skipIfTorchDynamo("too slow")
     @make_logging_test(**torch._logging.DEFAULT_LOGGING)
     def test_default_logging(self, records):
         def fn(a):
@@ -650,6 +656,28 @@ L['zs'][0] == 3.0                                             # for y, z in zip(
         self.assertGreater(
             len([r for r in records if "return a + 1" in r.getMessage()]), 0
         )
+
+    def test_logs_out(self):
+        import tempfile
+
+        with tempfile.NamedTemporaryFile() as tmp:
+            env = dict(os.environ)
+            env["TORCH_LOGS"] = "dynamo"
+            env["TORCH_LOGS_OUT"] = tmp.name
+            stdout, stderr = self.run_process_no_exception(
+                """\
+import torch
+@torch.compile(backend="eager")
+def fn(a):
+    return a.sum()
+
+fn(torch.randn(5))
+                """,
+                env=env,
+            )
+            with open(tmp.name) as fd:
+                lines = fd.read()
+                self.assertEqual(lines, stderr.decode("utf-8"))
 
 
 # single record tests
@@ -675,6 +703,7 @@ exclusions = {
     "onnx_diagnostics",
     "guards",
     "verbose_guards",
+    "export",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

@@ -46,9 +46,7 @@ lib.define("foo(Tensor self) -> Tensor")
 lib.impl("foo", torch.sin, "CPU")
 
 
-requires_cuda = functools.partial(
-    unittest.skipIf, not torch.cuda.is_available(), "requires cuda"
-)
+requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
 
 _GLOBAL_CPU_TENSOR = torch.randn(3)
@@ -959,7 +957,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_model(input), correct))
         return cnt
 
-    @requires_cuda()
+    @requires_cuda
     def test_sub_alpha_scalar_repro(self):
         @torch.compile(backend="aot_eager")
         def f(x):
@@ -2449,7 +2447,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(f(), opt_fn()))
         self.assertEqual(cnt.frame_count, 1)
 
-    @requires_cuda()
+    @requires_cuda
     def test_norm_dtype(self):
         def foo(_stack0):
             getitem = _stack0[(slice(None, None, None), -1)]
@@ -3532,7 +3530,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f(), _GLOBAL_CPU_TENSOR + _GLOBAL_CPU_TENSOR)
 
-    @requires_cuda()
+    @requires_cuda
     def test_guard_default_device(self):
         try:
             torch.set_default_device("cuda")
@@ -3999,6 +3997,73 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 # Prove guarding works - we run the compiled_fn 5 times
                 # frame_count should stay at 1.
                 self.assertEqual(cnt.frame_count, 1)
+
+    def test_user_ctor_ctx_manager(self):
+        class UserCtxManager:
+            def __enter__(self):
+                return 1
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                pass
+
+        def fn(x, y):
+            ucm = UserCtxManager()
+            return x * x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, nopython=True)(fn)
+        x = torch.rand([2, 2])
+        opt_fn(x, x)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_user_ctor_ctx_manager_custom_init(self):
+        class UserCtxManager:
+            def __init__(self, x):
+                x[0] = 10
+
+            def __enter__(self):
+                return 1
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                pass
+
+        def fn(x, y):
+            ucm = UserCtxManager(y)
+            return x * y[0]
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, nopython=True)(fn)
+        x = torch.rand([2, 2])
+        self.assertEqual(opt_fn(x, [5]), fn(x, [5]))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_user_ctor_ctx_manager_custom_init_graph_break(self):
+        counter = [0]
+
+        class UserCtxManager:
+            def __init__(self, k):
+                k[0] += 1
+
+            def __enter__(self):
+                return 1
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                pass
+
+        def fn(x, counter):
+            x = x * x
+            ucm = UserCtxManager(counter)
+            return x * x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        x = torch.rand([2, 2])
+        self.assertEqual(opt_fn(x, counter), fn(x, counter))
+        self.assertEqual(counter[0], 2)
+        for i in range(0, 10):
+            opt_fn(x, counter)
+        self.assertEqual(counter[0], 12)
+        self.assertEqual(cnt.frame_count, torch._dynamo.utils.ifdynstaticdefault(3, 2))
 
 
 if __name__ == "__main__":

@@ -355,12 +355,13 @@ inline PythonArgs PythonArgParser::parse(
     PyObject* args,
     PyObject* kwargs,
     ParsedArgs<N>& dst) {
-  if (N < max_args) {
-    throw ValueError(
-        "PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected %d (got %d)",
-        (int)max_args,
-        N);
-  }
+  TORCH_CHECK_VALUE(
+      N >= max_args,
+      "PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected ",
+      max_args,
+      " (got ",
+      N,
+      ")");
   return raw_parse(self, args, kwargs, dst.args);
 }
 
@@ -485,9 +486,8 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
   THPObjectPtr arg = six::maybeAsTuple(args[i]);
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
-  if (size != N) {
-    throw TypeError("expected tuple of %d elements but got %d", N, (int)size);
-  }
+  TORCH_CHECK_TYPE(
+      size == N, "expected tuple of ", N, " elements but got ", size);
   for (const auto idx : c10::irange(size)) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx)
                           : PyList_GET_ITEM(arg.get(), idx);
@@ -523,12 +523,16 @@ inline void throw_intlist_exception(
       ? e.what()
       : std::string("type must be ") + args->signature.params[i].type_name() +
           ",but got " + Py_TYPE(obj)->tp_name;
-  throw TypeError(
-      "%s(): argument '%s' failed to unpack the object at pos %zu with error \"%s\"",
-      args->signature.name.c_str(),
-      args->signature.params[i].name.c_str(),
+  TORCH_CHECK_TYPE(
+      false,
+      args->signature.name,
+      "(): argument '",
+      args->signature.params[i].name,
+      "' failed to unpack the object at pos ",
       idx + 1,
-      error.c_str());
+      " with error \"",
+      error,
+      "\"");
 }
 
 inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
@@ -547,16 +551,6 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
   if (size1 > 0 && torch::is_symint(py::handle(args[i]))) {
     auto si = py::handle(args[i]).cast<c10::SymInt>();
     return std::vector<c10::SymInt>(size1, si);
-  }
-
-  if (is_dynamo_compiling && size1 > 0 && THPVariable_Check(args[i])) {
-    auto& var = THPVariable_Unpack(args[i]);
-    if (size1 == 1 && var.numel() == 1 && var.sizes().empty() &&
-        at::isIntegralType(var.dtype().toScalarType(), /*include_bool*/ true)) {
-      auto scalar = var.item();
-      TORCH_CHECK(scalar.isIntegral(/*include bool*/ false));
-      return std::vector<c10::SymInt>(size1, scalar.toSymInt());
-    }
   }
 
   PyObject* arg = args[i];
@@ -712,12 +706,16 @@ inline std::vector<double> PythonArgs::getDoublelist(int i) {
     try {
       res[idx] = THPUtils_unpackDouble(obj);
     } catch (const std::exception& e) {
-      throw TypeError(
-          "%s(): argument '%s' must be %s, but found element of type %s at pos %zu",
-          signature.name.c_str(),
-          signature.params[i].name.c_str(),
-          signature.params[i].type_name().c_str(),
+      TORCH_CHECK_TYPE(
+          false,
+          signature.name,
+          "(): argument '",
+          signature.params[i].name,
+          "' must be ",
+          signature.params[i].type_name(),
+          ", but found element of type ",
           Py_TYPE(obj)->tp_name,
+          " at pos ",
           idx + 1);
     }
   }
@@ -817,6 +815,11 @@ inline at::Device toDevice(PyObject* obj) {
   if (THPUtils_checkLong(obj)) {
     const auto device_index = THPUtils_unpackLong(obj);
     TORCH_CHECK(device_index >= 0, "Device index must not be negative");
+    if (c10::is_privateuse1_backend_registered()) {
+      return at::Device(
+          c10::DeviceType::PrivateUse1,
+          static_cast<c10::DeviceIndex>(device_index));
+    }
     return at::Device(
         c10::DeviceType::CUDA, static_cast<c10::DeviceIndex>(device_index));
   }
@@ -960,7 +963,6 @@ inline int64_t PythonArgs::toInt64(int i) {
 }
 
 inline c10::SymInt PythonArgs::toSymInt(int i) {
-  PyObject* obj = args[i];
   if (!args[i]) {
     return c10::SymInt(signature.params[i].default_int);
   }
@@ -969,28 +971,6 @@ inline c10::SymInt PythonArgs::toSymInt(int i) {
     auto& var = THPVariable_Unpack(args[i]);
     jit::tracer::ArgumentStash::stashValue(
         signature.params[i].name, idx, var, c10::IntType::get());
-  }
-
-  // convert FakeTensor to SymInt
-  // expect empty sizes, numel = 1
-  // and ScalarType::Int
-  if (is_dynamo_compiling && THPVariable_Check(obj)) {
-    auto& var = THPVariable_Unpack(obj);
-
-    if (var.numel() != 1 || !var.sizes().empty() ||
-        !at::isIntegralType(
-            var.dtype().toScalarType(), /*include_bool*/ true)) {
-      throw TypeError(
-          "%s(): argument '%s' must be %s, failed to convert %s with sizes.empty()=%d",
-          signature.name.c_str(),
-          signature.params[i].name.c_str(),
-          signature.params[i].type_name().c_str(),
-          Py_TYPE(obj)->tp_name,
-          var.sizes().empty());
-    }
-    auto scalar = var.item();
-    TORCH_CHECK(scalar.isIntegral(/*include bool*/ false));
-    return scalar.toSymInt();
   }
 
   return py::cast<c10::SymInt>(py::handle(args[i]));
@@ -1128,10 +1108,11 @@ inline c10::Stream PythonArgs::stream(int i) {
   if (!args[i])
     return c10::Stream(
         c10::Stream::Default::DEFAULT, c10::Device(c10::DeviceType::CPU, -1));
-  if (!THPStream_Check(args[i])) {
-    throw TypeError(
-        "expected Stream object. Got '%s'", Py_TYPE(args[i])->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      THPStream_Check(args[i]),
+      "expected Stream object. Got '",
+      Py_TYPE(args[i])->tp_name,
+      "'");
   return c10::Stream::unpack3(
       ((THPStream*)args[i])->stream_id,
       static_cast<c10::DeviceIndex>(((THPStream*)args[i])->device_index),
