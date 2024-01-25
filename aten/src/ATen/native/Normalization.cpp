@@ -647,15 +647,16 @@ Tensor batch_norm(
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
-  // return std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
-  //                                               training, momentum, eps, cudnn_enabled));
-  if (training) {
-    return std::get<0>(at::_new_batch_norm_with_update(input, weight, bias, running_mean, running_var,
-                                                       momentum, eps, cudnn_enabled));
-  } else {
-    return std::get<0>(at::_new_batch_norm_no_update(input, weight, bias, running_mean, running_var,
-                                                     momentum, eps, cudnn_enabled));
-  }
+  return std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
+                                                training, momentum, eps, cudnn_enabled));
+  // TODO: switch to the new stack after the 2 week FC window
+  // if (training) {
+  //   return std::get<0>(at::_new_batch_norm_with_update(input, weight, bias, running_mean, running_var,
+  //                                                      momentum, eps, cudnn_enabled));
+  // } else {
+  //   return std::get<0>(at::_new_batch_norm_no_update(input, weight, bias, running_mean, running_var,
+  //                                                    momentum, eps, cudnn_enabled));
+  // }
 }
 
 Tensor instance_norm(
