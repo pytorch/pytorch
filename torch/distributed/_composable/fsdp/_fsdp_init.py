@@ -5,36 +5,27 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 
-from torch._prims_common import DeviceLikeType
-
 from torch.distributed._tensor import DeviceMesh, DTensor, init_device_mesh
-
+from torch.distributed.device_mesh import _get_device_handle
 from ._fsdp_common import _is_composable_with_fsdp, FSDPMeshInfo
 from ._fsdp_state import _get_module_fsdp_state
 
 
-def _normalize_device(device: DeviceLikeType) -> torch.device:
-    if isinstance(device, torch.device):
-        if device == torch.device("cuda"):
-            return torch.device("cuda", torch.cuda.current_device())
-        return device
-    elif isinstance(device, int):
-        return torch.device("cuda", device)
-    elif isinstance(device, str):
-        if device == "cuda":
-            return torch.device(device, torch.cuda.current_device())
-        return torch.device(device)
-    else:
-        raise TypeError(f"Invalid type for device {device}: {type(device)}")
-
-
-def _init_default_fully_shard_mesh(device_type: str) -> DeviceMesh:
-    """The default fully-shard mesh shards over the global mesh."""
+def _init_default_fully_shard_mesh() -> DeviceMesh:
+    """Default to global CUDA mesh if possible else global CPU mesh."""
     if not dist.distributed_c10d.is_initialized():
         dist.distributed_c10d.init_process_group()
     default_pg = dist.distributed_c10d._get_default_group()
-    mesh = init_device_mesh(device_type=device_type, mesh_shape=(default_pg.size(),))
+    device_type = "cuda" if torch.cuda.is_available() else "cpu"
+    mesh = init_device_mesh(device_type, mesh_shape=(default_pg.size(),))
     return mesh
+
+
+def _get_device_from_mesh(mesh: DeviceMesh) -> torch.device:
+    if mesh.device_type == "cpu":
+        return torch.device("cpu")
+    device_handle = _get_device_handle(mesh.device_type)
+    return torch.device(mesh.device_type, device_handle.current_device())
 
 
 def _get_managed_modules(root_module: nn.Module) -> List[nn.Module]:
@@ -53,7 +44,7 @@ def _get_managed_modules(root_module: nn.Module) -> List[nn.Module]:
             return  # nested `fully_shard` module
         visited_modules.add(module)
         for submodule in module.children():
-            if submodule is not None and submodule not in visited_modules:
+            if submodule not in visited_modules:
                 dfs(submodule)
         modules.append(module)
 
@@ -71,16 +62,14 @@ def _get_managed_states(
     visited_params: Set[nn.Parameter] = set()
     visited_buffers: Set[torch.Tensor] = set()
     for module in modules:
-        for param_name, param in module.named_parameters(recurse=False):
-            if param in visited_params:
-                continue
-            params.append(param)
-            visited_params.add(param)
-        for buffer_name, buffer in module.named_buffers(recurse=False):
-            if buffer in visited_buffers:
-                continue
-            buffers.append(buffer)
-            visited_buffers.add(buffer)
+        for param in module.parameters(recurse=False):
+            if param not in visited_params:
+                params.append(param)
+                visited_params.add(param)
+        for buffer in module.buffers(recurse=False):
+            if buffer not in visited_buffers:
+                buffers.append(buffer)
+                visited_buffers.add(buffer)
     return params, buffers
 
 
