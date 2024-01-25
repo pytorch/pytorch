@@ -77,7 +77,11 @@ from torch.nn import (
     ParameterList,
     Sequential,
 )
-from .dynamo_test_failures import dynamo_expected_failures, dynamo_skips, FIXME_default_non_strict
+from .dynamo_test_failures import (
+    dynamo_expected_failures,
+    dynamo_skips,
+    FIXME_inductor_non_strict,
+)
 from torch.onnx import (
     register_custom_op_symbolic,
     unregister_custom_op_symbolic,
@@ -92,6 +96,7 @@ from torch.testing._comparison import (
 )
 from torch.testing._comparison import not_close_error_metas
 from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
 
 from .composite_compliance import no_dispatch
@@ -1220,25 +1225,13 @@ else:
 
 IS_FILESYSTEM_UTF8_ENCODING = sys.getfilesystemencoding() == 'utf-8'
 
-def _check_module_exists(name: str) -> bool:
-    r"""Returns if a top-level module with :attr:`name` exists *without**
-    importing it. This is generally safer than try-catch block around a
-    `import X`. It avoids third party libraries breaking assumptions of some of
-    our tests, e.g., setting multiprocessing start method when imported
-    (see librosa/#747, torchvision/#544).
-    """
-    try:
-        import importlib.util
-        spec = importlib.util.find_spec(name)
-        return spec is not None
-    except ImportError:
-        return False
-
 TEST_NUMPY = _check_module_exists('numpy')
 TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_MPS = torch.backends.mps.is_available()
+# TODO change it when torch.backends.xpu.is_avaliable() is ready
+TEST_XPU = False
 TEST_CUDA = torch.cuda.is_available()
 custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name(), None)
 TEST_PRIVATEUSE1 = True if (hasattr(custom_device_mod, "is_available") and custom_device_mod.is_available()) else False
@@ -1258,6 +1251,9 @@ def split_if_not_empty(x: str):
     return x.split(",") if len(x) != 0 else []
 
 NOTEST_CPU = "cpu" in split_if_not_empty(os.getenv('PYTORCH_TESTING_DEVICE_EXCEPT_FOR', ''))
+
+skipIfNoDill = unittest.skipIf(not TEST_DILL, "no dill")
+
 
 # Python 2.7 doesn't have spawn
 TestEnvironment.def_flag("NO_MULTIPROCESSING_SPAWN", env_var="NO_MULTIPROCESSING_SPAWN")
@@ -1561,6 +1557,21 @@ def runOnRocm(fn):
         else:
             raise unittest.SkipTest("test currently only works on the ROCm stack")
     return wrapper
+
+def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
+    def dec_fn(fn):
+        reason = f"skipIfXpu: {msg}"
+
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if TEST_XPU:
+                raise unittest.SkipTest(reason)
+            else:
+                return fn(*args, **kwargs)
+        return wrapper
+    if func:
+        return dec_fn(func)
+    return dec_fn
 
 def skipIfMps(fn):
     @wraps(fn)
@@ -2243,6 +2254,7 @@ def check_if_enable(test: unittest.TestCase):
                     "windows": IS_WINDOWS,
                     "linux": IS_LINUX,
                     "rocm": TEST_WITH_ROCM,  # noqa: F821
+                    "xpu": TEST_XPU,  # noqa: F821
                     "asan": TEST_WITH_ASAN,  # noqa: F821
                     "dynamo": TEST_WITH_TORCHDYNAMO,  # noqa: F821
                     "inductor": TEST_WITH_TORCHINDUCTOR,  # noqa: F821
@@ -2703,7 +2715,10 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 match = re.match(r".*/test/(.*).py", full_path)
                 if match is not None:
                     filename = match.group(1)
-                    strict_default = filename not in FIXME_default_non_strict
+                    if TEST_WITH_TORCHINDUCTOR:  # noqa: F821
+                        strict_default = filename not in FIXME_inductor_non_strict
+                    else:
+                        strict_default = True
             # inspect.getfile can fail with these
             except (OSError, TypeError):
                 pass
@@ -2741,12 +2756,34 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 # TorchDynamo optimize annotation
                 super_run = torch._dynamo.optimize("eager", nopython=nopython)(super_run)
                 key = f"{self.__class__.__name__}.{self._testMethodName}"
+
+                def expect_failure(f):
+                    @wraps(f)
+                    def wrapper(*args, **kwargs):
+                        try:
+                            f(*args, **kwargs)
+                        except BaseException as e:
+                            self.skipTest(e)
+                        raise RuntimeError("Unexpected success, please remove test from dynamo_test_failures.py")
+                    return wrapper
+
                 if key in dynamo_expected_failures:
                     method = getattr(self, self._testMethodName)
-                    unittest.expectedFailure(self)
+                    setattr(self, self._testMethodName, expect_failure(method))
+
+                def ignore_failure(f):
+                    @wraps(f)
+                    def wrapper(*args, **kwargs):
+                        try:
+                            f(*args, **kwargs)
+                        except BaseException as e:
+                            self.skipTest(e)
+                        self.skipTest("This test passed, maybe we can remove the skip from dynamo_test_failures.py")
+                    return wrapper
+
                 if key in dynamo_skips:
                     method = getattr(self, self._testMethodName)
-                    setattr(self, self._testMethodName, unittest.skip("marked skip in dynamo_test_failures.py")(method))
+                    setattr(self, self._testMethodName, ignore_failure(method))
 
             super_run(result=result)
 
@@ -2773,6 +2810,17 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
 
 
     def run(self, result=None):
+        # Check if enable here as well so we don't have to worry about
+        # subclasses calling super().setUp().   Call it via a wrapper instead of
+        # directly because the skipTest call will raise an uncaught exception
+        def check_if_enable_wrapper(f):
+            @wraps(f)
+            def wrapper(*args, **kwargs):
+                check_if_enable(self)
+                f(*args, **kwargs)
+            return wrapper
+        setattr(self, self._testMethodName, check_if_enable_wrapper(getattr(self, self._testMethodName)))
+
         with contextlib.ExitStack() as stack:
             if TEST_WITH_CROSSREF:  # noqa: F821
                 stack.enter_context(CrossRefMode())
@@ -2781,7 +2829,6 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
             )
 
     def setUp(self):
-        check_if_enable(self)
         set_rng_seed(SEED)
 
         # Save global check sparse tensor invariants state that can be

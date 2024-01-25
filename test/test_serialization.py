@@ -20,12 +20,14 @@ from itertools import product
 
 from torch._utils_internal import get_file_path_2
 from torch._utils import _rebuild_tensor
+from torch.utils._import_utils import import_dill
 from torch.serialization import check_module_version_greater_or_equal, get_default_load_endianness, \
     set_default_load_endianness, LoadEndianness
 
-from torch.testing._internal.common_utils import IS_FILESYSTEM_UTF8_ENCODING, TemporaryDirectoryName, \
-    TestCase, IS_WINDOWS, TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName, \
-    parametrize, instantiate_parametrized_tests, AlwaysWarnTypedStorageRemoval
+from torch.testing._internal.common_utils import (
+    IS_FILESYSTEM_UTF8_ENCODING, TemporaryDirectoryName,
+    TestCase, IS_WINDOWS, TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName,
+    parametrize, instantiate_parametrized_tests, AlwaysWarnTypedStorageRemoval)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 
@@ -33,11 +35,8 @@ from torch.testing._internal.common_dtype import all_types_and_complex_and
 # the actual blame, see this revision
 # https://github.com/pytorch/pytorch/blame/9a2691f2fc948b9792686085b493c61793c2de30/test/test_torch.py
 
-if TEST_DILL:
-    import dill
-    HAS_DILL_AT_LEAST_0_3_1 = check_module_version_greater_or_equal(dill, (0, 3, 1))
-else:
-    HAS_DILL_AT_LEAST_0_3_1 = False
+dill = import_dill()
+HAS_DILL_AT_LEAST_0_3_1 = dill is not None and check_module_version_greater_or_equal(dill, (0, 3, 1))
 
 can_retrieve_source = True
 with warnings.catch_warnings(record=True) as warns:
