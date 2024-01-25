@@ -1,3 +1,4 @@
+from dataclasses import dataclass, field
 from enum import auto, Enum
 from typing import cast, List, Optional, Tuple
 
@@ -15,7 +16,6 @@ from ._fsdp_common import (
     _get_dim0_padded_size,
     _raise_assert_with_print,
     FSDPMeshInfo,
-    ParamModuleInfo,
 )
 
 """
@@ -68,6 +68,22 @@ class ShardedState(Enum):
     SHARDED = auto()
     SHARDED_POST_FORWARD = auto()
     UNSHARDED = auto()
+
+
+@dataclass
+class ParamModuleInfo:
+    """
+    For a parameter, this stores the module and the parameter name to be able
+    to do a parameter swap via ``setattr(module, param_name, ...)`` or to get
+    the parameter via ``getattr(module, param_name)``. We additionally save
+    shared modules and shared parameter names to update them accordingly.
+    """
+
+    # Parameter names are unprefixed, e.g. "weight", not "lin.weight"
+    module: nn.Module
+    param_name: str
+    shared_modules: List[nn.Module] = field(default_factory=list)
+    shared_param_names: List[str] = field(default_factory=list)
 
 
 class FSDPParam:
@@ -317,11 +333,10 @@ class FSDPParam:
         Converts a local tensor representing either the sharded parameter or
         sharded gradient to DTensor.
         """
-        if tensor.shape != self.sharded_size and not (
-            # For size-0 padding, DTensor can flatten from (0, *) to (0)
-            tensor.numel() == 0
-            and self.sharded_size.numel() == 0
-        ):
+        if tensor.numel() == 0:
+            # Normalize as (0) instead of possibly (0, *) for padding-only case
+            tensor = tensor.view(0)
+        if tensor.shape != self.sharded_size:
             _raise_assert_with_print(
                 f"Expects a tensor with the sharded size {self.sharded_size} "
                 f"but got {tensor.shape}"
