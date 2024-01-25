@@ -375,10 +375,6 @@ def is_contiguous_general(func, *args, **kwargs):
     if inp.lengths() is not None:
         return False
 
-    # If jagged dim is not 1 it's not contiguous
-    if inp._ragged_idx != 1:
-        return False
-
     new_kwargs["memory_format"] = new_kwargs.get(
         "memory_format", torch.contiguous_format
     )

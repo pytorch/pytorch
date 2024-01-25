@@ -61,11 +61,6 @@ def _validate_sdpa_input(
             f"Expected query, key, and value to all be ragged on the same dimension, but got ragged "
             f"dims {query._ragged_idx}, {key._ragged_idx}, and {value._ragged_idx}, respectively."
         )
-    if query._ragged_idx != 1 and query._ragged_idx != 2:
-        raise ValueError(
-            f"Expected query, key, and value to have ragged_idx of 1 or 2, "
-            f"but got {query._ragged_idx} instead."
-        )
     if attn_mask is not None:
         # TODO: Figure out whether masks are actually supported for this layout or not
         raise ValueError("Masks are not yet supported!")

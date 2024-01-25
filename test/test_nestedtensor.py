@@ -3061,7 +3061,9 @@ class TestNestedTensorSubclass(TestCase):
 
         nt, _ = jagged_from_list([a.detach(), b.detach(), c.detach()], None)
         nt_t = nt.transpose(1, 2)
+        self.assertFalse(nt_t.is_contiguous())
         out = torch.nn.functional.silu(nt_t.sin().cos())
+        self.assertEqual(out.is_contiguous(), torch.nn.functional.silu(b.transpose(-1, -2).sin().cos()).is_contiguous())
 
         self.assertEqual(nt_t.shape, out.shape)
 
@@ -3114,6 +3116,8 @@ class TestNestedTensorSubclass(TestCase):
         nt2_t = nt2.transpose(1, 2)
 
         out = nt1_t * nt2_t
+        self.assertFalse(nt1_t.is_contiguous())
+        self.assertEqual(out.is_contiguous(), (b.transpose(-1, -2) * b.transpose(-1, -2)).is_contiguous())
         self.assertEqual(out.shape, nt1_t.shape)
 
         self.assertRaisesRegex(
@@ -3614,11 +3618,20 @@ class TestNestedTensorSubclass(TestCase):
         nt, _ = jagged_from_list([a, b, c], None)
         # transpose ragged dim
         transposed = nt.transpose(1, 2)
+        self.assertFalse(transposed.is_contiguous())
         clone = transposed.clone()
+        self.assertFalse(clone.is_contiguous())
         self.assertEqual(clone.values(), transposed.values())
         self.assertEqual(clone.offsets(), transposed.offsets())
         self.assertEqual(clone._ragged_idx, transposed._ragged_idx)
         self.assertEqual(clone.shape, transposed.shape)
+
+        clone_contig = transposed.clone(memory_format=torch.contiguous_format)
+        self.assertTrue(clone_contig.is_contiguous())
+        self.assertEqual(clone_contig.values(), transposed.values())
+        self.assertEqual(clone_contig.offsets(), transposed.offsets())
+        self.assertEqual(clone_contig._ragged_idx, transposed._ragged_idx)
+        self.assertEqual(clone_contig.shape, transposed.shape)
 
     # Note 1: Math fallback doesn't work with bfloat16 on CUDA
     # Note 2: ROCm doesn't support flash attention or mem_efficient attention for NT
@@ -3739,36 +3752,6 @@ class TestNestedTensorSubclass(TestCase):
             # "group_gemm_dispatch" not implemented for 'BFloat16'
             if not (str(device).startswith("cuda") and dtype == torch.bfloat16):
                 check_forward_backward()
-
-    @xfailIfTorchDynamo
-    def test_sdpa_input_validation(self, device):
-        batch_size = 2
-        emb_dims = 1024
-        n_heads = 8
-        head_dims = emb_dims // n_heads
-        dtype = torch.float32
-
-        sen1 = torch.randn(11, emb_dims, dtype=dtype, device=device)
-        sen2 = torch.randn(13, emb_dims, dtype=dtype, device=device)
-
-        query = torch.nn.Linear(emb_dims, emb_dims, bias=False, device=device, dtype=dtype)
-        key = torch.nn.Linear(emb_dims, emb_dims, bias=False, device=device, dtype=dtype)
-        value = torch.nn.Linear(emb_dims, emb_dims, bias=False, device=device, dtype=dtype)
-
-        x_nt = torch.nested.as_nested_tensor([sen1, sen2], layout=torch.jagged)
-
-        def get_view(x):
-            return x.view(*x.size()[0:2], n_heads, head_dims).detach().requires_grad_(True).transpose(1, 3)
-
-        q = get_view(query(x_nt))
-        k = get_view(query(x_nt))
-        v = get_view(query(x_nt))
-
-        self.assertRaisesRegex(
-            ValueError,
-            "Expected query, key, and value to have ragged_idx of 1 or 2, but got 3 instead",
-            lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v),
-        )
 
     # This requires NT -> NT views to work in inductor, which is a TODO
     @unittest.expectedFailure  # noqa: E301
