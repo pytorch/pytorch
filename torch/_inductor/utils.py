@@ -546,7 +546,10 @@ def sympy_str(expr: sympy.Expr) -> str:
     return str(expr)
 
 
-def sympy_symbol(name: str) -> sympy.Symbol:
+def sympy_index_symbol(name: str) -> sympy.Symbol:
+    """
+    Used to generate an integer-nonnegative symbol.
+    """
     # This should never be used for creating shape/stride symbols, as those
     # should all be allocated before Inductor.
     assert name[0] != "s"
@@ -555,18 +558,26 @@ def sympy_symbol(name: str) -> sympy.Symbol:
     return sympy.Symbol(name, integer=True, nonnegative=True)
 
 
-def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]) -> sympy.Expr:
+def sympy_subs(expr: sympy.Expr, replacements: Dict[sympy.Expr, Any]) -> sympy.Expr:
     """
-    xreplace is faster than subs, but is way more picky
+    When the passed replacement symbol v is a string, it is converted to a symbol with name v that
+    have the same replaced expression integer and nonnegative properties.
     """
 
-    def promote_strings(key):
-        if isinstance(key, str):
-            return sympy_symbol(key)
-        return key
+    def to_symbol(replaced, replacement):
+        assert isinstance(replaced, sympy.Expr)
+        if isinstance(replacement, str):
+            return sympy.Symbol(
+                replacement,
+                integer=replaced.is_integer,
+                nonnegative=replaced.is_nonnegative,
+            )
+        else:
+            return replacement
 
+    # xreplace is faster than subs, but is way more picky
     return sympy.sympify(expr).xreplace(
-        {promote_strings(k): promote_strings(v) for k, v in replacements.items()}
+        {k: to_symbol(k, v) for k, v in replacements.items()}
     )
 
 

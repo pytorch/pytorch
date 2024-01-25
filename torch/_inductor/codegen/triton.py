@@ -52,9 +52,9 @@ from ..utils import (
     next_power_of_2,
     Placeholder,
     sympy_dot,
+    sympy_index_symbol,
     sympy_product,
     sympy_subs,
-    sympy_symbol,
     unique,
     yellow_text,
 )
@@ -937,7 +937,7 @@ class IterationRanges:
         return self.prefix == "r" and not self.kernel.persistent_reduction
 
     def symbol(self):
-        return sympy_symbol(self.name)
+        return sympy_index_symbol(self.name)
 
 
 class IterationRangesRoot(IterationRanges):
@@ -979,9 +979,11 @@ class IterationRangesRoot(IterationRanges):
         Lookup a given RangeTreeEntry, creating it if needed
         """
         if V.graph.sizevars.statically_known_equals(divisor * length, self.numel):
-            expr = FloorDiv(sympy_symbol(f"{self.prefix}index"), divisor)
+            expr = FloorDiv(sympy_index_symbol(f"{self.prefix}index"), divisor)
         else:
-            expr = ModularIndexing(sympy_symbol(f"{self.prefix}index"), divisor, length)
+            expr = ModularIndexing(
+                sympy_index_symbol(f"{self.prefix}index"), divisor, length
+            )
 
         if expr not in self.nodes:
             node = IterationRangesEntry(
@@ -1736,7 +1738,7 @@ class TritonKernel(Kernel):
         index_in_tile_vars = sympy_subs(index, index_to_tile_indexes)
         strides = {}
         for range_tree in self.range_trees:
-            s = sympy_symbol(range_tree.name)
+            s = sympy_index_symbol(range_tree.name)
             strides[s] = sympy_subs(index_in_tile_vars, {s: 1}) - sympy_subs(
                 index_in_tile_vars, {s: 0}
             )
