@@ -2774,6 +2774,11 @@ dynamo_expected_failures = {
     "LoggingTests.test_dynamo_info",  # dynamo/test_logging
     "LoggingTests.test_graph_breaks",  # dynamo/test_logging
     "LoggingTests.test_aot",  # dynamo/test_logging
+    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape2_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape3_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_is_causal_and_mask_fails_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape1_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape0_cpu",  # test_transformers.py
 }
 
 # see NOTE [dynamo_test_failures.py] for more details
