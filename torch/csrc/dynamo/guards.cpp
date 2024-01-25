@@ -1,4 +1,5 @@
 #define PY_SSIZE_T_CLEAN
+#include <ATen/EmptyTensor.h>
 #include <c10/util/flat_hash_map.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/dynamo/guards.h>
@@ -606,10 +607,10 @@ static PyObject* _empty_strided_cpu(PyObject* dummy, PyObject* args) {
   TORCH_CHECK(PyTuple_GET_SIZE(args) == 3);
 
   // note PyTuple_GET_ITEM returns a borrowed ref, so no need for refcounts
-  at::SmallVector<ssize_t, 8> sizes;
+  at::SmallVector<int64_t, 8> sizes;
   unwrap_size_tuple(PyTuple_GET_ITEM(args, 0), sizes);
 
-  at::SmallVector<ssize_t, 8> strides;
+  at::SmallVector<int64_t, 8> strides;
   unwrap_size_tuple(PyTuple_GET_ITEM(args, 1), strides);
 
   PyObject* py_dtype = PyTuple_GET_ITEM(args, 2);
