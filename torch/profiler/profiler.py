@@ -242,6 +242,8 @@ class _KinetoProfile:
             "backend": dist.get_backend(),
             "rank": dist.get_rank(),
             "world_size": dist.get_world_size(),
+            "pg_count": dist.get_pg_count(),
+            "pg_config": dist.get_pg_config(),
         }
 
     def _memory_profile(self) -> MemoryProfile:
