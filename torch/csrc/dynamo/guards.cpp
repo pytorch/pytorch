@@ -1,4 +1,5 @@
 #define PY_SSIZE_T_CLEAN
+#include <ATen/EmptyTensor.h>
 #include <c10/util/flat_hash_map.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/dynamo/guards.h>
@@ -585,12 +586,49 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
   Py_RETURN_TRUE;
 }
 
+template <typename T>
+inline static void unwrap_size_tuple(PyObject* obj, T& output) {
+  TORCH_CHECK(PyTuple_CheckExact(obj));
+  size_t len = PyTuple_GET_SIZE(obj);
+  output.reserve(len);
+  for (size_t i = 0; i < len; ++i) {
+    auto result = PyLong_AsSsize_t(PyTuple_GET_ITEM(obj, i));
+    TORCH_CHECK(result >= 0);
+    output.emplace_back(result);
+  }
+}
+
+static PyObject* _empty_strided_cpu(PyObject* dummy, PyObject* args) {
+  // at::empty_strided is surprising slow.  This is a lower-overhead
+  // version that saves ~2us on every allocation.
+  HANDLE_TH_ERRORS;
+
+  TORCH_CHECK(PyTuple_CheckExact(args));
+  TORCH_CHECK(PyTuple_GET_SIZE(args) == 3);
+
+  // note PyTuple_GET_ITEM returns a borrowed ref, so no need for refcounts
+  at::SmallVector<int64_t, 8> sizes;
+  unwrap_size_tuple(PyTuple_GET_ITEM(args, 0), sizes);
+
+  at::SmallVector<int64_t, 8> strides;
+  unwrap_size_tuple(PyTuple_GET_ITEM(args, 1), strides);
+
+  PyObject* py_dtype = PyTuple_GET_ITEM(args, 2);
+  TORCH_CHECK(THPDtype_Check(py_dtype));
+  at::ScalarType dtype = reinterpret_cast<THPDtype*>(py_dtype)->scalar_type;
+
+  return THPVariable_Wrap(at::detail::empty_strided_cpu(sizes, strides, dtype));
+
+  END_HANDLE_TH_ERRORS;
+}
+
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 static PyMethodDef _methods[] = {
     {"check_type_id", check_type_id, METH_VARARGS, nullptr},
     {"check_obj_id", check_obj_id, METH_VARARGS, nullptr},
     {"assert_size_stride", assert_size_stride, METH_VARARGS, nullptr},
-    {"dict_version", dict_version, METH_VARARGS, NULL},
+    {"dict_version", dict_version, METH_VARARGS, nullptr},
+    {"_empty_strided_cpu", _empty_strided_cpu, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 static struct PyModuleDef _module = {

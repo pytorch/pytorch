@@ -438,6 +438,7 @@ class WrapperCodeGen(CodeGen):
                 aten = torch.ops.aten
                 inductor_ops = torch.ops.inductor
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+                empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
                 alloc_from_pool = torch.ops.inductor._alloc_from_pool
                 reinterpret_tensor = torch.ops.inductor._reinterpret_tensor
                 async_compile = AsyncCompile()
@@ -1162,6 +1163,15 @@ class WrapperCodeGen(CodeGen):
         return self.make_allocation(buffer.get_name(), device, dtype, shape, stride)
 
     def make_allocation(self, name, device, dtype, shape, stride):
+        if device.type == "cpu":
+            # optimized path for faster allocations, saving ~2us versus the stuff below
+            return (
+                f"{name} = empty_strided_cpu("
+                f"{self.codegen_shape_tuple(shape)}, "
+                f"{self.codegen_shape_tuple(stride)}, "
+                f"{dtype})"
+            )
+
         try:
             expected = tuple(ir.make_contiguous_strides_for(shape))
         except Exception:  # cannot determine truth value of Relational
