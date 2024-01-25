@@ -9,7 +9,6 @@ import logging
 import math
 import operator
 import typing
-from collections import defaultdict
 
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -457,7 +456,20 @@ class GraphModuleSerializer:
                 path, ty = val
 
                 assert isinstance(path, str)
-                normalized_ty = ty.__module__ + "." + ty.__qualname__
+
+                # node.meta["nn_module_stack"] could have two forms:
+                # 1. (path: str, module_type: 'type'), e.g.
+                #    ('', <class 'sigmoid.inference.MySimpleModel'>)
+                # 2. (path: str, module_type: str), e.g.
+                #    ('', 'sigmoid.inference.MySimpleModel')
+                # ExportedProgram directly produced by torch.export() has form 1
+                # ExportedProgram deserialized from disk has form 2
+                # TODO: This is not ideal, we should fix this.
+                if isinstance(ty, str):
+                    normalized_ty = ty
+                else:
+                    normalized_ty = ty.__module__ + "." + ty.__qualname__
+
                 return path + "," + normalized_ty
 
             # Serialize to "key,orig_path,type_str"
@@ -1829,7 +1841,7 @@ def deserialize(
     )
 
 
-def _canonicalize_graph(sorted_inputs, sorted_outputs, graph) -> Graph:
+def _canonicalize_graph(sorted_inputs, sorted_outputs, graph) -> Tuple[Graph, Dict[str, str]]:
     def _get_argument(a: Argument):
         if a.type == "as_none":
             return None
@@ -1891,7 +1903,7 @@ def _canonicalize_graph(sorted_inputs, sorted_outputs, graph) -> Graph:
 
         graph_inputs: Set[str] = set()
         def_table: Dict[str, int] = {}
-        edges: Dict[int, Edges] = defaultdict(lambda: Edges([], 0))
+        edges: Dict[int, Edges] = {}
         candidates: List[Tuple[str, List[Tuple[str, List[int]]], int]] = []
         rank: Dict[str, int] = {}
         ret: List[Node] = []
@@ -1934,6 +1946,8 @@ def _canonicalize_graph(sorted_inputs, sorted_outputs, graph) -> Graph:
 
             for o in node.outputs:
                 for_args(add_def, o)
+
+            edges[idx] = Edges([], 0)
 
         for idx, user in enumerate(nodes):
             def add_edge(a):
@@ -1993,6 +2007,7 @@ def _canonicalize_graph(sorted_inputs, sorted_outputs, graph) -> Graph:
         return ret
 
     sorted_nodes = sort_nodes(graph.nodes)
+    assert len(sorted_nodes) == len(graph.nodes)
 
     # Stage 2: Rename nodes.
     name_table: Dict[str, str] = {}
@@ -2074,7 +2089,7 @@ def _canonicalize_graph(sorted_inputs, sorted_outputs, graph) -> Graph:
                 a.as_graph.name = f"_g{counter}"
                 counter += 1
 
-    return Graph(
+    graph = Graph(
         inputs=sorted_inputs,
         outputs=sorted_outputs,
         nodes=sorted_nodes,
@@ -2083,9 +2098,28 @@ def _canonicalize_graph(sorted_inputs, sorted_outputs, graph) -> Graph:
         sym_bool_values=sorted_sym_bool_values,
         is_single_tensor_return=graph.is_single_tensor_return,
     )
+    return graph, name_table
 
 
 def canonicalize(ep: ExportedProgram) -> ExportedProgram:
+    """
+    Normalize a serialized ExportedProgram, so that different eager program which
+    shares the same semantics can get a single representation on disk.
+
+    This function canonicalizes an ExportedProgram by:
+
+    1. Sorting nodes in topological order.
+    2. Rename nodes to have unique names.
+    3. Remove unstable fields.
+    4. Aggregate the above program fields.
+    5. Recurse in subgraphs.
+
+    Args:
+        ep (ExportedProgram): The ExportedProgram to canonicalize.
+
+    Returns:
+        ExportedProgram: The canonicalized exported program.
+    """
     ep = copy.deepcopy(ep)
 
     opset_version = dict(sorted(ep.opset_version.items(), key=lambda x: x[0]))
@@ -2130,17 +2164,92 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
             raise AssertionError(f"Unknown output type: {spec}")
 
     sorted_ins = sorted(enumerate(zip(graph.inputs, signature.input_specs)), key=rank_input)
-    sorted_inputs, signature.input_specs = zip(*(i for idx, i in sorted_ins))  # type: ignore[assignment]
+    sorted_inputs, input_specs = zip(*(i for idx, i in sorted_ins))  # type: ignore[assignment]
 
     sorted_outs = sorted(enumerate(zip(graph.outputs, signature.output_specs)), key=rank_output)
-    sorted_outputs, signature.output_specs = zip(*(i for idx, i in sorted_outs))  # type: ignore[assignment]
+    sorted_outputs, output_specs = zip(*(i for idx, i in sorted_outs))  # type: ignore[assignment]
 
-    sorted_graph = _canonicalize_graph(sorted_inputs, sorted_outputs, graph)
+    sorted_graph, replace_table = _canonicalize_graph(sorted_inputs, sorted_outputs, graph)
+
+    def replace_input(inp):
+        assert isinstance(spec, InputSpec)
+        if spec.type == "user_input":
+            arg = spec.user_input.arg
+            if arg.type == "as_tensor":
+                t = arg.as_tensor
+                t.name = replace_table[t.name]
+            elif arg.type == "as_sym_int":
+                s = arg.as_sym_int
+                if s.type == "as_name":
+                    s.as_name = replace_table[s.as_name]
+                elif s.type == "as_int":
+                    pass
+                else:
+                    raise AssertionError(f"Unknown sym_int type: {s}")
+            elif arg.type in ("as_none", "as_int", "as_float", "as_string"):
+                return
+            else:
+                raise AssertionError(f"Unknown input type: {arg}")
+        elif spec.type == "parameter":
+            t = spec.parameter.arg
+            t.name = replace_table[t.name]
+        elif spec.type == "buffer":
+            t = spec.buffer.arg
+            t.name = replace_table[t.name]
+        elif spec.type == "tensor_constant":
+            t = spec.tensor_constant.arg
+            t.name = replace_table[t.name]
+        elif spec.type == "custom_obj":
+            return
+        else:
+            raise AssertionError(f"Unknown input type: {spec}")
+
+    def replace_output(out):
+        assert isinstance(spec, OutputSpec)
+        if spec.type == "user_output":
+            arg = spec.user_output.arg
+            if arg.type == "as_tensor":
+                t = arg.as_tensor
+                t.name = replace_table[t.name]
+            elif arg.type == "as_sym_int":
+                s = arg.as_sym_int
+                if s.type == "as_name":
+                    s.as_name = replace_table[s.as_name]
+                elif s.type == "as_int":
+                    pass
+                else:
+                    raise AssertionError(f"Unknown sym_int type: {s}")
+            else:
+                raise AssertionError(f"Unknown input type: {arg}")
+        elif spec.type == "loss_output":
+            t = spec.loss_output.arg
+            t.name = replace_table[t.name]
+        elif spec.type == "buffer_mutation":
+            t = spec.buffer_mutation.arg
+            t.name = replace_table[t.name]
+        elif spec.type == "gradient_to_parameter":
+            t = spec.gradient_to_parameter.arg
+            t.name = replace_table[t.name]
+        elif spec.type == "gradient_to_user_input":
+            g = spec.gradient_to_user_input
+            g.arg.name = replace_table[g.arg.name]
+            g.user_input_name = replace_table[g.user_input_name]
+        else:
+            raise AssertionError(f"Unknown output type: {spec}")
+
+    for spec in input_specs:
+        replace_input(spec)
+
+    for spec in output_specs:
+        replace_output(spec)
 
     return ExportedProgram(
         graph_module=GraphModule(
             graph=sorted_graph,
-            signature=signature,
+            signature=GraphSignature(
+                input_specs=list(input_specs),
+                output_specs=list(output_specs),
+            ),
             module_call_graph=module_call_graph,
         ),
         opset_version=opset_version,
