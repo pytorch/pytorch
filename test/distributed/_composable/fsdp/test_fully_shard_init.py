@@ -11,6 +11,7 @@ from torch.distributed._composable import replicate
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp._fsdp_init import (
     _get_managed_modules,
+    _get_managed_states,
     _normalize_device,
 )
 from torch.distributed.device_mesh import init_device_mesh
@@ -74,8 +75,8 @@ class TestFullyShardMeshArg(FSDPTestMultiThread):
             fully_shard(model, mesh=mesh, device="cpu")
 
 
-class TestFullyShardManagedModules(FSDPTestMultiThread):
-    """Tests getting the managed modules for a ``fully_shard`` module."""
+class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
+    """Tests getting the managed modules/states for a ``fully_shard`` module."""
 
     @property
     def world_size(self) -> int:
@@ -126,6 +127,42 @@ class TestFullyShardManagedModules(FSDPTestMultiThread):
         self.assertEqual(len(managed_modules), len(expected_managed_modules))
         # Check set comparison since we do not require anything about the order
         self.assertEqual(set(managed_modules), set(expected_managed_modules))
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_managed_states_shared_params_and_buffers(self):
+        model = nn.Sequential(*[MLP(8, with_buffer=True) for _ in range(3)])
+        model[0].in_proj.weight = model[1].in_proj.weight
+        model[2].in_proj.weight = model[1].in_proj.weight
+        model[1].buffer = model[2].buffer
+        # Assume calling `fully_shard` on `model`
+        managed_modules = _get_managed_modules(model)
+        params, buffers = _get_managed_states(managed_modules)
+        expected_params = list(model.parameters())  # de-dups shared
+        expected_buffers = list(model.buffers())  # de-dups shared
+        self._check_managed_states(params, buffers, expected_params, expected_buffers)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_managed_states_nested_fully_shard(self):
+        model = nn.Sequential(*[MLP(8, with_buffer=True) for _ in range(2)])
+        fully_shard(model[0])
+        # Assume calling `fully_shard` on `model`
+        managed_modules = _get_managed_modules(model)
+        params, buffers = _get_managed_states(managed_modules)
+        expected_params = list(model[1].parameters())
+        expected_buffers = list(model[1].buffers())
+        self._check_managed_states(params, buffers, expected_params, expected_buffers)
+
+    def _check_managed_states(
+        self,
+        managed_params: List[nn.Parameter],
+        managed_buffers: List[torch.Tensor],
+        expected_managed_params: List[nn.Parameter],
+        expected_managed_buffers: List[torch.Tensor],
+    ):
+        self.assertEqual(len(managed_params), len(expected_managed_params))
+        self.assertEqual(len(managed_buffers), len(expected_managed_buffers))
+        self.assertEqual(set(managed_params), set(expected_managed_params))
+        self.assertEqual(set(managed_buffers), set(expected_managed_buffers))
 
 
 if __name__ == "__main__":

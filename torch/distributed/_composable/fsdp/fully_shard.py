@@ -11,6 +11,7 @@ from torch.distributed._tensor import DeviceMesh
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
 from ._fsdp_init import (
     _get_managed_modules,
+    _get_managed_states,
     _init_default_fully_shard_mesh,
     _normalize_device,
 )
@@ -48,6 +49,7 @@ def fully_shard(
     state.init(module, device)
 
     managed_modules = _get_managed_modules(module)
+    params, buffers = _get_managed_states(managed_modules)
 
     # Place FSDP leftmost for highest priority in the method resolution order
     cls = module.__class__
