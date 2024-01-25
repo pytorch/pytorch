@@ -5,8 +5,8 @@ import torch.nn as nn
 
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
 
-from ._fsdp_common import FSDPMeshInfo, ParamModuleInfo, TrainingState
-from ._fsdp_param import FSDPParam
+from ._fsdp_common import FSDPMeshInfo, TrainingState
+from ._fsdp_param import FSDPParam, ParamModuleInfo
 
 
 class FSDPParamGroup:
