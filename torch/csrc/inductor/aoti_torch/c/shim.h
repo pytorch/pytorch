@@ -85,6 +85,8 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cuda();
 
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e5m2();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e4m3fn();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e5m2fnuz();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e4m3fnuz();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_bfloat16();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float16();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float32();
@@ -258,6 +260,22 @@ aoti_torch__scaled_dot_product_flash_attention_v2(
     AtenTensorHandle* ret6, // returns new reference
     AtenTensorHandle* ret7, // returns new reference
     AtenTensorHandle* ret8 // returns new reference
+);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch__scaled_dot_product_efficient_attention(
+    AtenTensorHandle query,
+    AtenTensorHandle key,
+    AtenTensorHandle value,
+    AtenTensorHandle attn_bias, // optional argument
+    int compute_log_sumexp,
+    double dropout_p,
+    int is_causal,
+    double* scale, // optional argument
+    AtenTensorHandle* ret0, // returns new reference
+    AtenTensorHandle* ret1, // returns new reference
+    AtenTensorHandle* ret2, // returns new reference
+    AtenTensorHandle* ret3 // returns new reference
 );
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_mm(

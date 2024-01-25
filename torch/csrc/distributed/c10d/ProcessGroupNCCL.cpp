@@ -655,10 +655,20 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
   // Device synchronize only after we've completed timeout checks.
   if (!barrierTensors_.empty()) {
     // If we use the work to do barrier, we should block here
-    at::cuda::OptionalCUDAGuard gpuGuard;
     for (auto& device : devices_) {
-      gpuGuard.set_index(device.index());
-      AT_CUDA_CHECK(cudaDeviceSynchronize());
+      // `dist.barrier()` only requires all CPU processes to enter this
+      // function, hence we only need to make sure the dummy all-reduce has
+      // completed. So we would only need to sync the **current stream** back to
+      // host, and do not need to synchronize the entire device (which may have
+      // kernels running on other streams).
+      // Using `cudaStreamSynchronize` instead of `cudaDeviceSynchronize` can:
+      // - lower chance of hang;
+      // - CurrentCUDAStream is usually the context of the next operation in
+      // Python, thus blocking current stream would already block the next
+      // compute kernel;
+      // - achieve better barrier performance.
+      auto currentStream = at::cuda::getCurrentCUDAStream(device.index());
+      AT_CUDA_CHECK(cudaStreamSynchronize(currentStream));
     }
   }
 }
@@ -1012,29 +1022,31 @@ void ProcessGroupNCCL::waitForDumpOrTimeout(
   TORCH_CHECK(fut.valid(), "Expected a valid future");
 
   auto futStatus = fut.wait_for(std::chrono::seconds(timeout_sec));
-  if (futStatus != std::future_status::ready) {
-    TORCH_CHECK(
-        futStatus != std::future_status::deferred,
-        "Expected the dump future to have been launched eagerly.");
+  TORCH_CHECK(
+      futStatus != std::future_status::deferred, "Expected eager launch.");
+  if (futStatus == std::future_status::ready) {
+    // Calling .get() will re-raise any exception from the future, and we don't
+    // care about the retval
+    try {
+      fut.get();
+      std::this_thread::sleep_until(wakeUpTime);
+    } catch (const std::exception& e) {
+      LOG(ERROR) << logPrefix()
+                 << "Caught exception during async debug dump: \"" << e.what()
+                 << "\"\n";
+    } catch (...) {
+      LOG(ERROR) << logPrefix()
+                 << "Caught unknown exception during async debug dump.";
+    }
+  } else {
     LOG(INFO)
         << logPrefix() << "Debug dump timed out and is being abandoned."
         << " This may be due to slow ADDR2LINE performance processing stacktraces."
         << " Try TORCH_DISABLE_ADDR2LINE=1 and TORCH_NCCL_TRACE_CPP_STACK=0 to work around.";
   }
-
-  // Calling .get() will raise any exception stored in the promise associated
-  // with the future. (but we can ignore the return value, which will be false
-  // if dumping is not enabled)
-  try {
-    fut.get();
-    std::this_thread::sleep_until(wakeUpTime);
-  } catch (const std::exception& e) {
-    LOG(ERROR) << logPrefix() << "Caught exception during async debug dump: \""
-               << e.what() << "\"\n";
-  } catch (...) {
-    LOG(ERROR) << logPrefix()
-               << "Caught unknown exception during async debug dump.";
-  }
+  // Ensure we sleep at least until wakeUpTime regardless of future execution
+  // time
+  std::this_thread::sleep_until(wakeUpTime);
 }
 
 void ProcessGroupNCCL::abortCommsFromMap(
@@ -1582,6 +1594,9 @@ void ProcessGroupNCCL::watchdogHandler() {
         // completed.
         ++it;
       }
+      // Increment heartbeat after each work processed,
+      // in case processing is slowed down (but not hung) by cuda api contention
+      heartbeat_++;
     }
     // process a request to dump the trace. only PG uid 0 will respond to dump
     // requests, but this is fine since all PG's feed into the same flight
