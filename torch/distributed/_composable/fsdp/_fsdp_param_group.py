@@ -20,10 +20,9 @@ from ._fsdp_common import (
     _raise_assert_with_print,
     FSDPMeshInfo,
     HSDPMeshInfo,
-    ParamModuleInfo,
     TrainingState,
 )
-from ._fsdp_param import FSDPParam, ShardedState
+from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
 
 
 class FSDPParamGroup:
