@@ -9216,6 +9216,13 @@ distribution).
 
 The shape of the tensor is defined by the variable argument :attr:`size`.
 
+.. note::
+    For complex dtypes, the tensor is i.i.d. sampled from a `complex normal distribution`_ with zero mean and
+    unit variance as :math:`\text{{out}}_{{i}} \sim \mathcal{{CN}}(0, 1)`. This is equivalent to
+    :math:`\mathcal{{R}}(\text{{out}}_{{i}}) \sim \mathcal{{N}}(0, \frac{{1}}{{2}})` and
+    :math:`\mathcal{{I}}(\text{{out}}_{{i}}) \sim \mathcal{{N}}(0, \frac{{1}}{{2}})`, where :math:`\mathcal{{R}}` and
+    :math:`\mathcal{{I}}` are the real and imaginary part of :math:`\text{{out}}_i`.
+
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
@@ -9236,6 +9243,8 @@ Example::
     >>> torch.randn(2, 3)
     tensor([[ 1.5954,  2.8929, -1.0923],
             [ 1.1719, -0.4709, -0.1996]])
+
+.. _complex normal distribution: https://en.wikipedia.org/wiki/Complex_normal_distribution
 """.format(
         **factory_common_args
     ),
@@ -9247,8 +9256,8 @@ add_docstr(
 randn_like(input, *, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same size as :attr:`input` that is filled with
-random numbers from a normal distribution with mean 0 and variance 1.
-``torch.randn_like(input)`` is equivalent to
+random numbers from a normal distribution with mean 0 and variance 1. Please refer to :func:`torch.randn` for the
+sampling process of complex dtypes. ``torch.randn_like(input)`` is equivalent to
 ``torch.randn(input.size(), dtype=input.dtype, layout=input.layout, device=input.device)``.
 
 Args:
