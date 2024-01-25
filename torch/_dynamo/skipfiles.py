@@ -34,6 +34,7 @@ import torch
 import torch._inductor.test_operators
 import torch.distributed
 import torch.utils._content_store
+from ..utils import _config_module
 from .utils import getfile
 
 from .variables.functions import (
@@ -41,7 +42,6 @@ from .variables.functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
-
 
 """
 A note on skipfiles:
@@ -260,6 +260,7 @@ def get_mod_inlinelist():
 SKIP_DIRS = [
     "<frozen importlib",
     "<__array_function__ internals>",
+    _config_module.__file__,
 ] + [_module_dir(m) for m in BUILTIN_SKIPLIST]
 
 SKIP_DIRS_RE = re.compile(r"match nothing^")
