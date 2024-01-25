@@ -12,8 +12,9 @@ from torch.backends.cuda import (
     math_sdp_enabled,
     mem_efficient_sdp_enabled,
     SDPAParams,
-    SDPBackend,
 )
+
+from torch.nn.attention import SDPBackend
 
 from .nested_tensor import buffer_from_jagged, NestedTensor, ViewNestedFromBuffer
 
