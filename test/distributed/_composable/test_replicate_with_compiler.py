@@ -38,7 +38,7 @@ class Net(nn.Module):
 
     def forward(self, x):
         if self.use_checkpoint:
-            _fc1 = checkpoint(self.fc1, x, use_reentrant(False))
+            _fc1 = checkpoint(self.fc1, x, use_reentrant=False)
         else:
             _fc1 = self.fc1(x)
         return self.fc4(self.fc3(self.fc2(_fc1)))
@@ -154,6 +154,7 @@ class ReplicateTest(MultiProcessTestCase):
         self._test_compile(use_gpu=False, no_sync=True)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_rocm
     @skip_if_lt_x_gpu(2)
     def test_compile_gpu(self):
         self._test_compile(use_gpu=True, no_sync=False)
