@@ -81,6 +81,11 @@ class FSDPParamGroup:
         # Used to avoid mistargeted backward prefetches in the case that some
         # module is used in forward but not in backward
         self.expected_backward_unshard_count: int = 0
+        # Whether to reduce-scatter or all-reduce gradients, respectively
+        # (can be set to false to save communication during gradient
+        # accumulation); all-reducing without reduce-scatter is disallowed
+        self.reduce_scatter_grads: bool = True
+        self.all_reduce_grads: bool = True
         self._init_grad_divide_factors()
 
         # - CUDA events for stream synchronization
@@ -239,6 +244,9 @@ class FSDPParamGroup:
     def _post_backward(self, *unused: Any):
         self._training_state = TrainingState.POST_BACKWARD
         with torch.profiler.record_function("FSDP::post_backward_reshard"):
+            if not self.reduce_scatter_grads:
+                self.reshard()
+                return
             # Save the autograd-computed gradients before resharding to only
             # access the unsharded parameters when their data is present
             fsdp_params_with_grad: List[FSDPParam] = []

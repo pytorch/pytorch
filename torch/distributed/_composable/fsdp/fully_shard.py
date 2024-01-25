@@ -118,3 +118,44 @@ class FSDP:
         ):
             return  # no-op
         fsdp_param_group.reshard()
+
+    def set_requires_gradient_sync(
+        self, requires_gradient_sync: bool, recurse: bool = True
+    ) -> None:
+        """
+        Sets if the module should sync gradients. This can be used to implement
+        gradient accumulation without communication. For HSDP, this controls
+        both reduce-scatter and all-reduce together.
+
+        Args:
+            requires_gradient_sync (bool): Whether to reduce gradients for the
+                module's parameters.
+            recurse (bool): Whether to set for all submodules or just the
+                passed-in module.
+        """
+        module = cast(nn.Module, self)
+        states = (
+            [_get_module_fsdp_state(module)]
+            if not recurse
+            else [_get_module_fsdp_state(submodule) for submodule in module.modules()]
+        )
+        for state in states:
+            if state and (fsdp_param_group := state._fsdp_param_group):
+                fsdp_param_group.reduce_scatter_grads = requires_gradient_sync
+                fsdp_param_group.all_reduce_grads = requires_gradient_sync
+
+    def set_requires_all_reduce(self, requires_all_reduce: bool, recurse: bool = True):
+        """
+        Sets if the module should all-reduce gradients. This can be used to
+        implement gradient accumulation with only reduce-scatter but not
+        all-reduce for HSDP.
+        """
+        module = cast(nn.Module, self)
+        states = (
+            [_get_module_fsdp_state(module)]
+            if not recurse
+            else [_get_module_fsdp_state(submodule) for submodule in module.modules()]
+        )
+        for state in states:
+            if state and (fsdp_param_group := state._fsdp_param_group):
+                fsdp_param_group.all_reduce_grads = requires_all_reduce
