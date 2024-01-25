@@ -3209,8 +3209,16 @@ class TestSDPACudaOnly(NNTestCase):
 
 class TestAttnBias(NNTestCase):
 
-    def run_test(self, device, make_q, make_kv, attn_bias=None,
-                 forw_tolerances: Optional[Tolerances] = None, grad_tolerances: Optional[Tolerances] = None, backend = None):
+    def run_test(
+        self,
+        device,
+        make_q,
+        make_kv,
+        attn_bias=None,
+        forw_tolerances: Optional[Tolerances] = None,
+        grad_tolerances: Optional[Tolerances] = None,
+        backend=None,
+    ):
         if backend is not None:
             torch._dynamo.reset()
 
