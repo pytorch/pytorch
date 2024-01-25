@@ -1026,8 +1026,8 @@ def handle_log_file(
     test: ShardedTest, file_path: str, failed: bool, was_rerun: bool
 ) -> None:
     test = str(test)
-    with open(file_path, "rb") as f:
-        full_text = f.read().decode("utf-8", errors="ignore")
+    with open(file_path, "r", errors="ignore") as f:
+        full_text = f.read()
 
     new_file = "test/test-reports/" + sanitize_file_name(
         f"{test}_{os.urandom(8).hex()}_.log"
@@ -1042,14 +1042,13 @@ def handle_log_file(
         )
         for line in full_text.splitlines():
             if re.search("Running .* items in this shard:", line):
-                print_to_stderr(line.strip())
+                print_to_stderr(line.rstrip())
         print_to_stderr("")
         return
 
     # otherwise: print entire file
     print_to_stderr(f"\nPRINTING LOG FILE of {test} ({new_file})")
-    for line in full_text.splitlines():
-        print_to_stderr(line.rstrip())
+    print_to_stderr(full_text)
     print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({new_file})\n")
 
 
