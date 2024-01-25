@@ -802,18 +802,31 @@ dynamo_expected_failures = {
     "TestTypePromotionCPU.test_alternate_result_cpu",  # test_type_promotion
     "TestTypeHints.test_doc_examples",  # test_type_hints
     "TestSDPACPU.test_fused_sdp_choice_cpu_type_dense_dropout_0_0_float32_cpu_float32",
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape0_cpu",
     "TestSDPACPU.test_fused_sdp_choice_cpu_type_dense_dropout_0_0_float64_cpu_float64",
     "TestSDPACPU.test_fused_sdp_choice_cpu_type_dense_dropout_0_7_float16_cpu_float16",
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape1_cpu",
-    "TestAttnMasksCPU.test_is_causal_and_mask_fails_cpu",
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape2_cpu",
     "TestSDPACPU.test_fused_sdp_choice_cpu_type_dense_dropout_0_0_bfloat16_cpu_bfloat16",
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape3_cpu",
     "TestSDPACPU.test_fused_sdp_choice_cpu_type_dense_dropout_0_7_float32_cpu_float32",
     "TestSDPACPU.test_fused_sdp_choice_cpu_type_dense_dropout_0_7_float64_cpu_float64",
     "TestSDPACPU.test_fused_sdp_choice_cpu_type_dense_dropout_0_0_float16_cpu_float16",
     "TestSDPACPU.test_fused_sdp_choice_cpu_type_dense_dropout_0_7_bfloat16_cpu_bfloat16",
+    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape0_cpu",
+    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape1_cpu",
+    "TestAttnMasksCPU.test_is_causal_and_mask_fails_cpu",
+    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape2_cpu",
+    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape3_cpu",
+    "TestAttnMasksCUDA.test_causal_variants_causal_variant_1_shape0_cuda",
+    "TestAttnMasksCUDA.test_causal_variants_causal_variant_1_shape1_cuda",
+    "TestAttnMasksCUDA.test_causal_variants_causal_variant_1_shape2_cuda",
+    "TestAttnMasksCUDA.test_causal_variants_causal_variant_1_shape3_cuda",
+    "TestAttnMasksCUDA.test_causal_variants_causal_variant_2_shape0_cuda",
+    "TestAttnMasksCUDA.test_causal_variants_causal_variant_2_shape1_cuda",
+    "TestAttnMasksCUDA.test_causal_variants_causal_variant_2_shape2_cuda",
+    "TestAttnMasksCUDA.test_causal_variants_causal_variant_2_shape3_cuda",
+    "TestAttnMasksCUDA.test_is_causal_and_mask_fails_cuda",
+    "TestAttnMasksCUDA.test_is_causal_equals_upper_left_shape0_cuda",
+    "TestAttnMasksCUDA.test_is_causal_equals_upper_left_shape1_cuda",
+    "TestAttnMasksCUDA.test_is_causal_equals_upper_left_shape2_cuda",
+    "TestAttnMasksCUDA.test_is_causal_equals_upper_left_shape3_cuda",
     "TestAssertCloseSparseCOO.test_matching_coalesced",  # test_testing
     "TestImports.test_circular_dependencies",  # test_testing
     "TestAssertCloseSparseCSR.test_mismatching_crow_indices_msg",  # test_testing
@@ -1902,10 +1915,8 @@ dynamo_expected_failures = {
     "TestFX.test_custom_traceback_raised_when_exception_source_is_graphmodule",  # test_fx
     "TestConstFold.test_check_skip_folding_quant_dequant_pattern",  # test_fx
     "TestFX.test_immutable_list_pytree_ops",  # test_fx
-    "TestFX.test_annotation_with_future",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_TakeList_cpu",  # test_fx
     "TestPassManager.test_pass_manager",  # test_fx
-    "TestFX.test_pytree",  # test_fx
     "TestFX.test_user_friendly_call_provenance_with_function",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_MutationMetadata_cpu",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_MutationTorchTensorCall_cpu",  # test_fx

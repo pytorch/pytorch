@@ -94,6 +94,8 @@ CURRENT_NODE_KEY = "current_node"
 def uninteresting_files():
     import torch._inductor.sizevars
     import torch._library.abstract_impl
+    import torch._subclasses.meta_utils
+    import torch._subclasses.fake_tensor
     mods = [
         sys.modules[__name__],
         torch.fx.experimental.recording,
@@ -102,6 +104,8 @@ def uninteresting_files():
         torch,
         torch._inductor.sizevars,
         torch._library.abstract_impl,
+        torch._subclasses.meta_utils,
+        torch._subclasses.fake_tensor,
     ]
     return {inspect.getfile(m) for m in mods}
 
@@ -2538,7 +2542,14 @@ class ShapeEnv:
                 range_str = ""
 
             r = sympy_expr
-            self.log.info("create_symbol %s = %s for %s %s", sympy_expr, val, source.name(), range_str)
+
+            fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
+            self.log.info(
+                "create_symbol %s = %s for %s %s%s (%s)",
+                sympy_expr, val, source.name(), range_str,
+                maybe_user_loc, format_frame(fsummary)
+            )
+
             self.counter["create_symbol"] += 1
         else:
             # This implements duck-shaping: input sizes that match are assigned
