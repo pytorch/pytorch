@@ -96,28 +96,23 @@ class ColwiseParallel(ParallelStyle):
             input_tensor = input_tensor.redistribute(placements=desired_input_layouts)
         return input_tensor
 
-    def _partition_fn(self, name, module, device_mesh):
-        if isinstance(module, nn.Linear):
-            # colwise shard weight/bias to Shard(0), weight be Shard(0)
-            # means Colwise as Linear is input * weight^T + bias, where
-            # weight would become Shard(1)
-            for name, param in module.named_parameters():
-                dist_param = nn.Parameter(
-                    distribute_tensor(param, device_mesh, [Shard(0)])
-                )
-                module.register_parameter(name, dist_param)
-        elif isinstance(module, nn.Embedding):
-            # colwise shard embedding.weight is straight forward as Shard(1)
-            for name, param in module.named_parameters():
-                dist_param = nn.Parameter(
-                    distribute_tensor(param, device_mesh, [Shard(1)])
-                )
-                module.register_parameter(name, dist_param)
-        else:
-            raise NotImplementedError(
-                "ColwiseParallel only supports nn.Linear"
-                f"and nn.Embedding for now, but found {type(module)}!"
+    def _partition_linear_fn(self, name, module, device_mesh):
+        # colwise shard weight/bias to Shard(0), weight be Shard(0)
+        # means Colwise as Linear is input * weight^T + bias, where
+        # weight would become Shard(1)
+        for name, param in module.named_parameters():
+            dist_param = nn.Parameter(
+                distribute_tensor(param, device_mesh, [Shard(0)])
             )
+            module.register_parameter(name, dist_param)
+
+    def _partition_embedding_fn(self, name, module, device_mesh):
+        # colwise shard embedding.weight is straight forward as Shard(1)
+        for name, param in module.named_parameters():
+            dist_param = nn.Parameter(
+                distribute_tensor(param, device_mesh, [Shard(1)])
+            )
+            module.register_parameter(name, dist_param)
 
     @staticmethod
     def _prepare_output_fn(output_layouts, use_local_output, outputs, device_mesh):
@@ -127,10 +122,17 @@ class ColwiseParallel(ParallelStyle):
         return outputs.to_local() if use_local_output else outputs
 
     def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
+        if isinstance(module, nn.Linear):
+            partition_fn = self._partition_linear_fn
+        elif isinstance(module, nn.Embedding):
+            partition_fn = self._partition_embedding_fn
+        else:
+            raise NotImplementedError("ColwiseParallel currently only support nn.Linear and nn.Embedding!")
+
         return distribute_module(
             module,
             device_mesh,
-            self._partition_fn,
+            partition_fn,
             partial(self._prepare_input_fn, self.input_layouts, self.desired_input_layouts),
             partial(self._prepare_output_fn, self.output_layouts, self.use_local_output),
         )
