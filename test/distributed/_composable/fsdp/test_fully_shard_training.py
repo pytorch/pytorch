@@ -283,6 +283,49 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                     _optim.step()
                 self.assertEqual(losses[0], losses[1])
 
+    @skip_if_lt_x_gpu(2)
+    def test_multi_forward_module(self):
+        """
+        Tests parity with DDP when running a module that participates multiple
+        times in forward.
+        """
+        self.run_subtests(
+            {"reshard_after_forward": [True, False, 2]},
+            self._test_multi_forward_module,
+        )
+
+    def _test_multi_forward_module(self, reshard_after_forward: Union[bool, int]):
+        class MultiForwardModule(nn.Module):
+            def __init__(self, device: torch.device):
+                super().__init__()
+                self.inner = nn.Linear(4, 4, device=device)
+                self.outer = nn.Linear(4, 5, device=device)
+
+            def forward(self, x):
+                i = self.inner(x)
+                j = self.inner(x)
+                return self.outer(i + j)
+
+        torch.manual_seed(42)
+        model = MultiForwardModule(device="cuda")
+        ref_model = copy.deepcopy(model)
+        replicate(ref_model, device_ids=[self.rank])
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        fully_shard(model.inner)
+        fully_shard(model)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randn((32, 4), device="cuda")
+        for iter_idx in range(10):
+            losses: List[torch.Tensor] = []
+            for _model, _optim in ((ref_model, ref_optim), (model, optim)):
+                _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+                losses.append(_model(inp).sum())
+                losses[-1].backward()
+                _optim.step()
+            self.assertEqual(losses[0], losses[1])
+
 
 class TestFullyShard1DTrainingCompose(FSDPTest):
     @property
