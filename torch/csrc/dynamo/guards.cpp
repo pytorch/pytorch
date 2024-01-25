@@ -901,6 +901,53 @@ class TUPLE_ITERATOR_LEN : public LeafGuard {
   Py_ssize_t _length;
 };
 
+class GLOBAL_STATE : public LeafGuard {
+ public:
+  GLOBAL_STATE(py::object guard_str) : LeafGuard(guard_str) {
+    auto& ctx = at::globalContext();
+    _grad_mode = at::GradMode::is_enabled();
+    _torch_function = torch::torch_function_enabled();
+    _deterministic_algorithms = ctx.deterministicAlgorithms();
+    _deterministic_algorithms_warn_only = ctx.deterministicAlgorithmsWarnOnly();
+    _allow_tf32 = ctx.allowTF32CuBLAS();
+    _allow_fp16_reduce = ctx.allowFP16ReductionCuBLAS();
+    _allow_bf16_reduce = ctx.allowBF16ReductionCuBLAS();
+    _num_threads = at::get_num_threads();
+    _default_dtype = at::get_default_dtype();
+  }
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    // Ignore value arg, this is just to satisfy the interface.
+    auto& ctx = at::globalContext();
+    return (_grad_mode == at::GradMode::is_enabled() &&
+            _torch_function == torch::torch_function_enabled() &&
+            _deterministic_algorithms == ctx.deterministicAlgorithms() &&
+            _deterministic_algorithms_warn_only ==
+                ctx.deterministicAlgorithmsWarnOnly() &&
+            _allow_tf32 == ctx.allowTF32CuBLAS() &&
+            _allow_fp16_reduce == ctx.allowFP16ReductionCuBLAS() &&
+            _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
+            _num_threads == at::get_num_threads()) &&
+        _default_dtype == at::get_default_dtype();
+  }
+
+  std::string repr_prefix() override {
+    return "GLOBAL_STATE";
+  }
+
+ private:
+  bool _grad_mode;
+  bool _torch_function;
+  bool _deterministic_algorithms;
+  bool _deterministic_algorithms_warn_only;
+  bool _allow_tf32;
+  bool _allow_fp16_reduce;
+  bool _allow_bf16_reduce;
+  int _num_threads;
+  caffe2::TypeMeta _default_dtype;
+  // TODO(jansel): we should guard on more state as inductor starts using it
+};
+
 /**
  * Relational guards compare more than one value. We implement Relational guards
  * by capturing some state in the guard object. For example for tensor aliasing
@@ -1776,6 +1823,10 @@ PyObject* torch_c_dynamo_guards_init() {
       std::shared_ptr<TUPLE_ITERATOR_LEN>>(py_m, "TUPLE_ITERATOR_LEN")
       .def(py::init<py::object, py::str>())
       .def("__call__", &TUPLE_ITERATOR_LEN::check);
+  py::class_<GLOBAL_STATE, LeafGuard, std::shared_ptr<GLOBAL_STATE>>(
+      py_m, "GLOBAL_STATE")
+      .def(py::init<py::str>())
+      .def("__call__", &GLOBAL_STATE::check);
   py::class_<NoTensorAliasingGuard, std::shared_ptr<NoTensorAliasingGuard>>(
       py_m, "NoTensorAliasingGuard");
 
@@ -1877,6 +1928,11 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object value,
              py::object guard_str) -> void {
             self.add_leaf_guard(std::make_shared<DICT_KEYS>(value, guard_str));
+          })
+      .def(
+          "add_global_state_guard",
+          [](GuardManager& self, py::object guard_str) -> void {
+            self.add_leaf_guard(std::make_shared<GLOBAL_STATE>(guard_str));
           })
       .def(
           "add_tuple_iterator_length_guard",

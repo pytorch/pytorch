@@ -1234,6 +1234,9 @@ class CheckFunctionManager:
 
         # Don't report this guard, it's always the same, useless!
         code_parts = ["___guarded_code.valid", "___check_global_state()"]
+
+        # Insert global state guard at the root
+        self.guard_manager.root.add_global_state_guard("Checking global state")
         verbose_code_parts = code_parts[:]
 
         def add_code_part(code, guard, log_only=False):
