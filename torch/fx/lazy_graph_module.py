@@ -11,7 +11,7 @@ _force_skip_lazy_graph_module_flag = False
 
 @compatibility(is_backward_compatible=False)
 @contextmanager
-def force_skip_lazy_graph_module():
+def _force_skip_lazy_graph_module():
     """
     Skip using lazy graph module disregarding the setting of _use_lazy_graph_module.
     Use to skip _LazyGraphModule when testing inductor torchscript related backend.

@@ -814,7 +814,8 @@ class {module_name}(torch.nn.Module):
         return res
 
     def __copy__(self):
-        res = self.__class__(self, self.graph)
+        from .lazy_graph_module import get_graph_module_cls
+        res = get_graph_module_cls()(self, self.graph)
         res.meta = getattr(self, "meta", {})
         return res
 
