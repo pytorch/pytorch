@@ -1,4 +1,4 @@
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Sequence
 
 import torch
 from torch import SymInt, Tensor
@@ -17,7 +17,7 @@ __all__ = [
 
 
 def as_nested_tensor(
-    tensor_list: List[Tensor],
+    tensor_list: Sequence[Tensor],
     dtype: Optional[DType] = None,
     device: Optional[Device] = None,
     layout=None
