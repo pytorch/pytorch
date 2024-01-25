@@ -1,4 +1,5 @@
 #define PY_SSIZE_T_CLEAN
+#include <ATen/EmptyTensor.h>
 #include <c10/util/flat_hash_map.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/dynamo/guards.h>
@@ -608,12 +609,49 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
   Py_RETURN_TRUE;
 }
 
+template <typename T>
+inline static void unwrap_size_tuple(PyObject* obj, T& output) {
+  TORCH_CHECK(PyTuple_CheckExact(obj));
+  size_t len = PyTuple_GET_SIZE(obj);
+  output.reserve(len);
+  for (size_t i = 0; i < len; ++i) {
+    auto result = PyLong_AsSsize_t(PyTuple_GET_ITEM(obj, i));
+    TORCH_CHECK(result >= 0);
+    output.emplace_back(result);
+  }
+}
+
+static PyObject* _empty_strided_cpu(PyObject* dummy, PyObject* args) {
+  // at::empty_strided is surprising slow.  This is a lower-overhead
+  // version that saves ~2us on every allocation.
+  HANDLE_TH_ERRORS;
+
+  TORCH_CHECK(PyTuple_CheckExact(args));
+  TORCH_CHECK(PyTuple_GET_SIZE(args) == 3);
+
+  // note PyTuple_GET_ITEM returns a borrowed ref, so no need for refcounts
+  at::SmallVector<int64_t, 8> sizes;
+  unwrap_size_tuple(PyTuple_GET_ITEM(args, 0), sizes);
+
+  at::SmallVector<int64_t, 8> strides;
+  unwrap_size_tuple(PyTuple_GET_ITEM(args, 1), strides);
+
+  PyObject* py_dtype = PyTuple_GET_ITEM(args, 2);
+  TORCH_CHECK(THPDtype_Check(py_dtype));
+  at::ScalarType dtype = reinterpret_cast<THPDtype*>(py_dtype)->scalar_type;
+
+  return THPVariable_Wrap(at::detail::empty_strided_cpu(sizes, strides, dtype));
+
+  END_HANDLE_TH_ERRORS;
+}
+
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 static PyMethodDef _methods[] = {
     {"check_type_id", check_type_id, METH_VARARGS, nullptr},
     {"check_obj_id", check_obj_id, METH_VARARGS, nullptr},
     {"assert_size_stride", assert_size_stride, METH_VARARGS, nullptr},
-    {"dict_version", dict_version, METH_VARARGS, NULL},
+    {"dict_version", dict_version, METH_VARARGS, nullptr},
+    {"_empty_strided_cpu", _empty_strided_cpu, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 static struct PyModuleDef _module = {
@@ -839,6 +877,28 @@ class DICT_KEYS : public LeafGuard {
  private:
   // keys to compare against.
   PyObject* _keys;
+};
+
+class TUPLE_ITERATOR_LEN : public LeafGuard {
+ public:
+  TUPLE_ITERATOR_LEN(py::object value, py::object guard_str)
+      : LeafGuard(guard_str), _length(py::cast<Py_ssize_t>(value)) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    _PyTupleIterObject* it = (_PyTupleIterObject*)value;
+    Py_ssize_t length = 0;
+    if (it->it_seq)
+      length = PyTuple_GET_SIZE(it->it_seq) - it->it_index;
+    return length == _length;
+  }
+
+  std::string repr_prefix() override {
+    return "TUPLE_ITERATOR_LEN";
+  }
+
+ private:
+  // Length of the guarded list
+  Py_ssize_t _length;
 };
 
 /**
@@ -1468,11 +1528,10 @@ class TypeGuardAccessor : public GuardAccessor {
 /**
  * Getitem tuple_iterator accessor.
  */
-
 class TupleIteratorGetItemAccessor : public GuardAccessor {
  public:
   TupleIteratorGetItemAccessor(RootGuardManager* root, py::object index)
-      : GuardAccessor(root, index), _index(py::cast<int>(index)) {}
+      : GuardAccessor(root, index), _index(py::cast<Py_ssize_t>(index)) {}
 
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
@@ -1485,7 +1544,8 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
     return result;
   }
 
-  GuardDebugInfo check_verbose_nopybind(PyObject* obj) override { // borrowed ref
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
     _PyTupleIterObject* it = (_PyTupleIterObject*)obj;
     PyObject* x =
         PyTuple_GET_ITEM(it->it_seq, it->it_index + _index); // borrowed ref
@@ -1495,11 +1555,11 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    return "TupleIteratorGetItemAccessor";
+    return "TupleIteratorGetItemAccessor(" + std::to_string(_index) + ")";
   }
 
  private:
-  int _index;
+  Py_ssize_t _index;
 };
 
 /**
@@ -1659,6 +1719,12 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DICT_KEYS")
       .def(py::init<py::object, py::str>())
       .def("__call__", &DICT_KEYS::check);
+  py::class_<
+      TUPLE_ITERATOR_LEN,
+      LeafGuard,
+      std::shared_ptr<TUPLE_ITERATOR_LEN>>(py_m, "TUPLE_ITERATOR_LEN")
+      .def(py::init<py::object, py::str>())
+      .def("__call__", &TUPLE_ITERATOR_LEN::check);
   py::class_<NoTensorAliasingGuard, std::shared_ptr<NoTensorAliasingGuard>>(
       py_m, "NoTensorAliasingGuard");
 
@@ -1693,8 +1759,8 @@ PyObject* torch_c_dynamo_guards_init() {
   py::class_<
       TupleIteratorGetItemAccessor,
       GuardAccessor,
-      std::unique_ptr<TupleIteratorGetItemAccessor>>(py_m,
-      "TupleIteratorGetItemAccessor");
+      std::unique_ptr<TupleIteratorGetItemAccessor>>(
+      py_m, "TupleIteratorGetItemAccessor");
 
   // Guard Manager - No constructor in python, python should use
   // RootGuardManager.
@@ -1760,6 +1826,14 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object value,
              py::object guard_str) -> void {
             self.add_leaf_guard(std::make_shared<DICT_KEYS>(value, guard_str));
+          })
+      .def(
+          "add_tuple_iterator_length_guard",
+          [](GuardManager& self,
+             py::object value,
+             py::object guard_str) -> void {
+            self.add_leaf_guard(
+                std::make_shared<TUPLE_ITERATOR_LEN>(value, guard_str));
           })
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
