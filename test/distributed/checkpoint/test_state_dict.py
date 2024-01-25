@@ -11,7 +11,12 @@ import torch.nn as nn
 from torch.distributed._composable import fully_shard, replicate
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor, init_device_mesh
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    _CHECKPOINT_WRAPPED_MODULE,
+    apply_activation_checkpointing,
+)
 from torch.distributed.checkpoint.state_dict import (
+    _get_fqns,
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
     get_model_state_dict,
@@ -442,6 +447,21 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         else:
             self.assertEqual(mst, {})
             self.assertEqual(ost, {})
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_activation_ckpt_fqns(self) -> None:
+        """Tests that activation checkpointing prefixes are removed from module names"""
+        model = CompositeParamModel(device=torch.device("cuda"))
+        apply_activation_checkpointing(model)
+        model_names = [(model, name) for name, _ in model.named_parameters()]
+
+        ddp_model = DDP(model)
+        ddp_names = [(ddp_model, name) for name, _ in ddp_model.named_parameters()]
+
+        for model, name in model_names:
+            for fqn in _get_fqns(model, name):
+                self.assertNotIn(_CHECKPOINT_WRAPPED_MODULE, fqn)
 
 
 if __name__ == "__main__":
