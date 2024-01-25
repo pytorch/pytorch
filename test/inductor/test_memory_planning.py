@@ -50,7 +50,7 @@ class TestMemoryPlanning(TestCase):
         result, code = run_and_get_cpp_code(compiled, *args)
 
         FileCheck().check(
-            "pool1 = empty_strided(((4*s0*s1) + (align(4*(s0*s0))), ), (1, )"
+            "pool1 = empty_strided_cuda(((4*s0*s1) + (align(4*(s0*s0))), ), (1, )"
         ).check_next(
             "buf0 = alloc_from_pool(pool1, 0, torch.float32, (s0, s0), (s0, 1))"
         ).check(
