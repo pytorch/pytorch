@@ -107,10 +107,9 @@ def normalize_outarray(arg, parm=None):
     if arg is None:
         return arg
     from ._ndarray import ndarray
-
-    # If dynamo is tracing via a Tensor, we wrap it in an ndarray before
-    # normalizing
-    if isinstance(arg, torch.Tensor):
+    # If torch.dynamo is tracing and we pass a faketensor as an outarray
+    # we wrap it in a ndarray to continue tracing
+    if isinstance(arg, torch._subclasses.FakeTensor):
         arg = wrap_tensors(arg)
     if not isinstance(arg, ndarray):
         raise TypeError(f"'{parm.name}' must be an array")
