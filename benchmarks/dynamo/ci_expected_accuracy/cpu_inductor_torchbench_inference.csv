@@ -54,47 +54,47 @@ densenet121,pass,0
 
 
 
-detectron2_fasterrcnn_r_101_c4,pass,52
+detectron2_fasterrcnn_r_101_c4,pass,51
 
 
 
-detectron2_fasterrcnn_r_101_dc5,pass,52
+detectron2_fasterrcnn_r_101_dc5,pass,51
 
 
 
-detectron2_fasterrcnn_r_101_fpn,pass,56
+detectron2_fasterrcnn_r_101_fpn,pass,55
 
 
 
-detectron2_fasterrcnn_r_50_c4,pass,52
+detectron2_fasterrcnn_r_50_c4,pass,51
 
 
 
-detectron2_fasterrcnn_r_50_dc5,pass,52
+detectron2_fasterrcnn_r_50_dc5,pass,51
 
 
 
-detectron2_fasterrcnn_r_50_fpn,pass,56
+detectron2_fasterrcnn_r_50_fpn,pass,55
 
 
 
-detectron2_fcos_r_50_fpn,pass,44
+detectron2_fcos_r_50_fpn,pass,38
 
 
 
-detectron2_maskrcnn_r_101_c4,fail_accuracy,67
+detectron2_maskrcnn_r_101_c4,fail_accuracy,66
 
 
 
-detectron2_maskrcnn_r_101_fpn,pass,74
+detectron2_maskrcnn_r_101_fpn,pass,73
 
 
 
-detectron2_maskrcnn_r_50_c4,pass,67
+detectron2_maskrcnn_r_50_c4,pass,66
 
 
 
-detectron2_maskrcnn_r_50_fpn,pass,74
+detectron2_maskrcnn_r_50_fpn,pass,73
 
 
 
@@ -162,6 +162,10 @@ hf_clip,eager_fail_to_run,0
 
 
 
+hf_distil_whisper,pass,0
+
+
+
 lennard_jones,pass,0
 
 
@@ -199,10 +203,6 @@ nvidia_deeprecommender,pass,0
 
 
 opacus_cifar10,pass,0
-
-
-
-phi_1_5,pass,0
 
 
 
@@ -322,7 +322,7 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,29
+vision_maskrcnn,pass,28
 
 
 

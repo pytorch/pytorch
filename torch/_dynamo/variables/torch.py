@@ -18,6 +18,7 @@ import torch._refs
 import torch.fx
 import torch.nn
 import torch.onnx.operators
+from torch._logging import warning_once
 
 from .. import config, polyfill, variables
 from ..device_interface import get_registered_device_interfaces
@@ -26,6 +27,7 @@ from ..guards import GuardBuilder
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
+    guard_if_dyn,
     has_torch_function,
     product,
     proxy_args_kwargs,
@@ -139,7 +141,12 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import GradModeVariable, InferenceModeVariable, StreamVariable
+        from . import (
+            GradModeVariable,
+            InferenceModeVariable,
+            StreamVariable,
+            VmapIncrementNestingCtxManagerVariable,
+        )
 
         if self.value is torch.no_grad:
             if len(args) == 1 and isinstance(
@@ -187,11 +194,17 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             torch.autograd.profiler.profile,
             torch.autograd.profiler.record_function,
         ):
-            log.warning("Profiler function %s will be ignored", self.value)
+            warning_once(log, "Profiler function %s will be ignored", self.value)
             return NullContextVariable()
         elif self.value is torch._C.DisableTorchFunctionSubclass:
             assert not (args or kwargs)
             return TorchFunctionDisableVariable.create(tx)
+        elif self.value is torch._functorch.vmap.vmap_increment_nesting:
+            assert len(args) == 2
+            return VmapIncrementNestingCtxManagerVariable.create(
+                tx,
+                [guard_if_dyn(x) for x in args],
+            )
 
 
 class TorchInGraphFunctionVariable(BaseTorchVariable):
@@ -208,6 +221,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             DeterministicAlgorithmsVariable,
             DisabledSavedTensorsHooksVariable,
             GradModeVariable,
+            SDPAParamsVariable,
             StreamContextVariable,
             SymNodeVariable,
             TensorVariable,
@@ -236,10 +250,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             ):
                 tx.mark_inconsistent_side_effects()
             return ConstantVariable.create(tracing_state_functions[self.value])
-        elif self.value in (
-            torch._functorch.vmap.vmap_impl,
-            torch._functorch.eager_transforms.grad_impl,
-        ):
+        elif self.value in (torch._functorch.eager_transforms.grad_impl,):
             return TorchHigherOrderOperatorVariable.make(
                 self.value,
                 source=self.source,
@@ -446,6 +457,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
         ):
             return ConstantVariable(None)
+        elif SDPAParamsVariable.is_sdpa_params(self.value):
+            return wrap_fx_proxy(
+                tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    torch._C._SDPAParams,
+                    *proxy_args_kwargs(args, kwargs),
+                ),
+                param_vars=args,
+            )
         elif is_constant_pg_functions(self.value):
             # becuase the input is a "ProcessGroupVariable", we'll be guarding on its
             # ID_MATCH based on how it was constructed.
@@ -524,10 +545,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             # of value + args to determine this.
             fn_ = self.value
             if any(isinstance(x, SymNodeVariable) for x in args):
-                if self.value == math.sqrt:
-                    from torch.fx.experimental.sym_node import sym_sqrt
-
-                    fn_ = sym_sqrt
+                torch_sym_op = f"_sym_{self.value.__name__}"
+                if getattr(self.value, "__module__", None) == "math" and hasattr(
+                    torch, torch_sym_op
+                ):
+                    fn_ = getattr(torch, torch_sym_op)
 
             if fn_ is torch.tensor:
 
