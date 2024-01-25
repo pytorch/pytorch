@@ -431,6 +431,25 @@ def optim_error_inputs_func_adam(device, dtype):
 
 
 def optim_inputs_func_adamax(device=None):
+    cuda_supported_configs = [
+        OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.9, "maximize": True, "capturable": True},
+            desc="capturable, maximize, weight_decay",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0, "maximize": True, "capturable": True},
+            desc="capturable, maximize",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.9, "maximize": False, "capturable": True},
+            desc="capturable, weight_decay",
+        ),
+    ]
+
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 0.001}, desc="non-default lr"),
@@ -442,7 +461,7 @@ def optim_inputs_func_adamax(device=None):
             kwargs={"weight_decay": 0.9, "maximize": True},
             desc="maximize",
         ),
-    ]
+    ] + (cuda_supported_configs if str(device) == "cuda" else [])
 
 
 def optim_error_inputs_func_adamax(device, dtype):
@@ -704,6 +723,7 @@ def optim_error_inputs_func_rprop(device, dtype):
 def optim_inputs_func_sgd(device=None):
     return [
         OptimizerInput(params=None, kwargs={"lr": 1e-2}, desc="default"),
+        OptimizerInput(params=None, kwargs={"lr": 1e-2}, desc="Tensor lr"),
         OptimizerInput(
             params=None, kwargs={"lr": 1e-2, "momentum": 0.9}, desc="momentum"
         ),
@@ -1171,6 +1191,16 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
             ),
+            DecorateInfo(
+                unittest.skip("Does not support param groups"),
+                "TestOptimRenewed",
+                "test_param_groups_lr",
+            ),
+            DecorateInfo(
+                unittest.skip("Does not support param groups"),
+                "TestOptimRenewed",
+                "test_param_groups_weight_decay",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1374,7 +1404,7 @@ optim_db: List[OptimizerInfo] = [
         SGD,
         optim_inputs_func=optim_inputs_func_sgd,
         optim_error_inputs_func=optim_error_inputs_func_sgd,
-        supported_impls=("foreach", "differentiable"),
+        supported_impls=("foreach", "differentiable", "fused"),
         supports_sparse_on=("cpu", "cuda"),
         skips=(
             DecorateInfo(
@@ -1421,6 +1451,22 @@ optim_db: List[OptimizerInfo] = [
                     "Errors with list out of range, see https://github.com/pytorch/pytorch/issues/116061"
                 ),
                 "TestOptimRenewed",
+                "test_param_groups_weight_decay",
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Errors with list out of range, see https://github.com/pytorch/pytorch/issues/116061"
+                ),
+                "TestOptimRenewed",
+                "test_param_groups_lr",
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Errors with list out of range, see https://github.com/pytorch/pytorch/issues/116061"
+                ),
+                "TestOptimRenewed",
                 "test_load_nontensor_step",
                 device_type="cpu",
             ),
@@ -1457,6 +1503,11 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
+                "TestOptimRenewed",
+                "test_param_groups_lr",
             ),
             DecorateInfo(
                 unittest.skip(

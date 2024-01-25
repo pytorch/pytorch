@@ -44,6 +44,8 @@ class TensorWriteData:
 
 @dataclass(frozen=True)
 class WriteItem:
+    """Dataclass which holds information about what needs to be written to storage.
+    """
     index: MetadataIndex
     type: WriteItemType
 

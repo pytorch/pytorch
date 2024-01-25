@@ -15,27 +15,27 @@ def dedup_save_plans(all_plans: List[SavePlan]) -> List[SavePlan]:
     a set of SavePlans, only the smallest SavePlan in terms of planned storage keeps the entry.
     """
 
-    write_item_to_plans: Dict[MetadataIndex, Set[int]] = defaultdict(set)
+    write_item_to_plan_indices: Dict[MetadataIndex, Set[int]] = defaultdict(set)
     write_item_idx_to_write_item: Dict[MetadataIndex, WriteItem] = {}
     for plan_idx, plan in enumerate(all_plans):
         for write_item in plan.items:
             # map each write item to it's plan
-            write_item_to_plans[write_item.index].add(plan_idx)
+            write_item_to_plan_indices[write_item.index].add(plan_idx)
             write_item_idx_to_write_item[write_item.index] = write_item
 
-    # put item in the plan with the smallest size and remove it from the other plans
+    # put item in the plan with the smallest size and remove it from the other plan_indices
     to_remove: List[Set] = [set() for _ in range(len(all_plans))]
     plan_to_size = [0] * len(all_plans)
-    for write_item_idx, plans in write_item_to_plans.items():
-        selected_plan = min(plans, key=lambda plan_idx: plan_to_size[plan_idx])
+    for write_item_idx, plan_indices in write_item_to_plan_indices.items():
+        select_plan_idx = min(plan_indices, key=lambda plan_idx: plan_to_size[plan_idx])
 
         write_item = write_item_idx_to_write_item[write_item_idx]
         # essentially ignores the storage size of anything that is not a tensor, since
         # we don't know how much storage they represent
-        plan_to_size[selected_plan] += write_item.tensor_storage_size() or 1
+        plan_to_size[select_plan_idx] += write_item.tensor_storage_size() or 1
 
-        plans.remove(selected_plan)
-        for plan_idx in plans:
+        plan_indices.remove(select_plan_idx)
+        for plan_idx in plan_indices:
             to_remove[plan_idx].add(write_item_idx)
 
     for plan_idx, remove_set in enumerate(to_remove):
