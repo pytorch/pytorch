@@ -51,7 +51,7 @@
 #define I_INFO(tensor) cuda::detail::getTensorInfo<int64_t, uint64_t>(tensor)
 #define V_INFO(tensor) cuda::detail::getTensorInfo<scalar_t, uint64_t>(tensor)
 
-namespace at { namespace native {
+namespace at::native {
 
 using namespace at::sparse;
 using at::cuda::detail::TensorInfo;
@@ -296,9 +296,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
   Tensor dense_buffer = dense.to(commonDtype);
   Tensor values = sparse._values().to(commonDtype);
 
-  if (is_same_tensor(r, dense_buffer)) {
-    TORCH_CHECK(r_.is_contiguous(), "add: CUDA dense-sparse addition with a non-contiguous output tensor does not work; shout if you need it (see https://github.com/pytorch/pytorch/issues/1521 )");
-  } else {
+  if (!is_same_tensor(r, dense_buffer)) {
     r.resize_as_(dense);
     r.copy_(dense_buffer);
   }
@@ -961,4 +959,4 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
   return result;
 }
 
-}} // namespace at::native
+} // namespace at::native

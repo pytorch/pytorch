@@ -125,7 +125,7 @@ class PyCodegen:
             self.load_graph_output(graph_outputs[graph_outputs_key].index)
             output.append(
                 self.create_load_global(
-                    value.global_mangled_class_name(), False, add=True
+                    value.global_mangled_class_name(self.tx), False, add=True
                 )
             )
             output.extend(create_call_function(2, True))
@@ -325,14 +325,14 @@ class PyCodegen:
         """
         Generate a LOAD_GLOBAL instruction to fetch a given python module.
         """
-        global_scope = self.tx.output.global_scope
+        output = self.tx.output
+        global_scope = output.global_scope
         name = re.sub(r"^.*[.]", "", mod.__name__)
         if global_scope.get(name, None) is mod:
             return self.create_load_global(name, push_null, add=True)
-        mangled_name = f"___module_{name}_{id(mod)}"
-        if mangled_name not in global_scope:
-            self.tx.output.install_global(mangled_name, mod)
-        return self.create_load_global(mangled_name, push_null, add=True)
+        prefix = f"___module_{name}"
+        global_name = self.tx.output.install_global_by_id(prefix, mod)
+        return self.create_load_global(global_name, push_null, add=True)
 
     def make_call_generated_code(self, fn_name: str) -> None:
         """Call the generated code function stored in fn_name"""
