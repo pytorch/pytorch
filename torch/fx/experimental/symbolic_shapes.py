@@ -2544,7 +2544,11 @@ class ShapeEnv:
             r = sympy_expr
 
             fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
-            self.log.info("create_symbol %s = %s for %s %s%s (%s)", sympy_expr, val, source.name(), range_str, maybe_user_loc, format_frame(fsummary))
+            self.log.info(
+                "create_symbol %s = %s for %s %s%s (%s)",
+                sympy_expr, val, source.name(), range_str,
+                maybe_user_loc, format_frame(fsummary)
+            )
 
             self.counter["create_symbol"] += 1
         else:
