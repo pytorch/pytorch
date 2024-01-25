@@ -61,6 +61,7 @@ from .source import (
     GetItemSource,
     GlobalSource,
     GlobalStateSource,
+    GlobalWeakRefSource,
     LocalSource,
     NNModuleSource,
     NotNNModuleSource,
@@ -328,6 +329,7 @@ class GuardBuilder(GuardBuilderBase):
         # eval_frame calls check_fn with f_locals dict, which is then later
         # wrapped up into a "L" dict.
         root_guard_manager = self.guard_manager.root
+        global_manager = root_guard_manager.globals_dict_manager(self.scope["G"])
 
         # TODO(janimesh) - This should probably to guards object itself with a
         # member function - get_guard_manager. Need to figure out where to put
@@ -337,10 +339,9 @@ class GuardBuilder(GuardBuilderBase):
             if istype(source, LocalSource):
                 return root_guard_manager.dict_get_item_manager(source.local_name)
             elif istype(source, GlobalSource):
-                global_manager = root_guard_manager.globals_dict_manager(
-                    self.scope["G"]
-                )
                 return global_manager.dict_get_item_manager(source.global_name)
+            elif istype(source, GlobalWeakRefSource):
+                return global_manager.global_weakref_manager(source.global_name)
             elif istype(source, GlobalStateSource):
                 # TODO(janimesh) - Revisit this how to insert the global state
                 # guards at the root level. Specifically how is the closure
@@ -703,8 +704,8 @@ class GuardBuilder(GuardBuilderBase):
             local=is_from_local_source(guard.originating_source),
         )
         if any_key_is_id:
-            if config.enable_cpp_guard_manager:
-                assert False, "DICT_KEYS NOT FULLY SUPPORTED"
+            # if config.enable_cpp_guard_manager:
+            #     assert False, "DICT_KEYS NOT FULLY SUPPORTED"
             code.append(f"___key_to_id({ref}) == {const_keys_repr}")
         else:
             code.append(f"list({ref}.keys()) == {const_keys_repr}")
