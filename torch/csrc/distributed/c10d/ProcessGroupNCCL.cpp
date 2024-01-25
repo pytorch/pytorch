@@ -387,7 +387,6 @@ at::Device ProcessGroupNCCL::guessDeviceForRank() const {
   }
 }
 
-const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 100;
 constexpr int64_t kSynchronizeBusyWaitMillis = 10;
 thread_local uint64_t ProcessGroupNCCL::ncclActiveGroupCounter_ = 0;
 
@@ -972,7 +971,7 @@ void ProcessGroupNCCL::waitForPendingWorks() {
     }
 
     std::this_thread::sleep_for(
-        std::chrono::milliseconds(kWatchdogThreadSleepMillis));
+        std::chrono::milliseconds(watchdogSleepMillis_));
   }
 }
 
@@ -1215,7 +1214,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       // we haven't polled for `heartbeat_timeout` seconds and there haven't
       // any work added or removed for `watchdog_timeout` seconds.
       if (computeDeltaMS(lastTimePollStore, currentTime) >=
-              coordCheckIntervalMilSec_) {
+          coordCheckIntervalMilSec_) {
         lastTimePollStore = currentTime;
         if (globalStore_->check({std::string(TIMEOUT_DUMP)})) {
           errorMsg = c10::str(
@@ -1480,14 +1479,23 @@ void ProcessGroupNCCL::watchdogHandler() {
   }
   while (!done || !terminateProcessGroup_.load()) {
     std::unique_lock<std::mutex> lock(workMetaListMutex_);
-    // We busy-poll the work vector every kWatchdogThreadSleepMillis
+    // We busy-poll the work vector every watchdogSleepMillis_
     // milliseconds as long as the atomic is True.
     workMetaListCV_.wait_for(
-        lock,
-        std::chrono::milliseconds(kWatchdogThreadSleepMillis),
-        [&]() -> bool { return terminateProcessGroup_.load(); });
+        lock, std::chrono::milliseconds(watchdogSleepMillis_), [&]() -> bool {
+          return terminateProcessGroup_.load();
+        });
     // Bump up heart beat by one.
     heartbeat_++;
+
+    // Adjust next sleep interval (before processing the work queue)
+    if (workMetaList_.size() > 8) {
+      watchdogSleepMillis_ =
+          std::max(watchdogSleepMillis_ << 1, kWatchdogThreadSleepMinMillis);
+    } else if (workMetaList_.empty()) {
+      watchdogSleepMillis_ =
+          std::min(watchdogSleepMillis_ >> 1, kWatchdogThreadSleepMaxMillis);
+    }
 
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
          /* no increment */) {
@@ -1596,12 +1604,10 @@ void ProcessGroupNCCL::runHookLoop() {
   bool done = false;
   while (!done || !terminateProcessGroup_.load()) {
     std::unique_lock<std::mutex> lock(completedWorkListMutex_);
-    // We busy-poll the work vector every kWatchdogThreadSleepMillis
+    // We busy-poll the work vector every watchdogSleepMillis_
     // milliseconds as long as the atomic is True.
     completedWorkListCV_.wait_for(
-        lock,
-        std::chrono::milliseconds(kWatchdogThreadSleepMillis),
-        [&]() -> bool {
+        lock, std::chrono::milliseconds(watchdogSleepMillis_), [&]() -> bool {
           return !completedWorkList_.empty() || terminateProcessGroup_.load();
         });
 
