@@ -608,6 +608,7 @@ def parse_args() -> Any:
     parser.add_argument("--revert", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--ignore-current", action="store_true")
+    parser.add_argument("--check-mergeability", action="store_true")
     parser.add_argument("--comment-id", type=int)
     parser.add_argument("--reason", type=str)
     parser.add_argument("pr_num", type=int)
@@ -1068,6 +1069,7 @@ class GitHubPR:
         repo: GitRepo,
         skip_mandatory_checks: bool,
         comment_id: Optional[int] = None,
+        skip_all_rule_checks: bool = False,
     ) -> List["GitHubPR"]:
         assert self.is_ghstack_pr()
         ghstack_prs = get_ghstack_prs(
@@ -1082,7 +1084,7 @@ class GitHubPR:
             commit_msg = pr.gen_commit_message(
                 filter_ghstack=True, ghstack_deps=pr_dependencies
             )
-            if pr.pr_num != self.pr_num:
+            if pr.pr_num != self.pr_num and not skip_all_rule_checks:
                 # Raises exception if matching rule is not found
                 find_matching_merge_rule(
                     pr,
@@ -1199,7 +1201,11 @@ class GitHubPR:
         skip_mandatory_checks: bool = False,
         comment_id: Optional[int] = None,
         branch: Optional[str] = None,
+        skip_all_rule_checks: bool = False,
     ) -> List["GitHubPR"]:
+        """
+        :param skip_all_rule_checks: If true, skips all rule checks, useful for dry-running merge locally
+        """
         branch_to_merge_into = self.default_branch() if branch is None else branch
         if repo.current_branch() != branch_to_merge_into:
             repo.checkout(branch_to_merge_into)
@@ -1215,6 +1221,7 @@ class GitHubPR:
                 repo,
                 skip_mandatory_checks,
                 comment_id=comment_id,
+                skip_all_rule_checks=skip_all_rule_checks,
             )
 
 
@@ -2292,6 +2299,17 @@ def main() -> None:
         )
         return
 
+    if args.check_mergeability:
+        if pr.is_ghstack_pr():
+            get_ghstack_prs(repo, pr)  # raises error if out of sync
+        pr.merge_changes(
+            repo,
+            branch="main",
+            skip_mandatory_checks=True,
+            skip_all_rule_checks=True,
+        )
+        return
+
     if not args.force and pr.has_invalid_submodule_updates():
         message = (
             f"This PR updates submodules {', '.join(pr.get_changed_submodules())}\n"
@@ -2340,9 +2358,10 @@ def main() -> None:
         else:
             print("Missing comment ID or PR number, couldn't upload to Rockset")
     finally:
-        gh_remove_label(
-            org, project, args.pr_num, MERGE_IN_PROGRESS_LABEL, args.dry_run
-        )
+        if not args.check_mergeability:
+            gh_remove_label(
+                org, project, args.pr_num, MERGE_IN_PROGRESS_LABEL, args.dry_run
+            )
 
 
 if __name__ == "__main__":
