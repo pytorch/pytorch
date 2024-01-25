@@ -1,6 +1,8 @@
 #pragma once
 
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+
 #include <ATen/native/DispatchStub.h>
 #include <c10/util/Optional.h>
 
