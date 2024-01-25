@@ -15,12 +15,16 @@ c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
     // NB: This is not quite right, if you somehow had both CUDA and PrivateUse1 initialized
     // in the same PyTorch build, you would ONLY ever get the CUDA pinned memory allocator.
     // To properly support this, see https://github.com/pytorch/pytorch/issues/14560
-    if (at::globalContext().hasCUDA()) {
-      return at::detail::getCUDAHooks().getPinnedMemoryAllocator();
-    } else if(at::isPrivateUse1HooksRegistered()) {
-      return at::GetPrivateUse1HooksInterface()->getPinnedMemoryAllocator();
-    } else {
-      TORCH_CHECK(false, "Need to provide pin_memory allocator to use pin memory.")
+    c10::DeviceType device_type = at::globalContext().getDefaultPinMemoryDevice();
+    switch (device_type) {
+      case c10::DeviceType::CUDA:
+        return at::detail::getCUDAHooks().getPinnedMemoryAllocator();
+      case c10::DeviceType::PrivateUse1:
+        return at::GetPrivateUse1HooksInterface()->getPinnedMemoryAllocator();
+      case c10::DeviceType::HIP:
+        return at::detail::getHIPHooks().getPinnedMemoryAllocator();
+      default:
+        TORCH_CHECK(false, "Need to provide pin_memory allocator to use pin memory.")
     }
   }
   return c10::GetCPUAllocator();

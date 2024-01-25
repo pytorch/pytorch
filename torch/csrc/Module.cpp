@@ -1164,6 +1164,30 @@ PyObject* THPModule_unsetDefaultMobileCPUAllocator(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPModule_setDefaultPinMemoryDevice(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkString(arg),
+      "_set_default_pin_memory_device expects a str, but got ",
+      THPUtils_typename(arg));
+  const std::string backend_name = THPUtils_unpackString(arg);
+  c10::DeviceType device_type = at::Device(backend_name).type();
+  at::globalContext().setDefaultPinMemoryDevice(device_type);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_getDefaultPinMemoryDevice(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  c10::DeviceType device_type = at::globalContext().getDefaultPinMemoryDevice();
+  return THPUtils_packString(c10::DeviceTypeName(device_type, true));
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPModule_vmapmode_increment_nesting(
     PyObject* _unused,
     PyObject* arg) {
@@ -1405,6 +1429,14 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      nullptr},
     {"_unset_default_mobile_cpu_allocator",
      THPModule_unsetDefaultMobileCPUAllocator,
+     METH_NOARGS,
+     nullptr},
+    {"_set_default_pin_memory_device",
+     THPModule_setDefaultPinMemoryDevice,
+     METH_O,
+     nullptr},
+    {"_get_default_pin_memory_device",
+     THPModule_getDefaultPinMemoryDevice,
      METH_NOARGS,
      nullptr},
     {"_is_torch_function_enabled",

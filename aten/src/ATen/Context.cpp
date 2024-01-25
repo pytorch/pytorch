@@ -469,4 +469,13 @@ void Context::unsetDefaultMobileCPUAllocator() {
   c10::SetCPUAllocator(prev_allocator_ptr_ , /*priority*/ 100);
   prev_allocator_ptr_ = nullptr;
 }
+
+void Context::setDefaultPinMemoryDevice(c10::DeviceType device) {
+  default_pin_memory_device = device;
+}
+
+c10::DeviceType Context::getDefaultPinMemoryDevice() {
+  return default_pin_memory_device;
+}
+
 } // namespace at

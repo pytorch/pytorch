@@ -296,6 +296,9 @@ class TORCH_API Context {
   void setDefaultMobileCPUAllocator();
   void unsetDefaultMobileCPUAllocator();
 
+  void setDefaultPinMemoryDevice(c10::DeviceType device);
+  c10::DeviceType getDefaultPinMemoryDevice();
+
  private:
   void initCUDAIfNeeded(c10::DeviceType p) {
     if (p == c10::DeviceType::CUDA) {
@@ -348,6 +351,7 @@ class TORCH_API Context {
   bool enable_sparse_tensor_invariant_checks = false;
 
   Allocator* prev_allocator_ptr_{nullptr};
+  c10::DeviceType default_pin_memory_device{c10::kCUDA};
 };
 
 TORCH_API Context& globalContext();
