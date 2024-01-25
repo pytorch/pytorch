@@ -27,6 +27,7 @@ from ..utils import (
     cache_on_self,
     get_fused_kernel_name,
     is_welford_reduction,
+    parallel_num_threads,
     sympy_product,
     sympy_subs,
     sympy_symbol,
@@ -305,13 +306,6 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
             ]
         )
     return prefix
-
-
-def parallel_num_threads():
-    threads = config.cpp.threads
-    if threads < 1:
-        threads = torch.get_num_threads()
-    return threads
 
 
 @functools.lru_cache
