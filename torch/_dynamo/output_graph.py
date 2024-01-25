@@ -254,7 +254,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.cleanup_hooks: List[Callable[[], Any]] = []
         # compile_id is an id number for the current torch.compile
         self.compile_id: int = next(_compile_id_counter)
-        # Set of globals installed via install_global_once
+        # Set of globals installed via install_global* APIs
         self.installed_globals: Set[str] = set()
 
         # TODO: maybe should just pass the entire f_code in here?  Not
@@ -882,9 +882,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             append_prefix_insts()
             random_calls_instructions = []
             self.random_values_var = self.new_var("random_values")
-            rand_fn_name = unique_id("__gen_rand_values")
             rand_fn = disable(_get_gen_rand_values_fn(tx.random_calls))
-            self.install_global_unsafe(rand_fn_name, rand_fn)
+            rand_fn_name = self.install_global("__gen_rand_values", rand_fn)
             codegen = PyCodegen(tx, root)
             random_calls_instructions.extend(
                 codegen.load_function_name(rand_fn_name, True)
@@ -1090,6 +1089,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
+        # This is safe because we pre-process name to be unique
         self.install_global_unsafe(name, compiled_fn)
 
         cg = PyCodegen(tx)
@@ -1372,25 +1372,40 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def install_global_unsafe(self, name, value) -> None:
         """
-        WARNING: prefer the safer `install_global_once`.
+        WARNING: prefer the safer `install_global_by_id/install_global`.
         torch.compile instances should be independent of each other;
         one footgun is to have one instance depend on the existence of
         a global installed by another instance. This can happen if we mangle
         a global the same way across both instances.
         """
+        assert name not in self.installed_globals
+        self.installed_globals.add(name)
         self.cleanups.append(CleanupHook.create(self.global_scope, name, value))
 
-    def install_global_once(self, name, value) -> str:
+    def install_global_by_id(self, prefix, value) -> str:
         """
-        Install a global once per output_graph.
+        Installs a global if it hasn't been installed already.
+        This is determined by (prefix, id(value)) pair.
 
         Returns the name of the newly installed global.
         """
-        name = f"{name}_c{self.compile_id}"
+        # NB: need self.compile_id to distinguish this global
+        # from another global created in a different torch.compile instance
+        name = f"{prefix}_{id(value)}_c{self.compile_id}"
         if name in self.installed_globals:
             return name
         self.install_global_unsafe(name, value)
-        self.installed_globals.add(name)
+        return name
+
+    def install_global(self, prefix, value) -> str:
+        """
+        Installs a global, generating a unique name for it.
+
+        Returns the name of the newly installed global.
+        """
+        # NB: unique_id is unique, even across torch.compile instances
+        name = unique_id(prefix)
+        self.install_global_unsafe(name, value)
         return name
 
     def cleanup(self) -> None:
