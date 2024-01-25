@@ -1186,6 +1186,7 @@ def main():
         "include/ATen/native/mps/*.h",
         "include/ATen/native/quantized/*.h",
         "include/ATen/native/quantized/cpu/*.h",
+        "include/ATen/native/sparse/*.h",
         "include/ATen/native/utils/*.h",
         "include/ATen/quantized/*.h",
         "include/caffe2/serialize/*.h",
