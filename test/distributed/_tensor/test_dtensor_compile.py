@@ -125,6 +125,26 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             compiled_out = compiled_fn(x)
             self.assertEqual(opt_fn, compiled_out)
 
+    def test_device_mesh_compile(self):
+        def fn(x):
+            # test size()
+            a = x.size()
+            b = x.size(0)
+            c = x.size(mesh_dim=0)
+            size = a + b + c
+            # test get_coordinate()
+            coord = x.get_coordinate()
+            # test get_group()
+            group = x.get_group()
+            return size, coord, group
+
+        compiled_fn = torch.compile(backend="aot_eager", fullgraph=True)(fn)
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        opt_fn = fn(mesh)
+        compiled_out = compiled_fn(mesh)
+        self.assertEqual(opt_fn, compiled_out)
+
     def test_fakify_dtensor(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
