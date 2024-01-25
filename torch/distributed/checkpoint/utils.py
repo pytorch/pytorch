@@ -35,7 +35,9 @@ def _get_failure_dict(
     )
 
 
-def _all_gather_keys(local_dict: Dict[Any, Any], group:Optional[dist.ProcessGroup]=None) -> List[Any]:
+def _all_gather_keys(
+    local_dict: Dict[Any, Any], group: Optional[dist.ProcessGroup] = None
+) -> List[Any]:
     """Gathers all keys, and returns them sorted."""
     keys = list(local_dict.keys())
     gathered_keys: List[List[Any]] = [None] * dist.get_world_size()  # type: ignore[list-item]
