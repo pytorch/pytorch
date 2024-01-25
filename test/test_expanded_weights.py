@@ -696,14 +696,16 @@ for test_param in supported_tests:
     test_name_multi_input = test.get_name() + "_multiple_inputs"
     if hasattr(TestExpandedWeightModule, test_name_multi_input):
         raise RuntimeError('Found two tests with the same name: ' + test_name)
+    if decorator is not None:
+        test = decorator(test)
     if test.test_cpu:
-        setattr(TestExpandedWeightModule, test_name, decorator(lambda self, test=test: test.test_context_manager(self, 'cpu')))
+        setattr(TestExpandedWeightModule, test_name, lambda self, test=test: test.test_context_manager(self, 'cpu'))
         setattr(TestExpandedWeightModule, test_name_multi_input,
-                decorator(lambda self, test=test: test.test_context_manager_multiple_inputs(self, 'cpu')))
+                lambda self, test=test: test.test_context_manager_multiple_inputs(self, 'cpu'))
     if TEST_CUDA and test.test_cuda:
         # since this checks derivatives, only use double for precision
         setattr(TestExpandedWeightModule, test_name + '_cuda_double',
-                decorator(lambda self, test=test: test.test_context_manager(self, 'cuda')))
+                lambda self, test=test: test.test_context_manager(self, 'cuda'))
 
 # ------------- HELPER FUNCTIONS -----------------
 
