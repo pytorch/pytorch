@@ -133,6 +133,7 @@ qconfig_dict = {"object_type": [(torch.nn.Linear, uniform_qconfig_8bit)]}
 
 class MiscTests(torch._dynamo.test_case.TestCase):
     def test_get_cache_entry(self):
+        raise RuntimeError("failed!")
         def f(x):
             return x + 1
 
