@@ -178,6 +178,6 @@ def generate_redistribute_costs(
 ) -> List[float]:
     redistribute_costs: List[float] = []
     for strat in src_strategy.strategies:
-        redistribute_costs.append(redistribute_cost(strat.out_spec, dst_spec))
+        redistribute_costs.append(redistribute_cost(strat.output_spec, dst_spec))
 
     return redistribute_costs
