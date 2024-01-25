@@ -47,6 +47,24 @@ requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda"
 requires_multigpu = functools.partial(
     unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
 )
+from io import StringIO
+
+
+class capture_stderr(list):
+    """
+    Replace sys.stderr with a temporary StringIO
+    """
+
+    def __enter__(self):
+        self.sys_stderr = sys.stderr
+        self.stringio = StringIO()
+        sys.stderr = self.stringio
+        return self
+
+    def __exit__(self, *args):
+        self.append(str(self.stringio.getvalue()))
+        del self.stringio
+        sys.stderr = self.sys_stderr
 
 
 def cdata(t):
@@ -205,6 +223,30 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         def test_rng_non_trees(self):
             self.check_rng()
 
+        def test_mutation_reinplaced(self):
+            import torch.nn as nn
+
+            class Model(nn.Module):
+                def __init__(self):
+                    super().__init__()
+
+                def forward(self, input, other, out):
+                    input = torch.logical_xor(input=input, other=other, out=out)
+                    return input
+
+            x = torch.rand([1, 2, 1, 4, 9, 7], dtype=torch.float32).cuda()
+            y = torch.rand([1, 2, 1, 4, 9, 7], dtype=torch.float32).cuda()
+            z = torch.rand([1, 2, 1, 4, 9, 7], dtype=torch.float16).cuda()
+
+            model = Model().cuda()
+            eag = model(x, y, z)
+            with capture_stderr() as captured_output:
+                opt = torch.compile(model.forward, mode="reduce-overhead")(x, y, z)
+
+            FileCheck().check(
+                "skipping cudagraphs due to mutaton on input. Found from"
+            ).check("torch.logical_xor").run(captured_output[0])
+
         def test_mutation(self):
             @torch.compile()
             def foo(x):
@@ -214,7 +256,12 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def inp():
                 return torch.ones([10], device="cuda")
 
-            foo(inp())
+            with capture_stderr() as captured_output:
+                foo(inp())
+
+            FileCheck().check("skipping cudagraphs due to mutaton on input.").check(
+                ".add_(2)"
+            ).run(captured_output[0])
 
             # mutation on inp doesnt hit cudagraphs
             self.assertIsNone(self.get_manager())
