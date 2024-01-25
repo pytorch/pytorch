@@ -17,13 +17,14 @@ except ModuleNotFoundError:
 
 import torch
 
-from .utils import hashable, is_function, NP_SUPPORTED_MODULES
+from .utils import getfile, hashable, is_function, NP_SUPPORTED_MODULES
 
 from .variables import (
+    BuiltinVariable,
     FunctorchVmapHigherOrderVariable,
-    UserFunctionVariable,
     SkipFilesVariable,
     TorchInGraphFunctionVariable,
+    UserFunctionVariable,
     UserFunctionVariable,
 )
 
@@ -2982,15 +2983,18 @@ E.g, the lookup result of `torch.sin` is `TorchInGraphFunctionVariable`.
 """
 
 
-def lookup(obj, filename=None, is_inlined_call=False):
+def lookup(obj, filename=None, is_inlined_call=True):
+    if not hashable(obj):
+        return None
+
     if obj is not None:
-        if not hashable(obj):
-            return None
         # Custom allow/disallow in graph takes precedence over the `torch_name_rule_map`.
         if callable(obj) and is_callable_disallowed(obj):
             return SkipFilesVariable
         if callable(obj) and is_callable_allowed(obj):
             return TorchInGraphFunctionVariable
+        if callable(obj) and is_builtin_callable(obj):
+            return BuiltinVariable
         # Unwrap if the function is wrapped by functools.lru_cache or functools.wraps.
         if isinstance(obj, functools._lru_cache_wrapper) or (
             is_function(obj) and hasattr(obj, "__wrapped__")
@@ -3001,10 +3005,17 @@ def lookup(obj, filename=None, is_inlined_call=False):
                 and str(obj.__qualname__).startswith("_VariableFunctionsClass")
             ):
                 obj = obj.__wrapped__
-        rule = get_torch_obj_rule_map().get(obj, None)
-        if rule is None and is_aten_op_or_tensor_method(obj):
+        if is_aten_op_or_tensor_method(obj):
             return TorchInGraphFunctionVariable
-    if torch._dynamo.skipfiles._check_file(filename):
-        return SkipFilesVariable
-    else:
-        return UserFunctionVariable
+        rule = get_torch_obj_rule_map().get(obj, None)
+        if rule is not None:
+            return rule
+
+    if filename is None:
+        filename = getfile(obj)
+
+    if is_function(obj) or obj is None or isinstance(obj, types.MethodType):
+        if torch._dynamo.skipfiles._check_file(filename, is_inlined_call):
+            return SkipFilesVariable
+        else:
+            return UserFunctionVariable

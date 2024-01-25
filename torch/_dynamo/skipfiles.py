@@ -36,7 +36,7 @@ import torch.distributed
 import torch.utils._content_store
 from .utils import getfile
 
-from .variables import SkipFilesVariable
+from .variables import FunctorchVmapHigherOrderVariable, SkipFilesVariable
 from .variables.functions import (
     NestedUserFunctionVariable,
     UserFunctionVariable,
@@ -390,14 +390,14 @@ def check_verbose(obj, is_inlined_call=False):
         elif fi.name == "__torch_function__":
             return SkipResult(False, "allow inlining __torch_function__")
     # Go through function based skip/inline rules.
-    rule = torch._dynamo.trace_rules.lookup(fi.py_obj, fi.filename)
-    if rule == UserFunctionVariable:
+    rule = torch._dynamo.trace_rules.lookup(fi.py_obj, fi.filename, is_inlined_call)
+    if rule in [UserFunctionVariable, FunctorchVmapHigherOrderVariable]:
         return SkipResult(
             False,
             "inlined according trace_rules.lookup",
         )
     else:
-        assert rule == SkipFilesVariable
+        assert rule == SkipFilesVariable, breakpoint()
         return SkipResult(
             True,
             "skipped according trace_rules.lookup",

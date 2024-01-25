@@ -31,6 +31,7 @@ from ..utils import (
     extract_fake_example_value,
     get_fake_value,
     guard_if_dyn,
+    is_function,
     is_utils_checkpoint,
     istype,
     numpy_operator_wrapper,
@@ -1297,7 +1298,7 @@ class BuiltinVariable(VariableTracker):
             if is_utils_checkpoint(member):
                 options["source"] = source
                 return build_checkpoint_variable(**options)
-            elif trace_rules.lookup(member) is not None:
+            elif is_function(member) and trace_rules.lookup(member) is not None:
                 return trace_rules.lookup(member)(member, **options)
             elif source is not None:
                 return VariableBuilder(tx, source)(member)
