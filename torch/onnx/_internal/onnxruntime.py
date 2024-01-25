@@ -1,6 +1,7 @@
 import dataclasses
 import importlib
 import logging
+import os
 
 from typing import (
     Any,
@@ -83,6 +84,34 @@ def is_onnxrt_backend_supported() -> bool:
         ...
     """
     return _SUPPORT_ONNXRT
+
+
+_dumped_onnx_model: Dict[str, int] = {}
+
+
+def _dump_onnx_model(
+    model_string: bytes, graph_module: Optional[torch.fx.GraphModule] = None
+) -> str:
+    """Stores the onnx model into a file.
+    The name is "{ONNXRT_DUMP_PATH}{N}.onnx"
+    where *N* is the number of files already stored with
+    this prefix.
+    If graph_module is not None, the graph is stored as a string with
+    the same filename except the extension (.txt).
+    """
+    prefix = os.environ.get("ONNXRT_DUMP_PATH", None)
+    if not prefix:
+        return ""
+    n = _dumped_onnx_model.get(prefix, -1) + 1
+    filename = f"{prefix}{n}.onnx"
+    with open(filename, "wb") as f:
+        f.write(model_string)
+    _dumped_onnx_model[prefix] = n
+    if graph_module is not None:
+        filename_txt = f"{prefix}{n}.txt"
+        with open(filename_txt, "w", encoding="utf-8") as f:
+            f.write(str(graph_module.graph))
+    return filename
 
 
 def _infer_default_eps() -> Sequence[str]:
@@ -890,6 +919,18 @@ class OrtBackend:
                 opset_version=self._resolved_onnx_exporter_options.onnx_registry.opset_version,
             )
 
+            onnx_model_bytes = onnx_model.SerializeToString()
+            if os.environ.get("ONNXRT_DUMP_PATH", None):
+                # If not empty, environment variable ONNXRT_DUMP_PATH defined the path
+                # where generated onnx files should be stored.
+                # This module keeps a global variables keeping track of the
+                # stored models.
+                # If ONNXRT_DUMP_PATH="dumped/dumped_model_"
+                # The first file name will be 'dumped/dumped_model_0.onnx'.
+                # For every dumped model, a text file 'dumped/dumped_model_0.txt'
+                # is created as well to contain the string representing the graph_module.
+                _dump_onnx_model(onnx_model_bytes, graph_module=graph_module)
+
             # Initialize a ORT session to execute this ONNX model.
             # Note that TorchDynamo assumes all inputs/outputs are on the
             # same device, but it's subject to change (very likely with
@@ -900,7 +941,7 @@ class OrtBackend:
             # TODO(wschin): enable external allocators.
             # See https://github.com/pytorch/pytorch/issues/106867
             onnx_session = onnxruntime.InferenceSession(
-                path_or_bytes=onnx_model.SerializeToString(),
+                path_or_bytes=onnx_model_bytes,
                 sess_options=self._options.ort_session_options,
                 providers=self._select_eps(graph_module, *args),
             )
