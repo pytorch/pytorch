@@ -338,12 +338,12 @@ class _TorchDynamoContext:
                 "to use torch._dynamo.optimize(...) as an annotation/decorator. "
             )
         self.on_enter()
-        self.prior = set_eval_frame(self.callback)
         self.cleanup_fns.append(self.set_backend_cache())
         self.backend_ctx = self.extra_ctx_ctor()
         self.backend_ctx.__enter__()
         self.dynamic_ctx = enable_dynamic(self.dynamic, self.export)
         self.dynamic_ctx.__enter__()
+        self.prior = set_eval_frame(self.callback)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         assert self.prior is not unset
@@ -427,12 +427,12 @@ class _TorchDynamoContext:
                     return fn(*args, **kwargs)
 
             on_enter()
-            prior = set_eval_frame(callback)
             cleanups = (self.set_backend_cache(),)
             backend_ctx = backend_ctx_ctor()
             backend_ctx.__enter__()
             dynamic_ctx = enable_dynamic(self.dynamic, self.export)
             dynamic_ctx.__enter__()
+            prior = set_eval_frame(callback)
             try:
                 return fn(*args, **kwargs)
             finally:
