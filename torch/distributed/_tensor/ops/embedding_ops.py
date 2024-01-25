@@ -130,6 +130,10 @@ class _MaskPartial(_Partial):
 
         # if either data is not None, we invalidate the sharding cache, as this indicates
         # the current MaskPartial placement is still in use and should not be used for cache hit.
+        # NOTE: this is forbidding cache hit for operator input that contains MaskPartial for safety,
+        # so for the replicate input return a resharding schema that contains MaskPartial it should
+        # still have the cache hit.
+        # TODO: evaluate if we should loosen this constraint
         if self.mask_buffer.data is not None or other.mask_buffer.data is not None:
             return False
 
