@@ -655,11 +655,12 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def new_var(self, name="tmp"):
         existing = set(self.code_options["co_varnames"])
+        var = f"{name}"
         for i in itertools.count():
-            var = f"{name}_{i}"
             if var not in existing:
                 self.code_options["co_varnames"] += (var,)
                 return var
+            var = f"{name}_{i}"
 
     def update_co_names(self, name):
         """Ensure self.code_options.co_names contains name"""

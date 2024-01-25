@@ -433,7 +433,6 @@ class ContinueExecutionCache:
                 )
 
             assert not hooks
-
             prefix.append(create_jump_absolute(target))
 
             # because the line number table monotonically increases from co_firstlineno

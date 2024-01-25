@@ -57,6 +57,11 @@ class TorchRuntimeError(TorchDynamoException):
     pass
 
 
+class NestedGraphBreak(TorchDynamoException):
+    def __init__(self):
+        self.real_stack = torch._guards.TracingContext.extract_stack()
+
+
 class InvalidBackend(TorchDynamoException):
     def __init__(self, name):
         super().__init__(

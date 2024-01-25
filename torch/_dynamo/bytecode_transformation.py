@@ -966,6 +966,7 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
                 instructions[i].arg = names[instructions[i].argval]
         elif instructions[i].opcode in HAS_LOCAL:
             if should_compute_arg():
+                assert instructions[i].argval in varnames, breakpoint()
                 instructions[i].arg = varnames[instructions[i].argval]
         elif instructions[i].opcode in HAS_NAME:
             if should_compute_arg():
@@ -1022,7 +1023,18 @@ def get_code_keys() -> List[str]:
     return keys
 
 
+def code_to_insts(code, safe=False):
+    def no_op_transform(x, y):
+        pass
+
+    return _transform_code_object(code, no_op_transform, safe=safe)[0]
+
+
 def transform_code_object(code, transformations, safe=False) -> types.CodeType:
+    return _transform_code_object(code, transformations, safe=safe)[1]
+
+
+def _transform_code_object(code, transformations, safe=False) -> types.CodeType:
     keys = get_code_keys()
     code_options = {k: getattr(code, k) for k in keys}
     assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
@@ -1031,7 +1043,7 @@ def transform_code_object(code, transformations, safe=False) -> types.CodeType:
     propagate_line_nums(instructions)
 
     transformations(instructions, code_options)
-    return clean_and_assemble_instructions(instructions, keys, code_options)[1]
+    return clean_and_assemble_instructions(instructions, keys, code_options)
 
 
 def clean_and_assemble_instructions(

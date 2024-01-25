@@ -646,6 +646,20 @@ class FunctoolsPartialVariable(VariableTracker):
                 **{k: get_val(v) for k, v in self.keywords.items()},
             )
 
+    def reconstruct(self, codegen):
+        codegen.load_import_from("functools", "partial")
+        codegen(self.func)
+        if self.args:
+            codegen.foreach(self.args)
+        if not self.keywords:
+            return create_call_function(len(self.args) + 1, True)
+
+        codegen.foreach(self.keywords.values())
+        keys = tuple(self.keywords.keys())
+        return codegen.create_call_function_kw(
+            len(keys) + len(self.args) + 1, keys, True
+        )
+
 
 class TritonKernelVariable(VariableTracker):
     def __init__(self, kernel, kernel_idx, grid, **kwargs):

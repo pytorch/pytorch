@@ -69,13 +69,13 @@ from .utils import (
     counters,
     cprofile_wrapper,
     dynamo_timed,
-    format_bytecode,
     frame_phase_timing,
     gen_record_file_name,
     increment_frame,
     is_namedtuple,
     istype,
     LazyString,
+    log_bytecode,
     orig_code_map,
     record_compilation_metrics,
     reset_graph_break_dup_checker,
@@ -85,7 +85,6 @@ from .utils import (
 )
 
 log = logging.getLogger(__name__)
-bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
 GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
 
 
@@ -275,7 +274,6 @@ def convert_frame_assert(
         frame: types.FrameType, cache_entry, hooks: Hooks, frame_state
     ):
         increment_frame()
-
         code = frame.f_code
 
         cache_size = compute_cache_size(frame, cache_entry)
@@ -385,6 +383,7 @@ def convert_frame_assert(
 
         return _compile(
             frame.f_code,
+            getattr(frame, "f_func", None),  # 3.11+
             frame.f_globals,
             frame.f_locals,
             frame.f_builtins,
@@ -435,6 +434,7 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
 @maybe_cprofile
 def _compile(
     code: types.CodeType,
+    func_obj,
     globals: Dict[str, object],
     locals: Dict[str, object],
     builtins: Dict[str, object],
@@ -473,6 +473,7 @@ def _compile(
         tracer = InstructionTranslator(
             instructions,
             code,
+            func_obj,
             locals,
             globals,
             builtins,
@@ -545,12 +546,6 @@ def _compile(
                     log.debug("No graph captured with one_graph=True")
                 return None
 
-        def log_bytecode(prefix, name, filename, line_no, code):
-            if bytecode_log.isEnabledFor(logging.DEBUG):
-                bytecode_log.debug(
-                    format_bytecode(prefix, name, filename, line_no, code)
-                )
-
         log_bytecode(
             "ORIGINAL BYTECODE",
             code.co_name,
@@ -599,17 +594,17 @@ def _compile(
         assert (
             code.co_varnames[:total_argcount_old]
             == out_code.co_varnames[:total_argcount_new]
-        ), msg
+        ), (msg, code, breakpoint())
 
         msg = "free var mismatch: "
         msg += f"old code object has free var {code.co_freevars}, "
         msg += f"new code object has free var {out_code.co_freevars}"
-        assert code.co_freevars == out_code.co_freevars, msg
+        assert code.co_freevars == out_code.co_freevars, (msg, code, breakpoint())
 
         msg = "cell var mismatch: "
         msg += f"old code object has cell var {code.co_cellvars}, "
         msg += f"new code object has cell var {out_code.co_cellvars}"
-        assert code.co_cellvars == out_code.co_cellvars, msg
+        assert code.co_cellvars == out_code.co_cellvars, (msg, code)
 
         # Skipping Dynamo on a frame without any extracted graph.
         # This does not affect eager functionality. But this is necessary
@@ -627,6 +622,7 @@ def _compile(
             hooks.guard_fail_fn if hooks else None,
         )
 
+        # breakpoint()
         guarded_code = GuardedCode(out_code, check_fn.check_fn)
 
         if not output.is_empty_graph() and hooks.guard_export_fn is not None:
@@ -738,6 +734,7 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
     inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
 
     def _convert_frame(frame: types.FrameType, cache_entry, hooks: Hooks, frame_state):
+        # breakpoint()
         counters["frames"]["total"] += 1
         try:
             result = inner_convert(frame, cache_entry, hooks, frame_state)
