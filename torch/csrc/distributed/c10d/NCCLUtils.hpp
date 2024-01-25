@@ -86,6 +86,18 @@
     }                                                                         \
   } while (0)
 
+// Macro to throw on a non-successful NCCL return value for NONBLOCKING calls.
+#define C10D_NCCL_CHECK_NONBLOCKING(cmd, failureReason)                       \
+  do {                                                                        \
+    ncclResult_t result = cmd;                                                \
+    if (result != ncclSuccess && result != ncclInProgress) {                  \
+      std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +     \
+          std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(result) + \
+          "\n" + getNcclErrorDetailStr(result, failureReason);                \
+      TORCH_CHECK_WITH(DistBackendError, false, err);                         \
+    }                                                                         \
+  } while (0)
+
 // Macro to throw on a non-successful NCCL return value, non-blocking.
 #define C10D_NCCL_CHECK_TIMEOUT(cmd, comm, failureReason)                     \
   ncclResult_t result = cmd;                                                  \
@@ -251,10 +263,9 @@ class NCCLComm {
     auto comm = std::make_shared<NCCLComm>();
     if (nccl_use_nonblocking()) {
       config.blocking = 0;
-      C10D_NCCL_CHECK_TIMEOUT(
+      C10D_NCCL_CHECK_NONBLOCKING(
           ncclCommInitRankConfig(
               &(comm->ncclComm_), numRanks, commId, rank, &config),
-          comm->ncclComm_,
           c10::nullopt);
     } else {
       C10D_NCCL_CHECK(
