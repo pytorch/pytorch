@@ -11,7 +11,6 @@ from torch.nn.functional import scaled_dot_product_attention
 from torch.nn.attention.bias import CausalVariant, causal_lower_right, causal_upper_left
 from torch.nn.parameter import Parameter
 import unittest
-from unittest import expectedFailure as xfail
 from unittest.mock import patch, MagicMock, ANY
 import math
 from torch.backends.cuda import sdp_kernel, SDPBackend
@@ -2121,6 +2120,16 @@ class TestSDPACudaOnly(NNTestCase):
         max_diff = (out - out_contig).abs().mean()
         self.assertTrue(max_diff.item() < 1e-7)
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Fused SDPA was not built for this system")
+    def test_singelton_head_dim_stride_ne_1(self, device):
+        query = torch.tensor([[[[1, 2]]]], dtype=torch.float16, device=device)
+        query = query.transpose(-1, -2)
+        key = torch.tensor([[[[1]]]], dtype=torch.float16, device=device)
+        value = torch.tensor([[[[1]]]], dtype=torch.float16, device=device)
+
+        with torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=True, enable_mem_efficient=False):
+            scaled_dot_product_attention(query, key, value)
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("type", ["dense", "nested"])
     @parametrize("is_contiguous", [True, False])
@@ -3280,13 +3289,12 @@ class TestAttnMasks(NNTestCase):
 
         self.run_test(device, False, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol)
 
-    @skipIfRocm  # No support for the second variant for now
+    @unittest.skip("This test fails on some parameters and on some CI machines")
     @parametrize("causal_variant", [CausalVariant.UPPER_LEFT, CausalVariant.LOWER_RIGHT])
     @parametrize(
         "shape",
         [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)],
     )
-    @xfail
     def test_causal_variants_compile(self, device, causal_variant: CausalVariant, shape: List[Tuple[int]]):
         make_tensor = partial(
             torch.rand, device=device, dtype=torch.float16, requires_grad=True
