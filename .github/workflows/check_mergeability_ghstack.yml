@@ -1,16 +1,14 @@
-name: Check mergeability and dependencies for ghstack prs
+name: Check mergeability of ghstack PR
 
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
 
 jobs:
-  pr-dependencies-check:
+  ghstack-mergeability-check:
     runs-on: ubuntu-latest
-    outputs:
-      regex-match: ${{ steps.regex-match.outputs.match }}
     steps:
-      - id: regex-match
+      - id: check-if-ghstack
         # checks whether the PR is a ghstack PR
         uses: actions-ecosystem/action-regex-match@d50fd2e7a37d0e617aea3d7ada663bd56862b9cc
         with:
@@ -31,7 +29,7 @@ jobs:
               jq -r '.[].filename' | \
               grep -Ec '^.github/workflows/check_mergeability_ghstack.yml$|^.github/scripts/trymerge.py$')
 
-          IS_GHSTACK_PR="${{ steps.regex-match.outputs.match != '' }}"
+          IS_GHSTACK_PR="${{ steps.check-if-ghstack.outputs.match != '' }}"
 
           echo "Is ghstack PR: $IS_GHSTACK_PR"
           echo "Workflow files affected by the PR: $FILES_CHANGED"
