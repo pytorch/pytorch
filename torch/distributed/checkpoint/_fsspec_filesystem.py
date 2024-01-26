@@ -332,11 +332,18 @@ class FsspecWriter(StorageWriter):
 
         """
         super().__init__()
-        self.path = path
-        self.fs, _ = url_to_fs(path)
+        self._init_path(path)
         self.single_file_per_rank = single_file_per_rank
         self.thread_count = thread_count
         self.per_thread_copy_ahead = per_thread_copy_ahead
+
+    def _init_path(self, path: Union[str, os.PathLike]) -> None:
+        self.path = path
+        self.fs, _ = url_to_fs(path)
+
+    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+        if checkpoint_id:
+            self._init_path(checkpoint_id)
 
     def set_up_storage_writer(self, is_coordinator: bool) -> None:
         pass
@@ -432,12 +439,20 @@ class FsspecWriter(StorageWriter):
 class FsspecReader(StorageReader):
     def __init__(self, path: Union[str, os.PathLike]) -> None:
         super().__init__()
-        self.path = path
-        self.fs, _ = url_to_fs(path)
+        self._init_path(path)
         self.storage_data: Dict[MetadataIndex, _StorageInfo] = dict()
 
     def _slice_file(self, file, sinfo: _StorageInfo) -> io.IOBase:
         return _create_file_view(file, sinfo.offset, sinfo.length)
+
+    def _init_path(self, path: Union[str, os.PathLike]) -> None:
+        self.path = path
+        self.fs, _ = url_to_fs(path)
+
+    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+        self.storage_data = dict()
+        if checkpoint_id:
+            self._init_path(checkpoint_id)
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         # group requests by file
