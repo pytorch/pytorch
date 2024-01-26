@@ -10,6 +10,7 @@
 #include <ATen/NumericUtils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 #include <ATen/native/Math.h>
+#include <ATen/native/SharedReduceOps.h>
 
 #include <c10/util/Float8_e4m3fn.h>
 #include <c10/util/Float8_e5m2.h>
@@ -346,6 +347,19 @@ inline at::vec::Vectorized<float> flag_to_float_vec(const T* src) {
     dst_tmp[i] = flag_to_float_scalar(src[i]);
   }
   return at::vec::Vectorized<float>::loadu(dst_tmp);
+}
+
+// Refer to https://github.com/pytorch/pytorch/blob/b5b36cf0c4e1958f1ff25120f5d4beeef3288187/
+// aten/src/ATen/native/SharedReduceOps.h#L419-L445
+template <typename scalar_t>
+bool greater_or_nan(scalar_t a, scalar_t b, int64_t idx_a, int64_t idx_b) {
+  // TODO<Leslie> Should we include the header file of <ATen/native/SharedReduceOps.h> or copy the implementation
+  return at::native::detail::GreaterOrNan<scalar_t>()(a, b, idx_a, idx_b);
+}
+
+template <typename scalar_t>
+bool less_or_nan(scalar_t a, scalar_t b, int64_t idx_a, int64_t idx_b) {
+  return at::native::detail::LessOrNan<scalar_t>()(a, b, idx_a, idx_b);
 }
 
 template <typename scalar_t>
