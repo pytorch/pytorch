@@ -2115,17 +2115,18 @@ def _cuda_compiler() -> Optional[str]:
     if cuda_env.nvcc_exist(os.getenv("CUDACXX")):
         return os.getenv("CUDACXX", "")
     if cuda_env.nvcc_exist(os.getenv("CUDA_HOME")):
-        return os.path.join(os.getenv("CUDA_HOME", ""), "bin/nvcc")
+        return os.path.realpath(os.path.join(os.getenv("CUDA_HOME", ""), "bin/nvcc"))
     return "nvcc"
 
 
 def _cutlass_include_paths() -> List[str]:
     cutlass_path = config.cuda.cutlass_dir
     return [
-        os.path.join(cutlass_path, "include"),
-        os.path.join(cutlass_path, "tools/library/include"),
-        os.path.join(cutlass_path, "tools/library/src"),
-        os.path.join(cutlass_path, "tools/util/include"),
+        # Use realpath to get canonical absolute paths, in order not to mess up cache keys
+        os.path.realpath(os.path.join(cutlass_path, "include")),
+        os.path.realpath(os.path.join(cutlass_path, "tools/library/include")),
+        os.path.realpath(os.path.join(cutlass_path, "tools/library/src")),
+        os.path.realpath(os.path.join(cutlass_path, "tools/util/include")),
     ]
 
 
