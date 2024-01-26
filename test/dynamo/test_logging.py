@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import atexit
 import contextlib
 import functools
 import logging
@@ -282,8 +281,10 @@ LoweringException: AssertionError:
     def test_dump_compile_times(self, records):
         fn_opt = torch._dynamo.optimize("inductor")(example_fn)
         fn_opt(torch.ones(1000, 1000))
-        # explicitly invoke the atexit registered functions
-        atexit._run_exitfuncs()
+        # This function runs during exit via atexit.register.
+        # We're not actually going to run atexit._run_exit_funcs() here,
+        # because it'll destroy state necessary for other tests.
+        torch._dynamo.utils.dump_compile_times()
         self.assertEqual(
             len(
                 [r for r in records if "TorchDynamo compilation metrics" in str(r.msg)]
