@@ -60,7 +60,6 @@ from torch._dynamo.testing import (
     reset_rng_state,
     same,
 )
-from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 
 try:
     from torch._dynamo.utils import (
@@ -1149,7 +1148,7 @@ def export_aot_inductor(model, example_inputs, device):
 
     def opt_aot_inductor(_, example_inputs, collect_outputs=False):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-        return optimized(example_args, example_kwargs)
+        return optimized(*example_args, **example_kwargs)
 
     return opt_aot_inductor
 
@@ -2195,7 +2194,7 @@ class BenchmarkRunner:
         )
         return start, end
 
-    def get_fsdp_auto_wrap_policy(self, model_name: str) -> Optional[ModuleWrapPolicy]:
+    def get_fsdp_auto_wrap_policy(self, model_name: str):
         from diffusers.models.transformer_2d import Transformer2DModel
 
         from torch.distributed.fsdp.wrap import (

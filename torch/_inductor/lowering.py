@@ -54,6 +54,7 @@ from .utils import (
     is_dynamic,
     is_pointwise_use,
     pad_listlike,
+    parallel_num_threads,
     sympy_product,
 )
 from .virtualized import ops, V
@@ -2611,6 +2612,10 @@ def tensor_constructor(fill_value):
         dtype = dtype or torch.get_default_dtype()
         if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
             size = tuple(size[0])
+        # See https://github.com/pytorch/pytorch/issues/118102
+        # All sizes at lowering time should be sympy.Symbol, not SymInt!
+        for s in size:
+            assert not isinstance(s, torch.SymInt)
         size = [sympy.expand(s) for s in size]
         return _full(fill_value, device, dtype, size)
 
@@ -3178,6 +3183,7 @@ def scatter_fallback(
             and isinstance(src, TensorBox)
             and src.get_device() == torch.device("cpu")
             and config.cpp.fallback_scatter_reduce_sum
+            and (config.cpp.dynamic_threads or parallel_num_threads() != 1)
         )
         or (reduce == reduce_ty and self.get_dtype() in {torch.bool, torch.int64})
         or torch.are_deterministic_algorithms_enabled()
