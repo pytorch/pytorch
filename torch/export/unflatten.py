@@ -456,9 +456,7 @@ class _ModuleFrame:
         if module is not None:
             self.module = module
         else:
-            self.module = InterpreterModule(
-                torch.fx.Graph(), module_call_graph.get(self.fqn)
-            )
+            self.module = InterpreterModule(torch.fx.Graph())
         if self.module_id in self.seen_modules:
             self.cached_graph_module = self.seen_modules[self.module_id]
         else:

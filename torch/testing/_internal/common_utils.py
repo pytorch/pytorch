@@ -829,7 +829,7 @@ def wait_for_process(p, timeout=None):
         else:
             p.kill()
             raise
-    except subprocess.TimeoutExpired as timeout_exception:
+    except subprocess.TimeoutExpired:
         # send SIGINT to give pytest a chance to make xml
         p.send_signal(signal.SIGINT)
         exit_status = None
@@ -843,9 +843,7 @@ def wait_for_process(p, timeout=None):
             return exit_status
         else:
             p.kill()
-        # Provide more info about the timeout (specifically that it timed out
-        # after the keyboard interrupt as well)
-        raise RuntimeError(f"Subprocess failed to exit smoothly after timeout {timeout} expired") from timeout_exception
+        raise
     except:  # noqa: B001,E722, copied from python core library
         p.kill()
         raise
@@ -2822,6 +2820,17 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
 
 
     def run(self, result=None):
+        # Check if enable here as well so we don't have to worry about
+        # subclasses calling super().setUp().   Call it via a wrapper instead of
+        # directly because the skipTest call will raise an uncaught exception
+        def check_if_enable_wrapper(f):
+            @wraps(f)
+            def wrapper(*args, **kwargs):
+                check_if_enable(self)
+                f(*args, **kwargs)
+            return wrapper
+        setattr(self, self._testMethodName, check_if_enable_wrapper(getattr(self, self._testMethodName)))
+
         with contextlib.ExitStack() as stack:
             if TEST_WITH_CROSSREF:  # noqa: F821
                 stack.enter_context(CrossRefMode())
@@ -2830,7 +2839,6 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
             )
 
     def setUp(self):
-        check_if_enable(self)
         set_rng_seed(SEED)
 
         # Save global check sparse tensor invariants state that can be
