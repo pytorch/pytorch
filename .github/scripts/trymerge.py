@@ -152,12 +152,14 @@ GH_COMMIT_AUTHORS_FRAGMENT = """
 fragment CommitAuthors on PullRequestCommitConnection {
   nodes {
     commit {
-      author {
-        user {
-          login
+      authors(first: 2) {
+        nodes {
+          user {
+            login
+          }
+          email
+          name
         }
-        email
-        name
       }
       oid
     }
@@ -845,14 +847,14 @@ class GitHubPR:
 
         def add_authors(info: Dict[str, Any]) -> None:
             for node in info["commits_with_authors"]["nodes"]:
-                author_node = node["commit"]["author"]
-                user_node = author_node["user"]
-                author = f"{author_node['name']} <{author_node['email']}>"
-                if user_node is None:
-                    # If author is not github user, user node will be null
-                    authors.append(("", author))
-                else:
-                    authors.append((cast(str, user_node["login"]), author))
+                for author_node in node["commit"]["authors"]["nodes"]:
+                    user_node = author_node["user"]
+                    author = f"{author_node['name']} <{author_node['email']}>"
+                    if user_node is None:
+                        # If author is not github user, user node will be null
+                        authors.append(("", author))
+                    else:
+                        authors.append((cast(str, user_node["login"]), author))
 
         info = self.info
         for _ in range(100):
@@ -948,11 +950,6 @@ class GitHubPR:
 
     def get_authors(self) -> Dict[str, str]:
         rc = {}
-        # TODO: replace with  `self.get_commit_count()` when GraphQL pagination can be used
-        # to fetch all commits, see https://gist.github.com/malfet/4f35321b0c9315bcd7116c7b54d83372
-        # and https://support.github.com/ticket/enterprise/1642/1659119
-        if self.get_commit_count() <= 250:
-            assert len(self._fetch_authors()) == self.get_commit_count()
         for idx in range(len(self._fetch_authors())):
             rc[self.get_committer_login(idx)] = self.get_committer_author(idx)
 
