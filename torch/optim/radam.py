@@ -398,7 +398,7 @@ def _multi_tensor_radam(
         if grouped_state_steps[0].is_cpu:
             torch._foreach_add_(grouped_state_steps, torch.tensor(1.0, device='cpu'), alpha=1.0)
         else:
-            torch._foreach_add_(grouped_state_steps, 1.0)
+            torch._foreach_add_(grouped_state_steps, 1)
 
         if has_complex:
             _view_as_real(grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_avg_sqs)
