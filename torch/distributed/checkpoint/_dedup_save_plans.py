@@ -19,7 +19,7 @@ def dedup_save_plans(all_plans: List[SavePlan]) -> List[SavePlan]:
     write_item_idx_to_write_item: Dict[MetadataIndex, WriteItem] = {}
     for plan_idx, plan in enumerate(all_plans):
         for write_item in plan.items:
-            # map each write item to it's plan
+            # map each write item to its plan
             write_item_to_plan_indices[write_item.index].add(plan_idx)
             write_item_idx_to_write_item[write_item.index] = write_item
 
