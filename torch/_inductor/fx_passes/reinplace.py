@@ -286,7 +286,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
                 _generalized_scatter,
                 inp,
                 src_src,
-                [scatter_view_op, *src_scatter_view_op],
+                [scatter_view_op, *src_scatter_view_op],  # type: ignore[misc]
             )
             node.replace_all_uses_with(new_node)
             graph.erase_node(node)

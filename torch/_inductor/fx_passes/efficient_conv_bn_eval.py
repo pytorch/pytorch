@@ -102,9 +102,9 @@ def efficient_conv_bn_eval_graph_transform(match: Match, *args, **kwargs):
         input_node = bn_node.kwargs["input"]
     if input_node.op != "call_module":  # type: ignore[union-attr]
         return
-    if not hasattr(gm, input_node.target):  # type: ignore[arg-type]
+    if not hasattr(gm, input_node.target):  # type: ignore[arg-type, union-attr]
         return
-    input_mod = getattr(gm, input_node.target)  # type: ignore[arg-type]
+    input_mod = getattr(gm, input_node.target)  # type: ignore[arg-type, union-attr]
     supported_convs = [
         nn.Linear,
         nn.Conv1d,

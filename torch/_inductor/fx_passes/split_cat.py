@@ -837,10 +837,10 @@ class UnbindCatRemover(SplitCatSimplifier):
         graph: torch.fx.Graph,
         unbind_node: torch.fx.Node,
     ):
-        num_unbind = (
-            max(getitem_node.args[1] for getitem_node in unbind_node.users.keys()) + 1  # type: ignore[type-var]
+        num_unbind = (  # type: ignore
+            max(getitem_node.args[1] for getitem_node in unbind_node.users.keys()) + 1
         )
-        split_sections = [1 for _ in range(num_unbind)]  # type: ignore[operator]
+        split_sections = [1 for _ in range(num_unbind)]  # type: ignore[operator, arg-type]
 
         super().simplify(graph, unbind_node, split_sections)
 
@@ -1187,7 +1187,7 @@ def merge_getitem_cat(match: Match, split_sections: List[int], dim: int):
             fused_tensor_size = 0
             for i in range(len(split_node.args[1])):  # type: ignore[arg-type]
                 if i in indices:
-                    fused_tensor_size += split_node.args[1][i]  # type: ignore[operator, assignment]
+                    fused_tensor_size += split_node.args[1][i]  # type: ignore[operator, assignment, index]
             # update the split sections
             split_sections[indices[0]] = fused_tensor_size
             # padding others with zeros to keep the same dict size
@@ -1321,8 +1321,8 @@ def merge_stack_tahn_unbind(match: Match, split_sections: List[int], dim: int):
             indices = []
             split_sections_for_unbind = []
             for arg in user.args[0]:  # type: ignore[union-attr]
-                indices.append(arg.args[1])
-                split_sections_for_unbind.append(split_sections[arg.args[1]])
+                indices.append(arg.args[1])  # type: ignore[union-attr]
+                split_sections_for_unbind.append(split_sections[arg.args[1]])  # type: ignore[union-attr]
             # indices may not be necessarily sorted, we sort them first
             indices.sort()
             # the gettitems to be merged must be consecutive, otherwise
@@ -1335,7 +1335,7 @@ def merge_stack_tahn_unbind(match: Match, split_sections: List[int], dim: int):
             fused_tensor_size = 0
             for i in range(len(split_node.args[1])):  # type: ignore[arg-type]
                 if i in indices:
-                    fused_tensor_size += split_node.args[1][i]  # type: ignore[operator, index]
+                    fused_tensor_size += split_node.args[1][i]  # type: ignore[operator, index, assignment]
             # update the split sections
             split_sections[indices[0]] = fused_tensor_size
             # padding others with zeros to keep the same dict size

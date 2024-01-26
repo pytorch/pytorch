@@ -1123,7 +1123,7 @@ def is_mutation_op(node: torch.fx.Node) -> bool:
         if _mutation_op_re.search(node.target.__name__):  # type: ignore[union-attr]
             return True
     elif node.op == "call_method":
-        if _mutation_op_re.search(node.target):  # type: ignore[union-attr]
+        if _mutation_op_re.search(node.target):  # type: ignore[union-attr, arg-type]
             return True
     return node.kwargs.get("out") is not None
 
