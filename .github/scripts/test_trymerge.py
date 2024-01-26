@@ -144,7 +144,9 @@ def mock_parse_args(revert: bool = False, force: bool = False) -> Any:
     return Object()
 
 
-def mock_remove_label(org: str, repo: str, pr_num: str, label: str) -> None:
+def mock_remove_label(
+    org: str, repo: str, pr_num: str, label: str, dry_run: bool
+) -> None:
     pass
 
 
