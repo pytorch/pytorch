@@ -146,26 +146,42 @@ def _warn_tf32_disabled():
 def _unlift_graph(mod, gm, graph_signature):
     state_dict = {}
     for name, param in mod.named_parameters(remove_duplicate=False):
+        gm.register_parameter(name.replace(".", "_"), param)
         state_dict[name] = param
-    for name, param in mod.named_buffers(remove_duplicate=False):
-        state_dict[name] = param
+    for name, buffer in mod.named_buffers(remove_duplicate=False):
+        gm.register_buffer(name.replace(".", "_"), buffer)
+        state_dict[name] = buffer
 
-    from torch.export._unlift import _construct_inp_pos_to_param_buffer_name, _unlift
+    placeholder_nodes = [node for node in gm.graph.nodes if node.op == "placeholder"]
+    lifted_inputs = []
+    for node in placeholder_nodes:
+        node_name = node.name
+        if node_name in graph_signature.inputs_to_parameters:
+            lifted_inputs.append(graph_signature.inputs_to_parameters[node_name])
+        elif node_name in graph_signature.inputs_to_buffers:
+            lifted_inputs.append(graph_signature.inputs_to_buffers[node_name])
+        else:
+            assert node_name in graph_signature.user_inputs
+            lifted_inputs.append(None)
 
-    inp_pos_to_param_buffer_name = _construct_inp_pos_to_param_buffer_name(
-        gm,
-        graph_signature,
-        state_dict,
-        {},
-    )
+    from torch.export._unlift import _unlift
+
+    outputs = list(gm.graph.nodes)[-1].args[0]
+    mutated_outputs = []
+    for out in outputs:
+        if out in graph_signature.buffers_to_mutate:
+            mutated_outputs.append(graph_signature.buffers_to_mutate[out.name])
+        else:
+            mutated_outputs.append(None)
+
     unlifted_gm = _unlift(
         gm,
-        inp_pos_to_param_buffer_name,
+        lifted_inputs,
+        mutated_outputs,
         pytree.LeafSpec(),
         None,
         state_dict,
         {},
-        graph_signature.buffers_to_mutate,
     )
     return unlifted_gm
 
