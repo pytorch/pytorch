@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
+#include <torch/csrc/autograd/generated/ViewFuncs.h>
 #include <torch/library.h>
 
 #include <utility>
@@ -452,6 +453,7 @@ static Tensor detach(c10::DispatchKeySet ks, const Tensor& self) {
       /* output */ out,
       /* is_bw_differentiable */ false,
       /* is_fw_differentiable */ false,
+      /* full_view_func */ nullptr,
       /* view_func */ nullptr,
       /* rev_view_func */ nullptr,
       /* creation_meta */ CreationMeta::DEFAULT,
@@ -468,9 +470,11 @@ static Tensor _fw_primal(
     at::AutoDispatchBelowADInplaceOrView guard;
     return at::alias(self);
   })();
+  std::shared_ptr<torch::autograd::ViewFunc> full_func(nullptr);
   std::function<at::Tensor(const at::Tensor&)> func = nullptr;
   std::function<at::Tensor(const at::Tensor&)> rev_func = nullptr;
   if (!self.unsafeGetTensorImpl()->support_as_strided()) {
+    full_func = std::make_shared<ViewViewFunc>(self.sym_sizes());
     auto size_vec = self.sizes().vec();
     func = [=](const at::Tensor& input_base) {
       return input_base.view(size_vec);
@@ -487,6 +491,7 @@ static Tensor _fw_primal(
       /* output */ tmp,
       /* is_bw_differentiable */ true,
       /* is_fw_differentiable */ false,
+      /* full_view_func */ std::move(full_func),
       /* view_func */ std::move(func),
       /* rev_view_func */ std::move(rev_func),
       /* creation_meta */ CREATION_META_DEFINITION);
@@ -504,9 +509,11 @@ static Tensor _make_dual(
     at::AutoDispatchBelowADInplaceOrView guard;
     return at::alias(primal);
   })();
+  std::shared_ptr<torch::autograd::ViewFunc> full_func(nullptr);
   std::function<at::Tensor(const at::Tensor&)> func = nullptr;
   std::function<at::Tensor(const at::Tensor&)> rev_func = nullptr;
   if (!primal.unsafeGetTensorImpl()->support_as_strided()) {
+    full_func = std::make_shared<ViewViewFunc>(primal.sym_sizes());
     auto size_vec = primal.sizes().vec();
     func = [=](const at::Tensor& input_base) {
       return input_base.view(size_vec);
@@ -523,6 +530,7 @@ static Tensor _make_dual(
       /* output */ tmp,
       /* is_bw_differentiable */ true,
       /* is_fw_differentiable */ false,
+      /* full_view_func */ std::move(full_func),
       /* view_func */ std::move(func),
       /* rev_view_func */ std::move(rev_func),
       /* creation_meta */ CREATION_META_DEFINITION);

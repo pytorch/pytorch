@@ -70,7 +70,6 @@ VIEW_FUNCTIONS = {
     "expand": "self",
     "permute": "self",
     "select": "self",
-    "select_inverse": "self",
     "slice": "self",
     "slice_inverse": "self",
     "split": "self",
@@ -173,6 +172,7 @@ for (auto ${view_idx} : c10::irange(${var}.size())) {
 
 SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_METADATA_CHANGE = CodeTemplate(
     """\
+std::shared_ptr<torch::autograd::ViewFunc> full_func(nullptr);
 std::function<at::Tensor(const at::Tensor&)> func=nullptr;
 std::function<at::Tensor(const at::Tensor&)> rev_func=nullptr;
 if (${is_view_with_metadata_change} ||
@@ -182,6 +182,12 @@ if (${is_view_with_metadata_change} ||
   ${replay_view_func}
   ${reverse_replay_view_func}
 }
+"""
+)
+
+REPLAY_FULL_VIEW_FUNC = CodeTemplate(
+    """\
+full_func = std::make_shared<${view_func_name}>(${view_func_args});
 """
 )
 
@@ -280,6 +286,18 @@ def inverse_view_name(f: NativeFunction) -> str:
     if overload != "":
         overload = "_" + overload
     return f"{copy_variant}{overload}_inverse"
+
+
+# e.g. as_strided -> AsStridedViewFunc
+def view_func_name(f: NativeFunction, include_namespace=False) -> str:
+    name = f.func.name.unambiguous_name()
+    is_private = name.startswith("_")
+    camel_case = "".join([p.title() for p in name.replace(".", "_").split("_")])
+    if is_private:
+        # put the leading underscore back in
+        camel_case = f"_{camel_case}"
+    namespace = "torch::autograd::generated::" if include_namespace else ""
+    return f"{namespace}{camel_case}ViewFunc"
 
 
 def extract_bindings(f: NativeFunction) -> List[Binding]:
@@ -413,6 +431,15 @@ def emit_view_lambda(
         else:
             updated_args.append(arg)
 
+    # skip input_base arg
+    view_func_args = list(updated_args[1:])
+    if view_idx is not None:
+        view_func_args.append(f"{view_idx}")
+    replay_view_func += REPLAY_FULL_VIEW_FUNC.substitute(
+        view_func_name=view_func_name(f, include_namespace=True),
+        view_func_args=view_func_args,
+    )
+
     replay_view_call = emit_view_call(f, input_base, updated_args)
     replay_view_func += REPLAY_VIEW_LAMBDA_FUNC.substitute(
         input_base=input_base,
@@ -468,6 +495,7 @@ def emit_view_body(
         )
     if len(differentiable_output_vars) == 0:
         # no output is differentiable (.indices() for SparseTensors for example)
+        # TODO: Remove this? how does this work
         rhs_value = (
             f"as_view({view_info}, {var}, "
             f"/* is_bw_differentiable */ false, /* is_fw_differentiable */ false)"
@@ -500,6 +528,7 @@ def emit_view_body(
             as_view_call = (
                 f"as_view(/* base */ {view_info}, /* output */ {var}[{view_idx}], "
                 "/* is_bw_differentiable */ true, /* is_fw_differentiable */ true, "
+                "/* full_view_func */ full_func, "
                 "/* view_func */ func, /* rev_view_func */ rev_func, "
                 f"/* creation_meta */ {creation_meta});"
             )
@@ -512,7 +541,7 @@ def emit_view_body(
             creation_meta = get_creation_meta_in_mode("CreationMeta::DEFAULT")
             rhs_value = (
                 f"as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, "
-                "/* is_fw_differentiable */ true, "
+                "/* is_fw_differentiable */ true, /* full_view_func */ full_func, "
                 f"/* view_func */ func, /* rev_view_func */ rev_func, /* creation_meta */ {creation_meta})"
             )
     else:
