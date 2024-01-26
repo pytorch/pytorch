@@ -69,7 +69,7 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
 
     if config.pattern_matcher:
         lazy_init()
-        if config.fx_passes_numeric_check["pre_grad"]:
+        if config.fx_passes_numeric_check.get("pre_grad", False):
             gm_before_fx_passes = gm.__copy__()
         # explicitly run with predispatch atenIR based passes
         if config.is_predispatch:
@@ -94,7 +94,7 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
     gm.graph.lint()
     gm.recompile()
 
-    if config.pattern_matcher and config.fx_passes_numeric_check["pre_grad"]:
+    if config.pattern_matcher and config.fx_passes_numeric_check.get("pre_grad", False):
         from .numeric_utils import numeric_check_if_enabled
 
         gm_after_fx_passes = gm.__copy__()
@@ -102,8 +102,8 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
             gm_before_fx_passes,
             gm_after_fx_passes,
             example_inputs,
-            config.fx_passes_numeric_check["num_iterations"],
-            config.fx_passes_numeric_check["precision"],
+            config.fx_passes_numeric_check.get("num_iterations", 1),
+            config.fx_passes_numeric_check.get("precision", 1e-4),
         )
 
     print_graph(gm.graph, "After recompile in pre grad pass.")
