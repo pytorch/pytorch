@@ -2,67 +2,25 @@ name: Check mergeability of ghstack PR
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened]
+    branches: [gh/**/base]
 
 jobs:
   ghstack-mergeability-check:
     runs-on: ubuntu-latest
     steps:
-      - id: check-if-ghstack
-        # checks whether the PR is a ghstack PR
-        uses: actions-ecosystem/action-regex-match@d50fd2e7a37d0e617aea3d7ada663bd56862b9cc
-        with:
-          text: ${{ github.head_ref }}
-          regex: '^(gh/[^/]+/[0-9]+/)head$'
-
-      - name: Determine if should run
-        # checks whether the PR is a ghstack PR or whether PR changes the workflow files
-        id: should-run
-        shell: bash
-        run: |
-          # use GITHUB API to get the files changed in the PR
-          # and check if the following files were changed:
-          # .github/workflows/check_mergeability_ghstack.yml
-          # .github/scripts/trymerge.py
-          FILES_CHANGED=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              "https://api.github.com/repos/pytorch/pytorch/pulls/${{ github.event.pull_request.number }}/files" | \
-              jq -r '.[].filename' | \
-              grep -Ec '^.github/workflows/check_mergeability_ghstack.yml$|^.github/scripts/trymerge.py$')
-
-          IS_GHSTACK_PR="${{ steps.check-if-ghstack.outputs.match != '' }}"
-
-          echo "Is ghstack PR: $IS_GHSTACK_PR"
-          echo "Workflow files affected by the PR: $FILES_CHANGED"
-
-          if [ "$IS_GHSTACK_PR" = "true" ] || [ "$FILES_CHANGED" -gt 0 ]; then
-            echo "should-run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "should-run=false" >> "$GITHUB_OUTPUT"
-
-            {
-              echo "# The $PR_NUM is not a ghstack PR"
-              echo "For regular PRs the mergeability is reported correctly by GitHub."
-              echo "To debug the dependencies of the PR manually, run the diagnostic workflow:"
-              echo "https://github.com/pytorch/test-infra/actions/workflows/pr-dependencies-check.yml"
-            } >> "$GITHUB_STEP_SUMMARY"
-
-          fi
-
       - uses: actions/checkout@v4
-        if: steps.should-run.outputs.should-run == 'true'
         with:
           fetch-depth: 0
 
       - name: Setup git
-        if: steps.should-run.outputs.should-run == 'true'
         shell: bash
         run: |
           git config --global user.email "pytorchmergebot@users.noreply.github.com"
           git config --global user.name "PyTorch MergeBot"
-          git fetch origin main
+          git fetch origin main:main
 
       - name: Setup Python
-        if: steps.should-run.outputs.should-run == 'true'
         uses: actions/setup-python@v4
         with:
           python-version: '3.8'
@@ -70,11 +28,9 @@ jobs:
           architecture: x64
 
       - run: pip install pyyaml==6.0 rockset==1.0.3
-        if: steps.should-run.outputs.should-run == 'true'
         shell: bash
 
       - name: Verify mergeability
-        if: steps.should-run.outputs.should-run == 'true'
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
