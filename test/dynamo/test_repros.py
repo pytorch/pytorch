@@ -15,6 +15,7 @@ import weakref
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
+from enum import Enum
 from functools import wraps
 from typing import List
 
@@ -45,9 +46,7 @@ lib.define("foo(Tensor self) -> Tensor")
 lib.impl("foo", torch.sin, "CPU")
 
 
-requires_cuda = functools.partial(
-    unittest.skipIf, not torch.cuda.is_available(), "requires cuda"
-)
+requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
 
 _GLOBAL_CPU_TENSOR = torch.randn(3)
@@ -958,7 +957,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_model(input), correct))
         return cnt
 
-    @requires_cuda()
+    @requires_cuda
     def test_sub_alpha_scalar_repro(self):
         @torch.compile(backend="aot_eager")
         def f(x):
@@ -1038,6 +1037,27 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out_ref, out_test)
         self.assertEqual(a_ref.grad, a_test.grad)
         self.assertEqual(b_ref.grad, b_test.grad)
+
+    # https://github.com/pytorch/pytorch/issues/111603
+    def test_tuple_enum_as_key_dict(self):
+        class MyEnum(Enum):
+            A = "a"
+
+        class SomeModel(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(1, 1)
+
+            def forward(self, x) -> torch.Tensor:
+                return self.linear(x[MyEnum.A])
+
+        x = {MyEnum.A: torch.rand(8, 1)}
+        model_pytorch = SomeModel()
+        model = torch.compile(model_pytorch)
+        # Executing twice works
+        model(x)
+        y = model(x)
+        self.assertEqual(y, model_pytorch(x))
 
     def test_embedding_backward_broadcasting_decomp(self):
         def f(grad_output, indices):
@@ -1486,6 +1506,35 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 4)
+
+    def test_issue114171(self):
+        device = torch.device("cpu")
+
+        def fcnn(in_dim, out_dim, hidden_dim, activation=torch.nn.GELU):
+            layers = [
+                torch.nn.Linear(in_dim, hidden_dim, device=device),
+                activation(),
+                torch.nn.Linear(hidden_dim, out_dim, device=device),
+            ]
+            return torch.nn.Sequential(*layers)
+
+        class testmodel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.interaction_networks = torch.nn.ModuleList(
+                    [fcnn(262, 1174, 400) for _ in range(4)]
+                )
+
+            def interact(self, x, cycle):
+                return self.interaction_networks[cycle](x)
+
+        model = testmodel()
+        forward_aot = torch.compile(
+            model.interact, fullgraph=True, dynamic=True, backend="eager"
+        )
+
+        x = torch.rand([111, 262], device=device)
+        y2 = forward_aot(x, 2)  # previously failed
 
     def test_issue175(self):
         n_heads = 2
@@ -2398,7 +2447,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(f(), opt_fn()))
         self.assertEqual(cnt.frame_count, 1)
 
-    @requires_cuda()
+    @requires_cuda
     def test_norm_dtype(self):
         def foo(_stack0):
             getitem = _stack0[(slice(None, None, None), -1)]
@@ -3481,7 +3530,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f(), _GLOBAL_CPU_TENSOR + _GLOBAL_CPU_TENSOR)
 
-    @requires_cuda()
+    @requires_cuda
     def test_guard_default_device(self):
         try:
             torch.set_default_device("cuda")
@@ -3658,6 +3707,16 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return torch.compile(fn, backend="eager")
 
         make_fn(None)()
+
+    def test_call_finally_opcode_python_3_8(self):
+        def fn():
+            try:
+                return torch.zeros(4)
+            finally:
+                return torch.ones(4)  # noqa: SIM107, B012
+
+        result = torch.compile(fn, backend="aot_eager")()
+        self.assertEqual(result, torch.ones(4))
 
     def test_string_format(self):
         s = "temp{i}"
@@ -3938,6 +3997,73 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 # Prove guarding works - we run the compiled_fn 5 times
                 # frame_count should stay at 1.
                 self.assertEqual(cnt.frame_count, 1)
+
+    def test_user_ctor_ctx_manager(self):
+        class UserCtxManager:
+            def __enter__(self):
+                return 1
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                pass
+
+        def fn(x, y):
+            ucm = UserCtxManager()
+            return x * x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, nopython=True)(fn)
+        x = torch.rand([2, 2])
+        opt_fn(x, x)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_user_ctor_ctx_manager_custom_init(self):
+        class UserCtxManager:
+            def __init__(self, x):
+                x[0] = 10
+
+            def __enter__(self):
+                return 1
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                pass
+
+        def fn(x, y):
+            ucm = UserCtxManager(y)
+            return x * y[0]
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, nopython=True)(fn)
+        x = torch.rand([2, 2])
+        self.assertEqual(opt_fn(x, [5]), fn(x, [5]))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_user_ctor_ctx_manager_custom_init_graph_break(self):
+        counter = [0]
+
+        class UserCtxManager:
+            def __init__(self, k):
+                k[0] += 1
+
+            def __enter__(self):
+                return 1
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                pass
+
+        def fn(x, counter):
+            x = x * x
+            ucm = UserCtxManager(counter)
+            return x * x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        x = torch.rand([2, 2])
+        self.assertEqual(opt_fn(x, counter), fn(x, counter))
+        self.assertEqual(counter[0], 2)
+        for i in range(0, 10):
+            opt_fn(x, counter)
+        self.assertEqual(counter[0], 12)
+        self.assertEqual(cnt.frame_count, torch._dynamo.utils.ifdynstaticdefault(3, 2))
 
 
 if __name__ == "__main__":

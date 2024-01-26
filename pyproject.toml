@@ -40,7 +40,6 @@ ignore = [
     "E741",
     "EXE001",
     "F405",
-    "F821",
     "F841",
     # these ignores are from flake8-logging-format; please fix!
     "G101",
@@ -116,7 +115,15 @@ select = [
 ]
 
 [tool.ruff.per-file-ignores]
-"__init__.py" = ["F401"]
+"__init__.py" = [
+    "F401",
+]
+"test/typing/reveal/**" = [
+    "F821",
+]
+"test/torch_np/numpy_tests/**" = [
+    "F821",
+]
 "test/jit/**" = [
     "PLR0133", # tests require this for JIT
     "PYI",

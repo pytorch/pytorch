@@ -44,6 +44,7 @@ _double_types = _dispatch_dtypes((torch.float64, torch.complex128))
 def double_types():
     return _double_types
 
+# NB: Does not contain uint16/uint32/uint64 for BC reasons
 _integral_types = _dispatch_dtypes((torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64))
 def integral_types():
     return _integral_types

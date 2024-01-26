@@ -2571,7 +2571,7 @@ new_module_tests = [
                                 .dim_feedforward(8)
                                 .dropout(0.0)
                                 .activation(torch::kReLU)''',
-        input_fn=lambda:(torch.rand(3, 3, 4), torch.rand(2, 3, 4), torch.rand(3, 3)),
+        input_fn=lambda: (torch.rand(3, 3, 4), torch.rand(2, 3, 4), torch.rand(3, 3)),
         check_gradgrad=False,
         desc='multilayer_coder',
         with_tf32=True,

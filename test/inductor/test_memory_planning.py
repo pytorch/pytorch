@@ -10,10 +10,9 @@ if IS_WINDOWS and IS_CI:
     )
     if __name__ == "__main__":
         sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
+    raise unittest.SkipTest("requires sympy/functorch/filelock")  # noqa: F821
 
 import unittest
-from typing import List
 
 import torch
 from test_torchinductor import run_and_get_cpp_code
@@ -21,6 +20,7 @@ from torch._C import FileCheck
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import same
 from torch._inductor import config
+from torch.export import Dim
 from torch.utils._triton import has_triton
 
 
@@ -80,17 +80,15 @@ class TestMemoryPlanning(TestCase):
 
     @skipIfRocm(msg="test_aot_inductor doesn't work on ROCm")
     def test_abi_compatible(self):
-        from test_aot_inductor import AOTInductorModelRunner
+        from test_aot_inductor import AOTIRunnerUtil
 
         f, args = self._generate(device="cuda")
-        constraints: List[torch.export.Constraint] = [
-            torch._export.dynamic_dim(args[0], 0) >= 1,
-            torch._export.dynamic_dim(args[0], 0) <= 2048,
-        ]
+        dim0_x = Dim("dim0_x", min=1, max=2048)
+        dynamic_shapes = ({0: dim0_x}, None, None)
         with config.patch("aot_inductor.abi_compatible", True):
             result, code = run_and_get_cpp_code(
-                lambda: AOTInductorModelRunner.run(
-                    "cuda", f, args, constraints=constraints
+                lambda: AOTIRunnerUtil.run(
+                    "cuda", f, args, dynamic_shapes=dynamic_shapes
                 )
             )
 

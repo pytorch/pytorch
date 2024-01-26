@@ -11,6 +11,8 @@
 #include <ATen/core/PhiloxRNGEngine.h>
 #include <ATen/native/Math.h>
 
+#include <c10/util/Float8_e4m3fn.h>
+#include <c10/util/Float8_e5m2.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
 #include <c10/util/generic_math.h>
@@ -30,6 +32,9 @@
 
 typedef at::Half half;
 typedef at::BFloat16 bfloat16;
+
+typedef at::Float8_e4m3fn float8_e4m3fn;
+typedef at::Float8_e5m2 float8_e5m2;
 
 template <typename T>
 struct Welford {
@@ -144,7 +149,7 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> 
 #endif
 
 
-template <typename T> inline T mod(T a, T b) { return a % b; }
+template <typename T, typename U> inline typename std::common_type<T, U>::type mod(T a, U b) { return a % b; }
 template <> inline float mod(float a, float b) { return std::fmod(a, b); }
 template <> inline double mod(double a, double b) { return std::fmod(a, b); }
 
@@ -179,12 +184,12 @@ float randn_cpu(uint32_t seed, uint32_t offset) {
   return engine.randn(10);
 }
 
-uint64_t randint64_cpu(uint32_t seed, uint32_t offset, int64_t low, int64_t high) {
+int64_t randint64_cpu(uint32_t seed, uint32_t offset, int64_t low, int64_t high) {
   auto gen = at::Philox4_32(seed, 0, offset);
   uint64_t r0 = gen();
   uint64_t r1 = gen();
   uint64_t result = r0 | (r1 << 32);
-  return (result % static_cast<uint64_t>(high - low)) + low;
+  return static_cast<int64_t>(result % (high - low)) + low;
 }
 
 template <typename T> struct AsIntegerType { typedef T type; };
@@ -364,6 +369,14 @@ inline at::vec::Vectorized<float> mask_convert_to_float(at::vec::Vectorized<floa
   return at::vec::Vectorized<float>::blendv(zeros, ones, src);
 }
 
+template <typename scalar_t>
+inline
+typename std::enable_if<std::is_same<scalar_t, bfloat16>::value || std::is_same<scalar_t, half>::value, at::vec::Vectorized<scalar_t>>::type
+mask_convert_to_lowp(at::vec::Vectorized<float> src) {
+  auto fp_vec = mask_convert_to_float(src);
+  return cvt_fp32_to_lowp_fp<scalar_t>(fp_vec);
+}
+
 template <typename SRC>
 inline at::vec::Vectorized<float> vec_convert_to_mask(at::vec::Vectorized<SRC> src) {
   assert(
@@ -407,4 +420,36 @@ inline at::vec::Vectorized<float> to_float_mask(int src) {
   *(uint32_t*)&mask = src ? 0xFFFFFFFF : 0;
   return at::vec::Vectorized<float>(mask);
 }
+
+inline bool all_zero(at::vec::Vectorized<float> src) {
+# if defined(CPU_CAPABILITY_AVX512)
+  auto src_int = _mm512_castps_si512(src);
+  __mmask16 mask = _mm512_test_epi32_mask(src_int, src_int);
+  return mask == 0;
+# elif defined(CPU_CAPABILITY_AVX2)
+  return _mm256_testz_ps(src, src);
+# else
+  __at_align__ int mask[at::vec::Vectorized<float>::size()];
+  src.store(mask);
+  for (int i = 0; i < at::vec::Vectorized<float>::size(); i++) {
+    if (mask[i] != 0) {
+      return false;
+    }
+  }
+  return true;
+# endif
+}
+
+inline bool vector_lane_mask_check(at::vec::Vectorized<float> src, int lane) {
+# if defined(CPU_CAPABILITY_AVX512)
+  return _mm512_movepi32_mask(_mm512_castps_si512(src)) & (1 << lane);
+# elif defined(CPU_CAPABILITY_AVX2)
+  return _mm256_movemask_ps(src) & (1 << lane);
+# else
+  __at_align__ int mask[at::vec::Vectorized<float>::size()];
+  src.store(mask);
+  return mask[lane] != 0;
+# endif
+}
+
 #endif

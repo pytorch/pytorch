@@ -25,6 +25,11 @@ coremltools==5.0b5
 #Pinned versions:
 #test that import:
 
+dill==0.3.7
+#Description: dill extends pickle with serializing and de-serializing for most built-ins
+#Pinned versions: 0.3.7
+#test that import: dynamo/test_replay_record.py test_dataloader.py test_datapipe.py test_serialization.py
+
 expecttest==0.1.6
 #Description: method for writing tests where test framework auto populates
 # the expected output based on previous runs
@@ -162,11 +167,6 @@ pytest-xdist==3.3.1
 #Pinned versions:
 #test that import:
 
-pytest-shard==0.1.2
-#Description: plugin spliting up tests in pytest
-#Pinned versions:
-#test that import:
-
 pytest-flakefinder==1.1.0
 #Description: plugin for rerunning tests a fixed number of times in pytest
 #Pinned versions: 1.1.0
@@ -298,3 +298,8 @@ pywavelets==1.4.1
 # it here because 1.5.0 conflicts with numpy 1.21.2 used in CI
 #Pinned versions: 1.4.1
 #test that import:
+
+lxml==5.0.0.
+#Description: This is a requirement of unittest-xml-reporting
+
+# Python-3.9 binaries

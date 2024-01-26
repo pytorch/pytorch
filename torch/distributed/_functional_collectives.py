@@ -10,7 +10,10 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.fx.experimental.proxy_tensor import get_innermost_proxy_mode
 
 from . import _functional_collectives_impl as fun_col_impl
-from ._functional_collectives_impl import _register_tensor_wrapper, USE_NATIVE_C10D_FUNCTIONAL
+from ._functional_collectives_impl import (
+    _register_tensor_wrapper,
+    USE_NATIVE_C10D_FUNCTIONAL,
+)
 
 try:
     from torch.utils._cxx_pytree import tree_map_only
@@ -177,7 +180,7 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     if USE_NATIVE_C10D_FUNCTIONAL:
-        group_name, _ = _expand_group_for_for_native_ops(group, tag)
+        group_name = _resolve_group_name(group, tag)
         tensor = torch.ops._c10d_functional.all_reduce(self, reduceOp, group_name)
     else:
         tag, rankset, group_size = _expand_group(group, tag)
@@ -215,8 +218,11 @@ def all_gather_tensor(
     """
     assert self.is_contiguous()
     if USE_NATIVE_C10D_FUNCTIONAL:
-        group_name, group_size = _expand_group_for_for_native_ops(group, tag)
-        tensor = torch.ops._c10d_functional.all_gather_into_tensor(self, group_size, group_name)
+        group_name = _resolve_group_name(group, tag)
+        group_size = c10d._get_group_size_by_name(group_name)
+        tensor = torch.ops._c10d_functional.all_gather_into_tensor(
+            self, group_size, group_name
+        )
     else:
         tag, rankset, group_size = _expand_group(group, tag)
         tensor = torch.ops.c10d_functional.all_gather_into_tensor(  # type: ignore[attr-defined]
@@ -259,7 +265,9 @@ def reduce_scatter_tensor(
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     if USE_NATIVE_C10D_FUNCTIONAL:
-        group_name, group_size = _expand_group_for_for_native_ops(group, tag)
+        # TODO: rename
+        group_name = _resolve_group_name(group, tag)
+        group_size = c10d._get_group_size_by_name(group_name)
     else:
         tag, rankset, group_size = _expand_group(group, tag)
 
@@ -348,7 +356,8 @@ def all_gather_into_tensor_coalesced(
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     if USE_NATIVE_C10D_FUNCTIONAL:
-        group_name, group_size = _expand_group_for_for_native_ops(group, tag)
+        group_name = _resolve_group_name(group, tag)
+        group_size = c10d._get_group_size_by_name(group_name)
         tensor_list = torch.ops._c10d_functional.all_gather_into_tensor_coalesced(  # type: ignore[attr-defined]
             self,
             group_size,
@@ -388,7 +397,8 @@ def reduce_scatter_tensor_coalesced(
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     if USE_NATIVE_C10D_FUNCTIONAL:
-        group_name, group_size = _expand_group_for_for_native_ops(group, tag)
+        group_name = _resolve_group_name(group, tag)
+        group_size = c10d._get_group_size_by_name(group_name)
     else:
         tag, rankset, group_size = _expand_group(group, tag)
 
@@ -458,9 +468,12 @@ def all_to_all_single(
             isinstance(size, (int, torch.SymInt)) for size in output_split_sizes
         ), output_split_sizes
     if input_split_sizes is not None:
-        assert all(isinstance(size, (int, torch.SymInt)) for size in input_split_sizes), input_split_sizes
+        assert all(
+            isinstance(size, (int, torch.SymInt)) for size in input_split_sizes
+        ), input_split_sizes
     if USE_NATIVE_C10D_FUNCTIONAL:
-        group_name, group_size = _expand_group_for_for_native_ops(group, tag)
+        group_name = _resolve_group_name(group, tag)
+        group_size = c10d._get_group_size_by_name(group_name)
         tensor = torch.ops._c10d_functional.all_to_all_single(  # type: ignore[attr-defined]
             self,
             output_split_sizes,
@@ -524,7 +537,7 @@ class AsyncCollectiveTensor(torch.Tensor):
     elem: torch.Tensor
     completed: bool
 
-    __slots__ = ['elem', 'completed']
+    __slots__ = ["elem", "completed"]
 
     __torch_function__ = torch._C._disabled_torch_function_impl
 
@@ -696,24 +709,19 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
     return (tag, rankset, group_size)
 
 
-def _expand_group_for_for_native_ops(group: RANK_TYPES, tag: str = "") -> Tuple[str, int]:
+def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
     """
-    Given group in RANK_TYPES, return group name and group size.
+    Given group in RANK_TYPES, return the group name.
     """
-    # We decided to replace (tag, ranks, group_size) in the previous  with
-    # group_name in functional collective signatures as we migrate to native
-    # c10d_functional. Fow now, we'll raise an error if tag is supplied when
-    # USE_NATIVE_C10D_FUNCTIONAL is set. Once we completely switch to native
-    # c10d_functional, we'll remove `tag` from the Python APIs.
-    #
-    # https://github.com/pytorch/pytorch/pull/109738#discussion_r1334538196
+    # `tag` will be deprecated. See details in:
+    # https://github.com/pytorch/pytorch/issues/93173#issuecomment-1907095208
     if tag != "":
-        warnings.warn(f"Tag \"{tag}\" is ignored since USE_NATIVE_C10D_FUNCTIONAL is set")
+        warnings.warn(f"tag ({tag}) is ignored for process group resolution.")
 
     if isinstance(group, dist.ProcessGroup):
-        return group.group_name(), dist.get_world_size(group)
+        return group.group_name()
     elif isinstance(group, str):
-        return group, torch._C._distributed_c10d._resolve_process_group(group).size()
+        return group
     else:
         # TODO(yifu): DeviceMesh supported will be added in a subsequent PR
         raise ValueError(f"Unsupported group type: {type(group)}, {group}")
@@ -919,8 +927,8 @@ These schemas intentionally match torch.distributed.distributed_c10d.* ops that 
 
 
 def all_gather_tensor_inplace(
-    output: torch.Tensor,
-    input: torch.Tensor,
+    output_tensor: torch.Tensor,
+    input_tensor: torch.Tensor,
     group,  # TODO add a type,
     async_op: bool = False,
     tag: str = "",
@@ -929,7 +937,7 @@ def all_gather_tensor_inplace(
     assert (
         not async_op
     ), "Can't remap async version of inplace op to functional collective"
-    return output.copy_(all_gather_tensor(input, gather_dim, group, tag))
+    return output_tensor.copy_(all_gather_tensor(input_tensor, gather_dim, group, tag))
 
 
 def reduce_scatter_tensor_inplace(

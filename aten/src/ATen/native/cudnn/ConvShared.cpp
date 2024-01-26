@@ -177,64 +177,146 @@ std::string repro_from_args(const ConvolutionParams& params) {
 //
 // ---------------------------------------------------------------------
 
-Tensor cudnn_convolution_forward(
+void cudnn_convolution_forward_out(
+    TensorArg& output,
     CheckedFrom c,
-    const TensorArg& input, const TensorArg& weight,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic, bool allow_tf32)
-{
+    const TensorArg& input,
+    const TensorArg& weight,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32) {
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
 
-  auto memory_format = cudnn_conv_suggest_memory_format(*input, *weight);
-  Tensor output_t = at::detail::empty_cuda(
-      conv_output_size(input->sizes(), weight->sizes(),
-                       padding, stride, dilation),
-      input->options().memory_format(memory_format));
-
-  if (output_t.numel() == 0) {
-    return output_t;
-  }
-
-  // Avoid ambiguity of "output" when this is being used as backwards
-  TensorArg output{ output_t, "result", 0 };
-  convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);
+  auto memory_format = output->suggest_memory_format();
+  convolution_shape_check(
+      c, input, weight, output, padding, stride, dilation, groups);
 
   Tensor weight_contig = weight->contiguous(memory_format);
   Tensor input_contig = input->contiguous(memory_format);
 
   raw_cudnn_convolution_forward_out(
-      *output, input_contig, weight_contig,
-      padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
-
-  return *output;
+      *output,
+      input_contig,
+      weight_contig,
+      padding,
+      stride,
+      dilation,
+      groups,
+      benchmark,
+      deterministic,
+      allow_tf32);
 }
 
 Tensor cudnn_convolution(
-    const Tensor& input_t, const Tensor& weight_t,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool benchmark, bool deterministic, bool allow_tf32)
-{
-  TensorArg input  { input_t,  "input",  1 },
-            weight { weight_t, "weight", 2 };
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32) {
+  TensorArg input{input_t, "input", 1}, weight{weight_t, "weight", 2};
   CheckedFrom c = "cudnn_convolution";
-  auto output_t = cudnn_convolution_forward(
-    c, input, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
+  auto memory_format = cudnn_conv_suggest_memory_format(input_t, weight_t);
+  Tensor output_t = at::detail::empty_cuda(
+      conv_output_size(
+          input_t.sizes(), weight_t.sizes(), padding, stride, dilation),
+      input->options().memory_format(memory_format));
+  if (output_t.numel() == 0) {
+    return output_t;
+  }
+  // Avoid ambiguity of "output" when this is being used as backwards
+  TensorArg output{output_t, "result", 0};
+  cudnn_convolution_forward_out(
+      output,
+      c,
+      input,
+      weight,
+      padding,
+      stride,
+      dilation,
+      groups,
+      benchmark,
+      deterministic,
+      allow_tf32);
+  return *output;
+}
+at::Tensor& cudnn_convolution_out(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32,
+    Tensor& output_t) {
+  TensorArg input{input_t, "input", 1}, weight{weight_t, "weight", 2};
+  CheckedFrom c = "cudnn_convolution";
+  if (output_t.numel() == 0) {
+    return output_t;
+  }
+  TensorArg output{output_t, "result", 0};
+  cudnn_convolution_forward_out(
+      output,
+      c,
+      input,
+      weight,
+      padding,
+      stride,
+      dilation,
+      groups,
+      benchmark,
+      deterministic,
+      allow_tf32);
   return output_t;
 }
 
-// NB: output_padding not needed here, as there is no ambiguity to
-// resolve
+// NB: output_padding not needed here, as there is no ambiguity to resolve
 Tensor cudnn_convolution_transpose_backward_input(
-    const Tensor& grad_output_t, const Tensor& weight_t,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool benchmark, bool deterministic, bool allow_tf32)
-{
-  TensorArg grad_output { grad_output_t,  "grad_output", 1 },
-            weight      { weight_t, "weight", 2 };
-  return cudnn_convolution_forward(
-    "cudnn_convolution_transpose_backward_input",
-    grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
+    const Tensor& grad_output_t,
+    const Tensor& weight_t,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32) {
+  TensorArg grad_output{grad_output_t, "grad_output", 1},
+      weight{weight_t, "weight", 2};
+  auto memory_format =
+      cudnn_conv_suggest_memory_format(grad_output_t, weight_t);
+  Tensor output_t = at::detail::empty_cuda(
+      conv_output_size(
+          grad_output_t.sizes(), weight_t.sizes(), padding, stride, dilation),
+      grad_output_t.options().memory_format(memory_format));
+
+  if (output_t.numel() == 0) {
+    return output_t;
+  }
+  TensorArg output{output_t, "result", 0};
+  cudnn_convolution_forward_out(
+      output,
+      "cudnn_convolution_transpose_backward_input",
+      grad_output,
+      weight,
+      padding,
+      stride,
+      dilation,
+      groups,
+      benchmark,
+      deterministic,
+      allow_tf32);
+  return *output;
 }
 
 // ---------------------------------------------------------------------

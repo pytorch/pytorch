@@ -380,9 +380,7 @@ def _save_fx_default(current_name, folder_name, dump_example_input, gm, example_
 
         input_meta = get_input_meta(args)
 
-        isExist = os.path.exists(f"{folder_name}/{current_name}")
-        if not isExist:
-            os.makedirs(f"{folder_name}/{current_name}")
+        os.makedirs(f"{folder_name}/{current_name}", exist_ok=True)
         gm.to_folder(
             f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}"
         )

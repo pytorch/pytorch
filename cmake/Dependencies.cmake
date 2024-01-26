@@ -93,6 +93,16 @@ if(USE_CUDA)
   endif()
 endif()
 
+# ---[ XPU
+if(USE_XPU)
+  include(${CMAKE_CURRENT_LIST_DIR}/public/xpu.cmake)
+  if(NOT PYTORCH_FOUND_XPU)
+    # message(WARNING "Not compiling with XPU. Could NOT find SYCL."
+    # "Suppress this warning with -DUSE_XPU=OFF.")
+    caffe2_update_option(USE_XPU OFF)
+  endif()
+endif()
+
 # ---[ Custom Protobuf
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_BUILD_MOBILE)
   disable_ubsan()
@@ -1307,6 +1317,12 @@ if(USE_ROCM)
       message(STATUS "Disabling Kernel Assert for ROCm")
     endif()
 
+    if(USE_FLASH_ATTENTION)
+      include(${CMAKE_CURRENT_LIST_DIR}/External/oort.cmake)
+    endif()
+    if(USE_CUDA)
+      caffe2_update_option(USE_MEM_EFF_ATTENTION OFF)
+    endif()
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()

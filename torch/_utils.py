@@ -4,7 +4,6 @@ import sys
 import traceback
 import warnings
 from collections import defaultdict
-from contextlib import nullcontext
 from typing import Any, DefaultDict, List, Optional
 
 import torch
@@ -857,16 +856,8 @@ def is_compiling():
 def _functionalize_sync(t):
     # This code lives in python instead of C++ since conditioning on a certain python subclass
     # is much more of a pain in C++.
-    from torch._subclasses.functional_tensor import (
-        FunctionalTensor,
-        maybe_disable_functional_mode,
-    )
+    from torch._subclasses.functional_tensor import FunctionalTensor
 
-    ctx = (
-        maybe_disable_functional_mode
-        if isinstance(t, FunctionalTensor)
-        else nullcontext
-    )
     if isinstance(t, FunctionalTensor):
         # If a FunctionalTensorMode is active while syncing, we don't want it to intercept any ops that get called
         # when we sync our inner tensor.

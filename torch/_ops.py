@@ -149,7 +149,6 @@ class OperatorBase:
             return fn(_CppFunctionalizeAPI(), *args, **kwargs)
 
         def functionalize_dispatch_mode_fn(mode, *args, **kwargs):
-            # Mode is unused (there's a global FunctionalTensorMode that we can access)
             return fn(_PythonFunctionalizeAPI(), *args, **kwargs)
 
         def functionalize_functorch_fn(interpreter, *args, **kwargs):
@@ -568,8 +567,8 @@ class OpOverload(OperatorBase):
 
     def __call__(self_, *args, **kwargs):  # noqa: B902
         # use `self_` to avoid naming collide with aten ops arguments that
-        # named "self". This way, all the aten ops can be called by kwargs.
-        return self_._op(*args, **(kwargs or {}))
+        # are named "self". This way, all the aten ops can be called by kwargs.
+        return self_._op(*args, **kwargs)
 
     def __hash__(self):
         return hash(self._op)
