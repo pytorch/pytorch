@@ -389,6 +389,8 @@ class NNModuleVariable(VariableTracker):
                     decompose_and_inline_function_with_makefx,
                 )
 
+                start_node_code = len(tx.output.graph.nodes)
+
                 # For single step graph we want to use make_fx to extract the fx graph
                 # representing the fwd and inline that fx graph.
                 # Dynamo needs to see all inputs and output of each torch function
@@ -428,6 +430,21 @@ class NNModuleVariable(VariableTracker):
                     tx, functional_call, complete_tensor_variable_args, kwargs
                 )
 
+                num_nodes_need_update_metadata = (
+                    len(tx.output.graph.nodes) - start_node_code
+                )
+                for node in tx.output.graph.nodes.__reversed__():
+                    num_nodes_need_update_metadata -= 1
+                    if num_nodes_need_update_metadata < 0:
+                        break
+                    if (
+                        "source_fn_stack" in node.meta
+                        and len(node.meta["source_fn_stack"]) > 0
+                    ):
+                        node.meta["source_fn_stack"][-1] = (
+                            self.module_key,
+                            type(self.module),
+                        )
                 return res
             # Example: `self.layer.forward(x)`
             # This is used for explicit calling `forward` in a forward function.
