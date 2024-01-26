@@ -1042,30 +1042,30 @@ def handle_log_file(
     test: ShardedTest, file_path: str, failed: bool, was_rerun: bool
 ) -> None:
     test = str(test)
-    with open(file_path, "rb") as f:
-        full_text = f.read().decode("utf-8", errors="ignore")
+    with open(file_path, errors="ignore") as f:
+        full_text = f.read()
+
+    new_file = "test/test-reports/" + sanitize_file_name(
+        f"{test}_{os.urandom(8).hex()}_.log"
+    )
+    os.rename(file_path, REPO_ROOT / new_file)
 
     if not failed and not was_rerun and "=== RERUNS ===" not in full_text:
         # If success + no retries (idk how else to check for test level retries
-        # other than reparse xml), print only what tests ran, rename the log
-        # file so it doesn't get printed later, and do not remove logs.
-        new_file = "test/test-reports/" + sanitize_file_name(
-            f"{test}_{os.urandom(8).hex()}_.log"
-        )
-        os.rename(file_path, REPO_ROOT / new_file)
+        # other than reparse xml), print only what tests ran
         print_to_stderr(
             f"\n{test} was successful, full logs can be found in artifacts with path {new_file}"
         )
         for line in full_text.splitlines():
             if re.search("Running .* items in this shard:", line):
-                print_to_stderr(line.strip())
+                print_to_stderr(line.rstrip())
         print_to_stderr("")
         return
-    # otherwise: print entire file and then remove it
-    print_to_stderr(f"\nPRINTING LOG FILE of {test} ({file_path})")
+
+    # otherwise: print entire file
+    print_to_stderr(f"\nPRINTING LOG FILE of {test} ({new_file})")
     print_to_stderr(full_text)
-    print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})\n")
-    os.remove(file_path)
+    print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({new_file})\n")
 
 
 def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
