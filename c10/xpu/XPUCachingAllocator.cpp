@@ -3,10 +3,9 @@
 #include <c10/xpu/XPUCachingAllocator.h>
 
 #include <deque>
-#include <iostream>
 #include <map>
 #include <mutex>
-#include <string>
+#include <vector>
 
 namespace c10::xpu {
 
