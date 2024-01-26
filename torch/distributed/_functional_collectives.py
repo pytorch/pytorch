@@ -717,7 +717,7 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
         warnings.warn(f"tag ({tag}) is ignored for process group resolution.")
 
     if isinstance(group, dist.ProcessGroup):
-        return group.group_name()
+        return group.group_name
     elif isinstance(group, str):
         return group
     else:
