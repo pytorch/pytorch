@@ -129,7 +129,7 @@ class C10_API RefcountedMapAllocator : private RefcountedMapAllocatorArgCheck,
   void close() override;
 
   ~RefcountedMapAllocator() override {
-    close();
+    RefcountedMapAllocator::close();
   }
 
  protected:
