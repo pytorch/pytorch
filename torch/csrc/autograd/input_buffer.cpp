@@ -138,23 +138,23 @@ void InputBuffer::add(
 
   // Switches to accumulate device
   // The device (and stream) chosen for accumulation is:
-  //  (1) var is not a CUDA variable. Accumulation happens on var's device.
-  //  (2) var is a CUDA variable and it, the consumer, and the producer share
+  //  (1) var is not a CUDA/privateuse1 variable. Accumulation happens on var's device.
+  //  (2) var is a CUDA/privateuse1 variable and it, the consumer, and the producer share
   //  the same device:
   //       (2a) Uses the consumer's stream as the accumulation stream
   //       (2b) Syncs the accumulation stream with the producer's stream (if
   //       different) (2c) Accumulates.
-  //  (3) var is a CUDA variable and it shares a device with the consumer but
+  //  (3) var is a CUDA/privateuse1 variable and it shares a device with the consumer but
   //  not the producer:
   //       (3a) Uses the consumer's stream as the accumulation stream
   //       (3b) Syncs the accumulation stream with the consumer device's default
   //       stream (3c) Accumulates.
-  //  (4) var is a CUDA variable and it shares a device with the producer but
+  //  (4) var is a CUDA/privateuse1 variable and it shares a device with the producer but
   //  not the consumer:
   //       (4a) Uses the producer device's default stream as the accumulation
   //       stream (4b) Syncs the accumulation stream with the producer's
   //       stream (4c) Accumulates.
-  //  (5) var is a CUDA variable and it does not share a device with the
+  //  (5) var is a CUDA/privateuse1 variable and it does not share a device with the
   //  consumer or producer.
   //      Accumulation happens on the var device's default stream.
 
@@ -215,7 +215,7 @@ void InputBuffer::add(
       c10::OptionalStreamGuard stream_guard{opt_accumulate_stream};
       accumulate(buffer, pos, std::move(var));
     } else {
-      // (1) non-CUDA variable
+      // (1) non-CUDA/privateuse1 variable
       //     Accumulation happens on variable's device
       c10::OptionalDeviceGuard device_guard{device_of(var)};
       accumulate(buffer, pos, std::move(var));
