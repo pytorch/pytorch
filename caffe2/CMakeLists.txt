@@ -353,23 +353,28 @@ set(GENERATED_CXX_TORCH
   "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
   )
 
-if(NOT INTERN_DISABLE_AUTOGRAD AND NOT BUILD_LITE_INTERPRETER)
-  list(APPEND GENERATED_CXX_TORCH
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_0.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_1.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_2.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_3.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_4.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_0.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_1.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_2.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_3.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_4.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_0.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_1.cpp"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/ViewFuncs.cpp"
-  )
-  if(BUILD_LAZY_TS_BACKEND)
+if(NOT INTERN_DISABLE_AUTOGRAD)
+  if(BUILD_LITE_INTERPRETER)
+    list(APPEND GENERATED_CXX_TORCH
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/ViewFuncs.cpp"
+    )
+  else()
+    list(APPEND GENERATED_CXX_TORCH
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_0.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_1.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_2.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_3.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_4.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_0.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_1.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_2.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_3.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_4.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_0.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_1.cpp"
+    )
+  endif()
+  if(BUILD_LAZY_TS_BACKEND AND NOT BUILD_LITE_INTERPRETER)
     list(APPEND GENERATED_CXX_TORCH
       "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyNativeFunctions.cpp"
       "${TORCH_SRC_DIR}/csrc/lazy/generated/RegisterAutogradLazy.cpp"
