@@ -3406,19 +3406,16 @@ def _upsample_linear(
     for a in product(*[[0, 1]] * d):
         idx = [None, None] + [xs[k] if a[k] == 0 else xp1s[k] for k in range(d)]
         v = aten._unsafe_index(input, idx)
-        if not input.is_floating_point():
-            v = v.to(dtype)
+        v = _maybe_convert_to_dtype(v, dtype)
         vs.append(v)
 
     for i in reversed(range(d)):
         xscale = (xs_f32[i] - xs[i]).clamp(0.0, 1.0).to(dtype)
-        qs = []
-        for j in range(len(vs) // 2):
-            v1, v2 = vs[2 * j], vs[2 * j + 1]
+        vs = [
             # x1 * (1 - alpha) + x2 * alpha == x1 + (x2 - x1) * alpha
-            q = v1 + torch.mul(v2 - v1, xscale)
-            qs.append(q)
-        vs = qs
+            v1 + torch.mul(v2 - v1, xscale)
+            for v1, v2 in zip(vs[::2], vs[1::2])
+        ]
 
     assert len(vs) == 1
     result = vs[0]
