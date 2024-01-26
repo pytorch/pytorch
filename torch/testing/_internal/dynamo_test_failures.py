@@ -2745,7 +2745,6 @@ dynamo_expected_failures = {
     "TestPythonDispatch.test_subclass_autograd_device_check",  # test_python_dispatch
     "TestPythonDispatch.test_data_ptr_respects_numel_slow_path",  # test_python_dispatch
     "TestPythonDispatch.test_make_subclass_with_modes",  # test_python_dispatch
-    "TestPythonRegistration.test_override_aten_ops_with_multiple_libraries",  # test_python_dispatch
     "TestPythonDispatch.test_dispatch_super_call",  # test_python_dispatch
     "TestPythonDispatch.test_subclass_priority",  # test_python_dispatch
     "TestPythonDispatch.test_exception_handling",  # test_python_dispatch
