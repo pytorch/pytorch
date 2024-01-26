@@ -442,14 +442,11 @@ def _multi_tensor_radam(
             del denom
             torch._foreach_sqrt_(num)
 
-            # preallocate zeros
-            zeros = [torch.zeros_like(rho_t) for rho_t in rho_t_list]
-
             # TODO(mlazos): we should try and get a foreach_where op https://github.com/pytorch/pytorch/issues/117884
-            rect = [torch.where(rho_t > 5.0, n, z) for z, n, rho_t in zip(zeros, num, rho_t_list)]
+            rect = [torch.where(rho_t > 5.0, n, 0.0) for n, rho_t in zip(num, rho_t_list)]
             del num
             del rho_t_list
-            unrect_step_size = [torch.where(rect > 0, z, torch.ones_like(rect)) for z, rect in zip(zeros, rect)]
+            unrect_step_size = [torch.where(rect > 0, 0.0, 1.0) for rect in rect]
             torch._foreach_mul_(unrect_step_size, lr)
 
             bias_correction1 = torch._foreach_pow(beta1, grouped_state_steps)
