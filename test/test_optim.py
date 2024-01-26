@@ -186,11 +186,16 @@ class TestOptimRenewed(TestCase):
         for optim_input in optim_inputs:
             updated_params, state = [], []
             kwargs = deepcopy(optim_input.kwargs)
-            if kwargs.get("capturable", False) and (str(device) == "cpu" or optim_cls.__name__ == "Adamax"):
-                # capturable is not supported on CPU nor for single-tensor Adamax, see #117836
+            if kwargs.get("capturable", False) and str(device) == "cpu":
+                # capturable is not supported on CPU
                 continue
             for flag_value in (False, True):
+                # See https://github.com/pytorch/pytorch/issues/117836
+                if optim_cls.__name__ == "Adamax" and kwargs.get("capturable", False) and not flag_value:
+                    kwargs["capturable"] = False
+
                 kwargs[flag] = flag_value
+
                 input = torch.tensor(
                     [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=dtype, device=device
                 ).reshape(3, 2)
@@ -375,14 +380,12 @@ class TestOptimRenewed(TestCase):
         optim_cls = optim_info.optim_cls
         for optim_input in optim_inputs:
             kwargs = deepcopy(optim_input.kwargs)
-            # See https://github.com/pytorch/pytorch/issues/117836
-            if optim_cls.__name__ == "Adamax" and kwargs.get("capturable", False) and not kwargs.get("foreach", False):
-                continue
-
-
             max_mems = []
             for flag_value in (False, True):
                 kwargs["foreach"] = flag_value
+                # See https://github.com/pytorch/pytorch/issues/117836
+                if optim_cls.__name__ == "Adamax" and kwargs.get("capturable", False) and not flag_value:
+                    kwargs["capturable"] = False
 
                 # The 128 is critical here! Our CUDACachingAllocator allocates in blocks of 512,
                 # meaning any tensor that occupies <512 bytes of memory will allocate a whole

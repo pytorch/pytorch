@@ -305,6 +305,12 @@ def _multi_tensor_asgd(
 
     assert not differentiable, "_foreach ops don't support autograd"
 
+    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+    if not torch._utils.is_compiling() and capturable:
+        assert all(p.is_cuda and mu.is_cuda and eta.is_cuda and step.is_cuda
+                   for p, mu, eta, step in zip(params, mus, etas, state_steps)), \
+            "If capturable=True, params, mu_products, and state_steps must be CUDA tensors."
+
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, axs, mus, etas, state_steps])
     for ((device, _), ((grouped_params, grouped_grads, grouped_axs, grouped_mus,
          grouped_etas, grouped_state_steps), _)) in grouped_tensors.items():
