@@ -687,7 +687,6 @@ dynamo_expected_failures = {
     "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_False_memory_format0_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_False_memory_format1_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_batchnorm_grad_cpu",  # test_nn
-    "TestNN.test_interpolate",  # test_nn
     "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_True_memory_format0_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_True_memory_format1_cpu",  # test_nn
     "TestNN.test_fb_fc_packed",  # test_nn
