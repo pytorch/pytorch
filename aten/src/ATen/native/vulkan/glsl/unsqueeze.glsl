@@ -38,9 +38,7 @@ void main() {
   const int dim = uBlock.info.x;
   const int channels = uBlock.info.y;
   vec4 out_texel = vec4(0, 0, 0, 0);
-  if (dim == 0) {
-    imageStore(uOutput, pos, texelFetch(uImage, pos, 0));
-  } else if (dim == 1) {
+  if (dim == 1) {
     int src_x = pos.x;
     int src_y = pos.y;
     for (int i = 0; i < 4; i++) {
