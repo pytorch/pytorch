@@ -1,3 +1,9 @@
+r"""
+This package introduces support for the XPU backend, specifically tailored for
+Intel GPU optimization.
+
+You can use :func:`is_available()` to determine if your system supports XPU.
+"""
 from functools import lru_cache
 from typing import Any, Dict, Optional, Union
 
@@ -150,7 +156,7 @@ def get_device_capability(device: Optional[_device_t] = None) -> Dict[str, Any]:
     }
 
 
-def get_device_properties(device: _device_t) -> _XpuDeviceProperties:
+def get_device_properties(device: Optional[_device_t] = None) -> _XpuDeviceProperties:
     r"""Get the properties of a device.
 
     Args:
