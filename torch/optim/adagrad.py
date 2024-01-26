@@ -344,12 +344,12 @@ def _multi_tensor_adagrad(
             )
             continue
 
-        if maximize:
-            device_grads = torch._foreach_neg(device_grads)
-
         # Handle complex parameters
         if has_complex:
             _view_as_real(device_params, device_grads, device_state_sums)
+
+        if maximize:
+            device_grads = torch._foreach_neg(device_grads)
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over

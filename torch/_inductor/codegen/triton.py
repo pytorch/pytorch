@@ -52,9 +52,9 @@ from ..utils import (
     next_power_of_2,
     Placeholder,
     sympy_dot,
+    sympy_index_symbol,
     sympy_product,
     sympy_subs,
-    sympy_symbol,
     unique,
     yellow_text,
 )
@@ -387,6 +387,10 @@ def triton_compute_type(dtype):
         triton_type_name = "float8e4nv"
     elif triton_type_name == "float8_e5m2":
         triton_type_name = "float8e5"
+    elif triton_type_name == "float8_e4m3fnuz":
+        triton_type_name = "float8e4b8"
+    elif triton_type_name == "float8_e5m2":
+        triton_type_name = "float8e5b16"
     return f"tl.{triton_type_name}"
 
 
@@ -933,7 +937,7 @@ class IterationRanges:
         return self.prefix == "r" and not self.kernel.persistent_reduction
 
     def symbol(self):
-        return sympy_symbol(self.name)
+        return sympy_index_symbol(self.name)
 
 
 class IterationRangesRoot(IterationRanges):
@@ -975,9 +979,11 @@ class IterationRangesRoot(IterationRanges):
         Lookup a given RangeTreeEntry, creating it if needed
         """
         if V.graph.sizevars.statically_known_equals(divisor * length, self.numel):
-            expr = FloorDiv(sympy_symbol(f"{self.prefix}index"), divisor)
+            expr = FloorDiv(sympy_index_symbol(f"{self.prefix}index"), divisor)
         else:
-            expr = ModularIndexing(sympy_symbol(f"{self.prefix}index"), divisor, length)
+            expr = ModularIndexing(
+                sympy_index_symbol(f"{self.prefix}index"), divisor, length
+            )
 
         if expr not in self.nodes:
             node = IterationRangesEntry(
@@ -1546,7 +1552,7 @@ class TritonKernel(Kernel):
                 # indirect indexing
                 cse_var = self.cse.varname_map[var.name]
                 mask_vars.update(cse_var.mask_vars)
-            elif var.name.startswith(("s", "ps", "i")):
+            elif var.name.startswith(("s", "ps", "i", "u")):
                 pass
             else:
                 # var is one of xN, yN or rN
@@ -1732,7 +1738,7 @@ class TritonKernel(Kernel):
         index_in_tile_vars = sympy_subs(index, index_to_tile_indexes)
         strides = {}
         for range_tree in self.range_trees:
-            s = sympy_symbol(range_tree.name)
+            s = sympy_index_symbol(range_tree.name)
             strides[s] = sympy_subs(index_in_tile_vars, {s: 1}) - sympy_subs(
                 index_in_tile_vars, {s: 0}
             )
@@ -2385,7 +2391,7 @@ class TritonKernel(Kernel):
         self.stores.clear()
         self.suffix.clear()
 
-    def codegen_kernel_benchmark(self):
+    def codegen_kernel_benchmark(self, grid=None):
         result = IndentedBuffer()
         argdefs, call_args, signature = self.args.python_argdefs()
 
@@ -2423,9 +2429,22 @@ class TritonKernel(Kernel):
             result.writeline(f"return {', '.join(var_names)},")
 
         result.writelines(["\n", "\n", "def call(args):"])
-        grid = []
-        extra_args = []
-        extra_args_str = None
+        if grid is None:
+            grid = []
+            extra_args = []
+            extra_args_str = None
+            for tree in self.active_range_trees():
+                expr = pexpr(V.graph.sizevars.size_hint(tree.numel))
+                extra_args.append(expr)
+                if tree.prefix != "r":
+                    grid.append(expr)
+            if self.need_numel_args():
+                extra_args_str = ", ".join(map(str, extra_args)) + ", "
+            else:
+                extra_args_str = ""
+            grid_arg = f"{extra_args_str}grid=grid({', '.join(grid)})"
+        else:
+            grid_arg = f"grid={grid}"
         index = V.graph.scheduler.current_device.index
         with result.indent():
             result.writeline(f"with {V.graph.device_ops.device_guard(index)}:")
@@ -2433,22 +2452,10 @@ class TritonKernel(Kernel):
                 result.writeline(
                     V.graph.device_ops.set_device(index)
                 )  # no-op to ensure context
-                for tree in self.active_range_trees():
-                    expr = pexpr(V.graph.sizevars.size_hint(tree.numel))
-                    extra_args.append(expr)
-                    if tree.prefix != "r":
-                        grid.append(expr)
-
                 stream_name = f"stream{index}"
                 result.writeline(f"{stream_name} = get_raw_stream({index})")
-
-                if self.need_numel_args():
-                    extra_args_str = ", ".join(map(str, extra_args)) + ", "
-                else:
-                    extra_args_str = ""
-
                 result.writeline(
-                    f"{str(Placeholder.KERNEL_NAME)}.run(*args, {extra_args_str}grid=grid({', '.join(grid)}), stream={stream_name})"
+                    f"{str(Placeholder.KERNEL_NAME)}.run(*args, {grid_arg}, stream={stream_name})"
                 )
 
         # benchmark all configs
@@ -2460,7 +2467,7 @@ class TritonKernel(Kernel):
                     V.graph.device_ops.set_device(index)
                 )  # no-op to ensure context
                 result.writeline(
-                    f"return {str(Placeholder.KERNEL_NAME)}.benchmark_all_configs(*args, {extra_args_str}grid=grid({', '.join(grid)}))"  # noqa: B950 line too long
+                    f"return {str(Placeholder.KERNEL_NAME)}.benchmark_all_configs(*args, {grid_arg})"
                 )
 
         ninplace_args = len(unique(self.args.inplace_buffers.values()))
@@ -3389,7 +3396,14 @@ class TritonScheduling(BaseScheduling):
             node_schedule = [template_node, *epilogue_nodes]
 
             if config.benchmark_kernel:
-                src_code = f"{kernel.imports_for_benchmark_kernel()}\n{src_code}\n{kernel.codegen_kernel_benchmark().getvalue()}"
+                grid_args = V.graph.sizevars.size_hints(kernel.call_sizes)
+                assert kernel.meta is not None, "meta is None"
+                grid = kernel.grid_fn(*grid_args, kernel.meta)
+                src_code = (
+                    f"{kernel.imports_for_benchmark_kernel()}\n"
+                    f"{src_code}\n"
+                    f"{kernel.codegen_kernel_benchmark(grid).getvalue()}"
+                )
 
             kernel_name = self.define_kernel(src_code, node_schedule)
         self.codegen_comment(node_schedule)

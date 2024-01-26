@@ -35,8 +35,8 @@ from ..utils import (
     free_symbol_startswith,
     IndentedBuffer,
     sympy_dot,
+    sympy_index_symbol,
     sympy_subs,
-    sympy_symbol,
     unique,
 )
 from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
@@ -1193,7 +1193,7 @@ class Kernel(CodeGen):
                         )
 
                     self.indirect_max_sizes[map_key] = (size, self.index_to_str(size))
-                return sympy_symbol(str(var))
+                return sympy_index_symbol(str(var))
 
             @staticmethod
             def load(name: str, index: sympy.Expr) -> CSEVariable:
@@ -1315,8 +1315,7 @@ class Kernel(CodeGen):
         replacements = {
             x: self.args.size(x)
             for x in sorted_symbols
-            if x.name.startswith("s")
-            or x.name.startswith("ps")
+            if x.name.startswith(("s", "u", "ps"))
             or (x.name.startswith("i") and not x.name.startswith("idx"))
         }
         return sympy_subs(index, replacements)

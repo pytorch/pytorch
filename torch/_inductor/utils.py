@@ -546,7 +546,10 @@ def sympy_str(expr: sympy.Expr) -> str:
     return str(expr)
 
 
-def sympy_symbol(name: str) -> sympy.Symbol:
+def sympy_index_symbol(name: str) -> sympy.Symbol:
+    """
+    Used to generate an integer-nonnegative symbol.
+    """
     # This should never be used for creating shape/stride symbols, as those
     # should all be allocated before Inductor.
     assert name[0] != "s"
@@ -555,18 +558,26 @@ def sympy_symbol(name: str) -> sympy.Symbol:
     return sympy.Symbol(name, integer=True, nonnegative=True)
 
 
-def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]) -> sympy.Expr:
+def sympy_subs(expr: sympy.Expr, replacements: Dict[sympy.Expr, Any]) -> sympy.Expr:
     """
-    xreplace is faster than subs, but is way more picky
+    When the passed replacement symbol v is a string, it is converted to a symbol with name v that
+    have the same replaced expression integer and nonnegative properties.
     """
 
-    def promote_strings(key):
-        if isinstance(key, str):
-            return sympy_symbol(key)
-        return key
+    def to_symbol(replaced, replacement):
+        assert isinstance(replaced, sympy.Expr)
+        if isinstance(replacement, str):
+            return sympy.Symbol(
+                replacement,
+                integer=replaced.is_integer,
+                nonnegative=replaced.is_nonnegative,
+            )
+        else:
+            return replacement
 
+    # xreplace is faster than subs, but is way more picky
     return sympy.sympify(expr).xreplace(
-        {promote_strings(k): promote_strings(v) for k, v in replacements.items()}
+        {k: to_symbol(k, v) for k, v in replacements.items()}
     )
 
 
@@ -926,11 +937,12 @@ def run_and_get_code(fn, *args, **kwargs):
             source_codes.append(f.read())
         return mod
 
-    with mock.patch.object(
-        GraphLowering, "compile_to_module", patched_compile_to_module
-    ):
-        torch._dynamo.reset()
-        result = fn(*args, **kwargs)
+    with config.patch({"fx_graph_cache": False}):
+        with mock.patch.object(
+            GraphLowering, "compile_to_module", patched_compile_to_module
+        ):
+            torch._dynamo.reset()
+            result = fn(*args, **kwargs)
     return result, source_codes
 
 
@@ -1094,6 +1106,13 @@ def triton_config_to_hashable(cfg):
     items.append(("num_warps", cfg.num_warps))
     items.append(("num_stages", cfg.num_stages))
     return tuple(items)
+
+
+def parallel_num_threads():
+    threads = config.cpp.threads
+    if threads < 1:
+        threads = torch.get_num_threads()
+    return threads
 
 
 HAS_COLORAMA = True

@@ -82,7 +82,7 @@ from torch._inductor.utils import IndentedBuffer
 
 from torch.fx.graph import inplace_methods, magic_methods
 
-from .utils import reduction_num_outputs, sympy_str, sympy_symbol
+from .utils import reduction_num_outputs, sympy_index_symbol, sympy_str
 
 if TYPE_CHECKING:
     import torch
@@ -202,7 +202,7 @@ class MockHandler:
 
     @staticmethod
     def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:
-        return sympy_symbol(f"({str(index_var)})")
+        return sympy_index_symbol(f"({str(index_var)})")
 
     @classmethod
     def _init_cls(cls):
