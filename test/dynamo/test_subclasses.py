@@ -31,7 +31,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 compile_full_eager = torch.compile(backend="eager", fullgraph=True)
 
@@ -489,6 +489,19 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         def fn(w):
             return torch.add(w, 1.0)
+
+        fn_opt = compile_full_eager(fn)
+
+        res_exp = fn(wrapped)
+        res_act = fn_opt(wrapped)
+        self.assertEqual(res_exp, res_act)
+
+    def test_torch_function_wrapper_class_with_kwargs(self):
+        x = torch.ones(2, 2)
+        wrapped = WrapperSubclass(x)
+
+        def fn(w):
+            return torch.add(w, 1.0, alpha=2.0)
 
         fn_opt = compile_full_eager(fn)
 
@@ -1113,7 +1126,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
     def test_basic_autograd(self):
         self._test_autograd("aot_eager")
 
-    @requires_cuda()
+    @requires_cuda
     def test_basic_autograd_inductor(self):
         self._test_autograd("inductor")
 
