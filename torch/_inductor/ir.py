@@ -67,9 +67,9 @@ from .utils import (
     is_dynamic,
     pad_listlike,
     sympy_dot,
+    sympy_index_symbol,
     sympy_product,
     sympy_subs,
-    sympy_symbol,
 )
 from .virtualized import ops, V
 
@@ -395,7 +395,7 @@ class Loops(IRNode):
     @staticmethod
     def _index(ranges, prefix="i"):
         return [
-            sympy.Integer(0) if s == 1 else sympy_symbol(f"{prefix}{n}")
+            sympy.Integer(0) if s == 1 else sympy_index_symbol(f"{prefix}{n}")
             for n, s in enumerate(ranges)
         ]
 
@@ -2036,7 +2036,7 @@ class GenericView(BaseView):
         return self.reindex
 
     def reindex_str(self):
-        index_old = [sympy_symbol(f"i{n}") for n in range(len(self.size))]
+        index_old = [sympy_index_symbol(f"i{n}") for n in range(len(self.size))]
         index_new = list(self.reindex(index_old))
         return f"lambda {', '.join(map(str, index_old))}: {index_new}"
 
@@ -2093,7 +2093,8 @@ class View(GenericView):
             if unbacked_symbols_in_sizes and (not is_contiguous_storage_and_layout(x)):
                 # realize x; otherwise, the dynamic_reshape_indexer below will fail
                 # due to the size_hint's inability to process unbacked SymInts
-                x.realize()
+                x = ExternKernel.realize_input(x)
+
             storage, old_layout = as_contiguous_storage_and_layout(x)
             new_layout = FixedLayout(
                 old_layout.device,
@@ -2140,7 +2141,7 @@ class View(GenericView):
         Perform a reshape entirely by modifying indexing math
         """
         size_hint = V.graph.sizevars.size_hint
-        vars = [sympy_symbol(f"view{i}") for i in range(len(new_size))]
+        vars = [sympy_index_symbol(f"view{i}") for i in range(len(new_size))]
 
         stack_new = list(zip(vars, new_size))
         stack_old = list(old_size)
@@ -3024,12 +3025,7 @@ class ShapeAsConstantBuffer(IRNode):
         self.shape = shape
 
     def codegen_reference(self, writer=None):
-        expr = V.graph.wrapper_code.expr_printer(V.graph.sizevars.simplify(self.shape))
-        if V.graph.cpp_wrapper:
-            # wrap scalar to 0-d tensor for cpp wrapper
-            return f"torch::tensor({expr})"
-        else:
-            return expr
+        return V.graph.wrapper_code.expr_printer(V.graph.sizevars.simplify(self.shape))
 
 
 @dataclasses.dataclass
@@ -3916,7 +3912,7 @@ class ExternKernel(InputsKernel):
         sizes = self.get_size()
         strides = self.get_stride()
         strides = [sizevars.size_hint(x) for x in strides]
-        index_vars = [sympy_symbol(f"d{i}") for i in range(len(sizes))]
+        index_vars = [sympy_index_symbol(f"d{i}") for i in range(len(sizes))]
         # reorder index vars according to stride
         index_order = sorted(range(len(strides)), key=strides.__getitem__, reverse=True)
         lookup = {pos: idx for idx, pos in enumerate(index_order)}
@@ -4450,6 +4446,7 @@ class ExternKernelNode:
 
 
 has_c_shim = {
+    aten._scaled_dot_product_efficient_attention.default,
     aten._scaled_dot_product_flash_attention.default,
     aten.addmm.out,
     aten.bmm.out,
@@ -6635,7 +6632,7 @@ class LoopBody:
 
     def add_indirect(self, size):
         name = f"indirect{len(self.indirect_vars)}"
-        var = sympy_symbol(name)
+        var = sympy_index_symbol(name)
         self.indirect_vars.append(var)
         return var
 
@@ -7377,7 +7374,13 @@ class _CollectiveKernel(FallbackKernel):
             non_tensor_args,
             unflatten_args,
         )
-        pytree.tree_map(lambda x: MutationOutput(x.layout, x, packed), inputs)
+
+        def mark_mutation(x):
+            if isinstance(x.data, BaseView):
+                x = x.data.unwrap_view()
+            MutationOutput(x.layout, x, packed)
+
+        pytree.tree_map(lambda inp: mark_mutation(inp), inputs)
 
     # NOTE: [Out-of-Place Collective Safety]
     # Between the initiation and completion of an out-of-place collective:
@@ -7478,6 +7481,8 @@ class _WaitKernel(_CollectiveKernel):
             non_tensor_args,
             unflatten_args,
         )
+        if isinstance(inp.data, BaseView):
+            inp = inp.data.unwrap_view()
         MutationOutput(inp.layout, inp, packed)
 
     def get_read_writes(self):
