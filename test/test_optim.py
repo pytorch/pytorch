@@ -113,6 +113,10 @@ class TestOptimRenewed(TestCase):
         for optim_input in optim_inputs:
             if "foreach" in optim_info.supported_impls:
                 optim_input.kwargs["foreach"] = False  # force forloop
+
+            # https://github.com/pytorch/pytorch/issues/118230
+            _make_radam_single_tensor_non_capturable(optim_cls, optim_input.kwargs)
+
             weight = Parameter(torch.randn((10, 5), device="cuda:0", dtype=dtype))
             bias = Parameter(torch.randn((10), device="cuda:1", dtype=dtype))
             input = torch.randn(5, device="cuda:0", dtype=dtype)
