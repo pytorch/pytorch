@@ -193,7 +193,7 @@ class UniformValueConstantFolder(ConstantFolder):
         self.node_replacements[node] = tensor.flatten()[0].item()
         self.constant_data_ptrs[node] = StorageWeakRef(tensor.untyped_storage())
         shape = list(tensor.shape)
-        assert all(isinstance(dim, int) for dim in shape)
+        assert all(type(dim) is int for dim in shape)
         self.node_replacements_shapes[node] = shape
 
 
