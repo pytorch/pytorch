@@ -71,6 +71,7 @@ REWRITE_OPS_TO_TENSOR_SIZE_METHOD = [
 constant_fold_functions = [
     torch._assert,
     torch._utils._get_device_index,
+    torch._C._get_cublas_allow_tf32,
     torch.cuda.is_available,
     torch.distributed.is_available,
     torch.get_autocast_gpu_dtype,
@@ -422,10 +423,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return ConstantVariable.create(
                 torch.backends.cudnn.is_acceptable(tensor_inp)
             )
-        elif self.value is torch._C._get_cublas_allow_tf32:
-            # The corresponding global state is allowTF32CuBLAS, which is guarded by dynamo so we could
-            # safely assume it's a constant during tracing.
-            return ConstantVariable.create(torch.backends.cuda.matmul.allow_tf32)
         elif (
             self.value == torch.numel
             and len(args) == 1
