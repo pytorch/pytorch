@@ -605,18 +605,18 @@ def optim_inputs_func_radam(device=None):
             params=None,
             kwargs={
                 "capturable": True,
-                "weight_decay": 0.9,
+                "weight_decay": 0.1,
             },
-            desc="capturable",
+            desc="capturable, weight_decay",
         ),
         OptimizerInput(
             params=None,
             kwargs={
                 "capturable": True,
-                "weight_decay": 0.9,
+                "weight_decay": 0.1,
                 "decoupled_weight_decay": True,
             },
-            desc="capturable",
+            desc="capturable, weight_decay, decoupled_weight_decay",
         ),
     ]
     return [
@@ -1433,6 +1433,13 @@ optim_db: List[OptimizerInfo] = [
                 "test_forloop_goes_right_direction",
             ),
             DecorateInfo(
+                unittest.skip(
+                    "RAdam does not support capturable single tensor https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction_multigpu",
+            ),
+            DecorateInfo(
                 skipIfTorchDynamo(
                     "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
@@ -1483,6 +1490,14 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_can_load_older_state_dict",
+                device_type="cpu",
             ),
             DecorateInfo(
                 toleranceOverride(
