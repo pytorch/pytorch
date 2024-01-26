@@ -160,8 +160,7 @@ inline at::Tensor as_view(
     const at::Tensor& tensor,
     bool is_bw_differentiable,
     bool is_fw_differentiable,
-    std::shared_ptr<ViewFunc> full_view_func = nullptr,
-    std::function<at::Tensor(const at::Tensor&)> view_func = nullptr,
+    std::shared_ptr<ViewFunc> view_func = nullptr,
     std::function<at::Tensor(const at::Tensor&)> rev_view_func = nullptr,
     CreationMeta creation_meta = CreationMeta::DEFAULT,
     bool allow_tensor_metadata_change = true) {
@@ -188,11 +187,7 @@ inline at::Tensor as_view(
       return make_variable_differentiable_view(
           tensor,
           diff_view_meta->get_backward_view().chain(
-              base,
-              tensor,
-              std::move(full_view_func),
-              std::move(view_func),
-              std::move(rev_view_func)),
+              base, tensor, std::move(view_func), std::move(rev_view_func)),
           c10::nullopt,
           /*shared_view_info*/ true,
           creation_meta,
@@ -200,11 +195,7 @@ inline at::Tensor as_view(
     } else {
       return make_variable_differentiable_view(
           tensor,
-          ViewInfo(
-              base,
-              std::move(full_view_func),
-              std::move(view_func),
-              std::move(rev_view_func)),
+          ViewInfo(base, std::move(view_func), std::move(rev_view_func)),
           c10::nullopt,
           /*shared_view_info*/ true,
           creation_meta,
@@ -219,10 +210,9 @@ inline at::Tensor as_view(
   if (is_bw_differentiable) {
     if (diff_view_meta && diff_view_meta->has_bw_view()) {
       const auto& base_bw_info = diff_view_meta->get_backward_view();
-      new_bw_info = base_bw_info.chain(
-          base, tensor, full_view_func, view_func, rev_view_func);
+      new_bw_info = base_bw_info.chain(base, tensor, view_func, rev_view_func);
     } else {
-      new_bw_info = ViewInfo(base, full_view_func, view_func, rev_view_func);
+      new_bw_info = ViewInfo(base, view_func, rev_view_func);
     }
   } else {
     TORCH_CHECK(
@@ -235,17 +225,10 @@ inline at::Tensor as_view(
     if (diff_view_meta && diff_view_meta->has_fw_view()) {
       const auto& base_fw_info = diff_view_meta->get_forward_view();
       new_fw_info = base_fw_info.chain(
-          base,
-          tensor,
-          std::move(full_view_func),
-          std::move(view_func),
-          std::move(rev_view_func));
+          base, tensor, std::move(view_func), std::move(rev_view_func));
     } else {
-      new_fw_info = ViewInfo(
-          base,
-          std::move(full_view_func),
-          std::move(view_func),
-          std::move(rev_view_func));
+      new_fw_info =
+          ViewInfo(base, std::move(view_func), std::move(rev_view_func));
     }
   }
 
