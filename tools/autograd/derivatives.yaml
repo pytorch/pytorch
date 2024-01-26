@@ -402,7 +402,7 @@
   L: cholesky_jvp(self_t, L, upper)
 
 - name: cholesky_solve(Tensor self, Tensor input2, bool upper=False) -> Tensor
-  self, input2: cholesky_solve_backward(grad, self, input2, result, upper)
+  self, input2: cholesky_solve_backward(grad, self, input2, result, upper, grad_input_mask)
   result: cholesky_solve_jvp(result, input2_p, input2_t, self_t, upper)
 
 - name: cholesky_inverse(Tensor self, bool upper=False) -> Tensor
@@ -439,6 +439,10 @@
   result: where(self_p <= max_p, self_t, max_t)
 
 - name: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
+  self: grad
+  result: auto_linear
+
+- name: _lazy_clone(Tensor self) -> Tensor
   self: grad
   result: auto_linear
 
@@ -1065,9 +1069,14 @@
 
 - name: masked_scatter(Tensor self, Tensor mask, Tensor source) -> Tensor
   self: grad.masked_fill(mask, 0)
-  source: masked_scatter_backward(grad, mask, source.sym_sizes())
+  source: masked_scatter_backward_symint(grad, mask, source.sym_sizes())
   mask: non_differentiable
   result: self_t.masked_scatter(mask, source_t)
+
+- name: masked_scatter_backward(Tensor grad_output, Tensor mask, SymInt[] sizes) -> Tensor
+  grad_output: zeros_like(grad_output).masked_scatter(mask, grad)
+  mask: non_differentiable
+  result: masked_scatter_backward(grad_output_t, mask, grad_output_t.sizes())
 
 - name: masked_select(Tensor self, Tensor mask) -> Tensor
   self: masked_select_backward(grad, self, mask)
@@ -1494,6 +1503,11 @@
   grad_output: grad.slice_symint(dim, start, end, step)
   result: auto_linear
 
+- name: slice_inverse(Tensor(a) self, Tensor src, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor(a)
+  self: grad.slice_symint(dim, start, end, step)
+  src: slice_scatter_symint(grad, zeros_like(self), dim, start, end, step)
+  result: auto_linear
+
 - name: slice_scatter(Tensor self, Tensor src, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor
   self: slice_scatter_symint(grad, zeros_like(src), dim, start, end, step)
   src: grad.slice_symint(dim, start, end, step)
@@ -1883,7 +1897,7 @@
   indices: non_differentiable
   values: grad.sparse_mask(result)._values()
 
-- name: sparse_compressed_tensor.comp_plain_value_size(Tensor compressed_indices, Tensor plain_indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
+- name: sparse_compressed_tensor.comp_plain_value_size(Tensor compressed_indices, Tensor plain_indices, Tensor values, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   compressed_indices: non_differentiable
   plain_indices: non_differentiable
   # TODO: remove to_dense after gh-107381 is fixed
@@ -1901,7 +1915,7 @@
 - name: values(Tensor(a) self) -> Tensor(a)
   dispatch:
     Default:
-      self: at::_sparse_coo_tensor_unsafe_symint(self.indices(), grad, self.sym_sizes())._coalesced_(true)
+      self: values_backward(grad, self)
     AutogradNestedTensor:
       self: at::_nested_view_from_buffer(grad.contiguous(), self._nested_tensor_size(), self._nested_tensor_strides(), self._nested_tensor_storage_offsets())
 
@@ -2774,9 +2788,17 @@
   output_differentiability: [True, False, False, False, False, False, False, False, False]
   query, key, value: _scaled_dot_product_flash_attention_backward_symint(grad, query, key, value, output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, dropout_p, is_causal, philox_seed, philox_offset, scale)
 
-# - name: _flash_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cum_seq_q, Tensor? cum_seq_k, int? max_q, int? max_k, float dropout_p, bool is_causal, bool return_debug_mask, *, float? scale=None) -> (Tensor output, Tensor query_padded, Tensor key_padded, Tensor value_padded, Tensor softmax_logsumexp, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
-#   output_differentiability: [True, False, False, False, False, False, False, False]
-#   query, key, value: _flash_attention_backward(grad, query, key, value, output, softmax_logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, dropout_p, is_causal, philox_seed, philox_offset, scale)
+- name: _scaled_dot_product_flash_attention_for_cpu(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, *, Tensor? attn_mask=None, float? scale=None) -> (Tensor output, Tensor logsumexp)
+  output_differentiability: [True, False]
+  query, key, value: _scaled_dot_product_flash_attention_for_cpu_backward(grad, query, key, value, output, logsumexp, dropout_p, is_causal, attn_mask, scale)
+
+- name: _flash_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cum_seq_q, Tensor? cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, bool return_debug_mask, *, float? scale=None) -> (Tensor output, Tensor softmax_logsumexp, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
+  output_differentiability: [True, False, False, False, False]
+  query, key, value: _flash_attention_backward_symint(grad, query, key, value, output, softmax_logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, dropout_p, is_causal, philox_seed, philox_offset, scale)
+
+- name: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, int? max_seqlen_k, float dropout_p, int custom_mask_type, bool compute_log_sumexp=False, *, float? scale=None, Tensor? causal_diagonal=None, Tensor? seqlen_k=None) -> (Tensor output, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, SymInt max_seqlen_batch_q, SymInt max_seqlen_batch_k)
+  output_differentiability: [True, False, False, False, False, False]
+  query, key, value, bias: _efficient_attention_backward_symint(grad, query, key, value, bias, output, cu_seqlens_q, cu_seqlens_k, max_seqlen_batch_q, max_seqlen_batch_k, logsumexp, dropout_p, philox_seed, philox_offset, custom_mask_type, bias.requires_grad(), scale)
 
 # fft
 - name: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor

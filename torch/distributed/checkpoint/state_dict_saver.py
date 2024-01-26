@@ -1,19 +1,22 @@
-from typing import Optional
+import os
+import warnings
+from concurrent.futures import Future, ThreadPoolExecutor
+from typing import Optional, Union
 
 import torch
 import torch.distributed as dist
-from .planner import SavePlanner
+from torch.distributed._state_dict_utils import _offload_state_dict_to_cpu
+from torch.distributed.checkpoint.stateful import Stateful
+
 from .default_planner import DefaultSavePlanner
-
-
-from .storage import (
-    StorageWriter,
-)
-
+from .filesystem import FileSystemWriter
 from .metadata import Metadata, STATE_DICT_TYPE
-from .utils import _DistWrapper
+from .planner import SavePlanner
+from .storage import StorageWriter
+from .utils import _api_bc_check, _DistWrapper, _profile
 
-__all__ = ["save_state_dict"]
+
+__all__ = ["save_state_dict", "save"]
 
 
 def save_state_dict(
@@ -24,11 +27,45 @@ def save_state_dict(
     no_dist: bool = False,
     planner: Optional[SavePlanner] = None,
 ) -> Metadata:
+    """This method is deprecated. Please switch to 'save'."""
+    warnings.warn(
+        "'save_state_dict' is deprecated and will be removed in future versions."
+        "Please use 'save' instead."
+    )
+
+    storage_writer.reset()
+
+    # TODO: test returning `save` here instead.
+    with _profile():
+        return _save_state_dict(
+            state_dict,
+            storage_writer,
+            process_group,
+            coordinator_rank,
+            no_dist,
+            planner,
+        )
+
+
+@_api_bc_check
+def save(
+    state_dict: STATE_DICT_TYPE,
+    *,
+    checkpoint_id: Union[str, os.PathLike, None] = None,
+    storage_writer: Optional[StorageWriter] = None,
+    planner: Optional[SavePlanner] = None,
+    process_group: Optional[dist.ProcessGroup] = None,
+    coordinator_rank: int = 0,
+    no_dist: bool = False,
+) -> Metadata:
     """
-    Saves a distributed model in SPMD style.
+    Save a distributed model in SPMD style.
 
     This function is different from ``torch.save()`` as it handles
-    ``ShardedTensor`` by having each rank only save their local shards.
+    ``ShardedTensor`` , and ``DTensor`` by having each rank only save their local shards.
+
+    For each ``Stateful`` object (having both a ``state_dict`` and a ``load_state_dict``),
+    save will call ``state_dict`` before serialization.
 
     .. warning::
         There is no guarantees of Backwards Compatibility across PyTorch versions
@@ -50,12 +87,24 @@ def save_state_dict(
 
     Args:
         state_dict (Dict[str, Any]): The state_dict to save.
-        storage_writer (StorageWriter):
-            Instance of StorageWrite use to perform writes.
-        process_group (ProcessGroup):
+        checkpoint_id (Union[str, os.PathLike, None]):
+            The ID of this checkpoint instance. The meaning of the checkpoint_id
+            depends on the storage. It can be a path to a folder or to a file.
+            It can also be a key if the storage is a key-value store.
+            (Default: ``None``)
+        storage_writer (Optional[StorageWriter]):
+            Instance of StorageWriter used to perform writes. If this is not
+            specified, DCP will automatically infer the writer based on the
+            checkpoint_id. If checkpoint_id is also None, an exception will
+            be raised. (Default: ``None``)
+        planner (Optional[SavePlanner]):
+            Instance of SavePlanner. If this is not specificed, the default
+            planner will be used. (Default: ``None``)
+        process_group (Optional[ProcessGroup]):
             ProcessGroup to be used for cross-rank synchronization.
+            (Default: ``None``)
         coordinator_rank (int): Rank to use to coordinate the checkpoint.
-            rank0 is used by default.
+            rank0 is used by default. (Default: ``0``)
         no_dist (bool): If ``True``, distributed checkpoint will not save
             in SPMD style. (Default: ``False``)
 
@@ -82,7 +131,112 @@ def save_state_dict(
         and it is the user's responsibility to ensure that this is set so that
         each rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
+    torch._C._log_api_usage_once("torch.distributed.checkpoint.save")
 
+    with _profile():
+        if not storage_writer:
+            if not checkpoint_id:
+                raise RuntimeError(
+                    "`checkpoint_id` must be specificed if storage_writer is None."
+                )
+            # TODO: automatically decide whether to use FSSpecFileSystem
+            # https://github.com/pytorch/pytorch/issues/118033 and
+            # https://github.com/pytorch/pytorch/issues/118036
+            storage_writer = FileSystemWriter(checkpoint_id)
+
+        storage_writer.reset(checkpoint_id)
+
+        return _save_state_dict(
+            _stateful_to_state_dict(state_dict),
+            storage_writer,
+            process_group,
+            coordinator_rank,
+            no_dist,
+            planner,
+        )
+
+
+def _async_save(
+    state_dict: STATE_DICT_TYPE,
+    *,
+    checkpoint_id: Union[str, os.PathLike, None] = None,
+    storage_writer: Optional[StorageWriter] = None,
+    planner: Optional[SavePlanner] = None,
+    process_group: Optional[dist.ProcessGroup] = None,
+    coordinator_rank: int = 0,
+    no_dist: bool = False,
+) -> Future:
+    """Asynchronous version of ``save_state_dict``. This code first de-stages the state_dict on CPU, and then calls
+    `save` in a separate thread.
+
+    .. warning::
+        This feature is experimental and subject to removal/change.
+
+    Args:
+        state_dict (Dict[str, Any]): The state_dict to save.
+        checkpoint_id (Union[str, os.PathLike, None]):
+            The ID of this checkpoint instance. The meaning of the checkpoint_id
+            depends on the storage. It can be a path to a folder or to a file.
+            It can also be a key if the storage is a key-value store.
+            (Default: ``None``)
+        storage_writer (Optional[StorageWriter]):
+            Instance of StorageWriter used to perform writes. If this is not
+            specified, DCP will automatically infer the writer based on the
+            checkpoint_id. If checkpoint_id is also None, an exception will
+            be raised. (Default: ``None``)
+        planner (Optional[SavePlanner]):
+            Instance of SavePlanner. If this is not specificed, the default
+            planner will be used. (Default: ``None``)
+        process_group (Optional[ProcessGroup]):
+            ProcessGroup to be used for cross-rank synchronization.
+            (Default: ``None``)
+        coordinator_rank (int): Rank to use to coordinate the checkpoint.
+            rank0 is used by default. (Default: ``0``)
+        no_dist (bool): If ``True``, distributed checkpoint will not save
+            in SPMD style. (Default: ``False``)
+
+    Returns:
+        Future: A future holding the resultant Metadata object from `save`.
+
+    """
+    torch._C._log_api_usage_once("torch.distributed.checkpoint._async_save")
+
+    cpu_state_dict = _offload_state_dict_to_cpu(_stateful_to_state_dict(state_dict))
+
+    executor = ThreadPoolExecutor(max_workers=1)
+    f = executor.submit(
+        save,
+        cpu_state_dict,
+        checkpoint_id=checkpoint_id,
+        storage_writer=storage_writer,
+        planner=planner,
+        process_group=process_group,
+        coordinator_rank=coordinator_rank,
+        no_dist=no_dist,
+    )
+    f.add_done_callback(lambda f: executor.shutdown(wait=False))
+
+    return f
+
+
+def _stateful_to_state_dict(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
+    """Creates a shallow copy of `state_dict` where `state_dict` is called for each Stateful object."""
+    stateful_state_dict = {}
+    for key, elem in state_dict.items():
+        stateful_state_dict[key] = (
+            elem.state_dict() if isinstance(elem, Stateful) else elem
+        )
+    return stateful_state_dict
+
+
+def _save_state_dict(
+    state_dict: STATE_DICT_TYPE,
+    storage_writer: StorageWriter,
+    process_group: Optional[dist.ProcessGroup] = None,
+    coordinator_rank: int = 0,
+    no_dist: bool = False,
+    planner: Optional[SavePlanner] = None,
+) -> Metadata:
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save_state_dict")
 
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
@@ -104,9 +258,7 @@ def save_state_dict(
         nonlocal global_metatadata
 
         assert planner is not None
-        all_local_plans, global_metatadata = planner.create_global_plan(
-            all_local_plans
-        )
+        all_local_plans, global_metatadata = planner.create_global_plan(all_local_plans)
         all_local_plans = storage_writer.prepare_global_plan(all_local_plans)
         return all_local_plans
 

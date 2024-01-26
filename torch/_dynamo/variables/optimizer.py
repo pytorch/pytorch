@@ -4,11 +4,11 @@ from typing import Dict, List
 import torch
 from ..decorators import mark_static_address
 
-from ..guards import GuardBuilder
-from ..source import AttrSource, GetItemSource, GlobalWeakRefSource
-from ..utils import global_key_name
+from ..guards import GuardBuilder, install_guard
+from ..source import AttrSource, ConstDictKeySource, GetItemSource, GlobalWeakRefSource
+from ..utils import GLOBAL_KEY_PREFIX
 
-from .base import MutableLocal, VariableTracker
+from .base import VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .lists import ListVariable
@@ -57,15 +57,20 @@ class OptimizerVariable(UserDefinedObjectVariable):
         if name == "_init_group":
             try:
                 py_args, py_kwargs = self.get_python_args(*args, **kwargs)
-                self.value._init_group(*py_args, **py_kwargs)
+                ret_val = self.value._init_group(*py_args, **py_kwargs)
                 self.map_sources_and_install_guards(tx)
                 self.update_list_args(tx, args, kwargs, py_args, py_kwargs)
                 # stash a weak_ptr to optimizer to invalidate code
                 # if the optimizer object dies
-                tx.store_global_weakref(self.get_global_name(), self.value)
+                mangled_name = f"__optimizer_{id(self.value)}"
+                tx.store_global_weakref_by_id(mangled_name, self.value)
                 self.create_finalizer(tx)
 
-                return ConstantVariable.create(None)
+                # This is currently safe only because the only actual `ret_val`s returned
+                # by the `_init_group` of existing optimizers are properties that are invariant
+                # to the input tensors (e.g. dtype, layout). Changing these would trigger a
+                # recompilation and hence never result in the wrong specialization of `ret_val`.
+                return ConstantVariable.create(ret_val)
             except (ArgMappingException, GuardInstallException) as _:
                 # trace normally if we can't map args or install guards correctly
                 pass
@@ -122,13 +127,14 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         # state guards take a long time to generate
         # so we manually generate them here
-        guards = set()
         state_source = AttrSource(self.source, "state")
-        guards.add(state_source.make_guard(GuardBuilder.DICT_KEYS))
-        for p, value in self.value.state.items():
-            tx.store_global_weakref(global_key_name(p), p)
-            p_state_source = GetItemSource(state_source, self.tensor_to_source[p])
-            guards.add(p_state_source.make_guard(GuardBuilder.DICT_KEYS))
+        install_guard(state_source.make_guard(GuardBuilder.DICT_KEYS))
+        for idx, (p, value) in enumerate(self.value.state.items()):
+            tx.store_global_weakref_by_id(GLOBAL_KEY_PREFIX, p)
+            p_state_source = GetItemSource(
+                state_source, ConstDictKeySource(state_source, idx)
+            )
+            install_guard(p_state_source.make_guard(GuardBuilder.DICT_KEYS))
             for k, v in value.items():
                 if (
                     isinstance(v, torch.Tensor)
@@ -137,7 +143,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 ):
                     self.tensor_to_source[v] = GetItemSource(p_state_source, k)
                 elif v is None or isinstance(v, (bool, int, float, str)):
-                    guards.add(
+                    install_guard(
                         GetItemSource(p_state_source, k).make_guard(
                             GuardBuilder.CONSTANT_MATCH
                         )
@@ -145,12 +151,10 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 else:
                     raise GuardInstallException()
 
-        tx.output.guards.update(guards)
-
-        group_guards = VariableBuilder(tx, AttrSource(self.source, "param_groups"))(
+        # this next line has the side effect of installing guards
+        VariableBuilder(tx, AttrSource(self.source, "param_groups"))(
             self.value.param_groups
-        )
-        tx.output.guards.update(group_guards.guards)
+        ).recursive_realize()
 
     def wrap_tensor(self, tx, tensor_value):
         """Wrap state tensor in a TensorVariable"""
@@ -172,10 +176,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
             # mark these tensors as static for cudagraphs
             mark_static_address(tensor_value, guard=False)
 
-            tx.store_global_weakref(global_key_name(tensor_value), tensor_value)
-            builder = VariableBuilder(
-                tx, GlobalWeakRefSource(global_key_name(tensor_value))
-            )
+            global_name = tx.store_global_weakref_by_id(GLOBAL_KEY_PREFIX, tensor_value)
+            builder = VariableBuilder(tx, GlobalWeakRefSource(global_name))
             self.static_tensor_names.add(tx.output.module_key_name(builder.name))
 
         result = builder(tensor_value)
@@ -184,15 +186,23 @@ class OptimizerVariable(UserDefinedObjectVariable):
     def update_list_args(self, tx, args, kwargs, py_args, py_kwargs):
         """Update the args and kwargs to the traced optimizer call"""
         for arg, py_arg in zip(args, py_args):
-            if isinstance(arg, ListVariable) and all(
-                isinstance(t, torch.Tensor) for t in py_arg
-            ):
-                tensor_vars = ListVariable(
-                    [self.wrap_tensor(tx, t) for t in py_arg],
-                    mutable_local=MutableLocal(),
-                    recursively_contains={},
-                )
-                tx.replace_all(arg, tensor_vars)
+            if isinstance(arg, ListVariable):
+                assert isinstance(
+                    py_arg, list
+                ), "py_arg should be a list in optimizer variable"
+                for i, val in enumerate(py_arg):
+                    tx.output.side_effects.mutation(arg)
+                    if isinstance(val, torch.Tensor):
+                        arg.items.append(self.wrap_tensor(tx, val))
+                    else:
+                        from .builder import SourcelessBuilder, VariableBuilder
+
+                        if arg.source:
+                            arg.items.append(
+                                VariableBuilder(tx, GetItemSource(arg.source, i))(val)
+                            )
+                        else:
+                            arg.items.append(SourcelessBuilder()(tx, val))
 
     def create_finalizer(self, tx):
         names_to_delete = self.static_tensor_names
@@ -210,6 +220,3 @@ class OptimizerVariable(UserDefinedObjectVariable):
             weakref.finalize(value, clear_static_tensor_refs)
 
         tx.output.add_graph_finalizer(init_finalizer)
-
-    def get_global_name(self):
-        return f"__optimizer_{id(self.value)}"

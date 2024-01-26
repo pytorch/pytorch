@@ -100,7 +100,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "atan2", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Atan")
     ),
-    xfail("atan2", dtypes=[torch.float64], reason=onnx_test_common.reason_onnx_runtime_does_not_support("Atan", ["f64"])),
+    xfail(
+        "atan2", dtypes=[torch.float64],
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Atan", ["f64"])
+    ),
     xfail(
         "ceil", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Ceil")
@@ -269,7 +272,9 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
 
     @common_device_type.ops(
         [op for op in OPS_DB if op.name in TESTED_OPS],
-        allowed_dtypes=onnx_test_common.TESTED_DTYPES,
+        allowed_dtypes=onnx_test_common.INT_TYPES
+        + onnx_test_common.FLOAT_TYPES
+        + onnx_test_common.BOOL_TYPES,
     )
     def test_output_match(self, device: str, dtype: torch.dtype, op):
         """Test the ONNX exporter."""

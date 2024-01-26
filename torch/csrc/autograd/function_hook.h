@@ -12,8 +12,7 @@ class SwapSavedVariables;
 
 // A hook that's called on gradients
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 using Variable = at::Tensor;
 using variable_list = std::vector<Variable>;
@@ -52,7 +51,14 @@ struct TORCH_API PostAccumulateGradHook {
         std::string("not yet implemented for compiled autograd: ") +
         typeid(*this).name());
   }
+
+  virtual void apply_with_saved(
+      Variable&,
+      torch::dynamo::autograd::SwapSavedVariables&) {
+    throw std::runtime_error(
+        std::string("not yet implemented for compiled autograd: ") +
+        typeid(*this).name());
+  }
 };
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

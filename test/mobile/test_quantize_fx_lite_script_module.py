@@ -100,4 +100,4 @@ class TestLiteFuseFx(QuantizationLiteTestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    run_tests()  # noqa: F821

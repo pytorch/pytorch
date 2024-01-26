@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import functools
 import unittest
 
 import torch
@@ -12,7 +11,7 @@ from torch._dynamo.backends.tvm import has_tvm
 from torch._dynamo.testing import same
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 
 class Seq(torch.nn.Module):
@@ -118,7 +117,7 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_aot_ts(self):
         self._check_backend_works("aot_ts")
 
-    @requires_cuda()
+    @requires_cuda
     def test_aot_cudagraphs(self):
         self._check_backend_works("cudagraphs")
 
@@ -213,6 +212,79 @@ class TestExplainWithBackend(torch._dynamo.test_case.TestCase):
         self.assertEqual(8, explain_output.graph_count)
         self.assertEqual(7, explain_output.graph_break_count)
         self.assertEqual(8, explain_output.op_count)
+
+
+class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
+    """Test APIs documented by https://pytorch.org/docs/main/torch.compiler_custom_backends.html"""
+
+    def test_register_backend_api(self):
+        from torch._dynamo import register_backend
+
+        backend_run = False
+
+        @register_backend
+        def my_custom_backend(gm, example_inputs):
+            nonlocal backend_run
+            backend_run = True
+            return gm.forward
+
+        def f(x):
+            return torch.relu(x)
+
+        opt_f = torch.compile(f, backend="my_custom_backend")
+        opt_f(torch.randn(3, 3))
+        self.assertTrue(backend_run)
+
+    def test_aot_autograd_api(self):
+        from functorch.compile import make_boxed_func
+        from torch._dynamo.backends.common import aot_autograd
+
+        backend_run = False
+
+        def my_compiler(gm, example_inputs):
+            nonlocal backend_run
+            backend_run = True
+            return make_boxed_func(gm.forward)
+
+        my_backend = aot_autograd(fw_compiler=my_compiler)
+
+        def f(x):
+            return torch.relu(x)
+
+        opt_f = torch.compile(f, backend=my_backend)
+        opt_f(torch.randn(3, 3))
+        self.assertTrue(backend_run)
+
+    def test_lookup_backend(self):
+        from torch._dynamo import list_backends, lookup_backend
+
+        backends = list_backends()
+        backend_run = False
+
+        def my_compiler(gm, example_inputs):
+            nonlocal backend_run
+            backend_run = True
+            try:
+                trt_compiled = lookup_backend("tensorrt")(gm, example_inputs)
+                if trt_compiled is not None:
+                    return trt_compiled
+            except Exception:
+                pass
+            # first backend failed, try something else...
+            try:
+                inductor_compiled = lookup_backend("inductor")(gm, example_inputs)
+                if inductor_compiled is not None:
+                    return inductor_compiled
+            except Exception:
+                pass
+            return gm.forward
+
+        def f(x):
+            return torch.relu(x)
+
+        opt_f = torch.compile(f, backend=my_compiler)
+        opt_f(torch.randn(3, 3))
+        self.assertTrue(backend_run)
 
 
 if __name__ == "__main__":

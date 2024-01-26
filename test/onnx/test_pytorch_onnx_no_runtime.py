@@ -1308,12 +1308,10 @@ class TestQuantizeEagerONNXExport(common_utils.TestCase):
 
         with torch.no_grad():
             _ = model(
-                **{
-                    "input_ids": ids["input_ids"],
-                    "attention_mask": ids["attention_mask"],
-                    "decoder_input_ids": ids["input_ids"],
-                    "decoder_attention_mask": ids["attention_mask"],
-                }
+                input_ids=ids["input_ids"],
+                attention_mask=ids["attention_mask"],
+                decoder_input_ids=ids["input_ids"],
+                decoder_attention_mask=ids["attention_mask"],
             )
 
 

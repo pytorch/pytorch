@@ -2,11 +2,12 @@
 import copy
 import operator
 import unittest
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Tuple, Type
 
 import torch
 from torch._export import capture_pre_autograd_graph
 from torch.ao.quantization import (
+    default_fake_quant,
     FusedMovingAvgObsFakeQuantize,
     MovingAverageMinMaxObserver,
     MovingAveragePerChannelMinMaxObserver,
@@ -24,6 +25,12 @@ from torch.ao.quantization.quantize_pt2e import (
     prepare_pt2e,
     prepare_qat_pt2e,
 )
+from torch.ao.quantization.quantizer import (
+    DerivedQuantizationSpec,
+    QuantizationAnnotation,
+    QuantizationSpec,
+    Quantizer,
+)
 from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
     XNNPACKQuantizer,
@@ -34,7 +41,6 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     skip_if_no_torchvision,
     skipIfNoQNNPACK,
-    TestHelperModules,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
 
@@ -43,6 +49,50 @@ class PT2EQATTestCase(QuantizationTestCase):
     """
     Base QuantizationTestCase for PT2E QAT with some helper methods.
     """
+
+    class _BaseConvBnModel(torch.nn.Module):
+        def __init__(
+            self,
+            conv_class: Type[torch.nn.Module],
+            bn_class: Type[torch.nn.Module],
+            has_conv_bias: bool,
+            has_bn: bool,
+            has_relu: bool,
+            **conv_kwargs,
+        ):
+            super().__init__()
+            self.conv = conv_class(3, 3, 3, bias=has_conv_bias, **conv_kwargs)
+            self.bn = bn_class(3) if has_bn else None
+            self.relu = torch.nn.ReLU() if has_relu else None
+
+        def forward(self, x):
+            x = self.conv(x)
+            if self.bn is not None:
+                x = self.bn(x)
+            if self.relu is not None:
+                x = self.relu(x)
+            return x
+
+    def _get_conv_bn_model(
+        self,
+        has_conv_bias: bool = True,
+        has_bn: bool = True,
+        has_relu: bool = False,
+        **conv_kwargs,
+    ):
+        """
+        Return an instance of a simple test model containing the
+        conv[-bn][-relu] pattern. By default, this returns a
+        conv-bn model with conv bias.
+        """
+        return self._BaseConvBnModel(
+            self.conv_class,
+            self.bn_class,
+            has_conv_bias,
+            has_bn,
+            has_relu,
+            **conv_kwargs,
+        )
 
     def _verify_symmetric_xnnpack_qat_numerics(
         self,
@@ -109,8 +159,9 @@ class PT2EQATTestCase(QuantizationTestCase):
         self.assertEqual(after_prepare_result_pt2e, after_prepare_result_fx)
 
         if verify_convert:
+            # We don't want to impose any ordering requirements between move_exported_model_to_eval and convert_pt2e
             torch.ao.quantization.move_exported_model_to_eval(model_pt2e)
-            model_pt2e = convert_pt2e(model_pt2e)
+            model_pt2e = convert_pt2e(model_pt2e, fold_quantize=True)
             quant_result_pt2e = model_pt2e(*example_inputs)
             model_fx.eval()
             model_fx = _convert_to_reference_decomposed_fx(
@@ -217,7 +268,7 @@ class PT2EQATTestCase(QuantizationTestCase):
             div_scale_factor_node = bn_node.args[0]
         (conv_node, scale_factor_reshape_node) = div_scale_factor_node.args
         self.assertEqual(div_scale_factor_node.target, torch.ops.aten.div.Tensor)
-        self.assertEqual(conv_node.target, torch.ops.aten.conv2d.default)
+        self.assertTrue(_is_conv_node(conv_node))
         self.assertEqual(
             scale_factor_reshape_node.target, torch.ops.aten.reshape.default
         )
@@ -290,41 +341,40 @@ class PT2EQATTestCase(QuantizationTestCase):
         bn_running_var_add_node = sqrt_node.args[0]
         (bn_running_var_node, eps) = bn_running_var_add_node.args
         self.assertEqual(scale_factor_node.target, torch.ops.aten.div.Tensor)
-        self.assertTrue("param_constant" in bn_weight_node.target)
+        self.assertTrue("bn_weight" in bn_weight_node.target)
         self.assertEqual(sqrt_node.target, torch.ops.aten.sqrt.default)
         self.assertEqual(bn_running_var_add_node.target, torch.ops.aten.add.Tensor)
-        self.assertTrue("tensor_constant" in bn_running_var_node.target)
+        self.assertTrue("bn_running_var" in bn_running_var_node.target)
         self.assertEqual(eps, 1e-5)
 
 
-@skipIfNoQNNPACK
-class TestQuantizePT2EQAT(PT2EQATTestCase):
+class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
+    """
+    Base TestCase to be used for all conv-bn[-relu] fusion patterns.
+    """
+
+    def setUp(self):
+        # NB: Skip the test if this is a base class, this is to handle the test
+        # discovery logic in buck which finds and runs all tests here including
+        # the base class which we don't want to run
+        if self.id() and "_Base" in self.id():
+            self.skipTest("Skipping test running from base class")
+
     def test_qat_conv_no_bias(self):
-        class M(torch.nn.Module):
-            def __init__(self, has_relu: bool):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3, bias=False)
-                self.relu = torch.nn.ReLU() if has_relu else torch.nn.Identity()
-
-            def forward(self, x):
-                x = self.conv(x)
-                x = self.relu(x)
-                return x
-
-        example_inputs = (torch.randn(1, 3, 5, 5),)
-        self._verify_symmetric_xnnpack_qat_numerics(M(has_relu=False), example_inputs)
-        self._verify_symmetric_xnnpack_qat_numerics(M(has_relu=True), example_inputs)
+        m1 = self._get_conv_bn_model(has_conv_bias=False, has_bn=False, has_relu=True)
+        m2 = self._get_conv_bn_model(has_conv_bias=False, has_bn=False, has_relu=False)
+        self._verify_symmetric_xnnpack_qat_numerics(m1, self.example_inputs)
+        self._verify_symmetric_xnnpack_qat_numerics(m2, self.example_inputs)
 
     def test_qat_conv_bn_fusion(self):
-        m = TestHelperModules.ConvWithBNRelu(relu=False)
-        example_inputs = (torch.randn(1, 3, 5, 5),)
-        self._verify_symmetric_xnnpack_qat_graph(m, example_inputs, has_relu=False)
-        self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
+        m = self._get_conv_bn_model()
+        self._verify_symmetric_xnnpack_qat_graph(m, self.example_inputs, has_relu=False)
+        self._verify_symmetric_xnnpack_qat_numerics(m, self.example_inputs)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_qat_conv_bn_fusion_cuda(self):
-        m = TestHelperModules.ConvWithBNRelu(relu=False).cuda()
-        example_inputs = (torch.randn(1, 3, 5, 5).cuda(),)
+        m = self._get_conv_bn_model().cuda()
+        example_inputs = (self.example_inputs[0].cuda(),)
         self._verify_symmetric_xnnpack_qat_graph(
             m,
             example_inputs,
@@ -335,26 +385,35 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
 
     def test_qat_conv_bn_fusion_literal_args(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, conv_class, bn_class):
                 super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3, stride=(2, 2), padding=(4, 4))
-                self.bn = torch.nn.BatchNorm2d(3)
+                self.conv = conv_class(3, 3, 3, stride=2, padding=4)
+                self.bn = bn_class(3)
 
             def forward(self, x):
                 x = self.conv(x)
                 x = self.bn(x)
                 return x
 
-        example_inputs = (torch.randn(1, 3, 5, 5),)
-        # stride, padding, dilation, transposed, output_padding, groups
-        conv_args = ((2, 2), (4, 4), (1, 1), False, (0, 0), 1)
+        assert self.dim in [1, 2]
+        if self.dim == 1:
+            # stride, padding, dilation, transposed, output_padding, groups
+            conv_args = ((2,), (4,), (1,), False, (0,), 1)
+            example_inputs = (torch.randn(1, 3, 5),)
+        else:
+            # stride, padding, dilation, transposed, output_padding, groups
+            conv_args = ((2, 2), (4, 4), (1, 1), False, (0, 0), 1)
+            example_inputs = (torch.randn(1, 3, 5, 5),)
+
+        m = M(self.conv_class, self.bn_class)
+
         self._verify_symmetric_xnnpack_qat_graph(
-            M(),
+            m,
             example_inputs,
             has_relu=False,
             expected_conv_literal_args=conv_args,
         )
-        self._verify_symmetric_xnnpack_qat_numerics(M(), example_inputs)
+        self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
 
     def test_qat_conv_bn_fusion_no_conv_bias(self):
         class M2(torch.nn.Module):
@@ -362,12 +421,12 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
             Mixed conv + BN with and without conv bias.
             """
 
-            def __init__(self):
+            def __init__(self, conv_class, bn_class):
                 super().__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, 3, bias=False)
-                self.bn1 = torch.nn.BatchNorm2d(3)
-                self.conv2 = torch.nn.Conv2d(3, 3, 3, bias=True)
-                self.bn2 = torch.nn.BatchNorm2d(3)
+                self.conv1 = conv_class(3, 3, 3, bias=False)
+                self.bn1 = bn_class(3)
+                self.conv2 = conv_class(3, 3, 3, bias=True)
+                self.bn2 = bn_class(3)
 
             def forward(self, x):
                 x = self.conv1(x)
@@ -376,8 +435,15 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
                 x = self.bn2(x)
                 return x
 
-        m1 = TestHelperModules.ConvWithBNRelu(relu=False, bias=False)
-        example_inputs = (torch.randn(3, 3, 5, 5),)
+        m1 = self._get_conv_bn_model(has_conv_bias=False)
+        m2 = M2(self.conv_class, self.bn_class)
+
+        assert self.dim in [1, 2]
+        if self.dim == 1:
+            example_inputs = (torch.randn(3, 3, 5),)
+        else:
+            example_inputs = (torch.randn(3, 3, 5, 5),)
+
         self._verify_symmetric_xnnpack_qat_graph(
             m1,
             example_inputs,
@@ -385,18 +451,17 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
             has_bias=False,
         )
         self._verify_symmetric_xnnpack_qat_numerics(m1, example_inputs)
-        self._verify_symmetric_xnnpack_qat_numerics(M2(), example_inputs)
+        self._verify_symmetric_xnnpack_qat_numerics(m2, example_inputs)
 
     def test_qat_conv_bn_relu_fusion(self):
-        m = TestHelperModules.ConvWithBNRelu(relu=True)
-        example_inputs = (torch.randn(1, 3, 5, 5),)
-        self._verify_symmetric_xnnpack_qat_graph(m, example_inputs, has_relu=True)
-        self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
+        m = self._get_conv_bn_model(has_relu=True)
+        self._verify_symmetric_xnnpack_qat_graph(m, self.example_inputs, has_relu=True)
+        self._verify_symmetric_xnnpack_qat_numerics(m, self.example_inputs)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_qat_conv_bn_relu_fusion_cuda(self):
-        m = TestHelperModules.ConvWithBNRelu(relu=True).cuda()
-        example_inputs = (torch.randn(1, 3, 5, 5).cuda(),)
+        m = self._get_conv_bn_model(has_relu=True).cuda()
+        example_inputs = (self.example_inputs[0].cuda(),)
         self._verify_symmetric_xnnpack_qat_graph(
             m,
             example_inputs,
@@ -406,21 +471,20 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
 
     def test_qat_conv_bn_relu_fusion_no_conv_bias(self):
-        m = TestHelperModules.ConvWithBNRelu(relu=True, bias=False)
-        example_inputs = (torch.randn(3, 3, 5, 5),)
+        m = self._get_conv_bn_model(has_conv_bias=False, has_relu=True)
         self._verify_symmetric_xnnpack_qat_graph(
             m,
-            example_inputs,
+            self.example_inputs,
             has_relu=True,
             has_bias=False,
         )
-        self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
+        self._verify_symmetric_xnnpack_qat_numerics(m, self.example_inputs)
 
     def test_qat_inplace_add_relu(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, conv_class):
                 super().__init__()
-                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.conv = conv_class(1, 1, 1)
                 self.relu = torch.nn.ReLU(inplace=True)
 
             def forward(self, x):
@@ -430,8 +494,14 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
                 x = self.relu(x)
                 return x
 
-        example_inputs = (torch.randn(1, 1, 3, 3),)
-        self._verify_symmetric_xnnpack_qat_numerics(M(), example_inputs)
+        assert self.dim in [1, 2]
+        if self.dim == 1:
+            example_inputs = (torch.randn(1, 1, 3),)
+        else:
+            example_inputs = (torch.randn(1, 1, 3, 3),)
+
+        m = M(self.conv_class)
+        self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
 
     def test_prepare_qat_conv_bn_fusion_getitem_placeholder(self):
         """
@@ -446,11 +516,11 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, conv_class, bn_class):
                 super().__init__()
-                self.bn1 = torch.nn.BatchNorm2d(3)
-                self.conv = torch.nn.Conv2d(3, 3, 3)
-                self.bn2 = torch.nn.BatchNorm2d(3)
+                self.bn1 = bn_class(3)
+                self.conv = conv_class(3, 3, 3)
+                self.bn2 = bn_class(3)
 
             def forward(self, x):
                 x = self.bn1(x)
@@ -483,11 +553,8 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
             return (unrelated_getitem_node, conv_bn_getitem_node)
 
         # Program capture
-        example_inputs = (torch.randn(1, 3, 5, 5),)
-        m = capture_pre_autograd_graph(
-            M(),
-            example_inputs,
-        )
+        m = M(self.conv_class, self.bn_class)
+        m = capture_pre_autograd_graph(m, self.example_inputs)
         m.graph.eliminate_dead_code()
         m.recompile()
         (_, original_conv_bn_getitem_node) = _get_getitem_nodes(m)
@@ -515,10 +582,10 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, conv_class, bn_class):
                 super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
-                self.bn = torch.nn.BatchNorm2d(3)
+                self.conv = conv_class(3, 3, 3)
+                self.bn = bn_class(3)
                 self.hardtanh = torch.nn.Hardtanh()
 
             def forward(self, x):
@@ -527,8 +594,8 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
                 x = self.hardtanh(x)
                 return x
 
-        example_inputs = (torch.randn(1, 3, 5, 5),)
-        self._verify_symmetric_xnnpack_qat_numerics(M(), example_inputs)
+        m = M(self.conv_class, self.bn_class)
+        self._verify_symmetric_xnnpack_qat_numerics(m, self.example_inputs)
 
     def test_qat_preserve_source_fn_stack(self):
         """
@@ -536,12 +603,12 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, conv_class, bn_class, backbone):
                 super().__init__()
-                self.conv = torch.nn.Conv2d(5, 3, 3)
-                self.bn = torch.nn.BatchNorm2d(3)
+                self.conv = conv_class(5, 3, 3)
+                self.bn = bn_class(3)
                 self.relu = torch.nn.ReLU()
-                self.backbone = TestHelperModules.ConvWithBNRelu(relu=True)
+                self.backbone = backbone
 
             def forward(self, x):
                 x = self.conv(x)
@@ -550,15 +617,21 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
                 x = self.backbone(x)
                 return x
 
+        assert self.dim in [1, 2]
+        if self.dim == 1:
+            example_inputs = (torch.randn(1, 5, 10),)
+        else:
+            example_inputs = (torch.randn(1, 5, 10, 10),)
+
         # QAT prepare + convert
-        m = M()
-        example_inputs = (torch.randn(1, 5, 10, 10),)
+        backbone = self._get_conv_bn_model(has_relu=True)
+        m = M(self.conv_class, self.bn_class, backbone)
         quantizer = XNNPACKQuantizer()
         quantizer.set_global(get_symmetric_quantization_config(is_qat=True))
         m = capture_pre_autograd_graph(m, example_inputs)
         m = prepare_qat_pt2e(m, quantizer)
         m(*example_inputs)
-        m = convert_pt2e(m)
+        m = convert_pt2e(m, fold_quantize=True)
 
         # Extract the conv and relu nodes (bn was folded into conv)
         first_conv, first_relu, second_conv, second_relu = None, None, None, None
@@ -576,24 +649,26 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         # Extract the conv weight and bias nodes
         def get_conv_weight_and_bias(conv_node: torch.fx.Node):
             weight_dq_node = conv_node.args[1]
-            weight_q_node = weight_dq_node.args[0]
-            weight_node = weight_q_node.args[0]
+            qweight_node = weight_dq_node.args[0]
             bias_node = conv_node.args[2]
-            assert isinstance(weight_node, torch.fx.Node)
+            assert isinstance(qweight_node, torch.fx.Node)
             assert isinstance(bias_node, torch.fx.Node)
-            return (weight_node, bias_node)
+            return (qweight_node, bias_node)
 
-        first_conv_weight, first_conv_bias = get_conv_weight_and_bias(first_conv)
-        second_conv_weight, second_conv_bias = get_conv_weight_and_bias(second_conv)
+        first_conv_qweight, first_conv_bias = get_conv_weight_and_bias(first_conv)
+        second_conv_qweight, second_conv_bias = get_conv_weight_and_bias(second_conv)
 
         # Assert that each set of conv, conv weight, and conv bias are in the same partition
         def get_source_fn(node: torch.fx.Node):
             # E.g. [('l__self___backbone1_conv', <class 'torch.nn.modules.conv.Conv2d'>)]
             return node.meta["source_fn_stack"][0][0]
 
-        self.assertEqual(get_source_fn(first_conv), get_source_fn(first_conv_weight))
+        # we don't preserve this is quantized weight currently since it's folded
+        # but user can attach "quantization_tag" to the node and it will be preserved
+        # self.assertEqual(get_source_fn(first_conv), get_source_fn(first_conv_qweight))
+        # self.assertEqual(get_source_fn(second_conv), get_source_fn(second_conv_qweight))
+
         self.assertEqual(get_source_fn(first_conv), get_source_fn(first_conv_bias))
-        self.assertEqual(get_source_fn(second_conv), get_source_fn(second_conv_weight))
         self.assertEqual(get_source_fn(second_conv), get_source_fn(second_conv_bias))
 
         # Assert that different sets of convs and relus have different partitions
@@ -607,6 +682,220 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         self.assertTrue("backbone" not in get_source_fn(first_relu))
         self.assertTrue("backbone" in get_source_fn(second_conv))
         self.assertTrue("backbone" in get_source_fn(second_relu))
+
+    def test_qat_conv_bn_bias_derived_qspec(self):
+        m = self._get_conv_bn_model()
+        example_inputs = self.example_inputs
+        m = capture_pre_autograd_graph(m, example_inputs)
+        quantizer = ConvBnDerivedBiasQuantizer()
+        m = prepare_qat_pt2e(m, quantizer)
+        m(*example_inputs)
+        m = convert_pt2e(m, fold_quantize=True)
+        m(*example_inputs)
+
+        # Assert that both weight and bias are quantized
+        (conv_node, _, _) = _get_conv_bn_getitem_nodes(m)
+        weight_dq = conv_node.args[1]
+        bias_dq = conv_node.args[2]
+        self.assertEqual(
+            weight_dq.target,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+        )
+        self.assertEqual(
+            bias_dq.target,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+        )
+        weight_getattr = weight_dq.args[0]
+        bias_getattr = bias_dq.args[0]
+        self.assertEqual(
+            weight_getattr.op,
+            "get_attr",
+        )
+        self.assertEqual(
+            bias_getattr.op,
+            "get_attr",
+        )
+
+        # Assert that bias scale = weight scale * input scale
+        input_dq = conv_node.args[0]
+        input_scale = input_dq.args[1]
+        bias_scale = bias_dq.args[1]
+        weight_scale = weight_dq.args[1]
+        self.assertEqual(bias_scale, input_scale * weight_scale)
+
+        # Assert that args for the bias' quantize and dequantize ops
+        # are copied correctly after subgraph rewriting
+        (bias_qmin, bias_qmax, bias_dtype) = bias_dq.args[3:]
+        self.assertEqual(bias_qmin, -(2**31))
+        self.assertEqual(bias_qmax, 2**31 - 1)
+        self.assertEqual(bias_dtype, torch.int32)
+
+    def test_qat_per_channel_weight_custom_dtype(self):
+        m = self._get_conv_bn_model()
+        example_inputs = self.example_inputs
+        m = capture_pre_autograd_graph(m, example_inputs)
+        quantizer = ConvBnInt32WeightQuantizer()
+        m = prepare_qat_pt2e(m, quantizer)
+        m(*example_inputs)
+        m = convert_pt2e(m, fold_quantize=True)
+        m(*example_inputs)
+
+        # Assert that conv weight is quantized per channel
+        (conv_node, _, _) = _get_conv_bn_getitem_nodes(m)
+        weight_dq = conv_node.args[1]
+        self.assertEqual(
+            weight_dq.target,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default,
+        )
+        weight_getattr = weight_dq.args[0]
+        self.assertEqual(
+            weight_getattr.op,
+            "get_attr",
+        )
+
+        # Assert that args for the weight's dequantize ops
+        # are copied correctly after subgraph rewriting
+        (dq_axis, dq_qmin, dq_qmax, dq_dtype) = weight_dq.args[3:]
+        self.assertEqual(dq_axis, 0)
+        self.assertEqual(dq_qmin, 0)
+        self.assertEqual(dq_qmax, 2**31 - 1)
+        self.assertEqual(dq_dtype, torch.int32)
+
+
+# TODO: enable this in the next PR
+@skipIfNoQNNPACK
+class TestQuantizePT2EQAT_ConvBn1d(TestQuantizePT2EQAT_ConvBn_Base):
+    dim = 1
+    example_inputs = (torch.randn(1, 3, 5),)
+    conv_class = torch.nn.Conv1d
+    bn_class = torch.nn.BatchNorm1d
+
+
+@skipIfNoQNNPACK
+class TestQuantizePT2EQAT_ConvBn2d(TestQuantizePT2EQAT_ConvBn_Base):
+    dim = 2
+    example_inputs = (torch.randn(1, 3, 5, 5),)
+    conv_class = torch.nn.Conv2d
+    bn_class = torch.nn.BatchNorm2d
+
+
+def _is_conv_node(n: torch.fx.Node):
+    return n.op == "call_function" and n.target in [
+        torch.ops.aten.conv1d.default,
+        torch.ops.aten.conv2d.default,
+    ]
+
+
+def _get_conv_bn_getitem_nodes(model: torch.fx.GraphModule):
+    """
+    Return a 3-tuple of (conv, bn, getitem) nodes from the graph.
+    """
+    model.graph.eliminate_dead_code()
+    model.recompile()
+    conv_node = None
+    bn_node = None
+    getitem_node = None
+    for n in model.graph.nodes:
+        if _is_conv_node(n):
+            conv_node = n
+        if n.target == torch.ops.aten._native_batch_norm_legit.default:
+            bn_node = n
+        if n.target == operator.getitem:
+            getitem_node = n
+    assert conv_node is not None, "bad test setup"
+    return (conv_node, bn_node, getitem_node)
+
+
+class ConvBnInt32WeightQuantizer(Quantizer):
+    """
+    Dummy quantizer that annotates conv bn in such a way that the weights
+    are quantized per channel to int32.
+    """
+
+    def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+        conv_node, _, getitem_node = _get_conv_bn_getitem_nodes(model)
+        act_qspec = QuantizationSpec(
+            dtype=torch.uint8,
+            quant_min=0,
+            quant_max=255,
+            qscheme=torch.per_tensor_affine,
+            observer_or_fake_quant_ctr=default_fake_quant,
+        )
+        weight_qspec = QuantizationSpec(
+            dtype=torch.int32,
+            quant_min=0,
+            quant_max=2**31 - 1,
+            qscheme=torch.per_channel_affine,
+            observer_or_fake_quant_ctr=FusedMovingAvgObsFakeQuantize.with_args(
+                observer=MovingAveragePerChannelMinMaxObserver,
+            ),
+        )
+        conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map={
+                conv_node.args[0]: act_qspec,
+                conv_node.args[1]: weight_qspec,
+            },
+            _annotated=True,
+        )
+        getitem_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            output_qspec=act_qspec,
+            _annotated=True,
+        )
+        return model
+
+    def validate(self, model: torch.fx.GraphModule):
+        pass
+
+
+class ConvBnDerivedBiasQuantizer(Quantizer):
+    """
+    Dummy quantizer that annotates conv bn in such a way that the bias qparams are
+    derived from the conv input activation and weight qparams.
+    """
+
+    def _derive_bias_qparams_from_act_and_weight_qparams(self, obs_or_fqs):
+        act_scale, _ = obs_or_fqs[0].calculate_qparams()
+        weight_scale, _ = obs_or_fqs[1].calculate_qparams()
+        bias_scale = torch.tensor([act_scale * weight_scale], dtype=torch.float32)
+        bias_zero_point = torch.tensor([0], dtype=torch.int32)
+        return bias_scale, bias_zero_point
+
+    def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+        conv_node, _, getitem_node = _get_conv_bn_getitem_nodes(model)
+        act_and_weight_qspec = QuantizationSpec(
+            dtype=torch.uint8,
+            quant_min=0,
+            quant_max=255,
+            qscheme=torch.per_tensor_affine,
+            observer_or_fake_quant_ctr=default_fake_quant,
+        )
+        bias_qspec = DerivedQuantizationSpec(
+            derived_from=[
+                (conv_node.args[0], conv_node),
+                (conv_node.args[1], conv_node),
+            ],
+            derive_qparams_fn=self._derive_bias_qparams_from_act_and_weight_qparams,
+            dtype=torch.int32,
+            quant_min=-(2**31),
+            quant_max=2**31 - 1,
+            qscheme=torch.per_tensor_affine,
+        )
+        conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map={
+                conv_node.args[0]: act_and_weight_qspec,
+                conv_node.args[1]: act_and_weight_qspec,
+                conv_node.args[2]: bias_qspec,
+            },
+            _annotated=True,
+        )
+        getitem_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            output_qspec=act_and_weight_qspec,
+            _annotated=True,
+        )
+        return model
+
+    def validate(self, model: torch.fx.GraphModule):
+        pass
 
 
 @skipIfNoQNNPACK
@@ -710,7 +999,7 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
         quantizer.set_global(quantization_config)
         model_pt2e = prepare_pt2e(model_pt2e, quantizer)
         after_prepare_result_pt2e = model_pt2e(*example_inputs)
-        model_pt2e = convert_pt2e(model_pt2e)
+        model_pt2e = convert_pt2e(model_pt2e, fold_quantize=True)
         quant_result_pt2e = model_pt2e(*example_inputs)
 
         exported_model = torch.export.export(model_pt2e, example_inputs)
@@ -720,7 +1009,7 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
             # 3 x linear: 1 for act, 1 for output
             ns.call_function(
                 torch.ops.quantized_decomposed.quantize_per_tensor.default
-            ): 9,
+            ): 8,
             ns.call_function(
                 torch.ops.quantized_decomposed.dequantize_per_tensor.default
             ): 9,

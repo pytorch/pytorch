@@ -27,10 +27,12 @@ patterns = PatternMatcherPass()
 @init_once_fakemode
 def lazy_init():
     from .fuse_attention import _sfdp_init
+    from .misc_patterns import _misc_patterns_init
     from .pad_mm import _pad_mm_init
 
     _pad_mm_init()
     _sfdp_init()
+    _misc_patterns_init()
 
 
 @torch.utils._python_dispatch._disable_current_modes()
@@ -180,7 +182,7 @@ class UniformValueConstantFolder(ConstantFolder):
         # TODO - we could also Tensors which get replaced with arange here
         return (
             t.numel() != 0
-            and (t == t.flatten()[0]).all()
+            and bool((t == t.flatten()[0]).all())
             and torch._C._has_storage(t)
             and t.layout == torch.strided
         )

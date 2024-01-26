@@ -1,4 +1,4 @@
-"""Functional interface"""
+"""Functional interface."""
 from typing import Callable, List, Optional, Tuple, Union
 import math
 import warnings
@@ -434,7 +434,7 @@ def fractional_max_pool2d_with_indices(
     output_ratio: Optional[BroadcastingList2[float]] = None,
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None
-) -> Tuple[Tensor, Tensor]:
+) -> Tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     fractional_max_pool2d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None)
 
@@ -533,7 +533,7 @@ def fractional_max_pool3d_with_indices(
     output_ratio: Optional[BroadcastingList3[float]] = None,
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None
-) -> Tuple[Tensor, Tensor]:
+) -> Tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     fractional_max_pool3d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None)
 
@@ -642,7 +642,7 @@ def max_pool1d_with_indices(
     dilation: BroadcastingList1[int] = 1,
     ceil_mode: bool = False,
     return_indices: bool = False
-) -> Tuple[Tensor, Tensor]:
+) -> Tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
 
@@ -728,7 +728,7 @@ def max_pool2d_with_indices(
     dilation: BroadcastingList2[int] = 1,
     ceil_mode: bool = False,
     return_indices: bool = False
-) -> Tuple[Tensor, Tensor]:
+) -> Tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
 
@@ -814,7 +814,7 @@ def max_pool3d_with_indices(
     dilation: BroadcastingList3[int] = 1,
     ceil_mode: bool = False,
     return_indices: bool = False
-) -> Tuple[Tensor, Tensor]:
+) -> Tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
 
@@ -929,7 +929,7 @@ def max_unpool1d(
     padding: BroadcastingList1[int] = 0,
     output_size: Optional[BroadcastingList1[int]] = None
 ) -> Tensor:
-    r"""Computes a partial inverse of :class:`MaxPool1d`.
+    r"""Compute a partial inverse of :class:`MaxPool1d`.
 
     See :class:`~torch.nn.MaxUnpool1d` for details.
     """
@@ -965,7 +965,7 @@ def max_unpool2d(
     padding: BroadcastingList2[int] = 0,
     output_size: Optional[BroadcastingList2[int]] = None
 ) -> Tensor:
-    r"""Computes a partial inverse of :class:`MaxPool2d`.
+    r"""Compute a partial inverse of :class:`MaxPool2d`.
 
     See :class:`~torch.nn.MaxUnpool2d` for details.
     """
@@ -997,7 +997,7 @@ def max_unpool3d(
     padding: BroadcastingList3[int] = 0,
     output_size: Optional[BroadcastingList3[int]] = None
 ) -> Tensor:
-    r"""Computes a partial inverse of :class:`MaxPool3d`.
+    r"""Compute a partial inverse of :class:`MaxPool3d`.
 
     See :class:`~torch.nn.MaxUnpool3d` for details.
     """
@@ -1022,14 +1022,43 @@ def max_unpool3d(
     return torch._C._nn.max_unpool3d(input, indices, output_size, _stride, padding)
 
 
+def lp_pool3d(
+    input: Tensor, norm_type: Union[int, float],
+    kernel_size: BroadcastingList3[int],
+    stride: Optional[BroadcastingList3[int]] = None,
+    ceil_mode: bool = False
+) -> Tensor:
+    r"""
+    Apply a 3D power-average pooling over an input signal composed of several input planes.
+
+    If the sum of all inputs to the power of `p` is
+    zero, the gradient is set to zero as well.
+
+    See :class:`~torch.nn.LPPool3d` for details.
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(
+            lp_pool3d, (input,), input, norm_type, kernel_size, stride=stride, ceil_mode=ceil_mode
+        )
+    kd, kw, kh = utils._triple(kernel_size)
+    if stride is not None:
+        out = avg_pool3d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
+    else:
+        out = avg_pool3d(input.pow(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode)
+
+    return (torch.sign(out) * relu(torch.abs(out))).mul(kd * kw * kh).pow(1.0 / norm_type)
+
+
 def lp_pool2d(
     input: Tensor, norm_type: Union[int, float],
     kernel_size: BroadcastingList2[int],
     stride: Optional[BroadcastingList2[int]] = None,
     ceil_mode: bool = False
 ) -> Tensor:
-    r"""Applies a 2D power-average pooling over an input signal composed of
-    several input planes. If the sum of all inputs to the power of `p` is
+    r"""
+    Apply a 2D power-average pooling over an input signal composed of several input planes.
+
+    If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
 
     See :class:`~torch.nn.LPPool2d` for details.
@@ -1053,8 +1082,9 @@ def lp_pool1d(
     stride: Optional[BroadcastingList1[int]] = None,
     ceil_mode: bool = False
 ) -> Tensor:
-    r"""Applies a 1D power-average pooling over an input signal composed of
-    several input planes. If the sum of all inputs to the power of `p` is
+    r"""Apply a 1D power-average pooling over an input signal composed of several input planes.
+
+    If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
 
     See :class:`~torch.nn.LPPool1d` for details.
@@ -1073,7 +1103,7 @@ def lp_pool1d(
 
 def adaptive_max_pool1d_with_indices(
     input: Tensor, output_size: BroadcastingList1[int], return_indices: bool = False
-) -> Tuple[Tensor, Tensor]:
+) -> Tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     adaptive_max_pool1d(input, output_size, return_indices=False)
 
@@ -1115,9 +1145,8 @@ adaptive_max_pool1d = boolean_dispatch(
 def adaptive_max_pool2d_with_indices(
     input: Tensor, output_size: BroadcastingList2[int],
     return_indices: bool = False
-) -> Tuple[Tensor, Tensor]:
-    r"""
-    adaptive_max_pool2d(input, output_size, return_indices=False)
+) -> Tuple[Tensor, Tensor]:  # noqa: D400
+    r"""adaptive_max_pool2d(input, output_size, return_indices=False)
 
     Applies a 2D adaptive max pooling over an input signal composed of
     several input planes.
@@ -1159,7 +1188,7 @@ adaptive_max_pool2d = boolean_dispatch(
 def adaptive_max_pool3d_with_indices(
     input: Tensor, output_size: BroadcastingList3[int],
     return_indices: bool = False
-) -> Tuple[Tensor, Tensor]:
+) -> Tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     adaptive_max_pool3d(input, output_size, return_indices=False)
 
@@ -1217,9 +1246,7 @@ Args:
 
 
 def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> Tensor:
-    r"""
-    Applies a 2D adaptive average pooling over an input signal composed of
-    several input planes.
+    r"""Apply a 2D adaptive average pooling over an input signal composed of several input planes.
 
     See :class:`~torch.nn.AdaptiveAvgPool2d` for details and output shape.
 
@@ -1234,9 +1261,7 @@ def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> T
 
 
 def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList3[int]) -> Tensor:
-    r"""
-    Applies a 3D adaptive average pooling over an input signal composed of
-    several input planes.
+    r"""Apply a 3D adaptive average pooling over an input signal composed of several input planes.
 
     See :class:`~torch.nn.AdaptiveAvgPool3d` for details and output shape.
 
@@ -1252,10 +1277,9 @@ def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList3[int]) -> T
 
 # Activation functions
 def dropout(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
-    r"""
-    During training, randomly zeroes some of the elements of the input
-    tensor with probability :attr:`p` using samples from a Bernoulli
-    distribution.
+    r"""During training, randomly zeroes some elements of the input tensor with probability :attr:`p`.
+
+    Uses samples from a Bernoulli distribution.
 
     See :class:`~torch.nn.Dropout` for details.
 
@@ -1272,7 +1296,7 @@ def dropout(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool 
 
 
 def alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False, inplace: bool = False) -> Tensor:
-    r"""Applies alpha dropout to the input.
+    r"""Apply alpha dropout to the input.
 
     See :class:`~torch.nn.AlphaDropout` for details.
     """
@@ -1284,10 +1308,10 @@ def alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False, inplace
 
 
 def dropout1d(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
-    r"""
-    Randomly zero out entire channels (a channel is a 1D feature map,
-    e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
-    batched input is a 1D tensor :math:`\text{input}[i, j]`) of the input tensor).
+    r"""Randomly zero out entire channels (a channel is a 1D feature map).
+
+    For example, the :math:`j`-th channel of the :math:`i`-th sample in the
+    batched input is a 1D tensor :math:`\text{input}[i, j]` of the input tensor.
     Each channel will be zeroed out independently on every forward call with
     probability :attr:`p` using samples from a Bernoulli distribution.
 
@@ -1322,10 +1346,10 @@ def dropout1d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
 
 
 def dropout2d(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
-    r"""
-    Randomly zero out entire channels (a channel is a 2D feature map,
-    e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
-    batched input is a 2D tensor :math:`\text{input}[i, j]`) of the input tensor).
+    r"""Randomly zero out entire channels (a channel is a 2D feature map).
+
+    For example, the :math:`j`-th channel of the :math:`i`-th sample in the
+    batched input is a 2D tensor :math:`\text{input}[i, j]` of the input tensor.
     Each channel will be zeroed out independently on every forward call with
     probability :attr:`p` using samples from a Bernoulli distribution.
 
@@ -1366,10 +1390,10 @@ def dropout2d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
 
 
 def dropout3d(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
-    r"""
-    Randomly zero out entire channels (a channel is a 3D feature map,
-    e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
-    batched input is a 3D tensor :math:`\text{input}[i, j]`) of the input tensor).
+    r"""Randomly zero out entire channels (a channel is a 3D feature map).
+
+    For example, the :math:`j`-th channel of the :math:`i`-th sample in the
+    batched input is a 3D tensor :math:`\text{input}[i, j]` of the input tensor.
     Each channel will be zeroed out independently on every forward call with
     probability :attr:`p` using samples from a Bernoulli distribution.
 
@@ -1405,10 +1429,10 @@ def dropout3d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
 
 
 def feature_alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False, inplace: bool = False) -> Tensor:
-    r"""
-    Randomly masks out entire channels (a channel is a feature map,
-    e.g. the :math:`j`-th channel of the :math:`i`-th sample in the batch input
-    is a tensor :math:`\text{input}[i, j]`) of the input tensor). Instead of
+    r"""Randomly masks out entire channels (a channel is a feature map).
+
+    For example, the :math:`j`-th channel of the :math:`i`-th sample in the batch input
+    is a tensor :math:`\text{input}[i, j]` of the input tensor. Instead of
     setting activations to zero, as in regular Dropout, the activations are set
     to the negative saturation value of the SELU activation function.
 
@@ -1434,7 +1458,7 @@ def feature_alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False,
 
 
 def _threshold(input: Tensor, threshold: float, value: float, inplace: bool = False) -> Tensor:
-    r"""Thresholds each element of the input Tensor.
+    r"""Apply a threshold to each element of the input Tensor.
 
     See :class:`~torch.nn.Threshold` for more details.
     """
@@ -1462,7 +1486,7 @@ In-place version of :func:`~threshold`.
 )
 
 
-def relu(input: Tensor, inplace: bool = False) -> Tensor:
+def relu(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
     r"""relu(input, inplace=False) -> Tensor
 
     Applies the rectified linear unit function element-wise. See
@@ -1487,7 +1511,7 @@ In-place version of :func:`~relu`.
 )
 
 
-def glu(input: Tensor, dim: int = -1) -> Tensor:
+def glu(input: Tensor, dim: int = -1) -> Tensor:  # noqa: D400,D402
     r"""
     glu(input, dim=-1) -> Tensor
 
@@ -1512,7 +1536,7 @@ def glu(input: Tensor, dim: int = -1) -> Tensor:
     return torch._C._nn.glu(input, dim)
 
 
-def hardtanh(input: Tensor, min_val: float = -1., max_val: float = 1., inplace: bool = False) -> Tensor:
+def hardtanh(input: Tensor, min_val: float = -1., max_val: float = 1., inplace: bool = False) -> Tensor:  # noqa: D400,D402
     r"""
     hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Tensor
 
@@ -1538,7 +1562,7 @@ In-place version of :func:`~hardtanh`.
 )
 
 
-def relu6(input: Tensor, inplace: bool = False) -> Tensor:
+def relu6(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
     r"""relu6(input, inplace=False) -> Tensor
 
     Applies the element-wise function :math:`\text{ReLU6}(x) = \min(\max(0,x), 6)`.
@@ -1555,7 +1579,7 @@ def relu6(input: Tensor, inplace: bool = False) -> Tensor:
 
 
 def elu(input: Tensor, alpha: float = 1.0, inplace: bool = False) -> Tensor:
-    r"""Applies the Exponential Linear Unit (ELU) function element-wise.
+    r"""Apply the Exponential Linear Unit (ELU) function element-wise.
 
     See :class:`~torch.nn.ELU` for more details.
     """
@@ -1578,7 +1602,7 @@ In-place version of :func:`~elu`.
 )
 
 
-def selu(input: Tensor, inplace: bool = False) -> Tensor:
+def selu(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
     r"""selu(input, inplace=False) -> Tensor
 
     Applies element-wise,
@@ -1607,7 +1631,7 @@ In-place version of :func:`~selu`.
 )
 
 
-def celu(input: Tensor, alpha: float = 1.0, inplace: bool = False) -> Tensor:
+def celu(input: Tensor, alpha: float = 1.0, inplace: bool = False) -> Tensor:  # noqa: D400,D402
     r"""celu(input, alpha=1., inplace=False) -> Tensor
 
     Applies element-wise,
@@ -1634,7 +1658,7 @@ In-place version of :func:`~celu`.
 )
 
 
-def leaky_relu(input: Tensor, negative_slope: float = 0.01, inplace: bool = False) -> Tensor:
+def leaky_relu(input: Tensor, negative_slope: float = 0.01, inplace: bool = False) -> Tensor:  # noqa: D400,D402
     r"""
     leaky_relu(input, negative_slope=0.01, inplace=False) -> Tensor
 
@@ -1684,7 +1708,7 @@ See :class:`~torch.nn.PReLU` for more details.
 
 def rrelu(
     input: Tensor, lower: float = 1.0 / 8, upper: float = 1.0 / 3, training: bool = False, inplace: bool = False
-) -> Tensor:
+) -> Tensor:  # noqa: D400,D402
     r"""rrelu(input, lower=1./8, upper=1./3, training=False, inplace=False) -> Tensor
 
     Randomized leaky ReLU.
@@ -1751,7 +1775,7 @@ See :class:`~torch.nn.Hardshrink` for more details.
 """)
 
 
-def tanhshrink(input):
+def tanhshrink(input):  # noqa: D400,D402
     r"""tanhshrink(input) -> Tensor
 
     Applies element-wise, :math:`\text{Tanhshrink}(x) = x - \text{Tanh}(x)`
@@ -1763,7 +1787,7 @@ def tanhshrink(input):
     return input - input.tanh()
 
 
-def softsign(input):
+def softsign(input):  # noqa: D400,D402
     r"""softsign(input) -> Tensor
 
     Applies element-wise, the function :math:`\text{SoftSign}(x) = \frac{x}{1 + |x|}`
@@ -1803,7 +1827,7 @@ def _get_softmax_dim(name: str, ndim: int, stacklevel: int) -> int:
 
 
 def softmin(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, dtype: Optional[DType] = None) -> Tensor:
-    r"""Applies a softmin function.
+    r"""Apply a softmin function.
 
     Note that :math:`\text{Softmin}(x) = \text{Softmax}(-x)`. See softmax definition for mathematical formula.
 
@@ -1829,7 +1853,7 @@ def softmin(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, dtyp
 
 
 def softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, dtype: Optional[DType] = None) -> Tensor:
-    r"""Applies a softmax function.
+    r"""Apply a softmax function.
 
     Softmax is defined as:
 
@@ -1866,7 +1890,7 @@ def softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, dtyp
 
 def gumbel_softmax(logits: Tensor, tau: float = 1, hard: bool = False, eps: float = 1e-10, dim: int = -1) -> Tensor:
     r"""
-    Samples from the Gumbel-Softmax distribution (`Link 1`_  `Link 2`_) and optionally discretizes.
+    Sample from the Gumbel-Softmax distribution (`Link 1`_  `Link 2`_) and optionally discretize.
 
     Args:
       logits: `[..., num_features]` unnormalized log probabilities
@@ -1927,7 +1951,7 @@ def gumbel_softmax(logits: Tensor, tau: float = 1, hard: bool = False, eps: floa
 
 
 def log_softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, dtype: Optional[DType] = None) -> Tensor:
-    r"""Applies a softmax followed by a logarithm.
+    r"""Apply a softmax followed by a logarithm.
 
     While mathematically equivalent to log(softmax(x)), doing these two
     operations separately is slower and numerically unstable. This function
@@ -1965,7 +1989,7 @@ See :class:`~torch.nn.Softshrink` for more details.
 )
 
 
-def tanh(input):
+def tanh(input):  # noqa: D400,D402
     r"""tanh(input) -> Tensor
 
     Applies element-wise,
@@ -1976,7 +2000,7 @@ def tanh(input):
     return input.tanh()
 
 
-def sigmoid(input):
+def sigmoid(input):  # noqa: D400,D402
     r"""sigmoid(input) -> Tensor
 
     Applies the element-wise function :math:`\text{Sigmoid}(x) = \frac{1}{1 + \exp(-x)}`
@@ -1987,7 +2011,7 @@ def sigmoid(input):
 
 
 def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""Applies the element-wise function
+    r"""Apply the Hardsigmoid function element-wise.
 
     .. math::
         \text{Hardsigmoid}(x) = \begin{cases}
@@ -2054,7 +2078,8 @@ Shape:
 
 
 def silu(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""Applies the Sigmoid Linear Unit (SiLU) function, element-wise.
+    r"""Apply the Sigmoid Linear Unit (SiLU) function, element-wise.
+
     The SiLU function is also known as the swish function.
 
     .. math::
@@ -2078,7 +2103,8 @@ def silu(input: Tensor, inplace: bool = False) -> Tensor:
 
 
 def mish(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""Applies the Mish function, element-wise.
+    r"""Apply the Mish function, element-wise.
+
     Mish: A Self Regularized Non-Monotonic Neural Activation Function.
 
     .. math::
@@ -2097,8 +2123,9 @@ def mish(input: Tensor, inplace: bool = False) -> Tensor:
 
 
 def hardswish(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""Applies the hardswish function, element-wise, as described in the paper:
+    r"""Apply hardswish function, element-wise.
 
+    Follows implementation as described in the paper:
     `Searching for MobileNetV3`_.
 
     .. math::
@@ -2133,7 +2160,7 @@ def embedding(
     scale_grad_by_freq: bool = False,
     sparse: bool = False,
 ) -> Tensor:
-    r"""A simple lookup table that looks up embeddings in a fixed dictionary and size.
+    r"""Generate a simple lookup table that looks up embeddings in a fixed dictionary and size.
 
     This module is often used to retrieve word embeddings using indices.
     The input to the module is a list of indices, and the embedding matrix,
@@ -2202,7 +2229,6 @@ def embedding(
                  [ 0.0000,  0.0000,  0.0000],
                  [ 0.6262,  0.2438,  0.7471]]])
     """
-
     if has_torch_function_variadic(input, weight):
         return handle_torch_function(
             embedding,
@@ -2251,9 +2277,9 @@ def embedding_bag(
     include_last_offset: bool = False,
     padding_idx: Optional[int] = None,
 ) -> Tensor:
-    r"""Computes sums, means or maxes of `bags` of embeddings, without instantiating the
-    intermediate embeddings.
+    r"""Compute sums, means or maxes of `bags` of embeddings.
 
+    Calculation is done without instantiating the intermediate embeddings.
     See :class:`torch.nn.EmbeddingBag` for more details.
 
     Note:
@@ -2459,7 +2485,7 @@ def batch_norm(
     momentum: float = 0.1,
     eps: float = 1e-5,
 ) -> Tensor:
-    r"""Applies Batch Normalization for each channel across a batch of data.
+    r"""Apply Batch Normalization for each channel across a batch of data.
 
     See :class:`~torch.nn.BatchNorm1d`, :class:`~torch.nn.BatchNorm2d`,
     :class:`~torch.nn.BatchNorm3d` for details.
@@ -2504,8 +2530,7 @@ def instance_norm(
     momentum: float = 0.1,
     eps: float = 1e-5,
 ) -> Tensor:
-    r"""Applies Instance Normalization for each channel in each data sample in a
-    batch.
+    r"""Apply Instance Normalization independently for each channel in every data sample within a batch.
 
     See :class:`~torch.nn.InstanceNorm1d`, :class:`~torch.nn.InstanceNorm2d`,
     :class:`~torch.nn.InstanceNorm3d` for details.
@@ -2537,7 +2562,7 @@ def layer_norm(
     bias: Optional[Tensor] = None,
     eps: float = 1e-5,
 ) -> Tensor:
-    r"""Applies Layer Normalization for last certain number of dimensions.
+    r"""Apply Layer Normalization for last certain number of dimensions.
 
     See :class:`~torch.nn.LayerNorm` for details.
     """
@@ -2551,7 +2576,7 @@ def layer_norm(
 def group_norm(
     input: Tensor, num_groups: int, weight: Optional[Tensor] = None, bias: Optional[Tensor] = None, eps: float = 1e-5
 ) -> Tensor:
-    r"""Applies Group Normalization for last certain number of dimensions.
+    r"""Apply Group Normalization for last certain number of dimensions.
 
     See :class:`~torch.nn.GroupNorm` for details.
     """
@@ -2564,9 +2589,10 @@ def group_norm(
 
 
 def local_response_norm(input: Tensor, size: int, alpha: float = 1e-4, beta: float = 0.75, k: float = 1.0) -> Tensor:
-    r"""Applies local response normalization over an input signal composed of
-    several input planes, where channels occupy the second dimension.
-    Applies normalization across channels.
+    r"""Apply local response normalization over an input signal.
+
+    The input signal is composed of several input planes, where channels occupy the second dimension.
+    Normalization is applied across channels.
 
     See :class:`~torch.nn.LocalResponseNorm` for details.
     """
@@ -2608,7 +2634,7 @@ def ctc_loss(
     reduction: str = "mean",
     zero_infinity: bool = False,
 ) -> Tensor:
-    r"""The Connectionist Temporal Classification loss.
+    r"""Apply the Connectionist Temporal Classification loss.
 
     See :class:`~torch.nn.CTCLoss` for details.
 
@@ -2676,7 +2702,7 @@ def nll_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""The negative log likelihood loss.
+    r"""Compute the negative log likelihood loss.
 
     See :class:`~torch.nn.NLLLoss` for details.
 
@@ -2892,7 +2918,9 @@ def kl_div(
     reduction: str = "mean",
     log_target: bool = False,
 ) -> Tensor:
-    r"""The `Kullback-Leibler divergence Loss
+    r"""Compute the KL Divergence loss.
+
+    Refer - The `Kullback-Leibler divergence Loss
     <https://en.wikipedia.org/wiki/Kullback-Leibler_divergence>`__
 
     See :class:`~torch.nn.KLDivLoss` for details.
@@ -2975,7 +3003,7 @@ def cross_entropy(
     reduction: str = "mean",
     label_smoothing: float = 0.0,
 ) -> Tensor:
-    r"""This criterion computes the cross entropy loss between input logits and target.
+    r"""Compute the cross entropy loss between input logits and target.
 
     See :class:`~torch.nn.CrossEntropyLoss` for details.
 
@@ -3066,8 +3094,7 @@ def binary_cross_entropy(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""Function that measures the Binary Cross Entropy between the target and input
-    probabilities.
+    r"""Measure Binary Cross Entropy between the target and input probabilities.
 
     See :class:`~torch.nn.BCELoss` for details.
 
@@ -3136,8 +3163,7 @@ def binary_cross_entropy_with_logits(
     reduction: str = "mean",
     pos_weight: Optional[Tensor] = None,
 ) -> Tensor:
-    r"""Function that measures Binary Cross Entropy between target and input
-    logits.
+    r"""Calculate Binary Cross Entropy between target and input logits.
 
     See :class:`~torch.nn.BCEWithLogitsLoss` for details.
 
@@ -3208,7 +3234,9 @@ def smooth_l1_loss(
     reduction: str = "mean",
     beta: float = 1.0,
 ) -> Tensor:
-    r"""Function that uses a squared term if the absolute
+    r"""Compute the Smooth L1 loss.
+
+    Function uses a squared term if the absolute
     element-wise error falls below beta and an L1 term otherwise.
 
     See :class:`~torch.nn.SmoothL1Loss` for details.
@@ -3248,8 +3276,13 @@ def huber_loss(
     reduction: str = 'mean',
     delta: float = 1.0,
 ) -> Tensor:
-    r"""Function that uses a squared term if the absolute
+    r"""Compute the Huber loss.
+
+    Function uses a squared term if the absolute
     element-wise error falls below delta and a delta-scaled L1 term otherwise.
+
+    When delta equals 1, this loss is equivalent to SmoothL1Loss.
+    In general, Huber loss differs from SmoothL1Loss by a factor of delta (AKA beta in Smooth L1).
 
     See :class:`~torch.nn.HuberLoss` for details.
     """
@@ -3278,7 +3311,7 @@ def l1_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-) -> Tensor:
+) -> Tensor:  # noqa: D400,D402
     r"""l1_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     Function that takes the mean element-wise absolute value difference.
@@ -3309,11 +3342,10 @@ def mse_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-) -> Tensor:
+) -> Tensor:  # noqa: D400,D402
     r"""mse_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     Measures the element-wise mean squared error.
-
     See :class:`~torch.nn.MSELoss` for details.
     """
     if has_torch_function_variadic(input, target):
@@ -3342,7 +3374,7 @@ def margin_ranking_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-) -> Tensor:
+) -> Tensor:  # noqa: D400,D402
     r"""margin_ranking_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MarginRankingLoss` for details.
@@ -3378,7 +3410,7 @@ def hinge_embedding_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-) -> Tensor:
+) -> Tensor:  # noqa: D400,D402
     r"""hinge_embedding_loss(input, target, margin=1.0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.HingeEmbeddingLoss` for details.
@@ -3407,7 +3439,7 @@ def multilabel_margin_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-) -> Tensor:
+) -> Tensor:  # noqa: D400,D402
     r"""multilabel_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiLabelMarginLoss` for details.
@@ -3435,8 +3467,9 @@ def soft_margin_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-) -> Tensor:
-    r"""soft_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
+) -> Tensor:  # noqa: D400,D402
+    r"""
+    soft_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.SoftMarginLoss` for details.
     """
@@ -3458,7 +3491,7 @@ def multilabel_soft_margin_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-) -> Tensor:
+) -> Tensor:  # noqa: D400,D402
     r"""multilabel_soft_margin_loss(input, target, weight=None, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiLabelSoftMarginLoss` for details.
@@ -3506,7 +3539,7 @@ def cosine_embedding_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-) -> Tensor:
+) -> Tensor:  # noqa: D400,D402
     r"""cosine_embedding_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.CosineEmbeddingLoss` for details.
@@ -3539,7 +3572,7 @@ def multi_margin_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-) -> Tensor:
+) -> Tensor:  # noqa: D400,D402
     r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiMarginLoss` for details.
@@ -3715,7 +3748,9 @@ def upsample(input: Tensor, size: Optional[List[int]] = None, scale_factor: Opti
 
 
 def upsample(input, size=None, scale_factor=None, mode="nearest", align_corners=None):  # noqa: F811
-    r"""Upsamples the input to either the given :attr:`size` or the given
+    r"""Upsample input.
+
+    Provided tensor is upsampled to either the given :attr:`size` or the given
     :attr:`scale_factor`
 
     .. warning::
@@ -3781,6 +3816,7 @@ if upsample.__doc__:
 
 def _is_integer(x) -> bool:
     r"""Type check the input number is an integer.
+
     Will return True for int, SymInt, Numpy integers and Tensors with integer elements.
     """
     if isinstance(x, (int, torch.SymInt)):
@@ -3818,7 +3854,9 @@ def interpolate(  # noqa: F811
     pass
 
 def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811,B950
-    r"""Down/up samples the input to either the given :attr:`size` or the given
+    r"""Down/up samples the input.
+
+    Tensor interpolated to either the given :attr:`size` or the given
     :attr:`scale_factor`
 
     The algorithm used for interpolation is determined by :attr:`mode`.
@@ -3982,7 +4020,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         scale_factors = None
 
     if antialias and not (mode in ("bilinear", "bicubic") and input.ndim == 4):
-        raise ValueError("Anti-alias option is only supported for bilinear and bicubic modes")
+        raise ValueError("Anti-alias option is restricted to bilinear and bicubic modes and requires a 4-D tensor as input")
 
     if input.dim() == 3 and mode == "nearest":
         return torch._C._nn.upsample_nearest1d(input, output_size, scale_factors)
@@ -4171,7 +4209,9 @@ def grid_sample(
     padding_mode: str = "zeros",
     align_corners: Optional[bool] = None,
 ) -> Tensor:
-    r"""Given an :attr:`input` and a flow-field :attr:`grid`, computes the
+    r"""Compute grid sample.
+
+    Given an :attr:`input` and a flow-field :attr:`grid`, computes the
     ``output`` using :attr:`input` values and pixel locations from :attr:`grid`.
 
     Currently, only spatial (4-D) and volumetric (5-D) :attr:`input` are
@@ -4312,8 +4352,7 @@ def grid_sample(
 
 
 def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = None) -> Tensor:
-    r"""Generates a 2D or 3D flow field (sampling grid), given a batch of
-    affine matrices :attr:`theta`.
+    r"""Generate 2D or 3D flow field (sampling grid), given a batch of affine matrices :attr:`theta`.
 
     .. note::
         This function is often used in conjunction with :func:`grid_sample`
@@ -4406,8 +4445,7 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
     return torch.affine_grid_generator(theta, size, align_corners)
 
 
-pad = _add_docstr(
-    torch._C._nn.pad,
+def pad(input: Tensor, pad: List[int], mode: str = "constant", value: Optional[float] = None) -> Tensor:
     r"""
 pad(input, pad, mode="constant", value=None) -> Tensor
 
@@ -4468,7 +4506,21 @@ Examples::
     >>> print(out.size())
     torch.Size([3, 9, 7, 3])
 
-""")
+"""
+    if has_torch_function_unary(input):
+        return handle_torch_function(
+            torch.nn.functional.pad, (input,), input, pad, mode=mode, value=value)
+    if not torch.jit.is_scripting():
+        if torch.are_deterministic_algorithms_enabled() and input.is_cuda:
+            if mode == 'replicate':
+                # Use slow decomp whose backward will be in terms of index_put.
+                # importlib is required because the import cannot be top level
+                # (cycle) and cannot be nested (TS doesn't support)
+                return importlib.import_module('torch._decomp.decompositions')._replication_pad(
+                    input, pad
+                )
+    return torch._C._nn.pad(input, pad, mode, value)
+
 # TODO: Fix via https://github.com/pytorch/pytorch/issues/75798
 pad.__module__ = "torch.nn.functional"
 
@@ -4605,8 +4657,9 @@ def triplet_margin_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""
-    See :class:`~torch.nn.TripletMarginLoss` for details
+    r"""Compute the triplet loss between given input tensors and a margin greater than 0.
+
+    See :class:`~torch.nn.TripletMarginLoss` for details.
     """
     if has_torch_function_variadic(anchor, positive, negative):
         return handle_torch_function(
@@ -4640,7 +4693,8 @@ def triplet_margin_with_distance_loss(
     swap: bool = False,
     reduction: str = "mean"
 ) -> Tensor:
-    r"""
+    r"""Compute the triplet margin loss for input tensors using a custom distance function.
+
     See :class:`~torch.nn.TripletMarginWithDistanceLoss` for details.
     """
     if torch.jit.is_scripting():
@@ -4702,7 +4756,7 @@ def triplet_margin_with_distance_loss(
 
 
 def normalize(input: Tensor, p: float = 2.0, dim: int = 1, eps: float = 1e-12, out: Optional[Tensor] = None) -> Tensor:
-    r"""Performs :math:`L_p` normalization of inputs over specified dimension.
+    r"""Perform :math:`L_p` normalization of inputs over specified dimension.
 
     For a tensor :attr:`input` of sizes :math:`(n_0, ..., n_{dim}, ..., n_k)`, each
     :math:`n_{dim}` -element vector :math:`v` along dimension :attr:`dim` is transformed as
@@ -4740,7 +4794,7 @@ def unfold(
     padding: BroadcastingList2[int] = 0,
     stride: BroadcastingList2[int] = 1
 ) -> Tensor:
-    r"""Extracts sliding local blocks from a batched input tensor.
+    r"""Extract sliding local blocks from a batched input tensor.
 
     .. warning::
         Currently, only 4-D input tensors (batched image-like tensors) are
@@ -4770,8 +4824,7 @@ def fold(
     padding: BroadcastingList2[int] = 0,
     stride: BroadcastingList2[int] = 1
 ) -> Tensor:
-    r"""Combines an array of sliding local blocks into a large containing
-    tensor.
+    r"""Combine an array of sliding local blocks into a large containing tensor.
 
     .. warning::
         Currently, only unbatched (3D) or batched (4D) image-like output tensors are supported.
@@ -4797,8 +4850,8 @@ def _in_projection_packed(
     w: Tensor,
     b: Optional[Tensor] = None,
 ) -> List[Tensor]:
-    r"""
-    Performs the in-projection step of the attention operation, using packed weights.
+    r"""Perform the in-projection step of the attention operation, using packed weights.
+
     Output is a triple containing projection tensors for query, key and value.
 
     Args:
@@ -4864,9 +4917,10 @@ def _in_projection(
     b_k: Optional[Tensor] = None,
     b_v: Optional[Tensor] = None,
 ) -> Tuple[Tensor, Tensor, Tensor]:
-    r"""
-    Performs the in-projection step of the attention operation. This is simply
-    a triple of linear projections, with shape constraints on the weights which
+    r"""Perform the in-projection step of the attention operation.
+
+    This is simply a triple of linear projections,
+    with shape constraints on the weights which
     ensure embedding dimension uniformity in the projected outputs.
     Output is a triple containing projection tensors for query, key and value.
 
@@ -4944,7 +4998,7 @@ Note:
 
     There are currently three supported implementations of scaled dot product attention:
 
-        - `FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`_
+        - `FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning`_
         - `Memory-Efficient Attention`_
         - A PyTorch implementation defined in C++ matching the above formulation
 
@@ -4975,7 +5029,6 @@ Note:
     {cudnn_reproducibility_note}
 """.format(**reproducibility_notes)
     + r"""
-
 Args:
     query (Tensor): Query tensor; shape :math:`(N, ..., L, E)`.
     key (Tensor): Key tensor; shape :math:`(N, ..., S, E)`.
@@ -4984,7 +5037,7 @@ Args:
         A boolean mask where a value of True indicates that the element *should* take part in attention.
         A float mask of the same type as query, key, value that is added to the attention score.
     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
-    is_causal (bool): If true, assumes causal attention masking and errors if both attn_mask and is_causal
+    is_causal (bool): If true, assumes upper left causal attention masking and errors if both attn_mask and is_causal
         are set.
     scale (optional float): Scaling factor applied prior to softmax. If None, the default value is set
         to :math:`\frac{1}{\sqrt{E}}`.
@@ -5000,7 +5053,7 @@ Shape legend:
     - :math:`E: \text{Embedding dimension of the query and key}`
     - :math:`Ev: \text{Embedding dimension of the value}`
 
-Examples::
+Examples:
 
     >>> # Optionally use the context manager to ensure one of the fused kernels is run
     >>> query = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
@@ -5009,8 +5062,9 @@ Examples::
     >>> with torch.backends.cuda.sdp_kernel(enable_math=False):
     >>>     F.scaled_dot_product_attention(query,key,value)
 
-.. _FlashAttention\: Fast and Memory-Efficient Exact Attention with IO-Awareness:
-    https://arxiv.org/abs/2205.14135
+
+.. _FlashAttention-2\: Faster Attention with Better Parallelism and Work Partitioning:
+    https://arxiv.org/abs/2307.08691
 .. _Memory-Efficient Attention:
     https://github.com/facebookresearch/xformers
 
@@ -5125,7 +5179,10 @@ def multi_head_attention_forward(
     average_attn_weights: bool = True,
     is_causal: bool = False,
 ) -> Tuple[Tensor, Optional[Tensor]]:
-    r"""
+    r"""Forward method for MultiHeadAttention.
+
+    See :class:`torch.nn.MultiheadAttention` for details.
+
     Args:
         query, key, value: map a query and a set of key-value pairs to an output.
             See "Attention Is All You Need" for more details.

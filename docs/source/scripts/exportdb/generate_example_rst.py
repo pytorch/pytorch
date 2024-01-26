@@ -81,6 +81,10 @@ Result:
         output = f"    {graph_output}"
     except torchdynamo.exc.Unsupported as e:
         output = "    Unsupported: " + str(e).split("\n")[0]
+    except AssertionError as e:
+        output = "    AssertionError: " + str(e).split("\n")[0]
+    except RuntimeError as e:
+        output = "    RuntimeError: " + str(e).split("\n")[0]
 
     doc_contents += output + "\n"
 

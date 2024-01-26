@@ -24,8 +24,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 struct Edge;
 struct FunctionPostHook;
@@ -64,7 +63,7 @@ TORCH_API std::shared_ptr<Node> get_current_node();
 // or more input `Variable`s and producing zero or more output `Variable`s. All
 // functions in PyTorch's autograd machinery derive from this class and
 // override its `apply` method. Instances of such subclasses will then be
-// invokeable via the call operator.
+// invokable via the call operator.
 //
 //                    Nodes in the Autograd Graph
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -326,6 +325,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   ///    in a new thread
   uint64_t sequence_nr() const noexcept {
     return sequence_nr_;
+  }
+
+  void set_sequence_nr(uint64_t sequence_nr) {
+    sequence_nr_ = sequence_nr;
   }
 
   // NOTE [ Topological Number ]
@@ -590,7 +593,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   // Sequence number used to correlate backward nodes with forward ops in the
   // profiler and provide determinism in the engine.
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  const uint64_t sequence_nr_;
+  uint64_t sequence_nr_;
 
   // See NOTE [ Topological Number ]
   uint64_t topological_nr_ = 0;
@@ -747,13 +750,10 @@ struct TypeAndSize {
   TypeAndSize(const at::Tensor& t)
       : sym_sizes(t.sym_sizes().vec()), options(t.options()) {}
 
-  at::Tensor zeros() {
-    return at::zeros_symint(sym_sizes, options);
-  }
+  at::Tensor zeros();
 
   std::vector<c10::SymInt> sym_sizes;
   at::TensorOptions options;
 };
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

@@ -16,42 +16,6 @@ GENERATED_LAZY_TS_CPP = [
     "lazy/generated/RegisterLazy.cpp",
 ]
 
-# NVFuser runtime library
-libtorch_nvfuser_runtime_sources = [
-    "third_party/nvfuser/runtime/array.cu",
-    "third_party/nvfuser/runtime/array_rocm.cu",
-    "third_party/nvfuser/runtime/bf16_support.cu",
-    "third_party/nvfuser/runtime/bf16_support_rocm.cu",
-    "third_party/nvfuser/runtime/block_reduction.cu",
-    "third_party/nvfuser/runtime/block_sync_atomic.cu",
-    "third_party/nvfuser/runtime/block_sync_default.cu",
-    "third_party/nvfuser/runtime/block_sync_default_rocm.cu",
-    "third_party/nvfuser/runtime/broadcast.cu",
-    "third_party/nvfuser/runtime/fp16_support.cu",
-    "third_party/nvfuser/runtime/fused_reduction.cu",
-    "third_party/nvfuser/runtime/fused_welford_helper.cu",
-    "third_party/nvfuser/runtime/fused_welford_impl.cu",
-    "third_party/nvfuser/runtime/grid_broadcast.cu",
-    "third_party/nvfuser/runtime/grid_reduction.cu",
-    "third_party/nvfuser/runtime/grid_sync.cu",
-    "third_party/nvfuser/runtime/helpers.cu",
-    "third_party/nvfuser/runtime/index_utils.cu",
-    "third_party/nvfuser/runtime/memory.cu",
-    "third_party/nvfuser/runtime/random_numbers.cu",
-    "third_party/nvfuser/runtime/swizzle.cu",
-    "third_party/nvfuser/runtime/tensor.cu",
-    "third_party/nvfuser/runtime/tensorcore.cu",
-    "third_party/nvfuser/runtime/tuple.cu",
-    "third_party/nvfuser/runtime/type_traits.cu",
-    "third_party/nvfuser/runtime/warp.cu",
-    "third_party/nvfuser/runtime/warp_rocm.cu",
-    "third_party/nvfuser/runtime/welford.cu",
-    "aten/src/ATen/cuda/detail/PhiloxCudaStateRaw.cuh",
-    "aten/src/ATen/cuda/detail/UnpackRaw.cuh",
-]
-
-libtorch_nvfuser_generated_headers = ["{}.h".format(name.split("/")[-1].split(".")[0]) for name in libtorch_nvfuser_runtime_sources]
-
 def libtorch_generated_sources(gencode_pattern):
     return [gencode_pattern.format(name) for name in [
         "torch/csrc/autograd/generated/Functions.cpp",
@@ -160,6 +124,7 @@ core_trainer_sources = [
     "torch/csrc/autograd/custom_function.cpp",
     "torch/csrc/autograd/engine.cpp",
     "torch/csrc/autograd/function.cpp",
+    "torch/csrc/autograd/input_metadata.cpp",
     "torch/csrc/autograd/functions/accumulate_grad.cpp",
     "torch/csrc/autograd/functions/basic_ops.cpp",
     "torch/csrc/autograd/functions/tensor.cpp",
@@ -482,7 +447,6 @@ lazy_tensor_ts_sources = [
     "torch/csrc/lazy/ts_backend/dynamic_ir.cpp",
     "torch/csrc/lazy/ts_backend/config.cpp",
     "torch/csrc/lazy/ts_backend/ops/device_data.cpp",
-    "torch/csrc/lazy/ts_backend/ops/random_ops.cpp",
     "torch/csrc/lazy/ts_backend/ops/generic.cpp",
     "torch/csrc/lazy/ts_backend/tensor_aten_ops.cpp",
     "torch/csrc/lazy/ts_backend/ts_autograd_functions.cpp",
@@ -500,7 +464,8 @@ lazy_tensor_core_python_sources = [
 ]
 
 inductor_core_resources = [
-    "torch/csrc/inductor/aoti_model_runner.cpp",
+    "torch/csrc/inductor/aoti_runner/model_container_runner.cpp",
+    "torch/csrc/inductor/aoti_runner/model_container_runner_cpu.cpp",
     "torch/csrc/inductor/aoti_torch/shim_common.cpp",
     "torch/csrc/inductor/aoti_torch/tensor_converter.cpp",
     "torch/csrc/inductor/inductor_ops.cpp",
@@ -688,7 +653,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/CudaIPCTypes.cpp",
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/memory_snapshot.cpp",
-    "torch/csrc/inductor/aoti_model_runner_cuda.cpp",
+    "torch/csrc/inductor/aoti_runner/model_container_runner_cuda.cpp",
     "torch/csrc/inductor/aoti_torch/shim_cuda.cpp",
     "torch/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp",
     "torch/csrc/profiler/stubs/cuda.cpp",
@@ -710,6 +675,8 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/ProcessGroupUCC.cpp",
     "torch/csrc/distributed/c10d/UCCTracing.cpp",
     "torch/csrc/distributed/c10d/UCCUtils.cpp",
+    "torch/csrc/distributed/c10d/intra_node_comm.cpp",
+    "torch/csrc/distributed/c10d/intra_node_comm.cu",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
     "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
 ]
@@ -842,6 +809,7 @@ libtorch_python_core_sources = [
     "torch/csrc/dynamo/init.cpp",
     "torch/csrc/functorch/init.cpp",
     "torch/csrc/mps/Module.cpp",
+    "torch/csrc/inductor/aoti_runner/pybind.cpp",
     "torch/csrc/jit/backends/backend_init.cpp",
     "torch/csrc/jit/python/init.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
@@ -1057,6 +1025,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/core/operator_name.cpp",
     "aten/src/ATen/core/TorchDispatchUtils.cpp",
     "aten/src/ATen/core/register_symbols.cpp",
+    "aten/src/ATen/core/SingletonSymNodeImpl.cpp",
     "aten/src/ATen/core/class_type.cpp",
     "aten/src/ATen/core/type.cpp",
     "aten/src/ATen/core/type_factory.cpp",
@@ -1173,6 +1142,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/batch_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/group_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/layer_norm_kernel.cpp",
+    "aten/src/ATen/native/cpu/AmpGradScalerKernels.cpp",
     "aten/src/ATen/native/cpu/scaled_modified_bessel_k0.cpp",
     "aten/src/ATen/native/cpu/scaled_modified_bessel_k1.cpp",
     "aten/src/ATen/native/cpu/spherical_bessel_j0.cpp",
@@ -1372,6 +1342,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/WeightNorm.cpp",
     "aten/src/ATen/native/group_norm.cpp",
     "aten/src/ATen/native/layer_norm.cpp",
+    "aten/src/ATen/native/AmpKernels.cpp",
     "aten/src/ATen/native/mkl/LinearAlgebra.cpp",
     "aten/src/ATen/native/mkl/SparseBlasImpl.cpp",
     "aten/src/ATen/native/mkl/SparseCsrLinearAlgebra.cpp",

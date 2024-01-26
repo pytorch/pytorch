@@ -111,7 +111,7 @@ def fetch_jobs(url: str, headers: Dict[str, str]) -> List[Dict[str, str]]:
 # running.
 
 
-def find_job_id(args: Any) -> str:
+def find_job_id_name(args: Any) -> Tuple[str, str]:
     # From https://docs.github.com/en/actions/learn-github-actions/environment-variables
     PYTORCH_REPO = os.environ.get("GITHUB_REPOSITORY", "pytorch/pytorch")
     PYTORCH_GITHUB_API = f"https://api.github.com/repos/{PYTORCH_REPO}"
@@ -130,15 +130,28 @@ def find_job_id(args: Any) -> str:
 
     for job in jobs:
         if job["runner_name"] == args.runner_name:
-            return job["id"]
+            return (job["id"], job["name"])
 
     raise RuntimeError(f"Can't find job id for runner {args.runner_name}")
+
+
+def set_output(name: str, val: Any) -> None:
+    if os.getenv("GITHUB_OUTPUT"):
+        with open(str(os.getenv("GITHUB_OUTPUT")), "a") as env:
+            print(f"{name}={val}", file=env)
+        print(f"setting {name}={val}")
+    else:
+        print(f"::set-output name={name}::{val}")
 
 
 def main() -> None:
     args = parse_args()
     try:
-        print(find_job_id(args))
+        # Get both the job ID and job name because we have already spent a request
+        # here to get the job info
+        job_id, job_name = find_job_id_name(args)
+        set_output("job-id", job_id)
+        set_output("job-name", job_name)
     except Exception as e:
         print(repr(e), file=sys.stderr)
         print(f"workflow-{args.workflow_run_id}")

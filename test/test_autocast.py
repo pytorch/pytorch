@@ -4,7 +4,7 @@ import collections
 import unittest
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS, skipIfTorchDynamo
 from torch.testing._internal.autocast_test_lists import AutocastCPUTestLists
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -17,7 +17,16 @@ class TestAutocastCPU(TestCase):
         del self.autocast_lists
         super().tearDown()
 
-    def _run_autocast_outofplace(self, op, args, run_as_type, out_type=None, module=torch, add_kwargs=None):
+    def _run_autocast_outofplace(
+        self,
+        op,
+        args,
+        run_as_type,
+        out_type=None,
+        module=torch,
+        add_kwargs=None,
+        amp_dtype=torch.bfloat16,
+    ):
         # helper to cast args
         def cast(val, to_type):
             if isinstance(val, torch.Tensor):
@@ -31,7 +40,7 @@ class TestAutocastCPU(TestCase):
             add_kwargs = {}
 
         self.assertFalse(torch.is_autocast_cpu_enabled())
-        with torch.cpu.amp.autocast():
+        with torch.cpu.amp.autocast(dtype=amp_dtype):
             self.assertTrue(torch.is_autocast_cpu_enabled())
             out_type = out_type if out_type is not None else run_as_type
             output = output_method = None
@@ -91,37 +100,69 @@ class TestAutocastCPU(TestCase):
         else:
             return op_with_args[0], op_with_args[1], op_with_args[2]
 
+    @skipIfTorchDynamo()
     def test_autocast_torch_expect_builtin_promote(self):
-        for op, args, out_type in self.autocast_lists.torch_expect_builtin_promote:
-            self._run_autocast_outofplace(op, args, torch.float32, out_type=out_type)
+        for op, args1, args2, out_type in self.autocast_lists.torch_expect_builtin_promote:
+            self._run_autocast_outofplace(op, args1, torch.float32, out_type=out_type)
+            self._run_autocast_outofplace(op, args2, torch.float32, out_type=out_type, amp_dtype=torch.float16)
 
+    @skipIfTorchDynamo()
     def test_autocast_methods_expect_builtin_promote(self):
-        for op, args, out_type in self.autocast_lists.methods_expect_builtin_promote:
-            self._run_autocast_outofplace(op, args, torch.float32, module=None, out_type=out_type)
+        for op, args1, args2, out_type in self.autocast_lists.methods_expect_builtin_promote:
+            self._run_autocast_outofplace(op, args1, torch.float32, module=None, out_type=out_type)
+            self._run_autocast_outofplace(op, args2, torch.float32, module=None, out_type=out_type, amp_dtype=torch.float16)
 
-    def test_autocast_torch_bf16(self):
-        for op_with_args in self.autocast_lists.torch_bf16:
+    @skipIfTorchDynamo()
+    def test_autocast_torch_16(self):
+        for op_with_args in self.autocast_lists.torch_16:
             op, args, maybe_kwargs = self.args_maybe_kwargs(op_with_args)
             self._run_autocast_outofplace(op, args, torch.bfloat16, add_kwargs=maybe_kwargs)
+            self._run_autocast_outofplace(op, args, torch.float16, add_kwargs=maybe_kwargs, amp_dtype=torch.float16)
 
-    def test_autocast_nn_bf16(self):
-        for op_with_args in self.autocast_lists.nn_bf16:
+    @skipIfTorchDynamo()
+    def test_autocast_nn_16(self):
+        for op_with_args in self.autocast_lists.nn_16:
             op, args, maybe_kwargs = self.args_maybe_kwargs(op_with_args)
-            self._run_autocast_outofplace(op, args, torch.bfloat16, module=torch._C._nn, add_kwargs=maybe_kwargs)
+            self._run_autocast_outofplace(
+                op, args, torch.bfloat16, module=torch._C._nn, add_kwargs=maybe_kwargs
+            )
+            self._run_autocast_outofplace(
+                op,
+                args,
+                torch.float16,
+                module=torch._C._nn,
+                add_kwargs=maybe_kwargs,
+                amp_dtype=torch.float16,
+            )
 
+    @skipIfTorchDynamo()
     def test_autocast_torch_fp32(self):
         for op_with_args in self.autocast_lists.torch_fp32:
             op, args, maybe_kwargs = self.args_maybe_kwargs(op_with_args)
             self._run_autocast_outofplace(op, args, torch.float32, add_kwargs=maybe_kwargs)
+            self._run_autocast_outofplace(op, args, torch.float32, add_kwargs=maybe_kwargs, amp_dtype=torch.float16)
 
+    @skipIfTorchDynamo()
     def test_autocast_nn_fp32(self):
         for op_with_args in self.autocast_lists.nn_fp32:
             op, args, maybe_kwargs = self.args_maybe_kwargs(op_with_args)
-            self._run_autocast_outofplace(op, args, torch.float32, module=torch._C._nn, add_kwargs=maybe_kwargs)
+            self._run_autocast_outofplace(
+                op, args, torch.float32, module=torch._C._nn, add_kwargs=maybe_kwargs
+            )
+            self._run_autocast_outofplace(
+                op,
+                args,
+                torch.float32,
+                module=torch._C._nn,
+                add_kwargs=maybe_kwargs,
+                amp_dtype=torch.float16,
+            )
 
+    @skipIfTorchDynamo()
     def test_autocast_torch_need_autocast_promote(self):
-        for op, args in self.autocast_lists.torch_need_autocast_promote:
-            self._run_autocast_outofplace(op, args, torch.float32)
+        for op, args1, args2 in self.autocast_lists.torch_need_autocast_promote:
+            self._run_autocast_outofplace(op, args1, torch.float32)
+            self._run_autocast_outofplace(op, args2, torch.float32, amp_dtype=torch.float16)
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_autocast_rnn(self):
