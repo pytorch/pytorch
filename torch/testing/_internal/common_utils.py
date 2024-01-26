@@ -96,6 +96,7 @@ from torch.testing._comparison import (
 )
 from torch.testing._comparison import not_close_error_metas
 from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
 
 from .composite_compliance import no_dispatch
@@ -1224,20 +1225,6 @@ else:
 
 IS_FILESYSTEM_UTF8_ENCODING = sys.getfilesystemencoding() == 'utf-8'
 
-def _check_module_exists(name: str) -> bool:
-    r"""Returns if a top-level module with :attr:`name` exists *without**
-    importing it. This is generally safer than try-catch block around a
-    `import X`. It avoids third party libraries breaking assumptions of some of
-    our tests, e.g., setting multiprocessing start method when imported
-    (see librosa/#747, torchvision/#544).
-    """
-    try:
-        import importlib.util
-        spec = importlib.util.find_spec(name)
-        return spec is not None
-    except ImportError:
-        return False
-
 TEST_NUMPY = _check_module_exists('numpy')
 TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
@@ -1264,6 +1251,9 @@ def split_if_not_empty(x: str):
     return x.split(",") if len(x) != 0 else []
 
 NOTEST_CPU = "cpu" in split_if_not_empty(os.getenv('PYTORCH_TESTING_DEVICE_EXCEPT_FOR', ''))
+
+skipIfNoDill = unittest.skipIf(not TEST_DILL, "no dill")
+
 
 # Python 2.7 doesn't have spawn
 TestEnvironment.def_flag("NO_MULTIPROCESSING_SPAWN", env_var="NO_MULTIPROCESSING_SPAWN")
@@ -1305,6 +1295,7 @@ if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     # other libraries take up about 11% of space per process
     torch.cuda.set_per_process_memory_fraction(round(1 / num_procs - .11, 2))
 
+requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "Requires CUDA")
 
 def skipIfCrossRef(fn):
     @wraps(fn)
@@ -2820,6 +2811,17 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
 
 
     def run(self, result=None):
+        # Check if enable here as well so we don't have to worry about
+        # subclasses calling super().setUp().   Call it via a wrapper instead of
+        # directly because the skipTest call will raise an uncaught exception
+        def check_if_enable_wrapper(f):
+            @wraps(f)
+            def wrapper(*args, **kwargs):
+                check_if_enable(self)
+                f(*args, **kwargs)
+            return wrapper
+        setattr(self, self._testMethodName, check_if_enable_wrapper(getattr(self, self._testMethodName)))
+
         with contextlib.ExitStack() as stack:
             if TEST_WITH_CROSSREF:  # noqa: F821
                 stack.enter_context(CrossRefMode())
@@ -2828,7 +2830,6 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
             )
 
     def setUp(self):
-        check_if_enable(self)
         set_rng_seed(SEED)
 
         # Save global check sparse tensor invariants state that can be

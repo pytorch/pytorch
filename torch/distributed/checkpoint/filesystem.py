@@ -250,13 +250,21 @@ def _write_files_from_queue(
     planner: SavePlanner,
     inflight_threshhold: int,
     use_fsync: bool,
+    thread_count: int,
 ) -> None:
     try:
         while True:
             file_name, storage_key, write_items = file_queue.get_nowait()
             loader: _TensorLoader
 
-            if torch.cuda.is_available() and inflight_threshhold > 0:
+            # TODO: Using the OverlappingCpuLoader with multiple threads creates significant
+            # performance degredation, observed as being related to cuda stream syncs. We
+            # should try to fix this and use _OverlappingCpuLoader for all threaded cases
+            if (
+                thread_count == 1
+                and torch.cuda.is_available()
+                and inflight_threshhold > 0
+            ):
                 loader = _OverlappingCpuLoader(
                     planner.resolve_data,
                     inflight_threshhold=inflight_threshhold,
@@ -387,6 +395,7 @@ class FileSystemWriter(StorageWriter):
                     planner,
                     self.per_thread_copy_ahead,
                     self.sync_files,
+                    self.thread_count,
                 ),
             )
             t.start()
@@ -398,6 +407,7 @@ class FileSystemWriter(StorageWriter):
             planner=planner,
             inflight_threshhold=self.per_thread_copy_ahead,
             use_fsync=self.sync_files,
+            thread_count=self.thread_count,
         )
 
         for t in threads:
