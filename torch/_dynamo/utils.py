@@ -898,10 +898,12 @@ def rot_n_helper(n):
 common_constant_types = {
     int,
     float,
+    complex,
     bool,
     str,
     bytes,
     type(None),
+    Ellipsis.__class__,
     types.CodeType,
     torch.device,
     torch.dtype,
@@ -1110,8 +1112,7 @@ def dict_keys_repr(const_keys, *, local) -> str:
     return "[" + keys_str + "]"
 
 
-def global_key_name(key):
-    return f"__dict_key_{id(key)}"
+GLOBAL_KEY_PREFIX = "__dict_key"
 
 
 from torch._subclasses import (  # noqa: F401
@@ -1993,15 +1994,6 @@ class numpy_to_tensor_wrapper:
         return f"<Wrapped function <original {self.f.__name__}>>"
 
     def __call__(self, *args, **kwargs):
-        # Out variables in numpy need to be converted to ndarray before calling
-        if "out" in kwargs:
-            from torch._numpy._ndarray import ndarray
-
-            out_var = kwargs["out"]
-            # Wrap out variable tensors into ndarray before calling
-            if isinstance(out_var, torch.Tensor):
-                kwargs["out"] = ndarray(out_var)
-
         out = self.f(*args, **kwargs)
         return numpy_to_tensor(out)
 
