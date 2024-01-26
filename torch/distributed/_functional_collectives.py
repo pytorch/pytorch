@@ -265,7 +265,6 @@ def reduce_scatter_tensor(
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     if USE_NATIVE_C10D_FUNCTIONAL:
-        # TODO: rename
         group_name = _resolve_group_name(group, tag)
         group_size = c10d._get_group_size_by_name(group_name)
     else:
@@ -317,12 +316,11 @@ def all_reduce_coalesced(
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     if USE_NATIVE_C10D_FUNCTIONAL:
-        assert isinstance(group, str)
-        assert tag == ""
+        group_name = _resolve_group_name(group, tag)
         tensor_list = torch.ops._c10d_functional.all_reduce_coalesced(  # type: ignore[attr-defined]
             self,
             reduceOp,
-            group,
+            group_name,
         )
     else:
         tag, rankset, group_size = _expand_group(group, tag)
