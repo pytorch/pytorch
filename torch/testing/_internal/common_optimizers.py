@@ -370,7 +370,7 @@ def optim_inputs_func_adam(device=None):
         OptimizerInput(
             params=None, kwargs={"weight_decay": 0.1, "amsgrad": True}, desc="amsgrad"
         ),
-    ] + (cuda_supported_configs if str(device) == "cuda" else [])
+    ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
 
 def optim_error_inputs_func_adam(device, dtype):

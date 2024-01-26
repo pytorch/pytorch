@@ -18,6 +18,13 @@ from torch.testing._internal.common_utils import markDynamoStrictTest, parametri
 
 FP16_REDUCED_PRECISION = {'atol': 1e-5, 'rtol': 1e-4}
 
+
+def _override_kwargs(optim_cls, kwargs):
+    # Remove this function once https://github.com/pytorch/pytorch/issues/118230 is completed
+    if optim_cls == torch.optim.RAdam and not kwargs.get("foreach", False) and kwargs.get("capturable", False):
+        # Radam does not support capturable single tensor
+        kwargs["capturable"] = False
+
 @markDynamoStrictTest
 class TestOptimRenewed(TestCase):
 
@@ -71,6 +78,8 @@ class TestOptimRenewed(TestCase):
                 weight = Parameter(torch.randn((10, 5, 2), device=device, dtype=dtype)[..., 0])
                 bias = Parameter(torch.randn((10, 2), device=device, dtype=dtype)[..., 0])
             input = torch.randn(5, device=device, dtype=dtype)
+
+            _override_kwargs(optim_cls, optim_input.kwargs)
             optimizer = optim_cls([weight, bias], **optim_input.kwargs)
 
             def closure():
@@ -152,6 +161,9 @@ class TestOptimRenewed(TestCase):
                 continue
             for flag_value in (False, True):
                 kwargs[flag] = flag_value
+
+                _override_kwargs(optim_cls, kwargs)
+
                 input = torch.tensor(
                     [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=dtype, device=device
                 ).reshape(3, 2)
@@ -266,6 +278,7 @@ class TestOptimRenewed(TestCase):
                         p_clone.grad = p.grad.clone().detach()
                         params_clone.append(p_clone)
 
+                _override_kwargs(optim_cls, kwargs)
                 optimizer = optim_cls(params_clone, **kwargs)
                 for _ in range(kIterations):
                     optimizer.step()
@@ -337,6 +350,8 @@ class TestOptimRenewed(TestCase):
             max_mems = []
             for flag_value in (False, True):
                 kwargs["foreach"] = flag_value
+
+                _override_kwargs(optim_cls, kwargs)
 
                 # The 128 is critical here! Our CUDACachingAllocator allocates in blocks of 512,
                 # meaning any tensor that occupies <512 bytes of memory will allocate a whole
@@ -534,6 +549,7 @@ class TestOptimRenewed(TestCase):
             return torch.tensor([1], device=device, dtype=dtype)
 
         for optim_input in all_optim_inputs:
+            _override_kwargs(optim_cls, optim_input.kwargs)
             optimizer = optim_cls(params, **optim_input.kwargs)
             optimizer.step(closure)
             self.assertEqual(old_params, params)
@@ -551,6 +567,7 @@ class TestOptimRenewed(TestCase):
 
         for optim_input in all_optim_inputs:
             kwargs = optim_input.kwargs
+            _override_kwargs(optim_cls, optim_input.kwargs)
 
             # params will decay even if grads are empty if weight_decay != 0,
             # and capturable doesn't work for CPU tensors
