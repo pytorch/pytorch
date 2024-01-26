@@ -18,13 +18,17 @@ from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
 )
 from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
-from torch._export.passes.lift_constants_pass import lift_constants_pass
+from torch._export.passes.lift_constants_pass import (
+    lift_constants_pass,
+    rewrite_script_object_meta,
+)
 from torch._export.wrappers import _wrap_submodules
 from torch._functorch.aot_autograd import aot_export_module, GraphSignature
 from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
+    free_unbacked_symbols,
     GuardOnDataDependentSymNode,
     ShapeEnv,
 )
@@ -452,9 +456,10 @@ def _export_non_strict(
         input_specs=input_specs, output_specs=output_specs
     )
 
-    constants: Dict[
-        str, Union[torch.Tensor, torch._C.ScriptObject]
-    ] = lift_constants_pass(gm, export_graph_signature)
+    constants = rewrite_script_object_meta(gm)
+    more_constants = lift_constants_pass(gm, export_graph_signature)
+    for k, v in more_constants.items():
+        constants[k] = v
 
     @dataclasses.dataclass
     class _ExportedProgramNonStrict:
@@ -513,11 +518,23 @@ def _export(
     constraints = constraints or []
     kwargs = kwargs or {}
 
+    flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
+
     if not strict:
         assert isinstance(f, torch.nn.Module)
-        assert len(preserve_module_call_signature) == 0
         assert len(kwargs) == 0, "keyword arguments NYI"
         out_spec = None
+
+        module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
+
+        def strip_root(x):
+            if isinstance(x, str) and x.startswith("_export_root"):
+                stripped = x[len("_export_root") :]
+                return stripped[1:] if stripped.startswith(".") else stripped
+            return x
+
+        def fixup_key(x):
+            return "L__self__" + strip_root(x)
 
         def _tuplify_outputs(aot_export):
             def _aot_export_non_strict(mod, args, **kwargs):
@@ -533,16 +550,16 @@ def _export(
                         )
                         return tuple(flat_outs)
 
-                gm, sig = aot_export(Wrapper(mod), args, **kwargs)
-
-                def strip_root(x):
-                    if isinstance(x, str) and x.startswith("_export_root"):
-                        stripped = x[len("_export_root") :]
-                        return stripped[1:] if stripped.startswith(".") else stripped
-                    return x
-
-                def fixup_key(x):
-                    return "L__self__" + strip_root(x)
+                wrapped_mod = Wrapper(mod)
+                # Patch export_root to the signatures so that wrapper module correctly populates the
+                # in/out spec
+                new_preserved_call_signatures = [
+                    "_export_root." + i for i in preserve_module_call_signature
+                ]
+                with _wrap_submodules(
+                    wrapped_mod, new_preserved_call_signatures, module_call_specs
+                ):
+                    gm, sig = aot_export(wrapped_mod, args, **kwargs)
 
                 sig.parameters = pytree.tree_map(strip_root, sig.parameters)
                 sig.buffers = pytree.tree_map(strip_root, sig.buffers)
@@ -581,9 +598,39 @@ def _export(
             fake_mode, src_equalities, original_signature, ep_non_strict.gm
         )
         assert out_spec is not None
+
+        gm = ep_non_strict.gm
+
+        module_call_signatures = {
+            strip_root(fqn): ModuleCallSignature(inputs=[], outputs=[], **specs)
+            for fqn, specs in module_call_specs.items()
+        }
+
+        if len(preserve_module_call_signature) > 0:
+            for node in gm.graph.nodes:
+                if node.target == torch.ops.higher_order._export_tracepoint:
+                    if "path" in node.kwargs:
+                        path = strip_root(node.kwargs["path"])
+                        with gm.graph.inserting_before(node):
+                            new_node = gm.graph.create_node(
+                                "call_function",
+                                torch.ops.higher_order._export_tracepoint,
+                                args=node.args,
+                                kwargs={
+                                    "path": path,
+                                    "kind": node.kwargs["kind"],
+                                },
+                            )
+                            node.replace_all_uses_with(new_node)
+                            gm.graph.erase_node(node)
+
+            res = CollectTracepointsPass(module_call_signatures, ep_non_strict.sig)(gm)
+            assert res is not None
+            gm = res.graph_module
+
         return ExportedProgram(
-            root=ep_non_strict.gm,
-            graph=ep_non_strict.gm.graph,
+            root=gm,
+            graph=gm.graph,
             graph_signature=ep_non_strict.sig,
             state_dict=_get_params_buffers(f),
             range_constraints=range_constraints,
@@ -591,9 +638,12 @@ def _export(
                 ModuleCallEntry(
                     "",
                     ModuleCallSignature(
-                        [], [], pytree.tree_flatten((args, {}))[1], out_spec
+                        inputs=[], outputs=[], in_spec=orig_in_spec, out_spec=out_spec
                     ),
                 )
+            ]
+            + [
+                ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()
             ],
             example_inputs=(args, kwargs),
             constants=ep_non_strict.constants,
@@ -753,7 +803,7 @@ def _export(
     gm.meta["inline_constraints"] = {
         k: v
         for k, v in dynamo_fake_mode.shape_env.runtime_var_to_range.items()
-        if re.match(r"^[if]\d+$", str(k))
+        if free_unbacked_symbols(k)
     }
 
     num_lifted = next(
@@ -764,7 +814,6 @@ def _export(
         ),
         len(export_graph_signature.input_specs),
     )
-    flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
     range_constraints = _process_constraints(
         gm,
         num_lifted,

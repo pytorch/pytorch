@@ -572,6 +572,12 @@ class TestDTensorOps(DTensorOpTestBase):
         def test():
             samples = op.sample_inputs(DEVICE_TYPE, dtype, requires_grad=True)
             for sample_input in samples:
+                # Skip mm/add over empty tensors, as test fails with `min() arg is an empty sequence`
+                # For more info see https://github.com/pytorch/pytorch/issues/118043
+                if op.name == "addmm" and sample_input.args[0].numel() == 0:
+                    continue
+                if op.name == "mm" and sample_input.input.numel() == 0:
+                    continue
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
 

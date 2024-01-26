@@ -29,14 +29,17 @@ from typing import (
     Deque,
     Dict,
     FrozenSet,
+    Generic,
     Hashable,
     Iterable,
     List,
+    Mapping,
     NamedTuple,
     Optional,
     OrderedDict as GenericOrderedDict,
     overload,
     Protocol,
+    Sequence,
     Tuple,
     Type,
     TypeVar,
@@ -55,6 +58,7 @@ __all__ = [
     "TreeSpec",
     "LeafSpec",
     "keystr",
+    "key_get",
     "register_pytree_node",
     "tree_flatten",
     "tree_flatten_with_path",
@@ -87,11 +91,17 @@ DEFAULT_TREESPEC_SERIALIZATION_PROTOCOL = 1
 NO_SERIALIZED_TYPE_NAME_FOUND = "NO_SERIALIZED_TYPE_NAME_FOUND"
 
 
-class PHashable(Protocol):
+class KeyEntry(Protocol):
     def __hash__(self) -> int:
         ...
 
     def __eq__(self, other: object) -> bool:
+        ...
+
+    def __str__(self) -> str:
+        ...
+
+    def get(self, parent: Any) -> Any:
         ...
 
 
@@ -104,7 +114,6 @@ ToDumpableContextFn = Callable[[Context], DumpableContext]
 FromDumpableContextFn = Callable[[DumpableContext], Context]
 ToStrFunc = Callable[["TreeSpec", List[str]], str]
 MaybeFromStrFunc = Callable[[str], Optional[Tuple[Any, Context, str]]]
-KeyEntry = PHashable
 KeyPath = Tuple[KeyEntry, ...]
 FlattenWithKeysFunc = Callable[[PyTree], Tuple[List[Tuple[KeyEntry, Any]], Any]]
 
@@ -314,19 +323,28 @@ def _private_register_pytree_node(
 
 
 @dataclasses.dataclass(frozen=True)
-class SequenceKey:
+class SequenceKey(Generic[T]):
     idx: int
 
     def __str__(self) -> str:
         return f"[{self.idx!r}]"
 
+    def get(self, sequence: Sequence[T]) -> T:
+        return sequence[self.idx]
+
+
+K = TypeVar("K", bound=Hashable)
+
 
 @dataclasses.dataclass(frozen=True)
-class MappingKey:
-    key: Hashable
+class MappingKey(Generic[K, T]):
+    key: K
 
     def __str__(self) -> str:
         return f"[{self.key!r}]"
+
+    def get(self, mapping: Mapping[K, T]) -> T:
+        return mapping[self.key]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -335,6 +353,9 @@ class GetAttrKey:
 
     def __str__(self) -> str:
         return f".{self.name}"
+
+    def get(self, obj: Any) -> Any:
+        return getattr(obj, self.name)
 
 
 def _tuple_flatten(d: Tuple[Any, ...]) -> Tuple[List[Any], Context]:
@@ -907,7 +928,7 @@ def tree_map_(
     """
     leaves, treespec = tree_flatten(tree, is_leaf=is_leaf)
     flat_args = [leaves] + [treespec.flatten_up_to(r) for r in rests]
-    deque(map(func, *flat_args), maxlen=0)  # consume and exhaust the iterable
+    tuple(map(func, *flat_args))  # consume and exhaust the iterable
     return tree
 
 
@@ -1476,3 +1497,10 @@ def tree_map_with_path(
 def keystr(kp: KeyPath) -> str:
     """Given a key path, return a pretty-printed representation."""
     return "".join([str(k) for k in kp])
+
+
+def key_get(obj: Any, kp: KeyPath) -> Any:
+    """Given an object and a key path, return the value at the key path."""
+    for k in kp:
+        obj = k.get(obj)
+    return obj
