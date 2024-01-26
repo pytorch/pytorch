@@ -1127,8 +1127,8 @@ class Kernel(CodeGen):
                         )
 
                     if name == "to_dtype":
-                        if hasattr(args[0], 'from') and getattr(args[0], 'from').dtype == args[1]:
-                            return getattr(args[0], 'from')
+                        if hasattr(args[0], 'store_from') and getattr(args[0], 'store_from').dtype == args[1]:
+                            return getattr(args[0], 'store_from')
 
                     csevar = self.cse.generate(
                         self.compute,
@@ -1226,6 +1226,8 @@ class Kernel(CodeGen):
                     if self.current_node:
                         for other_name in self.current_node.get_mutations():
                             self.cse.store_cache[other_name] = value
+                    if hasattr(value, 'from'):
+                        setattr(value, 'store_from', getattr(value, 'from'))
                 if name not in V.graph.removed_buffers:
                     return self.store(name, index, value, mode=mode)
                 else:
