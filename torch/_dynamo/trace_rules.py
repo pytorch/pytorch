@@ -2,7 +2,6 @@ import builtins
 import copy
 import functools
 import importlib
-import inspect
 import itertools
 import operator
 import sys
@@ -2986,9 +2985,6 @@ def lookup(obj):
         return SkipFilesVariable
     if callable(obj) and is_callable_allowed(obj):
         return TorchInGraphFunctionVariable
-    # Unwrap if the function is wrapped by functools.lru_cache or functools.wraps.
-    if isinstance(obj, functools._lru_cache_wrapper):
-        obj = inspect.getattr_static(obj, "__wrapped__")
     if is_aten_op_or_tensor_method(obj):
         return TorchInGraphFunctionVariable
     rule = get_torch_obj_rule_map().get(obj, None)

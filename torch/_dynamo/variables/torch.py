@@ -35,6 +35,7 @@ from ..utils import (
     hashable,
     product,
     proxy_args_kwargs,
+    unwrap_if_wrapper,
 )
 from .base import VariableTracker
 from .ctx_manager import (
@@ -162,8 +163,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
     @staticmethod
     def is_matching_cls(value):
         # Unwrap if it's a functools.lru_cache wrapper
-        if isinstance(value, functools._lru_cache_wrapper):
-            value = inspect.getattr_static(value, "__wrapped__")
+        value = unwrap_if_wrapper(value)
         # We can't do isinstance(value, type) check because some ctx managers
         # are implemented as a function decorated by contextlib.contextmanager,
         # E.g., torch._functorch.vmap.vmap_increment_nesting.

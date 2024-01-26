@@ -1836,7 +1836,6 @@ dynamo_expected_failures = {
     "TestVmapOperatorsLegacy.test_view",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_div_cpu",  # test_legacy_vmap
     "TestVmapAPILegacy.test_out_dims_edge_case",  # test_legacy_vmap
-    "TestVmapAPILegacy.test_inplace_fallback_nary_different_levels",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_clone",  # test_legacy_vmap
     "TestVmapAPILegacy.test_in_dim_not_in_tensor_err_msg",  # test_legacy_vmap
     "TestVmapAPILegacy.test_fallback_with_undefined_grad",  # test_legacy_vmap

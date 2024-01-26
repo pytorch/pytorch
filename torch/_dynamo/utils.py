@@ -518,18 +518,30 @@ def is_numpy_float_type(value):
     )
 
 
-def is_function(value):
-    function_types = (
-        types.FunctionType,
-        types.BuiltinFunctionType,
-        types.MethodDescriptorType,
-        types.WrapperDescriptorType,
-    )
+def is_function_or_wrapper(value):
     return (
-        isinstance(value, function_types)
+        is_function(value)
         or isinstance(value, functools._lru_cache_wrapper)
-        and isinstance(inspect.getattr_static(value, "__wrapped__"), function_types)
+        and is_function(inspect.getattr_static(value, "__wrapped__"))
     )
+
+
+def is_function(value):
+    return isinstance(
+        value,
+        (
+            types.FunctionType,
+            types.BuiltinFunctionType,
+            types.MethodDescriptorType,
+            types.WrapperDescriptorType,
+        ),
+    )
+
+
+def unwrap_if_wrapper(value):
+    if isinstance(value, functools._lru_cache_wrapper):
+        value = inspect.getattr_static(value, "__wrapped__")
+    return value
 
 
 def is_numpy_ndarray(value):
