@@ -21,7 +21,7 @@ from torch._C._distributed_c10d import (
 )
 from torch.distributed.distributed_c10d import _CollOp, _store_based_barrier, P2POp
 from torch.futures import Future
-from torch.utils._pytree import tree_flatten
+from torch.utils import _pytree as pytree
 
 """
 TODO:
@@ -35,7 +35,7 @@ We need some synchronization around cleanup to ensure that timedout ranks don't 
 
 
 def flatten_list(lst):
-    return tree_flatten(lst)[0]
+    return pytree.tree_leaves(lst)
 
 
 def ret_work(ret):
@@ -381,7 +381,7 @@ def _create_threaded_pg(prefix_store, rank, world_size, timeout):
     return pg
 
 
-dist.Backend.register_backend("threaded", _create_threaded_pg)
+dist.Backend.register_backend("threaded", _create_threaded_pg, devices=["cpu", "cuda"])
 
 
 @dataclass

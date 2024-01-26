@@ -1,6 +1,7 @@
 import functools
 import logging
 import math
+import sys
 import typing
 from typing import Optional
 
@@ -19,7 +20,11 @@ from torch._decomp.decompositions import (
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
 from torch._higher_order_ops.out_dtype import out_dtype
-from torch._prims_common import type_to_dtype
+from torch._prims_common import (
+    elementwise_dtypes,
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
+    type_to_dtype,
+)
 
 from . import config, inductor_prims
 
@@ -68,7 +73,7 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 # the Inductor decomp table.
 decomps_to_exclude = [
     aten._unsafe_index,
-    aten._scaled_dot_product_flash_attention.default,  # See comments in torch/_decomp/decompositions.py
+    aten._scaled_dot_product_flash_attention_for_cpu.default,  # See comments in torch/_decomp/decompositions.py
     aten.clamp_max,
     aten.clamp_min,
     aten.glu,  # inductor lowers this directly
@@ -185,7 +190,7 @@ def round_dec(x, decimals=0):
 @pw_cast_for_opmath
 def bmm(self, batch2):
     if config.coordinate_descent_tuning:
-        if self.shape[1] == 1:
+        if self.shape[1] == 1 or batch2.shape[2] == 1:
             out = (self.unsqueeze(-1) * batch2.unsqueeze(1)).sum(dim=2)
             return out
     if self.device.type == "cpu":
@@ -245,7 +250,7 @@ def cat(tensors, dim=0):
     filtered_tensors = list(filter(non_empty_tensor, tensors))
 
     if len(filtered_tensors) == 1:
-        return tensors[0].clone()
+        return filtered_tensors[0].clone()
     elif 1 < len(filtered_tensors) < len(tensors):
         # on the first call, when we remove empty tensors, we redispatch recursively
         return aten.cat.default(filtered_tensors, dim)
@@ -259,14 +264,18 @@ def angle(x):
         return torch.where(
             torch.isnan(x.real), float("nan"), torch.atan2(x.imag, x.real)
         )
-    else:
-        # when x is real number
-        #   if x >= 0, return 0
-        #   if x < 0, return pi
-        #   if x is nan, return nan
-        ret = torch.where(x < 0, math.pi, 0.0)
-        nan = torch.where(torch.isnan(x), float("nan"), 0.0)
-        return ret + nan
+
+    # when x is real number
+    #   if x >= 0, return 0
+    #   if x < 0, return pi
+    #   if x is nan, return nan
+    _, dtype = elementwise_dtypes(
+        x,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    )
+    pi = torch.scalar_tensor(math.pi, dtype=dtype, device=x.device)
+    ret = torch.where(x < 0, pi, 0.0)
+    return torch.where(torch.isnan(x), float("nan"), ret)
 
 
 @register_decomposition([aten.add])
@@ -296,7 +305,7 @@ def lift(self):
 @register_decomposition([aten.bernoulli.default])
 def bernoulli(self, *, generator=None):
     assert generator is None
-    return torch.rand_like(self, dtype=torch.float32) < self
+    return (torch.rand_like(self, dtype=torch.float32) < self).to(self.dtype)
 
 
 @register_decomposition([aten.fmin, prims.fmin])
@@ -347,7 +356,7 @@ def get_like_layout(
     tensor: torch.Tensor, memory_format: Optional[torch.memory_format]
 ) -> torch.memory_format:
     # TODO: _to_copy tensor to stride permutation
-    if memory_format in (torch.preserve_format, None):
+    if memory_format is torch.preserve_format or memory_format is None:
         return utils.suggest_memory_format(tensor)
     else:
         return memory_format
@@ -437,6 +446,8 @@ def quantize_per_tensor_default_decomp_impl(
     quant_max: int,
     dtype: torch.dtype,
 ) -> torch.Tensor:
+    if input.dtype == torch.bfloat16:
+        input = input.to(torch.float32)
     inv_scale = 1.0 / scale
     return torch.clamp(
         torch.round(input * inv_scale) + zero_point, quant_min, quant_max
@@ -466,6 +477,8 @@ def quantize_per_tensor_tensor_decomp_impl(
     quant_max: int,
     dtype: torch.dtype,
 ) -> torch.Tensor:
+    if input.dtype == torch.bfloat16:
+        input = input.to(torch.float32)
     inv_scale = 1.0 / scale
     return torch.clamp(
         torch.round(input * inv_scale) + zero_point, quant_min, quant_max
@@ -488,7 +501,10 @@ def dequantize_per_tensor_tensor_decomp_impl(
 def q_embedding_bag_byte_unpack_decomp(packed):
     def bitcast_u8_to_f32(u8):
         x, y, z, w = (u8[..., n].to(torch.int32) for n in (0, 1, 2, 3))
-        return (x + (y << 8) + (z << 16) + (w << 24)).view(torch.float32)[..., None]
+        if sys.byteorder == "little":
+            return (x + (y << 8) + (z << 16) + (w << 24)).view(torch.float32)[..., None]
+        else:
+            return ((x << 24) + (y << 16) + (z << 8) + w).view(torch.float32)[..., None]
 
     scales = bitcast_u8_to_f32(packed[..., -8:-4])
     offsets = bitcast_u8_to_f32(packed[..., -4:])

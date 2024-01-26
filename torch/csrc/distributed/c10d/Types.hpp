@@ -118,6 +118,7 @@ struct BroadcastOptions {
   int64_t rootRank = 0;
   int64_t rootTensor = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
+  bool asyncOp = true;
 };
 
 struct AllreduceOptions {
@@ -148,6 +149,7 @@ struct GatherOptions {
 struct ScatterOptions {
   int64_t rootRank = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
+  bool asyncOp = true;
 };
 
 struct ReduceScatterOptions {

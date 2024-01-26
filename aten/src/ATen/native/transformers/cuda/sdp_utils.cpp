@@ -14,12 +14,12 @@
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
+#include <c10/util/CallOnce.h>
 
 #include <c10/core/SymInt.h>
 #include <c10/util/string_view.h>
 #include <cmath>
 #include <functional>
-#include <iostream>
 
 /**
 * Note [SDPA Runtime Dispatch]
@@ -84,23 +84,6 @@ bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
   const auto value_size_last = params.value.sym_size(-1);
   bool same_head_dim_size =
       query_size_last == key_size_last && query_size_last == value_size_last;
-  if (has_for_nested_inputs(params)) {
-    if (!(same_head_dim_size && (query_size_last % 8 == 0) &&
-          (query_size_last <= max_size))) {
-      if (debug) {
-        TORCH_WARN(
-            "For NestedTensor inputs, Flash attention requires q,k,v to have the same last dimension and to be a multiple of 8 and less than or equal to 256.",
-            " Got Query.size(-1): ",
-            query_size_last,
-            ", Key.size(-1): ",
-            params.key.sym_size(-1),
-            ", Value.size(-1): ",
-            params.value.sym_size(-1),
-            " instead.");
-      }
-      return false;
-    }
-  }
   if (!(same_head_dim_size && (query_size_last <= max_size))) {
     if (debug) {
       TORCH_WARN(
@@ -111,6 +94,31 @@ bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
           key_size_last,
           ", Value.size(-1): ",
           value_size_last,
+          " instead.");
+    }
+    return false;
+  }
+  return true;
+}
+
+bool check_head_dim_size_flash_nested(sdp_params const& params, bool debug) {
+  const auto max_size = c10::SymInt(256);
+  const auto query_size_last = params.query.sym_size(-1);
+  const auto key_size_last = params.key.sym_size(-1);
+  const auto value_size_last = params.value.sym_size(-1);
+  bool same_head_dim_size =
+      query_size_last == key_size_last && query_size_last == value_size_last;
+  if (!(same_head_dim_size && (query_size_last % 8 == 0) &&
+        (query_size_last <= max_size))) {
+    if (debug) {
+      TORCH_WARN(
+          "For NestedTensor inputs, Flash attention requires q,k,v to have the same last dimension and to be a multiple of 8 and less than or equal to 256.",
+          " Got Query.size(-1): ",
+          query_size_last,
+          ", Key.size(-1): ",
+          params.key.sym_size(-1),
+          ", Value.size(-1): ",
+          params.value.sym_size(-1),
           " instead.");
     }
     return false;
@@ -174,6 +182,31 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
   using sm80 = SMVersion<8, 0>;
   using sm90 = SMVersion<9, 0>;
   auto dprops = at::cuda::getCurrentDeviceProperties();
+#if USE_ROCM
+  constexpr std::string_view mi200 = "gfx90a:sramecc+:xnack-";
+  static const char *over_arch = [] {
+    auto rc = std::getenv("PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE");
+    if (rc) {
+        TORCH_WARN("SDPA functions only loads value from PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE once. "
+                   "Later changes to this environment variable with os.environ "
+                   "(or other methods) will not affect SDPA function's behavior.");
+    }
+    return rc;
+  }();
+  const char* real_arch = dprops->gcnArchName;
+  const char* arch = over_arch ? over_arch : real_arch;
+  if (mi200 != arch) {
+    if (debug) {
+      TORCH_WARN(
+          "Flash attention only supports gpu architecture gfx90a, for now. Attempting to run on a ",
+          arch,
+          ".",
+          over_arch ? " This is overrided by PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE. Real architecture is " : "",
+          over_arch ? real_arch : "");
+    }
+    return false;
+  }
+#else
   if (!check_sm_version<sm80, sm90>(dprops)) {
     if (debug) {
       TORCH_WARN(
@@ -185,6 +218,7 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
     }
     return false;
   }
+#endif
   return true;
 }
 
@@ -211,7 +245,7 @@ bool check_requires_grad_and_head_dim_gt192_and_sm_ge86_lt90(
     sdp_params const& params,
     bool debug) {
   // Flash Attention will raise an error in the backward pass if the head_dim
-  // size is greater than 64 And the device is between in the range [sm86, sm89]
+  // size is greater than 192 And the device is between in the range [sm86, sm89]
   using sm86 = SMVersion<8, 6>;
   using sm89 = SMVersion<8, 9>;
   auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -235,7 +269,9 @@ bool check_flash_causal_non_square_seqlens(sdp_params const& params, bool debug)
   // FlashAttention 2 updated the default mask meaning for causal in this PR:
   // 9e5e8bc91e it is now aligned to lower_right which would be a BC break
   // for non-square masks. We will not support non-square masks for causal w/ FAV2
-  if (params.is_causal && params.query.sym_size(-2) != params.key.sym_size(-2)) {
+  if (params.is_causal &&
+      !params.query.is_nested() && !params.key.is_nested() &&
+      params.query.sym_size(-2) != params.key.sym_size(-2)) {
     if (debug) {
       TORCH_WARN(
           "Flash attention does not support the is_causal flag when seqlen_q != seqlen_k. ",
@@ -247,30 +283,69 @@ bool check_flash_causal_non_square_seqlens(sdp_params const& params, bool debug)
   return true;
 }
 
-bool use_flash_attention(sdp_params const& params, bool debug) {
+bool check_all_tensors_on_device(sdp_params const& params, bool debug) {
+  // Check that all tensors are on the GPU device
+  // This should be handled by the stub dispatch, but whe call can_use_*_attention
+  // directly from python we need to ensure that the tensors are on cuda
+  if (params.query.device().type() != at::DeviceType::CUDA) {
+    if (debug) {
+      TORCH_WARN(
+          "All tensors need to be on cuda device. Got query on device: ",
+          params.query.device(),
+          ", key on device: ",
+          params.key.device(),
+          ", value on device: ",
+          params.value.device());
+    }
+    return false;
+  }
+  return true;
+}
+
+} // namespace
+bool can_use_flash_attention(sdp_params const& params, bool debug) {
 #ifndef USE_FLASH_ATTENTION
-  TORCH_WARN(!debug, "Torch was not compiled with flash attention.");
+  TORCH_WARN_ONCE(!debug, "Torch was not compiled with flash attention.");
   return false;
 #endif
 
   // Define gate functions that determine if a flash kernel can be ran
   // Replace with std::to_array when we migrate to c++20
-  constexpr auto constraints = array_of<bool (*)(sdp_params const&, bool)>(
+  constexpr auto general_constraints = array_of<bool (*)(sdp_params const&, bool)>(
       check_runtime_disabled_flash,
+      check_all_tensors_on_device,
       check_tensor_shapes,
-      check_batch_size_and_num_heads,
       check_for_attn_mask,
       check_head_dim_size_flash,
-      check_for_seq_len_0_nested_tensor,
-      check_nonzero_sequence_lengths,
-      check_last_dim_stride_equals_1,
       check_flash_attention_hardware_support,
       check_requires_grad_and_head_dim_gt192_and_sm_ge86_lt90,
-      check_flash_causal_non_square_seqlens,
-      check_for_seq_len_0_nested_tensor);
-  for (auto& constraint : constraints) {
+      check_flash_causal_non_square_seqlens);
+  for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;
+    }
+  }
+
+  if (has_for_nested_inputs(params)) {
+    constexpr auto nested_constraints = array_of<bool (*)(sdp_params const&, bool)>(
+        check_batch_size_nested,
+        check_head_dim_size_flash_nested,
+        check_for_seq_len_0_nested_tensor);
+    for (auto& constraint : nested_constraints) {
+      if (!constraint(params, debug)) {
+        return false;
+      }
+    }
+  }
+  if (has_only_dense_inputs(params)) {
+    constexpr auto dense_constraints = array_of<bool (*)(sdp_params const&, bool)>(
+        check_batch_size_and_num_heads_dense,
+        check_nonzero_sequence_lengths_dense,
+        check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>);
+    for (auto& constraint : dense_constraints) {
+      if (!constraint(params, debug)) {
+        return false;
+      }
     }
   }
 
@@ -285,41 +360,59 @@ bool use_flash_attention(sdp_params const& params, bool debug) {
   }
 }
 
-bool use_mem_efficient_attention(sdp_params const& params, bool debug) {
+bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
 #ifndef USE_MEM_EFF_ATTENTION
-  TORCH_WARN(!debug, "Torch was not compiled with memory efficient attention.");
+  TORCH_WARN_ONCE(!debug, "Torch was not compiled with memory efficient attention.");
   return false;
 #endif
   // Constraints specific to mem efficient attention
-  constexpr auto default_mem_efficient_dtypes =
+  constexpr auto greater_than_or_equal_sm80_mem_efficient_dtypes =
       array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
-  constexpr auto sm50_mem_efficient_dtypes =
+  constexpr auto less_than_sm80_mem_efficient_dtypes =
       array_of<at::ScalarType>(at::kHalf, at::kFloat);
 
-  //  Define gate functions that determine if a flash kernel can be ran
-  constexpr auto constraints = array_of<bool (*)(sdp_params const&, bool)>(
+  //  Define gate functions that determine if a mem efficient kernel can be ran
+  constexpr auto general_constraints = array_of<bool (*)(sdp_params const&, bool)>(
       check_runtime_disabled_mem_efficient,
+      check_all_tensors_on_device,
       check_mem_efficient_hardware_support,
-      check_requires_grad_and_nested,
       check_tensor_shapes,
-      check_batch_size_and_num_heads,
-      check_head_dim_size_mem_efficient,
-      check_for_seq_len_0_nested_tensor,
-      check_nonzero_sequence_lengths,
-      check_last_dim_stride_equals_1);
-  for (auto& constraint : constraints) {
+      check_head_dim_size_mem_efficient);
+  for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;
     }
   }
 
-  auto dprop = at::cuda::getCurrentDeviceProperties();
-  if (dprop->major == 5) {
-    return check_tensor_dtype(params, sm50_mem_efficient_dtypes, debug);
+  if (has_for_nested_inputs(params)) {
+    constexpr auto nested_constraints = array_of<bool (*)(sdp_params const&, bool)>(
+        check_requires_grad_and_nested,
+        check_batch_size_nested,
+        check_for_seq_len_0_nested_tensor);
+    for (auto& constraint : nested_constraints) {
+      if (!constraint(params, debug)) {
+        return false;
+      }
+    }
   }
-  return check_tensor_dtype(params, default_mem_efficient_dtypes, debug);
+  if (has_only_dense_inputs(params)) {
+    constexpr auto dense_constraints = array_of<bool (*)(sdp_params const&, bool)>(
+        check_batch_size_and_num_heads_dense,
+        check_nonzero_sequence_lengths_dense,
+        check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim=*/>);
+    for (auto& constraint : dense_constraints) {
+      if (!constraint(params, debug)) {
+        return false;
+      }
+    }
+  }
+
+  auto dprop = at::cuda::getCurrentDeviceProperties();
+  if (dprop->major >= 8) {
+    return check_tensor_dtype(params, greater_than_or_equal_sm80_mem_efficient_dtypes, debug);
+  }
+  return check_tensor_dtype(params, less_than_sm80_mem_efficient_dtypes, debug);
 }
-} // namespace
 
 SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
   // This function defines the priority order of the different sdp backends
@@ -340,12 +433,12 @@ SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
   for (auto& backend : ordering) {
     switch (backend) {
       case SDPBackend::flash_attention:
-        if (use_flash_attention(kernel_params, print_debug)) {
+        if (sdp::can_use_flash_attention(kernel_params, print_debug)) {
           return SDPBackend::flash_attention;
         }
         break;
       case SDPBackend::efficient_attention:
-        if (use_mem_efficient_attention(kernel_params, print_debug)) {
+        if (sdp::can_use_mem_efficient_attention(kernel_params, print_debug)) {
           return SDPBackend::efficient_attention;
         }
         break;
@@ -367,10 +460,10 @@ SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
 
   print_debug = true;
   TORCH_WARN("Memory efficient kernel not used because:");
-  use_mem_efficient_attention(kernel_params, print_debug);
+  sdp::can_use_mem_efficient_attention(kernel_params, print_debug);
   TORCH_WARN("Flash attention kernel not used because:");
-  use_flash_attention(kernel_params, print_debug);
-  TORCH_CHECK(!print_debug, "No available kernel.  Aborting execution.")
+  sdp::can_use_flash_attention(kernel_params, print_debug);
+  TORCH_CHECK(!print_debug, "No available kernel. Aborting execution.")
   return SDPBackend::error;
 }
 

@@ -177,8 +177,6 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
 // Flag to just run a frame normally
 #define SKIP_CODE ((void*)0x1)
 
-bool is_dynamo_compiling = false;
-static PyObject* guard_fail_hook = NULL;
 static PyObject* guard_error_hook = NULL;
 const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
 
@@ -685,13 +683,6 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     }
     return (PyObject*)e->code;
   }
-  if (unlikely(guard_fail_hook != NULL)) {
-    PyObject* r = call_guard_fail_hook(guard_fail_hook, e, index, f_locals);
-    if (r == NULL) {
-      return NULL;
-    }
-    Py_DECREF(r);
-  }
   return lookup(e->next, frame, e, index + 1);
 }
 
@@ -739,65 +730,15 @@ inline static PyObject* eval_custom_code_impl(
 
   PyObject** fastlocals_old = frame->localsplus;
   PyObject** fastlocals_new = shadow->localsplus;
+  Py_ssize_t n_old = frame->f_code->co_nlocalsplus;
+  Py_ssize_t n_new = code->co_nlocalsplus;
 
   // localsplus are XINCREF'd by default eval frame, so all values must be valid.
   for (int i = 0; i < code->co_nlocalsplus; i++) {
     fastlocals_new[i] = NULL;
   }
 
-  // copy from old localsplus to new localsplus:
-  // for i, name in enumerate(localsplusnames_new):
-  //   name_to_idx[name] = i
-  // for i, name in enumerate(localsplusnames_old):
-  //   fastlocals_new[name_to_idx[name]] = fastlocals_old[i]
-  PyObject* name_to_idx = PyDict_New();
-  if (name_to_idx == NULL) {
-    DEBUG_TRACE0("unable to create localsplus name dict");
-    THP_PyFrame_Clear(shadow);
-    free(shadow);
-    Py_DECREF(func);
-    return NULL;
-  }
-
-  for (Py_ssize_t i = 0; i < code->co_nlocalsplus; i++) {
-    PyObject *name = PyTuple_GET_ITEM(code->co_localsplusnames, i);
-    PyObject *idx = PyLong_FromSsize_t(i);
-    if (name == NULL || idx == NULL || PyDict_SetItem(name_to_idx, name, idx) != 0) {
-      Py_DECREF(name_to_idx);
-      THP_PyFrame_Clear(shadow);
-      free(shadow);
-      Py_DECREF(func);
-      return NULL;
-    }
-  }
-
-  for (Py_ssize_t i = 0; i < frame->f_code->co_nlocalsplus; i++) {
-    PyObject *name = PyTuple_GET_ITEM(frame->f_code->co_localsplusnames, i);
-    PyObject *idx = PyDict_GetItem(name_to_idx, name);
-    Py_ssize_t new_i = PyLong_AsSsize_t(idx);
-    if (name == NULL || idx == NULL || (new_i == (Py_ssize_t)-1 && PyErr_Occurred() != NULL)) {
-      Py_DECREF(name_to_idx);
-      THP_PyFrame_Clear(shadow);
-      free(shadow);
-      Py_DECREF(func);
-      return NULL;
-    }
-    Py_XINCREF(fastlocals_old[i]);
-    fastlocals_new[new_i] = fastlocals_old[i];
-  }
-
-  Py_DECREF(name_to_idx);
-
   #else
-  Py_ssize_t nlocals_new = code->co_nlocals;
-  Py_ssize_t nlocals_old = frame->f_code->co_nlocals;
-  DEBUG_CHECK(nlocals_new >= nlocals_old);
-
-  Py_ssize_t ncells = PyCode_GetNCellvars(code);
-  Py_ssize_t nfrees = PyCode_GetNFreevars(code);
-
-  DEBUG_CHECK(ncells == PyTuple_GET_SIZE(frame->f_code->co_cellvars));
-  DEBUG_CHECK(nfrees == PyTuple_GET_SIZE(frame->f_code->co_freevars));
 
   THP_EVAL_API_FRAME_OBJECT* shadow = PyFrame_New(tstate, code, frame->f_globals, NULL);
   if (shadow == NULL) {
@@ -806,18 +747,91 @@ inline static PyObject* eval_custom_code_impl(
 
   PyObject** fastlocals_old = frame->f_localsplus;
   PyObject** fastlocals_new = shadow->f_localsplus;
+  Py_ssize_t n_old = frame->f_code->co_nlocals + PyCode_GetNFreevars(frame->f_code) + PyCode_GetNCellvars(frame->f_code);
+  Py_ssize_t n_new = code->co_nlocals + PyCode_GetNFreevars(code) + PyCode_GetNCellvars(code);
 
-  for (Py_ssize_t i = 0; i < nlocals_old; i++) {
+  #endif
+
+  // ============== Initialize new frame from old frame ============
+  // Python internal for executing a function:
+  //  1. CPython interpreter first creates an empty frame according to the code object
+  //  2. CPython interpreter initializes the frame by filling arguments/free variables into frame and initializing cell variables
+  //  3. CPython interpreter executes the code object
+  //
+  // Dynamo hooks the 3th step: before executing the code object, Dynamo transforms the code object into a new code object. Then, the old frame is not suitable for executing the new code. Therefore, Dynamo needs to manually create and initialize a new frame to execute the new code.
+  // The main task is to copy data in old frame to new frame, concerning a storage space named `localsplus`.
+  //
+  // localsplus storage is an array with the following layout:
+  // |   args   |   new_locals    |    cell_variables |   free_variables    |
+  // | <--- from left to right, index from 0 to n - 1 ---> |
+  // code.co_varnames == args + new_locals, code.co_nlocals == len(code.co_varnames)
+  // code.co_freevars == free_variables
+  // In Python 3.10 and lower, `n == code.co_nlocals + len(code.co_cellvars) + len(code.co_freevars)` (Python expression)
+  // In Python 3.11 and higher, `n <= code.co_nlocals + len(code.co_cellvars) + len(code.co_freevars)` (Python expression). There is an extra field in Python C-API: `n == code->co_nlocalsplus` (C expression) to retrieve the length of array.
+  // The complexity happens if an argument becomes a cell variable:
+  //  In Python 3.10 and lower, `code.co_cellvars == cell_variables`, and the corresponding slot in args becomes `NULL`.
+  //  In Python 3.11 and higher, `code.co_cellvars > cell_variables`, that cell variable is still stored in args, with a flag set in corresponding item's `co_localspluskinds` .
+  //
+  // ideally, we need to look up new localsplus from old localsplus by name:
+  // for i, name, value in enumerate(localsplusnames_old):
+  //   if value != NULL: (NULL happens for new local variables and arguments that becomes cell variables)
+  //     name_to_idx[name] = i
+  // for i, name in enumerate(localsplusnames_new):
+  //  if name in name_to_idx:
+  //    fastlocals_new[i] = fastlocals_old[name_to_idx[name]]
+  //
+  // The above process of building a `name_to_idx` mapping is expensive.
+  // Dynamo makes the following assumptions:
+  //  1. new code has the same arguments as the old code (both the number and the order)
+  //  2. new code has the same cell variables as the old code (both the number and the order)
+  //  3. new code has the same free variables as the old code (both the number and the order)
+  //  The only flexibility lies in new local variables: new code can introduce their own variables.
+  // With these assumptions, Dynamo can copy data directly by index. Dynamo just needs to take care of copying cell variables correctly.
+  // To avoid runtime cost, the assumptions are checked when we first generate the code object in pytorch/torch/_dynamo/convert_frame.py .
+
+
+  // copy args
+  // according to https://docs.python.org/3/library/inspect.html , `co_argcount` is the number of arguments (not including keyword only arguments, * or ** args). so we need to add `co_kwonlyargcount` and `co_flags` to get the total number of arguments.
+  // !!(frame->f_code->co_flags & CO_VARARGS) is 1 if the function has *args, 0 otherwise
+  // !!(frame->f_code->co_flags & CO_VARKEYWORDS) is 1 if the function has **kwargs, 0 otherwise
+  // they convert bit flags to 0 or 1, and avoid branching.
+  // This is performance critical code, so we really care about performance.
+  Py_ssize_t total_argcount_old = frame->f_code->co_argcount + frame->f_code->co_kwonlyargcount + !!(frame->f_code->co_flags & CO_VARARGS) + !!(frame->f_code->co_flags & CO_VARKEYWORDS);
+
+  for (Py_ssize_t i = 0; i < total_argcount_old; i++) {
     Py_XINCREF(fastlocals_old[i]);
     fastlocals_new[i] = fastlocals_old[i];
   }
 
-  for (Py_ssize_t i = 0; i < ncells + nfrees; i++) {
-    Py_XINCREF(fastlocals_old[nlocals_old + i]);
-    fastlocals_new[nlocals_new + i] = fastlocals_old[nlocals_old + i];
+  // copy free vars
+  Py_ssize_t nfrees_old = PyCode_GetNFreevars(frame->f_code);
+
+  for (Py_ssize_t i = 0; i < nfrees_old; i++) {
+    Py_XINCREF(fastlocals_old[n_old - 1 - i]);
+    fastlocals_new[n_new - 1 - i] = fastlocals_old[n_old - 1 - i];
   }
 
+  // copy cell vars, from high index to low index, until it meets a variable that is not cell variable.
+  for (Py_ssize_t i = n_old - nfrees_old - 1, j = n_new - nfrees_old - 1; i >= total_argcount_old; i--, j--) {
+
+  // conditional test to tell if a variable is not a cell variable
+  // this is straightforward in Python 3.11 and higher, as there are bit flags in `co_localspluskinds` to tell if a variable is a cell variable.
+  // in Python 3.10 and lower, essentially we are checking if a variable is a new local variable (because of the layout mentioned above, the first variable that is not cell variable is the first new local variable). the corresponding slot in `flocalsplus` is NULL for new local variables.
+  #if IS_PYTHON_3_11_PLUS
+    if(!(_PyLocals_GetKind(frame->f_code->co_localspluskinds, i) & CO_FAST_CELL))
+    {
+      break;
+    }
+  #else
+    if(fastlocals_old[i] == NULL)
+    {
+      break;
+    }
   #endif
+
+    Py_XINCREF(fastlocals_old[i]);
+    fastlocals_new[j] = fastlocals_old[i];
+  }
 
   PyObject* result = eval_frame_default(tstate, shadow, throw_flag);
 
@@ -1065,7 +1079,6 @@ static PyObject* set_eval_frame(PyObject* new_callback, PyThreadState* tstate) {
   // is installed.
   eval_frame_callback_set(new_callback);
 
-  is_dynamo_compiling = !(new_callback == Py_None);
   return old_callback;
 }
 
@@ -1117,14 +1130,6 @@ static PyObject* skip_code(PyObject* dummy, PyObject* obj) {
   Py_RETURN_NONE;
 }
 
-static PyObject* set_guard_fail_hook(PyObject* dummy, PyObject* obj) {
-  if (obj == Py_None) {
-    obj = NULL;
-  }
-  Py_XSETREF(guard_fail_hook, Py_XNewRef(obj));
-  Py_RETURN_NONE;
-}
-
 static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* obj) {
   if (obj == Py_None) {
     obj = NULL;
@@ -1138,7 +1143,6 @@ static PyMethodDef _methods[] = {
     {"reset_code", reset_code, METH_O, NULL},
     {"unsupported", unsupported, METH_VARARGS, NULL},
     {"skip_code", skip_code, METH_O, NULL},
-    {"set_guard_fail_hook", set_guard_fail_hook, METH_O, NULL},
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
     {"_debug_get_cache_entry_list", _debug_get_cache_entry_list, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};

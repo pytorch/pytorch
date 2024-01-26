@@ -131,6 +131,9 @@ static void _process_forward_mode_AD(
       ")");
 
   for (const auto i : c10::irange(num_outputs)) {
+    if (!raw_outputs[i].has_value()) {
+      continue;
+    }
     const auto& out =
         outputs[i].has_value() ? outputs[i].value() : at::Tensor();
     auto out_tensor_impl = raw_outputs[i].value().unsafeGetTensorImpl();
@@ -149,7 +152,6 @@ static void _process_forward_mode_AD(
       continue;
     }
 
-    TORCH_INTERNAL_ASSERT(raw_outputs[i].has_value());
     bool is_input = inputs_mapping.count(out_tensor_impl) > 0;
     bool is_modified = dirty_inputs.count(out_tensor_impl) > 0;
 
@@ -380,6 +382,7 @@ static optional_variable_list _process_backward_mode_ad(
       continue;
     }
 
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     Variable var = raw_outputs[i].value();
 
     auto out_tensor_impl = var.unsafeGetTensorImpl();

@@ -1,3 +1,4 @@
+# mypy: disable-error-code="type-arg"
 from typing import List, Optional, overload, Sequence, Tuple, Union
 
 from torch import memory_format, Tensor

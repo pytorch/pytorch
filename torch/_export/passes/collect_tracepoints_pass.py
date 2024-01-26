@@ -13,9 +13,10 @@ class CollectTracepointsPass(PassBase):
     Performs constant folding and constant propagation.
     """
 
-    def __init__(self, specs) -> None:
+    def __init__(self, specs, sig) -> None:
         super().__init__()
         self.specs = specs
+        self.sig = sig
 
     def call(self, gm):
         def get_arg_spec(arg):
@@ -55,6 +56,7 @@ class CollectTracepointsPass(PassBase):
                                 assert isinstance(user.args[1], int)
                                 if user.args[1] == i:
                                     user.replace_all_uses_with(arg)
+                                    self.sig.replace_all_uses(user.name, arg.name)
                                     break
                     users = list(node.users)
                     for user in users:

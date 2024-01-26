@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/util/in_place.h>
+#include <utility>
 
 namespace c10 {
 
@@ -55,10 +55,7 @@ struct ExclusivelyOwnedTraits;
 template <typename T>
 class ExclusivelyOwned {
   using EOT = ExclusivelyOwnedTraits<T>;
-  union {
-    char dummy_;
-    typename ExclusivelyOwnedTraits<T>::repr_type repr_;
-  };
+  typename ExclusivelyOwnedTraits<T>::repr_type repr_;
 
  public:
   ExclusivelyOwned() : repr_(EOT::nullRepr()) {}
@@ -66,7 +63,7 @@ class ExclusivelyOwned {
   explicit ExclusivelyOwned(T&& t) : repr_(EOT::moveToRepr(std::move(t))) {}
 
   template <class... Args>
-  explicit ExclusivelyOwned(in_place_t, Args&&... args)
+  explicit ExclusivelyOwned(std::in_place_t, Args&&... args)
       : repr_(EOT::createInPlace(std::forward<Args>(args)...)) {}
 
   ExclusivelyOwned(const ExclusivelyOwned&) = delete;

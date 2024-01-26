@@ -15,7 +15,6 @@
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/file_format.h>
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
-#include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/mobile/upgrader_mobile.h>
@@ -24,8 +23,6 @@
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/custom_class.h>
-#include <exception>
-#include <fstream>
 #include <string>
 #include <vector>
 

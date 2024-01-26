@@ -195,8 +195,8 @@ warpMergeSortKVInPlace(
 
   namespace cub = ROCM_HIPCUB(at_cuda_detail::cub);
 
-  assert(blockDim.x == C10_WARP_SIZE);
-  assert(blockDim.y <= max_block_dim_y);
+  CUDA_KERNEL_ASSERT(blockDim.x == C10_WARP_SIZE);
+  CUDA_KERNEL_ASSERT(blockDim.y <= max_block_dim_y);
   constexpr int items_per_thread = sort_size / C10_WARP_SIZE;
   static_assert(
       items_per_thread * C10_WARP_SIZE == sort_size,

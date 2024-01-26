@@ -40,6 +40,7 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
         >>> list(filter_dp)
         [0, 2, 4]
     """
+
     datapipe: IterDataPipe[T_co]
     filter_fn: Callable
 

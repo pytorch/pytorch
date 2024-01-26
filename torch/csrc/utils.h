@@ -2,6 +2,7 @@
 #define THP_UTILS_H
 
 #include <ATen/ATen.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/Storage.h>
 #include <torch/csrc/THConcat.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -152,13 +153,6 @@
 */
 #define DEFERRED_ADDRESS(ADDR) nullptr
 
-#define THPUtils_assert(cond, ...) \
-  THPUtils_assertRet(nullptr, cond, __VA_ARGS__)
-#define THPUtils_assertRet(value, cond, ...) \
-  if (THP_EXPECT(!(cond), 0)) {              \
-    THPUtils_setError(__VA_ARGS__);          \
-    return value;                            \
-  }
 TORCH_PYTHON_API void THPUtils_setError(const char* format, ...);
 TORCH_PYTHON_API void THPUtils_invalidArguments(
     PyObject* given_args,
@@ -190,18 +184,14 @@ template <typename _real, typename = void>
 struct mod_traits {};
 
 template <typename _real>
-struct mod_traits<
-    _real,
-    typename std::enable_if<std::is_floating_point<_real>::value>::type> {
+struct mod_traits<_real, std::enable_if_t<std::is_floating_point_v<_real>>> {
   static _real mod(_real a, _real b) {
     return fmod(a, b);
   }
 };
 
 template <typename _real>
-struct mod_traits<
-    _real,
-    typename std::enable_if<std::is_integral<_real>::value>::type> {
+struct mod_traits<_real, std::enable_if_t<std::is_integral_v<_real>>> {
   static _real mod(_real a, _real b) {
     return a % b;
   }

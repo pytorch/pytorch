@@ -1,16 +1,16 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/DispatchStub.h>
 
+#include <c10/core/DeviceType.h>
 #include <c10/util/Exception.h>
-#include <c10/macros/Macros.h>
 
-#if !defined(__s390x__)
+#if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
 #include <cstdlib>
 #include <cstring>
 
-namespace at { namespace native {
+namespace at::native {
 
 static CPUCapability compute_cpu_capability() {
   auto envar = std::getenv("ATEN_CPU_CAPABILITY");
@@ -192,4 +192,4 @@ void* DispatchStubImpl::choose_cpu_impl(
   return DEFAULT;
 }
 
-}}  // namespace at::native
+}  // namespace at::native

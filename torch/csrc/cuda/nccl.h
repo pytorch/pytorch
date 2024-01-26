@@ -114,6 +114,7 @@ using comm_list = std::vector<ncclComm_t>;
 using stream_list = std::vector<c10::optional<at::cuda::CUDAStream>>;
 
 TORCH_CUDA_CPP_API std::uint64_t version();
+TORCH_CUDA_CPP_API const char* version_suffix();
 
 bool is_available(at::TensorList tensors);
 
