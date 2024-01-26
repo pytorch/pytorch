@@ -547,7 +547,7 @@ static PyObject* view_func_impl(
         torch::autograd::utils::has_same_meta(new_base, view_info.base_)) {
       // Do the actual view replay
       if (view_info.has_view_fn()) {
-        out = view_info.view_fn()(new_base);
+        out = (*view_info.view_fn())(new_base);
       } else {
         out = new_base.as_strided(
             self.sizes(), self.strides(), self.storage_offset());
@@ -594,6 +594,7 @@ static PyObject* THPVariable_rev_view_func_unsafe(
   return rev_view_func_impl(self_, arg);
 }
 
+// TODO: Change the name of this / merge it with view_func_unsafe()
 static PyObject* THPVariable_full_view_func_unsafe(
     PyObject* self_,
     PyObject* args) {
@@ -620,8 +621,7 @@ static PyObject* THPVariable_full_view_func_unsafe(
     auto& view_info = diff_view_meta->get_backward_view();
     // Do the actual view replay
     TORCH_CHECK(view_info.has_view_fn(), "No view func found");
-    auto view_func = view_info.full_view_fn();
-    TORCH_CHECK(view_func, "No full view func found");
+    auto view_func = view_info.view_fn();
 
     std::vector<c10::SymInt> symints;
     const auto old_symints = view_func->get_symints();
@@ -655,26 +655,6 @@ static PyObject* THPVariable_full_view_func_unsafe(
     view_func->set_tensors(old_tensors);
   }
   return THPVariable_Wrap(std::move(out));
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* THPVariable_set_sizes_strides_offset_unsafe(
-    PyObject* _self,
-    PyObject* args,
-    PyObject* kwargs) {
-  HANDLE_TH_ERRORS
-  const auto& self = THPVariable_Unpack(_self);
-  static PythonArgParser parser({
-      "_set_sizes_strides_offset_unsafe(SymIntArrayRef size, SymIntArrayRef strides, SymInt storage_offset)",
-  });
-  ParsedArgs<3> parsed_args{};
-  auto r = parser.parse(_self, args, kwargs, parsed_args);
-  auto sym_sizes = r.symintlist(0);
-  auto sym_strides = r.symintlist(1);
-  auto sym_offset = r.toSymInt(2);
-  self.unsafeGetTensorImpl()->set_sizes_and_strides(
-      sym_sizes, sym_strides, sym_offset);
-  return THPVariable_Wrap(self);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1761,10 +1741,6 @@ static PyMethodDef extra_methods[] = {
     {"_full_view_func_unsafe",
      THPVariable_full_view_func_unsafe,
      METH_VARARGS,
-     nullptr},
-    {"_set_sizes_strides_offset_unsafe",
-     castPyCFunctionWithKeywords(THPVariable_set_sizes_strides_offset_unsafe),
-     METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {nullptr}};
 
