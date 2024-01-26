@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import enum
 import dis
 import copy

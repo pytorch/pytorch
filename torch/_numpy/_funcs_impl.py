@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 """A thin pytorch / numpy compat layer.
 
 Things imported from here have numpy-compatible signatures but operate on

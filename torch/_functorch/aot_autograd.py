@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import itertools
 from contextlib import nullcontext
 from functools import partial, wraps

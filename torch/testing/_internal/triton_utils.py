@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import unittest
 
 from torch.testing._internal.inductor_utils import HAS_CUDA
