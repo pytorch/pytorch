@@ -1,6 +1,5 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
-#include <sys/stat.h> // for calling stat()
 
 #if !defined(__linux__) || !defined(__x86_64__) || !defined(__has_include) || \
     !__has_include("ext/stdio_filebuf.h")
@@ -335,32 +334,22 @@ c10::optional<std::pair<std::string, uint64_t>> libraryFor(void* addr) {
 }
 
 struct Symbolizer {
+  Symbolizer() {
+    auto envar = std::getenv("TORCH_ADDR2LINE_BINARY");
+    if (envar != nullptr) {
+      // currently we take user's input as is without checking
+      addr2line_binary_ = envar;
+      TORCH_WARN("Use custom addr2line binary: ", addr2line_binary_);
+    } else {
+      addr2line_binary_ = "addr2line"; // default
+    }
+  }
   static std::lock_guard<std::mutex> guard() {
     static std::mutex mutex;
     return std::lock_guard<std::mutex>(mutex);
   }
   static Symbolizer& get() {
     static Symbolizer singleton;
-    if (addr2line_binary == nullptr) {
-        auto envar = std::getenv("TORCH_ADDR2LINE_BINARY");
-        if (envar != nullptr) {
-          // we require users to specify the full path to binary when using this
-          // flag for simplicity currently
-          struct stat buffer;
-          if(stat(envar, &buffer) == 0) {
-            addr2line_binary = envar;
-          } else {
-            TORCH_WARN(
-              "ignoring invalid value for TORCH_ADDR2LINE_BINARY: '",
-              envar,
-              "', valid value needs to be a full path to the binary,",
-              " use default binary addr2line instead.");
-              addr2line_binary = "addr2line"; // default
-          }
-        } else {
-          addr2line_binary = "addr2line"; // default
-        }
-    }
     return singleton;
   }
   void request(void* addr) {
@@ -373,7 +362,7 @@ struct Symbolizer {
       return;
     }
     has_pending_results_ = true;
-    auto& entry = getOrCreate(maybe_library->first, addr2line_binary);
+    auto& entry = getOrCreate(maybe_library->first, addr2line_binary_);
     entry.queried.push_back(addr);
     auto libaddress = maybe_library->second - 1;
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
@@ -403,7 +392,7 @@ struct Symbolizer {
 
  private:
   static constexpr int BLOCK = 1024;
-  static const char* addr2line_binary;
+  const char* addr2line_binary_;
   struct Entry {
     std::unique_ptr<Communicate> comm;
     std::vector<void*> queried;
@@ -443,7 +432,6 @@ struct Symbolizer {
   }
 };
 
-const char* Symbolizer::addr2line_binary = nullptr;
 
 #ifndef FBCODE_CAFFE2
 std::vector<Frame> symbolize(const std::vector<void*>& frames) {

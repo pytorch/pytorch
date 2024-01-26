@@ -4,7 +4,6 @@
 #include <cstring>
 
 #include <c10/util/Exception.h>
-// #include <sys/stat.h> // for calling stat()
 
 namespace torch {
 namespace {
@@ -41,7 +40,6 @@ bool compute_disable_addr2line() {
   }
   return false;
 }
-
 } // namespace
 
 bool get_cpp_stacktraces_enabled() {
