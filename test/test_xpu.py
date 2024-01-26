@@ -32,11 +32,19 @@ class TestXpu(TestCase):
             self.assertEqual(target_device, torch.xpu.current_device())
         self.assertEqual(current_device, torch.xpu.current_device())
 
-    def test_get_device_name(self):
+    def test_get_device_properties(self):
         current_device = torch.xpu.current_device()
+        device_properties = torch.xpu.get_device_properties(current_device)
+        self.assertEqual(device_properties, torch.xpu.get_device_properties(None))
+        self.assertEqual(device_properties, torch.xpu.get_device_properties())
+
         device_name = torch.xpu.get_device_name(current_device)
         self.assertEqual(device_name, torch.xpu.get_device_name(None))
         self.assertEqual(device_name, torch.xpu.get_device_name())
+
+        device_capability = torch.xpu.get_device_capability(current_device)
+        self.assertTrue(device_capability["max_work_group_size"] > 0)
+        self.assertTrue(device_capability["max_num_sub_groups"] > 0)
 
 
 if __name__ == "__main__":
