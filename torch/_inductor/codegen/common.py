@@ -1126,12 +1126,20 @@ class Kernel(CodeGen):
                             fx_node, ValueRanges.unknown()
                         )
 
+                    if name == "to_dtype":
+                        if hasattr(args[0], 'from') and getattr(args[0], 'from').dtype == args[1]:
+                            return getattr(args[0], 'from')
+
                     csevar = self.cse.generate(
                         self.compute,
                         getattr(parent_handler, name)(*args, **kwargs),  # type: ignore[has-type]
                         bounds=buf_bounds,
                     )
                     csevar.update_on_args(name, args, kwargs)
+
+                    if name == "to_dtype":
+                        setattr(csevar, "from", args[0])
+
                     return csevar
 
                 return inner
