@@ -7646,6 +7646,19 @@ def ___make_guard_fn():
         compiled_out = compiled_fn()
         self.assertTrue(same(fn_out, compiled_out))
 
+    def test_tuple_hasattr(self):
+        def fn(x):
+            if hasattr(x, "foo"):
+                return x[0] + 1
+            return x[1] - 1
+
+        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = (torch.randn(3), torch.randn(3))
+        fn_out = fn(x)
+        compiled_out = compiled_fn(x)
+        self.assertTrue(same(fn_out, compiled_out))
+
     def test_fn_hasattr__name__1(self):
         def fn():
             foo = lambda x: x + 1
@@ -8859,7 +8872,7 @@ ShapeEnv not equal: field values don't match:
 ShapeEnv not equal: field values don't match:
 
 ==> name_to_node: values don't match.
-  >  Left: {f0, i0, i1}
+  >  Left: {f0, u0, u1}
   > Right: {}
 ==> unbacked_symfloat_counter: values don't match.
   >  Left: 1
@@ -8868,7 +8881,7 @@ ShapeEnv not equal: field values don't match:
   >  Left: 2
   > Right: 0
 ==> var_to_range: values don't match.
-  >  Left: {f0: ValueRanges(lower=-oo, upper=oo, is_bool=False), i0: ValueRanges(lower=-9223372036854775808, upper=9223372036854775807, is_bool=False), i1: ValueRanges(lower=0, upper=1, is_bool=False)}
+  >  Left: {f0: ValueRanges(lower=-oo, upper=oo, is_bool=False), u0: ValueRanges(lower=-9223372036854775808, upper=9223372036854775807, is_bool=False), u1: ValueRanges(lower=0, upper=1, is_bool=False)}
   > Right: {}
 """,
         )
@@ -9009,14 +9022,14 @@ ShapeEnv not equal: field values don't match:
 ShapeEnv not equal: field values don't match:
 
 ==> deferred_runtime_asserts: values don't match.
-  >  Left: {i0: [Eq(Mod(i0, 3), 0)]}
+  >  Left: {u0: [Eq(Mod(u0, 3), 0)]}
   > Right: {}
 ==> divisible: values don't match.
-  >  Left: {Mod(i0, 3)}
+  >  Left: {Mod(u0, 3)}
   > Right: {}
 ==> name_to_node: values don't match.
-  >  Left: {_assert, eq, i0, mod}
-  > Right: {i0}
+  >  Left: {_assert, eq, mod, u0}
+  > Right: {u0}
 ==> num_deferred_runtime_asserts: values don't match.
   >  Left: 1
   > Right: 0

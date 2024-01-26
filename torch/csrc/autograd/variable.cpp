@@ -8,6 +8,7 @@
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/generated/Functions.h>
+#include <torch/csrc/autograd/generated/ViewFuncs.h>
 #include <torch/csrc/autograd/utils/error_messages.h>
 
 #include <ATen/ATen.h>
@@ -58,6 +59,7 @@ DifferentiableViewMeta::DifferentiableViewMeta(
 ViewInfo ViewInfo::chain(
     const Variable& base,
     const Variable& tensor,
+    std::shared_ptr<ViewFunc> full_view_func,
     std::function<Variable(const Variable&)> view_func,
     std::function<Variable(const Variable&)> rev_view_func) const {
   // Set `view_func` using the root base as input.
@@ -69,6 +71,9 @@ ViewInfo ViewInfo::chain(
   if (view_func) {
     // both current_view and it's parent have a view_func
     if (view_fn_) {
+      full_view_func =
+          std::make_shared<ChainedViewFunc>(full_view_fn_, full_view_func);
+
       // Copy parent view function to gain ownership
       auto prev_fn = view_fn_;
       view_func = [=](const at::Tensor& root_base) {
@@ -85,6 +90,14 @@ ViewInfo ViewInfo::chain(
     } else {
       // current_view has a view_func and but it's parent doesn't have one
       if (base.unsafeGetTensorImpl()->support_as_strided()) {
+        auto as_strided_view_func =
+            std::make_shared<generated::AsStridedViewFunc>(
+                base.sym_sizes(),
+                base.sym_strides(),
+                base.sym_storage_offset());
+        full_view_func = std::make_shared<ChainedViewFunc>(
+            as_strided_view_func, full_view_func);
+
         auto size = base.sym_sizes().vec();
         auto stride = base.sym_strides().vec();
         auto storage_offset = base.sym_storage_offset();
@@ -112,6 +125,8 @@ ViewInfo ViewInfo::chain(
             ("Attempted to chain views when the parent view has no view_func() and "
              "does not support as_strided(). This is not supported.");
 
+        full_view_func = std::make_shared<ErroringViewFunc>(error_msg);
+
         view_func = [=](const at::Tensor& root_base) {
           TORCH_CHECK(false, error_msg);
           return root_base;
@@ -125,11 +140,16 @@ ViewInfo ViewInfo::chain(
     }
   } else if (view_fn_) {
     // if current_view doesn't have a view_func but it's parent has one
+    auto as_strided_view_func = std::make_shared<generated::AsStridedViewFunc>(
+        tensor.sym_sizes(), tensor.sym_strides(), tensor.sym_storage_offset());
+    full_view_func =
+        std::make_shared<ChainedViewFunc>(full_view_fn_, as_strided_view_func);
+
     // Copy parent view function to gain ownership
-    auto prev_view_fn = view_fn_;
     auto size = tensor.sym_sizes().vec();
     auto stride = tensor.sym_strides().vec();
     auto storage_offset = tensor.sym_storage_offset();
+    auto prev_view_fn = view_fn_;
     view_func = [=](const at::Tensor& root_base) {
       auto temp = prev_view_fn(root_base);
       return temp.as_strided_symint(size, stride, storage_offset);
@@ -147,7 +167,11 @@ ViewInfo ViewInfo::chain(
     };
   }
 
-  return ViewInfo(base_, std::move(view_func), std::move(rev_view_func));
+  return ViewInfo(
+      base_,
+      std::move(full_view_func),
+      std::move(view_func),
+      std::move(rev_view_func));
 }
 
 namespace {
@@ -239,6 +263,11 @@ void rebase_history(const Variable& self, Edge gradient_edge) {
         at::TensorGeometry(self),
         view_info.view_fn_,
         std::move(gradient_edge.function));
+    if (self.requires_grad()) {
+      // If self did not previously require grad, there are no hooks to move
+      torch::autograd::impl::update_tensor_hooks_on_new_gradfn(
+          view_info.base_, view_info.base_.grad_fn(), copy_slices);
+    }
     set_gradient_edge(view_info.base_, {std::move(copy_slices), 0});
     self.grad_fn(); // trigger an update to the view's grad_fn
     return;

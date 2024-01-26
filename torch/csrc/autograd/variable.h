@@ -7,6 +7,7 @@
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/forward_grad.h>
 #include <torch/csrc/autograd/function_hook.h>
+#include <torch/csrc/autograd/generated/ViewFuncs.h>
 
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/Tensor.h>
@@ -328,6 +329,11 @@ struct TORCH_API ViewInfo {
   /// then this Tensor cannot be a forward (respectively backward) view.
   Variable base_;
 
+  /// TODO: Fill this out / change the name
+  /// TODO: Can we avoid making this a shared_ptr? I don't think so because
+  /// ViewInfos are copied and shared.
+  mutable std::shared_ptr<ViewFunc> full_view_fn_;
+
   /// By default we use as_strided to recover views which is more efficient.
   /// view_fn is only saved when as_strided is not supported.
   /// If view_fn has value, we use it to recover views in backward.
@@ -340,6 +346,12 @@ struct TORCH_API ViewInfo {
   bool has_view_fn() const {
     // assume either BOTH or NEITHER of view_fn_ and rev_view_fn_ exist
     return view_fn_ != nullptr;
+  }
+
+  std::shared_ptr<ViewFunc>& full_view_fn() const {
+    TORCH_CHECK(
+        has_view_fn(), "Can only access the view function if it exists.");
+    return full_view_fn_;
   }
 
   std::function<Variable(const Variable&)> view_fn() const {
@@ -366,14 +378,17 @@ struct TORCH_API ViewInfo {
   ViewInfo chain(
       const Variable& base,
       const Variable& tensor,
+      std::shared_ptr<ViewFunc> full_view_func = nullptr,
       std::function<Variable(const Variable&)> view_func = nullptr,
       std::function<Variable(const Variable&)> rev_view_func = nullptr) const;
 
   ViewInfo(
       Variable base,
+      std::shared_ptr<ViewFunc> full_view_fn,
       std::function<Variable(const Variable&)> view_fn,
       std::function<Variable(const Variable&)> rev_view_fn)
       : base_(std::move(base)),
+        full_view_fn_(std::move(full_view_fn)),
         view_fn_(std::move(view_fn)),
         rev_view_fn_(std::move(rev_view_fn)) {
     TORCH_CHECK(base_.defined(), "base is undefined");

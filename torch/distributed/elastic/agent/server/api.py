@@ -22,6 +22,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch.distributed.elastic.rendezvous as rdzv
 import torch.distributed.elastic.utils.store as store_util
+from torch.distributed.elastic.rendezvous import RendezvousGracefulExitError
 from torch.distributed import Store
 from torch.distributed.elastic.events import Event, EventSource, record
 from torch.distributed.elastic.metrics import prof, put_metric
@@ -32,7 +33,15 @@ from torch.distributed.elastic.multiprocessing import (
 )
 from torch.distributed.elastic.utils.logging import get_logger
 
-__all__ = ['WorkerSpec', 'Worker', 'WorkerState', 'WorkerGroup', 'RunResult', 'ElasticAgent', 'SimpleElasticAgent']
+__all__ = [
+    "WorkerSpec",
+    "Worker",
+    "WorkerState",
+    "WorkerGroup",
+    "RunResult",
+    "ElasticAgent",
+    "SimpleElasticAgent",
+]
 _TERMINAL_STATE_SYNC_ID = "torchelastic/agent/terminal_state"
 
 DEFAULT_ROLE = "default"
@@ -729,6 +738,8 @@ class SimpleElasticAgent(ElasticAgent):
             self._record_metrics(result)
             self._record_worker_events(result)
             return result
+        except RendezvousGracefulExitError as e:
+            log.info("Rendezvous gracefully exited: %s", e)
         except SignalException as e:
             log.warning("Received %s death signal, shutting down workers", e.sigval)
             self._shutdown(e.sigval)

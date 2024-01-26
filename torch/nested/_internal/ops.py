@@ -226,7 +226,7 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
         # Assume there aren't additional tensors that aren't the "unary/binary" args
         num_tensor_args = sum([isinstance(x, torch.Tensor) for x in args])
         if num_tensor_args == 1:
-            check_schema("self: jt, ...", func, *args, **kwargs)
+            check_schema("self: jt_all, ...", func, *args, **kwargs)
             return functools.partial(jagged_unary_pointwise, func)
         elif num_tensor_args == 2:
             check_schema("lhs: any, rhs: any", func, *args, **kwargs)
@@ -239,6 +239,7 @@ def extract_kwargs(arg):
     kwargs = {
         "offsets": arg.offsets(),
         "_metadata_cache": arg._metadata_cache,
+        "_ragged_idx": arg._ragged_idx,
     }
     return kwargs
 
@@ -409,10 +410,6 @@ def is_contiguous_general(func, *args, **kwargs):
     if inp.lengths() is not None:
         return False
 
-    # If jagged dim is not 1 it's not contiguous
-    if inp._ragged_idx != 1:
-        return False
-
     new_kwargs["memory_format"] = new_kwargs.get(
         "memory_format", torch.contiguous_format
     )
@@ -481,7 +478,7 @@ register_jagged_func(
         torch.ops.aten.randn_like.default,
         torch.ops.aten.detach.default,
     ],
-    "self: jt",
+    "self: jt_all",
 )(jagged_unary_pointwise)
 
 
@@ -826,13 +823,14 @@ def transpose_int(func, *args, **kwargs):
             to_dim = dim1
         else:
             to_dim = dim0
+        inp_kwargs = extract_kwargs(inp)
+        inp_kwargs["_ragged_idx"] = to_dim
         return NestedTensor(
             inp.values().transpose(
                 _outer_to_inner_dim(len(inp._size), dim0),
                 _outer_to_inner_dim(len(inp._size), dim1),
             ),
-            **extract_kwargs(inp),
-            _ragged_idx=to_dim,
+            **inp_kwargs,
         )
 
     new_kwargs["dim0"] = _wrap_jagged_dim(inp.dim(), new_kwargs["dim0"], "transpose")
@@ -1001,55 +999,6 @@ def embedding_default(func, *args, **kwargs):
     return NestedTensor(
         func(weight, indices._values, **new_kwargs), **extract_kwargs(indices)
     )
-
-
-@register_jagged_func(
-    torch.ops.aten.select_inverse.default,
-    "self: jt, src: jt, dim: any, index: any",
-)
-def select_inverse_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-
-    inp = new_kwargs.pop("input")
-    src = new_kwargs.pop("src")
-    new_kwargs["dim"] = _wrap_jagged_dim(src.dim(), new_kwargs["dim"], "select_inverse")
-
-    return NestedTensor(
-        func(inp._values, src._values, **new_kwargs), **extract_kwargs(inp)
-    )
-
-
-@register_jagged_func(
-    torch.ops.aten.slice_inverse.default,
-    "self: jt, src: jt, dim: any?, start: any?, end: any?, step: any?",
-)
-def slice_inverse_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-
-    inp = new_kwargs.pop("input")
-    src = new_kwargs.pop("src")
-    new_kwargs["dim"] = _wrap_jagged_dim(src.dim(), new_kwargs["dim"], "slice_inverse")
-    dim = new_kwargs["dim"]
-
-    # NB: Prefer inp values because they may be symbolic
-    # inp and src should have shapes that differ only at the slice dim
-    out_values_shape = list(inp._values.shape)
-    out_values_shape[dim] = src._values.shape[dim]
-
-    # inp and src should have the same stride()
-    out_values_stride = list(inp._values.stride())
-
-    # storage_offset() only changes if you slice the first dim and we don't support that
-    out_storage_offset = inp._values.storage_offset()
-
-    out_values = inp._values.as_strided(
-        out_values_shape, out_values_stride, out_storage_offset
-    )
-    return NestedTensor(out_values, **extract_kwargs(inp))
 
 
 @register_jagged_func(torch.ops.aten.values.default, "self: jt")
