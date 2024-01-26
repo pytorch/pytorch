@@ -81,20 +81,21 @@ class Op:
     args: List[Union[Param, Intermediate]]
 
 
-# Given a Triton emitted TTIR text, this function lexes and parses the
-# code using a minimal grammar defined inside. During the lexing/parsing,
-# we drop any constant value and type information as they are not
-# necessary to us.
-# Being able to choose what we need makes this not a general purpose TTIR
-# parser which further makes parsing much simpler.
-
-
 def parse_ttir(ttir, kwargs):
+    """
+    Given a Triton emitted TTIR text, this function lexes and parses the
+    code using a minimal grammar defined inside. During the lexing/parsing,
+    we drop any constant value and type information as they are not
+    necessary to us.
+    Being able to choose what we need makes this not a general purpose TTIR
+    parser which further makes parsing much simpler.
+    """
     # TODO(oulgen):
     # - Support multiple functions
     # - Support parsing of conditionals
     # - Support parsing for/while loops
     # - Support alternative syntax parsing similar to "tt.name"(%0, %1)
+    # - Support ops with multiple return value (e.g. %4:2 = "tt.reduce")
 
     if ttir.count("tt.func") != 1:
         log.debug("Multiple functions in TTIR")
@@ -105,6 +106,7 @@ def parse_ttir(ttir, kwargs):
         from lark import Lark, Transformer, v_args
     except ModuleNotFoundError:
         log.debug("Cannot parse TTIR as Lark is not installed")
+        return None
 
     ops: Dict[Intermediate, Op] = {}
     next_fake_intermediate = 0
@@ -175,7 +177,7 @@ def parse_ttir(ttir, kwargs):
     # It should be possible to move this into the grammar alltogether.
     def convert_name(token):
         s = token.value
-        if s[0] == '"' and s[-1] == '"':
+        if len(s) > 2 and s[0] == '"' and s[-1] == '"':
             return s[1:-1]
         return s
 
@@ -192,19 +194,24 @@ def parse_ttir(ttir, kwargs):
     return ops
 
 
-# Given a triton kernel and the arguments for this kernel, this function
-# retrieves the TTIR converted version of the kernel from Triton's API.
-# Parsing the TTIR, it creates a control flow graph, detects all sinks
-# from a predefined list of sinks. NOTE: What if triton exposed this MemWrite Trait
-# From each sink, it traverses the CFG backwards to identify all the input
-# pointers that are mutated
 def identify_mutated_tensors(kernel, kwargs):
+    """
+    Given a triton kernel and the arguments for this kernel, this function
+    retrieves the TTIR converted version of the kernel from Triton's API.
+    Parsing the TTIR, it creates a control flow graph, detects all sinks
+    from a predefined list of sinks. NOTE: What if triton exposed this MemWrite Trait
+    From each sink, it traverses the CFG backwards to identify all the input
+    pointers that are mutated
+    """
     from triton.compiler.code_generator import ast_to_ttir
     from triton.runtime.autotuner import Autotuner
     from triton.runtime.jit import JITFunction
 
     import torch
     from torch._subclasses.fake_tensor import FakeTensor
+
+    def bail_out():
+        return [key for key, value in kwargs.items() if isinstance(value, Tensor)]
 
     if isinstance(kernel, Autotuner):
         if len(kernel.configs) > 0:
@@ -215,12 +222,17 @@ def identify_mutated_tensors(kernel, kwargs):
 
     assert isinstance(kernel, JITFunction)
 
+    if len(kwargs) != len(kernel.arg_names):
+        # Incorrect number of arguments passed
+        return bail_out()
+
     # Drop the keys
     # Replace all SymExprs with a regular value for TTIR generation
     # Replace all FakeTensor with real tensors
     # These replacements are needed for triton's type, key and config functions
     args: List[Any] = []
-    for a in kwargs.values():
+    for name in kernel.arg_names:
+        a = kwargs[name]
         if isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool)):
             args.append(2)
         elif isinstance(a, FakeTensor):
@@ -258,20 +270,24 @@ def identify_mutated_tensors(kernel, kwargs):
                 traceback.TracebackException.from_exception(e).format()  # noqa: G001
             )
         )
-        return [key for key, value in kwargs.items() if isinstance(value, Tensor)]
+        return bail_out()
 
     # Name of mutation op to mutated parameter indices
+    # List from Triton Github include/triton/Dialect/Triton/IR/TritonOps.td
+    # All the OPs that have MemWrite trait.
+    # What if Triton exposed this?
     MUTATION_OPS = {"tt.store": [0], "tt.atomic_cas": [0], "tt.atomic_rmw": [0]}
     # Ops that we want to bail out on
     UNKNOWN_OPS = {"tt.elementwise_inline_asm"}
 
     stack: List[Union[Param, Intermediate]] = []
+    visited = set()
     for op in ops.values():
         if op.name in UNKNOWN_OPS:
             log.debug(
                 f"ttir analysis hit an op we do not know how to analyze: {op.name}"  # noqa: G004
             )
-            return [key for key, value in kwargs.items() if isinstance(value, Tensor)]
+            return bail_out()
 
         for idx in MUTATION_OPS.get(op.name, []):
             stack.append(op.args[idx])
@@ -279,13 +295,16 @@ def identify_mutated_tensors(kernel, kwargs):
     # The following is an iterative DFS algorithm
     mutated = [False] * len(kwargs)
     while len(stack):
-        arg = stack[-1]
-        stack.pop()
+        arg = stack.pop()
+        if arg in visited:
+            continue
+        else:
+            visited.add(arg)
 
         if isinstance(arg, Param):
             mutated[arg.idx] = True
         elif isinstance(arg, Intermediate) and not arg.fake():
-            stack = [*stack, *ops[arg].args]
+            stack.extend(ops[arg].args)
 
     return [
         key
