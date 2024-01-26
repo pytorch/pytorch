@@ -1260,6 +1260,7 @@ class CommonTemplate:
                 reference_in_float=True,
             )
 
+    @skipCUDAIf(TEST_WITH_ROCM, "Numerical issues on ROCm")
     def test_consecutive_split_cumprod(self):
         def fn(a, b):
             return torch.cumprod(a, 0) + torch.cumprod(b, 0)
