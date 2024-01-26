@@ -116,13 +116,15 @@ def parse_ttir(ttir, kwargs):
     # tt.store %14, %12, %5 {cache = 1 : i32, evict = 1 : i32} : tensor<4xf32>
     # %15 = "tt.atomic_rmw"(%14, %12, %5) <{atomic_rmw_op = 5 : i32, scope = 1 : i32, sem = 4 : i32}> : (tensor<4x!tt.ptr<f32, 1>>, tensor<4xf32>, tensor<4xi1>) -> tensor<4xf32>  # noqa: B950
     grammar = """
-        start: module_block
+        start: (module_block | loc_line)+
 
-        module_block: "module" "{" decl_block "}"
+        loc_line: "#loc" /.+/ NEWLINE
 
-        decl_block: /.+/ NEWLINE op+ "}"
+        module_block: "module" "{" decl_block "}" LOC
 
-        op: "tt.return"
+        decl_block: /.+/ NEWLINE op+ "}" LOC
+
+        op: "tt.return" LOC
           | assign_lhs "=" FN_NAME args rest  -> process_op
           | FN_NAME args rest                 -> process_op_no_ret
 
@@ -143,6 +145,8 @@ def parse_ttir(ttir, kwargs):
         CONSTANT: "%"? NAME+ ("<" DIGIT+ ">")?
 
         FN_NAME: "\\""? NAME "." NAME "\\""?
+
+        LOC: "loc(#loc" DIGIT* ")"
 
         %import common.LETTER
         %import common.DIGIT
@@ -201,7 +205,8 @@ def identify_mutated_tensors(kernel, kwargs):
     From each sink, it traverses the CFG backwards to identify all the input
     pointers that are mutated
     """
-    from triton.compiler.code_generator import ast_to_ttir
+    import triton
+    from triton.compiler.compiler import ASTSource
     from triton.runtime.autotuner import Autotuner
     from triton.runtime.jit import JITFunction
 
@@ -241,8 +246,6 @@ def identify_mutated_tensors(kernel, kwargs):
     tensor_param_locs = [i for i, arg in enumerate(args) if isinstance(arg, Tensor)]
     specialization = kernel._get_config(*args)
     constants = {i: arg for i, arg in enumerate(args) if not isinstance(arg, Tensor)}
-    debug = None
-    target = None
 
     # Build kernel signature -- doesn't include constexpr arguments.
     signature = {
@@ -251,10 +254,16 @@ def identify_mutated_tensors(kernel, kwargs):
         if i not in kernel.constexprs
     }
 
+    context = triton._C.libtriton.ir.context()
+    target = triton.runtime.driver.active.get_current_target()
+    backend = triton.compiler.compiler.make_backend(target)
+    options = backend.parse_options(dict())
+    triton._C.libtriton.ir.load_dialects(context)
+    backend.load_dialects(context)
+
     try:
-        ttir_module = ast_to_ttir(
-            kernel, signature, specialization, constants, debug, target
-        )
+        src = ASTSource(kernel, signature, constants, specialization)
+        ttir_module = src.make_ir(options, context)
         ops = parse_ttir(str(ttir_module), kwargs)
         if ops is None:
             raise Exception("Parsing TTIR failed")
