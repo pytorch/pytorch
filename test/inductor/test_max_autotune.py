@@ -310,7 +310,7 @@ class TestMaxAutotune(TestCase):
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": max_profiling_configs,
-                "cuda.cutlass_only_evt_capable_ops": evt_only,
+                "cuda.cutlass_prefer_evt_capable_ops": evt_only,
                 "cuda.version": "12.1",  # required to enable the Kernels we need
             }
         ):
@@ -333,6 +333,47 @@ class TestMaxAutotune(TestCase):
         #  The pointwise ops seem to be pre-fused into a single Pointwise
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
             mixed_precision=False, fp16=True, expected_fuse_count=1, mm=mm
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_simple_fusion_fp16_unaligned_aten_fallback(
+        self,
+    ):
+        def mm(a, b):
+            return (a @ b) * 3.0
+
+        #  For this, we have no Cutlass Kernel because of alignment constraints.
+        # We expect the ATen fallback to be used, but this will not register a fusion,
+        # therefore expected_fuse_count=0
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False,
+            fp16=True,
+            expected_fuse_count=0,
+            mm=mm,
+            m=1024,
+            n=160,
+            k=257,
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_simple_fusion_fp32(self):
+        def mm(a, b):
+            return (a @ b) * 3.0
+
+        #  The pointwise ops seem to be pre-fused into a single Pointwise
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False,
+            fp16=False,
+            expected_fuse_count=0,
+            mm=mm,
+            m=1024,
+            n=512,
+            k=72,
+            batch_size=6,
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -578,7 +619,7 @@ class TestMaxAutotune(TestCase):
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": 2,
-                "cuda.cutlass_only_evt_capable_ops": only_evt_capable,
+                "cuda.cutlass_prefer_evt_capable_ops": only_evt_capable,
             }
         ):
             Y = mm(a, a, bias)

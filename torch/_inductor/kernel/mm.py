@@ -4,6 +4,7 @@ from typing import Any, Dict, List
 import torch
 from torch._inductor.virtualized import V
 from .. import config as inductor_config
+from ..codegen.common import ChoiceCaller
 from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
 from ..lowering import register_lowering
 from ..select_algorithm import (
@@ -121,8 +122,7 @@ aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
 def tuned_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
 
-    # options to tune from
-    choices = [aten_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
+    choices: List[ChoiceCaller] = []
 
     if m * n != 0 and use_triton_template(layout):
         for config in mm_configs(m, n, k):
@@ -140,17 +140,21 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
     from torch._inductor.ir import FixedLayout, FlexibleLayout
 
-    if (
-        len(choices) == 1
-        and use_aten_gemm_kernels()
-        and isinstance(layout, FixedLayout)
-    ):
-        # If we are not autotuning, we can swap to a FlexibleLayout
-        # in order to get fusion optimizations to kick in, e.g. ConcatFusion
-        layout = FlexibleLayout(
-            device=layout.device, dtype=layout.dtype, size=layout.size
-        )
-        choices = [aten_mm.bind((mat1, mat2), layout)]
+    use_aten = use_aten_gemm_kernels()
+
+    if len(choices) == 0 and not use_aten:
+        log.warning("No choices for GEMM, using ATen backend as fallback")
+        use_aten = True
+
+    if use_aten:
+        choices.extend([aten_mm.bind((mat1, mat2), layout)])
+        if len(choices) == 1 and isinstance(layout, FixedLayout):
+            # If we are not autotuning, we can swap to a FlexibleLayout
+            # in order to get fusion optimizations to kick in, e.g. ConcatFusion
+            layout = FlexibleLayout(
+                device=layout.device, dtype=layout.dtype, size=layout.size
+            )
+            choices = [aten_mm.bind((mat1, mat2), layout)]
 
     return autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
 
@@ -179,7 +183,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 @register_lowering(aten.addmm, type_promotion_kind=None)
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
-
+    choices = []
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
     if m * n == 0 or not use_max_autotune():
         choices = (
@@ -196,35 +200,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             else []
         )
         return autotune_select_algorithm("addmm", choices, [inp, mat1, mat2], layout)
-
-    choices = (
-        [
-            aten_addmm.bind(
-                (inp_expanded, mat1, mat2),
-                layout,
-                ordered_kwargs_for_cpp_kernel,
-                alpha=alpha,
-                beta=beta,
-            )
-        ]
-        if use_aten_gemm_kernels()
-        else []
-    )
-
-    if (
-        use_aten_gemm_kernels()
-        and inp_expanded.get_stride()[0] == 0
-        and inp_expanded.get_device().type == "cuda"
-        and inductor_config.triton.autotune_cublasLt
-    ):
-        # unexpand inp to make sure fused addmm from cublasLt is used
-        choices.insert(
-            0,
-            aten_bias_addmm.bind(
-                (inp_expanded, mat1, mat2), layout, alpha=alpha, beta=beta
-            ),
-        )
-
     if use_triton_template(layout):
         for config in mm_configs(m, n, k):
             mm_template.maybe_append_choice(
@@ -246,6 +221,37 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             fuseable=True,
             non_fuseable=True,
         )
+
+    use_aten = use_aten_gemm_kernels()
+    if len(choices) == 0 and not use_aten:
+        log.warning("No choices for GEMM, using ATen backend as fallback")
+        use_aten = True
+
+    if use_aten:
+        choices.extend(
+            [
+                aten_addmm.bind(
+                    (inp_expanded, mat1, mat2),
+                    layout,
+                    ordered_kwargs_for_cpp_kernel,
+                    alpha=alpha,
+                    beta=beta,
+                )
+            ]
+        )
+
+        if (
+            inp_expanded.get_stride()[0] == 0
+            and inp_expanded.get_device().type == "cuda"
+            and inductor_config.triton.autotune_cublasLt
+        ):
+            # unexpand inp to make sure fused addmm from cublasLt is used
+            choices.insert(
+                0,
+                aten_bias_addmm.bind(
+                    (inp_expanded, mat1, mat2), layout, alpha=alpha, beta=beta
+                ),
+            )
 
     return autotune_select_algorithm(
         "addmm", choices, [inp_expanded, mat1, mat2], layout
