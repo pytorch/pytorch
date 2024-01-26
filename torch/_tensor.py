@@ -397,6 +397,8 @@ class Tensor(torch._C.TensorBase):
             v3_dtypes = [
                 torch.float8_e5m2,
                 torch.float8_e4m3fn,
+                torch.float8_e5m2fnuz,
+                torch.float8_e4m3fnuz,
                 torch.bits8,
                 torch.bits16,
                 torch.bits1x8,

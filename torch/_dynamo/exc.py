@@ -7,20 +7,16 @@ from typing import cast, NoReturn, Optional
 import torch._guards
 
 from . import config
-from .config import is_fbcode
 
 from .utils import counters
 
-if is_fbcode():
-    from torch.fb.exportdb.logging import exportdb_error_message
-else:
 
-    def exportdb_error_message(case_name):
-        return (
-            "For more information about this error, see: "
-            + "https://pytorch.org/docs/main/generated/exportdb/index.html#"
-            + case_name.replace("_", "-")
-        )
+def exportdb_error_message(case_name):
+    return (
+        "For more information about this error, see: "
+        + "https://pytorch.org/docs/main/generated/exportdb/index.html#"
+        + case_name.replace("_", "-")
+    )
 
 
 import logging
