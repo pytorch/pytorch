@@ -6,6 +6,7 @@ import weakref
 import functools
 import inspect
 import re
+import contextlib
 import sys
 
 __all__ = [
@@ -171,10 +172,27 @@ class Library:
         self._op_impls.add(key)
 
     def _destroy(self):
+        if self.m is not None:
+            self.m.reset()
         self.m = None
         for handle in self._registration_handles:
             handle.destroy()
         self._registration_handles.clear()
+        for name in self._op_defs:
+            # Delete the cached torch.ops.ns.foo if it was registered.
+            # Otherwise, accessing it leads to a segfault.
+            # It's possible that we only registered an overload in this Library
+            # and another library owns an alive overload.
+            # That's OK - the next time torch.ops.ns.foo gets called, it'll be
+            # recomputed to point at the right collection of overloads.
+            ns, name_with_overload = name.split("::")
+            name = name_with_overload.split(".")[0]
+            if not hasattr(torch.ops, ns):
+                continue
+            namespace = getattr(torch.ops, ns)
+            if not hasattr(namespace, name):
+                continue
+            delattr(namespace, name)
 
 
 def _del_library(captured_impls, op_impls, captured_defs, op_defs, registration_handles):
@@ -182,6 +200,15 @@ def _del_library(captured_impls, op_impls, captured_defs, op_defs, registration_
     captured_defs -= op_defs
     for handle in registration_handles:
         handle.destroy()
+
+
+@contextlib.contextmanager
+def _scoped_library(*args, **kwargs):
+    try:
+        lib = Library(*args, **kwargs)
+        yield lib
+    finally:
+        lib._destroy()
 
 
 _keep_alive = []
