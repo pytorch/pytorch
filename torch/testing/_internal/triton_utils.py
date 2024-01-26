@@ -3,6 +3,18 @@ import unittest
 
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
+
+def has_lark():
+    try:
+        import lark  # noqa: F401
+
+        return True
+    except ModuleNotFoundError:
+        return False
+
+
+requires_lark = functools.partial(unittest.skipIf, not has_lark(), "requires lark")
+
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 if HAS_CUDA:
@@ -285,3 +297,38 @@ if HAS_CUDA:
         else:
             output = x * y
         tl.store(out_ptr + offsets, output, mask=mask)
+
+    @triton.jit
+    def atomic_add_kernel(
+        in_ptr0,
+        in_ptr1,
+        out_ptr,
+        n_elements,
+        BLOCK_SIZE: "tl.constexpr",
+    ):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(in_ptr0 + offsets, mask=mask)
+        y = tl.load(in_ptr1 + offsets, mask=mask)
+        output = x + y
+        tl.atomic_add(out_ptr + offsets, output, mask=mask)
+
+    @triton.jit
+    def add_4_times_kernel(
+        in_ptr0,
+        in_ptr1,
+        out_ptr,
+        n_elements,
+        BLOCK_SIZE: "tl.constexpr",
+    ):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(in_ptr0 + offsets, mask=mask)
+        y = tl.load(in_ptr1 + offsets, mask=mask)
+        for i in range(4):
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)

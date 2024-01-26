@@ -893,6 +893,7 @@ def forward(self, x_1, output_1):
 
 class MutationTests(torch._dynamo.test_case.TestCase):
     @requires_cuda()
+    @requires_lark()
     def test_find_mutations(self):
         from torch._higher_order_ops.triton_kernel_wrap import identify_mutated_tensors
 
@@ -941,8 +942,7 @@ class MutationTests(torch._dynamo.test_case.TestCase):
                     "BLOCK_SIZE": 4,
                     "ACTIVATION": "add_kernel",
                 },
-                # TODO(oulgen): since the indirection uses @triton.jit
-                # we cannot optimize this right now. Fix it.
+                # TODO(oulgen): Multiple functions is not implemented yet
                 ["in_ptr0", "out_ptr"],
             ],
             [
@@ -950,7 +950,7 @@ class MutationTests(torch._dynamo.test_case.TestCase):
                 {"ptr": t, "n_elements": 4, "BLOCK_SIZE": 4},
                 ["ptr"],
             ],
-            # cant optimize since the kernel contains a tl.inline_asm_elementwise
+            # Cant optimize since the kernel contains a tl.inline_asm_elementwise
             [
                 inline_asm_kernel,
                 {"X": t, "Y": t, "Z": t, "n": 4, "BLOCK": 4},
@@ -976,8 +976,30 @@ class MutationTests(torch._dynamo.test_case.TestCase):
                     "n_elements": 4,
                     "BLOCK_SIZE": 4,
                 },
-                # TODO(oulgen): Improve this by finding a way to monkey
-                # patch the imported tl functions
+                ["out_ptr"],
+            ],
+            [
+                atomic_add_kernel,
+                {
+                    "in_ptr0": t,
+                    "in_ptr1": t,
+                    "out_ptr": t,
+                    "n_elements": 4,
+                    "BLOCK_SIZE": 4,
+                },
+                # TODO(oulgen): Fix parsing
+                ["in_ptr0", "in_ptr1", "out_ptr"],
+            ],
+            [
+                add_4_times_kernel,
+                {
+                    "in_ptr0": t,
+                    "in_ptr1": t,
+                    "out_ptr": t,
+                    "n_elements": 4,
+                    "BLOCK_SIZE": 4,
+                },
+                # TODO(oulgen): For loops not implemented yet
                 ["in_ptr0", "in_ptr1", "out_ptr"],
             ],
             [
@@ -989,10 +1011,11 @@ class MutationTests(torch._dynamo.test_case.TestCase):
                     "n_elements": 4,
                     "BLOCK_SIZE": 4,
                 },
-                # Dynamic control flow, bail out
+                # TODO(oulgen): Dynamic control flow is not implemented yet
                 ["in_ptr0", "in_ptr1", "out_ptr"],
             ],
         ]
+
         for kernel, inputs, outputs in tests:
             self.assertListEqual(
                 identify_mutated_tensors(kernel, inputs),
