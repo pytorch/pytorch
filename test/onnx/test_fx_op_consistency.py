@@ -1905,6 +1905,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "nn.functional.cosine_embedding_loss": [1e-2, 1e-3],
         "nn.functional.hinge_embedding_loss": [4e-1, 3e-3],
         "nn.functional.kl_div": [2e-3, 2e-4],
+        "nn.functional.interpolate": [1e-3, 2e-3],
         "nn.functional.poisson_nll_loss": [3e-2, 1e-3],
         "nn.functional.multilabel_soft_margin_loss": [1e-3, 5e-3],
         "native_batch_norm": [3e-2, 1e-3],
