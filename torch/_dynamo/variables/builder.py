@@ -1815,7 +1815,11 @@ def wrap_to_fake_tensor_and_record(
             "stride": fake_e.stride(),
         }
 
-        if is_tensor and not (static_shapes and source.is_nn_module()):
+        if (
+            is_tensor
+            and not (static_shapes and source.is_nn_module())
+            and not is_constant_source(source)
+        ):
             tx.output.tracked_fakes.append(
                 TrackedFake(fake_e, source, symbolic_context)
             )
