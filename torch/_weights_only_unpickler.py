@@ -20,8 +20,11 @@ import functools as _functools
 import io
 from collections import OrderedDict
 from pickle import (
+    ADDITEMS,
     APPEND,
     APPENDS,
+    BINBYTES,
+    BINBYTES8,
     BINFLOAT,
     BINGET,
     BININT,
@@ -30,48 +33,42 @@ from pickle import (
     BINPERSID,
     BINPUT,
     BINUNICODE,
+    BINUNICODE8,
     BUILD,
+    BYTEARRAY8,
     bytes_types,
     decode_long,
     EMPTY_DICT,
     EMPTY_LIST,
     EMPTY_SET,
     EMPTY_TUPLE,
+    FRAME,
+    FROZENSET,
     GLOBAL,
     LONG1,
     LONG_BINGET,
     LONG_BINPUT,
     MARK,
+    MEMOIZE,
     NEWFALSE,
     NEWOBJ,
+    NEWOBJ_EX,
     NEWTRUE,
     NONE,
     PROTO,
     REDUCE,
     SETITEM,
     SETITEMS,
+    SHORT_BINBYTES,
     SHORT_BINSTRING,
+    SHORT_BINUNICODE,
+    STACK_GLOBAL,
     STOP,
     TUPLE,
     TUPLE1,
     TUPLE2,
     TUPLE3,
     UnpicklingError,
-    # Protocol 3
-    BINBYTES,
-    SHORT_BINBYTES,
-    # Protocol 4
-    SHORT_BINUNICODE,
-    BINUNICODE8,
-    BINBYTES8,
-    ADDITEMS,
-    FROZENSET,
-    NEWOBJ_EX,
-    STACK_GLOBAL,
-    MEMOIZE,
-    FRAME,
-    # Protocol 5 (no out-of-band buffer support)
-    BYTEARRAY8,
 )
 from struct import unpack
 from sys import maxsize
@@ -139,59 +136,54 @@ def _get_allowed_globals():
 
 
 class _Unframer:
-
-    def __init__(self, file_read, file_readline, file_tell=None):
+    def __init__(self, file_read, file_readline) -> None:
         self.file_read = file_read
         self.file_readline = file_readline
         self.current_frame = None
 
-    def readinto(self, buf):
-        if self.current_frame:
-            n = self.current_frame.readinto(buf)
-            if n == 0 and len(buf) != 0:
-                self.current_frame = None
-                n = len(buf)
-                buf[:] = self.file_read(n)
-                return n
-            if n < len(buf):
-                raise UnpicklingError(
-                    "pickle exhausted before end of frame")
-            return n
-        else:
+    def readinto(self, buf) -> int:
+        def readinto_noframe() -> int:
             n = len(buf)
             buf[:] = self.file_read(n)
             return n
 
+        if not self.current_frame:
+            return readinto_noframe()
+        n = self.current_frame.readinto(buf)
+        if n == 0 and len(buf) != 0:
+            self.current_frame = None
+            return readinto_noframe()
+        if n < len(buf):
+            raise UnpicklingError("pickle exhausted before end of frame")
+        return n
+
     def read(self, n):
-        if self.current_frame:
-            data = self.current_frame.read(n)
-            if not data and n != 0:
-                self.current_frame = None
-                return self.file_read(n)
-            if len(data) < n:
-                raise UnpicklingError(
-                    "pickle exhausted before end of frame")
-            return data
-        else:
+        if not self.current_frame:
             return self.file_read(n)
+        data = self.current_frame.read(n)
+        if not data and n != 0:
+            self.current_frame = None
+            return self.file_read(n)
+        if len(data) < n:
+            raise UnpicklingError("pickle exhausted before end of frame")
+        return data
 
     def readline(self):
-        if self.current_frame:
-            data = self.current_frame.readline()
-            if not data:
-                self.current_frame = None
-                return self.file_readline()
-            if data[-1] != b'\n'[0]:
-                raise UnpicklingError(
-                    "pickle exhausted before end of frame")
-            return data
-        else:
+        if not self.current_frame:
             return self.file_readline()
+        data = self.current_frame.readline()
+        if not data:
+            self.current_frame = None
+            return self.file_readline()
+        if data[-1] != b"\n"[0]:
+            raise UnpicklingError("pickle exhausted before end of frame")
+        return data
 
     def load_frame(self, frame_size):
-        if self.current_frame and self.current_frame.read() != b'':
+        if self.current_frame and self.current_frame.read() != b"":
             raise UnpicklingError(
-                "beginning of a new frame before end of current frame")
+                "beginning of a new frame before end of current frame"
+            )
         self.current_frame = io.BytesIO(self.file_read(frame_size))
 
 
@@ -368,10 +360,12 @@ class Unpickler:
                 return rc
             # Protocol 3
             elif key[0] == BINBYTES[0]:
-                n, = unpack('<I', read(4))
+                (n,) = unpack("<I", read(4))
                 if n > maxsize:
-                    raise UnpicklingError("BINBYTES exceeds system's maximum size "
-                                          "of %d bytes" % maxsize)
+                    raise UnpicklingError(
+                        "BINBYTES exceeds system's maximum size "
+                        "of %d bytes" % maxsize
+                    )
                 self.append(read(n))
             elif key[0] == SHORT_BINBYTES[0]:
                 n = read(1)[0]
@@ -379,18 +373,22 @@ class Unpickler:
             # Protocol 4
             elif key[0] == SHORT_BINUNICODE[0]:
                 n = read(1)[0]
-                self.append(str(read(n), 'utf-8', 'surrogatepass'))
+                self.append(str(read(n), "utf-8", "surrogatepass"))
             elif key[0] == BINUNICODE8[0]:
-                n, = unpack('<Q', read(8))
+                (n,) = unpack("<Q", read(8))
                 if n > maxsize:
-                    raise UnpicklingError("BINUNICODE8 exceeds system's maximum size "
-                                          "of %d bytes" % maxsize)
-                self.append(str(read(n), 'utf-8', 'surrogatepass'))
+                    raise UnpicklingError(
+                        "BINUNICODE8 exceeds system's maximum size "
+                        "of %d bytes" % maxsize
+                    )
+                self.append(str(read(n), "utf-8", "surrogatepass"))
             elif key[0] == BINBYTES8[0]:
-                n, = unpack('<Q', read(8))
+                (n,) = unpack("<Q", read(8))
                 if n > maxsize:
-                    raise UnpicklingError("BINBYTES8 exceeds system's maximum size "
-                                          "of %d bytes" % maxsize)
+                    raise UnpicklingError(
+                        "BINBYTES8 exceeds system's maximum size "
+                        "of %d bytes" % maxsize
+                    )
                 self.append(read(n))
             elif key[0] == EMPTY_SET[0]:
                 self.append(set())
@@ -426,16 +424,18 @@ class Unpickler:
                 memo = self.memo
                 memo[len(memo)] = self.stack[-1]
             elif key[0] == FRAME[0]:
-                frame_size, = unpack('<Q', read(8))
+                (frame_size,) = unpack("<Q", read(8))
                 if frame_size > maxsize:
                     raise ValueError("frame size > sys.maxsize: %d" % frame_size)
                 self._unframer.load_frame(frame_size)
             # Protocol 5 (no out-of-band buffer support)
             elif key[0] == BYTEARRAY8[0]:
-                n, = unpack('<Q', read(8))
+                (n,) = unpack("<Q", read(8))
                 if n > maxsize:
-                    raise UnpicklingError("BYTEARRAY8 exceeds system's maximum size "
-                                          "of %d bytes" % maxsize)
+                    raise UnpicklingError(
+                        "BYTEARRAY8 exceeds system's maximum size "
+                        "of %d bytes" % maxsize
+                    )
                 b = bytearray(n)
                 readinto(b)
                 self.append(b)
