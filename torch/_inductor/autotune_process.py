@@ -660,9 +660,9 @@ class CUDABenchmarkRequest(BenchmarkRequest):
     def precompile(self):
         # Prepopulate CUDACodeCache
         # may happen in separate Threadpool
-        log.warning("Precompiling %s", str(self))
+        log.debug("Precompiling %s", str(self))
         CUDACodeCache.compile(self.source_code, "so")
-        log.warning("Done precompiling %s", str(self))
+        log.debug("Done precompiling %s", str(self))
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
