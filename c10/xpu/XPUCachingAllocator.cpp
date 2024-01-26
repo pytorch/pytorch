@@ -458,7 +458,7 @@ class XPUAllocator : public Allocator {
     TORCH_INTERNAL_ASSERT(
         0 <= device && static_cast<size_t>(device) < device_allocator.size(),
         "Allocator not initialized for device ",
-        device,
+        static_cast<int16_t>(device),
         ": did you call init?");
     Block* block = device_allocator[device]->malloc(device, size, queue);
     add_allocated_block(block);
