@@ -432,7 +432,6 @@ struct Symbolizer {
   }
 };
 
-
 #ifndef FBCODE_CAFFE2
 std::vector<Frame> symbolize(const std::vector<void*>& frames) {
   auto guard = Symbolizer::guard();
