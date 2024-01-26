@@ -15,7 +15,7 @@ __all__ = ['BatchNorm1d', 'LazyBatchNorm1d', 'BatchNorm2d', 'LazyBatchNorm2d', '
 
 
 class _NormBase(Module):
-    """Common base of _InstanceNorm and _BatchNorm"""
+    """Common base of _InstanceNorm and _BatchNorm."""
 
     _version = 2
     __constants__ = ["track_running_stats", "momentum", "eps", "num_features", "affine"]
@@ -235,7 +235,9 @@ class _LazyNormBase(LazyModuleMixin, _NormBase):
 
 
 class BatchNorm1d(_BatchNorm):
-    r"""Applies Batch Normalization over a 2D or 3D input as described in the paper
+    r"""Applies Batch Normalization over a 2D or 3D input.
+
+    Method described in the paper
     `Batch Normalization: Accelerating Deep Network Training by Reducing
     Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
@@ -311,8 +313,9 @@ class BatchNorm1d(_BatchNorm):
 
 
 class LazyBatchNorm1d(_LazyNormBase, _BatchNorm):
-    r"""A :class:`torch.nn.BatchNorm1d` module with lazy initialization of
-    the ``num_features`` argument of the :class:`BatchNorm1d` that is inferred
+    r"""A :class:`torch.nn.BatchNorm1d` module with lazy initialization.
+
+    Lazy initialization based on the ``num_features`` argument of the :class:`BatchNorm1d` that is inferred
     from the ``input.size(1)``.
     The attributes that will be lazily initialized are `weight`, `bias`,
     `running_mean` and `running_var`.
@@ -346,8 +349,10 @@ class LazyBatchNorm1d(_LazyNormBase, _BatchNorm):
 
 
 class BatchNorm2d(_BatchNorm):
-    r"""Applies Batch Normalization over a 4D input (a mini-batch of 2D inputs
-    with additional channel dimension) as described in the paper
+    r"""Applies Batch Normalization over a 4D input.
+
+    4D is a mini-batch of 2D inputs
+    with additional channel dimension. Method described in the paper
     `Batch Normalization: Accelerating Deep Network Training by Reducing
     Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
@@ -421,8 +426,9 @@ class BatchNorm2d(_BatchNorm):
 
 
 class LazyBatchNorm2d(_LazyNormBase, _BatchNorm):
-    r"""A :class:`torch.nn.BatchNorm2d` module with lazy initialization of
-    the ``num_features`` argument of the :class:`BatchNorm2d` that is inferred
+    r"""A :class:`torch.nn.BatchNorm2d` module with lazy initialization.
+
+    Lazy initialization is done for the ``num_features`` argument of the :class:`BatchNorm2d` that is inferred
     from the ``input.size(1)``.
     The attributes that will be lazily initialized are `weight`, `bias`,
     `running_mean` and `running_var`.
@@ -454,8 +460,9 @@ class LazyBatchNorm2d(_LazyNormBase, _BatchNorm):
 
 
 class BatchNorm3d(_BatchNorm):
-    r"""Applies Batch Normalization over a 5D input (a mini-batch of 3D inputs
-    with additional channel dimension) as described in the paper
+    r"""Applies Batch Normalization over a 5D input.
+
+    5D is a mini-batch of 3D inputs with additional channel dimension as described in the paper
     `Batch Normalization: Accelerating Deep Network Training by Reducing
     Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
@@ -530,8 +537,9 @@ class BatchNorm3d(_BatchNorm):
 
 
 class LazyBatchNorm3d(_LazyNormBase, _BatchNorm):
-    r"""A :class:`torch.nn.BatchNorm3d` module with lazy initialization of
-    the ``num_features`` argument of the :class:`BatchNorm3d` that is inferred
+    r"""A :class:`torch.nn.BatchNorm3d` module with lazy initialization.
+
+    Lazy initialization is done for the ``num_features`` argument of the :class:`BatchNorm3d` that is inferred
     from the ``input.size(1)``.
     The attributes that will be lazily initialized are `weight`, `bias`,
     `running_mean` and `running_var`.
@@ -563,8 +571,9 @@ class LazyBatchNorm3d(_LazyNormBase, _BatchNorm):
 
 
 class SyncBatchNorm(_BatchNorm):
-    r"""Applies Batch Normalization over a N-Dimensional input (a mini-batch of [N-2]D inputs
-    with additional channel dimension) as described in the paper
+    r"""Applies Batch Normalization over a N-Dimensional input.
+
+    The N-D input is a mini-batch of [N-2]D inputs with additional channel dimension) as described in the paper
     `Batch Normalization: Accelerating Deep Network Training by Reducing
     Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
@@ -778,8 +787,7 @@ class SyncBatchNorm(_BatchNorm):
 
     @classmethod
     def convert_sync_batchnorm(cls, module, process_group=None):
-        r"""Helper function to convert all :attr:`BatchNorm*D` layers in the model to
-        :class:`torch.nn.SyncBatchNorm` layers.
+        r"""Converts all :attr:`BatchNorm*D` layers in the model to :class:`torch.nn.SyncBatchNorm` layers.
 
         Args:
             module (nn.Module): module containing one or more :attr:`BatchNorm*D` layers

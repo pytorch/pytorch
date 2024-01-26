@@ -487,7 +487,7 @@ def pointwise_strategy(
 
         pointwise_strategy.strategies.append(
             PlacementStrategy(
-                output_spec=DTensorSpec(
+                output_specs=DTensorSpec(
                     mesh=mesh,
                     placements=tuple(out_placements),
                 ),
@@ -604,7 +604,7 @@ def foreach_list_strategy(
                 )
             strategies.append(
                 PlacementStrategy(
-                    output_spec=spec_to_follow, redistribute_cost=redistribute_costs
+                    output_specs=spec_to_follow, redistribute_cost=redistribute_costs
                 )
             )
 

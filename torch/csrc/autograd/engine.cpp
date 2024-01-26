@@ -39,11 +39,9 @@
 #include <memory>
 #include <mutex>
 #include <queue>
-#include <set>
 #include <sstream>
 #include <string>
 #include <thread>
-#include <typeinfo>
 #include <unordered_set>
 #include <utility>
 
@@ -82,7 +80,7 @@ std::atomic<Engine::compiled_autograd_fn> the_compiled_autograd = nullptr;
   reinterpret_cast<Engine::compiled_autograd_fn>(1)
 std::atomic<int32_t> num_threads_in_backwards;
 struct CompiledAutogradThreadingDebugCheck {
-  CompiledAutogradThreadingDebugCheck() : incremented(true) {
+  CompiledAutogradThreadingDebugCheck() {
     num_threads_in_backwards++;
   }
   ~CompiledAutogradThreadingDebugCheck() {
@@ -95,7 +93,7 @@ struct CompiledAutogradThreadingDebugCheck {
   }
 
  private:
-  bool incremented;
+  bool incremented{true};
 };
 
 } // namespace
@@ -1120,7 +1118,7 @@ inline static uint64_t compute_min_topological_nr(const edge_list& outputs) {
   }
   auto min_topo_nr = std::numeric_limits<uint64_t>::max();
   for (auto& output_edge : outputs) {
-    auto topo_nr = output_edge.function.get()->topological_nr();
+    auto topo_nr = output_edge.function->topological_nr();
     min_topo_nr = (min_topo_nr < topo_nr) ? min_topo_nr : topo_nr;
   }
   return min_topo_nr;

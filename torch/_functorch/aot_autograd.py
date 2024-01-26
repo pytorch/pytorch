@@ -508,6 +508,7 @@ def create_aot_dispatcher_function(
                     flat_fn,
                     keep_input_mutations=aot_config.keep_inference_input_mutations,
                     is_train=needs_autograd,
+                    pre_dispatch=aot_config.pre_dispatch,
                 )(*fake_flat_args)
 
                 req_subclass_dispatch = requires_subclass_dispatch(fake_flat_args, fw_metadata)
@@ -526,6 +527,7 @@ def create_aot_dispatcher_function(
                             flat_fn,
                             keep_input_mutations=aot_config.keep_inference_input_mutations and not needs_autograd,
                             is_train=needs_autograd,
+                            pre_dispatch=aot_config.pre_dispatch,
                         )(*fake_flat_args)
                     else:
                         fw_metadata = ViewAndMutationMeta(
@@ -907,6 +909,7 @@ def aot_module_simplified(
 
     return forward
 
+
 def aot_export_module(
     mod: nn.Module,
     args,
@@ -918,6 +921,7 @@ def aot_export_module(
     # If trace_joint is True, we expect your module to return a scalar loss.
     # Your module can return multiple outputs, so you must specify which output the loss is.
     output_loss_index: Optional[int] = None,
+    pre_dispatch: bool = False,
 ) -> Tuple[torch.fx.GraphModule, GraphSignature]:
     """
     This function takes in a module, and returns:
@@ -949,6 +953,8 @@ def aot_export_module(
     (5) If an input is mutated, it is not allowed to alias any other inputs.
     (6) Parameters must not be duplicated.
     """
+    if pre_dispatch and trace_joint:
+        raise RuntimeError("pre_dispatch is not supported when trace_joint is True.")
     named_parameters = dict(mod.named_parameters(remove_duplicate=False))
     named_buffers = dict(mod.named_buffers(remove_duplicate=False))
     params_and_buffers = {
@@ -959,7 +965,7 @@ def aot_export_module(
     params_and_buffers_flat = tuple(params_and_buffers_flat)
     params_len = len(params_and_buffers_flat)
 
-    functional_call = create_functional_call(mod, params_spec, params_len)
+    functional_call = create_functional_call(mod, params_spec, params_len, store_orig_mod=True)
 
     num_fw_outs = None
 
@@ -1026,6 +1032,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             decompositions=decompositions,
             num_params_buffers=params_len,
             no_tangents=True,
+            pre_dispatch=pre_dispatch,
         )
     if trace_joint:
         def flattened_joint(*args):
@@ -1142,8 +1149,8 @@ def aot_export_joint_simple(
 
     if config.debug_assert:
         # Smoke test that after partitioning, we can run the forward without any calling convention changes.
-        fw_module, bw_module = aot_config.default_partition(
-            fx_g, args, num_fwd_outputs=len(fw_metadata.output_infos)
+        fw_module, bw_module = aot_config.default_partition(  # noqa: F821
+            fx_g, args, num_fwd_outputs=len(fw_metadata.output_infos)  # noqa: F821
         )
         # Attempt to run the fw_module with the original user inputs
         fake_mode = detect_fake_mode(args)
@@ -1171,6 +1178,7 @@ def _aot_export_function(
     # (requiring it to be a graph input).
     # We don't know this info at trace time though, so we need to make it an explicit config.
     no_tangents: bool = False,
+    pre_dispatch: bool = False,
 ) -> Tuple[torch.fx.GraphModule, ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec]:
     dynamic_shapes = False
     for x in args:
@@ -1200,6 +1208,7 @@ def _aot_export_function(
         aot_autograd_arg_pos_to_source=None,
         is_export=True,
         no_tangents=no_tangents,
+        pre_dispatch=pre_dispatch,
     )
 
     fx_g, meta = create_aot_dispatcher_function(

@@ -108,20 +108,13 @@ TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output_) {
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      id<MTLBuffer> outBuf = getMTLBufferStorage(outputTensor);
-      id<MTLBuffer> inputBuf = getMTLBufferStorage(inputTensor);
 
       getMPSProfiler().beginProfileKernel(cplState, "erf_inv", {inputTensor});
 
       [computeEncoder setComputePipelineState:cplState];
-      [computeEncoder setBuffer:outBuf offset:outputTensor.storage_offset() * outputTensor.element_size() atIndex:0];
-      [computeEncoder setBuffer:inputBuf offset:inputTensor.storage_offset() * inputTensor.element_size() atIndex:1];
-
-      MTLSize gridSize = MTLSizeMake(length, 1, 1);
-      uint32_t maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
-      NSUInteger threadsPerGroupSize = std::min(maxThreadsPerGroup, length);
-      MTLSize threadGroupSize = MTLSizeMake(threadsPerGroupSize, 1, 1);
-      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
+      mtl_setBuffer(computeEncoder, outputTensor, 0);
+      mtl_setBuffer(computeEncoder, inputTensor, 1);
+      mtl_dispatch1DJob(computeEncoder, cplState, length);
 
       getMPSProfiler().endProfileKernel(cplState);
     });

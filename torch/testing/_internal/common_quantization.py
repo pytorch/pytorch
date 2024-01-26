@@ -12,11 +12,28 @@ from torch.ao.nn.intrinsic import _FusedModule
 import torch.distributed as dist
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM
 
+from torch._export import (
+    capture_pre_autograd_graph,
+    dynamic_dim,
+)
 from torch.ao.quantization import (
     QuantType,
     default_dynamic_qat_qconfig,
     default_embedding_qat_qconfig,
     default_symmetric_qnnpack_qat_qconfig,
+)
+from torch.ao.quantization.quantize_pt2e import (
+    _convert_to_reference_decomposed_fx,
+    convert_pt2e,
+    prepare_pt2e,
+    prepare_qat_pt2e,
+)
+from torch.ao.quantization.backend_config import (
+    get_executorch_backend_config,
+)
+from torch.ao.quantization.quantizer.xnnpack_quantizer import (
+    XNNPACKQuantizer,
+    get_symmetric_quantization_config,
 )
 from torch.ao.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
@@ -206,7 +223,7 @@ def run_ddp(rank, world_size, prepared):
     prepared.to(rank)
     model_with_ddp = prepared
     optimizer = torch.optim.SGD(model_with_ddp.parameters(), lr=0.0001)
-    train_one_epoch(model_with_ddp, criterion, optimizer, dataset, rank, 1)
+    train_one_epoch(model_with_ddp, criterion, optimizer, dataset, rank, 1)  # noqa: F821
     ddp_cleanup()
 
 
@@ -1118,6 +1135,115 @@ class QuantizationLiteTestCase(QuantizationTestCase):
                         continue
                 break
 
+
+class PT2EQuantizationTestCase(QuantizationTestCase):
+    """
+    Base QuantizationTestCase for PT2 with some helper methods.
+    """
+    _MAP_TO_FX_TRACED_OPS = {
+        torch.ops.quantized_decomposed.quantize_per_tensor: torch.ops.quantized_decomposed.quantize_per_tensor.default,
+        torch.ops.quantized_decomposed.dequantize_per_tensor: torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+        torch.ops.quantized_decomposed.quantize_per_channel: torch.ops.quantized_decomposed.quantize_per_channel.default,
+        torch.ops.quantized_decomposed.dequantize_per_channel: torch.ops.quantized_decomposed.dequantize_per_channel.default,
+        torch.ops.quantized_decomposed.quantize_per_tensor.tensor: torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
+        torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+    }
+
+    def _test_quantizer(
+        self,
+        model,
+        example_inputs,
+        quantizer,
+        expected_node_occurrence,
+        expected_node_list=None,
+        check_against_fx_quant=False,
+        fx_qconfig_mapping=None,
+        export_with_dynamic_shape=False,
+        is_qat=False,
+    ):
+        # resetting dynamo cache
+        torch._dynamo.reset()
+        m_eager = model.eval()
+
+        # program capture
+        m = copy.deepcopy(m_eager)
+        m = capture_pre_autograd_graph(
+            m,
+            example_inputs,
+            constraints=[dynamic_dim(example_inputs[0], 0)] if export_with_dynamic_shape else [],
+        )
+
+        if is_qat:
+            m = prepare_qat_pt2e(m, quantizer)
+        else:
+            m = prepare_pt2e(m, quantizer)
+        # Calibrate
+        m(*example_inputs)
+        m = convert_pt2e(m, fold_quantize=True)
+
+        pt2_quant_output = m(*example_inputs)
+        ns = NodeSpec
+        node_occurrence = {
+            ns.call_function(k): v for k, v in expected_node_occurrence.items()
+        }
+        if expected_node_list is None:
+            expected_node_list = []
+        node_list = [ns.call_function(n) for n in expected_node_list]
+        self.checkGraphModuleNodes(
+            m, expected_node_occurrence=node_occurrence, expected_node_list=node_list
+        )
+        if check_against_fx_quant:
+            qconfig_mapping = fx_qconfig_mapping
+            backend_config = get_executorch_backend_config()
+            m_copy = copy.deepcopy(m_eager)
+            m_fx = prepare_fx(
+                m_copy, qconfig_mapping, example_inputs, backend_config=backend_config
+            )
+            m_fx(*example_inputs)
+            m_fx = _convert_to_reference_decomposed_fx(
+                m_fx, backend_config=backend_config
+            )
+            m_fx = capture_pre_autograd_graph(
+                m_fx,
+                example_inputs,
+                constraints=[dynamic_dim(example_inputs[0], 0)] if export_with_dynamic_shape else [],
+            )
+            node_occurrence = {}
+            for k, v in PT2EQuantizationTestCase._MAP_TO_FX_TRACED_OPS.items():
+                if k in expected_node_occurrence:
+                    node_occurrence[ns.call_function(v)] = expected_node_occurrence[k]
+            self.checkGraphModuleNodes(m_fx, expected_node_occurrence=node_occurrence)
+            fx_quant_output = m_fx(*example_inputs)
+            self.assertEqual(fx_quant_output, pt2_quant_output)
+
+    def _quantize(self, m, quantizer, example_inputs):
+        # resetting dynamo cache
+        torch._dynamo.reset()
+
+        m = capture_pre_autograd_graph(
+            m,
+            example_inputs,
+        )
+        m = prepare_pt2e(m, quantizer)
+        m(*example_inputs)
+        m = convert_pt2e(m, fold_quantize=True)
+        return m
+
+    def _get_pt2e_quantized_linear(self, is_per_channel=False) -> torch.fx.GraphModule:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=is_per_channel)
+        quantizer.set_global(operator_config)
+        example_inputs = (torch.randn(2, 2),)
+        m = M().eval()
+        return self._quantize(m, quantizer, example_inputs)
 
 # Below are a series of toy models to use in testing quantization
 
@@ -2678,3 +2804,13 @@ class TestHelperModules:
 
         def example_inputs(self):
             return (torch.randn(2, 4, 10, 10),)
+
+    class LinearReluModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.fc = torch.nn.Linear(5, 5).to(dtype=torch.float)
+            self.relu = torch.nn.ReLU()
+
+        def forward(self, x):
+            x = self.relu(self.fc(x))
+            return x

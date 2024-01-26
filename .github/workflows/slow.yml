@@ -10,11 +10,15 @@ on:
   push:
     tags:
       - ciflow/slow/*
+    branches:
+      - release/*
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}-${{ github.event.schedule }}
   cancel-in-progress: true
+
+permissions: read-all
 
 jobs:
   linux-focal-cuda12_1-py3-gcc9-slow-gradcheck-build:
@@ -96,6 +100,9 @@ jobs:
         ]}
 
   linux-focal-rocm5_6-py3_8-test:
+    permissions:
+      id-token: write
+      contents: read
     name: linux-focal-rocm5.6-py3.8
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-focal-rocm5_6-py3_8-build

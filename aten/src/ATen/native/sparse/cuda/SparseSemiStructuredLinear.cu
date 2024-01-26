@@ -25,8 +25,7 @@
   }
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 #ifndef USE_ROCM
 // Wrapper function for CUTLASS sparse GEMM implementation, used
@@ -115,10 +114,11 @@ Tensor two_four_sgemm_cutlass(
 
     // Determine PyTorch datatype for the output matrix.
     auto tensor_d_dtype = at::kChar;
-    if constexpr (std::is_same_v<ElementOutput, int32_t>) {
+    if constexpr (std::is_same_v<ElementOutput, int8_t>) {
+        tensor_d_dtype = at::kChar;
+    } else if constexpr (std::is_same_v<ElementOutput, int32_t>) {
         tensor_d_dtype = at::kInt;
-    }
-    else if constexpr (std::is_same_v<ElementOutput, cutlass::half_t>) {
+    } else if constexpr (std::is_same_v<ElementOutput, cutlass::half_t>) {
         tensor_d_dtype = at::kHalf;
     } else if constexpr (std::is_same_v<ElementOutput, cutlass::bfloat16_t>) {
         tensor_d_dtype = at::kBFloat16;
@@ -470,7 +470,8 @@ Tensor two_four_sgemm_cutlass_dispatch_layouts_activation(
 Tensor _sparse_semi_structured_linear(
       const Tensor& input, const Tensor& weight,
       const Tensor& meta, const c10::optional<Tensor>& bias_opt,
-      const c10::optional<c10::string_view> activation_opt) {
+      const c10::optional<c10::string_view> activation_opt,
+      const c10::optional<c10::ScalarType> out_dtype_opt) {
 #ifndef USE_ROCM
     // No need to check that all tensors are on CUDA device, as this
     // is provided by dispatch.
@@ -486,6 +487,12 @@ Tensor _sparse_semi_structured_linear(
 
     const auto activation =
         activation_opt.has_value() ? *activation_opt : "none";
+
+    TORCH_CHECK(!out_dtype_opt.has_value() ||
+                (tensor_a.dtype() == at::ScalarType::Char &&
+                 out_dtype_opt.value() == at::ScalarType::Int),
+                "_sparse_semi_structured_linear: Setting out_dtype is only "
+                "supported for int8 input and int32 output");
 
     // For now, only CC 8.x devices are supported.
     const auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -567,7 +574,6 @@ Tensor _sparse_semi_structured_linear(
             [&]() {
                 using ElementInputA = int8_t;
                 using ElementInputB = int8_t;
-                using ElementOutput = int32_t;
                 using ElementAccumulator = int32_t;
                 using ElementComputeEpilogue = int32_t;
                 using ThreadblockShape =
@@ -581,27 +587,53 @@ Tensor _sparse_semi_structured_linear(
                 const auto EnableActivationNone = true;
                 const auto EnableActivationReLU = true;
                 const auto EnableActivationSiLU = false;
-                output = two_four_sgemm_cutlass_dispatch_layouts_activation<
-                    ElementInputA,
-                    ElementInputB,
-                    ElementOutput,
-                    ElementAccumulator,
-                    ElementComputeEpilogue,
-                    ThreadblockShape,
-                    WarpShape,
-                    InstructionShape,
-                    EnableRowMajorRowMajorLayouts,
-                    EnableRowMajorColumnMajorLayouts,
-                    EnableColumnMajorRowMajorLayouts,
-                    EnableColumnMajorColumnMajorLayouts,
-                    EnableActivationNone,
-                    EnableActivationReLU,
-                    EnableActivationSiLU>(
-                    tensor_a,
-                    tensor_b,
-                    tensor_c,
-                    meta,
-                    activation);
+                if (out_dtype_opt.has_value()) {
+                  using ElementOutput = int32_t;
+                  output = two_four_sgemm_cutlass_dispatch_layouts_activation<
+                      ElementInputA,
+                      ElementInputB,
+                      ElementOutput,
+                      ElementAccumulator,
+                      ElementComputeEpilogue,
+                      ThreadblockShape,
+                      WarpShape,
+                      InstructionShape,
+                      EnableRowMajorRowMajorLayouts,
+                      EnableRowMajorColumnMajorLayouts,
+                      EnableColumnMajorRowMajorLayouts,
+                      EnableColumnMajorColumnMajorLayouts,
+                      EnableActivationNone,
+                      EnableActivationReLU,
+                      EnableActivationSiLU>(
+                      tensor_a,
+                      tensor_b,
+                      tensor_c,
+                      meta,
+                      activation);
+                } else {
+                  using ElementOutput = int8_t;
+                  output = two_four_sgemm_cutlass_dispatch_layouts_activation<
+                      ElementInputA,
+                      ElementInputB,
+                      ElementOutput,
+                      ElementAccumulator,
+                      ElementComputeEpilogue,
+                      ThreadblockShape,
+                      WarpShape,
+                      InstructionShape,
+                      EnableRowMajorRowMajorLayouts,
+                      EnableRowMajorColumnMajorLayouts,
+                      EnableColumnMajorRowMajorLayouts,
+                      EnableColumnMajorColumnMajorLayouts,
+                      EnableActivationNone,
+                      EnableActivationReLU,
+                      EnableActivationSiLU>(
+                      tensor_a,
+                      tensor_b,
+                      tensor_c,
+                      meta,
+                      activation);
+                }
                 return;
             })
         AT_DISPATCH_CASE(
@@ -738,12 +770,10 @@ Tensor _sparse_semi_structured_linear(
 #endif
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 // Following is just for testing purposes.
-namespace at {
-namespace native {
+namespace at::native {
 
 #ifndef USE_ROCM
 // Copied from tools/util/include/host_reorder.h, from CUTLASS source
@@ -841,15 +871,10 @@ _to_sparse_semi_structured(const Tensor& dense) {
       uint64_t meta_val = 0;
       for (auto k = 0; k < dense_elems_per_meta_elem / ksparse; ++k, mask_cpu_ptr += ksparse) {
         const auto mask_elems =
-            (ksparse == 4)
-            ? std::make_tuple(mask_cpu_ptr[0],
-                              mask_cpu_ptr[1],
-                              mask_cpu_ptr[2],
-                              mask_cpu_ptr[3])
-            : std::make_tuple(mask_cpu_ptr[0],
-                              mask_cpu_ptr[0],
-                              mask_cpu_ptr[1],
-                              mask_cpu_ptr[1]);
+          (ksparse == 4) ? std::make_tuple(mask_cpu_ptr[0], mask_cpu_ptr[1],
+                                           mask_cpu_ptr[2], mask_cpu_ptr[3])
+                         : std::make_tuple(mask_cpu_ptr[0], mask_cpu_ptr[0],
+                                           mask_cpu_ptr[1], mask_cpu_ptr[1]);
         auto meta_quadruple = 0;
         if (mask_elems == std::make_tuple(1, 1, 0, 0)) {
           meta_quadruple = 4; // 0100
@@ -918,5 +943,4 @@ _to_sparse_semi_structured(const Tensor& dense) {
 #endif
 }
 
-}  // namespace native
-}  // namespace at
+}  // namespace at::native

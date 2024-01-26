@@ -11,7 +11,7 @@ import subprocess
 import sys
 import textwrap
 from typing import (
-    cast, Any, Callable, DefaultDict, Dict, Generator, List, NamedTuple,
+    cast, Any, Callable, DefaultDict, Dict, Iterator, List, NamedTuple,
     Optional, Tuple, Union, TYPE_CHECKING)
 
 import torch
@@ -55,7 +55,7 @@ class FunctionCounts:
     # the print settings. This is simply to allow hermetic unit tests.
     _linewidth: Optional[int] = None
 
-    def __iter__(self) -> Generator[FunctionCount, None, None]:
+    def __iter__(self) -> Iterator[FunctionCount]:
         yield from self._data
 
     def __len__(self) -> int:

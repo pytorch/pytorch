@@ -4239,6 +4239,10 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             ("hipDeviceAttributeMaxSharedMemoryPerBlock", CONV_TYPE, API_RUNTIME),
         ),
         (
+            "cudaDevAttrMaxSharedMemoryPerBlockOptin",
+            ("hipDeviceAttributeMaxSharedMemoryPerBlock", CONV_TYPE, API_RUNTIME),
+        ),
+        (
             "cudaDevAttrTotalConstantMemory",
             ("hipDeviceAttributeTotalConstantMemory", CONV_TYPE, API_RUNTIME),
         ),
@@ -8638,6 +8642,8 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
 C10_MAPPINGS = collections.OrderedDict(
     [
         ("CUDA_VERSION", ("TORCH_HIP_VERSION", API_PYTORCH)),
+        ("CUDA_LAUNCH_BLOCKING=1", ("AMD_SERIALIZE_KERNEL=3", API_C10)),
+        ("CUDA_LAUNCH_BLOCKING", ("AMD_SERIALIZE_KERNEL", API_C10)),
         ("cuda::compat::", ("hip::compat::", API_C10)),
         ("c10/cuda/CUDAAlgorithm.h", ("c10/hip/HIPAlgorithm.h", API_C10)),
         ("c10/cuda/CUDADeviceAssertion.h", ("c10/hip/HIPDeviceAssertion.h", API_C10)),

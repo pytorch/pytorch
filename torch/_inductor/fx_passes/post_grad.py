@@ -1,4 +1,3 @@
-import dataclasses
 import functools
 import itertools
 import logging
@@ -14,20 +13,15 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
 
-from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_functional
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 
 from torch._utils_internal import print_graph
-from torch.fx.experimental.symbolic_shapes import definitely_true, sym_eq
-from torch.fx.immutable_collections import immutable_dict
+from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 
-from .. import config, inductor_prims, ir, pattern_matcher
+from .. import config, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 
-from ..lowering import (
-    inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
-    lowerings as L,
-)
+from ..lowering import lowerings as L
 from ..pattern_matcher import (
     _return_true,
     Arg,
@@ -47,6 +41,7 @@ from ..pattern_matcher import (
 from ..utils import decode_device, is_pointwise_use
 from ..virtualized import V
 from .group_batch_fusion import group_batch_fusion_passes
+from .reinplace import reinplace_inplaceable_ops
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -382,7 +377,8 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
 
     assert new_size is not None
     dtype = functools.reduce(
-        torch.promote_types, [x.get_dtype() for x in itertools.chain(*inputs)]
+        torch.promote_types,
+        [x.get_dtype() for x in itertools.chain.from_iterable(inputs)],
     )
     device = inputs[0][0].get_device()
     kernel = ir.ConcatKernel(
@@ -502,13 +498,13 @@ def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
     return (
         val1 is not None
         and val2 is not None
-        and definitely_true(sym_eq(val1.size(), val2.size()))
+        and statically_known_true(sym_eq(val1.size(), val2.size()))
         and val1.layout == val2.layout
         and val1.dtype == val2.dtype
         and val1.device == val2.device
         and (
             val1.layout != torch.strided
-            or definitely_true(sym_eq(val1.stride(), val2.stride()))
+            or statically_known_true(sym_eq(val1.stride(), val2.stride()))
         )
     )
 
@@ -633,162 +629,6 @@ def remove_noop_ops(graph: torch.fx.Graph):
             if same_meta(node, src) and cond(*args, **kwargs):
                 node.replace_all_uses_with(src)
                 graph.erase_node(node)
-
-
-@dataclasses.dataclass
-class InplaceableOp:
-    inplace_op: torch._ops.OpOverload
-    mutated_arg_indices: List[int]
-
-    def get_flat_mutated_args(self, node: torch.fx.Node) -> List[torch.fx.Node]:
-        """
-        Given a node that calls an in-placeable op, return the arg nodes that
-        would be mutated if the op were its in-place variant.
-
-        NOTE: we assume the in-placeable op to have the same signature as its
-        in-place variant.
-        """
-        mutated_args = []
-        for idx in self.mutated_arg_indices:
-            mutated_args.extend(pytree.tree_flatten(node.args[idx])[0])
-        return mutated_args
-
-inplaceable_ops = {
-    aten.index_put.default: InplaceableOp(aten.index_put_.default, [0]),
-    aten._unsafe_index_put.default: InplaceableOp(inductor_prims._unsafe_index_put_, [0]),
-}
-
-try:
-    c10d_functional = torch.ops._c10d_functional
-    inplaceable_collective_ops = {
-        c10d_functional.all_reduce.default: InplaceableOp(
-            c10d_functional.all_reduce_.default, [0]
-        ),
-        c10d_functional.all_reduce_coalesced.default: InplaceableOp(
-            c10d_functional.all_reduce_coalesced_.default, [0]
-        ),
-    }
-    inplaceable_ops.update(inplaceable_collective_ops)
-except AttributeError:
-    # _c10d_functional ops are only available when torch
-    # is built with USE_DISTRIBUTED=1.
-    pass
-
-for outplace_op, inplace_op in inplaceable_foreach_ops_lowerings.items():
-    inplaceable_ops[outplace_op] = InplaceableOp(inplace_op, [0])
-
-
-inplaceable_triton_ops = {triton_kernel_wrapper_functional}
-
-
-def reinplace_inplaceable_ops(graph):
-    """
-    Reinplaces in-placeable operations.
-    If there are no uses of a view of the mutated arg after the current node,
-    it is possible to inplace the op.
-    This above algorithm could be justified by observing side effects. While
-    we traverse the graph in forwards direction, only latter nodes could view
-    side effects of the current node. If the current node is not used later as
-    well as no view of this node is used later in the graph, then it is safe to
-    inplace as there would be no way to observe the side effects.
-    This condition is slightly different for graph inputs where they can only
-    be inplaced if the above condition is true and there's a copy_ in the
-    epilogue that signals that the caller wants to observe the mutation.
-    """
-
-    # (mutation_node, mutated_arg) => copy_epilogue
-    # The value associated to mutation_node may be a collection
-    # if the mutation op returns multiple values.
-    # The value associated to mutated_arg is always a tensor.
-    mutation_to_copy_epilogue = {}
-
-    mutated_inputs = set()
-    storage_to_nodes = defaultdict(list)
-    node_order: Dict[Any, int] = {}
-    for i, node in enumerate(reversed(graph.nodes)):
-        node_order[node] = len(graph.nodes) - i - 1
-        storage_to_nodes[get_node_storage(node)].append(node)
-        if node.target == aten.copy_.default:
-            mutated_arg = node.args[0]
-            mutation_node = node.args[1]
-            # The mutation op could have returned a collection of tensors.
-            # Follow getitem nodes to find the mutation node.
-            while mutation_node.target == operator.getitem:
-                mutation_node = mutation_node.args[0]
-            mutation_to_copy_epilogue[(mutation_node, mutated_arg)] = node
-            # According to the invariant, copy_ can only occur for mutations
-            # of placeholders.
-            assert mutated_arg.op == "placeholder"
-            mutated_inputs.add(mutated_arg)
-
-    def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node):
-        node_loc = node_order[node]
-        for view in shared_view_nodes:
-            for user in view.users:
-                # Skip all users before node
-                if node_order[user] <= node_loc:
-                    continue
-                # Skip over the copy_ epilogue node that could get reinplaced
-                if copy_node == user:
-                    continue
-                return True
-        return False
-
-    def can_inplace(node, mutated_args):
-        for mutated_arg in mutated_args:
-            if get_node_storage(mutated_arg) is None:
-                return False
-            shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
-            if mutated_arg.op == "placeholder":
-                if not (
-                    copy_node := mutation_to_copy_epilogue.get(
-                        (node, mutated_arg), False
-                    )
-                ):
-                    return False
-
-                if any_use_of_views_after_node(
-                    node, shared_view_nodes, copy_node=copy_node
-                ):
-                    return False
-            elif any(view.op == "placeholder" for view in shared_view_nodes):
-                # If mutated arg is view of any of the inputs of the graph,
-                # do not allow for inplacing.
-                # This would require more sophisticated algorithm to handle
-                return False
-            elif any_use_of_views_after_node(node, shared_view_nodes, copy_node=None):
-                return False
-        return True
-
-    def erase_copy_epilogue(mutation_op, mutated_arg):
-        copy_node = mutation_to_copy_epilogue.get((node, mutated_arg))
-        if copy_node is not None:
-            graph.erase_node(copy_node)
-
-    for node in graph.nodes:
-        if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
-            mutated_args = inplaceable_op.get_flat_mutated_args(node)
-            if can_inplace(node, mutated_args):
-                # Erase all copy epilogues incurred by this node
-                for mutated_arg in mutated_args:
-                    erase_copy_epilogue(node, mutated_arg)
-                node.target = inplaceable_op.inplace_op
-        elif node.target in inplaceable_triton_ops:
-            # inplaceable_triton_ops take an additional argument called
-            # tensors_to_clone which contain a list of tensors to clone
-            # This pass iterates over them and sees which ones are safe
-            # to eliminate (i.e. no longer need the clones)
-            tensors_to_clone = []
-            for arg in node.kwargs["tensors_to_clone"]:
-                assert arg in node.kwargs["kwargs"]
-                mutated_arg = node.kwargs["kwargs"][arg]
-                if can_inplace(node, [mutated_arg]):
-                    erase_copy_epilogue(node, mutated_arg)
-                else:
-                    tensors_to_clone.append(arg)
-            kwargs = dict(node.kwargs)
-            kwargs["tensors_to_clone"] = tensors_to_clone
-            node.kwargs = immutable_dict(kwargs)
 
 
 @register_lowering_pattern(

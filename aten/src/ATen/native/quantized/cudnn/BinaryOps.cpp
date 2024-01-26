@@ -2,8 +2,6 @@
 #include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
 
 #if AT_CUDNN_ENABLED()
-#include <ATen/native/cudnn/Macros.h>
-#if HAS_CUDNN_V8()
 
 #include <ATen/core/TensorBase.h>
 #include <ATen/core/TensorBody.h>
@@ -259,6 +257,5 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
 } // namespace native
 } // namespace at
 
-#endif  // HAS_CUDNN_V8
 #endif  // AT_CUDNN_ENABLED
 #endif  // USE_CUDA

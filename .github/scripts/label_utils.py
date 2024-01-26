@@ -44,6 +44,10 @@ def get_last_page_num_from_header(header: Any) -> int:
     # Link info looks like: <https://api.github.com/repositories/65600975/labels?per_page=100&page=2>;
     # rel="next", <https://api.github.com/repositories/65600975/labels?per_page=100&page=3>; rel="last"
     link_info = header["link"]
+    # Docs does not specify that it should be present for projects with just few labels
+    # And https://github.com/malfet/deleteme/actions/runs/7334565243/job/19971396887 it's not the case
+    if link_info is None:
+        return 1
     prefix = "&page="
     suffix = ">;"
     return int(
