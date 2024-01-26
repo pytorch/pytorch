@@ -679,15 +679,10 @@ dynamo_expected_failures = {
     "TestNNDeviceTypeCPU.test_threshold_inplace_overlap_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_module_to_empty_cpu_float64",  # test_nn
     "TestNN.test_Sequential_imul",  # test_nn
-    "TestNN.test_upsampling_bfloat16",  # test_nn
     "TestNNDeviceTypeCPU.test_triplet_margin_with_distance_loss_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_CTCLoss_no_batch_dim_reduction_sum_use_module_form_False_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_nll_loss_empty_tensor_reduction_sum_cpu",  # test_nn
-    "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_False_memory_format0_cpu",  # test_nn
-    "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_False_memory_format1_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_batchnorm_grad_cpu",  # test_nn
-    "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_True_memory_format0_cpu",  # test_nn
-    "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_True_memory_format1_cpu",  # test_nn
     "TestNN.test_fb_fc_packed",  # test_nn
     "TestFusionEval.test_fuse_module_eval_numerics",  # test_nn
     "TestNNDeviceTypeCPU.test_invalid_reduction_strings_cpu",  # test_nn
@@ -695,7 +690,6 @@ dynamo_expected_failures = {
     "TestNNDeviceTypeCPU.test_nll_loss_empty_tensor_reduction_mean_cpu",  # test_nn
     "TestNN.test_ParameterDict_replication",  # test_nn
     "TestNN.test_Sequential_iadd",  # test_nn
-    "TestNN.test_upsamplingLinear1d",  # test_nn
     "TestNativeFunctions.test_symintlist_error_with_overload",  # test_native_functions
     "TestNativeFunctions.test_vararg_symintlist_error",  # test_native_functions
     "TestNativeFunctions.test_optional_intlist_invalid",  # test_native_functions
