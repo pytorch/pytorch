@@ -2662,6 +2662,7 @@ class CppVecKernelChecker(CppVecKernel):
                         torch.int32,
                         torch.bfloat16,
                         torch.float16,
+                        torch.bool,
                     ]
 
                     if opt_ctx.dtype not in supported_dtypes or (
