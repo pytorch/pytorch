@@ -1471,6 +1471,11 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         matcher=lambda sample: len(sample.input.shape) == 0,
         reason="fixme: https://github.com/onnx/onnx/issues/4986",
     ),
+    skip(
+        "mm",
+        matcher=lambda sample: torch.numel(sample.input) == 0,
+        reason="values of matmul of [m, 0] and [0, n] matrices are undefined",
+    ),
     xfail(
         "native_batch_norm",
         matcher=lambda sample: sample.args[-3] is True
