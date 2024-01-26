@@ -2,6 +2,7 @@ import builtins
 import copy
 import functools
 import importlib
+import inspect
 import itertools
 import operator
 import sys
@@ -17,7 +18,7 @@ except ModuleNotFoundError:
 
 import torch
 
-from .utils import hashable, is_function, NP_SUPPORTED_MODULES
+from .utils import hashable, NP_SUPPORTED_MODULES
 
 from .variables import (
     FunctorchVmapHigherOrderVariable,
@@ -71,7 +72,6 @@ manual_torch_name_rule_map = {
     "torch.overrides.get_default_nowrap_functions": TorchInGraphFunctionVariable,
     "torch.fx._symbolic_trace.is_fx_tracing": TorchInGraphFunctionVariable,
     "torch._dynamo.external_utils.is_compiling": TorchInGraphFunctionVariable,
-    "torch.autograd.graph.disable_saved_tensors_hooks": TorchInGraphFunctionVariable,
     "torch.autograd._profiler_enabled": SkipFilesVariable,
     # We graph break on RNG state setters or getters like
     # `torch.get_rng_state` or `torch.set_rng_state`. These functions
@@ -2987,17 +2987,9 @@ def lookup(obj):
     if callable(obj) and is_callable_allowed(obj):
         return TorchInGraphFunctionVariable
     # Unwrap if the function is wrapped by functools.lru_cache or functools.wraps.
-    if isinstance(obj, functools._lru_cache_wrapper) or (
-        is_function(obj) and hasattr(obj, "__wrapped__")
-    ):
-        # TODO: Weird case, should not unwrap if it's wrapped as _VariableFunctionsClass.
-        if not (
-            hasattr(obj, "__qualname__")
-            and str(obj.__qualname__).startswith("_VariableFunctionsClass")
-        ):
-            obj = obj.__wrapped__
-    rule = get_torch_obj_rule_map().get(obj, None)
-    if rule is None and is_aten_op_or_tensor_method(obj):
+    if isinstance(obj, functools._lru_cache_wrapper):
+        obj = inspect.getattr_static(obj, "__wrapped__")
+    if is_aten_op_or_tensor_method(obj):
         return TorchInGraphFunctionVariable
-    else:
-        return rule
+    rule = get_torch_obj_rule_map().get(obj, None)
+    return rule

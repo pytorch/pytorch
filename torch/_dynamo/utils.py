@@ -519,14 +519,16 @@ def is_numpy_float_type(value):
 
 
 def is_function(value):
-    return istype(
-        value,
-        (
-            types.FunctionType,
-            types.BuiltinFunctionType,
-            types.MethodDescriptorType,
-            types.WrapperDescriptorType,
-        ),
+    function_types = (
+        types.FunctionType,
+        types.BuiltinFunctionType,
+        types.MethodDescriptorType,
+        types.WrapperDescriptorType,
+    )
+    return (
+        isinstance(value, function_types)
+        or isinstance(value, functools._lru_cache_wrapper)
+        and isinstance(inspect.getattr_static(value, "__wrapped__"), function_types)
     )
 
 
