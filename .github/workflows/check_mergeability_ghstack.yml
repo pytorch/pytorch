@@ -18,7 +18,7 @@ jobs:
         run: |
           git config --global user.email "pytorchmergebot@users.noreply.github.com"
           git config --global user.name "PyTorch MergeBot"
-          git fetch origin main "+refs/heads/*:refs/remotes/origin/gh/*"
+          git fetch --prune origin main 'refs/heads/gh/*:refs/remotes/origin/gh/*'
 
       - name: Setup Python
         uses: actions/setup-python@v4
