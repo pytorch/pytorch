@@ -221,7 +221,8 @@ class NCCLComm {
       : ncclComm_(ncclComm),
         aborted_(false),
         ncclAsyncErr_(ncclSuccess),
-        commFailureReason_(c10::nullopt) {}
+        commFailureReason_(c10::nullopt),
+        initialized_(false) {}
 
   NCCLComm() : NCCLComm(nullptr) {}
 
@@ -251,6 +252,7 @@ class NCCLComm {
         c10::nullopt);
     comm->ncclId_ = commId;
     comm->rank_ = rank;
+    comm->initialized_ = true;
     return comm;
   }
 
@@ -262,28 +264,37 @@ class NCCLComm {
       ncclConfig_t& config,
       bool eagerMode = false) {
     auto comm = std::make_shared<NCCLComm>();
+    bool isInitialized = false;
     if (nccl_use_nonblocking()) {
       config.blocking = 0;
       if (eagerMode) {
+        LOG(INFO) << "Rank " << rank
+                  << ": creating NCCL communicator eagerly in nonblocking mode";
         C10D_NCCL_CHECK_NONBLOCKING(
-          ncclCommInitRankConfig(
-              &(comm->ncclComm_), numRanks, commId, rank, &config),
-          c10::nullopt);
+            ncclCommInitRankConfig(
+                &(comm->ncclComm_), numRanks, commId, rank, &config),
+            c10::nullopt);
       } else {
         C10D_NCCL_CHECK_TIMEOUT(
-           ncclCommInitRankConfig(
-              &(comm->ncclComm_), numRanks, commId, rank, &config),
-          comm->ncclComm_,
-          c10::nullopt);
+            ncclCommInitRankConfig(
+                &(comm->ncclComm_), numRanks, commId, rank, &config),
+            comm->ncclComm_,
+            c10::nullopt);
+        // under non-blocking mode, comm is initialized after
+        // C10D_NCCL_CHECK_TIMEOUT
+        isInitialized = true;
       }
     } else {
       C10D_NCCL_CHECK(
           ncclCommInitRankConfig(
               &(comm->ncclComm_), numRanks, commId, rank, &config),
           c10::nullopt);
+      // under blocking mode, comm is initialized after NCCL CHECK
+      isInitialized = true;
     }
     comm->ncclId_ = commId;
     comm->rank_ = rank;
+    comm->initialized_ = isInitialized;
     return comm;
   }
 #endif
@@ -323,6 +334,7 @@ class NCCLComm {
     std::swap(ncclComm_, other.ncclComm_);
     std::swap(aborted_, other.aborted_);
     std::swap(ncclAsyncErr_, other.ncclAsyncErr_);
+    std::swap(initialized_, other.initialized_);
   }
 
   ncclComm_t getNcclComm();
@@ -384,6 +396,11 @@ class NCCLComm {
   bool isAborted() const {
     std::unique_lock<std::mutex> lock(mutex_);
     return aborted_;
+  }
+
+  bool isInitialized() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return initialized_;
   }
 
   uint64_t getCommSplitCounter() const {
@@ -462,6 +479,8 @@ class NCCLComm {
   }
 
  protected:
+  // a helper function to wait until the communicator is initialized;
+  void waitUtilInitialized(int timeoutSecs);
   ncclComm_t ncclComm_;
   // Unique nccl_id for this communicator.
   ncclUniqueId ncclId_;
@@ -474,6 +493,7 @@ class NCCLComm {
   // Optional reason for communicator failure, provided by ProcessGroupNCCL for
   // better error messaging.
   c10::optional<std::string> commFailureReason_;
+  bool initialized_{false};
 #ifdef NCCL_HAS_COMM_REGISTER
   // Stores handlers for tensors registered by NCCL
   std::unordered_map<void*, void*> registeredSegmentHandles_;

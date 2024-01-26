@@ -1947,7 +1947,8 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     // conditions that might have resulted in a split above.
     if (!ncclComms[i]) {
 #ifdef NCCL_HAS_COMM_NONBLOCKING
-      ncclComms[i] = NCCLComm::create(numRanks, rank, ncclID, options_->config);
+      ncclComms[i] =
+          NCCLComm::create(numRanks, rank, ncclID, options_->config, eagerMode);
 #else
       ncclComms[i] = NCCLComm::create(numRanks, rank, ncclID);
 #endif
@@ -1970,7 +1971,13 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   if (!nccl_use_nonblocking()) {
     C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
   } else {
-    C10D_NCCL_CHECK_TIMEOUT_GROUPEND(ncclGroupEnd(), ncclComms, c10::nullopt);
+    // If we use eager mode, allow communicators to be
+    // uninitilized/ncclInProgress until the first communication
+    if (eagerMode) {
+      C10D_NCCL_CHECK_NONBLOCKING(ncclGroupEnd(), c10::nullopt);
+    } else {
+      C10D_NCCL_CHECK_TIMEOUT_GROUPEND(ncclGroupEnd(), ncclComms, c10::nullopt);
+    }
   }
 #endif
 

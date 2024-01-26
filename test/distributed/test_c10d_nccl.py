@@ -1357,6 +1357,22 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         self.assertEqual(backend.comm_split_count(), 1)
         self.assertEqual(tensor, original_tensor)
 
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    def test_eager_mode_init(self):
+        # Test creating a pg eagerly with nonblocking mode when
+        # we've passed a specific device_id to init_process_group.
+        os.environ["TORCH_NCCL_USE_COMM_NONBLOCKING"] = "1"
+        os.environ["TORCH_NCCL_NONBLOCKING_TIMEOUT"] = "10"
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f'cuda:{self.rank}')
+        pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
+        backend = pg._get_backend(torch.device(device))
+        self.assertEqual(backend.comm_split_count(), 0)
+        t = torch.rand(10, 10, device=device)
+        # Run a allreduce
+        pg.allreduce(t)
+        dist.destroy_process_group(pg)
+
 
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
