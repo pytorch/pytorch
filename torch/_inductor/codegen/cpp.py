@@ -1254,7 +1254,6 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def acosh(x):
-        # For real x, acosh(x) = log(x + sqrt(x**2 -1))
         return f"{x}.acosh()"
 
     @staticmethod
