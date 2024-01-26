@@ -15,6 +15,7 @@ cxx_library(
         "//third_party:cpuinfo",
         "//third_party:fmt",
         "//third_party:glog",
+        "//third_party:rt",
     ],
     exported_deps = [],
     compiler_flags = [
@@ -46,7 +47,12 @@ cxx_library(
     header_namespace = "c10",
     link_whole = True,
     platform_preprocessor_flags = [['windows', ['-D_WINDOWS', '-D_WIN32', '-DWIN32', '-DNOMINMAX', '-D_CRT_SECURE_NO_WARNINGS', '-D_USE_MATH_DEFINES']], ['windows.*64$', ['-D_WIN64']]],
-    preprocessor_flags = ['-DC10_BUILD_MAIN_LIB'],
+    preprocessor_flags = [
+        '-DC10_BUILD_MAIN_LIB',
+        '-DHAVE_MMAP=1',
+        '-DHAVE_SHM_OPEN=1',
+        '-DHAVE_SHM_UNLINK=1',
+    ],
     reexport_all_header_dependencies = True,
     visibility = ['PUBLIC'],
 )

@@ -122,6 +122,16 @@ if(USE_MIMALLOC)
   add_dependencies(c10 mimalloc-static)
 endif()
 
+if(UNIX AND NOT APPLE)
+   include(CheckLibraryExists)
+   # https://github.com/libgit2/libgit2/issues/2128#issuecomment-35649830
+   CHECK_LIBRARY_EXISTS(rt clock_gettime "time.h" NEED_LIBRT)
+   if(NEED_LIBRT)
+     target_link_libraries(c10 PRIVATE rt)
+     set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} rt)
+   endif(NEED_LIBRT)
+endif(UNIX AND NOT APPLE)
+
 if(ANDROID)
     target_link_libraries(c10 PRIVATE log)
 endif()
@@ -147,6 +157,10 @@ endif()
 
 if(USE_XPU)
   add_subdirectory(xpu)
+endif()
+
+if(NOT MSVC AND NOT "${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
+  set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/core/MapAllocator.cpp PROPERTIES COMPILE_FLAGS "-fno-openmp")
 endif()
 
 # ---[ Installation
