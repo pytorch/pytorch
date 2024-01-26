@@ -675,7 +675,7 @@ class Trie:
         node[''] = True # Mark the end of the word
 
     def _dump(self):
-        """Return the data of Trie. """
+        """Return the root node of Trie. """
         return self.root
 
     def _quote(self, char):
@@ -687,28 +687,27 @@ class Trie:
         Returns True if yes, else return False"""
         node = self.root
         for char in word:
-            if char in word:
+            if char in node:
                 node = node[char]
             else:
                 return False
 
         return '' in node # make sure to check the end-of-word marker present
 
-    def _pattern(self, node):
-        """Convert a nested dictionary into a regular expression pattern"""
-        # import pdb;pdb.set_trace()
-        data = node
+    def _pattern(self, root):
+        """Convert a nested dictionary represented by a trie into a regular expression pattern"""
+        node = root
 
-        if "" in data and len(data.keys()) == 1:
+        if "" in node and len(node.keys()) == 1:
             return None
 
         alt = [] # store alternative patterns
         cc = [] # to store char to char classes
-        q = 0
-        for char in sorted(data.keys()):
-            if isinstance(data[char], dict):
+        q = 0 # for node representing the end of word
+        for char in sorted(node.keys()):
+            if isinstance(node[char], dict):
                 try:
-                    recurse = self._pattern(data[char])
+                    recurse = self._pattern(node[char])
                     alt.append(self._quote(char) + recurse)
                 except Exception:
                     cc.append(self._quote(char))
@@ -735,8 +734,7 @@ class Trie:
         return result
 
     def export_to_regex(self):
-        """ Export the Trie to a regex pattern. """
-    # def pattern(self):
+        """Export the Trie to a regex pattern."""
         return self._pattern(self.root)
 
 
