@@ -7355,7 +7355,13 @@ class _CollectiveKernel(FallbackKernel):
             non_tensor_args,
             unflatten_args,
         )
-        pytree.tree_map(lambda x: MutationOutput(x.layout, x, packed), inputs)
+
+        def mark_mutation(x):
+            if isinstance(x.data, BaseView):
+                x = x.data.unwrap_view()
+            MutationOutput(x.layout, x, packed)
+
+        pytree.tree_map(lambda inp: mark_mutation(inp), inputs)
 
     # NOTE: [Out-of-Place Collective Safety]
     # Between the initiation and completion of an out-of-place collective:
@@ -7456,6 +7462,8 @@ class _WaitKernel(_CollectiveKernel):
             non_tensor_args,
             unflatten_args,
         )
+        if isinstance(inp.data, BaseView):
+            inp = inp.data.unwrap_view()
         MutationOutput(inp.layout, inp, packed)
 
     def get_read_writes(self):

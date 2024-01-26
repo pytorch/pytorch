@@ -336,6 +336,39 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(debug=True)
     @fresh_inductor_cache()
+    def test_inductor_inplace_op_on_view(self):
+        self._init_process_group()
+
+        def func(arg: torch.Tensor) -> torch.Tensor:
+            buf0 = (arg + 10)[:2]
+            ar0 = torch.ops._c10d_functional.all_reduce(buf0, "avg", "default")
+            ar0 = torch.ops._c10d_functional.wait_tensor(ar0)
+            return ar0
+
+        arg = torch.rand(4, 4, device=self.device)
+        compiled = torch.compile(func)
+
+        code = run_and_get_triton_code(compiled, arg)
+        (
+            FileCheck()
+            .check("buf0 = empty(")
+            # Ensure the all_reduce_ input is a view
+            .check(
+                "torch.ops._c10d_functional.all_reduce_.default(reinterpret_tensor(buf0"
+            )
+            .check(
+                "torch.ops._c10d_functional.wait_tensor.default(reinterpret_tensor(buf0"
+            )
+            .check("return (reinterpret_tensor(buf0")
+            .run(code)
+        )
+        out = compiled(arg)
+        correct = func(arg)
+        assert same(out, correct), f"{out} va {correct}"
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(debug=True)
+    @fresh_inductor_cache()
     def test_inductor_reuse_buffer_after_inplace_collective(self):
         self._init_process_group()
 
@@ -423,7 +456,6 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         args = [torch.rand(4, 4, device=self.device) for _ in range(4)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
-        print(code)
         (
             FileCheck()
             .check(
