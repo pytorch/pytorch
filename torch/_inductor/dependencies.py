@@ -16,9 +16,9 @@ from .codegen.common import index_prevent_reordering
 from .utils import (
     get_dtype_size,
     reduction_num_outputs,
+    sympy_index_symbol,
     sympy_str,
     sympy_subs,
-    sympy_symbol,
     VarRanges,
 )
 from .virtualized import OpsHandler, ReductionType, V
@@ -329,7 +329,7 @@ def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Sy
     var_ranges: VarRanges = dict()
 
     def add_var(length: sympy.Expr) -> sympy.Symbol:
-        v = sympy_symbol(f"{prefix}{next(cnt)}")
+        v = sympy_index_symbol(f"{prefix}{next(cnt)}")
         var_ranges[v] = length
         return v
 
@@ -470,7 +470,7 @@ class FreeUnbackedSymbolsOpsHandler:
     def indirect_indexing(self, index_var, size, check=True) -> sympy.Symbol:
         assert not isinstance(index_var, (sympy.Expr, sympy.logic.boolalg.Boolean))
         self.symbols |= free_unbacked_symbols(size)
-        return sympy_symbol(f"({str(index_var)})")
+        return sympy_index_symbol(f"({str(index_var)})")
 
     def reduction(
         self,

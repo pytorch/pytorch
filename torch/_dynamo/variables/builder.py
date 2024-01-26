@@ -149,7 +149,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import TorchInGraphFunctionVariable
+from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
@@ -697,6 +697,9 @@ class VariableBuilder:
                 ],
                 source=self.source,
             )
+        elif TorchCtxManagerClassVariable.is_matching_cls(value):
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return TorchCtxManagerClassVariable(value, source=self.source)
         elif trace_rules.lookup(value) is not None:
             if is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
@@ -784,7 +787,6 @@ class VariableBuilder:
                 ),
             )
         else:
-            # breakpoint()
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = UserDefinedObjectVariable(value, source=self.source)
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
@@ -1507,6 +1509,9 @@ def wrap_fx_proxy_cls(
         torch._utils._element_size,
         torch.seed,
         operator.mod,
+        torch._C._functorch._vmap_increment_nesting,
+        torch._C._functorch._vmap_decrement_nesting,
+        torch._functorch.vmap._validate_and_get_batch_size,
         # some mac builds are missing torch.distributed.get_rank()
         getattr(torch.distributed, "get_rank", _missing),
         getattr(torch.distributed, "get_world_size", _missing),
@@ -1776,10 +1781,11 @@ def wrap_to_fake_tensor_and_record(
             symbolic_context = parent_context.inner_contexts[inner_context_name]
 
         log.debug(
-            "wrap_to_fake %s %s %s",
+            "wrap_to_fake %s %s %s %s",
             source.name(),
             tuple(e.shape),
             symbolic_context,
+            type(e),
         )
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
