@@ -222,8 +222,7 @@ inline at::Tensor as_view(
       new_bw_info = base_bw_info.chain(
           base, tensor, full_view_func, view_func, rev_view_func);
     } else {
-      new_bw_info =
-          ViewInfo(base, std::move(full_view_func), view_func, rev_view_func);
+      new_bw_info = ViewInfo(base, full_view_func, view_func, rev_view_func);
     }
   } else {
     TORCH_CHECK(
