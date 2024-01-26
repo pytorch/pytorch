@@ -5503,12 +5503,12 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
     # Since `where` allows type-promotion,
     # cast value to correct type before passing to `where`
     value = _maybe_convert_to_dtype(value, a.dtype)
-    r = torch.where(mask, value, a)  # type: ignore[arg-type]
-
-    if a.size() == r.size() and a.stride() != r.stride():
-        out = torch.empty_like(a)
-        out.copy_(r)
-        return out
+    _a, _mask = torch.broadcast_tensors(a, mask)
+    a_clone = _a.clone()
+    r = torch.where(mask, value, a_clone)  # type: ignore[arg-type]
+    if a_clone.stride() != r.stride():
+        a_clone.copy_(r)
+        return a_clone
     else:
         return r
 
