@@ -1,4 +1,3 @@
-import functools
 import unittest
 
 from torch.testing._internal.inductor_utils import HAS_CUDA
@@ -13,9 +12,8 @@ def has_lark():
         return False
 
 
-requires_lark = functools.partial(unittest.skipIf, not has_lark(), "requires lark")
-
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_lark = unittest.skipUnless(has_lark(), "requires lark")
+requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 if HAS_CUDA:
     import triton

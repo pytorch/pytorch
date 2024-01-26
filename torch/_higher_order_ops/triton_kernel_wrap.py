@@ -85,7 +85,7 @@ class Op:
 # code using a minimal grammar defined inside. During the lexing/parsing,
 # we drop any constant value and type information as they are not
 # necessary to us.
-# Being able to choose what we need makes this a not general purpose TTIR
+# Being able to choose what we need makes this not a general purpose TTIR
 # parser which further makes parsing much simpler.
 
 
