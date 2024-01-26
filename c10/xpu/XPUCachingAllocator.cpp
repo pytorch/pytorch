@@ -424,9 +424,6 @@ class XPUAllocator : public Allocator {
     allocated_blocks[block->ptr] = block;
   }
 
- public:
-  std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocator;
-
   Block* get_allocated_block(void* ptr, bool remove = false) {
     std::scoped_lock<std::mutex> lock(mutex);
     auto it = allocated_blocks.find(ptr);
@@ -440,12 +437,15 @@ class XPUAllocator : public Allocator {
     return block;
   }
 
+ public:
+  std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocators;
+
   void init(DeviceIndex device_count) {
-    const auto size = static_cast<DeviceIndex>(device_allocator.size());
+    const auto size = static_cast<DeviceIndex>(device_allocators.size());
     if (size < device_count) {
-      device_allocator.resize(device_count);
+      device_allocators.resize(device_count);
       for (const auto i : c10::irange(size, device_count)) {
-        device_allocator[i] = std::make_unique<DeviceCachingAllocator>(i);
+        device_allocators[i] = std::make_unique<DeviceCachingAllocator>(i);
       }
     }
   }
@@ -456,11 +456,11 @@ class XPUAllocator : public Allocator {
       size_t size,
       sycl::queue& queue) {
     TORCH_INTERNAL_ASSERT(
-        0 <= device && static_cast<size_t>(device) < device_allocator.size(),
+        0 <= device && static_cast<size_t>(device) < device_allocators.size(),
         "Allocator not initialized for device ",
         static_cast<int16_t>(device),
         ": did you call init?");
-    Block* block = device_allocator[device]->malloc(device, size, queue);
+    Block* block = device_allocators[device]->malloc(device, size, queue);
     add_allocated_block(block);
     *devPtr = block->ptr;
   }
@@ -471,11 +471,11 @@ class XPUAllocator : public Allocator {
     }
     Block* block = get_allocated_block(ptr, /* remove */ true);
     TORCH_CHECK(block, "invalid device pointer: ", ptr);
-    device_allocator[block->device]->free(block);
+    device_allocators[block->device]->free(block);
   }
 
   void emptyCache() {
-    for (auto& da : device_allocator) {
+    for (auto& da : device_allocators) {
       da->emptyCache();
     }
   }
@@ -489,8 +489,8 @@ class XPUAllocator : public Allocator {
     }
 
     Block* block = get_allocated_block(ptr.get());
-    TORCH_CHECK(block != nullptr, "No allocated block can be found.");
-    device_allocator[block->device]->recordStream(block, stream);
+    TORCH_CHECK(block, "No allocated block can be found.");
+    device_allocators[block->device]->recordStream(block, stream);
   }
 
   DataPtr allocate(size_t size) const override {
