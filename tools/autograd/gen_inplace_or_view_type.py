@@ -292,7 +292,7 @@ def inverse_view_name(f: NativeFunction) -> str:
 
 
 # e.g. as_strided -> AsStridedViewFunc
-def view_func_name(f: NativeFunction, include_namespace=False) -> str:
+def view_func_name(f: NativeFunction, include_namespace: bool = False) -> str:
     name = f.func.name.unambiguous_name()
     is_private = name.startswith("_")
     camel_case = "".join([p.title() for p in name.replace(".", "_").split("_")])
