@@ -49,7 +49,7 @@ __all__ = [
     'all_to_all_single', 'barrier', 'batch_isend_irecv', 'broadcast',
     'broadcast_object_list', 'destroy_process_group',
     'gather', 'gather_object', 'get_backend_config', 'get_backend', 'get_rank',
-    'get_world_size', 'group', 'init_process_group', 'irecv',
+    'get_world_size', 'get_pg_config', 'get_pg_count', 'group', 'init_process_group', 'irecv',
     'is_gloo_available', 'is_initialized', 'is_mpi_available', 'is_backend_available',
     'is_nccl_available', 'is_torchelastic_launched', 'is_ucc_available',
     'isend', 'monitored_barrier', 'new_group', 'new_subgroups',
@@ -1049,6 +1049,32 @@ def get_backend(group: Optional[ProcessGroup] = None) -> Backend:
         raise ValueError("Invalid process group specified")
     pg_store = _world.pg_map[pg] if pg in _world.pg_map else None
     return Backend(not_none(pg_store)[0])
+
+def get_pg_config() -> List[Dict[str, Union[int, str, List[int]]]]:
+    """
+    Return the pg configuration of all the process groups.
+
+    """
+    config_info: List[Dict[str, Union[int, str, List[int]]]] = []
+    for pg, pg_store in _world.pg_map.items():
+        backend_type = Backend.backend_type_map[pg_store[0]]
+        config_info.append(
+            {
+                "pg_name": _get_process_group_name(pg),
+                "backend_id": pg._backend_id(backend_type),
+                "backend_config": get_backend_config(pg),
+                "pg_size": _get_group_size(pg),
+                "ranks": get_process_group_ranks(pg),
+            }
+        )
+    return config_info
+
+def get_pg_count() -> int:
+    """
+    Return the number of process groups.
+
+    """
+    return _world.group_count
 
 def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) -> None:
     """
@@ -3530,6 +3556,10 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
     Returns:
         Async work handle, if async_op is set to True.
         None, if not async_op or if not part of the group
+
+    .. note:: `ProcessGroupNCCL` now relies on stream synchronization instead of
+              device synchronization to block the CPU. Thus, please do not assume that
+              `barrier()` would perform a device synchronization.
     """
     if _rank_not_in_group(group):
         _warn_not_in_group("barrier")

@@ -63,7 +63,7 @@ def get_use_stack_trace(node) -> Optional[str]:
     return None
 
 
-def check_multiple_devices(
+def check_multiple_devices_or_any_cpu_nodes(
     device_node_mapping: Dict[torch.device, torch.fx.Node]
 ) -> Optional[str]:
     if cpu_node := device_node_mapping.get(torch.device("cpu")):
@@ -71,6 +71,8 @@ def check_multiple_devices(
             return format_default_skip_message(
                 f"cpu device. Found from : \n {stack_trace}"
             )
+
+        return format_default_skip_message("cpu device")
 
     if (
         len(device_node_mapping) == 1
@@ -85,7 +87,7 @@ def check_multiple_devices(
 def check_lowering_disable_cudagraph(
     device_node_mapping: Dict[torch.device, torch.fx.Node]
 ) -> Optional[str]:
-    return check_multiple_devices(device_node_mapping)
+    return check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
 
 
 def check_for_incompatible_cudagraph_ops(gm) -> Optional[str]:

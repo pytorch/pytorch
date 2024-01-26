@@ -570,6 +570,7 @@ API Reference
 .. autoclass:: ExportGraphSignature
 
     .. automethod:: replace_all_uses
+    .. automethod:: get_replace_hook
 
 .. autoclass:: torch.export.graph_signature.CustomObjArgument
 
