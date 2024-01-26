@@ -2933,6 +2933,16 @@ class CPUReproTests(TestCase):
             with torch.no_grad():
                 self.common(fn, (o1, o2, x, y))
 
+    def test_constant_bool_vec(self):
+        def fn(x):
+            mask = torch.zeros(1, dtype=torch.bool)
+            return torch.where(mask, x, -1.0)
+
+        x = torch.rand(1000)
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
