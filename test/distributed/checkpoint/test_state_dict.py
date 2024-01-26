@@ -453,15 +453,13 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     def test_activation_ckpt_fqns(self) -> None:
         """Tests that activation checkpointing prefixes are removed from module names"""
         model = CompositeParamModel(device=torch.device("cuda"))
+        original_keys = get_model_state_dict(model).keys()
+
         apply_activation_checkpointing(model)
-        model_names = [(model, name) for name, _ in model.named_parameters()]
+        model = DDP(model)
+        new_keys = get_model_state_dict(model).keys()
 
-        ddp_model = DDP(model)
-        ddp_names = [(ddp_model, name) for name, _ in ddp_model.named_parameters()]
-
-        for model, name in model_names:
-            for fqn in _get_fqns(model, name):
-                self.assertNotIn(_CHECKPOINT_WRAPPED_MODULE, fqn)
+        self.assertEqual(original_keys, new_keys)
 
 
 if __name__ == "__main__":
