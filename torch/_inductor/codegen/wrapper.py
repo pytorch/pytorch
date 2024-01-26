@@ -6,6 +6,7 @@ import inspect
 import operator
 import os
 import re
+import sys
 from itertools import chain, count
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
@@ -429,7 +430,7 @@ class WrapperCodeGen(CodeGen):
                 from torch._inductor.utils import maybe_profile
                 from torch._inductor.codegen.memory_planning import _align as align
 
-                from torch import device, empty, empty_strided
+                from torch import device, empty_strided
                 from {codecache.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
                 from torch._inductor.codegen.multi_kernel import MultiKernelCall
@@ -437,6 +438,8 @@ class WrapperCodeGen(CodeGen):
                 aten = torch.ops.aten
                 inductor_ops = torch.ops.inductor
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+                empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
+                empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
                 alloc_from_pool = torch.ops.inductor._alloc_from_pool
                 reinterpret_tensor = torch.ops.inductor._reinterpret_tensor
                 async_compile = AsyncCompile()
@@ -1161,23 +1164,21 @@ class WrapperCodeGen(CodeGen):
         return self.make_allocation(buffer.get_name(), device, dtype, shape, stride)
 
     def make_allocation(self, name, device, dtype, shape, stride):
-        try:
-            expected = tuple(ir.make_contiguous_strides_for(shape))
-        except Exception:  # cannot determine truth value of Relational
-            expected = None
-        if stride == expected:
+        if device.type in ("cpu", "cuda"):
+            # optimized path for faster allocations, saving ~2us versus the stuff below
             return (
-                f"{name} = empty("
-                f"{self.codegen_shape_tuple(shape)}, "
-                f"device='{device.type}', dtype={dtype})"
-            )
-        else:
-            return (
-                f"{name} = empty_strided("
+                f"{name} = empty_strided_{device.type}("
                 f"{self.codegen_shape_tuple(shape)}, "
                 f"{self.codegen_shape_tuple(stride)}, "
-                f"device='{device.type}', dtype={dtype})"
+                f"{dtype})"
             )
+        # all other devices:
+        return (
+            f"{name} = empty_strided("
+            f"{self.codegen_shape_tuple(shape)}, "
+            f"{self.codegen_shape_tuple(stride)}, "
+            f"device='{device.type}', dtype={dtype})"
+        )
 
     def make_tensor_alias(self, new_name, old_name, comment=""):
         return f"{self.declare}{new_name} = {old_name}{self.ending}  {self.comment} {comment}"
@@ -1351,7 +1352,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.closed_bracket = "}"
         self.comment = "//"
         self.namespace = "at::"
-        self.none_str = "at::Tensor()"
+        self.none_str = (
+            "nullptr" if config.aot_inductor.abi_compatible else "at::Tensor()"
+        )
         self.extern_call_ops = set()
         self.size = "sizes()"
         self.stride = "strides()"
@@ -2226,16 +2229,22 @@ class CppWrapperCodeGen(WrapperCodeGen):
         return f"{{{', '.join(parts)}}}"
 
     def codegen_dynamic_scalar(self, node):
-        from .cpp import DTYPE_TO_ATEN
+        from .cpp import DTYPE_TO_ATEN, DTYPE_TO_CPP
 
         (data,) = (t.codegen_reference() for t in node.inputs)
-        if node.is_bool:
-            self.writeline(f"bool {node.sym} = {data}.item() ? 1 : 0;")
+        if config.aot_inductor.abi_compatible:
+            dtype = node.inputs[0].get_dtype()
+            dtype_str = str(dtype).split(".")[-1]
+            self.writeline(f"{DTYPE_TO_CPP[dtype]} {node.sym};")
+            self.writeline(f"aoti_torch_item_{dtype_str}({data}, &{node.sym});")
         else:
-            convert_type = DTYPE_TO_ATEN[node.inputs[0].get_dtype()].replace(
-                "at::k", "to"
-            )
-            self.writeline(f"auto {node.sym} = {data}.item().{convert_type}();")
+            if node.is_bool:
+                self.writeline(f"bool {node.sym} = {data}.item() ? 1 : 0;")
+            else:
+                convert_type = DTYPE_TO_ATEN[node.inputs[0].get_dtype()].replace(
+                    "at::k", "to"
+                )
+                self.writeline(f"auto {node.sym} = {data}.item().{convert_type}();")
 
     def can_stack_allocate_buffer(self, buffer):
         return (
@@ -2789,7 +2798,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else:
                 return "true" if val else "false"
         elif isinstance(val, int):
-            return f"{val}L"
+            # uint64_t is long on Linux, but long long on MacOS
+            return f"{val}LL" if sys.platform == "darwin" else f"{val}L"
         elif isinstance(val, str):
             return f'"{val}"'
         elif isinstance(val, (ir.Buffer, ReinterpretView)):
