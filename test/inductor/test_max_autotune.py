@@ -33,7 +33,7 @@ from torch._inductor.select_algorithm import (
     TritonTemplateCaller,
 )
 from torch._inductor.util_autotuning_log_parser import AutotuningLogParser
-from torch._inductor.utils import cache_dir, run_and_get_code
+from torch._inductor.utils import cache_dir, fresh_inductor_cache, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
@@ -335,6 +335,7 @@ class TestMaxAutotune(TestCase):
         evt_only=True,
         aux_shape: Optional[Tuple[int]] = None,
         config_override=None,
+        use_autotuning_cache=True,
     ):
         if config_override is None:
             config_override = {}
@@ -400,8 +401,13 @@ class TestMaxAutotune(TestCase):
             with config.patch(conf_patch):
                 counters["inductor"]["cuda_epilogue_fusion_counter"] = 0
                 Y = mm(*args)
-                mm_jit = torch.compile(mm, dynamic=dynamic)
-                Y_compiled = mm_jit(*args)
+                if use_autotuning_cache:
+                    mm_jit = torch.compile(mm, dynamic=dynamic)
+                    Y_compiled = mm_jit(*args)
+                else:
+                    with fresh_inductor_cache():
+                        mm_jit = torch.compile(mm, dynamic=dynamic)
+                        Y_compiled = mm_jit(*args)
                 actual_count = counters["inductor"]["cuda_epilogue_fusion_counter"]
                 torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
                 if expected_fuse_count is not None:
@@ -739,6 +745,63 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_simple_addmm_large(self):
+        def mm(a, b, bias):
+            return torch.addmm(bias, a, b)
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False,
+            fp16=True,
+            expected_fuse_count=0,
+            mm=mm,
+            with_bias=True,
+            # bias_broadcast=(False, True),
+            m=1024,
+            k=256,
+            n=109760,
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_simple_addmm_large_broadcasted_1(self):
+        def mm(a, b, bias):
+            return torch.addmm(bias, a, b)
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False,
+            fp16=True,
+            expected_fuse_count=0,
+            mm=mm,
+            with_bias=True,
+            bias_broadcast=(False, True),
+            m=1024,
+            k=256,
+            n=109760,
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_simple_addmm_large_broadcasted_2(self):
+        def mm(a, b, bias):
+            return torch.addmm(bias, a, b)
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False,
+            fp16=True,
+            expected_fuse_count=0,
+            mm=mm,
+            with_bias=True,
+            bias_broadcast=(True, False),
+            m=1024,
+            k=256,
+            n=4096 + 256,
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_addmm_broadcasted_col(self):
         def mm(a, b, bias):
             bias_slice = bias[:, 0:1]
@@ -750,6 +813,10 @@ class TestMaxAutotune(TestCase):
             expected_fuse_count=0,
             mm=mm,
             with_bias=True,
+            m=1024,
+            k=256,
+            n=4096 + 256,
+            use_autotuning_cache=True,
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -766,6 +833,10 @@ class TestMaxAutotune(TestCase):
             expected_fuse_count=0,
             mm=mm,
             with_bias=True,
+            m=1024,
+            k=256,
+            n=4096 + 256,
+            use_autotuning_cache=True,
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
