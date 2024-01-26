@@ -18,7 +18,6 @@
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/OpMathType.h>
 
-#include <c10/util/math_compat.h>
 #include <c10/util/MathConstants.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/TypeSafeSignMath.h>
@@ -140,8 +139,8 @@ void LogitMKLKernel(T eps, TensorIteratorBase* it) {
 #endif // AT_MKL_ENABLED
 
 static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      kBFloat16, iter.common_dtype(), "logit_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, iter.common_dtype(), "logit_cpu", [&]() {
         const scalar_t eps = eps_scalar.to<scalar_t>();
         if (at::hasMKL() && iter.is_contiguous()) {
           LogitMKLKernel<scalar_t>(eps, &iter);
@@ -180,9 +179,9 @@ static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
 }
 
 #if !defined(C10_MOBILE)
-#define _AT_DISPATCH_ABS_TYPES(TYPE, NAME, ...)                   \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(                   \
-            kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn,       \
+#define _AT_DISPATCH_ABS_TYPES(TYPE, NAME, ...)                                                 \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND6(                                                 \
+            kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, \
             TYPE, NAME, __VA_ARGS__)
 #else
 #define _AT_DISPATCH_ABS_TYPES(TYPE, NAME, ...)          \
@@ -523,8 +522,8 @@ static void kaiser_window_kernel(TensorIteratorBase& iter, int64_t window_length
     using opmath_t = at::opmath_type<scalar_t>;
     const opmath_t alpha = static_cast<opmath_t>((window_length - 1) / 2.0);
     const opmath_t beta_ = static_cast<opmath_t>(beta);
-    cpu_kernel(iter, [=](scalar_t a){
-        return calc_i0(beta_ * std::sqrt(1 - std::pow((static_cast<opmath_t>(a) - alpha) / alpha, static_cast<opmath_t>(2.0)))) / calc_i0(beta_);
+    cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
+        return calc_i0(beta_ * std::sqrt(std::abs(1 - std::pow((static_cast<opmath_t>(a) - alpha) / alpha, static_cast<opmath_t>(2.0))))) / calc_i0(beta_);
     });
   });
 }

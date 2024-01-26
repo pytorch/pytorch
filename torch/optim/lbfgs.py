@@ -182,7 +182,9 @@ def _strong_wolfe(obj_func,
 
 
 class LBFGS(Optimizer):
-    """Implements L-BFGS algorithm, heavily inspired by `minFunc
+    """Implements L-BFGS algorithm.
+
+    Heavily inspired by `minFunc
     <https://www.cs.ubc.ca/~schmidtm/Software/minFunc.html>`_.
 
     .. warning::
@@ -199,6 +201,7 @@ class LBFGS(Optimizer):
         try reducing the history size, or use a different algorithm.
 
     Args:
+        params (iterable): iterable of parameters to optimize. Parameters must be real.
         lr (float): learning rate (default: 1)
         max_iter (int): maximal number of iterations per optimization step
             (default: 20)
@@ -238,6 +241,9 @@ class LBFGS(Optimizer):
                              "(parameter groups)")
 
         self._params = self.param_groups[0]['params']
+        if any(p.is_complex() for p in self._params):
+            raise ValueError("LBFGS doesn't support complex parameters, see #118148")
+
         self._numel_cache = None
 
     def _numel(self):
@@ -282,7 +288,7 @@ class LBFGS(Optimizer):
 
     @torch.no_grad()
     def step(self, closure):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable): A closure that reevaluates the model

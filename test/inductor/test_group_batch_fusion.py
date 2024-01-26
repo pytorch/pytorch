@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 
-import functools
 import unittest
 
 import torch
@@ -18,7 +17,7 @@ except Exception:
     has_fbgemm = False
     pass
 
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 
 class MyModule(torch.nn.Module):
@@ -198,33 +197,46 @@ class MyModule5(torch.nn.Module):
         return torch.sin(l1_out)
 
 
-class MyModule6(torch.nn.Module):
+class TestPoitwiseOps(torch.nn.Module):
     def __init__(self, device, has_bias=True):
         super().__init__()
         self.device = device
 
     def forward(self, x):
         inputs = torch.split(x.to(self.device), 500, dim=1)
-        x_split = torch.split(inputs[0].to(self.device), 100, dim=1)
-        y_split = torch.split(inputs[1].to(self.device), 100, dim=1)
+        x_split = torch.split(inputs[0].to(self.device), 50, dim=1)
+        y_split = torch.split(inputs[1].to(self.device), 50, dim=1)
         tanh_1 = [torch.tanh(x_split[i]) for i in range(len(x_split))]
         tanh_2 = [torch.tanh(y_split[i]) for i in range(len(y_split))]
-        return torch.cat(tanh_1, dim=1) + torch.cat(tanh_2, dim=1)
+        sigmoid_1 = [torch.sigmoid(tanh_1[i]) for i in range(len(tanh_1))]
+        sigmoid_2 = [torch.sigmoid(tanh_2[i]) for i in range(len(tanh_2))]
+        relu_1 = [torch.nn.functional.relu(sigmoid_1[i]) for i in range(len(sigmoid_1))]
+        relu_2 = [torch.nn.functional.relu(sigmoid_2[i]) for i in range(len(sigmoid_2))]
+        add = [torch.add(relu_1[i], relu_2[i]) for i in range(len(relu_1))]
+        mul = [torch.mul(add[i], add[i]) for i in range(len(add))]
+        sub = [torch.sub(mul[i], mul[i]) for i in range(len(mul))]
+        div = [torch.div(sub[i], sub[i]) for i in range(len(sub))]
+        return torch.cat(div, dim=1)
 
 
-class MyModule7(torch.nn.Module):
-    def __init__(self, device, has_bias=True):
-        super().__init__()
-        self.device = device
-
-    def forward(self, x):
-        inputs = torch.unbind(x.to(self.device), dim=0)
-        relu = [torch.nn.functional.relu(inputs[i]) for i in range(len(inputs))]
-        return torch.stack(relu, dim=0)
-
-
-@requires_cuda()
-@torch._inductor.config.patch(group_fusion=True, batch_fusion=True)
+@requires_cuda
+@torch._inductor.config.patch(
+    pre_grad_fusion_options={
+        "batch_linear": {},
+        "batch_linear_lhs": {},
+        "batch_layernorm": {},
+        "batch_tanh": {},
+        "batch_relu": {},
+        "batch_sigmoid": {},
+    },
+    post_grad_fusion_options={
+        "batch_aten_add": {},
+        "batch_aten_mul": {},
+        "batch_aten_sub": {},
+        "batch_aten_div": {},
+        "group_linear": {"require_fbgemm": True},
+    },
+)
 class TestGroupBatchFusion(TestCase):
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
@@ -282,7 +294,7 @@ class TestGroupBatchFusion(TestCase):
             )
             self.assertEqual(
                 counters["inductor"]["batch_fusion"],
-                0,
+                3,
             )
             counters.clear()
 
@@ -313,7 +325,7 @@ class TestGroupBatchFusion(TestCase):
         )
         self.assertEqual(
             counters["inductor"]["batch_fusion"],
-            0,
+            1,
         )
         counters.clear()
 
@@ -396,22 +408,22 @@ class TestGroupBatchFusion(TestCase):
             self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
             counters.clear()
 
-    def test_batch_tanh_pre_grad_fusion(self):
+    def test_pointwise_op_fusion(self):
         counters.clear()
-        module = MyModule6("cuda")
+        module = TestPoitwiseOps("cuda")
         input = [torch.randn(50, 1000, requires_grad=True, device="cuda")]
         traced = torch.compile(module)
         ref = module(*input)
         res = traced(*input)
         self.compare_pred(module, traced, input)
-        self.assertEqual(counters["inductor"]["batch_fusion"], 2)
+        self.assertEqual(counters["inductor"]["batch_fusion"], 7)
         self.assertEqual(
             counters["inductor"]["scmerge_split_removed"],
-            2,
+            0,
         )
         self.assertEqual(
             counters["inductor"]["scmerge_cat_removed"],
-            2,
+            0,
         )
         ref.sum().backward()
         res.sum().backward()
@@ -419,20 +431,42 @@ class TestGroupBatchFusion(TestCase):
         self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
-    def test_batch_relu_pre_grad_fusion(self):
-        counters.clear()
-        module = MyModule7("cuda")
-        input = [torch.randn(20, 40, 60, requires_grad=True, device="cuda")]
-        traced = torch.compile(module)
-        ref = module(*input)
-        res = traced(*input)
-        self.compare_pred(module, traced, input)
-        self.assertEqual(counters["inductor"]["batch_fusion"], 1)
-        ref.sum().backward()
-        res.sum().backward()
-        self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
-        self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
-        counters.clear()
+
+class TestBMMFusionModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.my_modules = torch.nn.ModuleList()
+        for _ in range(10):
+            self.my_modules.append(torch.nn.Linear(10, 10))
+
+    def forward(self, inputs):
+        output = None
+        for linear, input in zip(self.my_modules, inputs):
+            if output is None:
+                output = linear(input)
+            else:
+                output += linear(input)
+        return output
+
+
+@requires_cuda
+@torch._inductor.config.patch(
+    post_grad_fusion_options={"batch_linear_post_grad": {"require_fbgemm": False}}
+)
+class TestPostGradBatchLinearFusion(TestCase):
+    def test_batch_linear_post_grad_fusion(self):
+        pt1_module = TestBMMFusionModule().cuda()
+        inputs = []
+        for _ in range(10):
+            inputs.append(torch.randn(10, 10).cuda())
+        eager_output = pt1_module(inputs)
+        pt2_module = torch.compile(pt1_module)
+        pt2_output = pt2_module(inputs)
+        self.assertTrue(torch.allclose(eager_output, pt2_output))
+        self.assertEqual(
+            counters["inductor"]["batch_fusion"],
+            2,
+        )
 
 
 if __name__ == "__main__":

@@ -323,18 +323,16 @@ SignalHandler::~SignalHandler() {
 // function was called.
 bool SignalHandler::GotSIGINT() {
   uint64_t count = sigintCount;
-  bool result = (count != my_sigint_count_);
-  my_sigint_count_ = count;
-  return result;
+  uint64_t localCount = my_sigint_count_.exchange(count);
+  return (localCount != count);
 }
 
 // Return true iff a SIGHUP has been received since the last time this
 // function was called.
 bool SignalHandler::GotSIGHUP() {
   uint64_t count = sighupCount;
-  bool result = (count != my_sighup_count_);
-  my_sighup_count_ = count;
-  return result;
+  uint64_t localCount = my_sighup_count_.exchange(count);
+  return (localCount != count);
 }
 
 SignalHandler::Action SignalHandler::CheckForSignals() {

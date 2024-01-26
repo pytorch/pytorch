@@ -10,7 +10,13 @@
 // Many APIs have changed/don't exist anymore
 #if IS_PYTHON_3_12_PLUS
 
+#include "dim.h"
+
 // Re-enable this some day
+PyObject* Dim_init() {
+    PyErr_SetString(PyExc_RuntimeError, "First class dim doesn't work with python 3.12");
+    return nullptr;
+}
 
 #else
 

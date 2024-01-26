@@ -4,29 +4,52 @@ import functools
 
 from unittest import expectedFailure as xfail, skipIf
 
-import torch._numpy as np
-
 from pytest import raises as assert_raises  # , assert_raises_regex,
 
-from torch._numpy import diag_indices, diag_indices_from, fill_diagonal, index_exp, s_
-from torch._numpy.testing import (
-    assert_,
-    assert_almost_equal,
-    assert_array_almost_equal,
-    assert_array_equal,
-    assert_equal,
-)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xpassIfTorchDynamo,
 )
 
 skip = functools.partial(skipIf, True)
 
 
-@xfail  # (reason="unravel_index not implemented")
+# If we are going to trace through these, we should use NumPy
+# If testing on eager mode, we use torch._numpy
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy import diag_indices, diag_indices_from, fill_diagonal, index_exp, s_
+    from numpy.testing import (
+        assert_,
+        assert_almost_equal,
+        assert_array_almost_equal,
+        assert_array_equal,
+        assert_equal,
+        assert_raises_regex,
+    )
+else:
+    import torch._numpy as np
+    from torch._numpy import (
+        diag_indices,
+        diag_indices_from,
+        fill_diagonal,
+        index_exp,
+        s_,
+    )
+    from torch._numpy.testing import (
+        assert_,
+        assert_almost_equal,
+        assert_array_almost_equal,
+        assert_array_equal,
+        assert_equal,
+    )
+
+
+@xpassIfTorchDynamo  # (reason="unravel_index not implemented")
 @instantiate_parametrized_tests
 class TestRavelUnravelIndex(TestCase):
     def test_basic(self):
@@ -428,7 +451,7 @@ class TestIx_(TestCase):
 
 
 class TestC(TestCase):
-    @xfail  # (reason="c_ not implemented")
+    @xpassIfTorchDynamo  # (reason="c_ not implemented")
     def test_c_(self):
         a = np.c_[np.array([[1, 2, 3]]), 0, 0, np.array([[4, 5, 6]])]
         assert_equal(a, [[1, 2, 3, 0, 0, 4, 5, 6]])

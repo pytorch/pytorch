@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _default_to_fused_or_foreach,
-                        _differentiable_doc, _foreach_doc, _maximize_doc)
+                        _differentiable_doc, _foreach_doc, _maximize_doc, _view_as_real)
 from typing import List, Optional
 
 __all__ = ["Adadelta", "adadelta"]
@@ -79,7 +79,7 @@ class Adadelta(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -157,9 +157,11 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
         rho (float, optional): coefficient used for computing a running average
-            of squared gradients (default: 0.9)
+            of squared gradients (default: 0.9). A higher value of `rho` will
+            result in a slower average, which can be helpful for preventing
+            oscillations in the learning process.
         eps (float, optional): term added to the denominator to improve
-            numerical stability (default: 1e-6)
+            numerical stability (default: 1e-6).
         lr (float, optional): coefficient that scale delta before it is applied
             to the parameters (default: 1.0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
@@ -194,7 +196,6 @@ def adadelta(
 
     See :class:`~torch.optim.Adadelta` for details.
     """
-
     # We still respect when the user inputs False for foreach.
     if foreach is None:
         _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
@@ -285,16 +286,11 @@ def _multi_tensor_adadelta(
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, square_avgs, acc_deltas])
     for ((device_params, device_grads, device_square_avgs, device_acc_deltas), _) in grouped_tensors.values():
+        if has_complex:
+            _view_as_real(device_params, device_grads, device_square_avgs, device_acc_deltas)
+
         if maximize:
             device_grads = torch._foreach_neg(device_grads)
-
-        if has_complex:
-            for i in range(len(device_params)):
-                if torch.is_complex(device_params[i]):
-                    device_params[i] = torch.view_as_real(device_params[i])
-                    device_grads[i] = torch.view_as_real(device_grads[i])
-                    device_square_avgs[i] = torch.view_as_real(device_square_avgs[i])
-                    device_acc_deltas[i] = torch.view_as_real(device_acc_deltas[i])
 
         if weight_decay != 0:
             # Re-use the intermediate memory (device_grads) already allocated for maximize

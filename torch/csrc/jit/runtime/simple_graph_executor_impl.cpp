@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 
 #include <c10/util/Optional.h>
-#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/simple_graph_executor_impl.h>
 #include <mutex>
 

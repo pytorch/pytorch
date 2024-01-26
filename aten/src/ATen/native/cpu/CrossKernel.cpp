@@ -69,7 +69,7 @@ static void apply_cross(const Tensor& result, const Tensor& a, const Tensor& b, 
 }
 
 static void cross_kernel_impl(const Tensor& result, const Tensor& a, const Tensor& b, const int64_t dim) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, result.scalar_type(), "cross", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, result.scalar_type(), "cross", [&]() {
     apply_cross<scalar_t>(result, a, b, dim);
   });
 }

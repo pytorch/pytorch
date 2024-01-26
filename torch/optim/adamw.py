@@ -1,8 +1,9 @@
 import torch
 from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt,
-                        _stack_if_compiling, _capturable_doc, _differentiable_doc, _foreach_doc,
-                        _fused_doc, _maximize_doc, _default_to_fused_or_foreach, ParamsT)
+                        _stack_if_compiling, _get_scalar_dtype, _capturable_doc, _differentiable_doc,
+                        _foreach_doc, _fused_doc, _maximize_doc, _default_to_fused_or_foreach,
+                        ParamsT, _view_as_real)
 from typing import List, Optional, Tuple, Union
 from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
 
@@ -78,14 +79,11 @@ class AdamW(Optimizer):
             group.setdefault("foreach", None)
             group.setdefault("capturable", False)
             group.setdefault("differentiable", False)
-            group.setdefault("fused", None)
-        state_values = list(self.state.values())
-        step_is_tensor = (len(state_values) != 0) and torch.is_tensor(
-            state_values[0]["step"]
-        )
-        if not step_is_tensor:
-            for s in state_values:
-                s["step"] = torch.tensor(float(s["step"]))
+            fused = group.setdefault("fused", None)
+            for p in group["params"]:
+                p_state = self.state.get(p, [])
+                if len(p_state) != 0 and not torch.is_tensor(p_state['step']):
+                    p_state["step"] = torch.tensor(float(p_state["step"]), dtype=_get_scalar_dtype(is_fused=fused))
 
     def _init_group(
         self,
@@ -98,9 +96,11 @@ class AdamW(Optimizer):
         max_exp_avg_sqs,
         state_steps,
     ):
+        has_complex = False
         for p in group["params"]:
             if p.grad is None:
                 continue
+            has_complex |= torch.is_complex(p)
             params_with_grad.append(p)
             if p.grad.is_sparse:
                 raise RuntimeError("AdamW does not support sparse gradients")
@@ -113,9 +113,9 @@ class AdamW(Optimizer):
                 # note(crcrpar): Deliberately host `step` on CPU if both capturable and fused are off.
                 # This is because kernel launches are costly on CUDA and XLA.
                 state["step"] = (
-                    torch.zeros((), dtype=torch.float, device=p.device)
+                    torch.zeros((), dtype=_get_scalar_dtype(is_fused=group["fused"]), device=p.device)
                     if group["capturable"] or group["fused"]
-                    else torch.tensor(0.0)
+                    else torch.tensor(0.0, dtype=_get_scalar_dtype())
                 )
                 # Exponential moving average of gradient values
                 state["exp_avg"] = torch.zeros_like(
@@ -144,10 +144,11 @@ class AdamW(Optimizer):
                 raise RuntimeError('lr as a Tensor is not supported for capturable=False and foreach=True')
 
             state_steps.append(state["step"])
+        return has_complex
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -170,7 +171,7 @@ class AdamW(Optimizer):
             amsgrad = group["amsgrad"]
             beta1, beta2 = group["betas"]
 
-            self._init_group(
+            has_complex = self._init_group(
                 group,
                 params_with_grad,
                 grads,
@@ -201,6 +202,7 @@ class AdamW(Optimizer):
                 fused=group["fused"],
                 grad_scale=getattr(self, "grad_scale", None),
                 found_inf=getattr(self, "found_inf", None),
+                has_complex=has_complex,
             )
 
         return loss
@@ -287,6 +289,7 @@ def adamw(
     fused: Optional[bool] = None,
     grad_scale: Optional[Tensor] = None,
     found_inf: Optional[Tensor] = None,
+    has_complex: bool = False,
     *,
     amsgrad: bool,
     beta1: float,
@@ -300,7 +303,6 @@ def adamw(
 
     See :class:`~torch.optim.AdamW` for details.
     """
-
     if not torch._utils.is_compiling() and not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError(
             "API has changed, `state_steps` argument must contain a list of singleton tensors"
@@ -350,6 +352,7 @@ def adamw(
         differentiable=differentiable,
         grad_scale=grad_scale,
         found_inf=found_inf,
+        has_complex=has_complex,
     )
 
 
@@ -372,6 +375,7 @@ def _single_tensor_adamw(
     maximize: bool,
     capturable: bool,
     differentiable: bool,
+    has_complex: bool,
 ):
 
     assert grad_scale is None and found_inf is None
@@ -489,6 +493,7 @@ def _multi_tensor_adamw(
     maximize: bool,
     capturable: bool,
     differentiable: bool,
+    has_complex: bool,
 ):
     if len(params) == 0:
         return
@@ -516,17 +521,14 @@ def _multi_tensor_adamw(
         device_max_exp_avg_sqs,
         device_state_steps,
     ), _) in grouped_tensors.values():
+        if has_complex:
+            if amsgrad:
+                _view_as_real(device_params, device_grads, device_exp_avgs, device_exp_avg_sqs, device_max_exp_avg_sqs)
+            else:
+                _view_as_real(device_params, device_grads, device_exp_avgs, device_exp_avg_sqs)
+
         if maximize:
             device_grads = torch._foreach_neg(device_grads)
-
-        for i in range(len(device_params)):
-            if torch.is_complex(device_params[i]):
-                device_params[i] = torch.view_as_real(device_params[i])
-                device_grads[i] = torch.view_as_real(device_grads[i])
-                device_exp_avgs[i] = torch.view_as_real(device_exp_avgs[i])
-                device_exp_avg_sqs[i] = torch.view_as_real(device_exp_avg_sqs[i])
-                if amsgrad:
-                    device_max_exp_avg_sqs[i] = torch.view_as_real(device_max_exp_avg_sqs[i])
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
@@ -627,6 +629,7 @@ def _fused_adamw(
     maximize: bool,
     capturable: bool,  # Needed for consistency.
     differentiable: bool,
+    has_complex: bool,
 ) -> None:
     if not params:
         return

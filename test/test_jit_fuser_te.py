@@ -1289,7 +1289,7 @@ class TestTEFuser(JitTestCase):
                 self.assertLastGraphAllFused()
             except Exception as e:
                 raise RuntimeError(
-                    " ".join(["Failed:", str(self_dtype), op.__name__, device, str(size)])
+                    " ".join(["Failed:", str(self_dtype), op.__name__, device, str(size)])  # noqa: F821
                 ) from e
 
     def test_isnan(self):
@@ -2043,7 +2043,7 @@ class TestTEFuser(JitTestCase):
         sets = []
         for i in range(0, len(indices) + 1):
             for subset in combinations(indices, i):
-                sets.append(subset)
+                sets.append(subset)  # noqa: PERF402
 
         for set in sets:
             size = [2, 3, 4, 5]
@@ -2706,7 +2706,7 @@ def f({', '.join(param_names)}):
             return
         try:
             with warnings.catch_warnings():
-                warnings.simplefilter('ignore', TracerWarning)
+                warnings.simplefilter('ignore', TracerWarning)  # noqa: F821
                 self.te_compile(device, dtype, op)
         except Exception as e:
             pass

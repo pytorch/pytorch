@@ -5,8 +5,8 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
-#include <ATen/Operators.h>
 #include <ATen/FunctionalTensorWrapper.h>
+#include <ATen/Operators.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/functorch/BatchedFallback.h>
@@ -46,6 +46,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(absolute);
   OP_DECOMPOSE(absolute_);
   OP_DECOMPOSE(arctan2);
+  OP_DECOMPOSE(arctan2_);
   OP_DECOMPOSE(argsort);
   OP_DECOMPOSE(avg_pool1d);
   OP_DECOMPOSE(adaptive_max_pool1d);
@@ -294,6 +295,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(trapezoid, dx);
   OP_DECOMPOSE2(trapz, x);
   OP_DECOMPOSE2(trapz, dx);
+  OP_DECOMPOSE(unsafe_chunk);
   m.impl("value_selecting_reduction_backward", native::value_selecting_reduction_backward_symint);
   OP_DECOMPOSE(var);
   OP_DECOMPOSE2(var, dim);

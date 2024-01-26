@@ -3,7 +3,6 @@ from typing import Optional
 
 import torch
 from torch._export.error import InternalError
-from torch._export.pass_base import _ExportPassBase
 
 from torch.ao.quantization.pt2e.utils import (
     _filter_sym_size_users,
@@ -13,7 +12,7 @@ from torch.ao.quantization.pt2e.utils import (
 
 from torch.ao.quantization.quantizer import QuantizationSpecBase
 
-from torch.fx.passes.infra.pass_base import PassResult
+from torch.fx.passes.infra.pass_base import PassBase, PassResult
 
 
 logger = logging.getLogger(__name__)
@@ -86,7 +85,7 @@ def _port_metadata_for_input_quant_nodes(
         if len(choose_qparam_users) != 2:
             raise InternalError(f"Expecting exactly two user for {choose_qparams_node}")
         scale_node = choose_qparam_users.pop()
-        dynamic_q_node = list(scale_node.users.keys())[0]
+        dynamic_q_node = next(iter(scale_node.users.keys()))
         dynamic_q_node_users = _filter_sym_size_users(dynamic_q_node)
         if len(dynamic_q_node_users) > 1:
             raise InternalError(f"Expecting single user for {dynamic_q_node}")
@@ -133,7 +132,7 @@ def _port_metadata_for_output_quant_nodes(
     _add_metadata(q_node, node)
 
 
-class PortNodeMetaForQDQ(_ExportPassBase):
+class PortNodeMetaForQDQ(PassBase):
     """
     Port metadata for nodes added by quantization flow.
     For static quant these are:

@@ -327,7 +327,7 @@ class TestHooks(FSDPTest):
     def _test_pre_backward_hook_registration(self, model):
         optim = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
         optim.zero_grad()
-        # Inputs always cuda, as computation happes on CUDA device only
+        # Inputs always cuda, as computation happens on CUDA device only
         input = model.module.get_input(torch.device("cuda"))
         output = model(*input)
         # this is pre-bwd hook

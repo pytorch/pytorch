@@ -1,7 +1,6 @@
 """
 This file includes private common utilities for FSDP.
 """
-
 import logging
 import traceback
 import warnings
@@ -21,6 +20,7 @@ from typing import (
     Set,
     Tuple,
     Type,
+    TYPE_CHECKING,
 )
 
 import torch
@@ -32,6 +32,7 @@ from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
+from torch.distributed.fsdp._fsdp_extensions import FSDPExtensions
 from torch.distributed.utils import _apply_to_tensors
 from torch.utils._mode_utils import no_dispatch
 
@@ -43,6 +44,9 @@ from .api import (
     StateDictConfig,
     StateDictType,
 )
+
+if TYPE_CHECKING:
+    from ._flat_param import FlatParamHandle
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
@@ -142,7 +146,7 @@ class _FSDPState(_State):
         # Save these static lists to avoid the repeated tree traversals
         self._all_fsdp_states: List[_FSDPState] = []
         self._all_handles: List[flat_param_file.FlatParamHandle] = []
-        self._enable_extension: bool = False
+        self._fsdp_extension: Optional[FSDPExtensions] = None
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
@@ -544,11 +548,8 @@ def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.Stream) -> No
     if tensor.device.type not in ["cuda", torch._C._get_privateuse1_backend_name()]:
         return
 
-    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-        # Don't no dispatch under torch compile like this
-        with no_dispatch():
-            tensor.record_stream(stream)
-    else:
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        return
         # from @ezyang:
         # The no_dispatch was added in https://github.com/pytorch/pytorch/pull/88014 cc @fegin
         # Looking over the PR, it looks like this is because we don't actually support Stream arguments
@@ -557,7 +558,6 @@ def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.Stream) -> No
         # a better version of this would just be to check if there are any modes before disabling dispatch.
         # TODO(voz): Extend a dynamo util to answer the above, unify the codepaths here.
         tensor.record_stream(stream)
-
-
-def _same_storage_as_data_ptr(x: torch.Tensor, data_ptr: int) -> bool:
-    return x._typed_storage()._data_ptr() == data_ptr
+    else:
+        with no_dispatch():
+            tensor.record_stream(stream)

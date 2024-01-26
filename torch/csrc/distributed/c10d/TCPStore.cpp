@@ -1,4 +1,5 @@
 #include <c10/util/irange.h>
+#include <fmt/format.h>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
@@ -331,6 +332,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_int_distribution<> distrib(1, *numWorkers_);
+    // TODO (xilunwu): this wait logic may be removed after fixing read_offset
     // stagger connecting to the store when there are too many ranks to
     // avoid causing a DDoS
     std::this_thread::sleep_for(std::chrono::milliseconds(distrib(gen)));
@@ -339,6 +341,9 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
   client_ = detail::TCPClient::connect(addr_, opts);
   // TCP connection established
   C10D_DEBUG("TCP client connected to host {}:{}", addr_.host, addr_.port);
+
+  // client's first query for validation
+  validate();
 
   if (opts.waitWorkers) {
     waitForWorkers();
@@ -371,12 +376,37 @@ void TCPStore::waitForWorkers() {
       const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
           std::chrono::steady_clock::now() - start);
       if (timeout_ != kNoTimeout && elapsed > timeout_) {
-        break;
+        C10_THROW_ERROR(
+            DistStoreError,
+            fmt::format(
+                "Timed out after {} seconds waiting for clients. {}/{} clients joined.",
+                elapsed.count(),
+                numWorkersCompleted,
+                *numWorkers_));
       }
       /* sleep override */
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
   }
+}
+
+void TCPStore::validate(void) {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
+  detail::SendBuffer buffer(*client_, detail::QueryType::VALIDATE);
+  buffer.appendValue<std::uint32_t>(c10d::detail::validationMagicNumber);
+  buffer.flush();
+}
+
+void TCPStore::_splitSet(
+    const std::string& key,
+    const std::vector<uint8_t>& data) {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
+  detail::SendBuffer buffer(*client_, detail::QueryType::SET);
+  buffer.appendString(keyPrefix_ + key);
+  buffer.flush();
+  std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+  buffer.appendBytes(data);
+  buffer.flush();
 }
 
 void TCPStore::set(const std::string& key, const std::vector<uint8_t>& data) {

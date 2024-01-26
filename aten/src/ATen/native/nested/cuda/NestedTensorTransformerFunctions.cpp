@@ -10,7 +10,8 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_nested_from_padded.h>
+#include <ATen/ops/_nested_from_padded_native.h>
+#include <ATen/ops/narrow_native.h>
 #endif
 
 #include <ATen/native/NonSymbolicBC.h>
@@ -140,6 +141,7 @@ Tensor NestedTensor_to_padded_tensor_cuda(
     const Tensor& t,
     double padding,
     OptionalIntArrayRef output_size) {
+  TORCH_CHECK(t.numel() > 0, "to_padded_tensor: at least one constituent tensor should have non-zero numel")
   int64_t t_dim = t.dim();
   if (t_dim >= 2 && t_dim <= 4 &&
       (t.dtype() == at::kFloat || t.dtype() == at::kDouble ||
@@ -291,6 +293,7 @@ _scaled_dot_product_efficient_attention_nestedtensor_cuda(
   Tensor query_buffer_reshaped, key_buffer_reshaped, value_buffer_reshaped,
       cumulative_sequence_length_q, cumulative_sequence_length_kv, output_shape;
   int64_t max_seqlen_batch_q{0};
+  int64_t max_seqlen_batch_k{0};
   std::tie(
       query_buffer_reshaped,
       key_buffer_reshaped,
@@ -298,7 +301,7 @@ _scaled_dot_product_efficient_attention_nestedtensor_cuda(
       cumulative_sequence_length_q,
       cumulative_sequence_length_kv,
       max_seqlen_batch_q,
-      std::ignore,
+      max_seqlen_batch_k,
       output_shape) = preprocessing::sdpa_nested_preprocessing(query, key, value);
 
   sdp::CustomMaskType custom_mask_type = is_causal
@@ -306,7 +309,8 @@ _scaled_dot_product_efficient_attention_nestedtensor_cuda(
       : sdp::CustomMaskType::NoCustomMask;
 
   // See Note [Seed and Offset] for description of seed and offset
-  auto [attention, log_sumexp, seed, offset] = at::_efficient_attention_forward(
+  // Although max_seqlen_q, and max_seqlen_batch_kv is returned we drop these values.
+  auto [attention, log_sumexp, seed, offset, max_seqlen_q, max_seqlen_batch_kv] = at::_efficient_attention_forward(
       query_buffer_reshaped.unsqueeze(0),
       key_buffer_reshaped.unsqueeze(0),
       value_buffer_reshaped.unsqueeze(0),
@@ -314,6 +318,7 @@ _scaled_dot_product_efficient_attention_nestedtensor_cuda(
       cumulative_sequence_length_q,
       cumulative_sequence_length_kv,
       max_seqlen_batch_q,
+      max_seqlen_batch_k,
       dropout_p,
       static_cast<int64_t>(custom_mask_type),
       compute_log_sumexp,

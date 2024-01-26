@@ -1,9 +1,10 @@
 # Owner(s): ["module: dynamo"]
-# flake8: noqa
+# flake8: noqa: E731, C405, F811, C418, C417
 import collections
 import functools
 import inspect
 import itertools
+import math
 import operator
 import sys
 import unittest
@@ -19,35 +20,25 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
 from torch._dynamo.testing import expectedFailureDynamic
-from torch._dynamo.utils import same
+from torch._dynamo.utils import ifdynstaticdefault, same
 
-from torch._higher_order_ops.triton_kernel_wrap import (
-    triton_kernel_wrapper_functional,
-    triton_kernel_wrapper_mutation,
-)
 from torch.nn import functional as F
-from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
-    skipIfRocm,
+    instantiate_parametrized_tests,
+    parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA
 
-from torch.utils._triton import has_triton
-
-HAS_TRITON = has_triton()
-
-requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
-
-if HAS_TRITON:
-    import triton
-    from triton import language as tl
-
+# Defines all the kernels for tests
+from torch.testing._internal.triton_utils import *  # noqa: F403
 
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
 flag = True
+
+
+class CustomDictSubclass(collections.OrderedDict):
+    pass
 
 
 clip01 = functools.partial(torch.clip, min=0.0, max=1.0)
@@ -62,11 +53,19 @@ def func_with_default(a, b, some_default_arg=True):
         return a - b
 
 
-def make_test(fn):
+def make_test(fn=None, expected_frame_count=1):
+    if fn is None:
+        return lambda fn: make_test(fn, expected_frame_count=expected_frame_count)
+
     nargs = len(inspect.signature(fn).parameters)
 
     def test_fn(self):
-        return torch._dynamo.testing.standard_test(self, fn=fn, nargs=nargs)
+        return torch._dynamo.testing.standard_test(
+            self,
+            fn=fn,
+            nargs=nargs,
+            expected_frame_count=expected_frame_count,
+        )
 
     return test_fn
 
@@ -134,6 +133,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_itertools_chain(a, b):
         v = a
         for x in itertools.chain([a, b], [1, 2]):
+            v = v + x
+        return v
+
+    @make_test
+    def test_itertools_chain_from_iterable(a, b):
+        v = a
+        for x in itertools.chain.from_iterable([[a, b], [1, 2]]):
             v = v + x
         return v
 
@@ -408,6 +414,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return z
 
     @make_test
+    def test_dict_keys(x):
+        d = {3: x}
+        keys = d.keys()
+        d[4] = x + 1
+        d2 = {3: 2, 4: "aa"}
+        return 3 in keys, 4 in keys, 5 in keys, d2.keys() == keys
+
+    @make_test
+    def test_dict_values(x):
+        d = {3: x}
+        values = d.values()
+        d[3] = x + 1
+        d[4] = x + 2
+        return len(values)
+
+    @make_test
     def test_callable_lambda(x):
         if callable(lambda x: True):
             return x + 1
@@ -446,8 +468,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return z
 
     @make_test
+    def test_custom_dict_kwargs(x):
+        z = CustomDictSubclass(sample=torch.ones(10))
+        return z
+
+    @make_test
     def test_float(x):
-        y = float(1.2)
+        y = float(1.2)  # noqa: UP018
         y += float("1.2")
         return torch.add(x, y)
 
@@ -479,6 +506,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x + 1
         else:
             return x - 1
+
+    @make_test
+    def test_cublas_allow_tf32(x):
+        if torch.backends.cuda.matmul.allow_tf32:
+            return x.sin() + 1
+
+        return x.cos() - 1
 
     @make_test
     def test_get_calculate_correct_fan(x):
@@ -530,6 +564,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_tensor_type5(a, b):
         m = a.type(torch.cuda.HalfTensor)
         return b.type(m.type())
+
+    @make_test
+    def test_tensor_element_size(a):
+        if a.element_size() > 1:
+            return (a + a.element_size(), a - a.element_size())
+        return (a - a.element_size(), a + a.element_size())
 
     @make_test
     def test_ndim(x):
@@ -683,6 +723,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_dict_ops(a, b):
         tmp = {"a": a + 1, "b": b + 2}
+        assert tmp.get("zzz") is None
         v = tmp.pop("b") + tmp.get("a") + tmp.get("missing", 3) + tmp.pop("missing", 4)
         tmp.update({"d": 3})
         tmp["c"] = v + tmp["d"]
@@ -739,6 +780,9 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             dd["a"] = x + 1
             dd[param] = 123
             dd["c"] = x * 2
+            dd.update({"b": x * 3})
+            dd.update([["d", x - 2], ("e", x + 2)])
+            dd.update(zip("ab", [x + 3, x + 4]))
             return dd["b"], dd
 
         x = torch.randn(10, 10)
@@ -748,8 +792,26 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(ref[0], res[0]))
         self.assertTrue(same(ref[1]["a"], res[1]["a"]))
+        self.assertTrue(same(ref[1]["b"], res[1]["b"]))
         self.assertTrue(same(ref[1]["c"], res[1]["c"]))
+        self.assertTrue(same(ref[1]["d"], res[1]["d"]))
+        self.assertTrue(same(ref[1]["e"], res[1]["e"]))
         self.assertTrue(same(ref[1][param], res[1][param]))
+
+    def test_dict_tuple_lazy_guard(self):
+        @torch.compile(backend="eager")
+        def fn(x, y):
+            return torch.sin(x) * y[1]
+
+        fn(torch.randn(3), {1: 1, 2: 2})
+        # Changing the value of other key should not causing recompilation
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            fn(torch.randn(3), {1: 1, 2: 3})
+
+        fn(torch.randn(3), (1, 2, 3))
+        # Changing the value of index 0, 2 (not 1) should not cause recompilation
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            fn(torch.randn(3), (11, 2, 13))
 
     @make_test
     def test_call_dict1(x):
@@ -797,6 +859,42 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return d1["a"] + d2["c"] + 1
 
     @make_test
+    def test_dict_fromkeys(x, y):
+        lst = ["a", "b"]
+        d = dict.fromkeys(lst)
+        d1 = dict.fromkeys(d, x + 1)
+        d2 = collections.defaultdict.fromkeys(iter(d1), x - 2)
+        d3 = collections.OrderedDict.fromkeys(tuple(lst), value=y)
+        return d1["a"] * d2["b"] + d2["a"] + d1["b"] + d3["a"] + d3["b"] + 1
+
+    @make_test
+    def test_dict_copy(x):
+        my_list = [("a", x), ("b", x + 1), ("c", x + 2)]
+        d1 = dict(my_list)
+        d1["a"] = x + 10
+        d2 = d1.copy()
+        d2["a"] = x - 5
+        d2["b"] = x + 3
+        d3 = collections.OrderedDict(my_list)
+        d3["c"] = x + 20
+        d4 = d3.copy()
+        d4["c"] = x - 10
+        return d1["a"] * d2["a"] + d2["b"] + d3["c"] * d4["c"] + 1
+
+    @make_test
+    def test_dict_update(x, y, z):
+        d = {"a": x, "b": y}
+        d.update({"a": y - 1})
+        d.update([("b", z + 1), ["c", z]])
+        d.update(zip("ab", [z + 3, y + 2]))
+
+        od = collections.OrderedDict(a=x * 3, b=y + 2)
+        od.update({"a": y + 5})
+        od.update([["b", z + 6], ("c", z - 7)])
+        od.update(zip("ab", [z - 3, x + 2]))
+        return d["a"] * od["a"] + od["c"] + d["b"] + od["b"] * d["c"]
+
+    @make_test
     def test_min_max(a, b):
         c = a + b
         a = a.sum()
@@ -806,12 +904,60 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return max(a, b) - min(a, b) + c
 
     @make_test
+    def test_symbool_to_int(x):
+        # this is roughly the pattern found in einops.unpack()
+        if sum(s == -1 for s in x.size()) == 0:
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_map_sum(a, b, c, d):
         return sum(map(lambda x: x + 1, [a, b, c, d]))
 
     @make_test
+    def test_sum(a, b, c, d):
+        return sum([a, b, c, d])
+
+    @make_test
+    def test_sum_with_start_arg(a, b, c, d):
+        return sum([b, c, d], a)
+
+    @make_test
+    def test_sum_with_start_kwarg(a, b, c, d):
+        return sum([b, c, d], start=a)
+
+    @make_test(expected_frame_count=0)
+    def test_sum_shortcut():
+        return sum([0, 1.0, 2, 3.0])
+
+    @make_test(expected_frame_count=0)
+    def test_sum_shortcut_with_start_arg():
+        return sum([0, 1.0, 2, 3.0], -10)
+
+    @make_test(expected_frame_count=0)
+    def test_sum_shortcut_with_start_kwarg():
+        return sum([0, 1.0, 2, 3.0], start=-10)
+
+    @make_test
     def test_reduce(a, b, c, d):
         return functools.reduce(operator.add, [a, b, c, d])
+
+    @make_test
+    def test_reduce_with_initial(a, b, c, d):
+        return functools.reduce(operator.add, [b, c, d], a)
+
+    @make_test(expected_frame_count=0)
+    def test_reduce_with_single(x):
+        return functools.reduce(lambda a, b: (a, b), [x])
+
+    @make_test(expected_frame_count=0)
+    def test_reduce_with_single_with_initial(x, y):
+        return functools.reduce(lambda a, b: (a, b), [y], x)
+
+    @make_test(expected_frame_count=0)
+    def test_reduce_with_none_initial(x):
+        return functools.reduce(lambda a, b: (a, b), [x], None)
 
     @make_test
     def test_tuple_contains(a, b):
@@ -1011,13 +1157,50 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         y = torch.jit.annotate(Any, x + 1)
         return y + 2
 
-    @expectedFailureDynamic
     @make_test
     def test_is_contiguous_memory_format(tensor):
         if torch.jit.is_scripting():
             return None
         elif tensor.is_contiguous(memory_format=torch.contiguous_format):
             return tensor + 1
+
+    def test_is_contiguous_frame_counts(self):
+        data = [
+            torch.rand(10),
+            torch.rand(2, 3, 32, 32),
+            torch.rand(2, 3, 32, 32).contiguous(memory_format=torch.channels_last),
+            torch.rand(10)[::2],
+            torch.rand(12),
+            torch.rand(2, 3, 24, 24).contiguous(memory_format=torch.channels_last),
+            torch.rand(50)[::2],
+            torch.rand(2, 3, 32, 32)[:, :, 2:-2, 3:-3],
+        ]
+        # dynamo should recompile for all inputs in static shapes mode
+        expected_frame_counts_static = [1, 2, 3, 4, 5, 6, 7, 8]
+        # dynamo should recompile for items 0, 1, 2, 6 in dynamic shapes mode
+        expected_frame_counts_dynamic = [1, 2, 3, 4, 4, 4, 4, 5]
+        expected_frame_counts = ifdynstaticdefault(
+            expected_frame_counts_static, expected_frame_counts_dynamic
+        )
+        dynamic = ifdynstaticdefault(False, True)
+
+        def func(x):
+            if x.is_contiguous():
+                return x + 1
+            elif x.is_contiguous(memory_format=torch.channels_last):
+                return x + 2
+            else:
+                return x + 3
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        cfunc = torch._dynamo.optimize_assert(cnt, dynamic=dynamic)(func)
+
+        assert cnt.frame_count == 0
+        for i, x in enumerate(data):
+            expected = func(x)
+            output = cfunc(x)
+            self.assertTrue(same(output, expected))
+            assert cnt.frame_count == expected_frame_counts[i]
 
     @make_test
     def test_list_slice_assignment(x):
@@ -1081,6 +1264,20 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     #             return x * param
     #         case {"b": param}:
     #             return x / param
+
+    def test_math_radians(self):
+        def func(x, a):
+            return x + math.radians(a)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        cfunc = torch._dynamo.optimize_assert(cnt)(func)
+
+        assert cnt.frame_count == 0
+        x = torch.rand(10)
+        expected = func(x, 12)
+        output = cfunc(x, 12)
+        self.assertTrue(same(output, expected))
+        assert cnt.frame_count == 1
 
     @make_test
     def test_numpy_meshgrid(x, y):
@@ -1210,6 +1407,91 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         triple = functools.partial(multiply, y=3)
         return triple(x)
 
+    @parametrize(
+        "attr",
+        (
+            # True
+            "__subclasshook__",
+            "__lt__",
+            "__hash__",
+            "__ge__",
+            "__le__",
+            "__gt__",
+            "__dict__",
+            "__getattribute__",
+            "__setattr__",
+            "__doc__",
+            "__repr__",
+            "__dir__",
+            "__init__",
+            "__new__",
+            "__class__",
+            "__eq__",
+            "__delattr__",
+            "__reduce__",
+            "__module__",
+            "__format__",
+            "__str__",
+            "__sizeof__",
+            "__ne__",
+            "__call__",
+            "__reduce_ex__",
+            "__init_subclass__",
+            "args",
+            "keywords",
+            "func",
+            # False
+            "__code__",
+            "__kwdefaults__",
+            "__defaults__",
+            "__name__",
+            "__annotations__",
+            "__get__",
+            "__builtins__",
+            "__qualname__",
+            "__globals__",
+            "__closure__",
+        ),
+    )
+    def test_partials_hasattr(self, attr):
+        def fn(t):
+            f = lambda x, y: torch.sin(x) + torch.cos(y)
+            p = functools.partial(f, y=t)
+            if hasattr(p, attr):
+                return p(t)
+            else:
+                return torch.zeros_like(t)
+
+        t = torch.randn(3, 4)
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fullgraph=True, backend=counter)(fn)
+        self.assertEqual(opt_fn(t), fn(t))
+        self.assertGreater(counter.frame_count, 0)
+
+    @unittest.expectedFailure
+    def test_partials_hasattr_set_attr(self):
+        def fn(t):
+            f = lambda x, y: torch.sin(x) + torch.cos(y)
+            p = functools.partial(f, y=t)
+            p.__name__ = "test"
+            if hasattr(p, "__name__"):
+                return p(t)
+            else:
+                return torch.zeros_like(t)
+
+        t = torch.randn(3, 4)
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fullgraph=True, backend=counter)(fn)
+        self.assertEqual(opt_fn(t), fn(t))
+
+    def test_pow_int(self):
+        def fn(a, b):
+            return torch.pow(a, b)
+
+        x = torch.ones(2, 2)
+        opt_fn = torch.compile(fullgraph=True, backend="eager", dynamic=True)(fn)
+        self.assertEqual(opt_fn(x, 2), fn(x, 2))
+
     def test_tensor_size_indexed_by_symint(self):
         def fn(x, y):
             index = x.shape[-1]
@@ -1334,6 +1616,143 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(foo(), foo())
         self.assertEqual(foo(), foo())
 
+    def test_partial_across_graph_break_uninvoked(self):
+        from functools import partial
+
+        def bar(x, **kwargs):
+            return x + x
+
+        @torch.compile(backend="eager", dynamic=True)
+        def foo(x, i):
+            def inner():
+                print("this is a graph_break")
+                return op(x)
+
+            op = partial(bar, dim=10)
+            x = inner()
+            op = partial(bar, other=10)
+            return inner() + x
+
+        foo(torch.rand(1), 10)
+
+    def test_no_recompile_inner_function(self):
+        def forward(inp):
+            def g(y):
+                return inp + y
+
+            print("graph break")
+            return g(torch.rand([1]))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(forward)
+
+        input = torch.rand([2])
+        _ = opt_fn(input)
+        _ = opt_fn(input)
+        _ = opt_fn(input)
+        # Should not have recompiled
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_no_recompile_inner_lambda(self):
+        def forward(inp):
+            g = lambda y: inp + y
+            print("graph break")
+            return g(torch.rand([1]))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(forward)
+
+        input = torch.rand([2])
+        _ = opt_fn(input)
+        _ = opt_fn(input)
+        _ = opt_fn(input)
+        # Should not have recompiled
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_complex_closure(self):
+        @torch.compile
+        def forward(y):
+            def a():
+                def x(z):
+                    return y + z
+
+                return x
+
+            return a()
+
+        input1 = torch.rand([2])
+        input2 = torch.rand([2])
+        res = forward(input1)(input2)
+        self.assertTrue(same(res, input1 + input2))
+
+    def test_non_inlined_closure(self):
+        @torch.compile()
+        def program(x, y):
+            one = lambda x, y: x + y
+
+            def inner():
+                # Force no inlining
+                torch._dynamo.graph_break()
+                return one(x, y)
+
+            res = inner()
+            one = lambda x, y: x - y
+            res += inner()
+            return res
+
+        input1 = torch.randn(1)
+        input2 = torch.randn(1)
+
+        self.assertTrue(same(program(input1, input2), input1 + input1))
+
+    def test_compare_constant_and_tensor(self):
+        for op in [
+            operator.lt,
+            operator.le,
+            operator.gt,
+            operator.ge,
+            operator.ne,
+            operator.eq,
+            operator.is_,
+            operator.is_not,
+        ]:
+            with self.subTest(op=op):
+
+                def fn(x):
+                    return op(-10, x)
+
+                opt_fn = torch.compile(fullgraph=True)(fn)
+
+                x = torch.randn(10)
+                self.assertEqual(opt_fn(x), fn(x))
+
+    def test_pos(self):
+        def fn(x, y):
+            return operator.pos(x) * operator.pos(y)
+
+        opt_fn = torch.compile(fullgraph=True, dynamic=True)(fn)
+
+        def test(x, y):
+            self.assertEqual(opt_fn(x, y), fn(x, y))
+
+        test(torch.ones(4), 1)
+        test(1, torch.ones(4))
+        test(-1, -1)
+        test(-1.1, 1.1)
+        test(True, False)
+        test(torch.ones(4, dtype=torch.float32), 1.1)
+
+    def test_unary_fold_op(self):
+        for op in (operator.abs, abs, operator.neg, operator.pos, operator.truth):
+            with self.subTest(op=op):
+
+                def fn():
+                    a = range(-10, 10)
+                    return list(map(op, a))
+
+                opt_fn = torch._dynamo.optimize(nopython=True)(fn)
+                self.assertEqual(opt_fn(), fn())
+
 
 def udf_mul(x, y):
     return x * y
@@ -1373,84 +1792,6 @@ class WrapperModule(torch.nn.Module):
 
     def forward(self):
         return self.m()
-
-
-if HAS_TRITON:
-    # Define shared triton kernels here so that multiple tests can access it
-    # NB: This also addresses a triton limitation where if the kernels are
-    # getting called indirectly, triton cannot find the kernels unless they
-    # are at top level.
-    # Define constants here for the same triton limitation
-    CONSTANT_C = 4
-    STRING_CONSTANT_C = "CONSTANT_C"
-    BOOL_CONSTANT_C = True
-
-    @triton.jit
-    def add_kernel(
-        in_ptr0,
-        in_ptr1,
-        out_ptr,
-        n_elements,
-        BLOCK_SIZE: "tl.constexpr",
-    ):
-        pid = tl.program_id(axis=0)
-        block_start = pid * BLOCK_SIZE
-        offsets = block_start + tl.arange(0, BLOCK_SIZE)
-        mask = offsets < n_elements
-        x = tl.load(in_ptr0 + offsets, mask=mask)
-        y = tl.load(in_ptr1 + offsets, mask=mask)
-        output = x + y
-        tl.store(out_ptr + offsets, output, mask=mask)
-
-    @triton.jit
-    def mul2_kernel(
-        in_ptr0,
-        out_ptr,
-        n_elements,
-        BLOCK_SIZE: "tl.constexpr",
-    ):
-        pid = tl.program_id(axis=0)
-        block_start = pid * BLOCK_SIZE
-        offsets = block_start + tl.arange(0, BLOCK_SIZE)
-        mask = offsets < n_elements
-        x = tl.load(in_ptr0 + offsets, mask=mask)
-        output = 2 * x
-        tl.store(out_ptr + offsets, output, mask=mask)
-
-    @triton.jit
-    def mul2_inplace_kernel(
-        ptr,
-        n_elements,
-        BLOCK_SIZE: "tl.constexpr",
-    ):
-        pid = tl.program_id(axis=0)
-        block_start = pid * BLOCK_SIZE
-        offsets = block_start + tl.arange(0, BLOCK_SIZE)
-        mask = offsets < n_elements
-        x = tl.load(ptr + offsets, mask=mask)
-        output = 2 * x
-        tl.store(ptr + offsets, output, mask=mask)
-
-    @triton.jit
-    def zero_negs(x):
-        return tl.where(x >= 0, x, 0)
-
-    @triton.jit
-    def indirection_kernel(
-        in_ptr0,
-        out_ptr,
-        n_elements,
-        BLOCK_SIZE: "tl.constexpr",
-        ACTIVATION: "tl.constexpr",
-    ):
-        pid = tl.program_id(axis=0)
-        block_start = pid * BLOCK_SIZE
-        offsets = block_start + tl.arange(0, BLOCK_SIZE)
-        mask = offsets < n_elements
-        if ACTIVATION == "mul2_inplace_kernel":
-            mul2_inplace_kernel(in_ptr0, n_elements, BLOCK_SIZE=BLOCK_SIZE)
-        x = tl.load(in_ptr0 + offsets, mask=mask)
-        tl.store(out_ptr + offsets, x, mask=mask)
 
 
 class DefaultsTests(torch._dynamo.test_case.TestCase):
@@ -1559,483 +1900,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out.size(), compiled_out.size())
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
-
-    @requires_cuda()
-    @requires_triton()
-    def test_triton_kernel_with_kernel_param(self):
-        @triton.jit
-        def pass_kernel(kernel):
-            pass
-
-        @torch.compile(backend="eager")
-        def f(x):
-            grid = (x.numel(),)
-            pass_kernel[grid](kernel=x)
-
-        t1 = torch.rand(5, device="cuda")
-        f(t1)
-        # No need to assert anything, the goal is to make sure dynamo does
-        # not crash
-
-    @requires_cuda()
-    @requires_triton()
-    def test_triton_kernel_higher_order_func(self):
-        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
-
-        add_kernel_id = kernel_side_table.add_kernel(add_kernel)
-
-        t1 = torch.rand(5, device="cuda")
-        t2 = torch.rand(5, device="cuda")
-
-        torch_add = t1 + t2
-
-        # Test higher order function with mutation
-        output = torch.zeros_like(t1)
-        n_elements = output.numel()
-        grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-        triton_kernel_wrapper_mutation(
-            kernel_idx=add_kernel_id,
-            grid=grid,
-            kwargs={
-                "in_ptr0": t1,
-                "in_ptr1": t2,
-                "out_ptr": output,
-                "n_elements": n_elements,
-                "BLOCK_SIZE": 16,
-            },
-        )
-        self.assertEqual(output, torch_add)
-        # Make sure it is modified
-        self.assertNotEqual(output, torch.zeros_like(t1))
-
-        # Test higher order function without mutation
-        output = torch.zeros_like(t1)
-        out_dict = triton_kernel_wrapper_functional(
-            kernel_idx=add_kernel_id,
-            grid=grid,
-            kwargs={
-                "in_ptr0": t1,
-                "in_ptr1": t2,
-                "out_ptr": output,
-                "n_elements": n_elements,
-                "BLOCK_SIZE": 16,
-            },
-            tensors_to_clone=["in_ptr0", "in_ptr1", "out_ptr"],
-        )
-        self.assertEqual(out_dict["out_ptr"], torch_add)
-        # Make sure it is NOT modified
-        self.assertEqual(output, torch.zeros_like(t1))
-
-    @requires_cuda()
-    @requires_triton()
-    @skipIfRocm
-    def test_triton_kernel_functionalize(self):
-        import functorch
-        from functorch import make_fx
-        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
-        from torch._subclasses.functional_tensor import (
-            CppFunctionalizeAPI,
-            FunctorchFunctionalizeAPI,
-            PythonFunctionalizeAPI,
-        )
-
-        kernel_side_table.reset_table()
-
-        def f(x, output):
-            out = triton_kernel_wrapper_functional(
-                kernel_idx=kernel_side_table.add_kernel(mul2_kernel),
-                grid=(x.numel(),),
-                kwargs={
-                    "in_ptr0": x,
-                    "out_ptr": output,
-                    "n_elements": output.numel(),
-                    "BLOCK_SIZE": 16,
-                },
-                tensors_to_clone=["in_ptr0", "out_ptr"],
-            )
-            return out["out_ptr"]
-
-        t1 = torch.rand(5, device="cuda")
-        t2 = torch.rand(5, device="cuda")
-
-        gm = make_fx(PythonFunctionalizeAPI().functionalize(f))(t1, t2)
-        # Make sure t2 was not modified
-        self.assertNotEqual(gm(t1, t2), t2)
-
-        gm = make_fx(CppFunctionalizeAPI().functionalize(f))(t1, t2)
-        # Make sure t2 was not modified
-        self.assertNotEqual(gm(t1, t2), t2)
-
-        gm = make_fx(torch.func.functionalize(f))(t1, t2)
-        # Make sure t2 was not modified
-        self.assertNotEqual(gm(t1, t2), t2)
-
-        gm = make_fx(f, tracing_mode="fake")(t1, t2)
-        self.assertExpectedInline(
-            gm.code.strip(),
-            """\
-def forward(self, x_1, output_1):
-    triton_kernel_wrapper_functional_proxy = torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional(kernel_idx = 0, grid = (5,), kwargs = {'in_ptr0': x_1, 'out_ptr': output_1, 'n_elements': 5, 'BLOCK_SIZE': 16}, tensors_to_clone = ['in_ptr0', 'out_ptr']);  x_1 = output_1 = None
-    getitem = triton_kernel_wrapper_functional_proxy['in_ptr0']
-    getitem_1 = triton_kernel_wrapper_functional_proxy['out_ptr']
-    getitem_2 = triton_kernel_wrapper_functional_proxy['n_elements']
-    getitem_3 = triton_kernel_wrapper_functional_proxy['BLOCK_SIZE'];  triton_kernel_wrapper_functional_proxy = None
-    return getitem_1""",
-        )
-
-    @requires_cuda()
-    @requires_triton()
-    @skipIfRocm
-    def test_triton_kernel_mutation_type(self):
-        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
-        from torch._subclasses.fake_tensor import FakeTensorMode
-        from torch._subclasses.functional_tensor import (
-            FunctionalTensor,
-            FunctionalTensorMode,
-        )
-
-        def prep():
-            x = torch.ones(4, device="cuda", requires_grad=True)
-            x_func = FunctionalTensor.to_functional(x)
-            self.assertTrue(torch._is_functional_tensor(x_func.elem))
-            return x_func
-
-        # normal mutation only
-        with FakeTensorMode():
-            x_func = prep()
-
-            with FunctionalTensorMode():
-                x_func.mul_(2)
-
-            self.assertFalse(
-                torch._functionalize_are_all_mutations_hidden_from_autograd(x_func.elem)
-            )
-
-        # triton kernel mutation only
-        with FakeTensorMode():
-            x_func = prep()
-
-            with FunctionalTensorMode():
-                triton_kernel_wrapper_mutation(
-                    kernel_idx=kernel_side_table.add_kernel(mul2_inplace_kernel),
-                    grid=(x_func.numel(),),
-                    kwargs={
-                        "ptr": x_func,
-                        "n_elements": x_func.numel(),
-                        "BLOCK_SIZE": 16,
-                    },
-                )
-
-            self.assertTrue(
-                torch._functionalize_are_all_mutations_hidden_from_autograd(x_func.elem)
-            )
-
-        # normal mutation + triton kernel mutation
-        with FakeTensorMode():
-            x_func = prep()
-
-            with FunctionalTensorMode():
-                x_func.mul_(2)
-                triton_kernel_wrapper_mutation(
-                    kernel_idx=kernel_side_table.add_kernel(mul2_inplace_kernel),
-                    grid=(x_func.numel(),),
-                    kwargs={
-                        "ptr": x_func,
-                        "n_elements": x_func.numel(),
-                        "BLOCK_SIZE": 16,
-                    },
-                )
-
-            self.assertFalse(
-                torch._functionalize_are_all_mutations_hidden_from_autograd(x_func.elem)
-            )
-
-    @requires_cuda()
-    @requires_triton()
-    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
-    def test_triton_kernel_with_views(self, backend):
-        def call_triton_take_view(x: torch.Tensor):
-            output = torch.zeros_like(x)
-            n_elements = output.numel()
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-            mul2_kernel[grid](x, output, n_elements, BLOCK_SIZE=16)
-            return output
-
-        def call_triton_return_view(x: torch.Tensor):
-            output = torch.zeros_like(x)
-            n_elements = output.numel()
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-            mul2_kernel[grid](x, output, n_elements, BLOCK_SIZE=16)
-            return output.view(4, 4)
-
-        t = torch.rand(4, 4, device="cuda")
-        t_view = t.view(16)
-
-        compiled_func = torch.compile(
-            call_triton_take_view, backend=backend, fullgraph=True
-        )
-        self.assertEqual(2 * t_view, compiled_func(t_view))
-        self.assertEqual(2 * t, compiled_func(t_view).view(4, 4))
-
-        compiled_func = torch.compile(
-            call_triton_return_view, backend=backend, fullgraph=True
-        )
-        self.assertEqual(2 * t_view, compiled_func(t).view(16))
-        self.assertEqual(2 * t, compiled_func(t))
-
-    @requires_cuda()
-    @requires_triton()
-    @common_utils.parametrize("grad_fn", [torch.no_grad, torch.enable_grad])
-    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
-    def test_triton_kernel_with_grad_option(self, grad_fn, backend):
-        def call_triton(x: torch.Tensor):
-            with grad_fn():
-                output = torch.zeros_like(x)
-                n_elements = output.numel()
-                grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-                mul2_kernel[grid](x, output, n_elements, BLOCK_SIZE=16)
-                return output
-
-        t = torch.rand(5, device="cuda")
-        compiled_func = torch.compile(call_triton, backend=backend, fullgraph=True)
-        self.assertEqual(2 * t, compiled_func(t))
-
-    @requires_cuda()
-    @requires_triton()
-    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
-    def test_triton_kernel_inner_triton_function(self, backend):
-        def f(x: torch.Tensor):
-            @triton.jit
-            def pow2_kernel(
-                in_ptr0,
-                out_ptr,
-                n_elements,
-                BLOCK_SIZE: "tl.constexpr",
-            ):
-                pid = tl.program_id(axis=0)
-                block_start = pid * BLOCK_SIZE
-                offsets = block_start + tl.arange(0, BLOCK_SIZE)
-                mask = offsets < n_elements
-                x = tl.load(in_ptr0 + offsets, mask=mask)
-                output = x * x
-                tl.store(out_ptr + offsets, output, mask=mask)
-
-            output = torch.zeros_like(x)
-            n_elements = output.numel()
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-            pow2_kernel[grid](x, output, n_elements, BLOCK_SIZE=16)
-            return output
-
-        t = torch.rand(5, device="cuda")
-
-        compiled_func = torch.compile(f, backend=backend, fullgraph=True)
-        # TODO(oulgen): NYI - Support this
-        # self.assertEqual(t * t, compiled_func(t))
-
-    @requires_cuda()
-    @requires_triton()
-    @common_utils.parametrize("grad", [False, True])
-    @patch.object(torch._inductor.config, "implicit_fallbacks", False)
-    def test_triton_kernel_no_clones(self, grad):
-        from torch._inductor.utils import run_and_get_code
-
-        def call_triton_add(
-            x: torch.Tensor,
-            y: torch.Tensor,
-        ):
-            output = torch.zeros_like(x, requires_grad=grad)
-            n_elements = output.numel()
-
-            grid = (x.numel(),)
-            add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
-
-            return output
-
-        t1 = torch.rand(5, device="cuda", requires_grad=grad)
-        t2 = torch.rand(5, device="cuda", requires_grad=grad)
-
-        torch_add = t1 + t2
-        test, (code,) = run_and_get_code(torch.compile(call_triton_add), t1, t2)
-        self.assertEqual(torch_add, test)
-        self.assertTrue("aten.copy" not in code)
-        self.assertTrue("aten.clone" not in code)
-
-    @requires_cuda()
-    @requires_triton()
-    @common_utils.parametrize("grad", [False, True])
-    def test_triton_kernel_multi_kernel(self, grad):
-        @triton.jit
-        def mul2_and_add_and_zero_negatives_kernel(
-            in_ptr0,
-            in_ptr1,
-            out_ptr,
-            n_elements,
-            BLOCK_SIZE: "tl.constexpr",
-            ACTIVATION: "tl.constexpr",
-        ):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            indirection_kernel(
-                in_ptr0,
-                in_ptr0,
-                n_elements,
-                BLOCK_SIZE=BLOCK_SIZE,
-                ACTIVATION="mul2_inplace_kernel",
-            )
-            indirection_kernel(
-                in_ptr1,
-                in_ptr1,
-                n_elements,
-                BLOCK_SIZE=BLOCK_SIZE,
-                ACTIVATION="mul2_inplace_kernel",
-            )
-            x = tl.load(in_ptr0 + offsets, mask=mask)
-            y = tl.load(in_ptr1 + offsets, mask=mask)
-            output = x + y
-            if ACTIVATION == "zero_negs":
-                output = zero_negs(output)
-            tl.store(out_ptr + offsets, output, mask=mask)
-
-        @torch.compile
-        def call_triton(
-            x: torch.Tensor,
-            y: torch.Tensor,
-            xi: torch.Tensor,
-            yi: torch.Tensor,
-        ):
-            output = torch.zeros_like(x, requires_grad=grad)
-            outputi = torch.zeros_like(xi)
-            n_elements = output.numel()
-
-            grid = (x.numel(),)
-            mul2_and_add_and_zero_negatives_kernel[grid](
-                x, y, output, n_elements, BLOCK_SIZE=16, ACTIVATION="zero_negs"
-            )
-            mul2_and_add_and_zero_negatives_kernel[grid](
-                xi, yi, outputi, n_elements, BLOCK_SIZE=16, ACTIVATION=None
-            )
-
-            return (output, outputi)
-
-        t1 = torch.tensor(
-            [-2.0, -1.0, 0.0, 1.0, 2.0], device="cuda", requires_grad=grad
-        )
-        t2 = torch.tensor(
-            [-2.0, -1.0, 0.0, 1.0, 2.0], device="cuda", requires_grad=grad
-        )
-        float_result = 2 * t1 + 2 * t2
-        float_result = float_result.where(float_result >= 0, 0.0)
-
-        t1i = torch.randint(-2, 2, (5,), device="cuda")
-        t2i = torch.randint(-2, 2, (5,), device="cuda")
-        int_result = 2 * t1i + 2 * t2i
-
-        (result, resulti) = call_triton(t1, t2, t1i, t2i)
-        self.assertEqual(float_result, result)
-        self.assertEqual(int_result, resulti)
-
-    @requires_cuda()
-    @requires_triton()
-    def test_triton_kernel_constants(self):
-        @triton.jit
-        def mulC_kernel(
-            in_ptr0,
-            out_ptr,
-            n_elements,
-            BLOCK_SIZE: "tl.constexpr",
-            CONSTANT_NAME: "tl.constexpr",
-        ):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(in_ptr0 + offsets, mask=mask)
-            if CONSTANT_NAME.value == STRING_CONSTANT_C:
-                output = CONSTANT_C * x
-            if BOOL_CONSTANT_C:
-                output *= CONSTANT_C
-            tl.store(out_ptr + offsets, output, mask=mask)
-
-        def call_triton(
-            x: torch.Tensor,
-        ):
-            output = torch.zeros_like(x)
-            n_elements = output.numel()
-
-            grid = (x.numel(),)
-            mulC_kernel[grid](
-                x, output, n_elements, BLOCK_SIZE=16, CONSTANT_NAME="CONSTANT_C"
-            )
-            return output
-
-        # Triton kernels capture global constants by their parse time value
-        # not runtime value
-        global CONSTANT_C
-        prev_c = CONSTANT_C
-        # If the behavior of triton kernels change, this test will fail
-        CONSTANT_C = 10
-        assert CONSTANT_C != prev_c
-
-        t = torch.randn(5, device="cuda")
-        torch_result = call_triton(t)
-        compiled_result = torch.compile(call_triton)(t)
-
-        self.assertEqual(torch_result, compiled_result)
-
-        # reset back
-        CONSTANT_C = prev_c
-
-    @requires_cuda()
-    @requires_triton()
-    @common_utils.parametrize("grad", [False, True])
-    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
-    @patch.object(torch._inductor.config, "implicit_fallbacks", False)
-    def test_triton_kernel_native(self, grad, backend):
-        def call_triton_add(
-            x: torch.Tensor, y: torch.Tensor, grid_type: int, num=1, positional=False
-        ):
-            output = torch.zeros_like(x, requires_grad=grad)
-            n_elements = output.numel()
-
-            def grid_fn(meta):
-                return (triton.cdiv(num, meta["BLOCK_SIZE"]),)
-
-            if grid_type == 0:
-                grid = (x.numel(),)
-            elif grid_type == 1:
-                grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-            else:
-                grid = grid_fn
-
-            if positional:
-                add_kernel[grid](x, y, output, n_elements, 16)
-            else:
-                add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
-
-            return output
-
-        t1 = torch.rand(5, device="cuda", requires_grad=grad)
-        t2 = torch.rand(5, device="cuda", requires_grad=grad)
-
-        torch_add = t1 + t2
-
-        # No Dynamo -- Make sure triton kernel works
-        self.assertEqual(call_triton_add(t1, t2, 1), torch_add)
-        # No Dynamo -- Make sure triton kernel works (with positional BLOCK_SIZE)
-        self.assertEqual(call_triton_add(t1, t2, 1, True), torch_add)
-
-        # With Dynamo
-        compiled_func = torch.compile(call_triton_add, backend=backend, fullgraph=True)
-        # With simple kernel
-        self.assertEqual(compiled_func(t1, t2, 0), torch_add)
-        # With lambda kernel
-        self.assertEqual(compiled_func(t1, t2, 1), torch_add)
-        # With lambda kernel (with positional BLOCK_SIZE)
-        self.assertEqual(compiled_func(t1, t2, 1, 1, True), torch_add)
-        # With user defined function kernel
-        self.assertEqual(compiled_func(t1, t2, 2, 200), torch_add)
 
     def test_dataclass_factory(self):
         @dataclass
@@ -2226,6 +2090,7 @@ def forward(self, x_1, output_1):
 
         self.assertEqual(fn(z), fn_opt(z))
 
+    @torch._dynamo.config.patch(capture_func_transforms=True)
     def test_is_init_in_compile_vmapped_mutated_tensor_tensor(self):
         def fn(z):
             x = z.clone()
@@ -2239,6 +2104,7 @@ def forward(self, x_1, output_1):
 
         self.assertEqual(fn(z), fn_opt(z))
 
+    @torch._dynamo.config.patch(capture_func_transforms=True)
     def test_is_vmapped_mutated_tensor_tensor(self):
         def fn(x):
             y = torch.vmap(torch.Tensor.acos_)(x)
@@ -2250,6 +2116,7 @@ def forward(self, x_1, output_1):
 
         self.assertEqual(fn(z), fn_opt(z))
 
+    @torch._dynamo.config.patch(capture_func_transforms=True)
     def test_is_init_in_compile_vmapped_mutated_tensor_tensor_multi_arg(self):
         def fn(y, z):
             a = y.clone()
@@ -2312,26 +2179,36 @@ def forward(self, x_1, output_1):
         self.assertEqual(opt_fn(param, param), fn(param, param))
         self.assertEqual(cnts.frame_count, 2)  # Recompiles
 
-    def test_compare_constant_and_tensor(self):
-        for op in [
-            operator.lt,
-            operator.le,
-            operator.gt,
-            operator.ge,
-            operator.ne,
-            operator.eq,
-        ]:
+    @unittest.skipIf(
+        sys.version_info < (3, 10),
+        "zip strict kwargs not implemented for Python < 3.10",
+    )
+    def test_zip_strict(self):
+        def fn(x, ys, zs):
+            x = x.clone()
+            for y, z in zip(ys, zs, strict=True):
+                x += y * z
+            return x
 
-            def fn(x):
-                return op(-10, x)
+        opt_fn = torch._dynamo.optimize(backend="eager")(fn)
+        nopython_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
 
-            opt_fn = torch.compile(fullgraph=True)(fn)
+        x = torch.ones(3)
+        ys = [1.0, 2.0, 3.0]
+        zs = [2.0, 5.0, 8.0]
 
-            x = torch.randn(10)
-            self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(opt_fn(x, ys, zs), fn(x, ys, zs))
+
+        # If nopython, should raise UserError
+        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "zip()"):
+            nopython_fn(x, ys[:1], zs)
+
+        # Should cause fallback if allow graph break
+        with self.assertRaisesRegex(ValueError, "zip()"):
+            opt_fn(x, ys[:1], zs)
 
 
-common_utils.instantiate_parametrized_tests(DefaultsTests)
+instantiate_parametrized_tests(FunctionTests)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
