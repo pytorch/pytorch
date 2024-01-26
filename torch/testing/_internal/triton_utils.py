@@ -1,9 +1,8 @@
-import functools
 import unittest
 
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 if HAS_CUDA:
     import triton
