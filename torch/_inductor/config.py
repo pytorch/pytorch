@@ -224,6 +224,15 @@ save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 # We will disable creating subprocess for autotuning if this is False
 autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
 
+# The following three timeouts are applicable if autotune_in_subproc is True:
+
+# Max time that a a valid benchmark result may take during autotuning
+max_autotune_subproc_result_timeout_seconds = 30.0
+# Additional time we allow subprocesses to terminate gracefully after the timeout until we send a SIGTERM
+max_autotune_subproc_graceful_timeout_seconds = 1.0
+# Additional time that we grant after a SIGTERM until we do a hard SIGKILL of subprocesses
+max_autotune_subproc_terminate_timeout_seconds = 2.0
+
 # If autotuning in subprocess, whether to use multiple devices
 autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") == "1"
 
@@ -680,7 +689,7 @@ class cuda:
     # If set to True, it will ensure that only GEMM ops capable of
     # epilogue fusion via CUTLASS Epilogue Visitor Trees ( EVT )
     # are enabled for the CUTLASS backend.
-    cutlass_only_evt_capable_ops: bool = False
+    cutlass_prefer_evt_capable_ops: bool = False
 
     # Minimum of M*N*N to consider the CUTLASS backend for GEMM ops.
     cutlass_backend_min_gemm_size: int = 1

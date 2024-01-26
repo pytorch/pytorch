@@ -233,7 +233,28 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         fuseable=True,
         non_fuseable=True,
     ):
-        if non_fuseable:
+        non_fuseable = non_fuseable and (
+            not inductor_cuda_config.cutlass_prefer_evt_capable_ops
+        )
+        if fuseable:
+            cutlass_template_evt = CUTLASSGemmTemplate(
+                input_nodes,
+                layout,
+                alpha=alpha,
+                beta=beta,
+                input_reorder=input_reorder,
+                can_fuse_epilogue=True,
+            )
+            # This will list only ops capable of EVT fusion
+            ops_evt = cutlass_template_evt.gen_ops()
+            for op in ops_evt:
+                cutlass_template_evt.maybe_append_choice(
+                    choices,
+                    op=op,
+                )
+        else:
+            ops_evt = []
+        if non_fuseable or len(ops_evt) == 0:
             if fuseable:
                 # list both fuseable and non-fuseable ops, and treat them all as non-fuseable
                 can_fuse_epilogue = False
@@ -256,26 +277,15 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                 )
         else:
             ops = []
-        if fuseable:
-            cutlass_template_evt = CUTLASSGemmTemplate(
-                input_nodes,
-                layout,
-                alpha=alpha,
-                beta=beta,
-                input_reorder=input_reorder,
-                can_fuse_epilogue=True,
-            )
-            # This will list only ops capable of EVT fusion
-            ops_evt = cutlass_template_evt.gen_ops()
-            for op in ops_evt:
-                cutlass_template_evt.maybe_append_choice(
-                    choices,
-                    op=op,
-                )
-        else:
-            ops_evt = []
+
+        if (len(ops_evt) == 0 and fuseable) or (len(ops) == 0 and non_fuseable):
+            input_layouts = [node.get_layout() for node in input_nodes]
+            input_strides = [node.get_stride() for node in input_nodes]
+            output_layout = layout
+            warning_msg = f"No suitable Cutlass GEMM configs found, fallbacks used ( {fuseable=}, {non_fuseable=}, {len(ops_evt)=}, {len(ops)=}, {output_layout=}, {input_layouts=}, {input_strides=}"  # noqa: B950
+            log.warning(warning_msg)
         log.debug(
-            "Added %d cutlass gemm configs and %d fuseable gemm configs.",
+            "Added %d Cutlass gemm configs and %d fuseable gemm configs.",
             len(ops),
             len(ops_evt),
         )
@@ -611,13 +621,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                 op.C.element = cutlass_lib.DataType.void
             else:
                 op.C.layout = op.D.layout
-        supports_evt: bool = self.supports_evt(op)
-        if (self.can_fuse_epilogue is not None) and (
-            self.can_fuse_epilogue != supports_evt
-        ):
-            return None
-        if inductor_cuda_config.cutlass_only_evt_capable_ops and not supports_evt:
-            return None
         return op
 
     def gen_ops(self) -> "List[cutlass_gemm_op.GemmOperation]":  # type: ignore[name-defined]  # noqa: F821
