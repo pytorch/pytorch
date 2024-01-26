@@ -91,7 +91,7 @@ ViewInfo ViewInfo::chain(
       // current_view has a view_func and but it's parent doesn't have one
       if (base.unsafeGetTensorImpl()->support_as_strided()) {
         auto as_strided_view_func =
-            std::make_shared<generated::AsStridedViewFunc>(
+            std::make_shared<torch::autograd::generated::AsStridedViewFunc>(
                 base.sym_sizes(),
                 base.sym_strides(),
                 base.sym_storage_offset());
@@ -140,8 +140,11 @@ ViewInfo ViewInfo::chain(
     }
   } else if (view_fn_) {
     // if current_view doesn't have a view_func but it's parent has one
-    auto as_strided_view_func = std::make_shared<generated::AsStridedViewFunc>(
-        tensor.sym_sizes(), tensor.sym_strides(), tensor.sym_storage_offset());
+    auto as_strided_view_func =
+        std::make_shared<torch::autograd::generated::AsStridedViewFunc>(
+            tensor.sym_sizes(),
+            tensor.sym_strides(),
+            tensor.sym_storage_offset());
     full_view_func =
         std::make_shared<ChainedViewFunc>(full_view_fn_, as_strided_view_func);
 
