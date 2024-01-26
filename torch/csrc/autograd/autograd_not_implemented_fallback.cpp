@@ -529,21 +529,16 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
     c10::IValue& aliased_output_iv =
         (*stack)[stack->size() - num_returns + aliased_output_idx];
 
+    // See NOTE [ View + Inplace detection ] for more details about this logic
+    // We always need this view_func because otherwise if we do in-place
+    // on this view, we would implicitly use AsStridedBackward instead
+    // of the NotImplemented node. For the cross-dtype/non-strided
+    // cases, we would create something like this anyway
     auto error_msg =
         ("Mutating the view " + op_name +
          "which does not have a derivative implemented is forbidden.");
-    const auto full_erroring_view_func =
+    const auto erroring_view_func =
         std::make_shared<ErroringViewFunc>(error_msg);
-
-    // See NOTE [ View + Inplace detection ] for more details about this logic
-    const auto erroring_view_func = [error_msg = error_msg](const at::Tensor&) {
-      // We always need this view_func because otherwise if we do in-place
-      // on this view, we would implicitly use AsStridedBackward instead
-      // of the NotImplemented node. For the cross-dtype/non-strided
-      // cases, we would create something like this anyway
-      TORCH_CHECK(false, error_msg);
-      return at::Tensor();
-    };
 
     const auto erroring_rev_view_func = [op_name = op_name](const at::Tensor&) {
       TORCH_CHECK(
@@ -562,7 +557,6 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
             /* tensor=*/sub_output,
             /* is_bw_differentiable=*/true,
             /* is_fw_differentiable=*/true,
-            /* full_view_func=*/full_erroring_view_func,
             /* view_func=*/erroring_view_func,
             /* rev_view_func=*/erroring_rev_view_func,
             /* creation_meta=*/
@@ -580,7 +574,6 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
           /* tensor=*/std::move(aliased_output_iv).toTensor(),
           /* is_bw_differentiable=*/true,
           /* is_fw_differentiable=*/true,
-          /* full_view_func=*/full_erroring_view_func,
           /* view_func=*/erroring_view_func,
           /* rev_view_func=*/erroring_rev_view_func,
           /* creation_meta=*/
