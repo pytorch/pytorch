@@ -42,7 +42,7 @@ struct TORCH_API ${op} : public ${superclass} {
 #endif
   ${op}(${constructor_args}) ${initializer_list}
   {};
-  virtual ~${op}() {};
+  virtual ~${op}() override {};
   virtual std::vector<c10::SymInt> get_symints() override;
   virtual void set_symints(const std::vector<c10::SymInt>&) override;
   virtual std::vector<at::Tensor> get_tensors() override;
