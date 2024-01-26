@@ -127,61 +127,6 @@ class DeviceCachingAllocator {
       xpu_events;
   DeviceIndex device_index;
 
- public:
-  DeviceCachingAllocator(DeviceIndex device_index)
-      : large_blocks(/* small */ false),
-        small_blocks(/* small */ true),
-        device_index(device_index) {}
-
-  Block* malloc(DeviceIndex device, size_t orig_size, sycl::queue& queue) {
-    std::scoped_lock<std::recursive_mutex> lock(mutex);
-    process_events();
-    size_t size = round_size(orig_size);
-    auto& pool = get_pool(size);
-    const size_t alloc_size = get_allocation_size(size);
-    AllocParams params(device, size, &queue, &pool, alloc_size);
-
-    // First, try to get a block from the existing pool.
-    bool block_found = get_free_block(params);
-    // Can't reuse an existing block, try to get a new one.
-    if (!block_found) {
-      block_found = alloc_block(params) ||
-          (release_cached_blocks() && alloc_block(params));
-    }
-    TORCH_CHECK(
-        block_found,
-        "XPU out of memory, please use `empty_cache` to release all unoccupied cached memory.");
-    bool split_remainder = should_split(params.block, params.size());
-    return alloc_found_block(std::move(params), orig_size, split_remainder);
-  }
-
-  void free(Block* block) {
-    std::scoped_lock<std::recursive_mutex> lock(mutex);
-    block->allocated = false;
-
-    if (!block->stream_uses.empty()) {
-      insert_events(block);
-    } else {
-      free_block(block);
-    }
-  }
-
-  void free_block(Block* block) {
-    TORCH_INTERNAL_ASSERT(
-        !block->allocated && block->event_count == 0 &&
-        block->stream_uses.empty());
-
-    auto& pool = *block->pool;
-    const std::array<Block*, 2> merge_candidates = {block->prev, block->next};
-    for (Block* merge_candidate : merge_candidates) {
-      try_merge_blocks(block, merge_candidate, pool);
-    }
-
-    active_blocks.erase(block);
-    bool inserted = pool.blocks.insert(block).second;
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
-  }
-
   size_t try_merge_blocks(Block* dst, Block* src, BlockPool& pool) {
     if (!src || src->allocated || src->event_count > 0 ||
         !src->stream_uses.empty()) {
@@ -210,14 +155,98 @@ class DeviceCachingAllocator {
     return subsumed_size;
   }
 
-  void insert_events(Block* block) {
-    stream_set streams(std::move(block->stream_uses));
-    TORCH_INTERNAL_ASSERT(block->stream_uses.empty());
-    for (auto& stream : streams) {
-      block->event_count++;
-      xpu_events[stream].emplace_back(
-          stream.queue().ext_oneapi_submit_barrier(), block);
+  void free_block(Block* block) {
+    TORCH_INTERNAL_ASSERT(
+        !block->allocated && block->event_count == 0 &&
+        block->stream_uses.empty());
+
+    auto& pool = *block->pool;
+    const std::array<Block*, 2> merge_candidates = {block->prev, block->next};
+    for (Block* merge_candidate : merge_candidates) {
+      try_merge_blocks(block, merge_candidate, pool);
     }
+
+    active_blocks.erase(block);
+    bool inserted = pool.blocks.insert(block).second;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
+  }
+
+  void process_events() {
+    using namespace sycl::info;
+    for (auto it = xpu_events.begin(); it != xpu_events.end();) {
+      while (!it->second.empty()) {
+        auto& e = it->second.front();
+        auto event = e.first;
+        auto* block = e.second;
+        if (event.get_info<event::command_execution_status>() !=
+            event_command_status::complete) {
+          break;
+        }
+        block->event_count--;
+        if (block->event_count == 0) {
+          free_block(block);
+        }
+        it->second.pop_front();
+      }
+
+      if (it->second.empty()) {
+        it = xpu_events.erase(it);
+      } else {
+        it++;
+      }
+    }
+  }
+
+  static size_t round_size(size_t size) {
+    if (size < kMinBlockSize) {
+      return kMinBlockSize;
+    } else {
+      return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
+    }
+  }
+
+  static size_t get_allocation_size(size_t size) {
+    if (size <= kSmallSize) {
+      return kSmallBuffer;
+    } else if (size < kMinLargeAlloc) {
+      return kLargeBuffer;
+    } else {
+      return kRoundLarge * ((size + kRoundLarge - 1) / kRoundLarge);
+    }
+  }
+
+  BlockPool& get_pool(size_t size) {
+    if (size < kSmallSize) {
+      return small_blocks;
+    } else {
+      return large_blocks;
+    }
+  }
+
+  bool get_free_block(AllocParams& p) {
+    BlockPool& pool = *p.pool;
+    auto it = pool.blocks.lower_bound(&p.search_key);
+    if (it == pool.blocks.end() || (*it)->queue != p.queue()) {
+      return false;
+    }
+    p.block = *it;
+    pool.blocks.erase(it);
+    return true;
+  }
+
+  bool alloc_block(AllocParams& p) {
+    auto size = p.alloc_size;
+    auto device = p.device();
+    void* ptr = sycl::aligned_alloc_device(
+        kDeviceAlignment,
+        size,
+        xpu::get_raw_device(device),
+        xpu::get_device_context());
+    if (!ptr) {
+      return false;
+    }
+    p.block = new Block(device, p.queue(), size, p.pool, ptr);
+    return true;
   }
 
   void synchronize_and_free_events() {
@@ -233,16 +262,6 @@ class DeviceCachingAllocator {
       }
     }
     xpu_events.clear();
-  }
-
-  bool release_cached_blocks() {
-    synchronize_and_free_events();
-    // See Note [Safe to Free Blocks on BlockPool]
-    c10::xpu::syncStreamsOnDevice(device_index);
-
-    release_blocks(large_blocks);
-    release_blocks(small_blocks);
-    return true;
   }
 
   void release_block(Block* block) {
@@ -269,6 +288,25 @@ class DeviceCachingAllocator {
       if (!block->prev && !block->next) {
         release_block(block);
       }
+    }
+  }
+
+  bool release_cached_blocks() {
+    synchronize_and_free_events();
+    // See Note [Safe to Free Blocks on BlockPool]
+    c10::xpu::syncStreamsOnDevice(device_index);
+
+    release_blocks(large_blocks);
+    release_blocks(small_blocks);
+    return true;
+  }
+
+  bool should_split(const Block* block, size_t size) {
+    size_t remaining = block->size - size;
+    if (block->pool->is_small) {
+      return remaining >= kMinBlockSize;
+    } else {
+      return remaining > kSmallSize;
     }
   }
 
@@ -311,90 +349,52 @@ class DeviceCachingAllocator {
     return block;
   }
 
-  bool alloc_block(AllocParams& p) {
-    auto size = p.alloc_size;
-    auto device = p.device();
-    void* ptr = sycl::aligned_alloc_device(
-        kDeviceAlignment,
-        size,
-        xpu::get_raw_device(device),
-        xpu::get_device_context());
-    if (!ptr) {
-      return false;
+  void insert_events(Block* block) {
+    stream_set streams(std::move(block->stream_uses));
+    TORCH_INTERNAL_ASSERT(block->stream_uses.empty());
+    for (auto& stream : streams) {
+      block->event_count++;
+      xpu_events[stream].emplace_back(
+          stream.queue().ext_oneapi_submit_barrier(), block);
     }
-    p.block = new Block(device, p.queue(), size, p.pool, ptr);
-    return true;
   }
 
-  bool get_free_block(AllocParams& p) {
-    BlockPool& pool = *p.pool;
-    auto it = pool.blocks.lower_bound(&p.search_key);
-    if (it == pool.blocks.end() || (*it)->queue != p.queue()) {
-      return false;
+ public:
+  DeviceCachingAllocator(DeviceIndex device_index)
+      : large_blocks(/* small */ false),
+        small_blocks(/* small */ true),
+        device_index(device_index) {}
+
+  Block* malloc(DeviceIndex device, size_t orig_size, sycl::queue& queue) {
+    std::scoped_lock<std::recursive_mutex> lock(mutex);
+    process_events();
+    size_t size = round_size(orig_size);
+    auto& pool = get_pool(size);
+    const size_t alloc_size = get_allocation_size(size);
+    AllocParams params(device, size, &queue, &pool, alloc_size);
+
+    // First, try to get a block from the existing pool.
+    bool block_found = get_free_block(params);
+    // Can't reuse an existing block, try to get a new one.
+    if (!block_found) {
+      block_found = alloc_block(params) ||
+          (release_cached_blocks() && alloc_block(params));
     }
-    p.block = *it;
-    pool.blocks.erase(it);
-    return true;
+    TORCH_CHECK(
+        block_found,
+        "XPU out of memory, please use `empty_cache` to release all unoccupied cached memory.");
+    bool split_remainder = should_split(params.block, params.size());
+    return alloc_found_block(std::move(params), orig_size, split_remainder);
   }
 
-  bool should_split(const Block* block, size_t size) {
-    size_t remaining = block->size - size;
-    if (block->pool->is_small) {
-      return remaining >= kMinBlockSize;
+  void free(Block* block) {
+    std::scoped_lock<std::recursive_mutex> lock(mutex);
+    block->allocated = false;
+
+    if (!block->stream_uses.empty()) {
+      insert_events(block);
     } else {
-      return remaining > kSmallSize;
-    }
-  }
-
-  static size_t get_allocation_size(size_t size) {
-    if (size <= kSmallSize) {
-      return kSmallBuffer;
-    } else if (size < kMinLargeAlloc) {
-      return kLargeBuffer;
-    } else {
-      return kRoundLarge * ((size + kRoundLarge - 1) / kRoundLarge);
-    }
-  }
-
-  BlockPool& get_pool(size_t size) {
-    if (size < kSmallSize) {
-      return small_blocks;
-    } else {
-      return large_blocks;
-    }
-  }
-
-  static size_t round_size(size_t size) {
-    if (size < kMinBlockSize) {
-      return kMinBlockSize;
-    } else {
-      return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
-    }
-  }
-
-  void process_events() {
-    using namespace sycl::info;
-    for (auto it = xpu_events.begin(); it != xpu_events.end();) {
-      while (!it->second.empty()) {
-        auto& e = it->second.front();
-        auto event = e.first;
-        auto* block = e.second;
-        if (event.get_info<event::command_execution_status>() !=
-            event_command_status::complete) {
-          break;
-        }
-        block->event_count--;
-        if (block->event_count == 0) {
-          free_block(block);
-        }
-        it->second.pop_front();
-      }
-
-      if (it->second.empty()) {
-        it = xpu_events.erase(it);
-      } else {
-        it++;
-      }
+      free_block(block);
     }
   }
 
