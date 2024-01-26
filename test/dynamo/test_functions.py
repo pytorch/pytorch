@@ -730,6 +730,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if "c" in tmp and "missing" not in tmp:
             return tmp["c"] - tmp["a"] + len(tmp)
 
+    @make_test
+    def test_inline_jit__unwrap_optional(x):
+        if torch.jit._unwrap_optional(x) is None:
+            return torch.ones(2, 2)
+        return x.sin()
+
     def test_dict_param_keys(self):
         a_param = torch.nn.Parameter(torch.ones([4, 4]))
 
