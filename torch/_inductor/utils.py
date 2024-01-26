@@ -1107,6 +1107,13 @@ def triton_config_to_hashable(cfg):
     return tuple(items)
 
 
+def parallel_num_threads():
+    threads = config.cpp.threads
+    if threads < 1:
+        threads = torch.get_num_threads()
+    return threads
+
+
 HAS_COLORAMA = True
 try:
     import colorama
