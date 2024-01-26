@@ -179,6 +179,7 @@ class TuningContext {
   private:
     bool enable_;
     bool tuning_enable_;
+    bool manager_initialized_;
     int max_tuning_duration_ms_;
     int max_tuning_iterations_;
     int max_warmup_duration_ms_;

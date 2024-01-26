@@ -293,6 +293,7 @@ TuningStatus TuningResultsValidator::ValidatePyTorchVersion(const std::string& v
 TuningContext::TuningContext() :
     enable_{false},
     tuning_enable_{false},
+    manager_initialized_{false},
     max_tuning_duration_ms_{0},
     max_tuning_iterations_{0},
     max_warmup_duration_ms_{0},
@@ -304,15 +305,22 @@ TuningContext::TuningContext() :
 }
 
 TuningContext::~TuningContext() {
-  if (IsTunableOpEnabled() && IsTuningEnabled() && !GetFilename().empty()) {
+  if (!manager_initialized_) {
+    // TuningResultsManager was never initialized, no tuning requested or performed.
+    // This can happen in a DDP job where a python process spawns other workers
+    // but doesn't do any computation itself.
+    return;
+  }
+  auto filename = GetFilename();
+  if (IsTunableOpEnabled() && IsTuningEnabled() && !filename.empty()) {
     if (results_count_from_input_file_ < GetTuningResultsManager().GetSize()) {
       if (results_count_from_input_file_ > 0) {
-        TUNABLE_LOG("additional tuning results available, rewriting file ", GetFilename());
+        TUNABLE_LOG("additional tuning results available, rewriting file ", filename);
       }
       else {
-        TUNABLE_LOG("writing file ", GetFilename());
+        TUNABLE_LOG("writing file ", filename);
       }
-      WriteFile(GetFilename());
+      WriteFile(filename);
     }
   }
 }
@@ -427,6 +435,7 @@ void TuningContext::DisableTunableOpAndTuning() {
 
 TuningResultsManager& TuningContext::GetTuningResultsManager() {
   c10::call_once(manager_init_once_, [this]() {
+    manager_initialized_ = true;
     if (!GetFilename().empty()) {
       ReadFile(GetFilename());
     }
@@ -460,32 +469,35 @@ std::string TuningContext::GetFilename() const {
   std::string filename = (env == nullptr) ? filename_ : env;
   if (filename.empty()) {
     TUNABLE_LOG("no filename from TuningContext::GetFilename()");
-    return filename;
+    return filename; // empty string
   }
+
+  // Using static with lambda here so that we don't make a cuda call during static shutdown.
+  // Do this the first and only time GetFilename() is called because it is called
+  // the first time a TunableOp is instantiated but also during static destruction
+  // when the cuda or hip runtime is no longer available.
+  static std::string device = []() {
+    return c10::str(int(c10::cuda::current_device()));
+  }();
 
   // differentiate filename based on device ordinal to avoid
   // use case of one process per device writing to same file
-  auto device = c10::str(int(c10::cuda::current_device()));
-  TUNABLE_LOG("current device ", device);
 
   // does filename contain %d to insert device ordinal in specific location?
   const std::string TOKEN("%d");
   std::size_t found = filename.find(TOKEN);
   if (found != std::string::npos) {
     filename.replace(found, TOKEN.length(), device);
-    TUNABLE_LOG("filename contained ", TOKEN, ", new name ", filename);
   }
   else {
     // no %d present, so append device ordinal before final '.'
     found = filename.rfind(".");
     if (found != std::string::npos) {
       filename.insert(found, device);
-      TUNABLE_LOG("filename contained '.', new name ", filename);
     }
     else {
       // all else fails, just prepend
       filename.insert(0, device);
-      TUNABLE_LOG("filename default behavior, new name ", filename);
     }
   }
   return filename;
