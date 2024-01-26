@@ -376,7 +376,7 @@ class _TorchDynamoContext:
             new_mod = OptimizedModule(mod, self)
             # Save the function pointer to find the original callable while nesting
             # of decorators.
-            new_mod._torchdynamo_orig_callable = mod.forward
+            new_mod._torchdynamo_orig_callable = mod.__call__
 
             # when compiling torch.nn.Module,
             # provide public api OptimizedModule.get_compiler_config()
