@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import types
 
 from .utils import ExactWeakKeyDictionary

@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import contextlib
 
 # Executed in the order they're registered

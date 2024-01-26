@@ -168,7 +168,7 @@ else:
         def __init__(self):
             pass
 
-    monkeytype_trace = None  # noqa: F811
+    monkeytype_trace = None  # noqa: F811  # type: ignore[assignment]
 
 
 def jit_code_filter(code: CodeType) -> bool:

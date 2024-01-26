@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 from typing import Any, Dict, List, Optional
 
 import torch.fx

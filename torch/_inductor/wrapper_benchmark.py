@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import dataclasses
 import tempfile
 from collections import defaultdict

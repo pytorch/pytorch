@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # mypy: disable-error-code="method-assign"
 
 import copy

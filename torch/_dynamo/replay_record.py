@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import dataclasses
 from dataclasses import field
 from types import CodeType, ModuleType

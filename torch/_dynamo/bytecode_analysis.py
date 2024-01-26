@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import bisect
 import dataclasses
 import dis

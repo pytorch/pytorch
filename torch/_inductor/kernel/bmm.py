@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import torch
 
 from ..lowering import register_lowering

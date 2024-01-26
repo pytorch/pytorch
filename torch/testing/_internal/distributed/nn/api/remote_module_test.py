@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 #!/usr/bin/python3
 import enum
 from typing import Tuple

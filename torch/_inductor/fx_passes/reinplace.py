@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import operator
 from collections import defaultdict
 from dataclasses import dataclass

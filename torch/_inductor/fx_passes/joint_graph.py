@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import logging
 import typing
 from collections import Counter

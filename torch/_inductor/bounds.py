@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import operator
 from functools import partial
 from typing import Any, Callable, Dict

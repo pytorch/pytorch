@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import os
 import textwrap
 from enum import auto, Enum

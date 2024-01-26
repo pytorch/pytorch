@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import collections
 from typing import Any, Callable, Dict, Optional
 

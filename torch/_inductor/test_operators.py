@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import torch.library
 from torch import Tensor
 from torch.autograd import Function

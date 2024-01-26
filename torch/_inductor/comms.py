@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # pyre-strict
 
 from typing import List

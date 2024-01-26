@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import itertools
 from collections import defaultdict
 from dataclasses import dataclass

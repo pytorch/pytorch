@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # mypy: disable-error-code="method-assign"
 
 from __future__ import annotations
