@@ -61,12 +61,10 @@ class InterpreterModule(torch.nn.Module):
     def __init__(
         self,
         graph: torch.fx.Graph,
-        module_call_signature: Optional[ModuleCallSignature],
     ):
         super().__init__()
         self.graph = graph
         self.graph.owning_module = self
-        self.module_call_signature = module_call_signature
 
     def forward(self, *args, **kwargs):
         assert self.graph_module is not None, "Didn't finalize this InterpreterModule"
