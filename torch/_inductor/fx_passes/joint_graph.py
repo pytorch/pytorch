@@ -178,7 +178,7 @@ class UniformValueConstantFolder(ConstantFolder):
         self.node_storages_ptrs: Dict[torch.fx.Node, int] = {}
         self.constant_data_ptrs: Dict[torch.fx.Node, StorageWeakRef] = {}
         # we may constant fold a tensor which in the graph has a sym size
-        self.node_replacements_shapes: Dict[torch.fx.Node, torch.Size] = {}
+        self.node_replacements_shapes: Dict[torch.fx.Node, List[int]] = {}
 
     def insertable_tensor_check(self, t: torch.Tensor) -> bool:
         # TODO - we could also Tensors which get replaced with arange here
@@ -192,7 +192,9 @@ class UniformValueConstantFolder(ConstantFolder):
     def add_node_replacement(self, node: torch.fx.Node, tensor: torch.Tensor) -> None:
         self.node_replacements[node] = tensor.flatten()[0].item()
         self.constant_data_ptrs[node] = StorageWeakRef(tensor.untyped_storage())
-        self.node_replacements_shapes[node] = tensor.shape
+        shape = list(tensor.shape)
+        assert all(isinstance(dim, int) for dim in shape)
+        self.node_replacements_shapes[node] = shape
 
 
 @torch.utils._python_dispatch._disable_current_modes()
@@ -242,7 +244,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
             # zeros, and ones just get traced into full, so we insert those
             new_node = graph.call_function(
                 aten.full.default,
-                args=(list(node_replacements_shapes[node]), value),
+                args=(node_replacements_shapes[node], value),
                 kwargs={
                     "dtype": fake_tensor.dtype,
                     "layout": torch.strided,
