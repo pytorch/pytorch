@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Dict, Optional
 
 import torch
 from torch._inductor.codecache import CompiledFxGraph
@@ -54,3 +54,37 @@ def check_for_mutation(
     else:
         has_mutation = len(compiled_graph.mutated_inputs) != 0
         return None if not has_mutation else default_msg
+
+
+def get_use_stack_trace(node) -> Optional[str]:
+    for use in node.users:
+        if stack_trace := use.meta.get("stack_trace", None):
+            return stack_trace
+    return None
+
+
+def check_multiple_devices_or_any_cpu_nodes(
+    device_node_mapping: Dict[torch.device, torch.fx.Node]
+) -> Optional[str]:
+    if cpu_node := device_node_mapping.get(torch.device("cpu")):
+        if stack_trace := get_use_stack_trace(cpu_node):
+            return format_default_skip_message(
+                f"cpu device. Found from : \n {stack_trace}"
+            )
+
+        return format_default_skip_message("cpu device")
+
+    if (
+        len(device_node_mapping) == 1
+        and next(iter(device_node_mapping.keys())).type == "cuda"
+    ):
+        return None
+
+    keys_repr = (repr(key) for key in device_node_mapping.keys())
+    return format_default_skip_message(f"multiple devices: {', '.join(keys_repr)}")
+
+
+def check_lowering_disable_cudagraph(
+    device_node_mapping: Dict[torch.device, torch.fx.Node]
+):
+    return check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
