@@ -508,6 +508,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x - 1
 
     @make_test
+    def test_cublas_allow_tf32(x):
+        if torch.backends.cuda.matmul.allow_tf32:
+            return x.sin() + 1
+
+        return x.cos() - 1
+
+    @make_test
     def test_get_calculate_correct_fan(x):
         fan_in = torch.nn.init._calculate_correct_fan(x, "fan_in")
         return x + fan_in
@@ -557,6 +564,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_tensor_type5(a, b):
         m = a.type(torch.cuda.HalfTensor)
         return b.type(m.type())
+
+    @make_test
+    def test_tensor_element_size(a):
+        if a.element_size() > 1:
+            return (a + a.element_size(), a - a.element_size())
+        return (a - a.element_size(), a + a.element_size())
 
     @make_test
     def test_ndim(x):

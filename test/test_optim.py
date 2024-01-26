@@ -291,8 +291,8 @@ class TestOptimRenewed(TestCase):
         for optim_input in optim_inputs:
             updated_params, state = [], []
             kwargs = deepcopy(optim_input.kwargs)
-            if kwargs.get("capturable", False) and str(device) == "cpu":
-                # capturable is not supported on CPU
+            if kwargs.get("capturable", False) and (str(device) == "cpu" or optim_cls.__name__ == "Adamax"):
+                # capturable is not supported on CPU nor for single-tensor Adamax, see #117836
                 continue
             for use_impl in (False, True):
                 kwargs[impl] = use_impl

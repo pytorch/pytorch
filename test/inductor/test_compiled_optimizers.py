@@ -97,8 +97,11 @@ def build_compiled_opt_kwarg_db():
 
                     name += f"_{device}"
 
-                    # Eager for-loop impl doesn't support capturable ASGD
-                    if name == "test_asgd_capturable_cuda":
+                    # Eager for-loop impl doesn't support capturable ASGD nor Adamax (see #117836)
+                    if name in [
+                        "test_asgd_capturable_cuda",
+                        "test_adamax_capturable_cuda",
+                    ]:
                         continue
 
                     kwargs["foreach"] = foreach
