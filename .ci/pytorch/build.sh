@@ -80,9 +80,7 @@ else
   elif [[ -v ANACONDA_PYTHON_VERSION ]]; then
     export CMAKE_PREFIX_PATH="/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}"
   else
-    # already checked by `! which conda`
-    CMAKE_PREFIX_PATH="$(conda info --base)"
-    export CMAKE_PREFIX_PATH
+    export CMAKE_PREFIX_PATH="$(conda info --base)"
   fi
 
   # Workaround required for MKL library linkage
