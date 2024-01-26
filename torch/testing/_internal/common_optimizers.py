@@ -1468,6 +1468,16 @@ optim_db: List[OptimizerInfo] = [
                 "test_foreach_matches_forloop",
             ),
             DecorateInfo(
+                toleranceOverride(
+                    {
+                        # previously atol=1e-7, rtol=1e-7
+                        torch.float64: tol(atol=1.5e-7, rtol=1.1e-7)
+                    }
+                ),
+                "TestOptimRenewed",
+                "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
                 skipIfTorchDynamo(
                     "See https://github.com/pytorch/pytorch/issues/116494"
                 ),
