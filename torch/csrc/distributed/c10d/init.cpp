@@ -34,6 +34,7 @@
 
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
+#include <torch/csrc/distributed/c10d/FakeProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 
 #include <torch/csrc/distributed/c10d/comm.hpp>
@@ -2669,6 +2670,13 @@ such as `dist.all_reduce(tensor, async_op=True)`.
         auto ivalue = torch::jit::toIValue(obj, typePtr);
         return ivalue.toCustomClass<::c10d::Work>();
       });
+
+  auto fakeProcessGroup =
+      intrusive_ptr_no_gil_destructor_class_<::c10d::FakeProcessGroup>(
+          module, "FakeProcessGroup", backend)
+          .def(py::init([](int rank, int size) {
+            return c10::make_intrusive<::c10d::FakeProcessGroup>(rank, size);
+          }));
 
   py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
       .def(py::init<>())
