@@ -140,6 +140,7 @@ def mock_parse_args(revert: bool = False, force: bool = False) -> Any:
             self.comment_id = 0
             self.reason = "this is for testing"
             self.ignore_current = False
+            self.check_mergeability = False
 
     return Object()
 
