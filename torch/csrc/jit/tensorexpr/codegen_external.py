@@ -1,6 +1,5 @@
 # mypy: ignore-errors
 
-#!/usr/bin/env python3
 import argparse
 
 import torchgen.model as model

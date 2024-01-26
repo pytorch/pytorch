@@ -1,7 +1,5 @@
 # mypy: ignore-errors
 
-#!/usr/bin/env python3
-
 import contextlib
 import enum
 import logging
