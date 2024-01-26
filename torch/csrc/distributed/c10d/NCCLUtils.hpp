@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <mutex>
+#include <thread>
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
@@ -261,29 +262,17 @@ class NCCLComm {
       int numRanks,
       int rank,
       ncclUniqueId commId,
-      ncclConfig_t& config,
-      bool eagerMode = false) {
+      ncclConfig_t& config) {
     auto comm = std::make_shared<NCCLComm>();
     bool isInitialized = false;
     if (nccl_use_nonblocking()) {
       config.blocking = 0;
-      if (eagerMode) {
-        LOG(INFO) << "Rank " << rank
-                  << ": creating NCCL communicator eagerly in nonblocking mode";
-        C10D_NCCL_CHECK_NONBLOCKING(
-            ncclCommInitRankConfig(
-                &(comm->ncclComm_), numRanks, commId, rank, &config),
-            c10::nullopt);
-      } else {
-        C10D_NCCL_CHECK_TIMEOUT(
-            ncclCommInitRankConfig(
-                &(comm->ncclComm_), numRanks, commId, rank, &config),
-            comm->ncclComm_,
-            c10::nullopt);
-        // under non-blocking mode, comm is initialized after
-        // C10D_NCCL_CHECK_TIMEOUT
-        isInitialized = true;
-      }
+      LOG(INFO) << "Rank " << rank
+                << ": creating NCCL communicator in nonblocking mode";
+      C10D_NCCL_CHECK_NONBLOCKING(
+          ncclCommInitRankConfig(
+              &(comm->ncclComm_), numRanks, commId, rank, &config),
+          c10::nullopt);
     } else {
       C10D_NCCL_CHECK(
           ncclCommInitRankConfig(
@@ -311,6 +300,7 @@ class NCCLComm {
             source->ncclComm_, color_id, rank, &(comm->ncclComm_), &config),
         c10::nullopt);
     ++source->ncclCommSplitCounter_;
+    comm->rank_ = rank;
     return comm;
   }
 #endif
@@ -398,11 +388,6 @@ class NCCLComm {
     return aborted_;
   }
 
-  bool isInitialized() const {
-    std::unique_lock<std::mutex> lock(mutex_);
-    return initialized_;
-  }
-
   uint64_t getCommSplitCounter() const {
     return ncclCommSplitCounter_;
   }
@@ -480,7 +465,7 @@ class NCCLComm {
 
  protected:
   // a helper function to wait until the communicator is initialized;
-  void waitUtilInitialized(int timeoutSecs);
+  void waitUntilInitialized(int timeoutSecs);
   ncclComm_t ncclComm_;
   // Unique nccl_id for this communicator.
   ncclUniqueId ncclId_;

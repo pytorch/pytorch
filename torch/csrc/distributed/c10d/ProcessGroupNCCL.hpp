@@ -575,16 +575,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Helper that either looks up the cached NCCL communicators or creates
   // a new set of NCCL communicators as a cache entry
-  // if eagerMode is true, this function would create NCCL communicators without
-  // guranteeing that they are initialized. However, communicators are
-  // guaranteed to be initialized before the first collective/P2P is issued.
   std::vector<std::shared_ptr<NCCLComm>>& getNCCLComm(
       const std::string& devicesKey,
       const std::vector<at::Device>& devices,
       OpType opType,
       int p2pRank = 0,
-      bool isSendRecvSelf = false,
-      bool eagerMode = false);
+      bool isSendRecvSelf = false);
 
   // Wrapper method which can be overridden for tests.
   virtual std::exception_ptr checkForNCCLErrors(

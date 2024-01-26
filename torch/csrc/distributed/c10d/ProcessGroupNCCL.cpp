@@ -897,7 +897,7 @@ void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
   const auto key = getKeyFromDevices(rankDevices);
   LOG(INFO) << logPrefix() << "Eagerly connecting nccl backend with device "
             << device;
-  getNCCLComm(key, rankDevices, OpType::ALLREDUCE, 0, false, true);
+  getNCCLComm(key, rankDevices, OpType::ALLREDUCE);
 }
 
 void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
@@ -1812,8 +1812,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     const std::vector<at::Device>& devices,
     OpType opType,
     int p2pRank,
-    bool isSendRecvSelf,
-    bool eagerMode) {
+    bool isSendRecvSelf) {
   // Sanity check
   if (devicesKey.empty()) {
     C10_THROW_ERROR(
@@ -1947,8 +1946,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     // conditions that might have resulted in a split above.
     if (!ncclComms[i]) {
 #ifdef NCCL_HAS_COMM_NONBLOCKING
-      ncclComms[i] =
-          NCCLComm::create(numRanks, rank, ncclID, options_->config, eagerMode);
+      ncclComms[i] = NCCLComm::create(numRanks, rank, ncclID, options_->config);
 #else
       ncclComms[i] = NCCLComm::create(numRanks, rank, ncclID);
 #endif
@@ -1968,16 +1966,12 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 #ifndef NCCL_HAS_COMM_NONBLOCKING
   C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
 #else
-  if (!nccl_use_nonblocking()) {
-    C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
+  if (nccl_use_nonblocking()) {
+    // If we use nonblocking mode, allow communicators to be
+    // uninitialized/ncclInProgress until the first communication
+    C10D_NCCL_CHECK_NONBLOCKING(ncclGroupEnd(), c10::nullopt);
   } else {
-    // If we use eager mode, allow communicators to be
-    // uninitilized/ncclInProgress until the first communication
-    if (eagerMode) {
-      C10D_NCCL_CHECK_NONBLOCKING(ncclGroupEnd(), c10::nullopt);
-    } else {
-      C10D_NCCL_CHECK_TIMEOUT_GROUPEND(ncclGroupEnd(), ncclComms, c10::nullopt);
-    }
+    C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
   }
 #endif
 

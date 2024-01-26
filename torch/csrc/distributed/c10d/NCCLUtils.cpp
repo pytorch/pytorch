@@ -9,6 +9,11 @@
 #include <cuda_runtime.h>
 #include <mutex>
 
+namespace {
+//
+constexpr int64_t kCommInitBusyWaitMillis = 10;
+} // namespace
+
 namespace c10d {
 
 ncclComm_t NCCLComm::getNcclComm() {
@@ -28,13 +33,13 @@ ncclComm_t NCCLComm::getNcclComm() {
   }
   // only wait for initialization if nonblocking mode is enabled
   if (nccl_use_nonblocking()) {
-    waitUtilInitialized(nccl_nonblocking_timeout());
+    waitUntilInitialized(nccl_nonblocking_timeout());
   }
 
   return ncclComm_;
 }
 
-void NCCLComm::waitUtilInitialized(int timeoutSecs) {
+void NCCLComm::waitUntilInitialized(int timeoutSecs) {
   auto startTimepoint = std::chrono::steady_clock::now();
   while (!initialized_) {
     auto currentTimepoint = std::chrono::steady_clock::now();
@@ -42,17 +47,19 @@ void NCCLComm::waitUtilInitialized(int timeoutSecs) {
                            currentTimepoint - startTimepoint)
                            .count();
     if (timeElapsed > timeoutSecs) {
-      std::string err = "NCCL timeout in communicator initilization.";
+      std::string err = "NCCL timeout in communicator initialization.";
       TORCH_CHECK_WITH(DistBackendError, false, err);
     }
     if (ncclComm_) {
       ncclResult_t result;
       ncclCommGetAsyncError(ncclComm_, &result);
       if (result == ncclSuccess) {
-        LOG(INFO) << "Rank " << rank_ << ": NCCL communicator is initilized.";
+        LOG(INFO) << "Rank " << rank_ << ": NCCL communicator is initialized.";
         initialized_ = true;
       }
     }
+    std::this_thread::sleep_for(
+        std::chrono::milliseconds(kCommInitBusyWaitMillis));
   }
 }
 
