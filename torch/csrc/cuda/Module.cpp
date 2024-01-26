@@ -80,17 +80,13 @@ static void poison_fork() {
 // CUDA management methods
 ////////////////////////////////////////////////////////////////////////////////
 
-void THCPModule_setDevice(int device) {
-  c10::cuda::set_device(static_cast<c10::DeviceIndex>(device));
-}
-
 PyObject* THCPModule_setDevice_wrap(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to setDevice");
-  int64_t device = THPUtils_unpackLong(arg);
+  auto device = THPUtils_unpackLong(arg);
 
   torch::utils::cuda_lazy_init();
-  THCPModule_setDevice(device);
+  c10::cuda::set_device(static_cast<c10::DeviceIndex>(device));
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -259,6 +255,7 @@ PyObject* THCPModule_setStream_wrap(
           args,
           kwargs,
           "|LLL",
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(kwlist),
           &stream_id,
           &device_index,
@@ -266,11 +263,13 @@ PyObject* THCPModule_setStream_wrap(
   }
 
   auto stream = at::cuda::CUDAStream::unpack3(
-      stream_id, device_index, static_cast<c10::DeviceType>(device_type));
+      stream_id,
+      static_cast<c10::DeviceIndex>(device_index),
+      static_cast<c10::DeviceType>(device_type));
 
   auto device = c10::cuda::current_device();
   if (device != stream.device_index()) {
-    THCPModule_setDevice(stream.device_index());
+    c10::cuda::set_device(stream.device_index());
   }
   at::cuda::setCurrentCUDAStream(stream);
   Py_RETURN_NONE;
@@ -926,7 +925,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
       static_cast<void (*)(
           c10::optional<std::string>,
           c10::optional<std::string>,
-          std::string,
+          const std::string&,
           size_t)>(torch::cuda::_record_memory_history));
 
   m.def("_cuda_isHistoryEnabled", []() {
@@ -1211,7 +1210,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
           }
         }
         auto delta = c10::cuda::CUDACachingAllocator::setCheckpointPoolState(
-            device, pps);
+            device, std::move(pps));
         auto& freed_pointers = delta.ptrs_freed;
 
         std::unordered_set<void*> allocd_set;

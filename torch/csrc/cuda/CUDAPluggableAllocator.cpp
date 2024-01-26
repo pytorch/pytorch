@@ -100,6 +100,7 @@ c10::DataPtr CUDAPluggableAllocator::allocate(size_t size) const {
   cudaStream_t stream =
       c10::cuda::getCurrentCUDAStream(static_cast<c10::DeviceIndex>(device));
   void* r =
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       const_cast<CUDAPluggableAllocator*>(this)->malloc(size, device, stream);
   c10::DataPtr data_ptr = {
       r,
