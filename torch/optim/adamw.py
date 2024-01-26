@@ -84,7 +84,9 @@ class AdamW(Optimizer):
                 p_state = self.state.get(p, [])
                 if len(p_state) != 0 and not torch.is_tensor(p_state['step']):
                     step_val = float(p_state["step"])
-                    p_state["step"] = torch.tensor(step_val, dtype=_get_scalar_dtype(is_fused=fused), device=p.device) if group['capturable'] or group['fused'] else torch.tensor(step_val, dtype=_get_scalar_dtype())
+                    p_state["step"] = (torch.tensor(step_val, dtype=_get_scalar_dtype(is_fused=fused), device=p.device)
+                                       if group['capturable'] or group['fused']
+                                       else torch.tensor(step_val, dtype=_get_scalar_dtype()))
 
     def _init_group(
         self,

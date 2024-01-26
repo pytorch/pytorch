@@ -42,10 +42,12 @@ class NAdam(Optimizer):
                 if len(p_state) != 0:
                     if not torch.is_tensor(p_state['step']):
                         step_val = float(p_state["step"])
-                        p_state["step"] = torch.tensor(step_val, dtype=_get_scalar_dtype(), device=p.device) if group['capturable'] else torch.tensor(step_val, dtype=_get_scalar_dtype())
+                        p_state["step"] = (torch.tensor(step_val, dtype=_get_scalar_dtype(), device=p.device)
+                                           if group['capturable'] else torch.tensor(step_val, dtype=_get_scalar_dtype()))
                     if not torch.is_tensor(p_state['mu_product']):
                         mu_prod_val = p_state["mu_product"]
-                        p_state["mu_product"] = torch.tensor(mu_prod_val, dtype=_get_scalar_dtype(), device=p.device) if group['capturable'] else torch.tensor(mu_prod_val, dtype=_get_scalar_dtype())
+                        p_state["mu_product"] = (torch.tensor(mu_prod_val, dtype=_get_scalar_dtype(), device=p.device)
+                                                 if group['capturable'] else torch.tensor(mu_prod_val, dtype=_get_scalar_dtype()))
 
 
     def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps):

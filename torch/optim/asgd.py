@@ -62,11 +62,14 @@ class ASGD(Optimizer):
                 if len(p_state) != 0:
                     if not torch.is_tensor(p_state['step']):
                         step_val = float(p_state["step"])
-                        p_state["step"] = torch.tensor(step_val, dtype=_get_scalar_dtype(), device=p.device) if group['capturable'] else torch.tensor(step_val, dtype=_get_scalar_dtype())
+                        p_state["step"] = (torch.tensor(step_val, dtype=_get_scalar_dtype(), device=p.device)
+                                           if group['capturable'] else torch.tensor(step_val, dtype=_get_scalar_dtype()))
                     if not torch.is_tensor(p_state["eta"]):
-                        p_state["eta"] = torch.tensor(p_state["eta"], dtype=_get_scalar_dtype(), device=p.device) if group["capturable"] else torch.tensor(p_state["eta"], dtype=_get_scalar_dtype())
+                        p_state["eta"] = (torch.tensor(p_state["eta"], dtype=_get_scalar_dtype(), device=p.device)
+                                          if group["capturable"] else torch.tensor(p_state["eta"], dtype=_get_scalar_dtype()))
                     if not torch.is_tensor(p_state["mu"]):
-                        p_state["mu"] = torch.tensor(p_state["mu"], dtype=_get_scalar_dtype(), device=p.device) if group["capturable"] else torch.tensor(p_state["mu"], dtype=_get_scalar_dtype())
+                        p_state["mu"] = (torch.tensor(p_state["mu"], dtype=_get_scalar_dtype(), device=p.device)
+                                         if group["capturable"] else torch.tensor(p_state["mu"], dtype=_get_scalar_dtype()))
 
 
     def _init_group(self, group, params_with_grad, grads, mus, axs, etas, state_steps):
