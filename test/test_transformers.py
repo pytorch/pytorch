@@ -2742,7 +2742,7 @@ class TestSDPACudaOnly(NNTestCase):
 
         upstream_grad = torch.rand_like(out, requires_grad=False)
 
-        # backward for flash attention on sm86, sm87, and sm89 for headdim > 192 currently disabled
+        # backward for flash attention on sm86, sm87, and sm89 for headdim >= 193 currently disabled
         if isSM8XDevice and head_dim in range(193, 256):
             self.assertRaises(RuntimeError, lambda: out.backward(upstream_grad))
             return
