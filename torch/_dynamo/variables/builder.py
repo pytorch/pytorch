@@ -706,7 +706,6 @@ class VariableBuilder:
         elif (is_function_or_wrapper(value) or callable(value)) and trace_rules.lookup(
             value
         ) is not None:
-            value = unwrap_if_wrapper(value)
             if is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup(value).create_with_source(

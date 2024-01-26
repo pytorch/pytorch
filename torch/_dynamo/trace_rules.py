@@ -17,7 +17,7 @@ except ModuleNotFoundError:
 
 import torch
 
-from .utils import hashable, NP_SUPPORTED_MODULES
+from .utils import hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
 
 from .variables import (
     FunctorchVmapHigherOrderVariable,
@@ -2978,6 +2978,8 @@ E.g, the lookup result of `torch.sin` is `TorchInGraphFunctionVariable`.
 
 
 def lookup(obj):
+    # Unwrap if it's a functools.lru_cache wrapper
+    obj = unwrap_if_wrapper(obj)
     if not hashable(obj):
         return None
     # Custom allow/disallow in graph takes precedence over the `torch_name_rule_map`.
