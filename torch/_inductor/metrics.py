@@ -146,6 +146,21 @@ MetricTable.register_table(
     ],
 )
 
+# track the perf difference between persistent reduction and non-persistent
+# reductions
+MetricTable.register_table(
+    "persistent_red_perf",
+    [
+        "kernel1_name",
+        "kernel2_name",
+        "kernel1_latency",
+        "kernel2_latency",
+        "size_hints",
+        "reduction_hint",
+        "speedup",
+    ],
+)
+
 
 def purge_old_log_files():
     """

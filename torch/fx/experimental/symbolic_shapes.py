@@ -94,6 +94,8 @@ CURRENT_NODE_KEY = "current_node"
 def uninteresting_files():
     import torch._inductor.sizevars
     import torch._library.abstract_impl
+    import torch._subclasses.meta_utils
+    import torch._subclasses.fake_tensor
     mods = [
         sys.modules[__name__],
         torch.fx.experimental.recording,
@@ -102,6 +104,8 @@ def uninteresting_files():
         torch,
         torch._inductor.sizevars,
         torch._library.abstract_impl,
+        torch._subclasses.meta_utils,
+        torch._subclasses.fake_tensor,
     ]
     return {inspect.getfile(m) for m in mods}
 
@@ -274,7 +278,7 @@ def has_free_symbols(val: Union[SymInt, torch.Tensor]) -> bool:
 # Like free_symbols, but filtered to only report unbacked symbols
 def free_unbacked_symbols(x):
     # NB: keep synced with is_unbacked_symint
-    return {s for s in free_symbols(x) if s.name.startswith(("i", "f"))}
+    return {s for s in free_symbols(x) if s.name.startswith(("u", "f"))}
 
 # WARNING: Don't use this on Dynamo produced graphs, they don't have meta
 # setup!
@@ -1754,6 +1758,8 @@ class ShapeEnv:
         duck_shape=True,
         # For debugging
         co_fields=None,
+        # XXX Add any new settings that could affect FakeTensor evaluation
+        # to: torch._subclasses.fake_tensor._ShapeEnvSettings
     ):
         # Not directly used by ShapeEnv; indirectly used by FakeTensor
         self.allow_scalar_outputs = allow_scalar_outputs
@@ -2255,19 +2261,15 @@ class ShapeEnv:
                 for i in range(len(size))
                 if stride[i] is not None and ex_stride[i] >= 0
             }
-
             # iterate over unbound strides in sorted order
-            def singleton_aware_sort(tup):
-                # Order singletons by their coefficients.
-                # 1 here to order singletons after non-singletons.
-                return (
+            val_list = sorted(
+                [(ex_stride[i], i) for i in range(len(stride)) if stride[i] is None],
+                key=lambda tup: (
+                    # Order singletons by their coefficients.
+                    # 1 here to order singletons after non-singletons.
                     (1, tup[0].node.singleton_coeff(), tup[1]) if is_singleton(tup[0])
                     else (0, *tup)
                 )
-
-            val_list = sorted(
-                [(ex_stride[i], i) for i in range(len(stride)) if stride[i] is None],
-                key=singleton_aware_sort
             )
             for _, i in val_list:
                 if stride[i] is None and ex_stride[i] in candidates:
@@ -2281,7 +2283,7 @@ class ShapeEnv:
                         (ex_stride[i], i)
                         for i in range(len(stride))
                         if stride[i] is None
-                    ], key=singleton_aware_sort
+                    ]
                 )
                 stride[i] = self.create_symbol(
                     val,
@@ -2384,7 +2386,7 @@ class ShapeEnv:
 
     @record_shapeenv_event()
     def create_unbacked_symint(self):
-        symbol: sympy.Symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
+        symbol: sympy.Symbol = sympy.Symbol(f"u{next(self.unbacked_symint_counter)}", integer=True)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = self._default_unspecified_value_range()
@@ -2399,11 +2401,11 @@ class ShapeEnv:
 
     def is_unbacked_symint(self, symbol: sympy.Symbol) -> bool:
         # NB: keep synced with free_unbacked_symbols
-        return str(symbol).startswith("i")
+        return str(symbol).startswith("u")
 
     @record_shapeenv_event()
     def create_unbacked_symbool(self):
-        symbol: sympy.Symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
+        symbol: sympy.Symbol = sympy.Symbol(f"u{next(self.unbacked_symint_counter)}", integer=True)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         self.var_to_range[symbol] = ValueRanges(0, 1)
@@ -2540,7 +2542,14 @@ class ShapeEnv:
                 range_str = ""
 
             r = sympy_expr
-            self.log.info("create_symbol %s = %s for %s %s", sympy_expr, val, source.name(), range_str)
+
+            fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
+            self.log.info(
+                "create_symbol %s = %s for %s %s%s (%s)",
+                sympy_expr, val, source.name(), range_str,
+                maybe_user_loc, format_frame(fsummary)
+            )
+
             self.counter["create_symbol"] += 1
         else:
             # This implements duck-shaping: input sizes that match are assigned
@@ -3799,7 +3808,7 @@ class ShapeEnv:
             stack = CapturedTraceback.extract(skip=1)
             ra = RuntimeAssert(expr, msg, stack)
             # TODO: Do this in a way that is less janky than int(s.name[1:])
-            cands = sorted([s for s in expr.free_symbols if s.name.startswith("i")], key=lambda s: int(s.name[1:]))
+            cands = sorted([s for s in expr.free_symbols if s.name.startswith("u")], key=lambda s: int(s.name[1:]))
             self.deferred_runtime_asserts.setdefault(cands[-1], []).append(ra)
             self.num_deferred_runtime_asserts += 1
             self._update_version_counter()

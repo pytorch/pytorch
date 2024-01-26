@@ -146,7 +146,6 @@
 #include <ATen/ops/select_backward_native.h>
 #include <ATen/ops/select_copy_native.h>
 #include <ATen/ops/select_native.h>
-#include <ATen/ops/select_inverse_native.h>
 #include <ATen/ops/select_scatter_native.h>
 #include <ATen/ops/set_native.h>
 #include <ATen/ops/slice.h>
@@ -2568,11 +2567,6 @@ Tensor slice_inverse_symint(
     c10::optional<SymInt> /* start */,
     c10::optional<SymInt> /* end */,
     SymInt /* step */) {
-  // assume self has enough to storage to be viewed with base's metadata
-  return self.as_strided_symint(base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
-}
-
-Tensor select_inverse_symint(const Tensor& self, const Tensor& base, int64_t dim, SymInt index) {
   // assume self has enough to storage to be viewed with base's metadata
   return self.as_strided_symint(base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
 }
