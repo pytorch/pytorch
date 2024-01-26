@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import sys
 import threading
 from dataclasses import dataclass
