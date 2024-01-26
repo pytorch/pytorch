@@ -12,11 +12,9 @@ from torch.distributed._composable import fully_shard, replicate
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor, init_device_mesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    _CHECKPOINT_WRAPPED_MODULE,
     apply_activation_checkpointing,
 )
 from torch.distributed.checkpoint.state_dict import (
-    _get_fqns,
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
     get_model_state_dict,
