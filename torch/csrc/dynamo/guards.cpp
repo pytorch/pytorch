@@ -844,9 +844,10 @@ class LENGTH_CHECK : public LeafGuard {
       : LeafGuard(guard_str), _length(py::cast<Py_ssize_t>(value)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    return Py_SIZE(value) == _length;
-    // return PyList_Size(value) == _length;
-    // return PyObject_RichCompareBool(value, _value, Py_EQ);
+    // TODO(janimesh) - We might want to break this check into per instance type
+    // if there are only a few. The known ones are list, tuple, tuple,
+    // ModuleList but the list is not exhaustive.
+    return PySequence_Length(value) == _length;
   }
 
   std::string repr_prefix() override {

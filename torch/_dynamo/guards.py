@@ -1196,13 +1196,16 @@ class CheckFunctionManager:
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
         # Check that the check_fn is True for this frame
         assert self.check_fn(output_graph.local_scope)
+        assert self.check_fn(output_graph.local_scope)
         if config.enable_cpp_guard_manager:
             # breakpoint()
             print(self.guard_manager)
             debug_guard_check = self.guard_manager.root.check_verbose(
                 output_graph.local_scope
             )
-            assert debug_guard_check.result
+            if not debug_guard_check.result:
+                print(debug_guard_check.failed_guard)
+                assert False
 
         self._weakrefs.clear()
         # Keep track of weak references of objects with ID_MATCH guard. This
@@ -1367,8 +1370,12 @@ class CheckFunctionManager:
 
         # TODO: the "guard" here is actually just the top level SHAPE_ENV
         # which is useless.  Get ShapeEnv to pass in more provenance.
+        symbolic_shape_code_parts = set()
+        symbolic_shape_guard_str = ""
         for gcl in builder.shape_env_code:
             for code in gcl.code_list:
+                symbolic_shape_code_parts.add(code)
+                symbolic_shape_guard_str += builder.get_guard_str(gcl.guard, [code]) + "\n"
                 add_code_part(code, gcl.guard)
 
         global_state = convert_frame.initial_global_state
@@ -1385,6 +1392,7 @@ class CheckFunctionManager:
             **SYMPY_INTERP,
             **CLOSURE_VARS,
         }
+        builder.add_python_lambda_leaf_guard_to_root(symbolic_shape_code_parts, symbolic_shape_guard_str, closure_vars)
 
         unique_code_parts = list(unique(code_parts))
         make_guard_fn_args = ", ".join(closure_vars.keys())
