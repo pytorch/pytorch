@@ -2,6 +2,7 @@
 
 import time
 from enum import auto, Enum
+from functools import partial
 
 import torch
 import torch.distributed as dist
@@ -23,6 +24,7 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.nn.parallel import DistributedDataParallel
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -77,6 +79,7 @@ class ModelType(Enum):
     FSDP = auto()
     HSDP = auto()
     FSDP_TP = auto()
+    DDP = auto()
     NONE = auto()  # no parallelization
 
 
@@ -128,6 +131,9 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
             }
             model = parallelize_module(dummy_model, tp_mesh, parallelize_plan)
             model = FSDP(model, device_mesh=dp_mesh, use_orig_params=True)
+        elif model_type == ModelType.DDP:
+            model = DistributedDataParallel(dummy_model)
+            model.get_input = partial(TestDummyModel.get_input, model)
         else:
             model = dummy_model
 
@@ -152,10 +158,10 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     @skip_if_lt_x_gpu(4)
     @with_temp_dir
     @parametrize("compile", [True, False])
-    # TODO: Previously PariwiseParallel does not shard properly, passing ModelType.FSDP_TP test where it
+    # TODO: Previously PairwiseParallel does not shard properly, passing ModelType.FSDP_TP test where it
     # should have failed. Disabling the failed test temporarily to unblock the deprecation of PairwiseParallel.
     # @parametrize("model_type", [ModelType.FSDP, ModelType.HSDP, ModelType.FSDP_TP])
-    @parametrize("model_type", [ModelType.FSDP, ModelType.HSDP])
+    @parametrize("model_type", [ModelType.FSDP, ModelType.HSDP, ModelType.DDP])
     def test_e2e(self, compile, model_type):
         self._run_e2e_test(compile, model_type)
 
