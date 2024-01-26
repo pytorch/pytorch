@@ -9924,11 +9924,11 @@ class TestNNDeviceType(NNTestCase):
             self.assertTrue(output_ui8.is_contiguous(memory_format=memory_format))
             self.assertTrue(output_f32.is_contiguous(memory_format=memory_format))
 
-        diff = (output_f32 - output_ui8.float()).abs()
         if mode == "bilinear":
             torch.testing.assert_close(output_f32, output_ui8.float(), rtol=0, atol=1)
         else:
-            self.assertLess(diff.max(), 15)
+            diff = (output_f32 - output_ui8.float()).abs()
+            self.assertLess(diff.max(), 5)
 
             threshold = 2
             percent = 3
