@@ -3,6 +3,7 @@
 
 import torch
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
+from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.placement_types import _Partial, Replicate, Shard
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -174,10 +175,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
         ones_like_dt = torch.ones_like(dist_tensor)
         ones_expected = torch.ones(dist_tensor.shape)
-        self.assertEqual(
-            ones_expected,
-            ones_like_dt.redistribute(device_mesh, [Replicate()]).to_local(),
-        )
+        self.assertEqual(ones_expected, ones_like_dt.full_tensor())
 
     @with_comms
     def test_fill_inplace_partial_sum(self):
@@ -188,12 +186,12 @@ class DistTensorOpsTest(DTensorTestBase):
         dist_tensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
         assert dist_tensor.shape == (4, 8)
 
-        torch.fill_(dist_tensor, 42)
-        fill_expected = torch.full(dist_tensor.shape, 42, dtype=input_tensor.dtype)
-        self.assertEqual(
-            fill_expected,
-            dist_tensor.redistribute(device_mesh, [Replicate()]).to_local(),
+        # inplace partial sum should keep partial
+        torch.fill_(dist_tensor, 8)
+        fill_expected = torch.full(
+            dist_tensor.shape, 8 * self.world_size, dtype=input_tensor.dtype
         )
+        self.assertEqual(fill_expected, dist_tensor.full_tensor())
 
     @with_comms
     def test_zeros_like_partial_sum(self):
@@ -206,10 +204,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
         zeros_like_dt = torch.zeros_like(dist_tensor)
         zeros_expected = torch.zeros(dist_tensor.shape)
-        self.assertEqual(
-            zeros_expected,
-            zeros_like_dt.redistribute(device_mesh, [Replicate()]).to_local(),
-        )
+        self.assertEqual(zeros_expected, zeros_like_dt.full_tensor())
 
     @with_comms
     def test_zero_inplace(self):
@@ -259,6 +254,22 @@ class DistTensorOpsTest(DTensorTestBase):
         eq_result = dist_tensor_1.equal(dist_tensor_2)
         # equal op all reduces each shard's local result
         self.assertFalse(eq_result)
+        self.assertTrue(dist_tensor_1.is_same_size(dist_tensor_2))
+
+        # test if sharding are different
+        replica_spec = [Replicate()]
+        global_input = torch.ones(4 * self.world_size, 4)
+        dist_tensor_3 = DTensor.from_local(
+            global_input, device_mesh, replica_spec, run_check=False
+        )
+
+        self.assertTrue(dist_tensor_1.equal(dist_tensor_3))
+        self.assertTrue(dist_tensor_1.is_same_size(dist_tensor_3))
+
+        # test sharding difference with only some shards content difference
+        self.assertFalse(dist_tensor_2.equal(dist_tensor_3))
+        self.assertTrue(dist_tensor_1.is_same_size(dist_tensor_3))
+        self.assertFalse(input_tensor_2.is_same_size(dist_tensor_3))
 
     def _test_op(self, mesh, op_call, *args, **kwargs):
         out = op_call(*args, **kwargs)
@@ -266,10 +277,26 @@ class DistTensorOpsTest(DTensorTestBase):
         for d_args, d_kwargs in dtc:
             self.assertTrue(dtc.successful())
             d_out = op_call(*d_args, **d_kwargs)
-            self.assertEqual(
-                d_out.redistribute(mesh, [Replicate()] * mesh.ndim).to_local(),
-                out,
-            )
+            self.assertEqual(d_out.full_tensor(), out)
+
+    @with_comms
+    def test_new_full(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        placements = [[Shard(0)], [Replicate()]]
+        for placement in placements:
+            global_tensor = torch.randn(12, 8)
+            input_dt = distribute_tensor(global_tensor, device_mesh, placement)
+            # TODO: Currently CommDebugMode cannot capture communications within DTensor op dispatcher.
+            # Need to revisit the assertions once we have correct CommDebugMode support.
+            comm_mode = CommDebugMode()
+            with comm_mode:
+                new_full_dt = input_dt.new_full((4, 8), 42.0)
+                # new_full creates a replicated tensor, which should not trigger any communication.
+                self.assertEqual(comm_mode.get_total_counts(), 0)
+            new_full_expected = torch.full((4, 8), 42.0)
+            self.assertEqual(input_dt.placements, placement)
+            self.assertTrue(new_full_dt.placements[0].is_replicate())
+            self.assertEqual(new_full_expected, new_full_dt.to_local())
 
     @with_comms
     def test_index(self):
@@ -390,7 +417,41 @@ class DistTensorOpsTest(DTensorTestBase):
             mat = distribute_tensor(global_tensor, mesh, spec)
             res = torch.where(mat > 0, 1, 0)
             ref = torch.where(global_tensor > 0, 1, 0)
-            self.assertEqual(res.redistribute(placements=[Replicate()]).to_local(), ref)
+            self.assertEqual(res.full_tensor(), ref)
+
+    @with_comms
+    def test_dtensor_dtype_conversion(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        shard_spec = [Shard(0)]
+        # by default we start from bf16 dtype
+        local_tenor = torch.randn(2, 8, dtype=torch.bfloat16)
+        bf16_sharded_dtensor = DTensor.from_local(local_tenor, device_mesh, shard_spec)
+        self.assertEqual(bf16_sharded_dtensor.dtype, torch.bfloat16)
+        self.assertEqual(bf16_sharded_dtensor.to_local().dtype, torch.bfloat16)
+
+        # convert to float dtype
+        fp32_sharded_dtensor = bf16_sharded_dtensor.float()
+        self.assertEqual(fp32_sharded_dtensor.dtype, torch.float32)
+        self.assertEqual(fp32_sharded_dtensor.to_local().dtype, torch.float32)
+
+        # convert back to bf16 dtype
+        bf16_sharded_dtensor1 = fp32_sharded_dtensor.type_as(bf16_sharded_dtensor)
+        self.assertEqual(bf16_sharded_dtensor1.dtype, torch.bfloat16)
+        self.assertEqual(bf16_sharded_dtensor1.to_local().dtype, torch.bfloat16)
+
+        from torch.distributed._tensor.debug import get_sharding_prop_cache_info
+
+        # by this point we only have cache misses
+        hits, misses, _, _ = get_sharding_prop_cache_info()
+        self.assertEqual(hits, 0)
+        self.assertEqual(misses, 2)
+
+        # convert to fp32 again and see if there's cache hit
+        fp32_sharded_dtensor1 = bf16_sharded_dtensor1.float()
+        hits, misses, _, _ = get_sharding_prop_cache_info()
+        # by now we should have cache hit
+        self.assertEqual(hits, 1)
+        self.assertEqual(misses, 2)
 
 
 if __name__ == "__main__":

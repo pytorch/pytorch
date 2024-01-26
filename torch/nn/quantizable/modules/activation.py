@@ -1,5 +1,5 @@
 # flake8: noqa: F401
-r"""Quantizable Modules
+r"""Quantizable Modules.
 
 This file is in the process of migration to `torch/ao/nn/quantizable`, and
 is kept here for compatibility while the migration process is ongoing.

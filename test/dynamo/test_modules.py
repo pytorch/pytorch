@@ -216,6 +216,26 @@ class ModuleProperty(torch.nn.Module):
         return x * self.scale_alias
 
 
+class NestedModuleList(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ModuleList([])
+        for _ in range(3):
+            self.layers.append(
+                torch.nn.ModuleList(
+                    [
+                        torch.nn.Linear(10, 10),
+                        torch.nn.ReLU(),
+                    ]
+                )
+            )
+
+    def forward(self, x):
+        for layer, act in self.layers:
+            x = act(layer(x))
+        return x
+
+
 class ConstLoop(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -798,7 +818,7 @@ class ConvTransposeCallSuperForwardDirectly(torch.nn.ConvTranspose2d):
             )
         ]
         output_shape = [x.shape[0], self.bias.shape[0]] + output_shape
-        return _NewEmptyTensorOp.apply(x, output_shape)
+        return _NewEmptyTensorOp.apply(x, output_shape)  # noqa: F821
 
 
 class ModuleNameString(torch.nn.Module):
@@ -1046,11 +1066,12 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_cfgmod = make_test(CfgModule())
     test_stringmember = make_test(StringMember())
     test_modulelist = make_test(ModuleList())
-    test_modulelist = make_test(CustomGetItemModuleList())
+    test_modulelist_nested = make_test(NestedModuleList())
+    test_modulelist_custom = make_test(CustomGetItemModuleList())
     test_moduledict = make_test(ModuleDict())
-    test_moduledict = make_test(CustomGetItemModuleDict())
+    test_moduledict_custom = make_test(CustomGetItemModuleDict())
     test_parameterdict = make_test(ParameterDict())
-    test_parameterdict = make_test(CustomGetItemParameterDict())
+    test_parameterdict_custom = make_test(CustomGetItemParameterDict())
     test_super1 = make_test(SuperModule())
     test_super2 = make_test(SuperModule2())
     test_super_class_method = make_test(SuperChildCallsClassMethod())
@@ -1527,7 +1548,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         mod = MockModule()
         opt_mod = torch._dynamo.optimize("eager")(mod)
 
-        # Check parameteres and buffers
+        # Check parameters and buffers
         for p1, p2 in zip(mod.parameters(), opt_mod.parameters()):
             self.assertTrue(id(p1) == id(p2))
         for b1, b2 in zip(mod.buffers(), opt_mod.buffers()):
@@ -1768,7 +1789,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         """
         Summary:
-          - removing a hook doesn't fail a guard, becuase we weren't compiling the hook
+          - removing a hook doesn't fail a guard, because we weren't compiling the hook
             (at least into the same graph) as forward in the first place! We do correctly
             omit calling the removed hook, but since this hook is a post forward hook,
             the 'RETURN' from forward is breaking the graph.
@@ -1842,7 +1863,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m._forward_hooks[handle.id] = new_forward_hook
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 16)
-        self.assertTrue("___check_obj_id(L['m']._forward_hooks" in failure_reason)
+        self.assertRegex(
+            failure_reason, r"^___check_obj_id\(.*\(L\['m'\]\._forward_hooks"
+        )
 
     @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", True)
     def test_hooks_skip_guards(self):

@@ -5,13 +5,16 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Mapping, Optional, Sequence, Union
+from typing import Any, Callable, Mapping, Optional, Sequence, TYPE_CHECKING, Union
 
 import torch._dynamo
 import torch.fx
 import torch.onnx
 from torch.onnx._internal import _beartype, exporter, io_adapter
 from torch.onnx._internal.diagnostics import infra
+
+if TYPE_CHECKING:
+    from torch.export.exported_program import ExportedProgram
 
 
 class TorchExport(exporter.FXGraphExtractor):
@@ -31,7 +34,7 @@ class TorchExport(exporter.FXGraphExtractor):
     def generate_fx(
         self,
         options: exporter.ResolvedExportOptions,
-        model: "ExportedProgram",  # type: ignore[name-defined]
+        model: "ExportedProgram",  # type: ignore[override]
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ) -> torch.fx.GraphModule:
@@ -48,13 +51,47 @@ class TorchExport(exporter.FXGraphExtractor):
             io_adapter.FlattenInputWithTreeSpecValidationInputStep()
         )
         self.input_adapter.append_step(
-            io_adapter.PrependParamsAndBuffersAotAutogradInputStep(model)
+            io_adapter.PrependParamsBuffersConstantAotAutogradInputStep()
         )
-        updated_model_args = self.input_adapter.apply(*model_args, **model_kwargs)
+
+        # ONNX does not support None inputs. During graph building, all None inputs
+        # are removed. Here we register this step to input adapter.
+        options.fx_tracer.input_adapter.append_step(io_adapter.RemoveNoneInputStep())
+
+        # NOTE: temp workaround for https://github.com/pytorch/pytorch/issues/99534
+        # Dynamo doesn't support non-tensor inputs.
+        options.fx_tracer.input_adapter.append_step(
+            io_adapter.RemoveNonTensorInputStep()
+        )
+
+        # ONNX does not support complex inputs. During graph building, all complex inputs
+        # are converted to real representation inputs. Here we register this step to
+        # input/output adapter.
+        options.fx_tracer.input_adapter.append_step(
+            io_adapter.ConvertComplexToRealRepresentationInputStep()
+        )
+
+        updated_model_args = self.input_adapter.apply(
+            *model_args, model=model, **model_kwargs
+        )
 
         # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
         # tensor, etc), we flatten the collection and register each element as output.
         options.fx_tracer.output_adapter.append_step(io_adapter.FlattenOutputStep())
+
+        # Output post-processing steps should happen after `FlattenOutputStep`.
+        options.fx_tracer.output_adapter.append_step(
+            io_adapter.ConvertComplexToRealRepresentationOutputStep()
+        )
+
+        options.fx_tracer.output_adapter.append_step(
+            io_adapter.PrependParamsAndBuffersAotAutogradOutputStep()
+        )
+
+        # TODO: https://github.com/pytorch/pytorch/issues/114628
+        # run_decomposition generates a new graph module with decomposed ops.
+        # Thus, we need to run this step after io_adapters.
+        model = model.run_decompositions(options.decomposition_table)
 
         # Export FX graph to ONNX ModelProto.
         return self.pre_export_passes(options, model, model.graph_module, updated_model_args)  # type: ignore[return-value]

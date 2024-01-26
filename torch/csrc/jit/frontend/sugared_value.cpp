@@ -241,6 +241,17 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     return SpecialFormValue::create(aten::index);
   }
 
+  if (auto generator_type = value_->type()->cast<GeneratorType>()) {
+    // Handle access to Generator's `manual_seed`, `initial_seed` and `seed`
+    // attributes.
+    if (field == "manual_seed" || field == "initial_seed" || field == "seed") {
+      if (auto builtin = BuiltinFunction::tryCreate(
+              Symbol::aten(field), NamedValue(loc, "self", value_))) {
+        return builtin;
+      }
+    }
+  }
+
   ErrorReport report(loc);
   report << "'" << value_->type()->repr_str()
          << "' object has no attribute or method '" << field << "'.";

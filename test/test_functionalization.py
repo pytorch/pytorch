@@ -8,11 +8,12 @@ from torch.testing._internal.common_utils import (
 )
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode, dispatch_functionalize
 from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs
-from torch.utils._pytree import tree_map_only, tree_flatten
+from torch.utils._pytree import tree_map_only
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.reinplace import reinplace
 from torch._dispatch.python import enable_crossref_functionalize, enable_python_dispatcher
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils import _pytree as pytree
 
 import unittest
 
@@ -41,8 +42,8 @@ def _functionalize(f, *, reapply_views: bool, crossref: bool, skip_input_mutatio
                 out = f(*inputs_functional)
             finally:
                 torch._disable_functionalization()
-            flat_inputs, _ = tree_flatten(inputs)
-            flat_inputs_functional, _ = tree_flatten(inputs_functional)
+            flat_inputs = pytree.tree_leaves(inputs)
+            flat_inputs_functional = pytree.tree_leaves(inputs_functional)
 
             for inpt, input_functional in zip(flat_inputs, flat_inputs_functional):
                 torch._sync(input_functional)
@@ -91,9 +92,9 @@ class TestFunctionalization(TestCase):
         # functionalize() deficiency: input metadata mutations aren't propagated properly,
         # so we just need to skip checks here for the tests that exercise that.
         if not mutated_input_metadata:
-            flat_inpts, _ = tree_flatten(inpts)
-            flat_clones1, _ = tree_flatten(clones1)
-            flat_clones3, _ = tree_flatten(clones3)
+            flat_inpts = pytree.tree_leaves(inpts)
+            flat_clones1 = pytree.tree_leaves(clones1)
+            flat_clones3 = pytree.tree_leaves(clones3)
             for inpt, input_clone, input_clone3 in zip(flat_inpts, flat_clones1, flat_clones3):
                 self.assertEqual(inpt, input_clone)  # input mutations should still occur
                 self.assertEqual(inpt, input_clone3)
@@ -476,6 +477,21 @@ def forward(self, arg0_1):
     return as_strided_scatter
     """)
 
+        # NB: even with reapply_views=True, we expect to see scatter op
+        reinplaced_logs = self.get_logs(f, torch.ones(2, 2), reapply_views=True, run_reinplace=False)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, arg0_1):
+    as_strided = torch.ops.aten.as_strided.default(arg0_1, [2], [2], 1)
+    add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(arg0_1, add, [2], [2], 1);  add = None
+    as_strided_1 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [2], 1)
+    copy_ = torch.ops.aten.copy_.default(arg0_1, as_strided_scatter);  arg0_1 = None
+    return as_strided_scatter
+    """)
+
     def test_tensor_list_composite(self):
         def f(x):
             # Test an op with TensorList input
@@ -585,6 +601,22 @@ def forward(self, arg0_1):
     return diagonal_scatter
     """)
 
+        # NB: even with reapply_views=True, we expect to see scatter op
+        reinplaced_logs = self.get_logs(f, torch.ones(2, 2), reapply_views=True, run_reinplace=False)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, arg0_1):
+    ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
+    diagonal = torch.ops.aten.diagonal.default(arg0_1)
+    add = torch.ops.aten.add.Tensor(diagonal, ones);  diagonal = ones = None
+    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(arg0_1, add);  add = None
+    diagonal_1 = torch.ops.aten.diagonal.default(diagonal_scatter)
+    copy_ = torch.ops.aten.copy_.default(arg0_1, diagonal_scatter);  arg0_1 = None
+    return diagonal_scatter
+    """)
+
     def test_channels_last_contiguous(self):
         def f(x):
             return x.contiguous(memory_format=torch.channels_last)
@@ -636,6 +668,143 @@ def forward(self, arg0_1):
     return diagonal_copy_1
     """)  # noqa: B950
 
+        # NB: even with reapply_views=True, we expect to see scatter op
+        reinplaced_logs = self.get_logs(f, torch.ones(4, 2), reapply_views=True, run_reinplace=False)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, arg0_1):
+    ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
+    split = torch.ops.aten.split.Tensor(arg0_1, 2)
+    getitem = split[0]
+    getitem_1 = split[1];  split = None
+    diagonal = torch.ops.aten.diagonal.default(getitem_1);  getitem_1 = None
+    add = torch.ops.aten.add.Tensor(diagonal, ones);  diagonal = ones = None
+    split_1 = torch.ops.aten.split.Tensor(arg0_1, 2)
+    getitem_2 = split_1[0]
+    getitem_3 = split_1[1];  split_1 = None
+    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(getitem_3, add);  getitem_3 = add = None
+    slice_scatter = torch.ops.aten.slice_scatter.default(arg0_1, diagonal_scatter, 0, 2, 4);  diagonal_scatter = None
+    split_2 = torch.ops.aten.split.Tensor(slice_scatter, 2)
+    getitem_4 = split_2[0]
+    getitem_5 = split_2[1];  split_2 = None
+    diagonal_1 = torch.ops.aten.diagonal.default(getitem_5);  getitem_5 = None
+    mul = torch.ops.aten.mul.Tensor(slice_scatter, slice_scatter)
+    copy_ = torch.ops.aten.copy_.default(arg0_1, slice_scatter);  arg0_1 = slice_scatter = None
+    return diagonal_1
+    """)  # noqa: B950
+
+    def test_split_with_sizes(self):
+        def f(x):
+            # test: view ops that return multiple tensors (split_with_sizes)
+            tmp = torch.ones(2)
+            y1, y2 = x.split_with_sizes([2, 2])
+            y3 = y1.diagonal()
+            y3.add_(tmp)
+            z = x * x
+            return y3
+        self.assert_functionalization(f, torch.ones(4, 2))
+        logs = self.get_logs(f, torch.ones(4, 2))
+        self.assertExpectedInline(logs, """\
+
+
+
+def forward(self, arg0_1):
+    ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
+    split_with_sizes_copy = torch.ops.aten.split_with_sizes_copy.default(arg0_1, [2, 2])
+    getitem = split_with_sizes_copy[0]
+    getitem_1 = split_with_sizes_copy[1];  split_with_sizes_copy = None
+    diagonal_copy = torch.ops.aten.diagonal_copy.default(getitem);  getitem = None
+    add = torch.ops.aten.add.Tensor(diagonal_copy, ones);  diagonal_copy = ones = None
+    split_with_sizes_copy_1 = torch.ops.aten.split_with_sizes_copy.default(arg0_1, [2, 2])
+    getitem_2 = split_with_sizes_copy_1[0]
+    getitem_3 = split_with_sizes_copy_1[1];  split_with_sizes_copy_1 = None
+    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(getitem_2, add);  getitem_2 = add = None
+    slice_scatter = torch.ops.aten.slice_scatter.default(arg0_1, diagonal_scatter, 0, 0, 2);  diagonal_scatter = None
+    split_with_sizes_copy_2 = torch.ops.aten.split_with_sizes_copy.default(slice_scatter, [2, 2])
+    getitem_4 = split_with_sizes_copy_2[0]
+    getitem_5 = split_with_sizes_copy_2[1];  split_with_sizes_copy_2 = None
+    diagonal_copy_1 = torch.ops.aten.diagonal_copy.default(getitem_4);  getitem_4 = None
+    mul = torch.ops.aten.mul.Tensor(slice_scatter, slice_scatter)
+    copy_ = torch.ops.aten.copy_.default(arg0_1, slice_scatter);  arg0_1 = slice_scatter = None
+    return diagonal_copy_1
+    """)  # noqa: B950
+
+        # NB: even with reapply_views=True, we expect to see scatter op
+        reinplaced_logs = self.get_logs(f, torch.ones(4, 2), reapply_views=True, run_reinplace=False)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, arg0_1):
+    ones = torch.ops.aten.ones.default([2], device = device(type='cpu'), pin_memory = False)
+    split_with_sizes = torch.ops.aten.split_with_sizes.default(arg0_1, [2, 2])
+    getitem = split_with_sizes[0]
+    getitem_1 = split_with_sizes[1];  split_with_sizes = None
+    diagonal = torch.ops.aten.diagonal.default(getitem);  getitem = None
+    add = torch.ops.aten.add.Tensor(diagonal, ones);  diagonal = ones = None
+    split_with_sizes_1 = torch.ops.aten.split_with_sizes.default(arg0_1, [2, 2])
+    getitem_2 = split_with_sizes_1[0]
+    getitem_3 = split_with_sizes_1[1];  split_with_sizes_1 = None
+    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(getitem_2, add);  getitem_2 = add = None
+    slice_scatter = torch.ops.aten.slice_scatter.default(arg0_1, diagonal_scatter, 0, 0, 2);  diagonal_scatter = None
+    split_with_sizes_2 = torch.ops.aten.split_with_sizes.default(slice_scatter, [2, 2])
+    getitem_4 = split_with_sizes_2[0]
+    getitem_5 = split_with_sizes_2[1];  split_with_sizes_2 = None
+    diagonal_1 = torch.ops.aten.diagonal.default(getitem_4);  getitem_4 = None
+    mul = torch.ops.aten.mul.Tensor(slice_scatter, slice_scatter)
+    copy_ = torch.ops.aten.copy_.default(arg0_1, slice_scatter);  arg0_1 = slice_scatter = None
+    return diagonal_1
+    """)  # noqa: B950
+
+    def test_slice(self):
+        def f(x):
+            tmp = torch.ones(4)
+            x.transpose_(1, 0)
+            y = x[0:2]
+            y.add_(tmp)
+            return x
+        self.assert_functionalization(f, torch.ones(4, 2), mutated_input_metadata=True)
+        logs = self.get_logs(f, torch.ones(4, 2))
+        self.assertExpectedInline(logs, """\
+
+
+
+def forward(self, arg0_1):
+    ones = torch.ops.aten.ones.default([4], device = device(type='cpu'), pin_memory = False)
+    transpose_copy = torch.ops.aten.transpose_copy.int(arg0_1, 1, 0)
+    slice_copy = torch.ops.aten.slice_copy.Tensor(transpose_copy, 0, 0, 2);  transpose_copy = None
+    add = torch.ops.aten.add.Tensor(slice_copy, ones);  slice_copy = ones = None
+    transpose_copy_1 = torch.ops.aten.transpose_copy.int(arg0_1, 1, 0);  arg0_1 = None
+    slice_scatter = torch.ops.aten.slice_scatter.default(transpose_copy_1, add, 0, 0, 2);  transpose_copy_1 = add = None
+    transpose_copy_2 = torch.ops.aten.transpose_copy.int(slice_scatter, 1, 0);  slice_scatter = None
+    transpose_copy_3 = torch.ops.aten.transpose_copy.int(transpose_copy_2, 1, 0)
+    slice_copy_1 = torch.ops.aten.slice_copy.Tensor(transpose_copy_3, 0, 0, 2);  transpose_copy_3 = None
+    transpose_copy_4 = torch.ops.aten.transpose_copy.int(transpose_copy_2, 1, 0);  transpose_copy_2 = None
+    return transpose_copy_4
+    """)  # noqa: B950
+
+        # NB: even with reapply_views=True, we expect to see scatter op
+        reinplaced_logs = self.get_logs(f, torch.ones(4, 2), reapply_views=True, run_reinplace=False)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, arg0_1):
+    ones = torch.ops.aten.ones.default([4], device = device(type='cpu'), pin_memory = False)
+    transpose = torch.ops.aten.transpose.int(arg0_1, 1, 0)
+    slice_1 = torch.ops.aten.slice.Tensor(transpose, 0, 0, 2);  transpose = None
+    add = torch.ops.aten.add.Tensor(slice_1, ones);  slice_1 = ones = None
+    transpose_1 = torch.ops.aten.transpose.int(arg0_1, 1, 0);  arg0_1 = None
+    slice_scatter = torch.ops.aten.slice_scatter.default(transpose_1, add, 0, 0, 2);  transpose_1 = add = None
+    transpose_2 = torch.ops.aten.transpose.int(slice_scatter, 1, 0);  slice_scatter = None
+    transpose_3 = torch.ops.aten.transpose.int(transpose_2, 1, 0)
+    slice_2 = torch.ops.aten.slice.Tensor(transpose_3, 0, 0, 2);  transpose_3 = None
+    transpose_4 = torch.ops.aten.transpose.int(transpose_2, 1, 0);  transpose_2 = None
+    return transpose_4
+    """)  # noqa: B950
+
     def test_view_inplace(self):
         def f(x):
             # test: view + inplace op (transpose_)
@@ -662,6 +831,82 @@ def forward(self, arg0_1):
     select_copy_1 = torch.ops.aten.select_copy.int(transpose_copy_3, 0, 0);  transpose_copy_3 = None
     transpose_copy_4 = torch.ops.aten.transpose_copy.int(transpose_copy_2, 1, 0);  transpose_copy_2 = None
     return transpose_copy_4
+    """)  # noqa: B950
+
+        # NB: even with reapply_views=True, we expect to see scatter op
+        reinplaced_logs = self.get_logs(f, torch.ones(4, 2), reapply_views=True, run_reinplace=False)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, arg0_1):
+    ones = torch.ops.aten.ones.default([4], device = device(type='cpu'), pin_memory = False)
+    transpose = torch.ops.aten.transpose.int(arg0_1, 1, 0)
+    select = torch.ops.aten.select.int(transpose, 0, 0);  transpose = None
+    add = torch.ops.aten.add.Tensor(select, ones);  select = ones = None
+    transpose_1 = torch.ops.aten.transpose.int(arg0_1, 1, 0);  arg0_1 = None
+    select_scatter = torch.ops.aten.select_scatter.default(transpose_1, add, 0, 0);  transpose_1 = add = None
+    transpose_2 = torch.ops.aten.transpose.int(select_scatter, 1, 0);  select_scatter = None
+    transpose_3 = torch.ops.aten.transpose.int(transpose_2, 1, 0)
+    select_1 = torch.ops.aten.select.int(transpose_3, 0, 0);  transpose_3 = None
+    transpose_4 = torch.ops.aten.transpose.int(transpose_2, 1, 0);  transpose_2 = None
+    return transpose_4
+    """)  # noqa: B950
+
+    def test_unbind(self):
+        def f(x):
+            # test: view + inplace op (transpose_)
+            tmp = torch.ones(4)
+            x.transpose_(1, 0)
+            y, _ = x.unbind(0)
+            y.add_(tmp)
+            return x
+        self.assert_functionalization(f, torch.ones(4, 2), mutated_input_metadata=True)
+        logs = self.get_logs(f, torch.ones(4, 2))
+        self.assertExpectedInline(logs, """\
+
+
+
+def forward(self, arg0_1):
+    ones = torch.ops.aten.ones.default([4], device = device(type='cpu'), pin_memory = False)
+    transpose_copy = torch.ops.aten.transpose_copy.int(arg0_1, 1, 0)
+    unbind_copy = torch.ops.aten.unbind_copy.int(transpose_copy);  transpose_copy = None
+    getitem = unbind_copy[0]
+    getitem_1 = unbind_copy[1];  unbind_copy = None
+    add = torch.ops.aten.add.Tensor(getitem, ones);  getitem = ones = None
+    transpose_copy_1 = torch.ops.aten.transpose_copy.int(arg0_1, 1, 0);  arg0_1 = None
+    select_scatter = torch.ops.aten.select_scatter.default(transpose_copy_1, add, 0, 0);  transpose_copy_1 = add = None
+    transpose_copy_2 = torch.ops.aten.transpose_copy.int(select_scatter, 1, 0);  select_scatter = None
+    transpose_copy_3 = torch.ops.aten.transpose_copy.int(transpose_copy_2, 1, 0)
+    unbind_copy_1 = torch.ops.aten.unbind_copy.int(transpose_copy_3);  transpose_copy_3 = None
+    getitem_2 = unbind_copy_1[0]
+    getitem_3 = unbind_copy_1[1];  unbind_copy_1 = None
+    transpose_copy_4 = torch.ops.aten.transpose_copy.int(transpose_copy_2, 1, 0);  transpose_copy_2 = None
+    return transpose_copy_4
+    """)  # noqa: B950
+
+        # NB: even with reapply_views=True, we expect to see scatter op
+        reinplaced_logs = self.get_logs(f, torch.ones(4, 2), reapply_views=True, run_reinplace=False)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, arg0_1):
+    ones = torch.ops.aten.ones.default([4], device = device(type='cpu'), pin_memory = False)
+    transpose = torch.ops.aten.transpose.int(arg0_1, 1, 0)
+    unbind = torch.ops.aten.unbind.int(transpose);  transpose = None
+    getitem = unbind[0]
+    getitem_1 = unbind[1];  unbind = None
+    add = torch.ops.aten.add.Tensor(getitem, ones);  getitem = ones = None
+    transpose_1 = torch.ops.aten.transpose.int(arg0_1, 1, 0);  arg0_1 = None
+    select_scatter = torch.ops.aten.select_scatter.default(transpose_1, add, 0, 0);  transpose_1 = add = None
+    transpose_2 = torch.ops.aten.transpose.int(select_scatter, 1, 0);  select_scatter = None
+    transpose_3 = torch.ops.aten.transpose.int(transpose_2, 1, 0)
+    unbind_1 = torch.ops.aten.unbind.int(transpose_3);  transpose_3 = None
+    getitem_2 = unbind_1[0]
+    getitem_3 = unbind_1[1];  unbind_1 = None
+    transpose_4 = torch.ops.aten.transpose.int(transpose_2, 1, 0);  transpose_2 = None
+    return transpose_4
     """)  # noqa: B950
 
     def test_optional_tensor_list(self):
@@ -1514,8 +1759,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             return x_view + 1
 
         def f_functionalized(x):
-            x_wrapped = FunctionalTensor.to_functional(x)
-
             # Note [Disabling Functionalize TLS Above Python Functionalization]
             # This UX is pretty annoying (although python functionalization's main customer is AOTAutograd,
             # and is not really advertised as a user API).
@@ -1527,6 +1770,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             # so globally disabling functionalization here is easier.
             maybe_disable = torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize))
             with maybe_disable, FunctionalTensorMode():
+                x_wrapped = FunctionalTensor.to_functional(x)
                 out_wrapped = f(x_wrapped)
             out_unwrapped = out_wrapped.elem
             torch._sync(out_unwrapped)
@@ -1535,12 +1779,15 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         # Make a non-leaf
         x = torch.randn(2, requires_grad=True) + 1
         fx_g = make_fx(f_functionalized)(x)
+        # NB: view_1 below is expected (though unused) due to view replay. AOTAutograd runs a
+        # DCE pass that will remove nodes like this later on.
         self.assertExpectedInline(fx_g.code.strip(), """\
 def forward(self, x_1):
     view = torch.ops.aten.view.default(x_1, [-1])
     mul = torch.ops.aten.mul.Tensor(x_1, 2);  x_1 = None
-    view_1 = torch.ops.aten.view.default(mul, [-1]);  mul = None
-    add = torch.ops.aten.add.Tensor(view_1, 1);  view_1 = None
+    view_1 = torch.ops.aten.view.default(mul, [-1])
+    view_2 = torch.ops.aten.view.default(mul, [-1]);  mul = None
+    add = torch.ops.aten.add.Tensor(view_2, 1);  view_2 = None
     return add""")
 
     def test_python_functionalization_zero_tensor(self):
@@ -1639,7 +1886,35 @@ def forward(self, arg0_1):
     return add""")
         self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
 
+    def test_python_functionalization_lift_fresh_storage(self):
+        unlifted = torch.tensor([0.0])
 
+        maybe_disable = torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize))
+        with maybe_disable, FunctionalTensorMode():
+            lifted = torch.ops.aten.lift_fresh.default(unlifted)
+
+        self.assertNotEqual(unlifted.untyped_storage(), lifted.untyped_storage())
+
+    def test_python_functionalization_lift_fresh(self):
+        def f(x):
+            tmp = torch.tensor([0.0])
+            return tmp + x
+
+        x = torch.randn(4)
+        out_ref = f(x)
+        out_test = dispatch_functionalize(f)(x)
+        out_test_cpp = _functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True)(x)
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(out_ref, out_test_cpp)
+        fx_g = make_fx(dispatch_functionalize(f))(x)
+        fx_g_cpp = make_fx(_functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True))(x)
+        self.assertExpectedInline(fx_g.code.strip(), """\
+def forward(self, arg0_1):
+    _tensor_constant0 = self._tensor_constant0
+    lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
+    add = torch.ops.aten.add.Tensor(lift_fresh_copy, arg0_1);  lift_fresh_copy = arg0_1 = None
+    return add""")
+        self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
 
 @xfail_inherited_tests([
     "test_as_strided",
@@ -1648,7 +1923,10 @@ def forward(self, arg0_1):
     "test_diagonal_mutated_input",
     "test_everything",
     "test_fill_",
+    "test_slice",
     "test_split",
+    "test_split_with_sizes",
+    "test_unbind",
     "test_view_clone_view_inplace",
     "test_view_inplace",
 ])

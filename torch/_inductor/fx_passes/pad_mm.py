@@ -1,5 +1,4 @@
 import functools
-from itertools import chain
 from typing import List, Optional
 
 import torch
@@ -8,12 +7,7 @@ from torch._inductor import utils
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._triton import has_triton
 
-from ..pattern_matcher import (
-    inference_graph,
-    Match,
-    register_replacement,
-    training_graph,
-)
+from ..pattern_matcher import fwd_only, joint_fwd_bwd, Match, register_replacement
 
 aten = torch.ops.aten
 
@@ -51,16 +45,6 @@ def check_dtype(a: Tensor, b: Tensor) -> bool:
     return a.is_floating_point() and b.is_floating_point()
 
 
-def is_symbolic(a: Optional[Tensor]) -> bool:
-    return a is not None and any(
-        isinstance(x, torch.SymInt) for x in chain(a.size(), a.stride())
-    )
-
-
-def any_is_symbolic(*args: Optional[Tensor]) -> bool:
-    return any(is_symbolic(a) for a in args)
-
-
 def should_pad_common(
     mat1: Tensor, mat2: Tensor, input: Optional[Tensor] = None
 ) -> bool:
@@ -68,11 +52,11 @@ def should_pad_common(
         torch._inductor.config.shape_padding
         and check_device(mat1, mat2)
         and check_dtype(mat1, mat2)
-        and not any_is_symbolic(mat1, mat2, input)
+        and not utils.any_is_symbolic(mat1, mat2, input)
     )
 
 
-def get_padded_length(x: Tensor, alignment_size) -> int:
+def get_padded_length(x: int, alignment_size) -> int:
     if alignment_size == 0 or x % alignment_size == 0:
         return 0
     return int((x // alignment_size + 1) * alignment_size) - x
@@ -99,7 +83,7 @@ def should_pad_addmm(match: Match) -> bool:
 
 
 def addmm_replace(
-    input: Tensor, mat1: Tensor, mat2: Tensor, beta=1.0, alpha=1.0
+    input: Optional[Tensor], mat1: Tensor, mat2: Tensor, beta=1.0, alpha=1.0
 ) -> Tensor:
     m_padded_length = get_padded_length(mat1.shape[0], get_alignment_size(mat1))
     k_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
@@ -121,7 +105,7 @@ def addmm_replace(
 
 
 def pad_addmm(
-    input: Tensor,
+    input: Optional[Tensor],
     mat1: Tensor,
     mat2: Tensor,
     m_padded_length: int,
@@ -139,13 +123,14 @@ def pad_addmm(
     elif m_padded_length != 0:
         mat1 = pad_dim(mat1, m_padded_length, 0)
 
+    # the add broadcasts, so we only pad if the dimension != 1
     if input is not None and k_padded_length == 0:
         if n_padded_length != 0:
-            if input.dim() == 2:
+            if input.dim() == 2 and input.shape[1] != 1:
                 input = pad_dim(input, n_padded_length, 1)
-            elif input.dim() == 1:
+            elif input.dim() == 1 and input.shape[0] != 1:
                 input = pad_dim(input, n_padded_length, 0)
-        elif m_padded_length != 0 and input.dim() == 2:
+        elif m_padded_length != 0 and input.dim() == 2 and input.shape[0] != 1:
             input = pad_dim(input, m_padded_length, 0)
 
     if k_padded_length != 0:
@@ -453,12 +438,11 @@ def _pad_mm_init():
         ),
     ]:
         assert isinstance(workaround, dict)  # mypy is unable to infer the type properly
-        args = [*args, *workaround.values()]
         register_replacement(
             pattern,
             replacement,
             args,
-            training_graph,
+            joint_fwd_bwd,
             patterns,
             extra_check=extra_check,
             scalar_workaround=workaround,
@@ -467,7 +451,7 @@ def _pad_mm_init():
             pattern,
             replacement,
             args,
-            inference_graph,
+            fwd_only,
             patterns,
             extra_check=extra_check,
             scalar_workaround=workaround,

@@ -6,18 +6,25 @@ import threading
 from unittest import skipIf as skipif, SkipTest
 
 import pytest
-import torch._numpy as np
 from pytest import raises as assert_raises
 
-from torch._numpy.random import random
-
-from torch._numpy.testing import assert_allclose, assert_array_equal  # , IS_WASM
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy.random import random
+    from numpy.testing import assert_allclose  # , IS_WASM
+else:
+    import torch._numpy as np
+    from torch._numpy.random import random
+    from torch._numpy.testing import assert_allclose  # , IS_WASM
+
 
 skip = functools.partial(skipif, True)
 
@@ -40,6 +47,7 @@ class TestFFTShift(TestCase):
 @instantiate_parametrized_tests
 class TestFFT1D(TestCase):
     def setUp(self):
+        super().setUp()
         np.random.seed(123456)
 
     def test_identity(self):
@@ -62,10 +70,10 @@ class TestFFT1D(TestCase):
     def test_ifft(self, norm):
         x = random(30) + 1j * random(30)
         assert_allclose(x, np.fft.ifft(np.fft.fft(x, norm=norm), norm=norm), atol=1e-6)
+
         # Ensure we get the correct error message
-        with pytest.raises(
-            (ValueError, RuntimeError), match="Invalid number of data points"
-        ):
+        # NB: Exact wording differs slightly under Dynamo and in eager.
+        with pytest.raises((ValueError, RuntimeError), match="Invalid number of"):
             np.fft.ifft([], norm=norm)
 
     def test_fft2(self):
@@ -358,10 +366,13 @@ class TestFFTThreadSafe(TestCase):
         [x.join() for x in t]
         # Make sure all threads returned the correct value
         for i in range(self.threads):
-            assert_array_equal(
+            # under torch.dynamo `assert_array_equal` fails with relative errors of
+            # about 1.5e-14. Hence replace it with `assert_allclose(..., rtol=2e-14)`
+            assert_allclose(
                 q.get(timeout=5),
                 expected,
-                "Function returned wrong value in multithreaded context",
+                atol=2e-14
+                # msg="Function returned wrong value in multithreaded context",
             )
 
     def test_fft(self):

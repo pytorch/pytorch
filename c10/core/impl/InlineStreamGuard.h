@@ -4,8 +4,7 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/irange.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 /**
  * A StreamGuard is an RAII class that changes the current device
@@ -33,8 +32,7 @@ class InlineStreamGuard : private InlineDeviceGuard<T> {
   /// This constructor exists purely for testing
   template <
       typename U = T,
-      typename = typename std::enable_if<
-          std::is_same<U, VirtualGuardImpl>::value>::type>
+      typename = typename std::enable_if_t<std::is_same_v<U, VirtualGuardImpl>>>
   explicit InlineStreamGuard(
       Stream stream,
       const DeviceGuardImplInterface* impl)
@@ -150,7 +148,7 @@ class InlineOptionalStreamGuard {
   /// All constructors of StreamGuard are valid for OptionalStreamGuard
   template <typename... Args>
   explicit InlineOptionalStreamGuard(Args&&... args)
-      : guard_(in_place, std::forward<Args>(args)...) {}
+      : guard_(std::in_place, std::forward<Args>(args)...) {}
 
   // See Note [Move construction for RAII guards is tricky]
   InlineOptionalStreamGuard(InlineOptionalStreamGuard<T>&& other) = delete;
@@ -222,9 +220,11 @@ class InlineMultiStreamGuard {
   InlineMultiStreamGuard(InlineMultiStreamGuard&& other) = delete;
   InlineMultiStreamGuard& operator=(InlineMultiStreamGuard&& other) = delete;
 
-  ~InlineMultiStreamGuard() {
-    for (const Stream& s : original_streams_) {
-      this->impl_->exchangeStream(s);
+  ~InlineMultiStreamGuard() noexcept {
+    if (this->impl_.has_value()) {
+      for (const Stream& s : original_streams_) {
+        this->impl_->exchangeStream(s);
+      }
     }
   }
 
@@ -252,5 +252,4 @@ class InlineMultiStreamGuard {
   }
 };
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

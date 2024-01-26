@@ -6,7 +6,7 @@ __all__ = [
 
 
 def get_cpu_capability() -> str:
-    r"""Returns cpu capability as a string value.
+    r"""Return cpu capability as a string value.
 
     Possible values:
     - "DEFAULT"

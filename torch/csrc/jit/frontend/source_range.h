@@ -11,8 +11,7 @@
 #include <sstream>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 class SourceRangeUnpickler;
 struct SourceRange;
@@ -23,11 +22,13 @@ struct SourceRange;
 struct TORCH_API StringCordView {
   StringCordView();
   StringCordView(const StringCordView&) = default;
+  StringCordView(StringCordView&&) noexcept = default;
   StringCordView(
       std::vector<c10::string_view> inputs,
       std::vector<std::shared_ptr<std::string>> ownerships);
 
   StringCordView& operator=(const StringCordView&) = default;
+  StringCordView& operator=(StringCordView&&) noexcept = default;
 
   size_t size() const {
     return accumulated_sizes_.back();
@@ -212,7 +213,7 @@ struct TORCH_API Source {
       c10::optional<std::string> filename = c10::nullopt,
       size_t starting_line_no = 0,
       std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr)
-      : text_view_(str),
+      : text_view_(std::move(str)),
         filename_(std::move(filename)),
         starting_line_no_(starting_line_no),
         gen_ranges_(std::move(gen_ranges)) {
@@ -442,8 +443,7 @@ using SourceRangeRecords = std::vector<TaggedRange>;
 using SourceRangeTagMap =
     std::unordered_map<SourceRange, int64_t, SourceRangeHasher>;
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
 
 namespace std {
 template <>

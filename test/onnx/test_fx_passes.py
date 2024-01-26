@@ -123,10 +123,10 @@ class TestModularizePass(common_utils.TestCase):
                 unused_relu_result = self.unused_relu(x)
                 return result
 
-        export_output = torch.onnx.dynamo_export(
+        onnx_program = torch.onnx.dynamo_export(
             TestModule(), torch.randn(3), torch.randn(3)
         )
-        model_proto = export_output.model_proto
+        model_proto = onnx_program.model_proto
         function_proto_names = [function.name for function in model_proto.functions]
         self.assertIn(
             "torch_nn_modules_activation_GELU_used_gelu_1", function_proto_names
@@ -146,10 +146,10 @@ class TestModularizePass(common_utils.TestCase):
                 out = self.relu(out)
                 return out
 
-        export_output = torch.onnx.dynamo_export(
+        onnx_program = torch.onnx.dynamo_export(
             TestModule(), torch.randn(3), torch.randn(3)
         )
-        model_proto = export_output.model_proto
+        model_proto = onnx_program.model_proto
         function_proto_names = [function.name for function in model_proto.functions]
         self.assertIn("torch_nn_modules_activation_ReLU_relu_1", function_proto_names)
         self.assertIn("torch_nn_modules_activation_ReLU_relu_2", function_proto_names)
@@ -178,10 +178,10 @@ class TestModularizePass(common_utils.TestCase):
                 out = self.inner_module.relu(out)
                 return out
 
-        export_output = torch.onnx.dynamo_export(
+        onnx_program = torch.onnx.dynamo_export(
             TestModule(), torch.randn(3), torch.randn(3)
         )
-        model_proto = export_output.model_proto
+        model_proto = onnx_program.model_proto
         function_proto_names = [function.name for function in model_proto.functions]
         self.assertIn(
             "torch_nn_modules_activation_ReLU_inner_module_relu_1", function_proto_names

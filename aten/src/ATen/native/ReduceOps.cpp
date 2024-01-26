@@ -130,12 +130,7 @@
 #include <utility>
 #include <vector>
 
-namespace at {
-namespace native {
-
-} // namespace native
-
-namespace meta {
+namespace at::meta {
 
 static ScalarType infer_dtype_from_optional(
     const Tensor& self,
@@ -402,9 +397,9 @@ TORCH_META_FUNC(amin)
   resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
 
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(aminmax_stub);
 DEFINE_DISPATCH(aminmax_allreduce_stub);
@@ -429,10 +424,6 @@ TORCH_IMPL_FUNC(aminmax_out)
     aminmax_allreduce_stub(self.device().type(), self.contiguous(), mutable_min, mutable_max);
   }
 }
-
-} // namespace native
-
-namespace native {
 
 DEFINE_DISPATCH(sum_stub);
 DEFINE_DISPATCH(nansum_stub);
@@ -794,7 +785,7 @@ void cummax_cummin_helper(const T1* self_data, T1* values_data, T2* indices_data
 }
 
 void cummax_helper_cpu(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
-  AT_DISPATCH_ALL_TYPES_AND2(kBool, kBFloat16,
+  AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf,
     self.scalar_type(), "cummax_cpu",
     [&] {
       at::native::tensor_dim_apply3<scalar_t, int64_t>(self, values, indices, dim, cummax_cummin_helper<scalar_t, int64_t, std::greater_equal<scalar_t>>);
@@ -829,7 +820,7 @@ std::tuple<Tensor, Tensor> cummax(const Tensor& self, int64_t dim) {
 }
 
 void cummin_helper_cpu(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
-  AT_DISPATCH_ALL_TYPES_AND2(kBool, kBFloat16,
+  AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf,
     self.scalar_type(), "cummin_cpu",
     [&] {
       at::native::tensor_dim_apply3<scalar_t, int64_t>(self, values, indices, dim, cummax_cummin_helper<scalar_t, int64_t, std::less_equal<scalar_t>>);
@@ -1009,7 +1000,12 @@ static void pre_check_gradient(const Tensor& self, c10::optional<int64_t> spacin
   // Helper for gradient function to make sure input data satisfies prerequisites
   TORCH_CHECK(self.scalar_type() != ScalarType::Byte, "torch.gradient does not support uint8 input.");
   if (spacing_size.has_value() && !dim.has_value()) {
-    TORCH_CHECK(spacing_size.value() == 1 || spacing_size.value() == self.dim(), "torch.gradient expected spacing to be unspecified, a scalar or a list of length ", self.dim(), " but got a list of length ", spacing_size.value());
+    // NOTE: If spacing was given as a scalar, the callers of this function
+    // create a spacing vector of the expected size, and this check passes
+    TORCH_CHECK(spacing_size.value() == self.dim(),
+      "torch.gradient expected spacing to be unspecified, a scalar, or a list ",
+      "of length equal to 'self.dim() = ", self.dim(), "', since dim argument ",
+      "was not given, but got a list of length ", spacing_size.value());
   }
   if (spacing_size.has_value() && dim.has_value()) {
     TORCH_CHECK(spacing_size.value() == static_cast<int64_t>(dim.value().size()),
@@ -1325,9 +1321,7 @@ TORCH_IMPL_FUNC(mean_out)
   // (mean_kernel_impl()) is unvectorized and leads to very poor performance
   // for production workloads. Once that's fixed, the following code can be used
   // in lieu of the sum + divide implementation below.
-  // Note: there has an accuracy loss for half and bfloat16 which has one more type
-  // cast compared with mean_stub path.
-  if (self.device().is_cpu() && dtype != kHalf && dtype != kBFloat16) {
+  if (self.device().is_cpu()) {
     int64_t dim_prod = 1;
     if (!opt_dim.has_value() || opt_dim.value().empty() || self.ndimension() == 0) {
       dim_prod = self.numel();
@@ -1338,8 +1332,30 @@ TORCH_IMPL_FUNC(mean_out)
       }
     }
     auto& result_mut = const_cast<Tensor&>(result);
-    at::sum_out(result_mut, self, opt_dim, keepdim, dtype).div_(dim_prod);
+    // For accuracy reasons, BF16/FP16 mean should be computed via the
+    // following approach:
+    //  cast_fp32 -> sum -> div -> cast_bf16_or_fp16
+    //
+    // Such an approach is necessary because if we were to choose the same
+    // approach for BF16/FP16 as FP32 here, then it would have resulted in
+    // the following code-flow -
+    // cast_fp32 -> sum -> cast_bf16 -> cast_fp32 -> div -> cast_bf16,
+    // which, in turn, does not produce as accurate results.
+    bool is_half_type = (dtype == kHalf || dtype == kBFloat16);
+    auto sum_out_dtype = is_half_type ? ScalarType::Float : dtype;
+    result_mut = is_half_type ? result_mut.to(sum_out_dtype) : result_mut;
+    // If dtype is FP16 or BF16, self (input tensor) will initially be cast to
+    // FP32 in sum_out. This results in having to read that FP32 tensor again,
+    // but maybe in the future, we could revise the implementation to not
+    // materialize that intermediate FP32 tensor. That approach would probably
+    // require some modifications in binary_kernel_reduce_vec(),
+    // TensorIteratorBase::for_each(), and
+    // TensorIteratorBase::serial_for_each(), apart from sum kernel for CPU.
+    at::sum_out(result_mut, self, opt_dim, keepdim, sum_out_dtype).div_(dim_prod);
+    // After sum & div, cast result_mut back to BF16 or FP16, if required.
+    result_mut = is_half_type ? result_mut.to(dtype) : result_mut;
   } else {
+    // device is not CPU
     auto iter = at::meta::make_reduction_from_out_ty(
         self, result, opt_dim, keepdim, dtype);
     if (iter.numel() == 0) {
@@ -1622,16 +1638,16 @@ Tensor any_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool keepdi
 
 Tensor& all_dims_out_default(
     const Tensor &self, OptionalIntArrayRef dim, bool keepdim, Tensor &result) {
-  TORCH_CHECK(self.device() == result.device(), "all: Output must be on the same device as input");
-  auto tmp = self.all(dim, keepdim);
+  TORCH_CHECK(self.device() == result.device(), "all.dims: output must be on the same device as input");
+  auto tmp = all_dims_default(self, dim, keepdim);
   at::native::resize_output(result, tmp.sizes());
   return result.copy_(tmp);
 }
 
 Tensor& any_dims_out_default(
     const Tensor &self, OptionalIntArrayRef dim, bool keepdim, Tensor &result) {
-  TORCH_CHECK(self.device() == result.device(), "any: Output must be on the same device as input");
-  auto tmp = self.any(dim, keepdim);
+  TORCH_CHECK(self.device() == result.device(), "any.dims: output must be on the same device as input");
+  auto tmp = any_dims_default(self, dim, keepdim);
   at::native::resize_output(result, tmp.sizes());
   return result.copy_(tmp);
 }
@@ -2307,5 +2323,4 @@ Tensor sum_sparse_compressed(
   return at::_sparse_csr_sum(self, *dim, keepdim, dtype);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

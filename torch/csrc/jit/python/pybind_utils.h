@@ -397,6 +397,8 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(IntType::get());
   } else if (THPDevice_Check(input.ptr())) {
     return InferredType(DeviceObjType::get());
+  } else if (THPGenerator_Check(input.ptr())) {
+    return InferredType(GeneratorType::get());
   } else if (THPStream_Check(input.ptr())) {
     return InferredType(StreamObjType::get());
   } else if (THPDtype_Check(input.ptr())) {

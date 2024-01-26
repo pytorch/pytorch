@@ -28,7 +28,6 @@
 #pragma once
 
 #include <cmath>
-#include <ATen/cuda/CUDAContext.h>
 #include <cuda_fp16.h>
 #include <ATen/native/transformers/cuda/flash_attn/philox.cuh>
 #include <ATen/native/transformers/cuda/flash_attn/utils.h>

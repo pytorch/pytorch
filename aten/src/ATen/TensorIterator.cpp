@@ -22,6 +22,7 @@
 #endif
 
 #include <c10/util/irange.h>
+#include <c10/util/string_utils.h>
 #include <c10/util/SmallBuffer.h>
 
 #include <array>
@@ -107,13 +108,20 @@ TensorIteratorConfig& TensorIteratorConfig::add_owned_output(const TensorBase& o
       num_inputs_ == 0,
       "Keep in mind that you have to add all outputs first before adding any input. "
       "For more details, see https://github.com/pytorch/pytorch/wiki/How-to-use-TensorIterator.");
-  tensors_.push_back(c10::MaybeOwned<TensorBase>::owned(c10::in_place, output));
+  tensors_.push_back(c10::MaybeOwned<TensorBase>::owned(std::in_place, output));
   num_outputs_++;
   return *this;
 }
 
 TensorIteratorConfig& TensorIteratorConfig::add_owned_input(const TensorBase& input) {
-  tensors_.push_back(c10::MaybeOwned<TensorBase>::owned(c10::in_place, input));
+  tensors_.push_back(c10::MaybeOwned<TensorBase>::owned(std::in_place, input));
+  num_inputs_++;
+  return *this;
+}
+
+TensorIteratorConfig& TensorIteratorConfig::add_owned_const_input(const TensorBase& input) {
+  const_tensor_indices_.push_back(tensors_.size());
+  tensors_.push_back(c10::MaybeOwned<TensorBase>::owned(std::in_place, input));
   num_inputs_++;
   return *this;
 }
@@ -129,6 +137,13 @@ TensorIteratorConfig& TensorIteratorConfig::add_borrowed_output(const TensorBase
 }
 
 TensorIteratorConfig& TensorIteratorConfig::add_borrowed_input(const TensorBase& input) {
+  tensors_.push_back(c10::MaybeOwned<TensorBase>::borrowed(input));
+  num_inputs_++;
+  return *this;
+}
+
+TensorIteratorConfig& TensorIteratorConfig::add_borrowed_const_input(const TensorBase& input) {
+  const_tensor_indices_.push_back(tensors_.size());
   tensors_.push_back(c10::MaybeOwned<TensorBase>::borrowed(input));
   num_inputs_++;
   return *this;
@@ -172,9 +187,13 @@ TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef sha
   return *this;
 }
 
+bool TensorIteratorConfig::is_tensor_const(size_t idx) {
+  return std::find(const_tensor_indices_.begin(), const_tensor_indices_.end(), idx) != const_tensor_indices_.end();
+}
+
 // NOTE: [Computing output strides]
 // We use the following algorithm to compute output strides
-// If correctly sized output is provided, we respect its stides and don't change them
+// If correctly sized output is provided, we respect its strides and don't change them
 // Otherwise, if provided output is of incorrect size or no output is provided,
 // we try to recover permutation that was applied to the inputs
 // by sorting the strides of the inputs. Precedence is given to the inputs in the order they were added,
@@ -873,16 +892,16 @@ void TensorIteratorBase::build_binary_float_op(
     const TensorBase& out, const TensorBase& a, const TensorBase& b) {
   build(BINARY_FLOAT_OP_CONFIG()
         .add_owned_output(out)
-        .add_owned_input(a)
-        .add_owned_input(b));
+        .add_owned_const_input(a)
+        .add_owned_const_input(b));
 }
 
 void TensorIteratorBase::build_borrowing_binary_float_op(
     const TensorBase& out, const TensorBase& a, const TensorBase& b) {
   build(BINARY_FLOAT_OP_CONFIG()
         .add_output(out)
-        .add_input(a)
-        .add_input(b));
+        .add_const_input(a)
+        .add_const_input(b));
 }
 
 static void set_up_comparison_op_config(TensorIteratorConfig& config, const TensorBase& out) {
@@ -915,8 +934,8 @@ void TensorIteratorBase::build_comparison_op(
   set_up_comparison_op_config(config, out);
 
   config.add_owned_output(out);
-  config.add_owned_input(a);
-  config.add_owned_input(b);
+  config.add_owned_const_input(a);
+  config.add_owned_const_input(b);
   build(config);
 }
 
@@ -926,8 +945,8 @@ void TensorIteratorBase::build_borrowing_comparison_op(
   set_up_comparison_op_config(config, out);
 
   config.add_borrowed_output(out);
-  config.add_borrowed_input(a);
-  config.add_borrowed_input(b);
+  config.add_borrowed_const_input(a);
+  config.add_borrowed_const_input(b);
   build(config);
 }
 
@@ -937,8 +956,8 @@ void TensorIteratorBase::build_borrowing_except_last_argument_comparison_op(
   set_up_comparison_op_config(config, out);
 
   config.add_borrowed_output(out);
-  config.add_borrowed_input(a);
-  config.add_owned_input(b);
+  config.add_borrowed_const_input(a);
+  config.add_owned_const_input(b);
   build(config);
 }
 
@@ -947,11 +966,12 @@ void TensorIteratorBase::build_ternary_op(
     const TensorBase& b, const TensorBase& c) {
   build(TensorIteratorConfig()
       .promote_inputs_to_common_dtype(true)
+      .cast_common_dtype_to_outputs(true)
       .enforce_safe_casting_to_output(true)
       .add_owned_output(out)
-      .add_owned_input(a)
-      .add_owned_input(b)
-      .add_owned_input(c));
+      .add_owned_const_input(a)
+      .add_owned_const_input(b)
+      .add_owned_const_input(c));
 }
 
 // This cannot be a function because TensorIteratorConfig is not
@@ -967,16 +987,16 @@ void TensorIteratorBase::build_ternary_op(
 void TensorIteratorBase::build_binary_op(const TensorBase& out, const TensorBase& a, const TensorBase& b) {
   build(BINARY_OP_CONFIG()
       .add_owned_output(out)
-      .add_owned_input(a)
-      .add_owned_input(b));
+      .add_owned_const_input(a)
+      .add_owned_const_input(b));
 }
 
 void TensorIteratorBase::build_borrowing_binary_op(
     const TensorBase& out, const TensorBase& a, const TensorBase& b) {
   build(BINARY_OP_CONFIG()
       .add_output(out)
-      .add_input(a)
-      .add_input(b));
+      .add_const_input(a)
+      .add_const_input(b));
 }
 
 // This cannot be a function because TensorIteratorConfig is not
@@ -992,13 +1012,13 @@ void TensorIteratorBase::build_borrowing_binary_op(
 void TensorIteratorBase::build_unary_float_op(const TensorBase& out, const TensorBase& a) {
   build(UNARY_FLOAT_OP_CONFIG()
       .add_owned_output(out)
-      .add_owned_input(a));
+      .add_owned_const_input(a));
 }
 
 void TensorIteratorBase::build_borrowing_unary_float_op(const TensorBase& out, const TensorBase& a) {
   build(UNARY_FLOAT_OP_CONFIG()
       .add_output(out)
-      .add_input(a));
+      .add_const_input(a));
 }
 
 // This cannot be a function because TensorIteratorConfig is not
@@ -1013,19 +1033,19 @@ void TensorIteratorBase::build_borrowing_unary_float_op(const TensorBase& out, c
 void TensorIteratorBase::build_unary_op(const TensorBase& out, const TensorBase& a) {
   build(UNARY_OP_CONFIG()
       .add_owned_output(out)
-      .add_owned_input(a));
+      .add_owned_const_input(a));
 }
 
 void TensorIteratorBase::build_borrowing_unary_op(const TensorBase& out, const TensorBase& a) {
   build(UNARY_OP_CONFIG()
       .add_output(out)
-      .add_input(a));
+      .add_const_input(a));
 }
 
 void TensorIteratorBase::build_output_borrowing_argument_owning_unary_op(const TensorBase& out, const TensorBase& a) {
   build(UNARY_OP_CONFIG()
       .add_output(out)
-      .add_owned_input(a));
+      .add_owned_const_input(a));
 }
 
 // Helper to construct a unary op that forcibly promotes output to boolean.
@@ -1037,7 +1057,7 @@ void TensorIteratorBase::build_borrowing_unary_force_boolean_op(const TensorBase
       .declare_static_dtype(at::kBool)
       .declare_static_device(a.device())
       .add_output(out)
-      .add_input(a));
+      .add_const_input(a));
 }
 
 TensorIterator TensorIterator::binary_op(TensorBase& out, const TensorBase& a, const TensorBase& b) {
@@ -1102,7 +1122,7 @@ TensorIterator TensorIterator::reduce_op(TensorBase& out, const TensorBase& a) {
   return TensorIteratorConfig()
     .set_check_mem_overlap(false)
     .add_owned_output(out)
-    .add_owned_input(a)
+    .add_owned_const_input(a)
     .resize_outputs(false)
     .is_reduction(true)
     // TODO: not supporting casting to outputs is only really necessary for arg{min,max}
@@ -1126,7 +1146,7 @@ TensorIterator TensorIterator::reduce_op(TensorBase& out1, TensorBase& out2, con
     .set_check_mem_overlap(false)
     .add_owned_output(out1)
     .add_owned_output(out2)
-    .add_owned_input(a)
+    .add_owned_const_input(a)
     .resize_outputs(false)
     .is_reduction(true)
     .check_all_same_dtype(false)
@@ -1134,7 +1154,8 @@ TensorIterator TensorIterator::reduce_op(TensorBase& out1, TensorBase& out2, con
 }
 
 void TensorIteratorBase::populate_operands(TensorIteratorConfig& config) {
-  for (auto& tensor: config.tensors_) {
+  for (const auto idx : c10::irange(config.tensors_.size())) {
+    auto& tensor = config.tensors_[idx];
     // If *any* of the arguments is a meta tensor, the overall
     // computation is a meta computation (don't do any work,
     // just compute output information).  This aligns with
@@ -1143,6 +1164,7 @@ void TensorIteratorBase::populate_operands(TensorIteratorConfig& config) {
       is_meta_ = true;
     }
     operands_.emplace_back(std::move(tensor));
+    operands_[idx].is_const = config.is_tensor_const(idx);
   }
   num_outputs_ = config.num_outputs_;
 }
@@ -1516,7 +1538,11 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 
   for (auto& op : operands_) {
     TORCH_INTERNAL_ASSERT(op.tensor_base().defined());
-    op.data = op.tensor_base().data_ptr();
+    if (op.is_const) {
+      op.data = const_cast<void*>(op.tensor_base().const_data_ptr());
+    } else {
+      op.data = op.tensor_base().mutable_data_ptr();
+    }
   }
 
   // zero out offsets

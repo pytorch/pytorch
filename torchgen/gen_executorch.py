@@ -206,6 +206,8 @@ class ComputeCodegenUnboxedKernels:
         arg_connector = ", "
 
         args_str = f"{arg_connector.join(e.name for e in binding_list)}"
+        event_tracer_output_logging = ""
+        output_ids = []
 
         if len(f.func.returns) == 0:
             if len(f.func.arguments.out) == 0:
@@ -215,15 +217,28 @@ class ComputeCodegenUnboxedKernels:
             out = f.func.arguments.out[0]
             return_assignment = f"""stack[{len(binding_list)}] = &{out.name};"""
             ret_prefix = ""
+            output_ids = [len(binding_list)]
         else:
             if len(f.func.arguments.out) == 0:
                 return_assignment = (
                     f"""*stack[{len(binding_list)}] = EValue(result_);"""
                 )
                 ret_prefix = return_type_gen(f.func.returns).cpp_type() + " result_ = "
+                output_ids = [len(binding_list)]
             else:
                 return_assignment = ""
                 ret_prefix = ""
+                output_ids = [
+                    len(binding_list) - (i + 1)
+                    for i in reversed(range(len(f.func.arguments.out)))
+                ]
+
+        for output_id in output_ids:
+            event_tracer_output_logging += (
+                f"internal::event_tracer_log_evalue("
+                f"context.internal_event_tracer(), "
+                f"*stack[{output_id}]);\n"
+            )
 
         newline = "\n    "
         return "\n".join(
@@ -237,7 +252,7 @@ Kernel(
         internal::EventTracerProfileScope event_tracer_scope(context.internal_event_tracer(), "native_call_{f.func.name}");
         EXECUTORCH_SCOPE_PROF("native_call_{f.func.name}");
         {ret_prefix}{kernel_call}(context, {args_str});
-
+        {event_tracer_output_logging}
         {return_assignment}
     }}
 ),

@@ -537,7 +537,7 @@ const Tensor& conv_depthwise2d_cuda_out(
     if (bias_opt.has_value() && bias_opt->defined()) {
       return bias_opt->expect_contiguous();
     }
-    return c10::MaybeOwned<Tensor>::owned(c10::in_place);
+    return c10::MaybeOwned<Tensor>::owned(std::in_place);
   }();
 
   conv_depthwise2d_forward_out(
