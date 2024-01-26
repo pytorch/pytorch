@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import copy
 import functools
 import itertools

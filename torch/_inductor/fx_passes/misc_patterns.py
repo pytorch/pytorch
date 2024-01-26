@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import functools
 
 from typing import Dict, Set, Tuple

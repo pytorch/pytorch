@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import atexit
 import collections
 import contextlib

@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import logging
 from typing import Callable, Dict, List, Optional, TYPE_CHECKING
 

@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import math
 
 import sympy

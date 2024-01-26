@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import functools
 import sys
 from typing import Callable, Dict, List, Optional, Protocol, Sequence, Tuple

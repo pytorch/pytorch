@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import dataclasses
 
 from typing import Callable, Optional

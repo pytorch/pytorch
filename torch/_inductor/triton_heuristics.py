@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import builtins
 import copy
 import functools

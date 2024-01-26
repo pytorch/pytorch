@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import tokenize
 
 from typing import Dict, List, Optional

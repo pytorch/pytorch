@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import _collections_abc
 import _weakrefset
 import abc

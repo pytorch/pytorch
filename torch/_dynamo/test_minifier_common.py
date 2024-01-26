@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import dataclasses
 import io
 import logging

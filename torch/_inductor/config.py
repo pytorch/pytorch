@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import os  # noqa: C101
 import sys
 from typing import Any, Dict, TYPE_CHECKING

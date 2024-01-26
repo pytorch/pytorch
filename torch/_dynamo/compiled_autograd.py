@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import contextlib
 import functools
 from typing import List, Optional

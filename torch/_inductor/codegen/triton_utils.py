@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 from typing import Dict, List, Union
 
 import torch

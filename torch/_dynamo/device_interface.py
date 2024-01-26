@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import inspect
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Type, Union
 

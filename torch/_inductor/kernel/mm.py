@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import logging
 from typing import Any, Dict, List
 

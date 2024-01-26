@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 MAX_CYCLE = 3000
 
 import itertools

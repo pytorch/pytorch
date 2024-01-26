@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 """This file implements the IndexPropagation ops handler, which wraps an
 underlying handler to add a limited form of constant propagation, as well as
 propagation of sympy expressions downstream of ops.index_expr calls.

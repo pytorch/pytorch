@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import getpass
 import inspect
 import os

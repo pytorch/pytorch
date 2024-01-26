@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import logging
 import traceback
 from dataclasses import dataclass, field

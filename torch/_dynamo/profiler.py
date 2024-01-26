@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import dataclasses
 import os
 from typing import Any, List

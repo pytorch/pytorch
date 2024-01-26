@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 """
 CUDA graph trees are a safety abstraction over CUDAGraphs, similar to make_graph_callables,
 which share the same memory pool.  Sharing a memory pool is an extremely

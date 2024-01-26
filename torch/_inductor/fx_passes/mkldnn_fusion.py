@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import functools
 import operator
 from functools import reduce

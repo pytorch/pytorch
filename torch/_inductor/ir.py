@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import collections
 import contextlib
 import dataclasses

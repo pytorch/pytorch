@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import collections
 from enum import Enum
 from typing import Any, Callable, Dict, List
