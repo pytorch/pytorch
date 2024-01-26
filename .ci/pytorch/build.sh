@@ -81,7 +81,21 @@ if ! which conda; then
     export USE_MKLDNN=0
   fi
 else
-  export CMAKE_PREFIX_PATH=/opt/conda
+  # CMAKE_PREFIX_PATH precedences
+  # 1. $CONDA_PREFIX, if defined. This follows the pytorch official build instructions.
+  # 2. /opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}, if ANACONDA_PYTHON_VERSION defined.
+  #    This is for CI, which defines ANACONDA_PYTHON_VERSION but not CONDA_PREFIX.
+  # 3. $(conda info --base). The fallback value of pytorch official build
+  #    instructions actually refers to this.
+  #    Commonly this is /opt/conda/
+  if [[ -v CONDA_PREFIX ]]; then
+    export CMAKE_PREFIX_PATH=${CONDA_PREFIX}
+  elif [[ -v ANACONDA_PYTHON_VERSION ]]; then
+    export CMAKE_PREFIX_PATH="/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}"
+  else
+    # already checked by `! which conda`
+    export CMAKE_PREFIX_PATH="$(conda info --base)"
+  fi
 
   # Workaround required for MKL library linkage
   # https://github.com/pytorch/pytorch/issues/119557
