@@ -1555,7 +1555,55 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_complex",
-                device_type="cpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_step_is_noop_when_params_have_no_grad",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_load_nontensor_step",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_param_groups_weight_decay",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_param_groups_lr",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_step_is_noop_for_zero_grads",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_with_cuda_params",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_mixed_device_dtype",
             ),
         ),
     ),
