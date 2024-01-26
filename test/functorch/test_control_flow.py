@@ -1618,9 +1618,11 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             return cond(x.shape[0] == 4, true_fn, false_fn, [x])
 
         inp = torch.ones(2, 3)
-        # For top-level cond, it take 5 arguments (x, a, b, a, b)
+        # For top-level cond, it take 3 arguments (x, a, b). Dynamo should
+        # realize that the nonlocal variables are same for the true and false
+        # branches, so it should de-dupe them.
         # For second-level conds, it takes (x, a, b)
-        self._check_closure_correctly_lifted_with_mutation(foo, (a, b), args=(inp,), exp_arg_num=5)
+        self._check_closure_correctly_lifted_with_mutation(foo, (a, b), args=(inp,), exp_arg_num=3)
 
     def test_cond_nested_with_closure_graph_module(self):
         a = torch.ones(1, 1)
