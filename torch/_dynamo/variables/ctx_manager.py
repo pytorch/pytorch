@@ -148,6 +148,46 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
         return x
 
 
+class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
+    """represents torch grad requries grad"""
+
+    @staticmethod
+    def create(tx, target_values, **kwargs):
+        return GradInplaceRequiresGradCtxManagerVariable(
+            target_values=target_values,
+            initial_values=None,
+            **kwargs,
+        )
+
+    def enter(self, tx):
+        [enabled] = self.target_values
+        self.prev_state = torch._C._functorch.get_inplace_requires_grad_allowed()
+        torch._C._functorch.set_inplace_requires_grad_allowed(enabled)
+        self.set_cleanup_hook(
+            tx,
+            lambda: torch._C._functorch.set_inplace_requires_grad_allowed(
+                self.prev_state
+            ),
+        )
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch._C._functorch.set_inplace_requires_grad_allowed,
+            (enabled,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+    def exit(self, tx, *args):
+        self.state.cleanup()
+        tx.output.create_node(
+            "call_function",
+            torch._C._functorch.set_inplace_requires_grad_allowed,
+            (self.prev_state,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+
 class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     """represents torch VMap increment/decrement nesting"""
 
