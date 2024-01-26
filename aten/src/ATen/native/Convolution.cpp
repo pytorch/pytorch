@@ -1463,6 +1463,11 @@ static inline at::MemoryFormat determine_backend_memory_format(
         backend_memory_format = at::MemoryFormat::ChannelsLast;
       }
       break;
+    case ConvBackend::SlowTranspose3d:
+      if (thnn_conv_use_channels_last(input, weight)) {
+        backend_memory_format = at::MemoryFormat::ChannelsLast3d;
+      }
+      break;
     case ConvBackend::Overrideable:
       if (xpu_conv_use_channels_last(input, weight)) {
         backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
