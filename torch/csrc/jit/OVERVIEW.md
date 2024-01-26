@@ -75,6 +75,7 @@ Sections start with a reference to the source file where the code related to the
   - [Testing Autodiff](#testing-autodiff)
 - [Python Printer](#python-printer)
 - [Python Bindings](#python-bindings)
+  - [Graph Manipulation](#graph-manipulation)
 
 <!-- tocstop -->
 
