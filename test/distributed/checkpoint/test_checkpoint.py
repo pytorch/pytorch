@@ -1,7 +1,8 @@
 # Owner(s): ["oncall: distributed"]
 
+import os
 import sys
-from typing import cast, List, Optional
+from typing import cast, List, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -174,6 +175,9 @@ class FaultyStorageWriter(TestStorageBase, StorageWriter):
     def __init__(self, fail_conf):
         super().__init__(fail_conf)
 
+    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+        return
+
     def set_up_storage_writer(self, is_coordinator: bool) -> None:
         self._fail_rank("fail_set_up_storage_writer")
 
@@ -199,6 +203,9 @@ class FaultyStorageReader(TestStorageBase, StorageReader):
     def __init__(self, metadata, fail_conf):
         super().__init__(fail_conf)
         self.metadata = metadata
+
+    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+        return
 
     def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
         self._fail_rank("fail_set_up_storage_reader")
