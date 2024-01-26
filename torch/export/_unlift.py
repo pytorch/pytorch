@@ -42,7 +42,11 @@ def _unlift(
             # In the case that the same node is returned multiple times,
             # node.all_input_nodes will only iterate that node once
             for return_node in pytree.tree_flatten(node.args)[0]:
-                return_node_name = return_node.name
+                return_node_name = (
+                    return_node.name
+                    if isinstance(return_node, torch.fx.Node)
+                    else return_node
+                )
                 # we found a param/buffer mutation
                 if return_node_name in buffers_to_mutate:
                     # TODO Fix situation here to replace dot with underscore...
@@ -216,6 +220,10 @@ def _construct_inp_pos_to_param_buffer_name(
                 else:
                     setattr(new_gm, name.replace(".", "_"), value)
                 constant_name_to_corrected_name[name] = name.replace(".", "_")
+            elif name in graph_signature.lifted_custom_objs:
+                assert isinstance(value, torch.ScriptObject)
+                setattr(new_gm, name.replace(".", "_"), value)
+                constant_name_to_corrected_name[name] = name.replace(".", "_")
 
     count = 0
     inp_pos_to_param_buffer_name = {}
@@ -240,6 +248,16 @@ def _construct_inp_pos_to_param_buffer_name(
             if hasattr(graph_signature, "inputs_to_lifted_tensor_constants"):
                 if node.name in graph_signature.inputs_to_lifted_tensor_constants:
                     constant_name = graph_signature.inputs_to_lifted_tensor_constants[
+                        node.name
+                    ]
+                    if constant_name in constant_name_to_corrected_name:
+                        inp_pos_to_param_buffer_name[
+                            count
+                        ] = constant_name_to_corrected_name[constant_name]
+                    else:
+                        inp_pos_to_param_buffer_name[count] = constant_name
+                elif node.name in graph_signature.inputs_to_lifted_custom_objs:
+                    constant_name = graph_signature.inputs_to_lifted_custom_objs[
                         node.name
                     ]
                     if constant_name in constant_name_to_corrected_name:
