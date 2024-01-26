@@ -1759,7 +1759,7 @@ class TestSDPA(NNTestCase):
 
     @onlyCPU
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
-    @parametrize("dtype", [torch.float16])
+    @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16, torch.float16])
     @parametrize("batch_size", [2, 12])
     @parametrize("seq_len", [267, 1030])
     @parametrize("n_head", [1, 3])
