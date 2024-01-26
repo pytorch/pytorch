@@ -912,6 +912,17 @@ class MutationTests(torch._dynamo.test_case.TestCase):
                 ["out_ptr"],
             ],
             [
+                add_kernel_out_of_order,
+                {
+                    "in_ptr0": t,
+                    "n_elements": 4,
+                    "in_ptr1": t,
+                    "out_ptr": t,
+                    "BLOCK_SIZE": 4,
+                },
+                ["out_ptr"],
+            ],
+            [
                 add_kernel_2d_autotuned,
                 {
                     "in_ptr0": t,

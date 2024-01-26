@@ -240,6 +240,7 @@ def identify_mutated_tensors(kernel, kwargs):
         else:
             args.append(a)
 
+    tensor_param_locs = [i for i, arg in enumerate(args) if isinstance(arg, Tensor)]
     specialization = kernel._get_config(*args)
     constants = {i: arg for i, arg in enumerate(args) if not isinstance(arg, Tensor)}
     debug = None
@@ -302,7 +303,7 @@ def identify_mutated_tensors(kernel, kwargs):
             visited.add(arg)
 
         if isinstance(arg, Param):
-            mutated[arg.idx] = True
+            mutated[tensor_param_locs[arg.idx]] = True
         elif isinstance(arg, Intermediate) and not arg.fake():
             stack.extend(ops[arg].args)
 
