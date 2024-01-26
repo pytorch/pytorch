@@ -285,8 +285,6 @@ dynamo_expected_failures = {
     "TestFromBuffer.test_basic_little_dtype0",
     "TestMatmul.test_exceptions",
     "TestFlag.test_writeable_from_readonly",
-    "TestArgmaxArgminCommon.test_np_vs_ndarray_positional_arr_method_argmax_np_method0",
-    "TestArgmaxArgminCommon.test_np_vs_ndarray_positional_arr_method_argmin_np_method1",
     "TestArgmax.test_combinations_data66",
     "TestArgmax.test_combinations_data65",
     "TestArgmax.test_combinations_data63",
