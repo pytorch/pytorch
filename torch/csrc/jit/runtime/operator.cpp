@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/runtime/operator.h>
 
 #include <ATen/ATen.h>
-#include <ATen/core/alias_info.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/edit_distance.h>
@@ -391,6 +390,29 @@ const std::vector<std::shared_ptr<Operator>> getAllOperators() {
 
 const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name) {
   return getRegistry().getOperators(name);
+}
+
+std::vector<std::shared_ptr<Operator>> getAllSortedOperatorsFor(Symbol name) {
+  const auto& unsortedOps = getAllOperatorsFor(name);
+  // Depending on the order of registration, aten or jit ops may be
+  // registered first. This sorting is helpful in cases where
+  // deterministic (i.e. not dependent on build config) behavior is
+  // desired; e.g. torch.ops.aten.* uses this function, and tries to
+  // find the "first" op that matches input args. Without the sorting,
+  // the "first" op may change depending on registration order.
+  std::vector<std::shared_ptr<Operator>> sortedOps;
+  sortedOps.reserve(unsortedOps.size());
+  std::copy_if(
+      unsortedOps.begin(),
+      unsortedOps.end(),
+      std::back_inserter(sortedOps),
+      [](const std::shared_ptr<Operator>& op) { return op->isC10Op(); });
+  std::copy_if(
+      unsortedOps.begin(),
+      unsortedOps.end(),
+      std::back_inserter(sortedOps),
+      [](const std::shared_ptr<Operator>& op) { return !op->isC10Op(); });
+  return sortedOps;
 }
 
 std::shared_ptr<Operator> findOperatorFor(const c10::OperatorName& full_name) {

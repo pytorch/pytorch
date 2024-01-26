@@ -1,9 +1,12 @@
+import operator
 from collections import defaultdict
 from typing import Any, Callable, DefaultDict, Dict, Optional, Tuple, Type
 
 import torch
 import torch.fx
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+from torch.utils import _pytree as pytree
+from torch.utils._pytree import tree_map
 from .virtualized import V
 
 
@@ -77,6 +80,9 @@ class FakeTensorUpdater:
         for node in self.graph.nodes:
             existing_storages[get_node_storage(node)] += 1
 
+        def is_intlist_same(new, old):
+            return statically_known_true(sym_eq(new, old))
+
         def is_fake_tensor_same(new, old):
             if type(new) != type(old):
                 return False
@@ -87,10 +93,16 @@ class FakeTensorUpdater:
                     is_fake_tensor_same(new_i, old_i) for new_i, old_i in zip(new, old)
                 )
             assert isinstance(new, torch.Tensor)
-            if new.shape != old.shape or new.layout != old.layout:
+            if not is_intlist_same(new.shape, old.shape) or new.layout != old.layout:
                 return False
-            if new.layout == torch.strided and new.stride() != old.stride():
+            if new.layout == torch.strided and (
+                not is_intlist_same(new.stride(), old.stride())
+                or not statically_known_true(
+                    new.storage_offset() == old.storage_offset()
+                )
+            ):
                 return False
+
             if get_storage(new) == get_storage(old):
                 return True
 
@@ -137,8 +149,7 @@ class FakeTensorUpdater:
                 # tests - add a test
                 existing_storages[get_node_storage(new_fake_tensor)] += 1
                 processed.add(updating_node)
-                for user in updating_node.users:
-                    processing.append(user)
+                processing.extend(updating_node.users)
 
                 self.processed_hashes.add(self.hash_node(updating_node))
 
@@ -147,7 +158,7 @@ def get_storage(t: torch.Tensor) -> int:
     return t.untyped_storage()._cdata
 
 
-def get_node_storage(node: torch.Tensor) -> Optional[int]:
+def get_node_storage(node: torch.fx.Node) -> Optional[int]:
     if "val" not in node.meta:
         return None
     if not isinstance(node.meta["val"], torch.Tensor):
@@ -170,6 +181,40 @@ def get_fake_args_kwargs(x: torch.fx.Node) -> Tuple[bool, Tuple[Any], Dict[str, 
     First value returns a boolean if any of the input nodes don't have a faketensor.
     """
     args, kwargs = tree_map(get_fake, (x.args, x.kwargs))
-    if any(isinstance(a, torch.fx.Node) for a in tree_flatten((args, kwargs))[0]):
+    if any(
+        isinstance(a, torch.fx.Node) for a in pytree.arg_tree_leaves(*args, **kwargs)
+    ):
         return False, args, kwargs
     return True, args, kwargs
+
+
+def is_node_realized(node: torch.fx.Node) -> bool:
+    """Returns true if a node is always realized when lowered to inductor IR.
+
+    NOTE: This may return some false negatives. e.g. it doesn't
+    handle buffers realized heuristically during lowering, or
+    buffers realized indirectly through view ops.
+    """
+    from torch._inductor.lowering import fallbacks, needs_realized_inputs
+
+    def is_buffer(node: torch.fx.Node) -> bool:
+        if node.op == "call_function" and node.target is operator.getitem:
+            # For nodes with multiple outputs, we get the fx graph:
+            #     foo = torch.ops.aten.foo(...)
+            #     getitem = foo[0]
+            #     getitem_1 = foo[1]
+            # where we need to check if foo is a fallback kernel
+            return is_buffer(node.args[0])
+        return node.op in ("placeholder", "output") or node.target in fallbacks
+
+    if is_buffer(node):
+        return True
+
+    def realizes_inputs(node: torch.fx.Node) -> bool:
+        return node.op == "output" or node.target in needs_realized_inputs
+
+    if any(realizes_inputs(user) for user in node.users):
+        return True
+
+    # Otherwise, assume node isn't realized
+    return False

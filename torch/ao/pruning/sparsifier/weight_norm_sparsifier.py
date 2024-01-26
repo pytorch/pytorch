@@ -5,6 +5,7 @@ import torch
 import torch.nn.functional as F
 
 from .base_sparsifier import BaseSparsifier
+import operator
 
 __all__ = ["WeightNormSparsifier"]
 
@@ -56,7 +57,7 @@ class WeightNormSparsifier(BaseSparsifier):
                  zeros_per_block: Optional[int] = None,
                  norm: Optional[Union[Callable, int]] = None):
         if zeros_per_block is None:
-            zeros_per_block = reduce((lambda x, y: x * y), sparse_block_shape)
+            zeros_per_block = reduce(operator.mul, sparse_block_shape)
         defaults = {
             "sparsity_level": sparsity_level,
             "sparse_block_shape": sparse_block_shape,
@@ -108,7 +109,7 @@ class WeightNormSparsifier(BaseSparsifier):
             mask.data = torch.ones_like(mask)
             return mask
 
-        values_per_block = reduce((lambda x, y: x * y), sparse_block_shape)
+        values_per_block = reduce(operator.mul, sparse_block_shape)
         if values_per_block > 1:
             # Reduce the data
             data = F.avg_pool2d(
@@ -145,7 +146,7 @@ class WeightNormSparsifier(BaseSparsifier):
         block_h, block_w = sparse_block_shape
         dh = (block_h - h % block_h) % block_h
         dw = (block_w - w % block_w) % block_w
-        values_per_block = reduce((lambda x, y: x * y), sparse_block_shape)
+        values_per_block = reduce(operator.mul, sparse_block_shape)
 
         if mask is None:
             mask = torch.ones((h + dh, w + dw), device=data.device)
@@ -174,7 +175,7 @@ class WeightNormSparsifier(BaseSparsifier):
 
     def update_mask(self, module, tensor_name, sparsity_level, sparse_block_shape,
                     zeros_per_block, **kwargs):
-        values_per_block = reduce((lambda x, y: x * y), sparse_block_shape)
+        values_per_block = reduce(operator.mul, sparse_block_shape)
         if zeros_per_block > values_per_block:
             raise ValueError(
                 "Number of zeros per block cannot be more than the total number of elements in that block."

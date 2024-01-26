@@ -4,7 +4,6 @@ from typing import cast, List, Optional, Sequence, Tuple
 import torch
 
 from torch.distributed._tensor._utils import compute_local_shape
-from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.op_schema import (
     OpSchema,
     OpStrategy,
@@ -29,43 +28,110 @@ from torch.distributed._tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.distributed.device_mesh import DeviceMesh
 
 
 aten = torch.ops.aten
 
 
-@register_op_strategy(
-    [
-        aten._to_copy.default,
-        aten.clone.default,
-        aten.contiguous.default,
-        aten.copy_.default,
-        aten.detach.default,
-        aten.equal.default,
-        aten.is_same_size.default,
-    ]
-)
 def default_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # Default strategy by default just propagate the first input strategy
     select_strategy = op_schema.args_schema[0]
     assert isinstance(select_strategy, OpStrategy)
-    return OpStrategy(
-        [
-            PlacementStrategy(arg_strategy.output_spec)
-            for arg_strategy in select_strategy.strategies
-        ]
+    default_strategy = []
+    for strategy in select_strategy.strategies:
+        # we create new DTensorSpecs even for default strategy to assure that
+        # the tensor metas are distinct between the arguments and outputs
+        default_strategy.append(
+            PlacementStrategy(
+                output_specs=DTensorSpec(
+                    mesh=strategy.output_spec.mesh,
+                    placements=strategy.output_spec.placements,
+                )
+            )
+        )
+    return OpStrategy(default_strategy)
+
+
+register_op_strategy(
+    [
+        aten.clone.default,
+        aten.contiguous.default,
+        aten.copy_.default,
+        aten.detach.default,
+        aten.fill_.Scalar,
+        aten.zero_.default,
+    ]
+)(default_strategy)
+
+register_op_strategy(
+    aten._to_copy.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["dtype"])
+)(default_strategy)
+
+
+@register_op_strategy(
+    [
+        aten.equal.default,
+        aten.is_same_size.default,
+    ]
+)
+def equal_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+    # equal_strategy deals with ops that comparing two tensor, we need to make sure
+    # sharding layout the same with two operands, we choose to follow the arg with max
+    # num of shards, still keep is_same_size here for completeness as they share the
+    # same strategy in theory.
+    self_strategy, other_strategy = op_schema.args_schema
+    assert isinstance(self_strategy, OpStrategy)
+    assert isinstance(other_strategy, OpStrategy)
+
+    select_strategy = (
+        self_strategy
+        if self_strategy.max_num_shards() >= other_strategy.max_num_shards()
+        else other_strategy
     )
+    equal_strategy = OpStrategy([])
+
+    for arg_strategy in select_strategy.strategies:
+        arg_spec = arg_strategy.output_spec
+        if is_tensor_partial(arg_spec):
+            # if the arg_spec have partial, reshard to replicate
+            # otherwise local shard tensor comparison would be invalid
+            output_spec = DTensorSpec(
+                mesh=arg_spec.mesh,
+                placements=tuple(
+                    Replicate() if isinstance(p, _Partial) else p
+                    for p in arg_spec.placements
+                ),
+            )
+            equal_strategy.strategies.append(
+                PlacementStrategy(output_specs=output_spec)
+            )
+        else:
+            equal_strategy.strategies.append(PlacementStrategy(arg_spec))
+    return equal_strategy
 
 
 @register_op_strategy(
     [
         aten.empty_like.default,
-        aten.fill_.Scalar,
-        aten.full_like.default,
         aten.ones_like.default,
-        aten.zero_.default,
+        aten.rand_like.default,
+        aten.randn_like.default,
         aten.zeros_like.default,
-    ]
+    ],
+    schema_info=RuntimeSchemaInfo(1, ["dtype"]),
+)
+@register_op_strategy(
+    [aten.full_like.default],
+    schema_info=RuntimeSchemaInfo(2, ["dtype"]),
+)
+@register_op_strategy(
+    [
+        aten.randint_like.default,
+        aten.randint_like.low_dtype,
+        aten.randint_like.low_dtype_out,
+    ],
+    schema_info=RuntimeSchemaInfo(3, ["dtype"]),
 )
 def create_like_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # create_like_strategy deals with ops that creating tensors with same
@@ -89,7 +155,7 @@ def create_like_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
                 ),
             )
             create_like_strategy.strategies.append(
-                PlacementStrategy(output_spec=output_spec, input_specs=(arg_spec,))
+                PlacementStrategy(output_specs=output_spec, input_specs=(arg_spec,))
             )
 
         else:
@@ -108,18 +174,25 @@ def create_like_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     ],
     schema_info=RuntimeSchemaInfo(1, ["dtype"]),
 )
-def new_factory_strategy(mesh: DeviceMesh, _) -> StrategyType:
+def new_factory_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # TODO: maybe we should generate all possible shardings intead of just stay
     # replicated for new factory methods
-    replica_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
-    return OpStrategy([PlacementStrategy(replica_spec)])
+    input_strategy = op_schema.args_schema[0]
+    new_factory_strategy = OpStrategy([])
+    assert isinstance(input_strategy, OpStrategy)
+    for arg_strategy in input_strategy.strategies:
+        input_spec = arg_strategy.output_spec
+        replica_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
+        new_factory_strategy.strategies.append(
+            PlacementStrategy(output_specs=replica_spec, input_specs=(input_spec,))
+        )
+
+    return new_factory_strategy
 
 
 @register_op_strategy(aten.bucketize.Tensor)
 def gen_bucketize_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
-    """
-    Just propagate input sharding, but expect replicated for boundaries input.
-    """
+    """Just propagate input sharding, but expect replicated for boundaries input."""
     input_strategy = op_schema.args_schema[0]
     bucketize_strategy = OpStrategy([])
     assert isinstance(input_strategy, OpStrategy)
@@ -128,7 +201,7 @@ def gen_bucketize_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyTyp
         replica_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
         bucketize_strategy.strategies.append(
             PlacementStrategy(
-                output_spec=arg_spec, input_specs=(arg_spec, replica_spec)
+                output_specs=arg_spec, input_specs=(arg_spec, replica_spec)
             )
         )
 
@@ -137,9 +210,7 @@ def gen_bucketize_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyTyp
 
 @register_op_strategy(aten.slice.Tensor, schema_info=RuntimeSchemaInfo(1))
 def gen_slice_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
-    """
-    forwards all shardings except the slice dimension.
-    """
+    """Forward all shardings except the slice dimension."""
     defaults = (None, 0, None, None, 1)
     input_strategy, dim, start, end, step = (
         op_schema.args_schema + defaults[len(op_schema.args_schema) :]
@@ -170,7 +241,7 @@ def gen_slice_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
         if not is_tensor_dim_sharded(arg_spec, dim=slice_dim) or redundant_slice:
             # only add the strategy if the slice dim is not sharded
             out_spec = DTensorSpec(mesh, arg_spec.placements)
-            slice_strategy.strategies.append(PlacementStrategy(output_spec=out_spec))
+            slice_strategy.strategies.append(PlacementStrategy(output_specs=out_spec))
     if not slice_strategy.strategies:
         # if all strategies are filtered out, unsharding all specs on slice dim
         # of the input strategy, and use that as the op strategy
@@ -180,7 +251,7 @@ def gen_slice_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
                 mesh, unshard_tensor_dim(arg_spec.placements, dim=slice_dim)
             )
             slice_strategy.strategies.append(
-                PlacementStrategy(output_spec=unshard_spec)
+                PlacementStrategy(output_specs=unshard_spec)
             )
     return slice_strategy
 
@@ -188,7 +259,7 @@ def gen_slice_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
 def unshard_tensor_dim(
     placements: Sequence[Placement], dim: int
 ) -> Tuple[Placement, ...]:
-    """Disallow the given tensor dimension to be sharded"""
+    """Disallow the given tensor dimension to be sharded."""
     return tuple(
         p if (not isinstance(p, Shard) or p.dim != dim) else Replicate()
         for p in placements
@@ -198,7 +269,7 @@ def unshard_tensor_dim(
 def replicate_tensor_dim(
     placements: Sequence[Placement], dim: int
 ) -> Tuple[Placement, ...]:
-    """Force the given tensor dimension to be replicated"""
+    """Force the given tensor dimension to be replicated."""
     # Not using p.is_shard() to avoid mypy complain about Placement not having
     # attribute dim.
     return tuple(
@@ -235,7 +306,7 @@ def gen_slice_scatter_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> Strateg
         ):
             # only add the strategy if the slice_scatter dim is not sharded or partial
             slice_scatter_strategy.strategies.append(
-                PlacementStrategy(output_spec=arg_spec)
+                PlacementStrategy(output_specs=arg_spec)
             )
 
     if not slice_scatter_strategy.strategies:
@@ -247,14 +318,14 @@ def gen_slice_scatter_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> Strateg
                 mesh, replicate_tensor_dim(arg_spec.placements, dim=slice_dim)
             )
             slice_scatter_strategy.strategies.append(
-                PlacementStrategy(output_spec=replicate_spec)
+                PlacementStrategy(output_specs=replicate_spec)
             )
     return slice_scatter_strategy
 
 
 @register_op_strategy(aten._local_scalar_dense.default)
 def replica_only_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
-    """Only allow replication on the input/ouput"""
+    """Only allow replication on the input/ouput."""
     replicate_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
     return OpStrategy([PlacementStrategy(replicate_spec)])
 
@@ -294,6 +365,7 @@ def prop_index_select(op_schema: OpSchema) -> OutputSharding:
 def prop_index(op_schema: OpSchema) -> OutputSharding:
     """
     Expect replicated on the first input; _mostly_ pointwise on the second input.
+
     TODO: exception: when the dtype of second input is "bool", then a torch.nonzero needs to be triggered first.
     """
     # Current sharding constraints:

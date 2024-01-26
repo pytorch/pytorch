@@ -2,7 +2,8 @@ import torch
 from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _default_to_fused_or_foreach,
-                        _differentiable_doc, _foreach_doc, _maximize_doc, _capturable_doc)
+                        _get_scalar_dtype, _view_as_real, _differentiable_doc, _foreach_doc, _maximize_doc,
+                        _capturable_doc)
 from torch._utils import is_compiling
 from typing import List, Optional
 
@@ -62,23 +63,25 @@ class ASGD(Optimizer):
         )
         if not step_is_tensor:
             for s in state_values:
-                s["step"] = torch.tensor(float(s["step"]))
+                s["step"] = torch.tensor(float(s["step"]), dtype=_get_scalar_dtype())
         eta_is_tensor = (len(state_values) != 0) and torch.is_tensor(
             state_values[0]["eta"]
         )
         if not eta_is_tensor:
             for s in state_values:
-                s["eta"] = torch.tensor(s["eta"])
+                s["eta"] = torch.tensor(s["eta"], dtype=_get_scalar_dtype())
         mu_is_tensor = (len(state_values) != 0) and torch.is_tensor(
             state_values[0]["mu"]
         )
         if not mu_is_tensor:
             for s in state_values:
-                s["mu"] = torch.tensor(float(s["mu"]))
+                s["mu"] = torch.tensor(float(s["mu"]), dtype=_get_scalar_dtype())
 
     def _init_group(self, group, params_with_grad, grads, mus, axs, etas, state_steps):
+        has_complex = False
         for p in group["params"]:
             if p.grad is not None:
+                has_complex |= torch.is_complex(p)
                 params_with_grad.append(p)
                 if p.grad.is_sparse:
                     raise RuntimeError("ASGD does not support sparse gradients")
@@ -87,9 +90,9 @@ class ASGD(Optimizer):
                 state = self.state[p]
                 # State initialization
                 if len(state) == 0:
-                    state["step"] = torch.zeros((), device=p.device)
-                    state["eta"] = torch.tensor(group["lr"], device=p.device)
-                    state["mu"] = torch.ones((), device=p.device)
+                    state["step"] = torch.zeros((), device=p.device, dtype=_get_scalar_dtype())
+                    state["eta"] = torch.tensor(group["lr"], device=p.device, dtype=_get_scalar_dtype())
+                    state["mu"] = torch.ones((), device=p.device, dtype=_get_scalar_dtype())
                     state["ax"] = torch.zeros_like(
                         p, memory_format=torch.preserve_format
                     )
@@ -98,10 +101,11 @@ class ASGD(Optimizer):
                 axs.append(state["ax"])
                 etas.append(state["eta"])
                 state_steps.append(state["step"])
+        return has_complex
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -120,7 +124,7 @@ class ASGD(Optimizer):
             etas = []
             state_steps = []
 
-            self._init_group(group, params_with_grad, grads, mus, axs, etas, state_steps)
+            has_complex = self._init_group(group, params_with_grad, grads, mus, axs, etas, state_steps)
 
             asgd(
                 params_with_grad,
@@ -138,6 +142,7 @@ class ASGD(Optimizer):
                 maximize=group["maximize"],
                 differentiable=group["differentiable"],
                 capturable=group["capturable"],
+                has_complex=has_complex,
             )
 
         return loss
@@ -180,6 +185,7 @@ def asgd(
     maximize: bool = False,
     differentiable: bool = False,
     capturable: bool = False,
+    has_complex: bool = False,
     *,
     lambd: float,
     lr: float,
@@ -191,7 +197,6 @@ def asgd(
 
     See :class:`~torch.optim.ASGD` for details.
     """
-
     if foreach is None:
         _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
 
@@ -220,6 +225,7 @@ def asgd(
         maximize=maximize,
         differentiable=differentiable,
         capturable=capturable,
+        has_complex=has_complex,
     )
 
 
@@ -239,6 +245,7 @@ def _single_tensor_asgd(
     maximize: bool,
     differentiable: bool,
     capturable: bool,
+    has_complex: bool,
 ):
     for i, param in enumerate(params):
         grad = grads[i]
@@ -295,6 +302,7 @@ def _multi_tensor_asgd(
     maximize: bool,
     differentiable: bool,
     capturable: bool,
+    has_complex: bool,
 ):
 
     if len(params) == 0:
@@ -305,15 +313,11 @@ def _multi_tensor_asgd(
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, axs, mus, etas, state_steps])
     for ((device, _), ((grouped_params, grouped_grads, grouped_axs, grouped_mus,
          grouped_etas, grouped_state_steps), _)) in grouped_tensors.items():
+        if has_complex:
+            _view_as_real(grouped_params, grouped_grads, grouped_axs)
+
         if maximize:
             grouped_grads = torch._foreach_neg(grouped_grads)
-
-        grouped_grads = list(grouped_grads)
-        for i in range(len(grouped_params)):
-            if torch.is_complex(grouped_params[i]):
-                grouped_params[i] = torch.view_as_real(grouped_params[i])
-                grouped_grads[i] = torch.view_as_real(grouped_grads[i])
-                grouped_axs[i] = torch.view_as_real(grouped_axs[i])
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over

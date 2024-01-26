@@ -37,10 +37,30 @@ class DistMatrixOpsTest(DTensorTestBase):
 
         dist_res = torch.addmm(input, mat1, mat2)
         local_res = torch.addmm(input_tensor, tensor_to_shard, tensor_to_replicate)
-        self.assertEqual(
-            dist_res.redistribute(device_mesh, replica_spec).to_local(),
-            local_res,
-        )
+        self.assertEqual(dist_res.full_tensor(), local_res)
+
+    @with_comms
+    def test_addmm_empty_operand(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        shard_spec = [Shard(0)]
+        replica_spec = [Replicate()]
+
+        tensor_to_shard = torch.randn(12, 0)
+        mat1 = distribute_tensor(tensor_to_shard, device_mesh, shard_spec)
+        tensor_to_replicate = torch.randn(0, 4)
+        mat2 = distribute_tensor(tensor_to_replicate, device_mesh, replica_spec)
+        input_tensor = torch.randn(4)
+        inp = distribute_tensor(input_tensor, device_mesh, replica_spec)
+
+        dist_res = torch.addmm(inp, mat1, mat2)
+        local_res = torch.addmm(input_tensor, tensor_to_shard, tensor_to_replicate)
+        # The behavior of torch.ops.aten.addmm.default is different on CPU and GPU.
+        # For more info see: https://github.com/pytorch/pytorch/issues/118131
+        # TODO: these two tensors should be equal on GPU. fix this.
+        if self.device_type == "cuda":
+            self.assertNotEqual(dist_res.full_tensor(), local_res)
+        else:
+            self.assertEqual(dist_res.full_tensor(), local_res)
 
     @with_comms
     def test_addmm_auto_redistribute(self):
@@ -64,16 +84,14 @@ class DistMatrixOpsTest(DTensorTestBase):
         self.assertIsInstance(dist_res.placements[0], _Partial)
 
         # test if result is the same as tensor
-        replica_res = dist_res.redistribute(device_mesh, replica_spec)
-        dist_local_res = replica_res.to_local()
+        dist_local_res = dist_res.full_tensor()
         self.assertEqual(local_res, dist_local_res)
 
         # backward checks
         dist_local_res.sum().backward()
         local_res.sum().backward()
         self.assertIsNotNone(mat2.grad)
-        mat2_grad = mat2.grad.redistribute(device_mesh, replica_spec)
-        self.assertEqual(mat2_grad.to_local(), tensor_to_shard0.grad)
+        self.assertEqual(mat2.grad.full_tensor(), tensor_to_shard0.grad)
 
     @with_comms
     def test_mm(self):

@@ -125,7 +125,9 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
         package_type="libtorch",
         abi_version=generate_binary_build_matrix.CXX11_ABI,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.LINUX, generate_binary_build_matrix.CXX11_ABI
+            OperatingSystem.LINUX,
+            generate_binary_build_matrix.CXX11_ABI,
+            libtorch_variants=["shared-with-deps"],
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
@@ -137,7 +139,9 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
         package_type="libtorch",
         abi_version=generate_binary_build_matrix.PRE_CXX11_ABI,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.LINUX, generate_binary_build_matrix.PRE_CXX11_ABI
+            OperatingSystem.LINUX,
+            generate_binary_build_matrix.PRE_CXX11_ABI,
+            libtorch_variants=["shared-with-deps"],
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
@@ -154,7 +158,6 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
             OperatingSystem.LINUX,
             arches=["11.8", "12.1"],
             python_versions=["3.8"],
-            gen_special_an_non_special_wheel=False,
         ),
         branches="main",
     ),
@@ -212,7 +215,9 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
         package_type="libtorch",
         abi_version=generate_binary_build_matrix.RELEASE,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.WINDOWS, generate_binary_build_matrix.RELEASE
+            OperatingSystem.WINDOWS,
+            generate_binary_build_matrix.RELEASE,
+            libtorch_variants=["shared-with-deps"],
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
@@ -224,7 +229,9 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
         package_type="libtorch",
         abi_version=generate_binary_build_matrix.DEBUG,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.WINDOWS, generate_binary_build_matrix.DEBUG
+            OperatingSystem.WINDOWS,
+            generate_binary_build_matrix.DEBUG,
+            libtorch_variants=["shared-with-deps"],
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
@@ -294,8 +301,26 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
         package_type="libtorch",
         abi_version=generate_binary_build_matrix.CXX11_ABI,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.MACOS, generate_binary_build_matrix.CXX11_ABI
+            OperatingSystem.MACOS,
+            generate_binary_build_matrix.CXX11_ABI,
+            libtorch_variants=["shared-with-deps"],
         ),
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
+            isolated_workflow=True,
+        ),
+    ),
+    BinaryBuildWorkflow(
+        os=OperatingSystem.MACOS_ARM64,
+        package_type="libtorch",
+        abi_version=generate_binary_build_matrix.CXX11_ABI,
+        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+            OperatingSystem.MACOS,
+            generate_binary_build_matrix.CXX11_ABI,
+            libtorch_variants=["shared-with-deps"],
+        ),
+        cross_compile_arm64=False,
+        macos_runner="macos-13-xlarge",
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
             isolated_workflow=True,
@@ -317,7 +342,8 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.MACOS_ARM64,
         package_type="conda",
-        cross_compile_arm64=True,
+        cross_compile_arm64=False,
+        macos_runner="macos-13-xlarge",
         build_configs=generate_binary_build_matrix.generate_conda_matrix(
             OperatingSystem.MACOS_ARM64
         ),

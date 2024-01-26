@@ -4,7 +4,6 @@
 #include <ATen/native/xnnpack/Convolution.h>
 #include <ATen/native/xnnpack/Linear.h>
 #include <ATen/native/xnnpack/OpContext.h>
-#include <ATen/Tensor.h>
 #include <torch/custom_class.h>
 
 namespace at::native::xnnpack {

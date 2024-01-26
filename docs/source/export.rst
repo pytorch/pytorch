@@ -61,7 +61,6 @@ serialized.
             assertion_dep_token=None,
         )
         Range constraints: {}
-        Equality constraints: []
 
 ``torch.export`` produces a clean intermediate representation (IR) with the
 following invariants. More specifications about the IR can be found
@@ -220,7 +219,6 @@ example:
             assertion_dep_token=None,
         )
         Range constraints: {}
-        Equality constraints: []
 
 Inspecting the ``ExportedProgram``, we can note the following:
 
@@ -329,7 +327,6 @@ run. Such dimensions must be specified by using the
             assertion_dep_token=None,
         )
         Range constraints: {s0: RangeConstraint(min_val=2, max_val=9223372036854775806)}
-        Equality constraints: [(InputDim(input_name='arg5_1', dim=0), InputDim(input_name='arg6_1', dim=0))]
 
 Some additional things to note:
 
@@ -347,13 +344,6 @@ Some additional things to note:
   that the exported program will not work for dimensions 0 or 1. See
   `The 0/1 Specialization Problem <https://docs.google.com/document/d/16VPOa3d-Liikf48teAOmxLc92rgvJdfosIy-yoT38Io/edit?fbclid=IwAR3HNwmmexcitV0pbZm_x1a4ykdXZ9th_eJWK-3hBtVgKnrkmemz6Pm5jRQ#heading=h.ez923tomjvyk>`_
   for an in-depth discussion of this topic.
-
-* ``exported_program.equality_constraints`` describes which dimensions are
-  required to be equal. Since we specified in the constraints that the first
-  dimension of each argument is equivalent,
-  (``dynamic_dim(example_args[0], 0) == dynamic_dim(example_args[1], 0)``),
-  we see in the equality constraints the tuple specifying that ``arg5_1``
-  dimension 0 and ``arg6_1`` dimension 0 are equal.
 
 (A legacy mechanism for specifying dynamic shapes
 involves marking and constraining dynamic dimensions with the
@@ -550,11 +540,11 @@ API Reference
 
 .. automodule:: torch.export
 .. autofunction:: export
-.. autofunction:: dynamic_dim
+.. autofunction:: torch.export.dynamic_shapes.dynamic_dim
 .. autofunction:: save
 .. autofunction:: load
 .. autofunction:: register_dataclass
-.. autofunction:: Dim
+.. autofunction:: torch.export.dynamic_shapes.Dim
 .. autofunction:: dims
 .. autoclass:: Constraint
 .. autoclass:: ExportedProgram
@@ -572,7 +562,24 @@ API Reference
 
 
 .. automodule:: torch.export.exported_program
+.. automodule:: torch.export.graph_signature
 .. autoclass:: InputKind
 .. autoclass:: InputSpec
 .. autoclass:: OutputKind
 .. autoclass:: OutputSpec
+.. autoclass:: ExportGraphSignature
+
+    .. automethod:: replace_all_uses
+    .. automethod:: get_replace_hook
+
+.. autoclass:: torch.export.graph_signature.CustomObjArgument
+
+.. py:module:: torch.export.dynamic_shapes
+
+.. automodule:: torch.export.unflatten
+    :members:
+
+.. automodule:: torch.export.wrapper
+    :members:
+
+.. automodule:: torch.export.custom_obj

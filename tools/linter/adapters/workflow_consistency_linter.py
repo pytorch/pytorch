@@ -52,7 +52,7 @@ def is_workflow(yaml: Any) -> bool:
 
 
 def print_lint_message(path: Path, job: Dict[str, Any], sync_tag: str) -> None:
-    job_id = list(job.keys())[0]
+    job_id = next(iter(job.keys()))
     with open(path) as f:
         lines = f.readlines()
     for i, line in enumerate(lines):

@@ -14,11 +14,7 @@
 #include <cuda_fp16.h>
 #include <curand_kernel.h>
 
-#include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAGeneratorImpl.h>
-#include <c10/cuda/CUDAGuard.h>
-#include <ATen/cuda/CUDAGraphsUtils.cuh>
-
+#include <ATen/cuda/PhiloxUtils.cuh>
 #include <cutlass/cutlass.h>
 #include <cutlass/epilogue/thread/linear_combination.h>
 #include <cutlass/epilogue/thread/scale_type.h>
@@ -1187,7 +1183,7 @@ struct AttentionBackwardKernel {
         "value is not correctly aligned (strideH)");
     TORCH_CHECK(
         p.num_batches <= 1 || p.q_strideB % kMinimumAlignment == 0,
-        "query is not correctly aligned (strideB)");
+        "query is not correctly aligned (strideB).");
     TORCH_CHECK(
         p.num_batches <= 1 || p.k_strideB % kMinimumAlignment == 0,
         "key is not correctly aligned (strideB)");
@@ -1206,13 +1202,19 @@ struct AttentionBackwardKernel {
     if (p.bias_ptr) {
       TORCH_CHECK(
           p.num_batches <= 1 || p.bias_strideB % kMinimumAlignment == 0,
-          "attn_bias is not correctly aligned (strideB)");
+          "attn_bias is not correctly aligned (strideB). ",
+          "attn_bias.stride(0) = ", p.bias_strideB, ", and should be a "
+          "multiple of ", kMinimumAlignment, ".");
       TORCH_CHECK(
           p.num_heads <= 1 || p.bias_strideH % kMinimumAlignment == 0,
-          "attn_bias is not correctly aligned (strideH)");
+          "attn_bias is not correctly aligned (strideH) ."
+          "attn_bias.stride(1) = ", p.bias_strideH, ", and should be a "
+          "multiple of ", kMinimumAlignment, ".");
       TORCH_CHECK(
           p.num_queries <= 1 || p.bias_strideM % kMinimumAlignment == 0,
-          "attn_bias is not correctly aligned (strideM)");
+          "attn_bias is not correctly aligned (strideM). "
+          "attn_bias.stride(2) = ", p.bias_strideM, ", and should be a ",
+          "multiple of ", kMinimumAlignment, ".");
     }
     if (p.grad_bias_ptr) {
       TORCH_CHECK(

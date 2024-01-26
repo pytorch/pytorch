@@ -24,6 +24,7 @@
 #include <c10/core/Event.h>
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
+#include <c10/util/AbortHandler.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/ThreadLocal.h>
@@ -38,11 +39,9 @@
 #include <memory>
 #include <mutex>
 #include <queue>
-#include <set>
 #include <sstream>
 #include <string>
 #include <thread>
-#include <typeinfo>
 #include <unordered_set>
 #include <utility>
 
@@ -81,7 +80,7 @@ std::atomic<Engine::compiled_autograd_fn> the_compiled_autograd = nullptr;
   reinterpret_cast<Engine::compiled_autograd_fn>(1)
 std::atomic<int32_t> num_threads_in_backwards;
 struct CompiledAutogradThreadingDebugCheck {
-  CompiledAutogradThreadingDebugCheck() : incremented(true) {
+  CompiledAutogradThreadingDebugCheck() {
     num_threads_in_backwards++;
   }
   ~CompiledAutogradThreadingDebugCheck() {
@@ -94,7 +93,7 @@ struct CompiledAutogradThreadingDebugCheck {
   }
 
  private:
-  bool incremented;
+  bool incremented{true};
 };
 
 } // namespace
@@ -346,6 +345,7 @@ void Engine::thread_init(
     int device,
     const std::shared_ptr<ReadyQueue>& ready_queue,
     bool should_increment) {
+  c10::set_terminate_handler();
   if (should_increment) {
     increment_non_reentrant_thread_count();
   }
@@ -575,6 +575,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
                 local_graph_task->cpu_ready_queue_);
           }
         } catch (std::exception& e) {
+          // See Note [ Persisting PyErr state across autograd engine threads ]
           thread_on_exception(local_graph_task, task.fn_, e);
         }
       }
@@ -612,6 +613,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
 // thread, but sharing the same cpu_ready_queue with parent thread is a
 // performance improvement and cuda thread still have to do the same thing.
 void Engine::reentrant_thread_init() {
+  c10::set_terminate_handler();
   at::init_num_threads();
   auto tp_shared = thread_pool_shared_;
   while (true) {
@@ -707,6 +709,7 @@ void GraphTask::exec_post_processing() {
       // If leaf_stream.device_index() happens to be for a new device,
       // operator* on the c10::nullopt should throw an error.
       const auto caller_current_stream =
+          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
           *caller_current_streams_[leaf_stream.device_index()];
 
       if (caller_current_stream != leaf_stream) {
@@ -1115,7 +1118,7 @@ inline static uint64_t compute_min_topological_nr(const edge_list& outputs) {
   }
   auto min_topo_nr = std::numeric_limits<uint64_t>::max();
   for (auto& output_edge : outputs) {
-    auto topo_nr = output_edge.function.get()->topological_nr();
+    auto topo_nr = output_edge.function->topological_nr();
     min_topo_nr = (min_topo_nr < topo_nr) ? min_topo_nr : topo_nr;
   }
   return min_topo_nr;

@@ -2,6 +2,7 @@
 
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_NUMPY
+from torch.testing._internal.common_utils import skipIfTorchDynamo
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import get_all_device_types
 from collections import namedtuple, OrderedDict
@@ -148,6 +149,7 @@ class TestNamedTensor(TestCase):
             names65 = ['A' * i for i in range(1, 66)]
             x = factory([1] * 65, names=names64, device=device)
 
+    @skipIfTorchDynamo("not a bug: Dynamo causes the refcounts to be different")
     def test_none_names_refcount(self, N=10):
         def scope():
             unnamed = torch.empty(2, 3)
@@ -2050,6 +2052,13 @@ class TestNamedTensor(TestCase):
 
             res = torch.isinf(a)
             self.assertEqual(res.names, ['N', 'C'])
+
+    def test_support_device_named_grad(self):
+        named_tensor = torch.randn(3, 3, device='meta')
+        with self.assertRaisesRegex(RuntimeError, 'NYI: named tensors only support CPU, CUDA'):
+            named_tensor.rename_('N', 'C')
+            named_tensor.names = ['N', 'C']
+            named_tensor = torch.randn(3, 3, device='meta', names=['N', 'C'])
 
 
 if __name__ == '__main__':

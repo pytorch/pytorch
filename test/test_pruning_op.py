@@ -4,7 +4,7 @@ import hypothesis.strategies as st
 from hypothesis import given
 import numpy as np
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
@@ -56,6 +56,7 @@ class PruningOpTest(TestCase):
         self.assertEqual(pt_compressed_indices_map.dtype, indices_type)
 
 
+    @skipIfTorchDynamo()
     @given(
         embedding_rows=st.integers(1, 100),
         embedding_dims=st.integers(1, 100),
@@ -67,6 +68,7 @@ class PruningOpTest(TestCase):
         self._test_rowwise_prune_op(embedding_rows, embedding_dims, torch.int, weights_dtype)
 
 
+    @skipIfTorchDynamo()
     @given(
         embedding_rows=st.integers(1, 100),
         embedding_dims=st.integers(1, 100),
