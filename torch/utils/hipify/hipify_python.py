@@ -659,43 +659,59 @@ def is_caffe2_gpu_file(rel_filepath):
     _, ext = os.path.splitext(filename)
     return ('gpu' in filename or ext in ['.cu', '.cuh']) and ('cudnn' not in filename)
 
-
-# Cribbed from https://stackoverflow.com/questions/42742810/speed-up-millions-of-regex-replacements-in-python-3/42789508#42789508
 class Trie:
-    """Regex::Trie in Python. Creates a Trie out of a list of words. The trie can be exported to a Regex pattern.
+    """Creates a Trie out of a list of words. The trie can be exported to a Regex pattern.
     The corresponding Regex should match much faster than a simple Regex union."""
 
     def __init__(self):
-        self.data = {}
+        """Initialize the trie with an empty root node."""
+        self.root = {}
 
     def add(self, word):
-        ref = self.data
+        """Add a word to the Trie. """
+        node = self.root
         for char in word:
-            ref[char] = char in ref and ref[char] or {}
-            ref = ref[char]
-        ref[''] = 1
+            node = node.setdefault(char, {})
+        node[''] = True # Mark the end of the word
 
-    def dump(self):
-        return self.data
+    def _dump(self):
+        """Return the data of Trie. """
+        return self.root
 
-    def quote(self, char):
+    def _quote(self, char):
+        """ Escape a char for regex. """
         return re.escape(char)
 
-    def _pattern(self, pData):
-        data = pData
+    def search(self, word):
+        """Search whether word is present in the Trie.
+        Returns True if yes, else return False"""
+        node = self.root
+        for char in word:
+            if char in word:
+                node = node[char]
+            else:
+                return False
+
+        return '' in node # make sure to check the end-of-word marker present
+
+    def _pattern(self, node):
+        """Convert a nested dictionary into a regular expression pattern"""
+        # import pdb;pdb.set_trace()
+        data = node
+
         if "" in data and len(data.keys()) == 1:
             return None
 
-        alt = []
-        cc = []
+        alt = [] # store alternative patterns
+        cc = [] # to store char to char classes
         q = 0
         for char in sorted(data.keys()):
             if isinstance(data[char], dict):
                 try:
                     recurse = self._pattern(data[char])
-                    alt.append(self.quote(char) + recurse)
+                    alt.append(self._quote(char) + recurse)
                 except Exception:
-                    cc.append(self.quote(char))
+                    cc.append(self._quote(char))
             else:
                 q = 1
         cconly = not len(alt) > 0
@@ -718,8 +734,10 @@ class Trie:
                 result = f"(?:{result})?"
         return result
 
-    def pattern(self):
-        return self._pattern(self.dump())
+    def export_to_regex(self):
+        """ Export the Trie to a regex pattern. """
+    # def pattern(self):
+        return self._pattern(self.root)
 
 
 CAFFE2_TRIE = Trie()
@@ -753,8 +771,8 @@ for mapping in CUDA_TO_HIP_MAPPINGS:
         if constants.API_PYTORCH not in meta_data and constants.API_SPECIAL not in meta_data:
             CAFFE2_TRIE.add(src)
             CAFFE2_MAP[src] = dst
-RE_CAFFE2_PREPROCESSOR = re.compile(CAFFE2_TRIE.pattern())
-RE_PYTORCH_PREPROCESSOR = re.compile(fr'(?<=\W)({PYTORCH_TRIE.pattern()})(?=\W)')
+RE_CAFFE2_PREPROCESSOR = re.compile(CAFFE2_TRIE.export_to_regex())
+RE_PYTORCH_PREPROCESSOR = re.compile(fr'(?<=\W)({PYTORCH_TRIE.export_to_regex()})(?=\W)')
 
 RE_QUOTE_HEADER = re.compile(r'#include "([^"]+)"')
 RE_ANGLE_HEADER = re.compile(r'#include <([^>]+)>')

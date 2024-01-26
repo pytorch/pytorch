@@ -694,8 +694,23 @@ class TestONNXUtils(TestCase):
 
 
 class TestHipify(TestCase):
+
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python  # noqa: F401
+    
+
+class TestHipifyTrie(TestCase):
+    def setup(self):
+        self.trie = torch.utils.hipify.hipify_python.Trie()
+
+    def test_add_and_search_trie(self):
+        self.trie.add("banana")
+        self.assertTrue(self.trie.search("banana"))
+        self.assertFalse(self.trie.search("ban"))
+        self.assertFalse(self.trie.search("dog"))
+
+
+    
 
 
 class TestAssert(TestCase):
