@@ -9,7 +9,9 @@ import typing
 import weakref
 from typing import Any, Callable, Dict, List, Optional, Set
 
-from torch.fx import _use_lazy_graph_module  # type: ignore[attr-defined]
+from torch.fx._lazy_graph_module import (  # type: ignore[attr-defined]
+    _use_lazy_graph_module,
+)
 
 try:
     import numpy as np
@@ -810,8 +812,7 @@ def replay(filename):
             hooks=Hooks(),
             cache_size=CacheSizeRelevantForFrame(0, 0),
             frame=None,
+            frame_state={},
         )
-    except Exception:
-        pass
     finally:
         config.replay_record_enabled = original_replay_val

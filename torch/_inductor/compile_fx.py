@@ -43,7 +43,7 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
 from .._dynamo.backends.common import aot_autograd
-from ..fx import _use_lazy_graph_module  # type: ignore[attr-defined]
+from ..fx._lazy_graph_module import _use_lazy_graph_module  # type: ignore[attr-defined]
 from ..fx.graph import _PyTreeCodeGen
 from . import config, metrics
 from .debug import DebugContext
@@ -148,26 +148,42 @@ def _warn_tf32_disabled():
 def _unlift_graph(mod, gm, graph_signature):
     state_dict = {}
     for name, param in mod.named_parameters(remove_duplicate=False):
+        gm.register_parameter(name.replace(".", "_"), param)
         state_dict[name] = param
-    for name, param in mod.named_buffers(remove_duplicate=False):
-        state_dict[name] = param
+    for name, buffer in mod.named_buffers(remove_duplicate=False):
+        gm.register_buffer(name.replace(".", "_"), buffer)
+        state_dict[name] = buffer
 
-    from torch.export._unlift import _construct_inp_pos_to_param_buffer_name, _unlift
+    placeholder_nodes = [node for node in gm.graph.nodes if node.op == "placeholder"]
+    lifted_inputs = []
+    for node in placeholder_nodes:
+        node_name = node.name
+        if node_name in graph_signature.inputs_to_parameters:
+            lifted_inputs.append(graph_signature.inputs_to_parameters[node_name])
+        elif node_name in graph_signature.inputs_to_buffers:
+            lifted_inputs.append(graph_signature.inputs_to_buffers[node_name])
+        else:
+            assert node_name in graph_signature.user_inputs
+            lifted_inputs.append(None)
 
-    inp_pos_to_param_buffer_name = _construct_inp_pos_to_param_buffer_name(
-        gm,
-        graph_signature,
-        state_dict,
-        {},
-    )
+    from torch.export._unlift import _unlift
+
+    outputs = list(gm.graph.nodes)[-1].args[0]
+    mutated_outputs = []
+    for out in outputs:
+        if out in graph_signature.buffers_to_mutate:
+            mutated_outputs.append(graph_signature.buffers_to_mutate[out.name])
+        else:
+            mutated_outputs.append(None)
+
     unlifted_gm = _unlift(
         gm,
-        inp_pos_to_param_buffer_name,
+        lifted_inputs,
+        mutated_outputs,
         pytree.LeafSpec(),
         None,
         state_dict,
         {},
-        graph_signature.buffers_to_mutate,
     )
     return unlifted_gm
 
@@ -275,7 +291,7 @@ def compile_fx_inner(
     if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
         # trigger the real recompilation for _LazyGraphModule before returning
         # the forward method.
-        from torch.fx.lazy_graph_module import _LazyGraphModule
+        from torch.fx._lazy_graph_module import _LazyGraphModule
 
         _LazyGraphModule.force_recompile(gm)
         return make_boxed_func(gm.forward)
@@ -332,6 +348,13 @@ def compile_fx_inner(
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
+    # check cudagraph disabling reasons from inductor lowering
+    if cudagraphs and compiled_graph.disabled_cudagraphs_reason:
+        perf_hint_log.warning(
+            "skipping cudagraphs due to %s", compiled_graph.disabled_cudagraphs_reason
+        )
+        BoxedBool.disable(cudagraphs)
+
     # Return the output strides to the caller via TracingContext
     context = torch._guards.TracingContext.try_get()
     if context is not None and context.output_strides is not None:
@@ -340,12 +363,6 @@ def compile_fx_inner(
 
     if aot_mode:
         return compiled_graph
-
-    if cudagraphs and compiled_graph.disabled_cudagraphs_reason:
-        perf_hint_log.warning(
-            "skipping cudagraphs due to %s", compiled_graph.disabled_cudagraphs_reason
-        )
-        BoxedBool.disable(cudagraphs)
 
     if cudagraphs:
         # output args are tuple of first argument
@@ -362,17 +379,15 @@ def compile_fx_inner(
             if isinstance(t, torch.Tensor)
         )
 
-        # doesnt work for non-trees because the warmup run would apply mutation twice
-        if config.triton.cudagraph_trees:
-            # checking if mutation is only on parameters/static inputs
-            has_mutation = not all(
-                idx < num_fixed for idx in compiled_graph.mutated_input_idxs
-            )
-        else:
-            has_mutation = len(compiled_graph.mutated_inputs) != 0
+        from torch._inductor.cudagraph_utils import check_for_mutation
+
+        has_mutation_str = check_for_mutation(gm, compiled_graph, num_fixed)
+        has_mutation = has_mutation_str is not None
+
+        if has_mutation:
+            compiled_graph.disabled_cudagraphs_reason = has_mutation_str
 
         cudagraph_tests = [
-            (set(compiled_graph.device_types) == {"cuda"}, "non-cuda device in graph"),
             (not has_mutation, "mutated inputs"),
             (not has_incompatible_cudagraph_ops(gm), "incompatible ops"),
             (not complex_memory_overlap_inputs, "complex memory overlap"),
@@ -381,13 +396,6 @@ def compile_fx_inner(
                     isinstance(t, (torch.Tensor, torch.SymInt)) for t in example_inputs
                 ),
                 "non-Tensor inputs",
-            ),
-            (
-                (
-                    len(compiled_graph.device_idxs) == 1
-                    or not config.triton.cudagraph_trees
-                ),
-                "multiple device indices with cudagraph_trees",
             ),
         ]
         cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
@@ -440,9 +448,14 @@ def compile_fx_inner(
                 compiled_graph.current_callable = compiled_artifact
 
             if "cuda" in compiled_graph.device_types:
-                perf_hint_log.warning(
-                    "skipping cudagraphs due to %s", cudagraph_fail_reasons
-                )
+                # prefer better disable_cudagraphs_reason bc stack trace
+                # TODO: migrate all disable reasons to stack trace, refactor
+                if compiled_graph.disabled_cudagraphs_reason:
+                    perf_hint_log.warning(compiled_graph.disabled_cudagraphs_reason)
+                else:
+                    perf_hint_log.warning(
+                        "skipping cudagraphs due to %s", cudagraph_fail_reasons
+                    )
 
     # cudagraphs does its own aligning of inputs
     if not cudagraphs:
@@ -570,6 +583,15 @@ def fx_codegen_and_compile(
 
             if V.aot_compilation is True:
                 return compiled_fn
+
+            if cudagraphs and not V.graph.disable_cudagraphs_reason:
+                from torch._inductor.cudagraph_utils import (
+                    check_lowering_disable_cudagraph,
+                )
+
+                V.graph.disable_cudagraphs_reason = check_lowering_disable_cudagraph(
+                    V.graph.device_node_mapping
+                )
 
             compiled_graph = CompiledFxGraph(
                 compiled_fn, graph, output_strides, V.graph.disable_cudagraphs_reason

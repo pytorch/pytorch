@@ -7,8 +7,8 @@ from unittest.mock import patch
 import torch
 import torch._export
 from torch import fx
+from torch.fx._lazy_graph_module import _LazyGraphModule, _use_lazy_graph_module
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.lazy_graph_module import _LazyGraphModule
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -18,7 +18,7 @@ class TestLazyGraphModule(TestCase):
     @classmethod
     def setUpClass(cls):
         cls.exit_stack = contextlib.ExitStack()
-        cls.exit_stack.enter_context(fx._use_lazy_graph_module(True))
+        cls.exit_stack.enter_context(_use_lazy_graph_module(True))
 
     @classmethod
     def tearDownClass(cls):

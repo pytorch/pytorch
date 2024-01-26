@@ -7,7 +7,7 @@ import torch._dynamo
 import torch._dynamo.config as config
 import torch._dynamo.test_case
 from torch._dynamo.testing import same
-from torch.fx.lazy_graph_module import _force_skip_lazy_graph_module
+from torch.fx._lazy_graph_module import _force_skip_lazy_graph_module
 
 
 class Seq(torch.nn.Module):

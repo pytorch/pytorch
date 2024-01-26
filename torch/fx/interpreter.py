@@ -1,5 +1,5 @@
 from .graph_module import GraphModule
-from .lazy_graph_module import get_graph_module_cls
+from ._lazy_graph_module import get_graph_module_cls
 from .graph import Graph
 from .node import Argument, Node, Target, map_arg, map_aggregate
 from .proxy import Proxy

@@ -196,7 +196,7 @@ def _deserialize_graph_module(forward, body: Dict[Any, Any], graph_module_cls=No
     # referencing the private local subclass KeepModules.
     graph._tracer_cls = tracer_cls
     if graph_module_cls is None:
-        from .lazy_graph_module import get_graph_module_cls
+        from ._lazy_graph_module import get_graph_module_cls
         graph_module_cls = get_graph_module_cls()
     gm = graph_module_cls(com, graph, class_name=graphmodule_cls_name)
 
@@ -814,7 +814,7 @@ class {module_name}(torch.nn.Module):
         return res
 
     def __copy__(self):
-        from .lazy_graph_module import get_graph_module_cls
+        from ._lazy_graph_module import get_graph_module_cls
         res = get_graph_module_cls()(self, self.graph)
         res.meta = getattr(self, "meta", {})
         return res
