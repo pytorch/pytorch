@@ -60,7 +60,7 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
         device = torch.device("cuda", 0)
         # Single FSDP group
         model = MLP(8, device)
-        fully_shard(model, device=device)
+        fully_shard(model)
         inp = torch.randn((2, 8), device="cuda")
         self._assert_dtensor_params(model)
         model(inp)
@@ -68,9 +68,9 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
 
         # Multiple FSDP groups
         model = MLP(8, device)
-        fully_shard(model.in_proj, device=device)
-        fully_shard(model.out_proj, device=device)
-        fully_shard(model, device=device)
+        fully_shard(model.in_proj)
+        fully_shard(model.out_proj)
+        fully_shard(model)
         self._assert_dtensor_params(model)
         model(inp)
         self._assert_dtensor_params(model)
