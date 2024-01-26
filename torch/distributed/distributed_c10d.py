@@ -1647,7 +1647,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
                     _world.tags_to_pg[""].remove(pg)
             except Exception:
                 pass
-        _unregister_process_group(pg.group_name())
+        _unregister_process_group(pg.group_name)
 
 
 def get_rank(group: Optional[ProcessGroup] = None) -> int:
