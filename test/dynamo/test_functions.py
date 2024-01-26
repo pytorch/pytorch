@@ -538,6 +538,15 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if not x.is_cuda:
             return x + 1
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @make_test
+    def test_get_device_properties_tensor_device(a):
+        x = a.to("cuda")
+        prop = torch.cuda.get_device_properties(x.device)
+        if prop.major == 8:
+            return x + prop.multi_processor_count
+        return x + prop.max_threads_per_multi_processor
+
     @make_test
     def test_tensor_type(a, b):
         m = a.to(torch.float16)
