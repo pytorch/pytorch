@@ -418,7 +418,7 @@ class TestOptimRenewed(TestCase):
                     nintermediates = 5
 
                 if optim_cls.__name__ == "RAdam":
-                    # RAdam has six intermediates with capturable
+                    # RAdam has four intermediates with capturable
                     # num, unrect_step_size, buffer, grouped_grads
                     nintermediates = 4
 
