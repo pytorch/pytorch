@@ -28,6 +28,7 @@ from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
+    free_unbacked_symbols,
     GuardOnDataDependentSymNode,
     ShapeEnv,
 )
@@ -422,7 +423,13 @@ def _export_non_strict(
     is_joint = graph_signature.backward_signature is not None
 
     def make_argument_spec(node) -> ArgumentSpec:
-        assert "val" in node.meta, f"{node} has no 'val' metadata field"
+        if isinstance(node, (int, bool, float, type(None))):
+            # For const outputs we just directly return this
+            return ConstantArgument(value=node)
+
+        assert (
+            "val" in node.meta
+        ), f"{node} is not a constant or a node with a 'val' metadata field"
         val = node.meta["val"]
         if isinstance(val, FakeTensor):
             return TensorArgument(name=node.name)
@@ -802,7 +809,7 @@ def _export(
     gm.meta["inline_constraints"] = {
         k: v
         for k, v in dynamo_fake_mode.shape_env.runtime_var_to_range.items()
-        if re.match(r"^[if]\d+$", str(k))
+        if free_unbacked_symbols(k)
     }
 
     num_lifted = next(

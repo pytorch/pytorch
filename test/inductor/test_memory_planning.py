@@ -13,7 +13,6 @@ if IS_WINDOWS and IS_CI:
     raise unittest.SkipTest("requires sympy/functorch/filelock")  # noqa: F821
 
 import unittest
-from typing import List
 
 import torch
 from test_torchinductor import run_and_get_cpp_code
@@ -21,6 +20,7 @@ from torch._C import FileCheck
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import same
 from torch._inductor import config
+from torch.export import Dim
 from torch.utils._triton import has_triton
 
 
@@ -50,7 +50,7 @@ class TestMemoryPlanning(TestCase):
         result, code = run_and_get_cpp_code(compiled, *args)
 
         FileCheck().check(
-            "pool1 = empty_strided(((4*s0*s1) + (align(4*(s0*s0))), ), (1, )"
+            "pool1 = empty_strided_cuda(((4*s0*s1) + (align(4*(s0*s0))), ), (1, )"
         ).check_next(
             "buf0 = alloc_from_pool(pool1, 0, torch.float32, (s0, s0), (s0, 1))"
         ).check(
@@ -83,13 +83,13 @@ class TestMemoryPlanning(TestCase):
         from test_aot_inductor import AOTIRunnerUtil
 
         f, args = self._generate(device="cuda")
-        constraints: List[torch.export.Constraint] = [
-            torch._export.dynamic_dim(args[0], 0) >= 1,
-            torch._export.dynamic_dim(args[0], 0) <= 2048,
-        ]
+        dim0_x = Dim("dim0_x", min=1, max=2048)
+        dynamic_shapes = ({0: dim0_x}, None, None)
         with config.patch("aot_inductor.abi_compatible", True):
             result, code = run_and_get_cpp_code(
-                lambda: AOTIRunnerUtil.run("cuda", f, args, constraints=constraints)
+                lambda: AOTIRunnerUtil.run(
+                    "cuda", f, args, dynamic_shapes=dynamic_shapes
+                )
             )
 
         FileCheck().check(

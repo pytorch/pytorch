@@ -55,6 +55,7 @@ import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import (
     tf32_on_and_off, tf32_is_not_fp32, TEST_CUDNN)
+from torch.testing._internal.common_mkldnn import bf32_on_and_off
 from torch.testing._internal.common_dtype import (
     floating_types_and, get_all_math_dtypes, all_types_and_complex_and, complex_types,
     all_types_and, floating_types, floating_and_complex_types, integral_types_and,
@@ -2457,6 +2458,7 @@ else:
                         self.assertEqual(y1.grad, y2.grad, rtol=0, atol=0.001)
 
     @tf32_on_and_off(0.005)
+    @bf32_on_and_off(0.005)
     def test_cdist_large(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(1000, 10, device=device)
@@ -2467,6 +2469,7 @@ else:
 
     @slowTest
     @tf32_on_and_off(0.01)
+    @bf32_on_and_off(0.01)
     def test_cdist_large_batch(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 1000, 10, device=device)
@@ -2476,6 +2479,7 @@ else:
             self.assertEqual(expected, actual)
 
     @tf32_on_and_off(0.005)
+    @bf32_on_and_off(0.005)
     def test_cdist_non_contiguous(self, device):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(5, 7, device=device).mT
@@ -2503,6 +2507,7 @@ else:
             self.assertEqual(expected, actual)
 
     @tf32_on_and_off(0.005)
+    @bf32_on_and_off(0.005)
     def test_cdist_non_contiguous_batch(self, device):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 2, 5, 7, device=device).mT
@@ -4985,7 +4990,6 @@ else:
             torch.channels_last_3d)
 
     # FIXME: make this a elementwise unary and elementwise binary OpInfo test
-    @skipIfTorchDynamo("Torchdynamo fails with unknown reason")
     def test_strides_propagation(self, device):
         def _test_helper(x, op, unary=False):
             def compare_strides(s1, s2, div):
@@ -5195,6 +5199,15 @@ else:
         self.assertTrue(torch._C._data_address(t) == t_new_data_addr)
         self.assertTrue(torch._C._data_address(view) == t_new_data_addr)
         self.assertTrue(torch._C._data_address(clone) == orig_data_ptr)
+
+    @skipXLA
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_lazy_clone_binary_op_no_materialize(self, device, dtype):
+        t = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)
+        clone = t._lazy_clone()
+        res = t + clone
+        self.assertTrue(torch._C._is_cow_tensor(t))
+        self.assertTrue(torch._C._is_cow_tensor(clone))
 
     # FIXME: move to test distributions
     @skipIfMps
@@ -9945,6 +9958,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(t1_moved, new_t2_moved)
         self.assertEqual(t2_moved, new_t1_moved)
 
+        # tests that PyObject slots on TensorImpl are correctly swapped by
+        # checking that when the function applied on a swapped tensor is
+        # returns doesn't change the TensorImpl, the returned value (which is
+        # given by returning the reference to the PyObject in the TensorImpl's
+        # PyObjectSlot) is still correct
+        self.assertEqual(id(t1.fill_(0.5)), id(t1))
+        self.assertEqual(id(t2.fill_(0.5)), id(t2))
+
     @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo adds weakrefs")
     def test_swap_basic(self):
         ts = [
@@ -9966,9 +9987,20 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self.assertIs(holder[0], t1)
             self.assertEqual(t1.foo, "bar")
 
+            if t1.is_floating_point():
+                t3 = t1.clone().detach().requires_grad_(True)
+                out = t3 * 2
+                with self.assertRaisesRegex(RuntimeError, "Expected single reference to a's"):
+                    torch.utils.swap_tensors(t3, t2)
+                del out
+                # Now succeeds
+                torch.utils.swap_tensors(t3, t2)
+                torch.utils.swap_tensors(t1, t2)
+
             wr = weakref.ref(t1)
             with self.assertRaisesRegex(RuntimeError, "has weakref"):
                 torch.utils.swap_tensors(t1, t2)
+
 
     @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo adds weakrefs")
     def test_swap_fail_slots(self):
