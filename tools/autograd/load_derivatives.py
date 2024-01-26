@@ -84,7 +84,8 @@ def add_view_copy_derivatives(
                     view_copy_differentiability_infos[dispatch_key] = view_copy_info
             else:
                 break
-        if len(view_copy_differentiability_infos) > 0:
+        # prefer manually-defined derivatives if any
+        if len(view_copy_differentiability_infos) > 0 and fn_schema not in infos:
             assert fn_schema is not None
             view_infos[fn_schema] = view_copy_differentiability_infos
 
@@ -105,11 +106,10 @@ def load_derivatives(
         # From the parsed native functions, separate out the (generated) view_copy functions,
         # so we can generate derivatives for them separately.
         native_functions_with_view_groups = get_grouped_by_view_native_functions(funcs)
-        native_functions_without_view_copies = concatMap(
-            # We need to pull out the view_inplace ops too, since they might have their own derivative entries.
+        native_functions = concatMap(
             lambda g: [g]
             if isinstance(g, NativeFunction)
-            else list(g.functions(include_copy=False)),
+            else list(g.functions(include_copy=True)),
             native_functions_with_view_groups,
         )
         view_groups = [
@@ -126,7 +126,7 @@ def load_derivatives(
             FunctionSchema, List[NativeFunction]
         ] = defaultdict(list)
         functions_by_schema: Dict[str, NativeFunction] = {}
-        for function in native_functions_without_view_copies:
+        for function in native_functions:
             functions_by_signature[function.func.signature()].append(function)
             assert str(function.func) not in functions_by_schema
             functions_by_schema[str(function.func)] = function

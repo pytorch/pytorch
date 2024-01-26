@@ -191,7 +191,7 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
         # Assume there aren't additional tensors that aren't the "unary/binary" args
         num_tensor_args = sum([isinstance(x, torch.Tensor) for x in args])
         if num_tensor_args == 1:
-            check_schema("self: jt, ...", func, *args, **kwargs)
+            check_schema("self: jt_all, ...", func, *args, **kwargs)
             return functools.partial(jagged_unary_pointwise, func)
         elif num_tensor_args == 2:
             check_schema("lhs: any, rhs: any", func, *args, **kwargs)
@@ -204,6 +204,7 @@ def extract_kwargs(arg):
     kwargs = {
         "offsets": arg.offsets(),
         "_metadata_cache": arg._metadata_cache,
+        "_ragged_idx": arg._ragged_idx,
     }
     return kwargs
 
@@ -279,20 +280,6 @@ def jagged_torch_function(func, *args, **kwargs):
     # Dispatch to the correct implementation here
     if func is torch._C._nn.scaled_dot_product_attention:
         return jagged_scaled_dot_product_attention(*args, **kwargs)
-
-    # Handle reshape() / reshape_as() here because they're CompositeImplicit.
-    # TODO: Do the full view determination logic based on computeStride()
-    if func.__name__ == "reshape":
-        inp = args[0]
-        shape = args[1:]
-
-        return inp.view(shape) if inp.is_contiguous() else inp.contiguous().view(shape)
-
-    if func.__name__ == "reshape_as":
-        inp = args[0]
-        other = args[1]
-
-        return inp.reshape(*other.shape)
 
     # Handle flatten() here because it's CompositeImplicit.
     if func.__name__ == "flatten":
@@ -388,10 +375,6 @@ def is_contiguous_general(func, *args, **kwargs):
     if inp.lengths() is not None:
         return False
 
-    # If jagged dim is not 1 it's not contiguous
-    if inp._ragged_idx != 1:
-        return False
-
     new_kwargs["memory_format"] = new_kwargs.get(
         "memory_format", torch.contiguous_format
     )
@@ -460,7 +443,7 @@ register_jagged_func(
         torch.ops.aten.randn_like.default,
         torch.ops.aten.detach.default,
     ],
-    "self: jt",
+    "self: jt_all",
 )(jagged_unary_pointwise)
 
 
@@ -805,13 +788,14 @@ def transpose_int(func, *args, **kwargs):
             to_dim = dim1
         else:
             to_dim = dim0
+        inp_kwargs = extract_kwargs(inp)
+        inp_kwargs["_ragged_idx"] = to_dim
         return NestedTensor(
             inp.values().transpose(
                 _outer_to_inner_dim(len(inp._size), dim0),
                 _outer_to_inner_dim(len(inp._size), dim1),
             ),
-            **extract_kwargs(inp),
-            _ragged_idx=to_dim,
+            **inp_kwargs,
         )
 
     new_kwargs["dim0"] = _wrap_jagged_dim(inp.dim(), new_kwargs["dim0"], "transpose")

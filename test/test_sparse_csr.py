@@ -1271,6 +1271,7 @@ class TestSparseCSR(TestCase):
                 new_shape = (2, 2)
                 a.resize_(new_shape)
 
+    @skipIfTorchDynamo()
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_sparse_csr_from_dense(self, device, dtype):
         dense = torch.tensor([[4, 5, 0], [0, 0, 0], [1, 0, 0]], dtype=dtype, device=device)
@@ -3462,6 +3463,7 @@ class TestSparseCompressedTritonKernels(TestCase):
         return d
 
     @onlyCUDA
+    @skipIfRocm(msg="test is too slow on ROCm stack")
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")

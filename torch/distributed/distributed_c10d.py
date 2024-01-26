@@ -1167,7 +1167,9 @@ def init_process_group(
             NCCL: the communicator is immediately formed (calling
             ``ncclCommInit*`` immediately rather than the normal lazy
             call) and sub-groups will use ``ncclCommSplit`` when
-            possible to avoid unnecessary overhead of group creation.
+            possible to avoid unnecessary overhead of group creation. If you
+            want to know NCCL initialization error early, you can also use this
+            field.
 
     .. note:: To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
         on a system that supports MPI.
@@ -1255,6 +1257,23 @@ def init_process_group(
     _world.pg_group_ranks[GroupMember.WORLD] = {i: i for i in range(GroupMember.WORLD.size())}  # type: ignore[attr-defined, index]
     _backend = _world.pg_map[not_none(GroupMember.WORLD)][0]
     _default_pg_init_method = init_method
+
+    old_hook = sys.excepthook
+
+    def _distributed_excepthook(*args):
+        old_stderr = sys.stderr
+        sys.stderr = buf = io.StringIO()
+        try:
+            old_hook(*args)
+        finally:
+            sys.stderr = old_stderr
+        msg = buf.getvalue()
+        prefix = f"[rank{get_rank()}]"
+        msg = "\n".join(f"{prefix}: {s}" if s != "" else "" for s in msg.split("\n"))
+        sys.stderr.write(msg)
+        sys.stderr.flush()
+
+    sys.excepthook = _distributed_excepthook
 
     if _is_barrier_after_init() == 1:
         # barrier at the end to ensure that once we return from this method, all
@@ -1380,7 +1399,7 @@ def _new_process_group_helper(
     if device_id:
         pg.bound_device_id = device_id
     backend_config = BackendConfig(backend)
-    backend_class: ProcessGroup
+    backend_class: torch._C._distributed_c10d.Backend
     for device, backend_str in backend_config.get_device_backend_map().items():
         # Use the group name as prefix in the default store, such that
         # a single store can be reused by multiple groups.
@@ -1473,7 +1492,7 @@ def _new_process_group_helper(
         # TODO: This defaults to the old behavior for PythonProcessGroups which overwrites the
         # ProcessGroup instance
         if issubclass(type(backend_class), ProcessGroup):
-            pg = backend_class
+            pg = backend_class  # type: ignore[assignment]
             break
 
         # Process group wrapper initialization for supported PGs when TORCH_DISTRIBUTED_DEBUG is set
@@ -3528,6 +3547,10 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
     Returns:
         Async work handle, if async_op is set to True.
         None, if not async_op or if not part of the group
+
+    .. note:: `ProcessGroupNCCL` now relies on stream synchronization instead of
+              device synchronization to block the CPU. Thus, please do not assume that
+              `barrier()` would perform a device synchronization.
     """
     if _rank_not_in_group(group):
         _warn_not_in_group("barrier")
@@ -3629,7 +3652,7 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=Fals
 
 
 def _create_process_group_wrapper(
-    wrapped_pg: ProcessGroup,
+    wrapped_pg: torch._C._distributed_c10d.Backend,
     store_prefix: str,
     store: Store,
     rank: int,

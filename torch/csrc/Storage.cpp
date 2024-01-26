@@ -332,6 +332,7 @@ c10::intrusive_ptr<c10::StorageImpl> make_storage_impl(
     } else if (device.type() == at::DeviceType::Meta) {
       allocator = c10::GetAllocator(device.type());
     } else if (device.type() == at::DeviceType::PrivateUse1) {
+      at::globalContext().lazyInitPrivateUse1();
       allocator = c10::GetAllocator(device.type());
     } else {
       // NOLINTEND(bugprone-branch-clone)

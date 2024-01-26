@@ -18,7 +18,7 @@ Tensor select_batch_4d(const Tensor& input_arg, uint32_t index) {
   vTensor v_output{
       context,
       {v_input_sizes[1], v_input_sizes[2], v_input_sizes[3]},
-      input_arg.scalar_type(),
+      v_input.dtype(),
   };
   /*
   Input tensor: (n, c, h, w)
@@ -70,7 +70,7 @@ Tensor select_depth_3d(const Tensor& input_arg, uint32_t index) {
   vTensor v_output{
       context,
       {v_input_sizes[1], v_input_sizes[2]},
-      input_arg.scalar_type(),
+      v_input.dtype(),
   };
 
   const struct Block final {
@@ -117,7 +117,7 @@ Tensor select_depth_4d(const Tensor& input_arg, uint32_t index) {
   vTensor v_output{
       context,
       {v_input_sizes[0], v_input_sizes[2], v_input_sizes[3]},
-      input_arg.scalar_type(),
+      v_input.dtype(),
   };
   /*
   Input tensor: (n, c, h, w)
@@ -170,7 +170,7 @@ Tensor select_height_3d(const Tensor& input_arg, uint32_t index) {
   vTensor v_output{
       context,
       {v_input_sizes[0], v_input_sizes[2]},
-      input_arg.scalar_type(),
+      v_input.dtype(),
   };
   // Input tensor is a (c, h, w)
   // Output tensor is a (c, w)
@@ -229,7 +229,7 @@ Tensor select_height_4d(const Tensor& input_arg, uint32_t index) {
   vTensor v_output{
       context,
       {v_input_sizes[0], v_input_sizes[1], v_input_sizes[3]},
-      input_arg.scalar_type(),
+      v_input.dtype(),
   };
   /*
   Input tensor: (n, c, h, w)
@@ -283,7 +283,7 @@ Tensor select_width_3d(const Tensor& input_arg, uint32_t index) {
   vTensor v_output{
       context,
       {v_input_sizes[0], v_input_sizes[1]},
-      input_arg.scalar_type(),
+      v_input.dtype(),
   };
 
   const struct Block final {
@@ -343,7 +343,7 @@ Tensor select_width_4d(const Tensor& input_arg, uint32_t index) {
   vTensor v_output{
       context,
       {v_input_sizes[0], v_input_sizes[1], v_input_sizes[2]},
-      input_arg.scalar_type(),
+      v_input.dtype(),
   };
   /*
   Input tensor: (n, c, h, w)
