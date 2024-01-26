@@ -115,19 +115,21 @@ class AsyncFuncHandle:
     for arg in self.args:
       print(f"here8 in schedule: type(arg): {type(arg)}")
     # Since we are doing real computations here, we should disable fake mode if any.
-    with torch.fx.experimental.proxy_tensor.maybe_disable_fake_tensor_mode():
-      args_materialized = pytree.tree_map(
-        lambda x: x.detach(),
-        pytree.tree_map_only(AsyncTensor, lambda x: x.get_materialized_tensor(), self.args)
-      )
-      self._scheduler().add_to_recorded_exec_order(self.segment)
-      # print(f"args_materialized: {args_materialized}")
-      if isinstance(self.fn, CompiledFxGraph):
-        outs = self.fn(list(args_materialized))
-      else:
-        # TODO: when do we hit this case?
-        outs = self.fn(args_materialized)
-      self.outs = [out.get_materialized_tensor() if isinstance(out, AsyncTensor) else out for out in outs]
+    # with torch.fx.experimental.proxy_tensor.maybe_disable_fake_tensor_mode():
+    args_materialized = pytree.tree_map_only(AsyncTensor, lambda x: x.get_materialized_tensor(), self.args)
+    fake_mode = torch._guards.detect_fake_mode()
+    if fake_mode is not None:
+      args_materialized = pytree.tree_map(lambda x: fake_mode.from_tensor(x), args_materialized)
+    else:
+      args_materialized = pytree.tree_map(lambda x: x.detach(), args_materialized)
+    self._scheduler().add_to_recorded_exec_order(self.segment)
+    # print(f"args_materialized: {args_materialized}")
+    if isinstance(self.fn, CompiledFxGraph):
+      outs = self.fn(list(args_materialized))
+    else:
+      # TODO: when do we hit this case?
+      outs = self.fn(args_materialized)
+    self.outs = [out.get_materialized_tensor() if isinstance(out, AsyncTensor) else out for out in outs]
     self.cuda_event.record()
 
   def wait_for_completion(self):

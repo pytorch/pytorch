@@ -602,9 +602,9 @@ class VariableBuilder:
             result = KeyedJaggedTensorVariable(value, source=self.source)
             # TODO: this doing it manually is bad
             return self.tx.output.side_effects.track_object_existing(value, result)
-        elif AsyncTensorVariable.is_matching_object(value):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            return AsyncTensorVariable(value, source=self.source)
+        # elif AsyncTensorVariable.is_matching_object(value):
+        #     self.install_guards(GuardBuilder.TYPE_MATCH)
+        #     return AsyncTensorVariable(value, source=self.source)
         elif isinstance(value, torch.optim.Optimizer):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return OptimizerVariable(value, source=self.source)
@@ -998,6 +998,7 @@ class VariableBuilder:
                 torch.nn.Parameter,
                 torch._subclasses.fake_tensor.FakeTensor,
                 torch._subclasses.functional_tensor.FunctionalTensor,
+                torch._subclasses.async_tensor.AsyncTensor,
             ) or is_traceable_wrapper_subclass(value), type(value)
             subclass_type = None
 

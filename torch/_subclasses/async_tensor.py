@@ -141,15 +141,16 @@ class AsyncTensor(torch.Tensor):
     else:
       # TODO: handle tuple / list / etc in args
       # TODO: handle tensor kwargs
-      for arg in args:
-        print(f"here9: type(arg): {type(arg)}")
       AsyncTensor.wait_until_materialized(args)
-      args_materialized = pytree.tree_map_only(AsyncTensor, lambda x: x._materialized_tensor_container.get_tensor(), args)
+      args_from_functional = pytree.tree_map_only(torch._subclasses.functional_tensor.FunctionalTensor, lambda x: x.from_functional(), args)
+      args_materialized = pytree.tree_map_only(AsyncTensor, lambda x: x._materialized_tensor_container.get_tensor(), args_from_functional)
       # kwargs_materialized = {k: pytree.tree_map_only(AsyncTensor, lambda x: x._materialized_tensor_container.get_tensor(), v) for k, v in kwargs.items()}
       # out = func(*args_materialized, **kwargs_materialized)
       assert not any(isinstance(x, AsyncTensor) for x in args_materialized)
-      with torch.fx.experimental.proxy_tensor.maybe_disable_fake_tensor_mode():
-        out = func(*args_materialized, **kwargs)
+      for arg in args_materialized:
+        print(f"here92: type(arg): {type(arg)}")
+      # with torch.fx.experimental.proxy_tensor.maybe_disable_fake_tensor_mode():
+      out = func(*args_materialized, **kwargs)
       # NOTE: if we don't re-wrap the output with AsyncTensor, sometimes the output will still be re-wrapped as AsyncTensor
       # (by another unknown mechanism outside of this code, maybe in `def __torch_function__(...)` in torch/_tensor.py?)
       # but lose all its AsyncTensor attributes like `_materialized_tensor_container`
