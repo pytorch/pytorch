@@ -3,6 +3,7 @@ from typing import List, Optional
 
 import torch
 from torch import Tensor
+import itertools
 
 from .optimizer import (
     Optimizer,
@@ -433,15 +434,22 @@ def _multi_tensor_radam(
             num = torch._foreach_sub(rho_t_list, 4)
             sub2 = torch._foreach_sub(rho_t_list, 2)
             torch._foreach_mul_(num, sub2)
+            del sub2
             torch._foreach_mul_(num, rho_inf)
             rho_inf = ((rho_inf - 4) * (rho_inf - 2))
             denom = torch._foreach_mul(rho_t_list, rho_inf)
             torch._foreach_div_(num, denom)
+            del denom
             torch._foreach_sqrt_(num)
 
+            # preallocate zeros
+            zeros = [torch.zeros_like(rho_t) for rho_t in rho_t_list]
+
             # TODO(mlazos): we should try and get a foreach_where op https://github.com/pytorch/pytorch/issues/117884
-            rect = [torch.where(rho_t > 5, n, torch.zeros_like(n)) for n, rho_t in zip(num, rho_t_list)]
-            unrect_step_size = [torch.where(rect > 0, torch.zeros_like(rect), torch.ones_like(rect)) for rect in rect]
+            rect = [torch.where(rho_t > 5.0, n, zeros[i]) for i, n, rho_t in zip(itertools.count(), num, rho_t_list)]
+            del num
+            del rho_t_list
+            unrect_step_size = [torch.where(rect > 0, zeros[i], torch.ones_like(rect)) for i, rect in enumerate(rect)]
             torch._foreach_mul_(unrect_step_size, lr)
 
             bias_correction1 = torch._foreach_pow(beta1, grouped_state_steps)
@@ -457,8 +465,10 @@ def _multi_tensor_radam(
             torch._foreach_sqrt_(bias_correction2)
             torch._foreach_mul_(bias_correction2, lr)
             torch._foreach_mul_(bias_correction2, rect)
+            del rect
             torch._foreach_neg_(bias_correction2)
             torch._foreach_div_(bias_correction2, bias_correction1)
+            del bias_correction1
         else:
             rect = [
                 _dispatch_sqrt(

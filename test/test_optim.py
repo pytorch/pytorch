@@ -360,7 +360,7 @@ class TestOptimRenewed(TestCase):
             st_max_mem, mt_max_mem = max_mems
             intermediate_size = nparams * param.nelement() * param.element_size()
             nintermediates = 1  # we expect a budget of 1 intermediate most of the time
-            if kwargs.get('capturable') or optim_cls.__name__ in ["Adadelta", "ASGD"]:
+            if kwargs.get('capturable') or optim_cls.__name__ in ["Adadelta", "ASGD", "RAdam"]:
                 # with capturable in Adam(W), we have 2 extra intermediates for the bias_corrections
                 # with Adadelta, we have 2 extra for (acc_delta + eps) and (square_avg + eps)
                 # ASGD allocates axs, 2x mus, 2x etas, and grads at the same time
@@ -369,6 +369,11 @@ class TestOptimRenewed(TestCase):
                     # with capturable in NAdam, we have 3 extra intermediates for the
                     # bias_correction, mus, and mu_nexts
                     nintermediates = 5
+
+                if optim_cls.__name__ == "RAdam":
+                    # RAdam has six intermediates with capturable
+                    # num, unrect_step_size, zeros, ones, buffer, grouped_grads
+                    nintermediates = 6
 
             elif optim_cls.__name__ in ["NAdam", "Adagrad", "RMSprop"]:
                 # NAdam uses two intermediates at the same time (grads & exp_avg_sq_sqrt)

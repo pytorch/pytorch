@@ -631,7 +631,7 @@ def optim_inputs_func_radam(device=None):
             kwargs={"weight_decay": 0.1, "decoupled_weight_decay": True},
             desc="decoupled_weight_decay",
         ),
-    ] + (cuda_supported_configs if str(device) == "cuda" else [])
+    ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
 
 def optim_error_inputs_func_radam(device, dtype):
