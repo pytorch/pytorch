@@ -79,3 +79,6 @@
 "module: distributed_checkpoint":
 - torch/distributed/checkpoint/**
 - test/distributed/checkpoint/**
+
+"module: docs":
+- docs/*
