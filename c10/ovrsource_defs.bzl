@@ -47,6 +47,9 @@ def define_c10_ovrsource(name, is_mobile):
             "-DNO_EXPORT",
             "-DC10_BUILD_MAIN_LIB=1",
             "-DSUPPORTS_BACKTRACE=0",
+            "-DHAVE_MMAP=1",
+            "-DHAVE_SHM_OPEN=1",
+            "-DHAVE_SHM_UNLINK=1",
         ],
         public_include_directories = [".."],
         public_preprocessor_flags = pp_flags,
@@ -65,7 +68,9 @@ def define_c10_ovrsource(name, is_mobile):
         visibility = [
             "//xplat/caffe2/c10:c10_ovrsource",
         ],
-        deps = select({
+        deps = [
+            "//third-party/rt",
+        ] + select({
             "DEFAULT": [],
             "ovr_config//os:linux": [
                 "//third-party/numactl:numactl",

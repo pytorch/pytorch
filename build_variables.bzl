@@ -972,7 +972,6 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/FunctionalTensorWrapper.cpp",
     "aten/src/ATen/FunctionalizeFallbackKernel.cpp",
     "aten/src/ATen/MemoryOverlap.cpp",
-    "aten/src/ATen/MapAllocator.cpp",
     "aten/src/ATen/NamedTensorUtils.cpp",
     "aten/src/ATen/NestedTensorImpl.cpp",
     "aten/src/ATen/ParallelCommon.cpp",
