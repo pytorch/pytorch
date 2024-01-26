@@ -33,7 +33,6 @@ import torch.export.exported_program as ep
 from torch._export.serde.schema import SchemaVersion
 from torch._export.verifier import load_verifier
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-from torch.export.custom_obj import ScriptObjectMeta as export_ScriptObjectMeta
 from torch.fx.experimental import symbolic_shapes
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import treespec_dumps, treespec_loads
@@ -67,7 +66,6 @@ from .schema import (  # type: ignore[attr-defined]
     OutputSpec,
     RangeConstraint,
     ScalarType,
-    ScriptObjectMeta,
     SCHEMA_VERSION,
     SymBool,
     SymBoolArgument,
@@ -105,7 +103,7 @@ def _reverse_map(d: Dict[Any, Enum]):
     return {v.value: k for k, v in d.items()}
 
 
-MetaType = Union[FakeTensor, int, torch.SymInt, bool, torch.SymBool, export_ScriptObjectMeta]
+MetaType = Union[FakeTensor, int, torch.SymInt, bool, torch.SymBool, ep.CustomObjArgument]
 
 
 ST_DELIMITER = ";"
@@ -314,7 +312,7 @@ class GraphState:
     sym_int_values: Dict[str, SymInt] = field(default_factory=dict)
     sym_bool_values: Dict[str, SymBool] = field(default_factory=dict)
     is_single_tensor_return: bool = False
-    script_object_metas: Dict[str, ScriptObjectMeta] = field(default_factory=dict)
+    custom_obj_values: Dict[str, CustomObjArgument] = field(default_factory=dict)
 
 
 class GraphModuleSerializer:
@@ -346,10 +344,10 @@ class GraphModuleSerializer:
             raise AssertionError("SymInt graph input is not implemented yet.")
         elif isinstance(node.meta['val'], (int, bool, str, float, type(None))):
             graph_input = self.serialize_input(node.meta['val'])
-        elif isinstance(node.meta['val'], export_ScriptObjectMeta):
+        elif isinstance(node.meta['val'], ep.CustomObjArgument):
             class_fqn = node.meta["val"].class_fqn
             graph_input = Argument.create(as_custom_obj=CustomObjArgument(name=node.name, class_fqn=class_fqn))
-            self.graph_state.script_object_metas[node.name] = self.serialize_script_obj_meta(node.meta["val"])
+            self.graph_state.custom_obj_values[node.name] = self.serialize_script_obj_meta(node.meta["val"])
         else:
             raise AssertionError(f"Unimplemented graph input type: {node.meta['val']}")
         self.graph_state.inputs.append(graph_input)
@@ -486,9 +484,9 @@ class GraphModuleSerializer:
 
         return ret
 
-    def serialize_script_obj_meta(self, script_obj_meta: export_ScriptObjectMeta) -> ScriptObjectMeta:
-        return ScriptObjectMeta(
-            constant_name=script_obj_meta.constant_name,
+    def serialize_script_obj_meta(self, script_obj_meta: ep.CustomObjArgument) -> CustomObjArgument:
+        return CustomObjArgument(
+            name=script_obj_meta.name,
             class_fqn=script_obj_meta.class_fqn,
         )
 
@@ -565,7 +563,7 @@ class GraphModuleSerializer:
             elif self.is_sym_bool_arg(arg):
                 return Argument.create(as_sym_bool=SymBoolArgument.create(as_name=arg.name))
             else:
-                if isinstance(arg.meta["val"], export_ScriptObjectMeta):
+                if isinstance(arg.meta["val"], ep.CustomObjArgument):
                     return Argument.create(as_custom_obj=CustomObjArgument(name=arg.name, class_fqn=arg.meta["val"].class_fqn))
                 return Argument.create(as_tensor=TensorArgument(name=arg.name))
         elif isinstance(arg, inductor_tensor_buffers):
@@ -978,7 +976,7 @@ class GraphModuleSerializer:
             tensor_values=self.graph_state.tensor_values,
             sym_int_values=self.graph_state.sym_int_values,
             sym_bool_values=self.graph_state.sym_bool_values,
-            script_object_metas=self.graph_state.script_object_metas,
+            custom_obj_values=self.graph_state.custom_obj_values,
             outputs=self.graph_state.outputs,
             is_single_tensor_return=self.graph_state.is_single_tensor_return,
         )
@@ -1155,9 +1153,9 @@ class GraphModuleDeserializer:
                 ),
             )
 
-    def deserialize_script_obj_meta(self, script_obj_meta: ScriptObjectMeta) -> export_ScriptObjectMeta:
-        return export_ScriptObjectMeta(
-            constant_name=script_obj_meta.constant_name,
+    def deserialize_script_obj_meta(self, script_obj_meta: CustomObjArgument) -> ep.CustomObjArgument:
+        return ep.CustomObjArgument(
+            name=script_obj_meta.name,
             class_fqn=script_obj_meta.class_fqn,
         )
 
@@ -1183,7 +1181,7 @@ class GraphModuleDeserializer:
         for name, sym_bool_value in serialized_graph.sym_bool_values.items():
             self.serialized_name_to_meta[name] = self.deserialize_sym_bool(sym_bool_value)
 
-        for name, script_obj_meta in serialized_graph.script_object_metas.items():
+        for name, script_obj_meta in serialized_graph.custom_obj_values.items():
             self.serialized_name_to_meta[name] = self.deserialize_script_obj_meta(script_obj_meta)
 
         # Inputs: convert to placeholder nodes in FX.
