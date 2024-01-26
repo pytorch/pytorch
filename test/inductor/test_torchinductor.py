@@ -8878,12 +8878,24 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             )
             code = run_and_get_triton_code(f, *inps)
             lines = [line for line in code.split("\n") if "tl.load" in line]
-            self.assertExpectedInline(
-                "\n".join(lines),
-                """\
+            if config.triton.multi_kernel:
+                # the first 2 lines are generated for the persistent reduction
+                # variant.
+                self.assertExpectedInline(
+                    "\n".join(lines),
+                    """\
+    tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
+    tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, other=0.0)
         tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
         tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, eviction_policy='evict_first', other=0.0)""",
-            )
+                )
+            else:
+                self.assertExpectedInline(
+                    "\n".join(lines),
+                    """\
+        tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
+        tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, eviction_policy='evict_first', other=0.0)""",
+                )
 
         @skipIfRocm
         @config.patch("triton.use_block_ptr", True)
@@ -8899,12 +8911,25 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             )
             code = run_and_get_triton_code(f, *inps)
             lines = [line for line in code.split("\n") if "tl.load" in line]
-            self.assertExpectedInline(
-                "\n".join(lines),
-                """\
+
+            if config.triton.multi_kernel:
+                # the first 2 lines are generated for the persistent reduction
+                # variant.
+                self.assertExpectedInline(
+                    "\n".join(lines),
+                    """\
+    tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
+    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[262144, 512], strides=[1, 262144], block_shape=[XBLOCK, RBLOCK], order=[0, 1], offsets=[xoffset, roffset]), boundary_check=[1], padding_option='zero')
+        tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
+        tmp1 = tl.load(block_ptr0, boundary_check=[1], padding_option='zero', eviction_policy='evict_first')""",  # noqa: B950 line too long
+                )
+            else:
+                self.assertExpectedInline(
+                    "\n".join(lines),
+                    """\
         tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
         tmp1 = tl.load(block_ptr0, boundary_check=[1], padding_option='zero', eviction_policy='evict_first')""",
-            )
+                )
 
         # Disable index propagation, so the indirect indexing isn't optimized away
         @patch.object(config, "constant_and_index_propagation", False)

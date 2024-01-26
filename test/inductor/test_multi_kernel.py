@@ -43,7 +43,12 @@ def _contains_multi_kernel_code(wrapper_code: str):
     )
 
 
-@config.patch({"triton.multi_kernel": 1, "benchmark_kernel": True})
+@config.patch(
+    {
+        "triton.multi_kernel": int(os.environ.get("TORCHINDUCTOR_MULTI_KERNEL", "1")),
+        "benchmark_kernel": True,
+    }
+)
 @instantiate_parametrized_tests
 class MultiKernelTest(TestCase):
     def test_softmax(self, expect_multi_kernel=True):
