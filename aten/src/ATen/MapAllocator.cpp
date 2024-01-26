@@ -325,11 +325,6 @@ MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags,
       TORCH_CHECK(false, "unable to mmap ", size_, " bytes from file <", filename_, ">: ", strerror(errno), " (", errno, ")");
     }
 
-#ifndef __APPLE__
-    /* attempt to use larger block size on Linux, which is important for getting better CUDA upload speed */
-    posix_fadvise(fd, 0, size, POSIX_FADV_SEQUENTIAL);
-#endif
-
     if (flags_ & ALLOCATOR_MAPPED_KEEPFD) {
       fd_ = fd;
     } else {
