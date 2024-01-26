@@ -626,7 +626,7 @@ static PyObject* THPVariable_full_view_func_unsafe(
     std::vector<c10::SymInt> symints;
     const auto old_symints = view_func->get_symints();
     symints.reserve(old_symints.size());
-    for (auto s : old_symints) {
+    for (const c10::SymInt& s : old_symints) {
       PyObject* res =
           PyObject_CallOneArg(symint_visitor_fn, torch::toPyObject(s));
       TORCH_CHECK(
@@ -638,7 +638,7 @@ static PyObject* THPVariable_full_view_func_unsafe(
     std::vector<at::Tensor> tensors;
     const auto old_tensors = view_func->get_tensors();
     tensors.reserve(old_tensors.size());
-    for (auto t : view_func->get_tensors()) {
+    for (const at::Tensor& t : view_func->get_tensors()) {
       PyObject* res =
           PyObject_CallOneArg(tensor_visitor_fn, THPVariable_Wrap(t));
       TORCH_CHECK(
