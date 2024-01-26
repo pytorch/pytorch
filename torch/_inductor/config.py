@@ -134,6 +134,18 @@ force_fuse_int_mm_with_mul = False
 # Autotune will compare perf with normal cast->then->mm option
 use_mixed_mm = False
 
+# enable runtime numeric check for pre/post grad fx passes
+# floating point provides limited accuracy (about 7 decimal digits for single precision
+# floating point numbers,about 16 decimal digits for double precision floating point numbers)
+# according to PyTorch documentation.
+# https://pytorch.org/docs/stable/notes/numerical_accuracy.html#batched-computations-or-slice-computations
+fx_passes_numeric_check: Dict[str, Any] = {
+    "pre_grad": False,
+    "precision": 1e-4,
+    "num_iterations": 1,
+    "requires_optimizer": True,
+}
+
 # for pattern torch.mm(a, b.to(dtype)) with cuda tensors, always use
 # torch._inductor.kernel.mm.tuned_mixed_mm's fused kernel.
 # Autotune will not compare with normal cast->then->mm option.
@@ -523,8 +535,8 @@ class triton:
         os.environ.get("TORCHINDUCTOR_PERSISTENT_REDUCTIONS", "1") == "1"
     )
 
-    # 0: disable
-    # 1: enable, use tuning to pick between different subkernels
+    # 0/False: disable
+    # 1/True: enable, use tuning to pick between different subkernels
     # 2: enable, force using persistent reduction (for debugging)
     # 3: enable, force using non-persistent reduction (for debugging)
     multi_kernel = int(os.environ.get("TORCHINDUCTOR_MULTI_KERNEL", "1"))

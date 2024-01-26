@@ -249,6 +249,7 @@ include_patterns = [
     'c10/**/*.h',
     # Enable coverage of headers in torch/csrc and excluding sub-directories for now.
     'torch/csrc/*.h',
+    'torch/csrc/autograd/**/*.h',
     'torch/csrc/**/*.cpp',
 ]
 exclude_patterns = [
