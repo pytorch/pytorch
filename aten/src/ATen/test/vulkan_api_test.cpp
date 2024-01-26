@@ -5433,6 +5433,11 @@ void test_unsqueeze(const at::IntArrayRef input_shape, int64_t dim) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, unsqueeze_0dto1d_dim0) {
+  test_unsqueeze({}, 0);
+  test_unsqueeze({}, -1);
+}
+
 TEST_F(VulkanAPITest, unsqueeze_1dto2d_dim0) {
   test_unsqueeze({5}, 0);
   test_unsqueeze({6}, -2);
@@ -6933,6 +6938,12 @@ void test_stack(const at::IntArrayRef input_shape, int64_t dim, int numTensors) 
     showRtol(out_cpu, out_vulkan.cpu());
   }
   ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, stack_0d) {
+  test_stack({}, 0, 1);
+  test_stack({}, 0, 2);
+  test_stack({}, 0, 3);
 }
 
 TEST_F(VulkanAPITest, stack_1d) {

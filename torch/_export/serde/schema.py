@@ -94,11 +94,6 @@ class TensorMeta:
     layout: Layout
 
 
-@dataclass
-class ScriptObjectMeta:
-    constant_name: Optional[str]
-
-
 # In most cases we will use the "as_name" field to store arguments which are
 # SymInts.
 # The "as_int" field is used in the case where we have a list containing a mix
@@ -147,6 +142,7 @@ class GraphArgument:
 @dataclass
 class CustomObjArgument:
     name: str
+    class_fqn: str
 
 
 # This is actually a union type
@@ -204,7 +200,7 @@ class Graph:
     # tensor, rather than following export schema and returning a singleton
     # list.
     is_single_tensor_return: bool = False
-    script_object_metas: Dict[str, ScriptObjectMeta] = field(default_factory=dict)
+    custom_obj_values: Dict[str, CustomObjArgument] = field(default_factory=dict)
 
 
 @dataclass
