@@ -162,8 +162,11 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             s = torch.cuda.Stream()
             x = torch.mul(x, 5)
             x = torch.add(x, 2)
+            current_stream = torch.cuda.current_stream()
+            s.wait_stream(current_stream)
             with torch.cuda.stream(s):
                 x = torch.relu(x)
+            current_stream.wait_stream(s)
             x = torch.add(x, 1)
             x = torch.cos(x)
             return x
@@ -175,8 +178,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 9)
+        self.assertEqual(cnts.op_count, 12)
 
+    @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/118204
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_across_graph_break(self):
         def fn(x):
@@ -185,9 +189,15 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.add(x, 2)
 
             print("foo")
+
             tcs = torch.cuda.stream(s)
+            current_stream = torch.cuda.current_stream()
+            s.wait_stream(current_stream)
+
             with tcs:
                 x = torch.relu(x)
+
+            current_stream.wait_stream(s)
             x = torch.add(x, 1)
             x = torch.cos(x)
             return x
@@ -201,22 +211,29 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 9)
 
+    @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/118204
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_context_manager2(self):
         def fn(x, s):
             x = torch.mul(x, 5)
             x = torch.add(x, 2)
+
+            current_stream = torch.cuda.current_stream()
+            s.wait_stream(current_stream)
+
             with torch.cuda.stream(s):
                 x = torch.relu(x)
 
-            s1 = torch.cuda.current_stream()
-            with torch.cuda.stream(s1):
+            current_stream.wait_stream(s)
+            with torch.cuda.stream(current_stream):
                 x = torch.relu(x)
 
             s2 = torch.cuda.Stream()
+            s2.wait_stream(current_stream)
             with torch.cuda.stream(s2):
                 x = torch.relu(x)
 
+            current_stream.wait_stream(s2)
             x = torch.add(x, 1)
             x = torch.cos(x)
             return x
@@ -238,11 +255,13 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.add(x, 2)
 
             new_stream = torch.cuda.Stream()
+            cur_stream = torch.cuda.current_stream()
+            new_stream.wait_stream(cur_stream)
+
             with torch.cuda.stream(new_stream):
                 x = torch.sin(x)
                 x = torch.add(x, 3)
 
-            cur_stream = torch.cuda.current_stream()
             cur_stream.wait_stream(new_stream)
 
             x = torch.add(x, 4)
@@ -264,9 +283,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         res = opt_fn(x)
-        self.assertTrue(same(ref, res))
+        self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 20)
+        self.assertEqual(cnts.op_count, 21)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_event_method(self):
@@ -289,8 +308,8 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             new_event = torch.cuda.Event()
             new_event.record(new_stream)
 
-            x = torch.add(x, 5)
             new_event.wait(cur_stream)
+            x = torch.add(x, 5)
 
             # use new event to sync
             new_event.synchronize()
@@ -304,7 +323,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         res = opt_fn(x)
-        self.assertTrue(same(ref, res))
+        self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 19)
 
@@ -744,11 +763,23 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                 x = torch.relu(x)
             return x - 1
 
+        x = torch.rand(2, 3)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(backend=cnts, fullgraph=False)(fn)
+
         with torch.no_grad():
-            torch._dynamo.testing.standard_test(self, fn=fn, nargs=1, expected_ops=6)
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertTrue(same(ref, res))
+            self.assertEqual(cnts.frame_count, 2)
+            self.assertEqual(cnts.op_count, 2)
 
         with torch.enable_grad():
-            torch._dynamo.testing.standard_test(self, fn=fn, nargs=1, expected_ops=6)
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertTrue(same(ref, res))
+            self.assertEqual(cnts.frame_count, 4)
+            self.assertEqual(cnts.op_count, 4)
 
     def test_nested_generic_context_manager(self):
         def fn(x):
@@ -763,11 +794,23 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                 x = torch.relu(x)
             return x - 1
 
+        x = torch.rand(2, 3)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(backend=cnts, fullgraph=False)(fn)
+
         with torch.no_grad():
-            torch._dynamo.testing.standard_test(self, fn=fn, nargs=1, expected_ops=9)
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertTrue(same(ref, res))
+            self.assertEqual(cnts.frame_count, 4)
+            self.assertEqual(cnts.op_count, 4)
 
         with torch.enable_grad():
-            torch._dynamo.testing.standard_test(self, fn=fn, nargs=1, expected_ops=9)
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertTrue(same(ref, res))
+            self.assertEqual(cnts.frame_count, 6)
+            self.assertEqual(cnts.op_count, 6)
 
     def test_generic_context_manager_with_graph_break(self):
         def fn(x):
