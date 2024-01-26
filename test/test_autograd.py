@@ -8768,7 +8768,8 @@ get_out().sum().backward()
             err_msg = "RuntimeError: one of the variables needed for gradient computation"
             self.assertTrue(err_msg in e.output.decode("utf-8"))
 
-    def test_view_func_replay(self):
+    @parametrize("use_full", [True, False])
+    def test_view_func_replay(self, use_full):
         with torch.autograd._force_original_view_tracking(True):
             def _assert_match_metadata(a, b):
                 self.assertEqual(a.size(), b.size())
@@ -8777,7 +8778,7 @@ get_out().sum().backward()
                 self.assertEqual(a.device, b.device)
                 self.assertEqual(a.dtype, b.dtype)
 
-            def _test_fn(fn, inp, *args):
+            def _test_fn(fn, inp, *args, use_full=use_full):
                 outs = fn(inp, *args)
                 # handle functions that return multiple views (e.g. split)
                 if isinstance(outs, torch.Tensor):
@@ -8790,7 +8791,11 @@ get_out().sum().backward()
                     # forward view_func
                     new_inp = inp.clone()
                     _assert_match_metadata(new_inp, inp)
-                    new_out = out._view_func(new_inp)
+
+                    if use_full:
+                        new_out = out._full_view_func_unsafe(new_inp, lambda x: x, lambda x: x)
+                    else:
+                        new_out = out._view_func_unsafe(new_inp)
                     _assert_match_metadata(new_out, out)
 
                     # reverse view_func
@@ -8838,7 +8843,7 @@ get_out().sum().backward()
                     x = x.split_with_sizes([1, 3], -1)[0]
 
                 with torch.autograd._force_original_view_tracking(False):
-                    x = x.chunk(2, -1)
+                    x = x.chunk(2, 0)
 
                 return x
 

@@ -1533,7 +1533,8 @@ class TestCompositeCompliance(TestCase):
                 op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual)
 
     @ops(op_db, allowed_dtypes=(torch.float,))
-    def test_view_replay(self, device, dtype, op):
+    @parametrize("use_full", [False, True])
+    def test_view_replay(self, device, dtype, op, use_full):
         def _assert_match_metadata(a, b):
             self.assertEqual(a.size(), b.size())
             self.assertEqual(a.stride(), b.stride())
@@ -1562,7 +1563,11 @@ class TestCompositeCompliance(TestCase):
                     # forward view_func
                     new_inp = inp.clone()
                     _assert_match_metadata(new_inp, inp)
-                    new_out = out._view_func_unsafe(new_inp)
+                    if use_full:
+                        new_out = out._full_view_func_unsafe(
+                            new_inp, lambda x: x, lambda x: x)
+                    else:
+                        new_out = out._view_func_unsafe(new_inp)
                     _assert_match_metadata(new_out, out)
 
                     # reverse view_func
