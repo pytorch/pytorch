@@ -1,3 +1,4 @@
+import getpass
 import inspect
 import os
 import re
@@ -292,7 +293,7 @@ if DEBUG_DIR_VAR_NAME in os.environ:
     )
 elif is_fbcode():
     debug_dir_root = os.path.join(  # [@compile_ignored: debug]
-        tempfile.gettempdir(), "torch_compile_debug"
+        tempfile.gettempdir(), getpass.getuser(), "torch_compile_debug"
     )
 else:
     debug_dir_root = os.path.join(  # [@compile_ignored: debug]
@@ -356,6 +357,10 @@ _experimental_support_context_fn_in_torch_utils_checkpoint = False
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
+
+    def _make_closure_patcher(**changes):
+        ...
+
 
 from torch.utils._config_module import install_config_module
 
