@@ -1717,7 +1717,7 @@ class CppKernel(Kernel):
                         for kernel in loop.get_kernels():
                             for i, line in enumerate(kernel.stores._lines):
                                 if isinstance(line, str):
-                                    m = re.match("tmp_acc[0-9]+", line)
+                                    m = re.search("tmp_acc[0-9]+", line)
                                     if m:
                                         var_name = m.group(0)
                                         if f"{var_name}_vec" in line:
