@@ -1254,9 +1254,7 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def acosh(x):
-        # For real x, acosh(x) = log(x + sqrt(x**2 -1))
-        vec_one = f"decltype({x})(1)"
-        return f"({x} + ({x}*{x} - {vec_one}).sqrt()).log()"
+        return f"{x}.acosh()"
 
     @staticmethod
     def relu(x):
