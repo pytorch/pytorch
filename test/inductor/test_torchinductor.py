@@ -2162,6 +2162,7 @@ class CommonTemplate:
             check_lowp=True,
         )
 
+    @with_tf32_off
     @config.patch(use_mixed_mm=True)
     def test_uint4x2_mixed_mm(self):
         def fn(a, b):
