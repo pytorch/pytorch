@@ -23,7 +23,8 @@ constexpr size_t kSmallBuffer = 2097152;
 constexpr size_t kLargeBuffer = 20971520;
 // allocations between 1 and 10 MiB may use kLargeBuffer
 constexpr size_t kMinLargeAlloc = 10485760;
-constexpr size_t kRoundLarge = 2097152; // round up large allocations to 2 MiB
+// round up large allocations to 2 MiB
+constexpr size_t kRoundLarge = 2097152;
 
 namespace {
 using stream_set = ska::flat_hash_set<xpu::XPUStream>;
