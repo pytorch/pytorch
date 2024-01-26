@@ -1,9 +1,9 @@
 #pragma once
 
-#include <ATen/cudnn/cudnn-wrapper.h>
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
+#include <ATen/cudnn/cudnn-wrapper.h>
 
 // Declares utilities used by RNN.cpp and also needed by external consumers
 namespace at {
