@@ -2,7 +2,7 @@ import copy
 import functools
 import itertools
 import logging
-from typing import Any, Dict, Generator, List, Optional, Sequence, Union
+from typing import Any, Dict, Generator, List, Optional, Union
 from unittest.mock import patch
 
 import sympy
@@ -43,7 +43,6 @@ class MakeCUDAKernelRender:
     def __call__(
         self,
         template_node: CUDATemplateBuffer,
-        epilogue_nodes: Optional[List[IRNode]] = None,
         **kwargs_override,
     ):
         kernel = CUDATemplateKernel(
@@ -54,11 +53,11 @@ class MakeCUDAKernelRender:
             render_kwargs.update(kwargs_override)
         else:
             render_kwargs = self.render_kwargs
-        render_kwargs["epilogue_nodes"] = epilogue_nodes
-        render_kwargs["template_buffer_node"] = template_node
+
         render = functools.partial(
             self.template.render,
             kernel=kernel,
+            template_buffer_node=template_node,
             **render_kwargs,  # includes "op" argument in case of CUTLASSGemmTemplate
         )
         return kernel, render
@@ -108,15 +107,6 @@ class CUDATemplate(KernelTemplate):
 
         # Generate Row-Major and Column-Major variants of all flexible input tensor layouts
         input_nodes = list(self.input_nodes)
-        Bias, aux_inputs = self.determine_additional_inputs(**kwargs)
-        if Bias is not None and len(input_nodes) < 3:
-            input_nodes.append(Bias)
-        input_nodes.extend(aux_inputs)
-        for aux_inp in aux_inputs:
-            assert isinstance(
-                aux_inp.get_layout(), FixedLayout
-            ), "Auxiliary inputs must have a fixed layout."
-
         all_input_layout_combinations: List[
             List[TensorMeta]
         ] = self.generate_input_layout_combinations(input_nodes)
@@ -188,13 +178,6 @@ class CUDATemplate(KernelTemplate):
                 kwargs,
             )
 
-    def determine_additional_inputs(self, **kwargs):
-        """Determines Bias and auxiliary input nodes for the fused epilogue nodes
-        based on existing input nodes (including their Layout), presence of a Bias node
-         and additional nodes that are read by the epilogue nodes
-        """
-        raise NotImplementedError()
-
     def generate_kernel_source_for_benchmark(self, input_tensor_meta, kernel, kwargs):
         original_layouts = [
             getattr(input_node, "layout", None) for input_node in self.input_nodes
@@ -259,34 +242,6 @@ class CUDATemplate(KernelTemplate):
             input_layout_alternatives.append(input_tensor_meta_variants)  # type: ignore[arg-type]
         all_variant_combinations = list(itertools.product(*input_layout_alternatives))
         return all_variant_combinations  # type: ignore[return-value]
-
-    def generate_variants_after_fusion(
-        self,
-        template_buffer: CUDATemplateBuffer,
-        epilogue_nodes: List[IRNode],
-        kwarg_override_variants: Sequence[Dict],  # type: ignore[type-arg]
-    ) -> Generator[CUDATemplateCaller, None, None]:
-        """
-        Generates variants of the given CUDATemplateBuffer after fusion with the given epilogue nodes.
-        May be used to determine the best configuration for a fused kernel, which may differ from
-        the best configuration for the unfused kernel.
-
-        Args:
-            template_buffer (CUDATemplateBuffer): The CUDATemplateBuffer to generate variants of.
-            epilogue_nodes (List[IRNode]): The epilogue nodes to fuse with the given CUDATemplateBuffer.
-            kwarg_override_variants (Sequence[Dict]): A sequence of keyword argument overrides to use for
-            generating the variants. Will typically be used to override the "op" argument for
-            CUTLASSGemmTemplates and provide a sequence of ops to try.
-        """
-        original_kwargs = template_buffer.make_kernel_render.render_kwargs
-        original_template = template_buffer.make_kernel_render.template
-        assert original_template is self
-        for kwarg_override in kwarg_override_variants:
-            variant_kwargs = dict(original_kwargs)
-            variant_kwargs["epilogue_nodes"] = epilogue_nodes
-            variant_kwargs["template_buffer_node"] = template_buffer
-            variant_kwargs.update(kwarg_override)
-            yield from self.generate(**variant_kwargs)
 
     def _are_inputs_layout_compatible(self, layouts: List[Layout]) -> bool:
         raise NotImplementedError()

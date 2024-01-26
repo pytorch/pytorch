@@ -345,7 +345,6 @@ class TestMaxAutotune(TestCase):
         k=1024,
         max_profiling_configs=4,
         batch_size=None,
-        evt_only=True,
         aux_shape: Optional[Tuple[int]] = None,
         config_override=None,
         use_autotuning_cache=True,
@@ -416,7 +415,6 @@ class TestMaxAutotune(TestCase):
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": max_profiling_configs,
-                "cuda.cutlass_prefer_evt_capable_ops": evt_only,
                 "cuda.version": "12.1",  # required to enable the Kernels we need
             }
             conf_patch.update(config_override)
@@ -1065,7 +1063,6 @@ class TestMaxAutotune(TestCase):
             mm=mm,
             with_bias=True,
             batch_size=31,
-            evt_only=True,
         )
 
     # TODO: Enable support for typecasts in fused epilogues
@@ -1127,7 +1124,6 @@ class TestMaxAutotune(TestCase):
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": 2,
-                "cuda.cutlass_prefer_evt_capable_ops": only_evt_capable,
             }
         ):
             Y = mm(a, a, bias)
@@ -1178,13 +1174,11 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @parametrize("dynamic", (False,))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,Triton,CUTLASS"))
-    @parametrize("cutlass_prefer_evt_capable_ops", (True, False))
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_addmm(
         self,
         dynamic=False,
         max_autotune_gemm_backends="CUTLASS",
-        cutlass_prefer_evt_capable_ops=True,
     ):
         """
         Make sure autotuning addmm in sub processes work without crashes.
@@ -1217,7 +1211,6 @@ class TestMaxAutotune(TestCase):
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": 2,
-                "cuda.cutlass_prefer_evt_capable_ops": cutlass_prefer_evt_capable_ops,
                 "cuda.cutlass_op_whitelist_regex": "warpspecialized_cooperative_epi_tma",
                 "cuda.cutlass_op_blacklist_regex": "pingpong",  # Pingpong Kernels can lead to numerical issues
             }

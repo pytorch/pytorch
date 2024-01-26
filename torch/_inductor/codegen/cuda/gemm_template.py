@@ -2,7 +2,7 @@ import copy
 import enum
 import logging
 import re
-from typing import cast, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 from ... import ir
 from ...config import cuda as inductor_cuda_config
@@ -19,16 +19,6 @@ from ..common import ChoiceCaller, IndentedBuffer
 from . import cutlass_utils
 from .cuda_kernel import CUDATemplateKernel
 from .cuda_template import CUTLASSTemplate
-from .cutlass_epilogue_gen import (
-    CutlassEVTEpilogueArgumentFormatter,
-    CutlassEVTEpilogueTypeFormatter,
-    EVT_EXTRA_HEADER,
-)
-
-from .pointwise_stride_utils import (
-    extract_epilogue_storage_layout,
-    extract_pointwise_load_strides,
-)
 
 log = logging.getLogger(__name__)
 
@@ -69,9 +59,6 @@ extern "C" {
   {{kernel.check_not_null(W)}}
   {{kernel.check_not_null(Bias)}}
   {{kernel.check_not_null(Y)}}
-  {% for aux_node in aux_input_nodes %}
-  {{kernel.check_not_null(aux_node)}}
-  {% endfor %}
   {
     auto status = gemm_op.can_implement(arguments);
     CUTLASS_CHECK(status);
@@ -232,9 +219,6 @@ extern "C" int run_standalone(uint64_t seed, int repetitions) {
     using ElementB = {{kernel.cutlass_dtype(W)}};
     using ElementC = {{kernel.cutlass_dtype(Bias, default_dtype='uint8_t')}}; // may not be void
     using ElementD = {{kernel.cutlass_dtype(Y)}};
-    {% for aux_node in aux_input_nodes %}
-    using Element_{{aux_node.get_name()}} = {{kernel.cutlass_dtype(aux_node)}};
-    {% endfor %}
 
     cutlass::DeviceAllocation<ElementA> X_data({{kernel.max_valid_index(X)+1}});
     initialize_block(X_data, seed++);
@@ -243,10 +227,6 @@ extern "C" int run_standalone(uint64_t seed, int repetitions) {
     cutlass::DeviceAllocation<ElementC> Bias_data({{kernel.max_valid_index(Bias)+1}});
     initialize_block(Bias_data, seed++);
     cutlass::DeviceAllocation<ElementD> Y_data({{kernel.max_valid_index(Y)+1}});
-    {% for aux_node in aux_input_nodes %}
-    cutlass::DeviceAllocation<Element_{{aux_node.get_name()}}> aux_{{aux_node.get_name()}}_data({{kernel.max_valid_index(aux_node)+1}});
-    initialize_block(aux_{{aux_node.get_name()}}_data, seed++);
-    {% endfor %}
 
     cutlass::DeviceAllocation<uint8_t> workspace_data;
     // Call once with workspace_size_ptr set to get workspace size
@@ -296,7 +276,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         alpha: float,
         beta: float,
         input_reorder: Optional[List[int]] = None,
-        can_fuse_epilogue: Optional[bool] = None,
     ):
         """
         Args:
@@ -313,7 +292,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         super().__init__("cutlass_gemm", input_nodes, layout, input_reorder)
         self.alpha = alpha
         self.beta = beta
-        self.can_fuse_epilogue = can_fuse_epilogue
         assert len(input_nodes) == 2 or len(input_nodes) == 3
         assert self._are_inputs_layout_compatible(
             [node.get_layout() for node in input_nodes]
@@ -447,38 +425,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             len(ops),
         )
 
-    def generate_retune_choices(
-        self, ctb: CUDATemplateBuffer, epilogue_nodes: List[IRNode]
-    ) -> Sequence[ChoiceCaller]:
-        """
-        Generates ChoiceCaller objects for retuning the CUDA template buffer and its associated kernel,
-        including a fused epilogue.
-
-        Args:
-            ctb (CUDATemplateBuffer): The CUDA template buffer to retune.
-            epilogue_nodes (List[IRNode]): A list of IRNodes representing
-                the epilogue operations to be applied after the primary kernel.
-
-        Returns:
-            Sequence[ChoiceCaller]: A list of ChoiceCaller objects, returned for further operations related
-            to the CUDA template buffer and its underlying kernel.
-        """
-        if not self.can_fuse_epilogue:
-            return []
-        choices: List[ChoiceCaller] = []
-        CUTLASSGemmTemplate.add_cutlass_gemm_choices(
-            choices,
-            self.layout,
-            self.input_nodes,  # type: ignore[arg-type]
-            alpha=self.alpha,
-            beta=self.beta,
-            fuseable=True,
-            non_fuseable=False,
-            epilogue_nodes=epilogue_nodes,
-            template_buffer_node=ctb,
-        )
-        return choices
-
     def header(self) -> IndentedBuffer:
         """
         Returns a buffer containing CUDA C++ code for the header section of the CUTLASS GEMM template.
@@ -508,8 +454,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         )
         if inductor_cuda_config.generate_test_runner:
             res.splice(GEMM_STANDALONE_RUNNER_ADDITIONAL_INCLUDES)
-        if self.can_fuse_epilogue:
-            res.splice(EVT_EXTRA_HEADER)
         return res
 
     @staticmethod
@@ -593,86 +537,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             result = epilogue_schedule_str.lower().startswith("tma")
         return result
 
-    @staticmethod
-    def supports_evt(op: "cutlass_library.gemm_op.GemmOperation") -> bool:  # type: ignore[name-defined]  # noqa: F821
-        """
-        Determineif a given op is capable of flexible epilogue fusions
-        using epilogue visitor trees (EVTs).
-
-        See https://github.com/NVIDIA/cutlass/blob/e01b9b5029b7caca5a43c29f7d2714d7cf1dcae8/examples/49_hopper_gemm_with_collective_builder/49_collective_builder.cu#L283-L285 # noqa: B950
-        """
-        assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.library as cutlass_lib
-
-        if op.gemm_kind != cutlass_lib.GemmKind.Universal3x:
-            return False
-        if op.epilogue_schedule not in (
-            cutlass_lib.EpilogueScheduleType.TmaWarpSpecialized,
-            cutlass_lib.EpilogueScheduleType.TmaWarpSpecializedCooperative,
-        ):
-            return False
-
-        return True
-
-    def render_evt_epilogue_declaration(
-        self,
-        template_output_node_name: str,
-        evt_type_name: str,
-        epilogue_nodes: List[IRNode],
-        Bias: Optional[Buffer] = None,
-        gemm_output_layout: Optional[Layout] = None,
-        flip_mn: Optional[bool] = None,
-    ) -> str:
-        """
-        Renders the Cutlass / CUDA C++ code for the epilogue of a fused Cutlass EVT-based epilogue.
-
-        It uses `CutlassEVTEpilogueTypeFormatter.ir_to_evt_string` to generate the code.
-
-        If a bias argument has been passed at construction, a Linear Combination epilogue is pre-fused
-        before applying any further fusions.
-
-        Requires `flip_mn` flag to determine whether it is necessary to flip the last two dimensions
-        of Bias and Output due to an explicit transpose.
-
-        Args:
-            template_output_node_name (str): Template output node name.
-            evt_type_name (str): EVT type name.
-            epilogue_nodes (List[IRNode]): List of epilogue nodes.
-            Bias (Optional[Buffer]): Bias buffer. If passed at construction, a Linear Combination epilogue is pre-fused.
-            gemm_output_layout (Layout): Optional; layout of GEMM output.
-            flip_mn (bool): Determines if the last two dimensions of Bias and Output are flipped due to a transpose.
-
-        Returns:
-            str: Rendered CUDA C++ code.
-        """
-        assert flip_mn is not None
-        if len(self.input_nodes) > 2:
-            # if Bias arg passed in at construction
-            # we pre-populate the epilogue with the expression alpha * ( A @ B ) + beta * C
-            # instead of just ( A @ B ), before any further fusions are applied
-            pre_fused_addmm_evt = (
-                CutlassEVTEpilogueTypeFormatter.create_pre_fused_addmm_evt_type()
-            )
-        else:
-            pre_fused_addmm_evt = None
-        return CutlassEVTEpilogueTypeFormatter.ir_to_evt_string(
-            template_output_node_name,
-            evt_type_name,
-            epilogue_nodes,
-            pre_fused_addmm_evt,
-            Bias.get_name() if Bias is not None else None,
-            gemm_output_layout=gemm_output_layout,
-            flip_mn=flip_mn,
-        )
-
     def define_gemm_instance(
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
-        output_buffer_name: str,
-        epilogue_nodes: Optional[List[IRNode]] = None,
-        Bias: Optional[Buffer] = None,
-        gemm_output_layout: Optional[Layout] = None,
-        flip_mn: bool = False,
     ) -> Tuple[str, str]:
         """Defines and renders the Cutlass / CUDA C++ code for a given GEMM operation instance.
 
@@ -682,13 +549,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
         Args:
             op (cutlass_library.gemm_op.GemmOperation): This is the core GEMM operation that we are defining and rendering.
-            output_buffer_name (str): This specifies the name that the output buffer will have in the generated C++ code.
-            epilogue_nodes (Optional[List[IRNode]]): List of nodes to be added after the main GEMM operation. This enables
-                                                      addition of custom functionality to the GEMM operation. Defaults to None.
-            Bias (Optional[Buffer]): Optional Bias operand to be used to the GEMM operation or in the epilogue. Defaults to None.
-            gemm_output_layout (Optional[Layout]): Layout of the GEMM output ( before epilogue). Required for EVT fusion.
-            flip_mn (bool): Whether M and N dimensions need to be flipped, because we use an explicit transpose
-                            ( e.g. switch the matmul operands for implementation reasons ). Defaults to False.
 
         Returns:
             Tuple[str, str]: A tuple where the first part is a string that constitutes the defined GEMM operation in C++
@@ -698,52 +558,16 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         import cutlass_library.gemm_operation as cutlass_gemm_op
         import cutlass_library.library as cutlass_lib
 
-        from torch._inductor.codegen.cuda.cutlass_lib_extensions.gemm_operation_extensions import (
-            EmitGemmUniversal3xInstanceWithEVT,
-        )
+        emitter = cutlass_gemm_op.EmitGemmUniversal3xInstance()
+        if not hasattr(op, "epilogue_functor") or not isinstance(
+            op.epilogue_functor, enum.Enum
+        ):
+            op = copy.deepcopy(op)
+            op.epilogue_functor = cutlass_lib.EpilogueFunctor.LinearCombination
+        op_def = emitter.emit(op)
+        pattern = re.compile(r"\s*struct\s(.*?)\s:")
+        decl = [line for line in op_def.split("\n") if "struct " in line][-1]
 
-        if epilogue_nodes is None:
-            epilogue_nodes = []
-
-        if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
-            use_evt = self.supports_evt(op) and (
-                (Bias is not None) or (len(epilogue_nodes) > 0)
-            )
-            if use_evt:
-                emitter = EmitGemmUniversal3xInstanceWithEVT()
-                assert gemm_output_layout is not None
-                op = copy.deepcopy(op)
-                op.epilogue_functor = lambda epilogue_functor_type_name: self.render_evt_epilogue_declaration(
-                    output_buffer_name,
-                    epilogue_functor_type_name,
-                    epilogue_nodes,
-                    Bias=Bias,
-                    gemm_output_layout=gemm_output_layout,
-                    flip_mn=flip_mn,
-                )
-            else:
-                emitter = cutlass_gemm_op.EmitGemmUniversal3xInstance()
-                if not hasattr(op, "epilogue_functor") or not isinstance(
-                    op.epilogue_functor, enum.Enum
-                ):
-                    op = copy.deepcopy(op)
-                    op.epilogue_functor = cutlass_lib.EpilogueFunctor.LinearCombination
-            op_def = emitter.emit(op)
-            pattern = re.compile(r"\s*struct\s(.*?)\s:")
-            decl = [line for line in op_def.split("\n") if "struct " in line][-1]
-        else:
-            if epilogue_nodes is not None and len(epilogue_nodes) > 0:
-                raise RuntimeError(
-                    "EVT epilogue fusion is not supported for Cutlass 2.x ops."
-                )
-            emitter = cutlass_gemm_op.EmitGemmInstance()
-            op_def = emitter.emit(op)
-            op_def = op_def.replace(
-                "cutlass::gemm::device::Gemm", "cutlass::gemm::device::GemmUniversal"
-            )
-            op_def = op_def.replace("false,", "")
-            pattern = re.compile(r"\s*using\s(.*?)\s=")
-            decl = op_def.split("\n")[2]
         match = pattern.match(decl)
         if match is None:
             raise RuntimeError("Invalid Gemm config: \n" + op_def)
@@ -865,16 +689,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         ):
             return None
 
-        supports_evt: bool = self.supports_evt(op)
-        if (self.can_fuse_epilogue is not None) and (
-            self.can_fuse_epilogue != supports_evt
-        ):
-            return None
-        # StreamK seems to lead to extreme spilling for certain shapes
-        # and might take forever during autotuning. @TODO kadeng: investigate
-        if op.tile_scheduler == cutlass_lib.TileSchedulerType.StreamK:
-            return None
-
         # Only keep GemmUniversal kernels
         if op.gemm_kind not in {
             cutlass_lib.GemmKind.Universal3x,
@@ -968,8 +782,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
         ops = cutlass_utils.gen_ops()[cutlass_lib.OperationKind.Gemm]
         res: Dict[str, cutlass_gemm_op.GemmOperation] = dict()
-        num_3x_ops = 0
-        num_2x_ops = 0
         for op_dict in ops.values():
             for op_list in op_dict.values():
                 for op in op_list:
@@ -980,18 +792,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                         and res.get(filter_res.configuration_name(), None) is None
                     ):
                         res[filter_res.configuration_name()] = filter_res
-        for op in res.values():
-            if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
-                num_3x_ops += 1
-            else:
-                num_2x_ops += 1
-        log.debug(
-            "Got cutlass configs: total number of ops: %d, "
-            "total number of 3x ops: %d, total number of 2x ops: %d",
-            len(res),
-            num_3x_ops,
-            num_2x_ops,
-        )
+        log.debug("Got cutlass configs: total number of ops: %d, ", len(res))
         return list(res.values())[: inductor_cuda_config.cutlass_max_profiling_configs]
 
     def gemm_mode(self) -> str:
@@ -1061,45 +862,42 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             N="N",
             epilogue_args=epilogue_args,
         )
+        assert epilogue_template is not None
 
-        if epilogue_template is not None:
-            if should_swap_xw:
-                # Swap
-                def clone_with_transposed_stride(node: IRNode) -> IRNode:
-                    old_layout = node.get_layout()
-                    new_stride = list(old_layout.stride)
-                    new_stride[-2], new_stride[-1] = new_stride[-1], new_stride[-2]
-                    new_layout = FixedLayout(
-                        old_layout.device,
-                        old_layout.dtype,
-                        list(old_layout.size),
-                        new_stride,
-                        old_layout.offset,
-                    )
-                    return Buffer(node.get_name(), new_layout)
-
-                new_X = clone_with_transposed_stride(X)
-                new_W = clone_with_transposed_stride(W)
-                new_Bias = clone_with_transposed_stride(Bias)
-                new_Y = clone_with_transposed_stride(Y)
-                options["X"], options["W"], options["Bias"], options["Y"] = (
-                    new_W,
-                    new_X,
-                    new_Bias,
-                    new_Y,
+        if should_swap_xw:
+            # Swap
+            def clone_with_transposed_stride(node: IRNode) -> IRNode:
+                old_layout = node.get_layout()
+                new_stride = list(old_layout.stride)
+                new_stride[-2], new_stride[-1] = new_stride[-1], new_stride[-2]
+                new_layout = FixedLayout(
+                    old_layout.device,
+                    old_layout.dtype,
+                    list(old_layout.size),
+                    new_stride,
+                    old_layout.offset,
                 )
-                options["M"], options["N"] = "N", "M"
+                return Buffer(node.get_name(), new_layout)
 
-            epilogue_arguments = self._template_from_string(epilogue_template).render(
-                **options
+            new_X = clone_with_transposed_stride(X)
+            new_W = clone_with_transposed_stride(W)
+            new_Bias = clone_with_transposed_stride(Bias)
+            new_Y = clone_with_transposed_stride(Y)
+            options["X"], options["W"], options["Bias"], options["Y"] = (
+                new_W,
+                new_X,
+                new_Bias,
+                new_Y,
             )
-            arguments = self._template_from_string(argument_template).render(
-                epilogue_arguments=epilogue_arguments, **options
-            )
-        else:
-            arguments = self._template_from_string(GEMM_ARGS_CUTLASS_2X).render(
-                split_k=1, **options
-            )
+            options["M"], options["N"] = "N", "M"
+
+        epilogue_arguments = self._template_from_string(epilogue_template).render(
+            **options
+        )
+        arguments = self._template_from_string(argument_template).render(
+            epilogue_arguments=epilogue_arguments, **options
+        )
+
         return arguments
 
     def render(  # type: ignore[override]
@@ -1107,7 +905,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         kernel: CUDATemplateKernel,
         op: "cutlass_gemm_op.GemmOperation" = None,  # type: ignore[name-defined]  # noqa: F821
         template_buffer_node: Optional[CUDATemplateBuffer] = None,
-        epilogue_nodes: Optional[List[IRNode]] = None,
         **kwargs,
     ) -> str:
         """
@@ -1119,11 +916,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             kernel (CUDATemplateKernel): The kernel to be rendered.
             op (cutlass_gemm_op.GemmOperation, optional): A GEMM operation that is required to be compatible with the
                 input and output definitions as well as a possible epilogue. Defaults to None.
-            template_buffer_node (Optional[CUDATemplateBuffer], optional): Represents the actual IRNode of
-                the GEMM operation within the current graph. Defaults to None. Required if epilogue fusion
-                is to be applied.
-            epilogue_nodes (Optional[List[IRNode]], optional): A list of IR nodes to fuse as epilogue, which
-                should be ComputedBuffer objects wrapping Pointwise nodes. Defaults to None.
             **kwargs: Additional keyword arguments. Currently unused.
 
         Returns:
@@ -1138,27 +930,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             are to be applied. They are usually not present in the first stages of autotuning
             ( when the GEMM op is benchmarked in isolation ).
         """
-        if epilogue_nodes is not None and len(epilogue_nodes) > 0:
-            assert self.can_fuse_epilogue and CUTLASSGemmTemplate.supports_evt(
-                op
-            ), "op does not support EVT epilogue fusion"
-            assert (
-                template_buffer_node is not None
-            ), "Template node is required for epilogue fusion"
-            assert isinstance(
-                template_buffer_node, CUDATemplateBuffer
-            ), f"Template node has to be a CUDATemplateBuffer, is type {type(template_buffer_node)}"
-            assert (
-                template_buffer_node.name is not None
-            ), "Output node has to be a Buffer with a name"
-            # This is the name of the output of the Matmul, before epilogues are applied.
-            # it is not necessarily materialized in global memory if we have an epilogue
-
-        template_output_node_name = (
-            template_buffer_node.name if template_buffer_node is not None else None
-        )
-        if epilogue_nodes is None:
-            epilogue_nodes = []
 
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.gemm_operation as cutlass_gemm_op
@@ -1167,19 +938,16 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         assert isinstance(
             op, cutlass_gemm_op.GemmOperation
         ), "op argument is required and has to be an instance of GemmOperation"
-        if template_buffer_node is not None:
-            self.output_node = template_buffer_node
-        if epilogue_nodes is not None and len(epilogue_nodes) > 0:
-            self.update_output_node_given_epilogue(epilogue_nodes, template_buffer_node)
 
         assert len(self.input_nodes) >= 2 and self.output_node is not None
         X, W = self.input_nodes[0], self.input_nodes[1]
         assert isinstance(X.layout, FixedLayout), "X.layout is not fixed"
         assert isinstance(W.layout, FixedLayout), "W.layout is not fixed"
         Y = self.output_node
-        Bias, aux_input_nodes = self.determine_additional_inputs(
-            epilogue_nodes, template_buffer_node
-        )
+        if template_buffer_node is not None:
+            Y = template_buffer_node
+        Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
+
         # to make op mutable without affecting others
         op = copy.deepcopy(op)
         if Bias is not None:
@@ -1193,15 +961,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         # Important: This step also populates Kernel name to node mapping data structures,
         # which are required further below ( for example by CutlassEVTEpilogueArgumentFormatter and
         # the template renderer )
-        inputs = [X, W, Bias] + aux_input_nodes
-        names = (
-            ["X", "W", "Bias"]
-            + ["aux_" + n.get_name() for n in aux_input_nodes]
-            + ["Y"]
-        )
+        inputs = [X, W, Bias]
+        names = ["X", "W", "Bias"] + ["Y"]
         names_str = ",".join(names)
         if self.input_reorder is not None:
-            input_reorder = self.input_reorder + list(range(3, len(aux_input_nodes)))
+            input_reorder = self.input_reorder
         else:
             input_reorder = None
         kernel_call_signature = kernel.def_kernel(
@@ -1213,50 +977,21 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         # Also there might be a Bias / additional input node which was not present during autotuning
 
         op = self.fix_op_layout(op, X, W, Bias, Y)
-        epilogue_template: Optional[str] = None
+        epilogue_template: str = GEMM_ARGS_CUTLASS_3X_EPILOGUE
+        argument_template: str = GEMM_ARGS_CUTLASS_3X
         should_swap_xw: bool = False
         epilogue_args = f"{{ElementComputeEpilogue({self.alpha}), ElementComputeEpilogue({self.beta})}}"
-        if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
-            if Bias is not None and self.has_tma_epilogue(op):
-                if (
-                    op.epilogue_schedule
-                    != cutlass_lib.EpilogueScheduleType.EpilogueTransposed
-                    and self.should_swap_XW(Bias)
-                ):
-                    # TMA epilogue requires bias vector in column major to get best perf.
-                    op = self.swap_XW(op)
-                    should_swap_xw = True
-            if self.supports_evt(op):
-                if len(self.input_nodes) > 2:  # if bias arg passed in at construction
-                    pre_fused_evt_args = CutlassEVTEpilogueArgumentFormatter.create_pre_fused_addmm_arg_str(
-                        self.alpha, self.beta
-                    )
-                else:
-                    pre_fused_evt_args = None
-                epilogue_args = (
-                    CutlassEVTEpilogueArgumentFormatter.ir_to_evt_argument_string(
-                        cast(str, template_output_node_name),
-                        epilogue_nodes,
-                        pre_fused_evt_args,
-                        Bias.get_name() if Bias is not None else None,
-                        gemm_output_layout=self.output_node.get_layout(),
-                        flip_mn=should_swap_xw,
-                    )
-                )
-            epilogue_template = GEMM_ARGS_CUTLASS_3X_EPILOGUE
-            argument_template = GEMM_ARGS_CUTLASS_3X
-        else:
-            # TODO: Support split_k.
-            argument_template = GEMM_ARGS_CUTLASS_2X
+        if Bias is not None and self.has_tma_epilogue(op):
+            if (
+                op.epilogue_schedule
+                != cutlass_lib.EpilogueScheduleType.EpilogueTransposed
+                and self.should_swap_XW(Bias)
+            ):
+                # TMA epilogue requires bias vector in column major to get best perf.
+                op = self.swap_XW(op)
+                should_swap_xw = True
 
-        instance_definition, instance_type = self.define_gemm_instance(
-            op,
-            cast(str, template_output_node_name),
-            epilogue_nodes,
-            Bias=Bias,
-            gemm_output_layout=self.output_node.get_layout(),
-            flip_mn=should_swap_xw,
-        )
+        instance_definition, instance_type = self.define_gemm_instance(op)
 
         options = dict(
             alpha=self.alpha,
@@ -1275,7 +1010,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             instance_type=instance_type,
             input_reorder=self.input_reorder,
             epilogue_args=epilogue_args,
-            aux_input_nodes=aux_input_nodes,
             test_call_statement=test_call_statement,
         )
         res = self._template_from_string(GEMM_TEMPLATE).render(**options)
@@ -1285,154 +1019,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             ).render(**options)
             res += "\n\n" + test_runner_code
         return res
-
-    def update_output_node_given_epilogue(self, epilogue_nodes, template_buffer_node):
-        assert (
-            template_buffer_node is not None
-        ), "If epilogue nodes are passed, template_buffer_node is required"
-        # We need to match dimensions of the target buffer to the output of the matmul
-        if epilogue_nodes is None or len(epilogue_nodes) == 0:
-            self.output_node = template_buffer_node
-            return
-        result_strides, result_sizes = extract_epilogue_storage_layout(
-            epilogue_nodes[-1], template_buffer_node
-        )
-        outbuf = cast(Buffer, epilogue_nodes[-1])
-        outbuf.freeze_layout()
-        out_layout = FixedLayout(
-            outbuf.layout.device,
-            outbuf.layout.dtype,
-            result_sizes,  #
-            result_strides,
-            outbuf.layout.offset,
-        )
-        self.output_node = ir.ReinterpretView(data=outbuf, layout=out_layout)
-
-    def determine_additional_inputs(
-        self,
-        epilogue_nodes: Optional[List[ir.IRNode]] = None,
-        template_buffer_node: Optional[ir.CUDATemplateBuffer] = None,
-        **kwargs,
-    ) -> Tuple[Optional[Buffer], List[Buffer]]:
-        """
-        Determines bias and auxiliary input nodes for the fused epilogue nodes
-        based on existing input nodes (including their layout), presence of a bias node
-        and additional nodes that are read by the epilogue nodes.
-        The logic used to determine whether one of the additional inputs may be interpreted as bias is based on
-        the pointwise node's indexing expressions and the memory layout of the corresponding node.
-
-        Args:
-            epilogue_nodes (Optional[List[ir.IRNode]], optional): Fused epilogue nodes to be evaluated. Defaults to None.
-                        template_buffer_node (Optional[ir.CUDATemplateBuffer], optional): The node of a buffer template.
-                    Defaults to None.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            Tuple[Optional[Buffer], List[Buffer]]: The first element of the tuple contains the calculated bias (or None
-            if it doesn't exist). The second element of the returned tuple is a list of auxiliary input nodes.
-        """
-        X, W = self.input_nodes[:2]
-        Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
-        aux_input_nodes: List[ir.Buffer] = []
-        if (
-            template_buffer_node is not None
-            and epilogue_nodes is not None
-            and len(epilogue_nodes) > 0
-        ):
-            additional_input_nodes: List[
-                ir.ComputedBuffer
-            ] = template_buffer_node.get_additional_input_nodes(
-                epilogue_nodes  # type: ignore[arg-type]
-            )  # type: ignore[arg-type]
-            aux_input_nodes = additional_input_nodes  # type: ignore[assignment]
-            # If we have additional nodes, their memory layout might be interpreted differently
-            # than in the corresponding input node. We actually need to interpret the (Triton-style)
-            # indexing expressions used within the Pointwise node and map that back to the
-            # dimensions of the GEMM output reference layout in order to arrive at a layout
-            # that we may use for the Bias.
-            if (
-                Bias is None
-                and len(epilogue_nodes) == 1
-                and template_buffer_node is not None
-            ):
-                epilogue_node = epilogue_nodes[0]
-                # Extract strides and offsets, mapped to the GEMM output reference dimensions
-                # of all inputs of the Pointwise op
-                pointwise_load_strides: Dict[str, Tuple[List[int], int, List[int]]] = {}
-                if len(additional_input_nodes) > 0:
-                    pointwise_load_strides = extract_pointwise_load_strides(
-                        epilogue_node, template_buffer_node
-                    )
-                # If we want to cast one of the additional inputs as Bias
-                for i in range(len(additional_input_nodes)):
-                    MaybeBias: IRNode = additional_input_nodes[i]
-                    if MaybeBias.get_name() is None:
-                        continue
-                    (
-                        maybe_bias_stride,
-                        maybe_bias_offset,
-                        maybe_bias_size,
-                    ) = pointwise_load_strides.get(
-                        MaybeBias.get_name(), (None, None, None)
-                    )
-                    if maybe_bias_stride is None:
-                        continue
-                    if len(maybe_bias_stride) < 2:
-                        continue
-                    mbb_layout = MaybeBias.get_layout()
-                    if not isinstance(mbb_layout, FixedLayout):
-                        continue
-                    if (
-                        mbb_layout.stride != maybe_bias_stride
-                        or mbb_layout.offset != maybe_bias_offset
-                    ):
-                        # the Pointwise op implicitly reinterprets this input, we need to wrap it
-                        # in a ReinterpretView to reflect that
-                        reinterpret_mbb_layout = ir.FixedLayout(
-                            device=mbb_layout.device,
-                            dtype=mbb_layout.dtype,
-                            size=maybe_bias_size,  # type: ignore[arg-type]
-                            stride=maybe_bias_stride,
-                            offset=maybe_bias_offset,
-                        )
-                        MaybeBiasNew = ir.ReinterpretView(
-                            MaybeBias, reinterpret_mbb_layout
-                        )
-                        assert (
-                            MaybeBiasNew.get_numel() <= MaybeBias.get_storage_numel()
-                        ), "ReinterpretView of potential Bias node would read beyond storage bounds. This indicates a bug."
-                        min_required_storage_size = (
-                            MaybeBiasNew.get_layout().offset
-                            + sum(
-                                (sz - 1) * strid
-                                for strid, sz in zip(
-                                    maybe_bias_stride, template_buffer_node.get_size()
-                                )
-                            )
-                            + 1
-                        )
-                        assert (
-                            min_required_storage_size <= MaybeBias.get_storage_numel()
-                        ), "ReinterpretView of potential Bias node would read beyond storage bounds. This indicates a bug."
-                        MaybeBias = MaybeBiasNew
-                    if not self._are_inputs_layout_compatible(
-                        [X.get_layout(), W.get_layout(), MaybeBias.get_layout()]
-                    ):
-                        continue
-                    # remove it from the list of aux inputs, we will add it as Bias
-                    aux_input_nodes = (
-                        additional_input_nodes[:i] + additional_input_nodes[i + 1 :]  # type: ignore[assignment]
-                    )
-                    Bias = MaybeBias  # type: ignore[assignment]
-                    break
-            for i, aux_input_node in enumerate(aux_input_nodes):
-                assert (
-                    aux_input_node.get_name() is not None
-                ), f"Auxiliary input node {i} has to have a name"
-                assert self._are_inputs_layout_compatible(
-                    [X.get_layout(), W.get_layout(), aux_input_node.get_layout()]
-                ), f"Input layouts are not compatible with auxiliary input {i}: {aux_input_node}"
-        return Bias, aux_input_nodes
 
     def test_call_statement(
         self,
