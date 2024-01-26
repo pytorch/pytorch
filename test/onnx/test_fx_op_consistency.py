@@ -1828,9 +1828,6 @@ def _run_test_output_match(
                         )
                     else:
                         raise e
-                onnx_program.save_diagnostics(
-                    f"test_report_{test_suite._testMethodName}_{test_suite.model_type}.sarif"
-                )
                 _compare_onnx_and_torch_exported_program(
                     model,
                     onnx_program,
