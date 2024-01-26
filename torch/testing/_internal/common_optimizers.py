@@ -1549,6 +1549,14 @@ optim_db: List[OptimizerInfo] = [
                 "test_mixed_device_dtype",
                 active_if=TEST_WITH_TORCHDYNAMO,
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_complex",
+                device_type="cpu",
+            ),
         ),
     ),
     OptimizerInfo(
