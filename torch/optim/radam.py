@@ -66,7 +66,9 @@ class RAdam(Optimizer):
             for p in group["params"]:
                 p_state = self.state.get(p, [])
                 if len(p_state) != 0 and not torch.is_tensor(p_state['step']):
-                    p_state["step"] = torch.tensor(float(p_state["step"]), dtype=_get_scalar_dtype())
+                    step_val = float(p_state["step"])
+                    p_state["step"] = (torch.tensor(step_val, dtype=_get_scalar_dtype(), device=p.device) if group['capturable']
+                                       else torch.tensor(step_val, dtype=_get_scalar_dtype()))
 
     def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_avg_sqs, state_steps):
         has_complex = False
