@@ -137,6 +137,8 @@ class SpeculationEntry:
         """
         Start tracing of the current frame over again, and don't take this branch.
         """
+        # import traceback
+        # traceback.print_stack()
         self.failed = True
         raise exc.SpeculationRestartAnalysis()
 
@@ -2208,6 +2210,11 @@ class InstructionTranslator(InstructionTranslatorBase):
         ):
             raise exc.SkipFrame("because no content in function call")
         self.instruction_pointer = None
+        # Done tracing this NN method, so reset state.
+        # If tracer fails, we don't reset state, so that the next InstructionTranslator
+        # still knows which NN method we are in, so that the instance bound NN method is correctly associated.
+        tls.instance_bound_nn_method = None
+        print(f"Root: Set tls.instance_bound_nn_method to None")
         _step_logger()(
             logging.INFO,
             f"torchdynamo done tracing {self.f_code.co_name} (RETURN_VALUE)",
@@ -2381,6 +2388,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             strict_ctx = tracer.strict_translation_mode()
         try:
             with strict_ctx:
+                # Store current NN method being traced into.
+                if instance_bound_nn_method is not None:
+                    tls.instance_bound_nn_method = instance_bound_nn_method
+                    print(f"Inlining: Set tls.instance_bound_nn_method to {instance_bound_nn_method.__name__}")
                 tracer.run()
         except exc.SkipFrame as e:
             msg = f"SKIPPED INLINING {code}: {e}"
@@ -2528,6 +2539,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def RETURN_VALUE(self, inst):
         self.symbolic_result = self.pop()
         self.instruction_pointer = None
+        # Done tracing this NN method, so reset state.
+        # If tracer fails, we don't reset state, so that the next InstructionTranslator
+        # still knows which NN method we are in, so that the instance bound NN method is correctly associated.
+        tls.instance_bound_nn_method = None
+        print(f"Inlining: Set tls.instance_bound_nn_method to None")
 
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):

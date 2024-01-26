@@ -1740,18 +1740,23 @@ class SubgraphTracer(fx.Tracer):
             #     print(f"node.meta['nn_module_method']: {node.meta['nn_module_method']}")
             # print(f"self.output_graph._current_tx[-1].f_locals.keys(): {self.output_graph._current_tx[-1].f_locals.keys()}")
             # breakpoint()
-            if "self" in self.output_graph._current_tx[-1].f_locals.keys():
-                module = self.output_graph._current_tx[-1].f_locals['self']
-                method_name = f_code.co_name
-                instance_bound_nn_method = getattr(module, method_name)
-            else:
-                try:
-                    instance_bound_nn_method = self.output_graph._current_tx[-1].instance_bound_nn_method
-                except Exception as e:
-                    TODO: `AttributeError: 'InstructionTranslator' object has no attribute 'instance_bound_nn_method'` is a legit error that we need to fix.
-                    find a way to store instance_bound_nn_method in InstructionTranslator.
-                    print(f"node: {node}, node.op: {node.op}, node.target: {node.target}, node.args: {node.args}, node.kwargs: {node.kwargs}")
-                    raise
+            # if "self" in self.output_graph._current_tx[-1].f_locals.keys():
+            #     # Case 1: `torch.compile(module.func1)`, no graph break.
+            #     module = self.output_graph._current_tx[-1].f_locals['self']
+            #     method_name = f_code.co_name
+            #     instance_bound_nn_method = getattr(module, method_name)
+            # elif isinstance(self.output_graph._current_tx[-1], torch._dynamo.symbolic_convert.InliningInstructionTranslator):
+            #     # Case 2: `torch.compile(module)` which calls NN method `module.func1`, no graph break.
+            #     instance_bound_nn_method = self.output_graph._current_tx[-1].instance_bound_nn_method
+            # else:
+            #     # Case 3: `torch.compile(module.func1)`, has graph break and second graph is no longer an InliningInstructionTranslator.
+            #     # TODO: can we keep track of NN method via `symbolic_convert.tls.instance_bound_nn_method`, and update that only when entering a new NN method via InliningInstructionTranslator?
+            #     # TODO: `AttributeError: 'InstructionTranslator' object has no attribute 'instance_bound_nn_method'` is a legit error that we need to fix.
+            #     # find a way to store instance_bound_nn_method in InstructionTranslator.
+            #     print(f"node: {node}, node.op: {node.op}, node.target: {node.target}, node.args: {node.args}, node.kwargs: {node.kwargs}")
+            #     # breakpoint()
+            #     raise
+            instance_bound_nn_method = torch._dynamo.symbolic_convert.tls.instance_bound_nn_method
             assert instance_bound_nn_method is not None
             node.meta['nn_module_method'] = instance_bound_nn_method
             # print(f"node.meta['nn_module_method']: {node.meta['nn_module_method']}")

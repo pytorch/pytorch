@@ -61,7 +61,7 @@ class AsyncTensor(torch.Tensor):
     out._fake_tensor = fake_tensor
     out._handle = handle
     out._materialized_tensor_container = materialized_tensor_container
-    traceback.print_stack()
+    # traceback.print_stack()
     print(f"here7: id(out): {id(out)}")
     return out
 
@@ -141,16 +141,19 @@ class AsyncTensor(torch.Tensor):
     else:
       # TODO: handle tuple / list / etc in args
       # TODO: handle tensor kwargs
+      for arg in args:
+        print(f"here9: type(arg): {type(arg)}")
       AsyncTensor.wait_until_materialized(args)
       args_materialized = pytree.tree_map_only(AsyncTensor, lambda x: x._materialized_tensor_container.get_tensor(), args)
       # kwargs_materialized = {k: pytree.tree_map_only(AsyncTensor, lambda x: x._materialized_tensor_container.get_tensor(), v) for k, v in kwargs.items()}
       # out = func(*args_materialized, **kwargs_materialized)
       assert not any(isinstance(x, AsyncTensor) for x in args_materialized)
-      out = func(*args_materialized, **kwargs)
+      with torch.fx.experimental.proxy_tensor.maybe_disable_fake_tensor_mode():
+        out = func(*args_materialized, **kwargs)
       # NOTE: if we don't re-wrap the output with AsyncTensor, sometimes the output will still be re-wrapped as AsyncTensor
       # (by another unknown mechanism outside of this code, maybe in `def __torch_function__(...)` in torch/_tensor.py?)
       # but lose all its AsyncTensor attributes like `_materialized_tensor_container`
-      if isinstance(out, torch.Tensor) and not isinstance(out, AsyncTensor):  # and not func in [torch.ops.aten.clone.default]:
+      if isinstance(out, torch.Tensor) and not isinstance(out, AsyncTensor):
         print(f"here5: type(out): {type(out)}")
         print(f"torch._utils.is_compiling(): {torch._utils.is_compiling()}")
         # TODO maybe look at input args to know if we are compiling? see how we do it for SAC dispatch mode. We should not re-wrap with AsyncTensor if we are compiling with AsyncTensor input
@@ -170,17 +173,17 @@ class AsyncTensor(torch.Tensor):
       return out
       # return return_and_correct_aliasing(func, args, kwargs, out)
 
-  @classmethod
-  def __torch_function__(cls, func, types, args=(), kwargs=None):
-    if kwargs is None:
-      kwargs = {}
+  # @classmethod
+  # def __torch_function__(cls, func, types, args=(), kwargs=None):
+  #   if kwargs is None:
+  #     kwargs = {}
 
-    with torch._C.DisableTorchFunctionSubclass():
-      ret = func(*args, **kwargs)
-      if func in get_default_nowrap_functions():
-        return ret
-      else:
-        return _convert(ret, cls)
+  #   with torch._C.DisableTorchFunctionSubclass():
+  #     ret = func(*args, **kwargs)
+  #     if func in get_default_nowrap_functions():
+  #       return ret
+  #     else:
+  #       return _convert(ret, cls)
 
   def materialize_with_value(self, materialized_tensor):
     assert (not isinstance(materialized_tensor, AsyncTensor)) and isinstance(materialized_tensor, torch.Tensor), f"Received type: {type(materialized_tensor)}"

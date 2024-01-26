@@ -695,11 +695,13 @@ but got:
       model,
       # Create NN module method to segment mapping.
       segments=[
-        Segment("sdd_fwd", model.sdd.forward, nth_call=0),
-        Segment("overarch_func2_bwd", model.overarch.func2, nth_call=0),
+        Segment("sdd_fwd", model.sdd.forward),
+        Segment("overarch_func2_bwd", model.overarch.func2),
       ],
       # Run "sdd_fwd" right before "overarch_func2_bwd".
-      schedule=["sdd_fwd", "overarch_func2_bwd"],
+      schedule=[],
+      # Actual execution order is:
+      # "_____overarch_func1_fwd", "______overarch_func2_fwd", "sdd_fwd", "overarch_func2_bwd", "______overarch_func1_bwd"
     )
     output = model_ls(inputs)
 
@@ -707,8 +709,8 @@ but got:
     model_c = LazyScheduler(
       model,
       segments=[
-        Segment("sdd_fwd", model.sdd.forward, nth_call=0),
-        Segment("overarch_func2_bwd", model.overarch.func2, nth_call=0),
+        Segment("sdd_fwd", model.sdd.forward, backend="eager"),
+        Segment("overarch_func2_bwd", model.overarch.func2),
       ],
       schedule=["sdd_fwd", "overarch_func2_bwd"],
       compile_options={
@@ -726,15 +728,18 @@ Design doc: https://docs.google.com/document/d/1vv0H5IMGwUMyzmJKnksJOnRSult1B4Yl
 - Unit test: graph break within segment (i.e. multiple graphs per segment), either in the delayed segment or in the anchored segment
   - In the delayed segment case, also add output usage within the graph break eager region, to trigger the immediate materialization of AsyncTensor output
   - Make sure to assert that each GM contains the ops you expect.
-- Unit test: in-place op in named segment
 - Make debug_mode work
-- Support user calling a method multiple times and only tag a specific call as segment (i.e. make `nth_call=X` work)
+- Unit test: delayed segment modify global dictionary or module attribute
+- Unit test: in-place op in named segment
+- Remove fake_tensor and fake_mode usage within AsyncTensor
 - For named segments, show its segment ID (prefix + fwd/bwd + nth_call) in profiler annotation in GPU trace
+- Try on Ads model: https://docs.google.com/document/d/1tFLUh4Xe4_eGKOtgpj08kfNDhy7Fqp-dSq0d7lejdZU/edit#bookmark=id.wds06wiqwjh2 figure out integration point with trainer loop
+
 - Integration with DDPOptimizer
 - Integration with FSDP (graph break version, not tracing)
+- Support user calling a method multiple times and only tag a specific call as segment (i.e. make `nth_call=X` work)
 - Integration with (selective) activation checkpointing
 - What if a segment is in the schedule but is never run due to dynamic control flow change? we should either throw error or gracefully fall back to no-scheduler mode
-- Try on Ads model: https://docs.google.com/document/d/1tFLUh4Xe4_eGKOtgpj08kfNDhy7Fqp-dSq0d7lejdZU/edit#bookmark=id.wds06wiqwjh2 figure out integration point with trainer loop
 - (Later) Integration with compiled autograd
 - Logging for better user debugging (what is scheduled and when, and the compilation output). Look at the generated graph and the original code.
 - Also log memory usage, how much memory I am keeping above.

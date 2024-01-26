@@ -548,9 +548,9 @@ class MetaConverter:
                                 # preserve_format is the default, but we want to
                                 # emphasize how important it is to preserve
                                 # format here
-                                print(f"here234 before: r._is_view(): {r._is_view()}")
+                                print(f"here234 before: type(r): {type(r)}")
                                 r = r.clone(memory_format=torch.preserve_format)
-                                print(f"here234 after: r._is_view(): {r._is_view()}")
+                                print(f"here234 after: type(r): {type(r)}")
 
                     # Graph-Break for wrapped tensors
                     if not is_batchedtensor(

@@ -60,7 +60,7 @@ from .guards import (
 from .hooks import Hooks
 from .output_graph import OutputGraph
 from .replay_record import ExecutionRecord
-from .symbolic_convert import InstructionTranslator, SpeculationLog
+from .symbolic_convert import InstructionTranslator, SpeculationLog, tls
 from .trace_rules import is_numpy
 from .types import BytecodeHook
 from .utils import (
@@ -486,6 +486,14 @@ def _compile(
 
         try:
             with tracing(tracer.output.tracing_context), tracer.set_current_tx():
+                # breakpoint()
+                if "self" in locals.keys() and isinstance(locals["self"], torch.nn.Module):
+                    module = locals["self"]
+                    method_name = code.co_name
+                    instance_bound_nn_method = getattr(module, method_name)
+                    # Store current NN method being traced into.
+                    tls.instance_bound_nn_method = instance_bound_nn_method
+                    print(f"Root: Set tls.instance_bound_nn_method to {instance_bound_nn_method.__name__}")
                 tracer.run()
         except exc.UnspecializeRestartAnalysis:
             speculation_log.clear()
