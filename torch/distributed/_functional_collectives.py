@@ -12,7 +12,9 @@ from torch.fx.experimental.proxy_tensor import get_innermost_proxy_mode
 from . import _functional_collectives_impl as fun_col_impl
 from ._functional_collectives_impl import (
     _register_tensor_wrapper,
-    USE_NATIVE_C10D_FUNCTIONAL,
+    disable_native_funcol,  # noqa
+    enable_native_funcol,  # noqa
+    native_funcol_enabled,
 )
 
 try:
@@ -142,7 +144,7 @@ def wait_tensor(tensor):
 
     Waiting follows device semantics, which means blocking on CPU and synchronizing streams on CUDA.
     """
-    if USE_NATIVE_C10D_FUNCTIONAL:
+    if native_funcol_enabled():
         return torch.ops._c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
     else:
         return torch.ops.c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
@@ -179,7 +181,7 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
-    if USE_NATIVE_C10D_FUNCTIONAL:
+    if native_funcol_enabled():
         group_name = _resolve_group_name(group, tag)
         tensor = torch.ops._c10d_functional.all_reduce(
             self, reduceOp.lower(), group_name
@@ -219,7 +221,7 @@ def all_gather_tensor(
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     assert self.is_contiguous()
-    if USE_NATIVE_C10D_FUNCTIONAL:
+    if native_funcol_enabled():
         group_name = _resolve_group_name(group, tag)
         group_size = c10d._get_group_size_by_name(group_name)
         tensor = torch.ops._c10d_functional.all_gather_into_tensor(
@@ -266,7 +268,7 @@ def reduce_scatter_tensor(
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
-    if USE_NATIVE_C10D_FUNCTIONAL:
+    if native_funcol_enabled():
         group_name = _resolve_group_name(group, tag)
         group_size = c10d._get_group_size_by_name(group_name)
     else:
@@ -279,7 +281,7 @@ def reduce_scatter_tensor(
         tensor_list = torch.chunk(self, group_size, dim=scatter_dim)
         self = torch.cat(tensor_list)
 
-    if USE_NATIVE_C10D_FUNCTIONAL:
+    if native_funcol_enabled():
         tensor = torch.ops._c10d_functional.reduce_scatter_tensor(
             self,
             reduceOp.lower(),
@@ -317,7 +319,7 @@ def all_reduce_coalesced(
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
-    if USE_NATIVE_C10D_FUNCTIONAL:
+    if native_funcol_enabled():
         group_name = _resolve_group_name(group, tag)
         tensor_list = torch.ops._c10d_functional.all_reduce_coalesced(  # type: ignore[attr-defined]
             self,
@@ -355,7 +357,7 @@ def all_gather_into_tensor_coalesced(
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
-    if USE_NATIVE_C10D_FUNCTIONAL:
+    if native_funcol_enabled():
         group_name = _resolve_group_name(group, tag)
         group_size = c10d._get_group_size_by_name(group_name)
         tensor_list = torch.ops._c10d_functional.all_gather_into_tensor_coalesced(  # type: ignore[attr-defined]
@@ -396,7 +398,7 @@ def reduce_scatter_tensor_coalesced(
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
-    if USE_NATIVE_C10D_FUNCTIONAL:
+    if native_funcol_enabled():
         group_name = _resolve_group_name(group, tag)
         group_size = c10d._get_group_size_by_name(group_name)
     else:
@@ -411,7 +413,7 @@ def reduce_scatter_tensor_coalesced(
             tensor_list = torch.chunk(tensor, group_size, dim=dim)
             inputs[idx] = torch.cat(tensor_list)
 
-    if USE_NATIVE_C10D_FUNCTIONAL:
+    if native_funcol_enabled():
         tensor_list = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(  # type: ignore[attr-defined]
             inputs,
             reduceOp.lower(),
@@ -471,7 +473,7 @@ def all_to_all_single(
         assert all(
             isinstance(size, (int, torch.SymInt)) for size in input_split_sizes
         ), input_split_sizes
-    if USE_NATIVE_C10D_FUNCTIONAL:
+    if native_funcol_enabled():
         group_name = _resolve_group_name(group, tag)
         group_size = c10d._get_group_size_by_name(group_name)
         tensor = torch.ops._c10d_functional.all_to_all_single(  # type: ignore[attr-defined]
