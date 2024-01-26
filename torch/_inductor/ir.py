@@ -52,6 +52,7 @@ from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
 from .dependencies import (
+    extract_free_unbacked_symbols,
     extract_input_node_reduction_ranges,
     extract_read_writes,
     var_builder,
@@ -340,7 +341,10 @@ class Loops(IRNode):
     ranges: List[Expr]
 
     def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
-        return set().union(*(free_unbacked_symbols(e) for e in self.ranges))
+        return set().union(
+            *(free_unbacked_symbols(e) for e in self.ranges),
+            self.inner_fn_free_unbacked_symbols(),
+        )
 
     def __str__(self, names=("ranges",)):
         return self.str_helper(
@@ -402,6 +406,10 @@ class Loops(IRNode):
     def inner_fn_str(self):
         index = self._index(self.ranges)
         return V.KernelFormatterHandler.ir_to_string(self.inner_fn, index)
+
+    def inner_fn_free_unbacked_symbols(self):
+        index = self._index(self.ranges)
+        return extract_free_unbacked_symbols(self.inner_fn, index)
 
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
@@ -612,6 +620,11 @@ class Reduction(Loops):
             index,
             rindex,
         )
+
+    def inner_fn_free_unbacked_symbols(self):
+        index = self._index(self.ranges)
+        rindex = self._index(self.reduction_ranges, "r")
+        return extract_free_unbacked_symbols(self.inner_fn, index, rindex)
 
     def constant_to_device(self, device):
         """Move this to a given device. Requires that all reads are to constants."""
@@ -1595,11 +1608,17 @@ class Scan(Loops):
     def inner_fn_str(self):
         index = self._index(self.ranges)
         rindex = self._index(self.scan_ranges, "r")
+        idx = self.reindex(index, rindex)
         return V.KernelFormatterHandler.ir_to_string(
             self.inner_fn,
-            index,
-            rindex,
+            idx,
         )
+
+    def inner_fn_free_unbacked_symbols(self):
+        index = self._index(self.ranges)
+        rindex = self._index(self.scan_ranges, "r")
+        idx = self.reindex(index, rindex)
+        return extract_free_unbacked_symbols(self.inner_fn, idx)
 
     @classmethod
     def create(
