@@ -127,6 +127,10 @@ class FakeProcessGroup(dist.ProcessGroup):
     def getBackendName(self):
         return "fake"
 
+    @property
+    def group_name(self):
+        return "fake"
+
     def __repr__(self):
         return f"FakePG world_size:{self._world_size} rank:{self._rank}"
 
