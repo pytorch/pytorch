@@ -94,7 +94,6 @@ def parse_ttir(ttir, kwargs):
     # - Support multiple functions
     # - Support parsing of conditionals
     # - Support parsing for/while loops
-    # - Support alternative syntax parsing similar to "tt.name"(%0, %1)
     # - Support ops with multiple return value (e.g. %4:2 = "tt.reduce")
 
     if ttir.count("tt.func") != 1:
@@ -124,27 +123,26 @@ def parse_ttir(ttir, kwargs):
         decl_block: /.+/ NEWLINE op+ "}"
 
         op: "tt.return"
-          | assign_lhs "=" FN_NAME args /.+/ NEWLINE  -> process_op
-          | FN_NAME args /.+/ NEWLINE  -> process_op_no_ret
+          | assign_lhs "=" FN_NAME args rest  -> process_op
+          | FN_NAME args rest                 -> process_op_no_ret
 
-        args: arg?
-            | arg "," args
+        ?rest: (":" | "{" | "\\"" | "->" | "<") /.+/ NEWLINE
 
-        ?arg: INTERMEDIATE | CONSTANT | PARAM
+        args: | "("? arg ("," arg)* ")"?
+
+        ?arg: INTERMEDIATE | CONSTANT | PARAM | "[" arg "]"
 
         ?assign_lhs: INTERMEDIATE | CONSTANT
 
         PARAM.5: "%arg" DIGIT+
 
-        INTERMEDIATE: "%" DIGIT+
+        INTERMEDIATE.4: "%" DIGIT+
 
         NAME: (LETTER | DIGIT | "_")+
 
-        CONSTANT: "%"? LETTER NAME*
+        CONSTANT: "%"? NAME+ ("<" DIGIT+ ">")?
 
-        FN_NAME_QUOTED: ESCAPED_STRING
-
-        FN_NAME: NAME "." NAME
+        FN_NAME: "\\""? NAME "." NAME "\\""?
 
         %import common.LETTER
         %import common.DIGIT

@@ -998,8 +998,7 @@ class MutationTests(torch._dynamo.test_case.TestCase):
                     "n_elements": 4,
                     "BLOCK_SIZE": 4,
                 },
-                # TODO(oulgen): Fix parsing
-                ["in_ptr0", "in_ptr1", "out_ptr"],
+                ["out_ptr"],
             ],
             [
                 add_4_times_kernel,
