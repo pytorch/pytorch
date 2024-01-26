@@ -6,9 +6,14 @@ from functools import reduce
 from typing import Any, List, Optional, Tuple, Union
 
 import torch
-from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
 
-from .metadata import ChunkStorageMetadata, Metadata, MetadataIndex, STATE_DICT_TYPE
+from .metadata import (
+    ChunkStorageMetadata,
+    Metadata,
+    MetadataIndex,
+    STATE_DICT_TYPE,
+    TensorProperties,
+)
 
 
 __all__ = [

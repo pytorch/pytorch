@@ -3054,6 +3054,32 @@ class TestNestedTensorSubclass(TestCase):
 
         gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
 
+    def test_unary_pointwise_transposed_inputs(self, device):
+        a, b, c = (
+            torch.randn(i + 2, 5, requires_grad=True, dtype=torch.float64, device=device) for i in range(3)
+        )
+
+        nt, _ = jagged_from_list([a.detach(), b.detach(), c.detach()], None)
+        nt_t = nt.transpose(1, 2)
+        self.assertFalse(nt_t.is_contiguous())
+        out = torch.nn.functional.silu(nt_t.sin().cos())
+        self.assertEqual(out.is_contiguous(), torch.nn.functional.silu(b.transpose(-1, -2).sin().cos()).is_contiguous())
+
+        self.assertEqual(nt_t.shape, out.shape)
+
+        a, b, c = (
+            torch.randn(i + 2, 5, requires_grad=True, dtype=torch.float64, device=device) for i in range(3)
+        )
+
+        def grad_test_func(a, b, c):
+            nt, _ = jagged_from_list([a, b, c], None)
+            nt_t = nt.transpose(1, 2)
+            out = torch.nn.functional.silu(nt_t.sin().cos())
+            return buffer_from_jagged(out)
+
+        gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
+
+
     def test_binary_pointwise(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
@@ -3074,6 +3100,43 @@ class TestNestedTensorSubclass(TestCase):
             nt1, offsets = jagged_from_list([a, b, c], None)
             nt2, offsets = jagged_from_list([a, b, c], offsets)
             out = nt1 * nt2
+            return buffer_from_jagged(out)
+
+        gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
+
+    def test_binary_pointwise_transposed(self, device):
+        a, b, c = (
+            torch.randn(i + 2, 5, dtype=torch.float64, device=device) for i in range(3)
+        )
+
+        nt1, offsets = jagged_from_list([a, b, c], None)
+        nt2, offsets = jagged_from_list([a, b, c], offsets)
+
+        nt1_t = nt1.transpose(1, 2)
+        nt2_t = nt2.transpose(1, 2)
+
+        out = nt1_t * nt2_t
+        self.assertFalse(nt1_t.is_contiguous())
+        self.assertEqual(out.is_contiguous(), (b.transpose(-1, -2) * b.transpose(-1, -2)).is_contiguous())
+        self.assertEqual(out.shape, nt1_t.shape)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "cannot call binary pointwise function mul.Tensor with inputs of shapes",
+            lambda: nt1 * nt2_t,
+        )
+
+        a, b, c = (
+            torch.randn(i + 2, 5, requires_grad=True, dtype=torch.float64, device=device) for i in range(3)
+        )
+
+        # Correct usage: chain the calls using the same offsets tensor object
+        def grad_test_func(a, b, c):
+            nt1, offsets = jagged_from_list([a, b, c], None)
+            nt2, offsets = jagged_from_list([a, b, c], offsets)
+            nt1_t = nt1.transpose(1, 2)
+            nt2_t = nt2.transpose(1, 2)
+            out = nt1_t * nt2_t
             return buffer_from_jagged(out)
 
         gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
@@ -3555,9 +3618,25 @@ class TestNestedTensorSubclass(TestCase):
         nt, _ = jagged_from_list([a, b, c], None)
         # transpose ragged dim
         transposed = nt.transpose(1, 2)
-        # pointwise ops are not supported on ragged dim transposed jagged layout NTs
-        with self.assertRaisesRegex(ValueError, "expected .* to be a contiguous jagged layout"):
-            clone = transposed.clone()
+        self.assertFalse(transposed.is_contiguous())
+        clone = transposed.clone()
+
+        def check_nt_equality(x, y):
+            self.assertEqual(x.values(), y.values())
+            self.assertEqual(x.offsets(), y.offsets())
+            self.assertEqual(x._ragged_idx, y._ragged_idx)
+            self.assertEqual(x.shape, y.shape)
+
+        self.assertFalse(clone.is_contiguous())
+        check_nt_equality(clone, transposed)
+
+        clone_contig = transposed.clone(memory_format=torch.contiguous_format)
+        self.assertTrue(clone_contig.is_contiguous())
+        check_nt_equality(clone_contig, transposed)
+
+        detached = transposed.detach()
+        self.assertFalse(clone.is_contiguous())
+        check_nt_equality(detached, transposed)
 
     # Note 1: Math fallback doesn't work with bfloat16 on CUDA
     # Note 2: ROCm doesn't support flash attention or mem_efficient attention for NT
@@ -3678,7 +3757,6 @@ class TestNestedTensorSubclass(TestCase):
             # "group_gemm_dispatch" not implemented for 'BFloat16'
             if not (str(device).startswith("cuda") and dtype == torch.bfloat16):
                 check_forward_backward()
-
 
     # This requires NT -> NT views to work in inductor, which is a TODO
     @unittest.expectedFailure  # noqa: E301
