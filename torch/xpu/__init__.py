@@ -1,5 +1,9 @@
 r"""
-This package is lazily initialized, so you can always import it.
+This package introduces support for the XPU backend, specifically tailored for
+Intel GPU optimization.
+
+This package is lazily initialized, so you can always import it, and use
+:func:`is_available()` to determine if your system supports XPU.
 """
 import threading
 from functools import lru_cache
@@ -189,7 +193,7 @@ def get_device_capability(device: Optional[_device_t] = None) -> Dict[str, Any]:
     }
 
 
-def get_device_properties(device: _device_t) -> _XpuDeviceProperties:
+def get_device_properties(device: Optional[_device_t] = None) -> _XpuDeviceProperties:
     r"""Get the properties of a device.
 
     Args:
