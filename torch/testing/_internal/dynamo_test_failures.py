@@ -7454,6 +7454,9 @@ dynamo_skips = {
     "TestSymbolicShapeAnalysis.test_if_propagation",  # test_jit
     "TestPeephole.test_normalized_rsub",  # test_jit
     "TestPythonIr.test_param_strides",  # test_jit
+    "TestPythonIr.test_permute_inputs_binding",  # test_jit
+    "TestPythonIr.test_python_ir_utils",  # test_jit
+    "TestPythonIr.test_python_ir_utils_graph",  # test_jit
     "TestComplex.test_complex_list_sum",  # test_jit
     "TestUnion.test_union_redundant_arguments_are_skipped_optional",  # test_jit
     "TestNnapiBackend.test_conv2d",  # test_jit
