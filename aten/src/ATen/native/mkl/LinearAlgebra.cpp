@@ -138,7 +138,7 @@ void mkl_gemm_f16f16f32(
   cblas_gemm_f16f16f32(CblasColMajor, transa_cblas, transb_cblas, M, N, K, alpha,
                          (const MKL_F16*)A, lda, (const MKL_F16*)B, ldb, beta, C, ldc);
 #else
-  TORCH_INTERNAL_ASSERT(false, "mkl_gemm_bf16bf16f32 requires mkl version >= 2024.0");
+  TORCH_INTERNAL_ASSERT(false, "mkl_gemm_f16f16f32 requires mkl version >= 2024.0");
 #endif
 }
 
