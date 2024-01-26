@@ -3201,6 +3201,28 @@ class TestNestedTensorSubclass(TestCase):
         self.assertEqual(nt.shape[:2], view.shape[:2])
 
     @xfailIfTorchDynamo
+    def test_view_ragged_idx_not_one(self, device):
+        nt = random_nt_from_dims([2, None, 20], device=device, dtype=torch.float32, layout=torch.jagged)
+
+        view_transposed = nt.transpose(1, 2).view(2, 20, nt.size(1))
+        self.assertEqual((2, 20, nt.size(1)), (view_transposed.size()))
+        self.assertEqual(view_transposed._base, nt)
+
+    def test_unsafe_view(self, device):
+        nt = random_nt_from_dims([4, None, 8, 10], device=device, dtype=torch.float32, layout=torch.jagged)
+        # basic view
+        view1 = torch.ops.aten._unsafe_view(nt, (4, -1, 80))
+        self.assertEqual((4, nt.size(1), 80), tuple(view1.size()))
+        # _unsafe_view differs from view in that the view information is not tracked
+        self.assertTrue(view1._base is None)
+
+        # test an unsafe_view when ragged_idx != 1, currently only supports identity view
+        nt_t = nt.transpose(1, 2)
+        view2 = torch.ops.aten._unsafe_view(nt_t, (4, 8, nt.size(1), 10))
+        self.assertEqual((4, 8, nt.size(1), 10), tuple(view2.size()))
+        self.assertTrue(view2._base is None)
+
+    @xfailIfTorchDynamo
     @parametrize("requires_grad", [False, True])
     def test_reshape_decomp(self, device, requires_grad):
         # contiguous NT should result in view
