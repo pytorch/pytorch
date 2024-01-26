@@ -70,7 +70,7 @@ from .code_context import code_context
 from .exc import CondOpArgsMismatchError, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
 from .types import CacheEntry, DynamoCallback
-from .utils import compile_times
+from .utils import common_constant_types, compile_times
 
 log = logging.getLogger(__name__)
 
@@ -288,19 +288,15 @@ def innermost_fn(fn):
     return unaltered_fn
 
 
-@contextlib.contextmanager
-def enable_dynamic(enable: Optional[bool] = None, export: bool = False):
-    if enable is None:
-        yield
-    elif enable:
+def make_set_enable_dynamic(enable: bool):
+    assert isinstance(enable, bool)
+    if enable:
         # Assume everything is dynamic by default
-        with config.patch(assume_static_by_default=False):
-            yield
+        return config._make_closure_patcher(assume_static_by_default=False)
     else:
-        with config.patch(
+        return config._make_closure_patcher(
             automatic_dynamic_shapes=False, assume_static_by_default=True
-        ):
-            yield
+        )
 
 
 class _TorchDynamoContext:
@@ -320,15 +316,32 @@ class _TorchDynamoContext:
         assert callable(callback) or callback is False or callback is None
         self.callback: DynamoCallback = callback
         self.prior: Union[Unset, DynamoCallback] = unset
-        self.on_enter = on_enter
-        self.extra_ctx_ctor = backend_ctx_ctor
         self.first_ctx = first_ctx
         self.export = export
-        self.dynamic = dynamic
         self.compiler_config = compiler_config
-        self.set_backend_cache = backend_cache_manager(self.callback)
         self.cleanup_fns: List[Callable[[], Any]] = []
+        self.enter_exit_hooks = [backend_cache_manager(self.callback)]
         patch_fn()
+
+        if dynamic is not None:
+            self.enter_exit_hooks.append(make_set_enable_dynamic(dynamic))
+
+        if on_enter is not nothing:
+            # this case is not common
+            def call_on_enter():
+                on_enter()
+                return nothing
+
+            self.enter_exit_hooks.append(call_on_enter)
+
+        if backend_ctx_ctor is not contextlib.nullcontext:
+            # this case is not common
+            def call_backend_ctx():
+                ctx = backend_ctx_ctor()
+                ctx.__enter__()
+                return functools.partial(ctx.__exit__, None, None, None)
+
+            self.enter_exit_hooks.append(call_backend_ctx)
 
     def __enter__(self):
         if config.raise_on_ctx_manager_usage:
@@ -337,21 +350,13 @@ class _TorchDynamoContext:
                 "Please refer to https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html "
                 "to use torch._dynamo.optimize(...) as an annotation/decorator. "
             )
-        self.on_enter()
+        self.cleanup_fns = [enter() for enter in self.enter_exit_hooks]
         self.prior = set_eval_frame(self.callback)
-        self.cleanup_fns.append(self.set_backend_cache())
-        self.backend_ctx = self.extra_ctx_ctor()
-        self.backend_ctx.__enter__()
-        self.dynamic_ctx = enable_dynamic(self.dynamic, self.export)
-        self.dynamic_ctx.__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         assert self.prior is not unset
         set_eval_frame(self.prior)
         self.prior = unset
-        # TODO: This is totally not the right way to chain contexts manually
-        self.dynamic_ctx.__exit__(exc_type, exc_val, exc_tb)
-        self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
         for cleanup in self.cleanup_fns:
             cleanup()
         self.cleanup_fns.clear()
@@ -401,8 +406,6 @@ class _TorchDynamoContext:
             fn = external_utils.wrap_inline(fn)
 
         callback = self.callback
-        on_enter = self.on_enter
-        backend_ctx_ctor = self.extra_ctx_ctor
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
@@ -426,19 +429,12 @@ class _TorchDynamoContext:
                 else:
                     return fn(*args, **kwargs)
 
-            on_enter()
+            cleanups = [enter() for enter in self.enter_exit_hooks]
             prior = set_eval_frame(callback)
-            cleanups = (self.set_backend_cache(),)
-            backend_ctx = backend_ctx_ctor()
-            backend_ctx.__enter__()
-            dynamic_ctx = enable_dynamic(self.dynamic, self.export)
-            dynamic_ctx.__enter__()
             try:
                 return fn(*args, **kwargs)
             finally:
                 set_eval_frame(prior)
-                dynamic_ctx.__exit__(None, None, None)
-                backend_ctx.__exit__(None, None, None)
                 for cleanup in cleanups:
                     cleanup()
 
@@ -817,6 +813,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         m: torch.fx.GraphModule,
         flat_args: Tuple[Any],
         matched_input_elements_positions: List[int],
+        flat_results: List[Any],
         matched_output_elements_positions: List[int],
         example_fake_inputs: List[torch.Tensor],
         flat_args_dynamic_dims: List[Set[int]],
@@ -855,6 +852,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
             self.new_args.append(arg)
         self.old_args_gen = (self.new_args[i] for i in matched_input_elements_positions)
         self.matched_output_elements_positions = matched_output_elements_positions
+        self.flat_results = flat_results
 
     def placeholder(self, target, args, kwargs):
         arg = next(self.old_args_gen)
@@ -869,8 +867,17 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
     def output(self, target, args, kwargs):
         dynamo_result_flat = args[0]
         lookup = [*dynamo_result_flat, *self.new_args]
-        new_result_flat = [lookup[i] for i in self.matched_output_elements_positions]
-        return super().output(target, (new_result_flat,), {})
+        new_results_flat = []
+        for i in range(len(self.flat_results)):
+            if self.matched_output_elements_positions[i] is not None:
+                new_results_flat.append(
+                    lookup[self.matched_output_elements_positions[i]]
+                )
+            else:
+                const_val = self.flat_results[i]
+                assert isinstance(const_val, tuple(common_constant_types))
+                new_results_flat.append(const_val)
+        return super().output(target, (new_results_flat,), {})
 
     def run_node(self, n):
         self.current_node = n
@@ -959,17 +966,6 @@ def rewrite_signature(
 ):
     orig_args, orig_kwargs = pytree.tree_unflatten(flat_args, in_spec)
 
-    constant_types = [
-        int,
-        str,
-        bool,
-        float,
-        torch.memory_format,
-        torch.device,
-        torch.dtype,
-        torch.layout,
-    ]
-
     def check_user_input_output(flat_values, error_type):
         supported_types = [
             torch.Tensor,
@@ -977,9 +973,7 @@ def rewrite_signature(
             torch.SymFloat,
             torch.SymBool,
             torch._C.ScriptObject,
-        ]
-        if error_type == UserErrorType.INVALID_INPUT:
-            supported_types.extend(constant_types)
+        ] + list(common_constant_types)
 
         def is_supported_type(val):
             return isinstance(val, tuple(supported_types))
@@ -1008,19 +1002,21 @@ def rewrite_signature(
     check_user_input_output(flat_results_traced, UserErrorType.INVALID_OUTPUT)
 
     def produce_matching(debug_type, sources, candidates):
-        matched_elements_positions = []
+        matched_elements_positions: List[Optional[int]] = []
         dict_of_source_vals = {}
         for i, val in enumerate(sources):
             dict_of_source_vals[id(val)] = i
 
         for i, val in enumerate(candidates):
-            if id(val) not in dict_of_source_vals:
+            if isinstance(val, tuple(common_constant_types)):
+                matched_elements_positions.append(None)
+            elif id(val) not in dict_of_source_vals:
                 raise AssertionError(
                     f"Unexpectedly found a {type(val)} in the {debug_type}.\n"
                     'Please file an issue along with a paste of the logs from TORCH_LOGS="+export"'
                 )
-
-            matched_elements_positions.append(dict_of_source_vals[id(val)])
+            else:
+                matched_elements_positions.append(dict_of_source_vals[id(val)])
 
         return matched_elements_positions
 
@@ -1037,6 +1033,7 @@ def rewrite_signature(
         graph,
         flat_args,
         matched_input_elements_positions,
+        flat_results_traced,
         matched_output_elements_positions,
         example_fake_inputs,
         flat_args_dynamic_dims,
