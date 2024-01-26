@@ -838,7 +838,7 @@ class UnbindCatRemover(SplitCatSimplifier):
         unbind_node: torch.fx.Node,
     ):
         num_unbind = (  # type: ignore
-            max(getitem_node.args[1] for getitem_node in unbind_node.users.keys()) + 1
+            max(getitem_node.args[1] for getitem_node in unbind_node.users.keys()) + 1  # type: ignore
         )
         split_sections = [1 for _ in range(num_unbind)]  # type: ignore[operator, arg-type]
 
