@@ -1540,7 +1540,7 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/115607
                 ),
                 "TestOptimRenewed",
                 "test_can_load_older_state_dict",
