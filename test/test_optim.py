@@ -711,6 +711,12 @@ class TestOptimRenewed(TestCase):
             return lbfgs_loss if optim_cls.__name__ == "LBFGS" else None
 
         for optim_input in all_optim_inputs:
+            kwargs = optim_input.kwargs
+            # See https://github.com/pytorch/pytorch/issues/117836 for Adamax
+            # See https://github.com/pytorch/pytorch/issues/118230 for RAdam
+            if optim_cls.__name__ in ["Adamax", "RAdam"] and kwargs.get("capturable", False) and not kwargs.get("foreach", False):
+                continue
+
             optimizer = optim_cls(params, **optim_input.kwargs)
             for _ in range(3):
                 optimizer.step(closure)
