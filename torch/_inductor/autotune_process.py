@@ -171,7 +171,9 @@ class TuningProcess:
         assert self.request_queue is not None
         self.request_queue.put(obj)
 
-    def get(self) -> Any:
+    def get(
+        self, result_timeout=1.0, graceful_timeout=3.0, terminate_timeout=1.0
+    ) -> Any:
         """
         Get a response from the child process.
         """
@@ -179,14 +181,32 @@ class TuningProcess:
         assert self.response_queue is not None
         while True:
             try:
-                return self.response_queue.get(timeout=1.0)
+                start = time.time()
+                remaining_timeout = result_timeout
+                res = None
+                while remaining_timeout is not None and remaining_timeout >= 1.0:
+                    remaining_timeout -= 0.5
+                    try:
+                        res = self.response_queue.get(timeout=0.5)
+                        break
+                    except queue.Empty:
+                        if not self.process.is_alive():
+                            raise  # is being caught a few lines below
+                if res is None:
+                    res = self.response_queue.get(timeout=remaining_timeout)
+                end = time.time()
+                return res
             except queue.Empty:
                 status = self.process.exitcode
+                end = time.time()
                 if status is None:
-                    # child process is still running
-                    continue
-                # child process crashed
-                self.clear()
+                    self.kill(
+                        graceful_timeout=graceful_timeout,
+                        terminate_timeout=terminate_timeout,
+                    )
+                else:
+                    # child process crashed
+                    self.clear()
                 raise
 
     def terminate(self) -> None:
@@ -204,6 +224,29 @@ class TuningProcess:
         """
         if self.process is not None:
             self.process.join()
+            self.clear()
+
+    def kill(self, graceful_timeout=5.0, terminate_timeout=1.0) -> None:
+        # Tries to kill the process, using a graceful_timeout in which the process
+        # is allowed to exit gracefully. If the process is still alive,
+        # it will be terminated. If that is not sufficient to end it
+        # within terminate_timeout seconds, it will be killed.
+        if self.process is not None:
+            self.terminate()
+            self.process.join(timeout=graceful_timeout)
+            if self.process.is_alive():
+                log.warning(
+                    "Sending SIGTERM to process with PID %d",
+                    self.process.pid,
+                )
+                self.process.terminate()
+                self.process.join(timeout=terminate_timeout)
+                if self.process.is_alive():
+                    log.error(
+                        "Sending SIGKILL to process with PID %d",
+                        self.process.pid,
+                    )
+                    self.process.kill()  # This should definitely end the process
             self.clear()
 
 
@@ -239,7 +282,7 @@ class TuningProcessPool:
 
         # Wait for the initialization to finish
         for p in self.processes.queue:
-            assert isinstance(p.get(), Pong)
+            assert isinstance(p.get(result_timeout=None), Pong)
 
         # Use a thread pool to manage distributing work to the subprocesses.
         # Threads block on an available process, so it makes sense to match
@@ -300,7 +343,11 @@ class TuningProcessPool:
         process = self.processes.get()
         process.put(choice.bmreq)
         try:
-            return process.get()
+            return process.get(
+                config.max_autotune_subproc_result_timeout_seconds,
+                config.max_autotune_subproc_graceful_timeout_seconds,
+                config.max_autotune_subproc_terminate_timeout_seconds,
+            )
         except queue.Empty:
             warnings.warn(
                 f"Failed to benchmark choice '{choice}'. It will be ignored. "
@@ -569,9 +616,9 @@ class CUDABenchmarkRequest(BenchmarkRequest):
     def precompile(self):
         # Prepopulate CUDACodeCache
         # may happen in separate Threadpool
-        log.debug("Precompiling %s", str(self))
-        CUDACodeCache.load(self.source_code, "so")
-        log.debug("Done precompiling %s", str(self))
+        log.warning("Precompiling %s", str(self))
+        CUDACodeCache.compile(self.source_code, "so")
+        log.warning("Done precompiling %s", str(self))
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
