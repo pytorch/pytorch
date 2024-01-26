@@ -2734,6 +2734,45 @@ class TestMod(torch.nn.Module):
 
 class TestAOTExport(AOTTestCase):
 
+    def test_aot_export_ban_dropout_mut_pre_dispatch(self):
+        def fn(p, x):
+            y = torch.ops.aten.dropout.default(x, 0.1, train=False)
+            y.add_(1)
+            return (y,)
+
+        mod = TestMod(fn)
+        inp = torch.randn(2, 2)
+
+        with self.assertRaisesRegex(RuntimeError, "cannot mutate tensors with frozen storage"):
+            aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+
+        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=False)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    clone = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
+    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
+    return (add,)""")
+
+        fw_graph_cell = [None]
+        bw_graph_cell = [None]
+
+        compiled_outs = aot_function(
+            fn,
+            fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+            bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
+            partition_fn=default_partition,
+            decompositions=default_decompositions,
+            dynamic=True)(*inp)
+        fw_graph = fw_graph_cell[0]
+        bw_graph = bw_graph_cell[0]
+
+        self.assertExpectedInline(str(fw_graph.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    clone = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
+    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
+    return (add,)""")
+
+
     def test_aot_export_predispatch_func_simple(self):
         def fn(p, x):
             y = x + 2
