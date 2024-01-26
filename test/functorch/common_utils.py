@@ -27,7 +27,7 @@ def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
     for idx in range(batch_size):
         flat_args, args_spec = pytree.tree_flatten(batched_args)
         flat_dims, dims_spec = pytree.tree_flatten(in_dims)
-        assert(args_spec == dims_spec)
+        assert args_spec == dims_spec
         new_args = [a.select(in_dim, idx) if in_dim is not None else a for a, in_dim in zip(flat_args, flat_dims)]
         out = op(*pytree.tree_unflatten(new_args, args_spec), **kwarg_values)
         flat_out, out_spec = pytree.tree_flatten(out)
@@ -45,9 +45,9 @@ def loop2(op, in_dims1, in_dims2, out_dim1, out_dim2, batch_size1, batch_size2, 
     flat_args, args_spec = pytree.tree_flatten(batched_args)
     flat_dims1, dims_spec1 = pytree.tree_flatten(in_dims1)
     flat_dims2, dims_spec2 = pytree.tree_flatten(in_dims2)
-    assert(args_spec == dims_spec1)
-    assert(args_spec == dims_spec2)
-    assert(len(flat_dims1) == len(flat_dims2))
+    assert args_spec == dims_spec1
+    assert args_spec == dims_spec2
+    assert len(flat_dims1) == len(flat_dims2)
     for idx1 in range(batch_size1):
         out_split = []
         arg_split = [a.select(in_dim1, idx1) if in_dim1 is not None else a for a, in_dim1 in zip(flat_args, flat_dims1)]
@@ -118,8 +118,7 @@ def get_bdim_choices(num_tensors):
 
     # All permutations of (-1, None)
     options = (-1, None)
-    for choice in itertools.product(options, repeat=num_tensors):
-        choices.append(choice)
+    choices.extend(itertools.product(options, repeat=num_tensors))
 
     assert choices[-1] == (None,) * num_tensors
     return tuple(choices[:-1])

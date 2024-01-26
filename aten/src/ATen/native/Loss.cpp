@@ -70,8 +70,7 @@ namespace {
   }
 }
 
-namespace at {
-namespace meta {
+namespace at::meta {
 
 TORCH_META_FUNC(smooth_l1_loss)
 (const Tensor& input, const Tensor& target, const int64_t reduction, double beta) {
@@ -98,9 +97,9 @@ TORCH_META_FUNC(mse_loss)
   maybe_get_output().resize_({});
 }
 
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(smooth_l1_stub);
 DEFINE_DISPATCH(smooth_l1_backward_stub);
@@ -146,10 +145,9 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
   TORCH_CHECK(
       targ_dim == 1 || targ_dim == 0,
       "0D or 1D target tensor expected, multi-target not supported");
-
   if (targ_dim == 1) {
     TORCH_CHECK(
-        input1.dim() == 2,
+        input1.dim() == 2 && input2.dim() == 2,
         "1D target tensor expects 2D input tensors, but found inputs with sizes ",
         input1.sizes(),
         " and ",
@@ -157,7 +155,7 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
         ".");
   } else {
     TORCH_CHECK(
-        input1.dim() == 1,
+        input1.dim() == 1 && input2.dim() == 1,
         "0D target tensor expects 1D input tensors, but found inputs with sizes ",
         input1.sizes(),
         " and ",
@@ -511,4 +509,4 @@ Tensor& mse_loss_backward_out(const Tensor& grad_output,
 Tensor l1_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
   return apply_loss_reduction((input - target).abs(), reduction);
 }
-}}  // namespace at::native
+}  // namespace at::native

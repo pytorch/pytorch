@@ -114,6 +114,7 @@ def main():
             f"source activate {env_path}",
             shell=True,
             capture_output=True,
+            check=False,
         )
         if base_source.returncode:
             raise OSError(
@@ -147,6 +148,7 @@ def main():
                 f"conda env config vars set {' '.join(env_spec.environment_variables)}",
                 shell=True,
                 capture_output=True,
+                check=False,
             )
             if env_set.returncode:
                 raise OSError(
@@ -160,6 +162,7 @@ def main():
                 f"source activate {env_path} && env",
                 shell=True,
                 capture_output=True,
+                check=True,
             ).stdout.decode("utf-8").strip().splitlines()
             for e in env_spec.environment_variables:
                 assert e in actual_env_vars, f"{e} not in envs"
@@ -173,6 +176,7 @@ def main():
             "python setup.py install --cmake",
             shell=True,
             capture_output=True,
+            check=True,
         )
 
         print("Checking configuration:")
@@ -189,6 +193,7 @@ def main():
             "print(stats.filter(lambda l: 'blas' in l.lower()))\"",
             shell=True,
             capture_output=True,
+            check=False,
         )
         if check_run.returncode:
             raise OSError(

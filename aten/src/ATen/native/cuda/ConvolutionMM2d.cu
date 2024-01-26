@@ -390,7 +390,7 @@ Tensor& slow_conv2d_forward_out_cuda(
     if (bias_.has_value() && bias_->defined()) {
       return bias_->expect_contiguous();
     }
-    return MaybeOwned<Tensor>::owned(c10::in_place);
+    return MaybeOwned<Tensor>::owned(std::in_place);
   }();
 
   slow_conv2d_forward(

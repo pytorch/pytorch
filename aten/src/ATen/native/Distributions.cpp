@@ -4,7 +4,6 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
 #include <c10/util/Exception.h>
-#include <c10/util/math_compat.h>
 #include <c10/util/Optional.h>
 
 #include <ATen/CPUGeneratorImpl.h>
@@ -142,8 +141,7 @@ int64_t sample_poisson(double lambda, at::CPUGeneratorImpl* generator) {
 
 } // namespace
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(bernoulli_tensor_stub);
 DEFINE_DISPATCH(bernoulli_scalar_stub);
@@ -470,7 +468,7 @@ Tensor _s_poisson_cpu(const Tensor& lambda, c10::optional<Generator> gen) {
     .add_output(ret)
     .add_input(lambda)
     .build();
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, ret.scalar_type(), "poisson_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Half, ret.scalar_type(), "poisson_cpu", [&] {
     CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
@@ -655,4 +653,4 @@ Tensor multinomial(
   return result;
 }
 
-}} // namespace at::native
+} // namespace at::native

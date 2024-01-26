@@ -8,7 +8,7 @@ load("@pytorch//tools/rules:cu.bzl", "cu_library")
 load("@pytorch//tools/config:defs.bzl", "if_cuda")
 load("@pytorch//:aten.bzl", "generate_aten", "intern_build_aten_ops")
 load(":build.bzl", "GENERATED_AUTOGRAD_CPP", "GENERATED_AUTOGRAD_PYTHON", "define_targets")
-load(":build_variables.bzl", "jit_core_sources", "lazy_tensor_ts_sources", "libtorch_core_sources", "libtorch_cuda_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "libtorch_nvfuser_generated_headers", "libtorch_nvfuser_runtime_sources", "libtorch_python_core_sources", "torch_cpp_srcs", "libtorch_python_cuda_sources", "libtorch_python_distributed_sources")
+load(":build_variables.bzl", "jit_core_sources", "lazy_tensor_ts_sources", "libtorch_core_sources", "libtorch_cuda_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "libtorch_python_core_sources", "torch_cpp_srcs", "libtorch_python_cuda_sources", "libtorch_python_distributed_sources")
 load(":ufunc_defs.bzl", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cuda_sources")
 load("//:tools/bazel.bzl", "rules")
 
@@ -413,6 +413,7 @@ cc_library(
         "@cuda//:cusolver",
         "@cuda//:nvrtc",
         "@cudnn",
+        "@cudnn_frontend",
     ],
     alwayslink = True,
 )
@@ -1452,7 +1453,10 @@ cu_library(
     # https://github.com/pytorch/pytorch/issues/79236
     # To solve it we add it into the `caffe2_cuda`,
     # this is also aligned with the CMake build.
-    srcs = [":caffe2_cu_srcs"] + ["torch/csrc/distributed/c10d/quantization/quantization_gpu.cu"],
+    srcs = [":caffe2_cu_srcs"] + [
+        "torch/csrc/distributed/c10d/intra_node_comm.cu",
+        "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
+    ],
     copts = CAFFE2_COPTS + torch_cuda_half_options,
     visibility = ["//visibility:public"],
     deps = [
@@ -1619,6 +1623,7 @@ cc_library(
         exclude = [
             "torch/csrc/cuda/python_nccl.cpp",
             "torch/csrc/cuda/nccl.cpp",
+            "torch/csrc/distributed/c10d/intra_node_comm.cu",
             "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
         ],
     )) + torch_sources,

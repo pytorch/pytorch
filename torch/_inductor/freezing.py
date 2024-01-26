@@ -9,6 +9,7 @@ from typing import Any, List, Optional, Tuple
 import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code
+from torch._functorch.aot_autograd import MutationType
 from torch._functorch.compile_utils import fx_graph_cse
 from torch._inductor.constant_folding import constant_fold, replace_node_with_constant
 
@@ -16,8 +17,6 @@ from torch._inductor.fx_passes.freezing_patterns import freezing_passes
 from torch._inductor.fx_passes.post_grad import view_to_reshape
 
 from . import config
-
-aten = torch.ops.aten
 
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -42,8 +41,18 @@ def replace_params_with_constants(
         for out_info in fw_metadata.output_info
         if out_info.base_idx is not None
     ]
+
+    # TODO (tmanlaibaatar) figure out why this is different
+    # from mutated_inp_runtime_indices
+    mutated_inps = [
+        i
+        for i, m in enumerate(fw_metadata.input_info)
+        if m.mutation_type
+        in (MutationType.MUTATED_IN_GRAPH, MutationType.MUTATED_OUT_GRAPH)
+    ]
+
     for i, (real_input, node) in enumerate(zip(flat_params, fake_inp_nodes)):
-        if i in fw_metadata.mutated_inp_indices or i in aliased_input_args:
+        if i in mutated_inps or i in aliased_input_args:
             preserved_arg_indices.append(i)
             continue
         replace_node_with_constant(gm, node, real_input)
@@ -79,9 +88,9 @@ def freeze(
     # See the details in fx_codegen_and_compile of compile_fx.py.
     view_to_reshape(aot_autograd_gm)
 
-    if torch._guards.TracingContext.get():
-        fw_metadata = torch._guards.TracingContext.get().fw_metadata
-        params_flat = torch._guards.TracingContext.get().params_flat
+    if tracing_context := torch._guards.TracingContext.try_get():
+        fw_metadata = tracing_context.fw_metadata
+        params_flat = tracing_context.params_flat
         assert fw_metadata is not None and params_flat is not None
 
         preserved_arg_indices = replace_params_with_constants(
@@ -125,7 +134,7 @@ class ErasedTensor(torch.Tensor):
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         erased_tensors = [
             e
-            for e in pytree.tree_flatten((args, kwargs))[0]
+            for e in pytree.arg_tree_leaves(*args, **kwargs)
             if isinstance(e, ErasedTensor)
         ]
         assert len(erased_tensors) > 0
@@ -153,7 +162,7 @@ def invalidate_eager_modules():
                 e_t = ErasedTensor(tensor, attr_name, mod)
             if isinstance(tensor, torch.nn.Parameter):
                 e_t.requires_grad_(True)
-                e_t._is_param = True
+                e_t._is_param = True  # type: ignore[attr-defined]
             setattr(mod, attr_name, e_t)
 
 
@@ -168,7 +177,7 @@ def discard_traced_gm_params(mod: torch.fx.GraphModule):
             e_t = ErasedTensor(tensor, attr_name, mod)
         if isinstance(tensor, torch.nn.Parameter):
             e_t.requires_grad_(True)
-            e_t._is_param = True
+            e_t._is_param = True  # type: ignore[attr-defined]
         setattr(mod, attr_name, e_t)
 
 

@@ -8,6 +8,8 @@ def partition_model(
         balance: List[int],
         devices: Optional[List[int]] = None):
     """
+    Partions the model accross multiple GPU devices.
+
     Given an :class:`nn.Sequential <torch.nn.Sequential>` module, partitions
     the model across multiple GPU devices according the provided ``balance``
     and ``devices``.

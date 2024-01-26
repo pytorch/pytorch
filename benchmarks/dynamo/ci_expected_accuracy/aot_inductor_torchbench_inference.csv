@@ -2,6 +2,10 @@ name,accuracy,graph_breaks
 
 
 
+torchrec_dlrm,eager_fail_to_run,0
+
+
+
 BERT_pytorch,fail_to_run,0
 
 
@@ -46,7 +50,51 @@ dcgan,pass,0
 
 
 
+demucs,pass,0
+
+
+
 densenet121,pass,0
+
+
+
+detectron2_fasterrcnn_r_101_c4,eager_fail_to_run,0
+
+
+
+detectron2_fasterrcnn_r_101_dc5,eager_fail_to_run,0
+
+
+
+detectron2_fasterrcnn_r_101_fpn,eager_fail_to_run,0
+
+
+
+detectron2_fasterrcnn_r_50_c4,eager_fail_to_run,0
+
+
+
+detectron2_fasterrcnn_r_50_dc5,eager_fail_to_run,0
+
+
+
+detectron2_fasterrcnn_r_50_fpn,eager_fail_to_run,0
+
+
+
+detectron2_maskrcnn_r_101_c4,eager_fail_to_run,0
+
+
+
+detectron2_maskrcnn_r_101_fpn,eager_fail_to_run,0
+
+
+
+detectron2_maskrcnn_r_50_c4,eager_fail_to_run,0
+
+
+
+detectron2_maskrcnn_r_50_fpn,eager_fail_to_run,0
 
 
 
@@ -74,23 +122,23 @@ functorch_maml_omniglot,pass,0
 
 
 
-hf_Albert,pass,0
+hf_Albert,fail_to_run,0
 
 
 
-hf_Bart,pass,0
+hf_Bart,fail_to_run,0
 
 
 
-hf_BigBird,fail_accuracy,0
+hf_BigBird,fail_to_run,0
 
 
 
-hf_DistilBert,pass,0
+hf_DistilBert,fail_to_run,0
 
 
 
-hf_GPT2,pass,0
+hf_GPT2,fail_to_run,0
 
 
 
@@ -98,7 +146,11 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
-hf_T5,pass,0
+hf_T5,fail_to_run,0
+
+
+
+hf_T5_base,eager_fail_to_run,0
 
 
 
@@ -106,7 +158,15 @@ hf_T5_large,pass_due_to_skip,0
 
 
 
-hf_Whisper,pass,0
+hf_Whisper,fail_to_run,0
+
+
+
+hf_clip,eager_fail_to_run,0
+
+
+
+hf_distil_whisper,fail_to_run,0
 
 
 
@@ -115,6 +175,10 @@ lennard_jones,pass,0
 
 
 llama,fail_to_run,0
+
+
+
+llama_v2_7b_16h,model_fail_to_load,0
 
 
 
@@ -127,6 +191,10 @@ mnasnet1_0,pass,0
 
 
 mobilenet_v2,pass,0
+
+
+
+mobilenet_v2_quantized_qat,model_fail_to_load,0
 
 
 
@@ -190,6 +258,10 @@ resnet50,pass,0
 
 
 
+resnet50_quantized_qat,model_fail_to_load,0
+
+
+
 resnext50_32x4d,pass,0
 
 
@@ -210,7 +282,7 @@ squeezenet1_1,pass,0
 
 
 
-stable_diffusion_text_encoder,pass,0
+stable_diffusion_text_encoder,fail_to_run,0
 
 
 
@@ -242,6 +314,10 @@ timm_vovnet,pass,0
 
 
 
+torch_multimodal_clip,pass,0
+
+
+
 tts_angular,fail_to_run,0
 
 
@@ -250,4 +326,8 @@ vgg16,pass,0
 
 
 
-yolov3,pass,0
+vision_maskrcnn,fail_to_run,0
+
+
+
+yolov3,fail_to_run,0

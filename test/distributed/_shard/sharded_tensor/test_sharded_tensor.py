@@ -6,6 +6,7 @@ import io
 import itertools
 import pickle
 import sys
+from typing import List
 import torch
 import torch.distributed as dist
 from torch.distributed import rpc
@@ -49,6 +50,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    TEST_CUDA
 )
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
@@ -113,7 +115,7 @@ class TestShardedTensorMetadata(TestCase):
             self.assertEqual(expected_st_metadata, st_metadata)
 
 class TestCreateTensorFromParams(TestCase):
-    @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 1, 'CUDA GPU is needed')
+    @skip_but_pass_in_sandcastle_if(not TEST_CUDA, 'CUDA GPU is needed')
     def test_empty(self):
         expected_dtype = torch.double
         tensor_properties = TensorProperties(
@@ -1594,7 +1596,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         # test ability to move st to CPU
         spec_before_move = st.sharding_spec()
         new_st = st.cpu(process_group=gloo_pg)
-        # return a copy of orginal st
+        # return a copy of original st
         self.assertFalse(st is new_st)
         # check the spec is still ChunkShardingSpec
         spec_after_move = new_st.sharding_spec()
@@ -1626,7 +1628,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
         st = sharded_tensor.zeros(mixed_spec, h, w, process_group=gloo_pg)
         new_st = st.cpu()
-        # return a copy of orginal st
+        # return a copy of original st
         self.assertFalse(st is new_st)
         # check the spec is still ChunkShardingSpec
         spec_after_move = new_st.sharding_spec()

@@ -227,7 +227,7 @@ void histogramdd_out_cpu_template(const Tensor& self, const c10::optional<Tensor
         bin_edges_contig[dim] = bin_edges[dim].contiguous();
     }
 
-    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, self.scalar_type(), "histogram_cpu", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "histogram_cpu", [&]() {
         histogramdd_cpu_contiguous<scalar_t, bin_algorithm>(
                 hist, bin_edges_contig, reshaped_input, reshaped_weight);
     });

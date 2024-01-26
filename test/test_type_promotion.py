@@ -18,6 +18,7 @@ from torch.testing._internal.common_dtype import (
 
 
 import numpy as np
+import operator
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -550,37 +551,37 @@ class TestTypePromotion(TestCase):
                 name="lt",
                 out_op=lambda x, y, d: torch.lt(x, y, out=torch.empty(0, dtype=torch.bool, device=d)),
                 ret_op=lambda x, y: torch.lt(x, y),
-                compare_op=lambda x, y: x < y,
+                compare_op=operator.lt,
             ),
             dict(
                 name="le",
                 out_op=lambda x, y, d: torch.le(x, y, out=torch.empty(0, dtype=torch.bool, device=d)),
                 ret_op=lambda x, y: torch.le(x, y),
-                compare_op=lambda x, y: x <= y,
+                compare_op=operator.le,
             ),
             dict(
                 name="gt",
                 out_op=lambda x, y, d: torch.gt(x, y, out=torch.empty(0, dtype=torch.bool, device=d)),
                 ret_op=lambda x, y: torch.gt(x, y),
-                compare_op=lambda x, y: x > y,
+                compare_op=operator.gt,
             ),
             dict(
                 name="ge",
                 out_op=lambda x, y, d: torch.ge(x, y, out=torch.empty(0, dtype=torch.bool, device=d)),
                 ret_op=lambda x, y: torch.ge(x, y),
-                compare_op=lambda x, y: x >= y,
+                compare_op=operator.ge,
             ),
             dict(
                 name="eq",
                 out_op=lambda x, y, d: torch.eq(x, y, out=torch.empty(0, dtype=torch.bool, device=d)),
                 ret_op=lambda x, y: torch.eq(x, y),
-                compare_op=lambda x, y: x == y,
+                compare_op=operator.eq,
             ),
             dict(
                 name="ne",
                 out_op=lambda x, y, d: torch.ne(x, y, out=torch.empty(0, dtype=torch.bool, device=d)),
                 ret_op=lambda x, y: torch.ne(x, y),
-                compare_op=lambda x, y: x != y,
+                compare_op=operator.ne,
             ),
         ]
         for op in comparison_ops:
@@ -627,12 +628,12 @@ class TestTypePromotion(TestCase):
     @onlyNativeDeviceTypes
     def test_complex_assertraises(self, device):
         comparison_ops = [
-            dict(name="lt", compare_op=lambda x, y: x < y, ),
-            dict(name="le", compare_op=lambda x, y: x <= y, ),
-            dict(name="gt", compare_op=lambda x, y: x > y, ),
-            dict(name="ge", compare_op=lambda x, y: x >= y, ),
-            dict(name="eq", compare_op=lambda x, y: x == y, ),
-            dict(name="ne", compare_op=lambda x, y: x != y, ),
+            dict(name="lt", compare_op=operator.lt, ),
+            dict(name="le", compare_op=operator.le, ),
+            dict(name="gt", compare_op=operator.gt, ),
+            dict(name="ge", compare_op=operator.ge, ),
+            dict(name="eq", compare_op=operator.eq, ),
+            dict(name="ne", compare_op=operator.ne, ),
         ]
         for op in comparison_ops:
             is_cuda = torch.device(device).type == 'cuda'
@@ -678,8 +679,10 @@ class TestTypePromotion(TestCase):
         self.assertEqual(torch.promote_types(torch.float, torch.int), torch.float)
         self.assertEqual(torch.promote_types(torch.float, torch.double), torch.double)
         self.assertEqual(torch.promote_types(torch.int, torch.uint8), torch.int)
-        self.assertEqual(torch.promote_types(torch.float8_e5m2, torch.float), torch.float)
-        self.assertEqual(torch.promote_types(torch.float, torch.float8_e4m3fn), torch.float)
+        with self.assertRaisesRegex(RuntimeError, "Promotion for Float8 Types is not supported"):
+            self.assertEqual(torch.promote_types(torch.float8_e5m2, torch.float), torch.float)
+        with self.assertRaisesRegex(RuntimeError, "Promotion for Float8 Types is not supported"):
+            self.assertEqual(torch.promote_types(torch.float, torch.float8_e4m3fn), torch.float)
 
     @float_double_default_dtype
     def test_promote_self(self, device):
@@ -938,8 +941,10 @@ class TestTypePromotion(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @float_double_default_dtype
     @onlyCPU
-    @dtypes(*list(itertools.product(set(numpy_to_torch_dtype_dict.values()),
-                                    set(numpy_to_torch_dtype_dict.values()))))
+    # NB: skip uint16,32,64 as PyTorch doesn't implement promotion for them
+    @dtypes(*list(itertools.product(
+        set(numpy_to_torch_dtype_dict.values()) - {torch.uint16, torch.uint32, torch.uint64},
+        set(numpy_to_torch_dtype_dict.values()) - {torch.uint16, torch.uint32, torch.uint64})))
     def test_numpy_array_binary_ufunc_promotion(self, device, dtypes):
         import operator
         np_type = torch_to_numpy_dtype_dict[dtypes[0]]
@@ -1164,6 +1169,19 @@ class TestTypePromotion(TestCase):
                 if inp.dtype in floating_types() or exp_type == inp.dtype:
                     actual = torch.clamp_max_(inp, val)
                     self.assertEqual(actual, expected, exact_dtype=False)
+
+    @onlyNativeDeviceTypes
+    def test_ternary_out_promotion(self, device):
+        for op in [torch.addcdiv, torch.addcmul]:
+            for dtype in [torch.float32, torch.cfloat]:
+                prom_dtype = torch.float64 if dtype is torch.float32 else torch.cdouble if dtype is torch.cfloat else dtype
+                x = torch.rand(3, device=device, dtype=dtype)
+                y = torch.empty(3, device=device, dtype=dtype)
+                y_promo = torch.empty(3, device=device, dtype=prom_dtype)
+                op(x, x, x, out=y)
+                op(x, x, x, out=y_promo)
+                self.assertEqual(y, y_promo.to(dtype=dtype))
+
 
 
 
