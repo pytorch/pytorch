@@ -8,7 +8,6 @@ from typing import List
 
 from torchgen.api.autograd import NativeFunctionWithDifferentiabilityInfo
 from torchgen.api.types import (
-    Argument,
     BaseCType,
     Binding,
     intArrayRefT,
@@ -22,7 +21,7 @@ from torchgen.api.types import (
     VectorCType,
 )
 from torchgen.code_template import CodeTemplate
-from torchgen.model import NativeFunction, OptionalType
+from torchgen.model import Argument, NativeFunction, OptionalType
 from torchgen.utils import FileManager
 
 from .gen_inplace_or_view_type import (
@@ -38,7 +37,6 @@ FUNCTION_DECLARATION = CodeTemplate(
     """\
 #ifdef _WIN32
 struct ${op} : public ${superclass} {
-  TORCH_API ${op}() = default;
 #else
 struct TORCH_API ${op} : public ${superclass} {
 #endif
@@ -85,11 +83,11 @@ at::Tensor ${op}::operator()(const at::Tensor& ${call_input_name}) {
 )
 
 
-def is_symint_or_tensor(arg: Argument):
+def is_symint_or_tensor(arg: Argument) -> bool:
     return arg.type.is_tensor_like() or arg.type.is_symint_like()
 
 
-def maybe_convert_ref_to_value_type(nctype: NamedCType):
+def maybe_convert_ref_to_value_type(nctype: NamedCType) -> NamedCType:
     nctype = nctype.remove_const_ref()
     arg_type = nctype.type
     arg_name = nctype.name
@@ -99,11 +97,11 @@ def maybe_convert_ref_to_value_type(nctype: NamedCType):
         val_type = VectorCType(BaseCType(longT))
     elif arg_type == BaseCType(symIntArrayRefT):
         val_type = VectorCType(BaseCType(SymIntT))
-    elif type == BaseCType(optionalIntArrayRefT) or type == OptionalCType(
+    elif arg_type == BaseCType(optionalIntArrayRefT) or arg_type == OptionalCType(
         BaseCType(intArrayRefT)
     ):
         val_type = OptionalCType(VectorCType(BaseCType(longT)))
-    elif type == BaseCType(optionalSymIntArrayRefT) or type == OptionalCType(
+    elif arg_type == BaseCType(optionalSymIntArrayRefT) or arg_type == OptionalCType(
         BaseCType(symIntArrayRefT)
     ):
         val_type = OptionalCType(VectorCType(BaseCType(SymIntT)))
@@ -112,7 +110,7 @@ def maybe_convert_ref_to_value_type(nctype: NamedCType):
 
 
 # TODO: This is dumb; merge this with the previous somehow
-def maybe_convert_ref_to_value_name(nctype: NamedCType, name: str):
+def maybe_convert_ref_to_value_name(nctype: NamedCType, name: str) -> str:
     val_name = name
     arg_type = nctype.type
     if arg_type == BaseCType(intArrayRefT) or arg_type == BaseCType(symIntArrayRefT):
@@ -120,7 +118,7 @@ def maybe_convert_ref_to_value_name(nctype: NamedCType, name: str):
     return val_name
 
 
-def get_value_type_binding(binding: Binding):
+def get_value_type_binding(binding: Binding) -> Binding:
     return Binding(
         name=binding.name,
         nctype=maybe_convert_ref_to_value_type(binding.nctype),
@@ -129,7 +127,7 @@ def get_value_type_binding(binding: Binding):
     )
 
 
-def returns_multi_tensor(fn: NativeFunction):
+def returns_multi_tensor(fn: NativeFunction) -> bool:
     returns = fn.func.returns
     assert len(returns) == 1
     returns_list_like = returns[0].type.is_list_like() is not None
@@ -148,6 +146,7 @@ def process_function(fn: NativeFunction, template: CodeTemplate) -> str:
     initializers = []
     for b in non_self_bindings:
         name = b.nctype.name
+        assert isinstance(name, str)
         initializers.append(
             f"{name}({maybe_convert_ref_to_value_name(b.nctype, name)})"
         )
@@ -169,21 +168,21 @@ def process_function(fn: NativeFunction, template: CodeTemplate) -> str:
         op_call += f"[{view_idx_name}]"
 
     # Handle any symints, which often show up in lists.
-    symint_bindings = [b for b in non_self_bindings if b.argument.type.is_symint_like()]
+    symint_bindings = [
+        b
+        for b in non_self_bindings
+        if isinstance(b.argument, Argument) and b.argument.type.is_symint_like()
+    ]
     symints_vec = "symints"
     get_symints = []
     set_symints = []
-
-    def compute_num_symints(exprs):
-        if len(exprs) == 0:
-            return "0"
-        return " + ".join(exprs)
 
     if len(symint_bindings) > 0:
         set_symints.append("auto i = 0;")
 
     num_exprs = []
     for i, b in enumerate(symint_bindings):
+        assert isinstance(b.argument, Argument)
         if b.argument.type.is_list_like():
             num_expr = f"{b.name}.size()"
             num_exprs.append(num_expr)
@@ -208,21 +207,23 @@ def process_function(fn: NativeFunction, template: CodeTemplate) -> str:
         if i < len(symint_bindings) - 1:
             set_symints.append(f"i += {num_expr};")
 
-    num_symints = compute_num_symints(num_exprs)
+    num_symints = "0" if len(num_exprs) == 0 else " + ".join(num_exprs)
     if len(symint_bindings) > 0:
         get_symints.insert(0, f"{symints_vec}.reserve({num_symints});")
 
     # Handle any tensors. Assumes no tensor lists, which is currently the case for views.
-    tensor_bindings = [b for b in non_self_bindings if b.argument.type.is_tensor_like()]
+    tensor_bindings = [
+        b
+        for b in non_self_bindings
+        if isinstance(b.argument, Argument) and b.argument.type.is_tensor_like()
+    ]
     tensor_list = [b.name for b in tensor_bindings]
     set_tensors = []
     for i, b in enumerate(tensor_bindings):
         set_tensor = f"{b.name} = tensors[{i}];"
         set_tensors.append(set_tensor)
 
-    initializer_list = (
-        f": {', '.join([i for i in initializers])}" if len(initializers) > 0 else ""
-    )
+    initializer_list = f": {', '.join(initializers)}" if len(initializers) > 0 else ""
 
     return template.substitute(
         op=view_func_name(fn),

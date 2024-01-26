@@ -28,7 +28,7 @@ struct ChainedViewFunc : public ViewFunc {
   ChainedViewFunc(
       const std::shared_ptr<ViewFunc>&,
       const std::shared_ptr<ViewFunc>&);
-  virtual ~ChainedViewFunc() {};
+  virtual ~ChainedViewFunc() override {};
   virtual std::vector<c10::SymInt> get_symints() override;
   virtual void set_symints(const std::vector<c10::SymInt>&) override;
   virtual std::vector<at::Tensor> get_tensors() override;
@@ -47,7 +47,7 @@ private:
 
 struct ErroringViewFunc : public ViewFunc {
   ErroringViewFunc(const std::string& error_msg) : error_msg(error_msg) {}
-  virtual ~ErroringViewFunc() {};
+  virtual ~ErroringViewFunc() override {};
   virtual std::vector<c10::SymInt> get_symints() override {
     return {};
   }
