@@ -27,6 +27,7 @@ from ..utils import (
     cache_on_self,
     get_fused_kernel_name,
     is_welford_reduction,
+    parallel_num_threads,
     sympy_index_symbol,
     sympy_product,
     sympy_subs,
@@ -305,13 +306,6 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
             ]
         )
     return prefix
-
-
-def parallel_num_threads():
-    threads = config.cpp.threads
-    if threads < 1:
-        threads = torch.get_num_threads()
-    return threads
 
 
 @functools.lru_cache
@@ -1254,9 +1248,7 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def acosh(x):
-        # For real x, acosh(x) = log(x + sqrt(x**2 -1))
-        vec_one = f"decltype({x})(1)"
-        return f"({x} + ({x}*{x} - {vec_one}).sqrt()).log()"
+        return f"{x}.acosh()"
 
     @staticmethod
     def relu(x):
