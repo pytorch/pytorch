@@ -964,6 +964,7 @@ def compile_fx(
         with config.patch(
             {
                 "cpp_wrapper": False,
+                "triton.multi_kernel": False,
                 "triton.autotune_cublasLt": False,
                 "triton.cudagraphs": False,
                 "triton.store_cubin": True,

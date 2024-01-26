@@ -8750,7 +8750,9 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
                 torch.randn(1, N, K, device=GPU_TYPE),
             ]
             code = run_and_get_triton_code(fn_opt, *inps)
-            self.assertEqual(code.count("tl.store"), 1)
+            self.assertEqual(
+                code.count("tl.store"), 2 if config.triton.multi_kernel else 1
+            )
             self.assertTrue("out_ptr1" in code)
             self.assertFalse("out_ptr0" in code)
             self.assertEqual(fn_opt(*inps), fn(*inps))
