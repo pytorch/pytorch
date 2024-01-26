@@ -16024,6 +16024,11 @@ dedent """
             with torch.jit.fuser(fuser_name):
                 self.checkModule(MyModule(), (x, y))
 
+    def test_zero_dimension_tensor_trace(self):
+        def f(x):
+            return x[x > 0]
+        jf = torch.jit.trace(f, torch.tensor(2., device="cpu"))
+
 # known to be failing in tracer
 EXCLUDE_TRACED = {
     # The following fail due to #12024.

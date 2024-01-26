@@ -161,7 +161,7 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
 
     auto src_option =
         c10::TensorOptions().device(storage.device()).dtype(at::kByte);
-    auto src_tensor = at::empty({0}, {}, src_option).set_(storage);
+    auto src_tensor = at::empty({0}, src_option).set_(storage);
     src_tensor.resize_({size_bytes});
 
     // When using resize_ to replace resize_bytes_xxx, in some cases
