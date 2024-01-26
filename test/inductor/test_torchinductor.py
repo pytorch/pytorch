@@ -718,10 +718,12 @@ class CommonTemplate:
             return c + d
 
         for dtype in [torch.complex32, torch.complex64, torch.complex128]:
-            x = torch.tensor([1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1],
-                             dtype=dtype)
-            y = torch.tensor([1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1],
-                             dtype=dtype)
+            x = torch.tensor(
+                [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1], dtype=dtype
+            )
+            y = torch.tensor(
+                [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1], dtype=dtype
+            )
 
             _, code = run_and_get_code(fn, x, y)
             self.assertEqual(
