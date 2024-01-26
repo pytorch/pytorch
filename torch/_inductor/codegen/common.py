@@ -35,8 +35,8 @@ from ..utils import (
     free_symbol_startswith,
     IndentedBuffer,
     sympy_dot,
+    sympy_index_symbol,
     sympy_subs,
-    sympy_symbol,
     unique,
 )
 from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
@@ -1193,7 +1193,7 @@ class Kernel(CodeGen):
                         )
 
                     self.indirect_max_sizes[map_key] = (size, self.index_to_str(size))
-                return sympy_symbol(str(var))
+                return sympy_index_symbol(str(var))
 
             @staticmethod
             def load(name: str, index: sympy.Expr) -> CSEVariable:
