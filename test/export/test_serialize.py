@@ -754,6 +754,11 @@ class TestSerializeCustomClass(TestCase):
                     node.args = (arg0, custom_node)
 
         serialized_vals = serialize(ep)
+
+        ep_str = serialized_vals.exported_program.decode("utf-8")
+        assert "class_fqn" in ep_str
+        assert custom_obj._type().qualified_name() in ep_str
+
         deserialized_ep = deserialize(serialized_vals)
 
         for node in deserialized_ep.graph.nodes:
@@ -763,6 +768,7 @@ class TestSerializeCustomClass(TestCase):
             ):
                 arg = node.args[0]
                 self.assertTrue(isinstance(arg, torch._C.ScriptObject))
+                self.assertEqual(arg._type(), custom_obj._type())
                 self.assertEqual(arg.__getstate__(), custom_obj.__getstate__())
                 self.assertEqual(arg.top(), 7)
 
