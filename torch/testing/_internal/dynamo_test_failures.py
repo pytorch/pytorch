@@ -2181,7 +2181,6 @@ dynamo_expected_failures = {
     "TestAutograd.test_backward_with_inputs",  # test_autograd
     "TestAutograd.test_setitem",  # test_autograd
     "TestAutogradDeviceTypeCPU.test_inplace_on_view_python_cpu",  # test_autograd
-    "TestAutogradForwardMode.test_make_dual_inference_tensor_in_inference_mode",  # test_autograd
     "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_normal_mode_inplace_op",  # test_autograd
     "TestAutograd.test_custom_function_save_for_forward",  # test_autograd
     "TestAutograd.test_sparse_mm_backward",  # test_autograd
@@ -2745,7 +2744,6 @@ dynamo_expected_failures = {
     "TestPythonDispatch.test_subclass_autograd_device_check",  # test_python_dispatch
     "TestPythonDispatch.test_data_ptr_respects_numel_slow_path",  # test_python_dispatch
     "TestPythonDispatch.test_make_subclass_with_modes",  # test_python_dispatch
-    "TestPythonRegistration.test_override_aten_ops_with_multiple_libraries",  # test_python_dispatch
     "TestPythonDispatch.test_dispatch_super_call",  # test_python_dispatch
     "TestPythonDispatch.test_subclass_priority",  # test_python_dispatch
     "TestPythonDispatch.test_exception_handling",  # test_python_dispatch
