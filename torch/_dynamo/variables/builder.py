@@ -1572,6 +1572,9 @@ def _automatic_dynamic(
         # Get symbolic contexts for inner tensors
         attrs, _ = type(e).__tensor_flatten__(e)
         inner_contexts = {}  # mapping from attr -> symbolic context
+        # include the base if the tensor is a view
+        if e._is_view():
+            attrs.append("_base")
         for attr in attrs:
             inner_tensor = getattr(e, attr)
             inner_source = AttrSource(source, attr)

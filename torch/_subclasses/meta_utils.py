@@ -364,11 +364,17 @@ class MetaConverter:
                         StatelessSymbolicContext,
                     )
 
-                    if shape_env and not t.is_nested and not t._base.is_nested:
-                        base_symbolic_context = StatelessSymbolicContext(
-                            dynamic_sizes=[DimDynamic.STATIC] * t._base.dim(),
-                            constraint_sizes=[None] * t._base.dim(),
-                        )
+                    if shape_env:
+                        if is_traceable_wrapper_subclass(t):
+                            # TODO: Do this for dense tensors too
+                            base_symbolic_context = symbolic_context.inner_contexts[
+                                "_base"
+                            ]
+                        else:
+                            base_symbolic_context = StatelessSymbolicContext(
+                                dynamic_sizes=[DimDynamic.STATIC] * t._base.dim(),
+                                constraint_sizes=[None] * t._base.dim(),
+                            )
                     else:
                         base_symbolic_context = None
                     base = self.meta_tensor(
@@ -428,19 +434,41 @@ class MetaConverter:
                         # So we may have to do *two* views out of the base to
                         # recreate this situation.
                         def _view_from_base(base, t):
-                            if t.is_nested:
-                                # Nested tensors do not support as_strided, and
-                                # hence,always have _view_func available.
-                                #
-                                # The unsafe version of _view_func omits
-                                # checking whether the base passed in has the same
-                                # metadata as the original base the view_func
-                                # was originally executed with. (1) It is OK here,
-                                # because we're calling it on the meta-ified base,
-                                # so the metadata is guaranteed to be the same.
-                                # (2) It is necessary because we don't actually
-                                # want to guard on the base's metadata here.
-                                return t._view_func_unsafe(base)
+                            if is_traceable_wrapper_subclass(t):
+                                # fake-ify t naively; view relationship isn't correct yet
+                                (
+                                    sizes,
+                                    strides,
+                                    storage_offset,
+                                ) = sym_sizes_strides_storage_offset(t, source)
+
+                                fake_t = metafy_subclass(
+                                    t, outer_size=sizes, outer_stride=strides
+                                )
+
+                                real_to_fake_mapping = {}
+                                attrs, _ = fake_t.__tensor_flatten__()
+                                for attr in attrs:
+                                    real_to_fake_mapping[getattr(t, attr)] = getattr(
+                                        fake_t, attr
+                                    )
+
+                                def symint_visitor_fn(s):
+                                    # TODO: handle this
+                                    return s
+
+                                def tensor_visitor_fn(t):
+                                    # assume the only closed-over tensors we run into
+                                    # will be one of the inner tensors
+                                    return real_to_fake_mapping.get(t, t)
+
+                                # replay the view, swapping out any non-symbolic SymInts
+                                # or real tensors for symbolic SymInts or fake tensors
+                                fake_t = t._full_view_func_unsafe(
+                                    base, symint_visitor_fn, tensor_visitor_fn
+                                )
+                                return fake_t
+
                             else:
                                 (
                                     sizes,
