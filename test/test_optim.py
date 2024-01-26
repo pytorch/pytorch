@@ -412,8 +412,8 @@ class TestOptimRenewed(TestCase):
 
                 if optim_cls.__name__ == "RAdam":
                     # RAdam has six intermediates with capturable
-                    # num, unrect_step_size, zeros, ones, buffer, grouped_grads
-                    nintermediates = 6
+                    # num, unrect_step_size, buffer, grouped_grads
+                    nintermediates = 4
 
             elif optim_cls.__name__ in ["NAdam", "Adagrad", "RMSprop"]:
                 # NAdam uses two intermediates at the same time (grads & exp_avg_sq_sqrt)
