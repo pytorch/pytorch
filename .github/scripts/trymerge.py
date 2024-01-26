@@ -1116,9 +1116,8 @@ class GitHubPR:
 
         # Mention PR co-authors
         for author_login, author_name in self.get_authors().items():
-            if author_login == self.get_pr_creator_login():
-                continue
-            msg += f"\nCo-authored-by: {author_name}"
+            if author_login != self.get_pr_creator_login():
+                msg += f"\nCo-authored-by: {author_name}"
 
         msg += f"\nPull Request resolved: {self.get_pr_url()}\n"
         msg += f"Approved by: {approved_by_urls}\n"
