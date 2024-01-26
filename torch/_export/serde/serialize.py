@@ -347,7 +347,8 @@ class GraphModuleSerializer:
         elif isinstance(node.meta['val'], (int, bool, str, float, type(None))):
             graph_input = self.serialize_input(node.meta['val'])
         elif isinstance(node.meta['val'], export_ScriptObjectMeta):
-            graph_input = Argument.create(as_custom_obj=CustomObjArgument(name=node.name))
+            class_fqn = node.meta["val"].class_fqn
+            graph_input = Argument.create(as_custom_obj=CustomObjArgument(name=node.name, class_fqn=class_fqn))
             self.graph_state.script_object_metas[node.name] = self.serialize_script_obj_meta(node.meta["val"])
         else:
             raise AssertionError(f"Unimplemented graph input type: {node.meta['val']}")
@@ -487,7 +488,8 @@ class GraphModuleSerializer:
 
     def serialize_script_obj_meta(self, script_obj_meta: export_ScriptObjectMeta) -> ScriptObjectMeta:
         return ScriptObjectMeta(
-            constant_name=script_obj_meta.constant_name
+            constant_name=script_obj_meta.constant_name,
+            class_fqn=script_obj_meta.class_fqn,
         )
 
     def serialize_sym_op_inputs(self, op, args) -> List[NamedArgument]:
@@ -564,7 +566,7 @@ class GraphModuleSerializer:
                 return Argument.create(as_sym_bool=SymBoolArgument.create(as_name=arg.name))
             else:
                 if isinstance(arg.meta["val"], export_ScriptObjectMeta):
-                    return Argument.create(as_custom_obj=CustomObjArgument(name=arg.name))
+                    return Argument.create(as_custom_obj=CustomObjArgument(name=arg.name, class_fqn=arg.meta["val"].class_fqn))
                 return Argument.create(as_tensor=TensorArgument(name=arg.name))
         elif isinstance(arg, inductor_tensor_buffers):
             # Other branches are for arguments in fx node.
@@ -688,7 +690,8 @@ class GraphModuleSerializer:
             # serialize/deserialize function.
             custom_obj_name = f"_custom_obj_{len(self.custom_objs)}"
             self.custom_objs[custom_obj_name] = arg
-            return Argument.create(as_custom_obj=CustomObjArgument(custom_obj_name))
+            class_fqn = arg._type().qualified_name()  # type: ignore[attr-defined]
+            return Argument.create(as_custom_obj=CustomObjArgument(custom_obj_name, class_fqn))
         else:
             raise SerializeError(f"Unsupported argument type: {type(arg)}")
 
@@ -746,7 +749,7 @@ class GraphModuleSerializer:
             assert isinstance(spec.arg, ep.CustomObjArgument)
             return InputSpec.create(
                 custom_obj=InputToCustomObjSpec(
-                    arg=CustomObjArgument(name=spec.arg.name),
+                    arg=CustomObjArgument(name=spec.arg.name, class_fqn=spec.arg.class_fqn),
                     custom_obj_name=spec.target,
                 )
             )
@@ -811,7 +814,7 @@ class GraphModuleSerializer:
         elif isinstance(x, ep.ConstantArgument):
             return self.serialize_input(x.value)
         elif isinstance(x, ep.CustomObjArgument):
-            return Argument.create(as_custom_obj=CustomObjArgument(name=x.name))
+            return Argument.create(as_custom_obj=CustomObjArgument(name=x.name, class_fqn=x.class_fqn))
         else:
             raise AssertionError("TODO")
 
@@ -1154,7 +1157,8 @@ class GraphModuleDeserializer:
 
     def deserialize_script_obj_meta(self, script_obj_meta: ScriptObjectMeta) -> export_ScriptObjectMeta:
         return export_ScriptObjectMeta(
-            constant_name=script_obj_meta.constant_name
+            constant_name=script_obj_meta.constant_name,
+            class_fqn=script_obj_meta.class_fqn,
         )
 
     def deserialize_graph_output(self, output) -> torch.fx.Node:
@@ -1296,10 +1300,10 @@ class GraphModuleDeserializer:
                 arg=ep.TensorArgument(name=i.tensor_constant.arg.name),
                 target=i.tensor_constant.tensor_constant_name,
             )
-        elif i.custom_obj is not None:
+        elif i.type == "custom_obj":
             return ep.InputSpec(
                 kind=ep.InputKind.CUSTOM_OBJ,
-                arg=ep.CustomObjArgument(name=i.custom_obj.arg.name),
+                arg=ep.CustomObjArgument(name=i.custom_obj.arg.name, class_fqn=i.custom_obj.arg.class_fqn),
                 target=i.custom_obj.custom_obj_name,
             )
         else:
