@@ -731,7 +731,8 @@ known_failing_tests = {
     "test_hook_edge_case_when_called_with_grad",  # RuntimeError: specifying inputs= with .backward() not yet
     "test_hooks",  # torch._dynamo.exc.Unsupported: inline in skipfiles
     "test_inplace_on_view_backward",  # RuntimeError: compiled_autograd does not support create_graph
-    "test_multi_grad_hooks",  # RuntimeError: specifying inputs= with .backward() not yet implemented for compiled autograd
+    "test_multi_grad_any_hooks",  # RuntimeError: specifying inputs= with .backward() not yet implemented for compiled autograd
+    "test_multi_grad_all_hooks",  # RuntimeError: specifying inputs= with .backward() not yet implemented for compiled autograd
     "test_nested_anomaly_detect_nan",  # RuntimeError: compiled_autograd does not support create_graph
     "test_nested_anomaly_printstack_cleanup",  # RuntimeError: compiled_autograd does not support create_graph
     "test_once_differentiable",  # RuntimeError: compiled_autograd does not support create_graph
