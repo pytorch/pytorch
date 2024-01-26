@@ -987,7 +987,7 @@ def gen_pyi(
     for binop in ["add", "sub"]:
         unsorted_function_hints[binop].append(
             f"def {binop}(input: Union[Tensor, Number, _complex], other: Union[Tensor, Number, _complex], "
-            "*, alpha: Optional[Number, _complex] = 1, out: Optional[Tensor] = None) -> Tensor: ..."
+            "*, alpha: Optional[Union[Number, _complex]] = 1, out: Optional[Tensor] = None) -> Tensor: ..."
         )
 
     native_functions = parse_native_yaml(
@@ -1213,7 +1213,7 @@ def gen_pyi(
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
                 f"def {binop}(self, other: Union[Tensor, Number, _complex, torch.SymInt, torch.SymFloat], "
-                f"*, alpha: Optional[Number, _complex] = 1{out_suffix})"
+                f"*, alpha: Optional[Union[Number, _complex]] = 1{out_suffix})"
                 " -> Tensor: ..."
             )
     simple_conversions = [
