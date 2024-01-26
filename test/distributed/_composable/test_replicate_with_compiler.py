@@ -141,6 +141,8 @@ class ReplicateTest(MultiProcessTestCase):
                 compiled_optim.step()
                 # Right now we have to use `set_to_none=False`, otherwise
                 # the backward will be recompiled every iteration.
+                # With `set_to_none=False`, it will only be recompiled once.
+                # https://github.com/pytorch/pytorch/issues/118435
                 compiled_optim.zero_grad(set_to_none=False)
                 optim.step()
                 optim.zero_grad()
