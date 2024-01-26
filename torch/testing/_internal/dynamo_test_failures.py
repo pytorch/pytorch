@@ -1874,7 +1874,6 @@ dynamo_expected_failures = {
     "TestNamedTensor.test_addcmul_addcdiv",  # test_namedtensor
     "TestNamedTensor.test_big_tensor_repr_has_names",  # test_namedtensor
     "TestNamedTensor.test_unsupported_op_error_msg",  # test_namedtensor
-    "TestNamedTensor.test_none_names_refcount",  # test_namedtensor
     "TestNamedTensor.test_addmm",  # test_namedtensor
     "TestNamedTensor.test_pow_special",  # test_namedtensor
     "TestNamedTensor.test_autograd_ignores_names",  # test_namedtensor
