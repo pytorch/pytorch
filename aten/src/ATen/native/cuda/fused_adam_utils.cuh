@@ -119,8 +119,7 @@ struct FusedAdamMathFunctor {
       const double& eps,
       const bool& maximize,
       const float* grad_scale_ptr,
-      const float* found_inf_ptr,
-      const ADAM_MODE adam_mode) {
+      const float* found_inf_ptr) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
     const double lr_double = lr_ptr ? *lr_ptr : lr;
