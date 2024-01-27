@@ -437,6 +437,7 @@ class NNModuleVariable(VariableTracker):
                     num_nodes_need_update_metadata -= 1
                     if num_nodes_need_update_metadata < 0:
                         break
+                    # restore the source_fn_stack to be nn module.
                     if (
                         "source_fn_stack" in node.meta
                         and len(node.meta["source_fn_stack"]) > 0
@@ -445,6 +446,21 @@ class NNModuleVariable(VariableTracker):
                             self.module_key,
                             type(self.module),
                         )
+                    # remove the additional stack trace caused by fwd inlining
+                    if "stack_trace" in node.meta and len(node.meta["stack_trace"]) > 0:
+                        splited = node.meta["stack_trace"].split("\n")
+                        # handle the cases where make_fx is called.
+                        if (
+                            len(splited) > 7
+                            and "_dynamo/variables/inline_helper.py" in splited[-5]
+                        ):
+                            node.meta["stack_trace"] = "\n".join(splited[:-7]) + "\n"
+                        # handle the case for lifted parameters.
+                        elif (
+                            len(splited) > 4
+                            and "return forward_call(*args, **kwargs)" in splited[-2]
+                        ):
+                            node.meta["stack_trace"] = "\n".join(splited[:-3]) + "\n"
                 return res
             # Example: `self.layer.forward(x)`
             # This is used for explicit calling `forward` in a forward function.
