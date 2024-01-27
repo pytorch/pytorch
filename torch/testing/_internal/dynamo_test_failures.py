@@ -1874,7 +1874,6 @@ dynamo_expected_failures = {
     "TestNamedTensor.test_addcmul_addcdiv",  # test_namedtensor
     "TestNamedTensor.test_big_tensor_repr_has_names",  # test_namedtensor
     "TestNamedTensor.test_unsupported_op_error_msg",  # test_namedtensor
-    "TestNamedTensor.test_none_names_refcount",  # test_namedtensor
     "TestNamedTensor.test_addmm",  # test_namedtensor
     "TestNamedTensor.test_pow_special",  # test_namedtensor
     "TestNamedTensor.test_autograd_ignores_names",  # test_namedtensor
@@ -2746,7 +2745,6 @@ dynamo_expected_failures = {
     "TestPythonDispatch.test_subclass_autograd_device_check",  # test_python_dispatch
     "TestPythonDispatch.test_data_ptr_respects_numel_slow_path",  # test_python_dispatch
     "TestPythonDispatch.test_make_subclass_with_modes",  # test_python_dispatch
-    "TestPythonRegistration.test_override_aten_ops_with_multiple_libraries",  # test_python_dispatch
     "TestPythonDispatch.test_dispatch_super_call",  # test_python_dispatch
     "TestPythonDispatch.test_subclass_priority",  # test_python_dispatch
     "TestPythonDispatch.test_exception_handling",  # test_python_dispatch
