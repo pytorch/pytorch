@@ -4048,15 +4048,6 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
 
     if input.dim() == 3 and mode == "linear":
         assert align_corners is not None
-        # Two levels are necessary to prevent TorchScript from touching
-        # are_deterministic_algorithms_enabled.
-        if not torch.jit.is_scripting():
-            if torch.are_deterministic_algorithms_enabled() and input.is_cuda:
-                # Use slow decomp whose backward will be in terms of index_put
-                # importlib is required because the import cannot be top level
-                # (cycle) and cannot be nested (TS doesn't support)
-                return importlib.import_module('torch._decomp.decompositions')._upsample_linear_vec(
-                    input, output_size, align_corners, scale_factors)
         return torch._C._nn.upsample_linear1d(input, output_size, align_corners, scale_factors)
     if input.dim() == 4 and mode == "bilinear":
         assert align_corners is not None
@@ -4075,15 +4066,6 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
     if input.dim() == 5 and mode == "trilinear":
         assert align_corners is not None
         return torch._C._nn.upsample_trilinear3d(input, output_size, align_corners, scale_factors)
-        # Two levels are necessary to prevent TorchScript from touching
-        # are_deterministic_algorithms_enabled.
-        if not torch.jit.is_scripting():
-            if torch.are_deterministic_algorithms_enabled() and input.is_cuda:
-                # Use slow decomp whose backward will be in terms of index_put
-                # importlib is required because the import cannot be top level
-                # (cycle) and cannot be nested (TS doesn't support)
-                return importlib.import_module('torch._decomp.decompositions')._upsample_linear_vec(
-                    input, output_size, align_corners, scale_factors)
     if input.dim() == 4 and mode == "bicubic":
         assert align_corners is not None
         if antialias:
