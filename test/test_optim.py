@@ -18,6 +18,13 @@ from torch.testing._internal.common_utils import markDynamoStrictTest, parametri
 
 FP16_REDUCED_PRECISION = {'atol': 1e-5, 'rtol': 1e-4}
 
+
+def _make_radam_single_tensor_non_capturable(optim_cls, kwargs):
+    # Remove this function once https://github.com/pytorch/pytorch/issues/118230 is completed
+    if optim_cls == torch.optim.RAdam and not kwargs.get("foreach", False) and kwargs.get("capturable", False):
+        # Radam does not support capturable single tensor
+        kwargs["capturable"] = False
+
 @markDynamoStrictTest
 class TestOptimRenewed(TestCase):
 
@@ -71,6 +78,9 @@ class TestOptimRenewed(TestCase):
                 weight = Parameter(torch.randn((10, 5, 2), device=device, dtype=dtype)[..., 0])
                 bias = Parameter(torch.randn((10, 2), device=device, dtype=dtype)[..., 0])
             input = torch.randn(5, device=device, dtype=dtype)
+
+            # https://github.com/pytorch/pytorch/issues/118230
+            _make_radam_single_tensor_non_capturable(optim_cls, optim_input.kwargs)
             optimizer = optim_cls([weight, bias], **optim_input.kwargs)
 
             def closure():
@@ -94,6 +104,7 @@ class TestOptimRenewed(TestCase):
                 self.assertLess(closure().item(), initial_value)
 
 
+    @onlyCUDA
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @optims(optim_db, dtypes=[torch.float32])
     def test_forloop_goes_right_direction_multigpu(self, device, dtype, optim_info):
@@ -102,6 +113,10 @@ class TestOptimRenewed(TestCase):
         for optim_input in optim_inputs:
             if "foreach" in optim_info.supported_impls:
                 optim_input.kwargs["foreach"] = False  # force forloop
+
+            # https://github.com/pytorch/pytorch/issues/118230
+            _make_radam_single_tensor_non_capturable(optim_cls, optim_input.kwargs)
+
             weight = Parameter(torch.randn((10, 5), device="cuda:0", dtype=dtype))
             bias = Parameter(torch.randn((10), device="cuda:1", dtype=dtype))
             input = torch.randn(5, device="cuda:0", dtype=dtype)
@@ -137,6 +152,9 @@ class TestOptimRenewed(TestCase):
         for optim_input in all_optim_inputs:
             complex_params = [torch.randn(2, 3, device=device, dtype=dtype, requires_grad=True) for _ in range(3)]
             real_params = [torch.view_as_real(p).detach().clone().requires_grad_(True) for p in complex_params]
+
+            # https://github.com/pytorch/pytorch/issues/118230
+            _make_radam_single_tensor_non_capturable(optim_cls, optim_input.kwargs)
 
             complex_optimizer = optim_cls(complex_params, **optim_input.kwargs)
             real_optimizer = optim_cls(real_params, **optim_input.kwargs)
@@ -175,6 +193,10 @@ class TestOptimRenewed(TestCase):
                 continue
             for flag_value in (False, True):
                 kwargs[flag] = flag_value
+
+                # https://github.com/pytorch/pytorch/issues/118230
+                _make_radam_single_tensor_non_capturable(optim_cls, kwargs)
+
                 input = torch.tensor(
                     [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=dtype, device=device
                 ).reshape(3, 2)
@@ -289,6 +311,8 @@ class TestOptimRenewed(TestCase):
                         p_clone.grad = p.grad.clone().detach()
                         params_clone.append(p_clone)
 
+                # https://github.com/pytorch/pytorch/issues/118230
+                _make_radam_single_tensor_non_capturable(optim_cls, kwargs)
                 optimizer = optim_cls(params_clone, **kwargs)
                 for _ in range(kIterations):
                     optimizer.step()
@@ -361,6 +385,9 @@ class TestOptimRenewed(TestCase):
             for flag_value in (False, True):
                 kwargs["foreach"] = flag_value
 
+                # https://github.com/pytorch/pytorch/issues/118230
+                _make_radam_single_tensor_non_capturable(optim_cls, kwargs)
+
                 # The 128 is critical here! Our CUDACachingAllocator allocates in blocks of 512,
                 # meaning any tensor that occupies <512 bytes of memory will allocate a whole
                 # 512 bytes anyway. We use 128 (since datasize would be 4 bytes) so that param
@@ -384,7 +411,7 @@ class TestOptimRenewed(TestCase):
             st_max_mem, mt_max_mem = max_mems
             intermediate_size = nparams * param.nelement() * param.element_size()
             nintermediates = 1  # we expect a budget of 1 intermediate most of the time
-            if kwargs.get('capturable') or optim_cls.__name__ in ["Adadelta", "ASGD"]:
+            if kwargs.get('capturable') or optim_cls.__name__ in ["Adadelta", "ASGD", "RAdam"]:
                 # with capturable in Adam(W), we have 2 extra intermediates for the bias_corrections
                 # with Adadelta, we have 2 extra for (acc_delta + eps) and (square_avg + eps)
                 # ASGD allocates axs, 2x mus, 2x etas, and grads at the same time
@@ -393,6 +420,11 @@ class TestOptimRenewed(TestCase):
                     # with capturable in NAdam, we have 3 extra intermediates for the
                     # bias_correction, mus, and mu_nexts
                     nintermediates = 5
+
+                if optim_cls.__name__ == "RAdam":
+                    # RAdam has four intermediates with capturable
+                    # num, unrect_step_size, buffer, grouped_grads
+                    nintermediates = 4
 
             elif optim_cls.__name__ in ["NAdam", "Adagrad", "RMSprop"]:
                 # NAdam uses two intermediates at the same time (grads & exp_avg_sq_sqrt)
@@ -552,6 +584,7 @@ class TestOptimRenewed(TestCase):
             return torch.tensor([1], device=device, dtype=dtype)
 
         for optim_input in all_optim_inputs:
+            _make_radam_single_tensor_non_capturable(optim_cls, optim_input.kwargs)
             optimizer = optim_cls(params, **optim_input.kwargs)
             optimizer.step(closure)
             self.assertEqual(old_params, params)
@@ -569,6 +602,7 @@ class TestOptimRenewed(TestCase):
 
         for optim_input in all_optim_inputs:
             kwargs = optim_input.kwargs
+            _make_radam_single_tensor_non_capturable(optim_cls, optim_input.kwargs)
 
             # params will decay even if grads are empty if weight_decay != 0,
             # and capturable doesn't work for CPU tensors
@@ -730,6 +764,12 @@ class TestOptimRenewed(TestCase):
             return lbfgs_loss if optim_cls.__name__ == "LBFGS" else None
 
         for optim_input in all_optim_inputs:
+            kwargs = optim_input.kwargs
+            # See https://github.com/pytorch/pytorch/issues/117836 for Adamax
+            # See https://github.com/pytorch/pytorch/issues/118230 for RAdam
+            if optim_cls.__name__ in ["Adamax", "RAdam"] and kwargs.get("capturable", False) and not kwargs.get("foreach", False):
+                continue
+
             optimizer = optim_cls(params, **optim_input.kwargs)
             for _ in range(3):
                 optimizer.step(closure)
