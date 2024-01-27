@@ -3,7 +3,6 @@ from typing import Dict, Union
 import torch
 from torch._export.verifier import SpecViolationError
 from torch._guards import detect_fake_mode
-from torch.export.custom_obj import ScriptObjectMeta
 from torch.export.exported_program import (
     ArgumentSpec,
     CustomObjArgument,
@@ -96,7 +95,7 @@ def lift_constants_pass(
                     input_spec_arg = TensorArgument(name=const_placeholder_node.name)
                 elif isinstance(constant_val, torch._C.ScriptObject):
                     class_fqn = constant_val._type().qualified_name()  # type: ignore[attr-defined]
-                    const_placeholder_node.meta["val"] = ScriptObjectMeta(
+                    const_placeholder_node.meta["val"] = CustomObjArgument(
                         constant_fqn, class_fqn
                     )
                     input_spec_arg = CustomObjArgument(
@@ -132,7 +131,7 @@ def rewrite_script_object_meta(
     meta["val"]. Eventually we want to change this behavior, when FakeMode infra
     for ScriptObjects lands.
 
-    For now, we rewrie meta["val"] to be a placeholder ScriptObjectMeta.
+    For now, we rewrie meta["val"] to be a placeholder CustomObjArgument
     """
     constants: Dict[str, Union[torch.Tensor, torch._C.ScriptObject]] = {}
     for node in gm.graph.nodes:
@@ -143,7 +142,7 @@ def rewrite_script_object_meta(
 
         old_meta = node.meta["val"]
         class_fqn = old_meta._type().qualified_name()  # type: ignore[attr-defined]
-        new_meta = ScriptObjectMeta(node.name, class_fqn)
+        new_meta = CustomObjArgument(node.name, class_fqn)
         constants[node.name] = old_meta
         node.meta["val"] = new_meta
 
