@@ -6578,7 +6578,7 @@ class InterpreterShim(torch.fx.Interpreter):
         # call super() with a placeholder to avoid constructing a
         # GraphModule which is very expensive (it does codegen).
         super().__init__(self._dummy_gm(), garbage_collect_values=False)
-        self.module = self
+        self.module = self  # type: ignore[assignment]
         self.graph = graph
         self.submodules = submodules
         self.extra_traceback = False

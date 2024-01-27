@@ -126,7 +126,7 @@ class PostGradBatchLinearFusion(BatchFusion):
 
     def _addmm_node_can_be_fused(self, node: torch.fx.Node) -> bool:
         return (
-            node.kwargs.get("beta", 1.0) == 1.0 and node.kwargs.get("alpha", 1.0) == 1.0
+            node.kwargs.get("beta", 1.0) == 1.0 and node.kwargs.get("alpha", 1.0) == 1.0  # type: ignore[return-value]
         )
 
     def _is_input_2d(self, input: torch.fx.Node) -> bool:
@@ -150,10 +150,10 @@ class PostGradBatchLinearFusion(BatchFusion):
             return None
 
         # only handle the cases where inputs are 2D tensors
-        if not self._is_input_2d(input_m) or not self._is_input_2d(weight_m):
+        if not self._is_input_2d(input_m) or not self._is_input_2d(weight_m):  # type: ignore[arg-type]
             return None
-        m, k = input_m.meta["tensor_meta"].shape
-        n = weight_m.meta["tensor_meta"].shape[1]
+        m, k = input_m.meta["tensor_meta"].shape  # type: ignore[union-attr]
+        n = weight_m.meta["tensor_meta"].shape[1]  # type: ignore[union-attr]
         batch_key = ("batch_linear", m, k, n, bias_m is not None)
         return batch_key
 
@@ -200,8 +200,8 @@ class PostGradBatchLinearFusion(BatchFusion):
 @register_fusion("group_linear", pre_grad=False)
 class GroupLinearFusion(GroupFusion):
     def _addmm_node_can_be_fused(self, node: torch.fx.Node):
-        input_shape = node.args[1].meta["tensor_meta"].shape
-        weight_shape = node.args[2].meta["tensor_meta"].shape
+        input_shape = node.args[1].meta["tensor_meta"].shape  # type: ignore[union-attr]
+        weight_shape = node.args[2].meta["tensor_meta"].shape  # type: ignore[union-attr]
         return (
             node.kwargs.get("beta", 1.0) == 1.0
             and node.kwargs.get("alpha", 1.0) == 1.0
@@ -215,8 +215,8 @@ class GroupLinearFusion(GroupFusion):
         )
 
     def _mm_node_can_be_fused(self, node: torch.fx.Node):
-        input_shape = node.args[0].meta["tensor_meta"].shape
-        weight_shape = node.args[1].meta["tensor_meta"].shape
+        input_shape = node.args[0].meta["tensor_meta"].shape  # type: ignore[union-attr]
+        weight_shape = node.args[1].meta["tensor_meta"].shape  # type: ignore[union-attr]
         return (
             len(input_shape) == 2
             and len(weight_shape) == 2
@@ -295,11 +295,11 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
         # its inputs, and cause dtype not same error in mm or addmm
         input, other = node.args
         return (
-            input.meta["tensor_meta"].shape == other.meta["tensor_meta"].shape
+            input.meta["tensor_meta"].shape == other.meta["tensor_meta"].shape  # type: ignore[union-attr]
             if hasattr(input, "meta")
             and hasattr(other, "meta")
-            and "tensor_meta" in input.meta
-            and "tensor_meta" in other.meta
+            and "tensor_meta" in input.meta  # type: ignore[union-attr]
+            and "tensor_meta" in other.meta  # type: ignore[union-attr]
             else False
         )
 
@@ -310,12 +310,12 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
             alpha = node.kwargs.get("alpha", 1.0)
             rounding_mode = node.kwargs.get("rounding_mode", None)
             input, other = node.args
-            shape = list(input.meta["tensor_meta"].shape)
+            shape = list(input.meta["tensor_meta"].shape)  # type: ignore[union-attr]
             group_key = (
                 "batch_" + self.op.__name__.lower() + "_post_grad",
                 str(shape),
-                str(input.meta["tensor_meta"].dtype),
-                str(other.meta["tensor_meta"].dtype),
+                str(input.meta["tensor_meta"].dtype),  # type: ignore[union-attr]
+                str(other.meta["tensor_meta"].dtype),  # type: ignore[union-attr]
                 str(alpha),
                 str(rounding_mode),
             )
@@ -827,7 +827,7 @@ def get_fusion_candidates(
 
 
 def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusionBase):
-    stable_topological_sort(graph)
+    stable_topological_sort(graph)  # type: ignore[arg-type]
     fused_set: Set[torch.fx.Node] = set()
 
     for node in reversed(graph.nodes):
@@ -893,5 +893,5 @@ def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
             fusions += generate_fusion_from_config(fbgemm_fusions, pre_grad=False)
 
     for rule in fusions:
-        apply_group_batch_fusion(graph, rule)
+        apply_group_batch_fusion(graph, rule)  # type: ignore[arg-type]
         print_graph(graph, f"Apply fusion {rule.__class__.__name__}.")

@@ -2768,7 +2768,7 @@ class CppVecKernelChecker(CppVecKernel):
                             # Support masked_load for BF16/FP16. Because the legalization will
                             # insert to_dtype to convert the BF16/FP16 input to FP32.
                             dtype = (
-                                V.graph.get_dtype(input_value.args[1])
+                                V.graph.get_dtype(input_value.args[1])  # type: ignore[arg-type]
                                 if input_value.target == "load"
                                 else input_value.args[-1]
                             )
@@ -2784,7 +2784,7 @@ class CppVecKernelChecker(CppVecKernel):
                                 dtype in [torch.int32, torch.int64]
                                 and input_value.target == "load"
                             ):
-                                buffer = V.graph.get_buffer(input_value.args[1])
+                                buffer = V.graph.get_buffer(input_value.args[1])  # type: ignore[arg-type]
                                 # Check if load of a scalar tensor of integer
                                 if not (
                                     isinstance(buffer, TensorBox)
@@ -2907,14 +2907,14 @@ class CppKernelProxy(CppKernel):
                 if node.target not in ["load"]:
                     return False
                 assert len(node.args) == 3
-                load_dtype = V.graph.get_dtype(node.args[1])
+                load_dtype = V.graph.get_dtype(node.args[1])  # type: ignore[arg-type]
                 return load_dtype in DTYPE_LOWP_FP
 
             def is_lowp_fp_store(node: torch.fx.Node):
                 if node.target != "store":
                     return False
                 _, store_var, _, _, _ = node.args
-                store_dtype = V.graph.get_dtype(store_var)
+                store_dtype = V.graph.get_dtype(store_var)  # type: ignore[arg-type]
                 return store_dtype in DTYPE_LOWP_FP
 
             sub_graph_nodes = list(sub_graph.nodes)

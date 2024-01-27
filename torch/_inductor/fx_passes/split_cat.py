@@ -322,7 +322,7 @@ class TorchSplit(CallFunction):
                 return FailedMatch("only integer getitems are handled")
             if user.args[1] in seen_idxs:
                 return FailedMatch(f"duplicate getitem {user.args[1]}")
-            if user.args[-1] < 0:
+            if user.args[-1] < 0:  # type: ignore[operator]
                 # This shouldn't ideally happen as dynamo normalizes indexes to positive
                 return FailedMatch("negative index")
             seen_idxs.add(user.args[1])
@@ -358,13 +358,13 @@ def merge_splits(
     if len(node.users.keys()) == 0:
         return
     graph = match.graph
-    first_split = node.args[0].args[0]
-    next_split_index = node.args[0].args[1]
+    first_split = node.args[0].args[0]  # type: ignore[union-attr]
+    next_split_index = node.args[0].args[1]  # type: ignore[union-attr]
 
     new_split_sections = list(first_split_sections)
-    new_split_sections[next_split_index : next_split_index + 1] = next_split_sections
+    new_split_sections[next_split_index : next_split_index + 1] = next_split_sections  # type: ignore[operator, misc]
 
-    first_split_dim = first_split.kwargs["dim"]
+    first_split_dim = first_split.kwargs["dim"]  # type: ignore[union-attr]
 
     to_remove = []
 
@@ -376,7 +376,7 @@ def merge_splits(
             kwargs={"dim": first_split_dim},
         )
         first_split_num_to_user = {
-            user.args[1]: user for user in first_split.users.keys()
+            user.args[1]: user for user in first_split.users.keys()  # type: ignore[union-attr]
         }
 
         new_split_num = 0
@@ -406,7 +406,7 @@ def merge_splits(
                 to_remove.append(node)
                 to_remove.append(old_getitem)
 
-        to_remove.append(first_split)
+        to_remove.append(first_split)  # type: ignore[arg-type]
     for node in to_remove:
         graph.erase_node(node)
 
@@ -463,9 +463,9 @@ class SplitCatSimplifier:
             graph, split_node, split_sections, user_inputs_list, simplified_split_ranges
         )
         self.replace_cat(
-            graph, split_node, next_users, user_inputs_list_new, transform_params_list
+            graph, split_node, next_users, user_inputs_list_new, transform_params_list  # type: ignore[arg-type]
         )
-        self.erase_old_nodes(graph, split_node, next_users)
+        self.erase_old_nodes(graph, split_node, next_users)  # type: ignore[arg-type]
 
     def get_user_input_list(
         self, split_node: torch.fx.Node, next_users: List[torch.fx.Node]
@@ -481,7 +481,7 @@ class SplitCatSimplifier:
             if user.target in {torch.cat, torch.stack}:
                 user_inputs_list.append(self.get_merged_user_inputs(split_node, user))
             else:
-                user_inputs_list.append(self.get_non_cat_node_input(split_node, user))
+                user_inputs_list.append(self.get_non_cat_node_input(split_node, user))  # type: ignore[arg-type]
         return user_inputs_list
 
     def get_merged_user_inputs(
@@ -536,10 +536,10 @@ class SplitCatSimplifier:
                 if cur_range:
                     merged_ranges.append(tuple(cur_range))
                     cur_range = None
-                merged_ranges.append(input_)
+                merged_ranges.append(input_)  # type: ignore[arg-type]
         if cur_range:
             merged_ranges.append(tuple(cur_range))
-        return merged_ranges
+        return merged_ranges  # type: ignore[return-value]
 
     def get_simplified_split_ranges(
         self,
@@ -618,7 +618,7 @@ class SplitCatSimplifier:
                     transform_params.append((None, None, None, None))
                 elif isinstance(user_input, tuple):  # Split being simplified
                     # Verify equal split
-                    subset_split_sections = split_sections[
+                    subset_split_sections = split_sections[  # type: ignore[index]
                         user_input[0] : user_input[1] + 1
                     ]
                     # All sections should be equal
@@ -698,7 +698,7 @@ class SplitCatSimplifier:
                 else:
                     new_user_inputs.append(user_input)
             new_user_inputs_list.append(new_user_inputs)
-        return new_user_inputs_list
+        return new_user_inputs_list  # type: ignore[return-value]
 
     def replace_cat(
         self,
@@ -837,10 +837,10 @@ class UnbindCatRemover(SplitCatSimplifier):
         graph: torch.fx.Graph,
         unbind_node: torch.fx.Node,
     ):
-        num_unbind = (
-            max(getitem_node.args[1] for getitem_node in unbind_node.users.keys()) + 1
+        num_unbind = (  # type: ignore[operator]
+            max(getitem_node.args[1] for getitem_node in unbind_node.users.keys()) + 1  # type: ignore[operator, union-attr, type-var]
         )
-        split_sections = [1 for _ in range(num_unbind)]
+        split_sections = [1 for _ in range(num_unbind)]  # type: ignore[operator, arg-type]
 
         super().simplify(graph, unbind_node, split_sections)
 
@@ -1115,11 +1115,11 @@ def safe_to_abort_node(node: torch.fx.Node):
     2. the user of all the input nodes should be only one
     """
     prev_node = None
-    for arg in node.args[0]:
-        if len(arg.users) != 1 or arg.target != operator.getitem:
+    for arg in node.args[0]:  # type: ignore[union-attr]
+        if len(arg.users) != 1 or arg.target != operator.getitem:  # type: ignore[union-attr]
             return False
         if prev_node is None:
-            prev_node = arg.args[0]
+            prev_node = arg.args[0]  # type: ignore[union-attr]
         else:
             if arg.args[0] != prev_node:
                 return False
@@ -1173,8 +1173,8 @@ def merge_getitem_cat(match: Match, split_sections: List[int], dim: int):
                 continue
             # find the index of getitems to be cated/stacked
             indices = []
-            for arg in cat_user.args[0]:
-                indices.append(arg.args[1])
+            for arg in cat_user.args[0]:  # type: ignore[union-attr]
+                indices.append(arg.args[1])  # type: ignore[union-attr]
             # indices may not be necessarily sorted, we sort them first
             indices.sort()
             # the gettitems to be merged must be consecutive, otherwise
@@ -1182,12 +1182,12 @@ def merge_getitem_cat(match: Match, split_sections: List[int], dim: int):
             if indices[len(indices) - 1] - indices[0] + 1 != len(indices):
                 continue
             # update the arg of cat user, only keep the first getitem
-            cat_user.update_arg(0, cat_user.args[0][0])
+            cat_user.update_arg(0, cat_user.args[0][0])  # type: ignore[index]
             # calculate the fused tensor sizes in the indices
             fused_tensor_size = 0
-            for i in range(len(split_node.args[1])):
+            for i in range(len(split_node.args[1])):  # type: ignore[arg-type]
                 if i in indices:
-                    fused_tensor_size += split_node.args[1][i]
+                    fused_tensor_size += split_node.args[1][i]  # type: ignore[operator, assignment, index]
             # update the split sections
             split_sections[indices[0]] = fused_tensor_size
             # padding others with zeros to keep the same dict size
@@ -1320,9 +1320,9 @@ def merge_stack_tahn_unbind(match: Match, split_sections: List[int], dim: int):
             # find the index of getitems to be stacked
             indices = []
             split_sections_for_unbind = []
-            for arg in user.args[0]:
-                indices.append(arg.args[1])
-                split_sections_for_unbind.append(split_sections[arg.args[1]])
+            for arg in user.args[0]:  # type: ignore[union-attr]
+                indices.append(arg.args[1])  # type: ignore[union-attr]
+                split_sections_for_unbind.append(split_sections[arg.args[1]])  # type: ignore[union-attr]
             # indices may not be necessarily sorted, we sort them first
             indices.sort()
             # the gettitems to be merged must be consecutive, otherwise
@@ -1330,12 +1330,12 @@ def merge_stack_tahn_unbind(match: Match, split_sections: List[int], dim: int):
             if indices[len(indices) - 1] - indices[0] + 1 != len(indices):
                 continue
             # update the arg of stack user, only keep the first getitem
-            user.update_arg(0, user.args[0][0])
+            user.update_arg(0, user.args[0][0])  # type: ignore[index]
             # calculate the fused tensor sizes in the indices
             fused_tensor_size = 0
-            for i in range(len(split_node.args[1])):
+            for i in range(len(split_node.args[1])):  # type: ignore[arg-type]
                 if i in indices:
-                    fused_tensor_size += split_node.args[1][i]
+                    fused_tensor_size += split_node.args[1][i]  # type: ignore[operator, index, assignment]
             # update the split sections
             split_sections[indices[0]] = fused_tensor_size
             # padding others with zeros to keep the same dict size

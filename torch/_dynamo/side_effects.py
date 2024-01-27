@@ -338,7 +338,7 @@ class SideEffects:
                 cg.extend_output(create_call_function(0, True))
                 cg.add_cache(var)
                 if isinstance(var.mutable_local, AttributeMutationNew):
-                    var.mutable_local.source = LocalSource(cg.tempvars[var])
+                    var.mutable_local.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
             elif isinstance(var.mutable_local, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
@@ -455,7 +455,7 @@ class SideEffects:
             if isinstance(var, variables.ListVariable):
                 # old[:] = new
                 cg(var, allow_cache=False)
-                cg(var.mutable_local.source)
+                cg(var.mutable_local.source)  # type: ignore[attr-defined]
                 cg.extend_output(
                     [
                         cg.create_load_const(None),
@@ -468,11 +468,11 @@ class SideEffects:
                 cg.tx.output.update_co_names("clear")
                 cg.tx.output.update_co_names("update")
 
-                cg(var.mutable_local.source)
+                cg(var.mutable_local.source)  # type: ignore[attr-defined]
                 cg.extend_output([create_instruction("LOAD_METHOD", argval="update")])
                 cg(var, allow_cache=False)
 
-                cg(var.mutable_local.source)
+                cg(var.mutable_local.source)  # type: ignore[attr-defined]
                 cg.extend_output([create_instruction("LOAD_METHOD", argval="clear")])
 
                 suffixes.append(
@@ -512,7 +512,7 @@ class SideEffects:
             elif isinstance(var, variables.TupleIteratorVariable):
                 for _ in range(var.index):
                     cg.load_import_from(utils.__name__, "iter_next")
-                    cg(var.mutable_local.source)
+                    cg(var.mutable_local.source)  # type: ignore[attr-defined]
                     cg.extend_output(create_call_function(1, True))
                     cg.append_output(create_instruction("POP_TOP"))
             else:

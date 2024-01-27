@@ -2737,7 +2737,7 @@ Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
 def get_torch_obj_rule_map():
     d: Dict[Any, VariableTracker] = dict()
     for m in torch_name_rule_map:
-        for k, v in m.items():
+        for k, v in m.items():  # type: ignore[attr-defined]
             obj = load_object(k)
             if obj is not None:
                 if obj in d and d[obj] != v:

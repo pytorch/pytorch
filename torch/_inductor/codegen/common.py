@@ -224,10 +224,10 @@ class DataTypePropagation:
             "store_reduction",
         ):
             buf_name = node.args[1]
-            return V.graph.get_dtype(buf_name)
+            return V.graph.get_dtype(buf_name)  # type: ignore[arg-type]
 
         if node.target == operator.getitem:
-            return self.deduce_node_dtype(node.args[0])
+            return self.deduce_node_dtype(node.args[0])  # type: ignore[arg-type]
 
         assert isinstance(node.target, str)
 
@@ -235,7 +235,7 @@ class DataTypePropagation:
             return node.args[1]
 
         if node.target == "constant":
-            return DTYPE_TO_COMPUTATION_DTYPE[node.args[-1]]
+            return DTYPE_TO_COMPUTATION_DTYPE[node.args[-1]]  # type: ignore[index]
 
         if node.target.startswith("masked_subblock"):
             return self.deduce_node_dtype_by_subgraph(node)

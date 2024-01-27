@@ -99,7 +99,7 @@ class AutogradCompilerInstance:
         backward_idx: int,
     ):
         assert self.hooks_proxy is not None
-        backward_fn = self.hooks_proxy[backward_idx]
+        backward_fn = self.hooks_proxy[backward_idx]  # type: ignore[index]
         proxies = self.fx_tracer.create_proxy(
             kind="call_function",
             target=call_backward,
@@ -139,7 +139,7 @@ class AutogradCompilerInstance:
 
     def tensor_pre_hook(self, inputs, hook_id, i: int):
         assert self.hooks_proxy is not None
-        hook = self.hooks_proxy[hook_id]
+        hook = self.hooks_proxy[hook_id]  # type: ignore[index]
         proxy = self.proxy_call_hook(
             hook,
             inputs[i],
@@ -151,7 +151,7 @@ class AutogradCompilerInstance:
 
     def pre_hook(self, inputs, hook_id):
         assert self.hooks_proxy is not None
-        hook = self.hooks_proxy[hook_id]
+        hook = self.hooks_proxy[hook_id]  # type: ignore[index]
         proxies = self.proxy_call_hook(
             hook,
             inputs,
@@ -163,7 +163,7 @@ class AutogradCompilerInstance:
 
     def post_hook(self, outputs, inputs, hook_id):
         assert self.hooks_proxy is not None
-        hook = self.hooks_proxy[hook_id]
+        hook = self.hooks_proxy[hook_id]  # type: ignore[index]
         proxies = self.proxy_call_hook(
             hook,
             outputs,
@@ -177,7 +177,7 @@ class AutogradCompilerInstance:
     def post_acc_grad_hook(self, input, hook_id):
         assert isinstance(input, torch.Tensor)
         assert self.hooks_proxy is not None
-        hook = self.hooks_proxy[hook_id]
+        hook = self.hooks_proxy[hook_id]  # type: ignore[index]
         proxies = self.proxy_call_hook(
             hook,
             input,

@@ -3769,7 +3769,7 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
         )
         if V.graph.sizevars.size_hint((x_alt - 1) * stride[i] - x - padding[i]) >= 0:
             # Sliding windows must start within the input or left padding
-            x_alt -= 1
+            x_alt -= 1  # type: ignore[assignment]
             V.graph.sizevars.guard_leq(0, x_alt * stride[i] - x - padding[i])
         if V.graph.sizevars.size_hint(x_out - x_alt) == 0:
             # ceil mode is actually a no-op, lets guard on that

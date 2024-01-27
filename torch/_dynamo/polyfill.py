@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 """
 Python polyfills for common builtins.
 """

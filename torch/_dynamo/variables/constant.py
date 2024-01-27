@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import operator
 from typing import Dict, List
 

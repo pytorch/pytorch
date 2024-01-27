@@ -343,11 +343,11 @@ if torch._C._has_mkldnn:
         if any(
             not (
                 hasattr(n.args[0], "meta")
-                and isinstance(n.args[0].meta.get("val", None), torch.Tensor)
+                and isinstance(n.args[0].meta.get("val", None), torch.Tensor)  # type: ignore[union-attr]
             )
             or not (
                 hasattr(n.args[1], "meta")
-                and isinstance(n.args[1].meta.get("val", None), torch.Tensor)
+                and isinstance(n.args[1].meta.get("val", None), torch.Tensor)  # type: ignore[union-attr]
             )
             for n in binary_nodes
         ):
@@ -360,9 +360,9 @@ if torch._C._has_mkldnn:
         ):
             return False
         if any(
-            n.args[0].meta["val"].size() != n.args[1].meta["val"].size()
-            or n.args[0].meta["val"].device != n.args[1].meta["val"].device
-            or n.args[0].meta["val"].dtype != n.args[1].meta["val"].dtype
+            n.args[0].meta["val"].size() != n.args[1].meta["val"].size()  # type: ignore[union-attr]
+            or n.args[0].meta["val"].device != n.args[1].meta["val"].device  # type: ignore[union-attr]
+            or n.args[0].meta["val"].dtype != n.args[1].meta["val"].dtype  # type: ignore[union-attr]
             for n in binary_nodes
         ):
             return False
