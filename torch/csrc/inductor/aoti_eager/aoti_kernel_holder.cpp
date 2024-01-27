@@ -100,12 +100,15 @@ AOTIPythonKernelHolder::AOTIPythonKernelHolder(
     py::object func,
     c10::DispatchKey dispatch_key,
     c10::string_view op_name,
-    bool is_dynamic)
+    bool is_symbolic)
     : python_kernel_holder_(func, dispatch_key),
       dispatch_key_(dispatch_key),
-      op_name_(op_name),
-      is_dynamic_(is_dynamic),
+      op_name_(std::string(op_name)),
+      is_symbolic_(is_symbolic),
       device_opt_(c10::nullopt) {
+  // Canonicalize the op_name as a valid directory name
+  std::replace(op_name_.begin(), op_name_.end(), '.', '_');
+
   if (dispatch_key_ == c10::DispatchKey::CUDA) {
     device_opt_ = c10::Device(c10::DeviceType::CUDA, 0);
   } else if (dispatch_key_ == c10::DispatchKey::XPU) {
@@ -131,14 +134,15 @@ void AOTIPythonKernelHolder::operator()(
   auto inputs_meta_info = getInputsMetaInfo(inputs);
   auto kernel_handle = aoti_kernel_cache_.find(inputs_meta_info);
   // Cache miss
-  if (kernel_handle == aoti_kernel_cache_.end()) {
+  if (kernel_handle == aoti_kernel_cache_.end() || !kernel_handle->second) {
     python_kernel_holder_(op, keyset, stack);
     return;
   }
 
   // Cache hit
   torch::jit::pop(*stack, op.schema().arguments().size());
-  auto outputs = kernel_handle->second->run(inputs);
+  auto aoti_eager_kernel = kernel_handle->second;
+  auto outputs = (*aoti_eager_kernel)(inputs);
   for (auto& output : outputs) {
     stack->push_back(output);
   }
@@ -160,6 +164,7 @@ AOTIKernelMetaInfo AOTIPythonKernelHolder::getInputsMetaInfo(
   AOTIKernelMetaInfo inputs_meta_info;
   for (const auto& input : inputs) {
     inputs_meta_info.push_back(TensorMetaInfo(
+        is_symbolic_,
         input.scalar_type(),
         input.device(),
         input.sizes().vec(),
@@ -168,6 +173,52 @@ AOTIKernelMetaInfo AOTIPythonKernelHolder::getInputsMetaInfo(
   return inputs_meta_info;
 }
 
+/**
+ * Initializes the cache for AOTInductor kernels within the
+ * AOTIPythonKernelHolder class.
+ *
+ * The path of AOTI kernels for eager is
+ *  - ${TORCH_EAGER_AOTI_KERNEL_PATH}/${device}/${op_name}/${kernel_id}.so
+ *
+ * Besides the kernel library, there is also a metadata file for each kernel
+ * library.
+ *  - ${TORCH_EAGER_AOTI_KERNEL_PATH}/${device}/${op_name}/${kernel_id}.conf
+ *
+ * The kernels are loaded from the path and cached in the
+ * AOTIPythonKernelHolder.
+ *
+ * Process:
+ * 1. Device Type Check: It first checks if the device type is the compile-time
+ * maximum. If so, the function exits early, as no initialization is needed for
+ * these device types.
+ *
+ * 2. Environment Variable Retrieval: Attempts to retrieve the Eager AOTI kernel
+ * path from the "TORCH_EAGER_AOTI_KERNEL_PATH" environment variable. If this
+ * variable isn't set, the function exits early, indicating no path is provided.
+ *
+ * 3. AOTI Kernel Path Construction: Constructs the path to the AOTI kernels by
+ * combining the base path from the environment variable with subdirectories
+ * based on the device type (cpu, cuda, xpu) and operation name. This results in
+ * a specific path targeting the required AOTI kernel for the current operation
+ * and device.
+ *
+ * 4. Path Existence Check: Checks if the constructed path exists in the file
+ * system. If not, the function returns, as there are no kernels to load.
+ *
+ * 5. Kernel File Processing: If the path exists, iterates through each file in
+ * the directory. For files with a .so extension, it replaces this with .conf to
+ * locate the corresponding kernel configuration file.
+ *
+ * 6. Kernel Metadata Loading and Caching: Reads the kernel metadata from each
+ * .conf file (using TensorMetaInfo::fromConfig). If successful, adds this
+ * metadata to the aoti_kernel_cache_. The cache maps the kernel metadata to a
+ * corresponding AOTI model container runner, obtained via
+ * getAOTIModelContainerRunner.
+ *
+ * This function is crucial for setting up the AOTI kernel infrastructure,
+ * enabling efficient inference operations tailored to the specific runtime
+ * environment.
+ */
 void AOTIPythonKernelHolder::initAOTIKernelCache() {
   if (device_opt_.value().type() ==
       c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES) {
@@ -184,7 +235,7 @@ void AOTIPythonKernelHolder::initAOTIKernelCache() {
       device_opt_.value().type() == c10::DeviceType::CPU    ? "cpu"
       : device_opt_.value().type() == c10::DeviceType::CUDA ? "cuda"
                                                             : "xpu";
-  fs::path eager_aoti_op_path = std::string(op_name_);
+  fs::path eager_aoti_op_path = op_name_;
   fs::path eager_aoti_full_path =
       eager_aoti_path / eager_aoti_device_path / eager_aoti_op_path;
   if (!fs::exists(eager_aoti_full_path)) {
@@ -198,16 +249,16 @@ void AOTIPythonKernelHolder::initAOTIKernelCache() {
       auto kernel_meta_infos = TensorMetaInfo::fromConfig(kernel_conf);
       if (kernel_meta_infos.size() > 0) {
         aoti_kernel_cache_[kernel_meta_infos] =
-            getAOTIModelContainerRunner(so_path);
+            getAOTIEagerKernelRunner(so_path);
       }
     }
   }
 }
 
-std::shared_ptr<AOTIModelContainerRunner> AOTIPythonKernelHolder::
-    getAOTIModelContainerRunner(const std::string& so_path) {
+std::shared_ptr<AOTIEagerKernelRunner> AOTIPythonKernelHolder::
+    getAOTIEagerKernelRunner(const std::string& so_path) {
   if (device_opt_.value().type() == c10::DeviceType::CUDA) {
-    return std::make_shared<AOTIModelContainerRunnerCuda>(so_path);
+    return std::make_shared<AOTIEagerKernelRunnerCuda>(so_path);
   } else {
     return nullptr;
   }

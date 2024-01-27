@@ -6,15 +6,23 @@
 namespace torch::inductor {
 
 TensorMetaInfo::TensorMetaInfo(
+    bool is_symbolic,
     c10::ScalarType dtype,
     c10::Device device,
     std::vector<int64_t> sizes,
     std::vector<int64_t> strides)
-    : dtype(dtype), device(device), sizes(sizes), strides(strides) {}
+    : is_symbolic(is_symbolic),
+      dtype(dtype),
+      device(device),
+      sizes(sizes),
+      strides(strides) {}
 
 bool TensorMetaInfo::operator==(const TensorMetaInfo& other) const {
-  return dtype == other.dtype && device == other.device &&
-      sizes == other.sizes && strides == other.strides;
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      !is_symbolic, "To support symbolic shape now");
+  return is_symbolic == other.is_symbolic && dtype == other.dtype &&
+      device == other.device && sizes == other.sizes &&
+      strides == other.strides;
 }
 
 bool TensorMetaInfo::sanityCheck(const TensorMetaInfo& tensor_meta_info) {
@@ -29,6 +37,10 @@ bool TensorMetaInfo::sanityCheck(const TensorMetaInfo& tensor_meta_info) {
 }
 
 AOTIKernelMetaInfo TensorMetaInfo::fromConfig(const std::string& conf_path) {
+  auto parse_symbolic = [](std::string& symbolic_str) -> bool {
+    return symbolic_str == "true";
+  };
+
   auto parse_dtype = [](std::string& dtype_str) -> c10::ScalarType {
     if (dtype_str == "float32") {
       return c10::ScalarType::Float;
@@ -85,12 +97,14 @@ AOTIKernelMetaInfo TensorMetaInfo::fromConfig(const std::string& conf_path) {
   //  ${dtype};${device};${sizes};${strides}
   auto parse_tensor_meta_info = [&](std::string& line) -> TensorMetaInfo {
     std::stringstream ss(line);
-    std::string dtype_str, device_str, sizes_str, strides_str;
+    std::string symbolic_str, dtype_str, device_str, sizes_str, strides_str;
+    getline(ss, symbolic_str, ';');
     getline(ss, dtype_str, ';');
     getline(ss, device_str, ';');
     getline(ss, sizes_str, ';');
     getline(ss, strides_str, ';');
     return TensorMetaInfo(
+        parse_symbolic(symbolic_str),
         parse_dtype(dtype_str),
         parse_device(device_str),
         parse_sizes_or_strides(sizes_str),
@@ -123,7 +137,9 @@ AOTIKernelMetaInfo TensorMetaInfo::fromConfig(const std::string& conf_path) {
 
 size_t TensorMetaInfoHash::operator()(
     const TensorMetaInfo& tensor_meta_info) const {
-  auto hash = std::hash<c10::ScalarType>()(tensor_meta_info.dtype);
+  auto hash = std::hash<bool>()(tensor_meta_info.is_symbolic);
+  hash = c10::hash_combine(
+      hash, std::hash<c10::ScalarType>()(tensor_meta_info.dtype));
   hash = c10::hash_combine(
       hash, std::hash<c10::Device>()(tensor_meta_info.device));
   for (auto& e : tensor_meta_info.sizes) {

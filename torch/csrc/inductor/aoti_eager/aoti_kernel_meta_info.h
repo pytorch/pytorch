@@ -8,12 +8,14 @@
 namespace torch::inductor {
 
 struct TensorMetaInfo {
+  bool is_symbolic;
   c10::ScalarType dtype;
   c10::Device device;
   std::vector<int64_t> sizes;
   std::vector<int64_t> strides;
 
   TensorMetaInfo(
+      bool is_symbolic,
       c10::ScalarType dtype,
       c10::Device device,
       std::vector<int64_t> sizes,

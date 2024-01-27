@@ -1606,6 +1606,17 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 self.prefix.splice(run_impl_proto)
         else:
             self.prefix.splice(
+                f"""std::vector<at::Tensor> {self.call_func_name}(const std::vector<at::Tensor>& inputs);"""
+            )
+            # For aoti eager mode
+            self.prefix.splice(
+                f"""
+                extern "C" std::vector<at::Tensor> aoti_eager_{self.call_func_name}(const std::vector<at::Tensor>& inputs) {{
+                    return {self.call_func_name}(inputs);
+                }}
+                """
+            )
+            self.prefix.splice(
                 f"""std::vector<at::Tensor> {self.call_func_name}(const std::vector<at::Tensor>& inputs) {{"""
             )
         with self.prefix.indent():

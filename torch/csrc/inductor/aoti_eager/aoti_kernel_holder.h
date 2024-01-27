@@ -9,6 +9,8 @@
 
 #include <torch/csrc/utils/python_dispatch.h>
 
+#include <string>
+
 namespace torch::inductor {
 
 class AOTIPythonKernelHolder : public c10::OperatorKernel {
@@ -16,13 +18,13 @@ class AOTIPythonKernelHolder : public c10::OperatorKernel {
   // python_kernel_holder_;
   torch::impl::dispatch::PythonKernelHolder python_kernel_holder_;
   c10::DispatchKey dispatch_key_;
-  c10::string_view op_name_;
-  bool is_dynamic_;
+  std::string op_name_;
+  bool is_symbolic_;
   c10::optional<c10::Device> device_opt_;
 
   std::unordered_map<
       AOTIKernelMetaInfo,
-      std::shared_ptr<AOTIModelContainerRunner>,
+      std::shared_ptr<AOTIEagerKernelRunner>,
       AOTIKernelMetaInfoHash>
       aoti_kernel_cache_;
 
@@ -44,7 +46,7 @@ class AOTIPythonKernelHolder : public c10::OperatorKernel {
       const torch::jit::Stack& stack,
       std::vector<at::Tensor>& inputs);
   AOTIKernelMetaInfo getInputsMetaInfo(const std::vector<at::Tensor>&);
-  std::shared_ptr<AOTIModelContainerRunner> getAOTIModelContainerRunner(
+  std::shared_ptr<AOTIEagerKernelRunner> getAOTIEagerKernelRunner(
       const std::string&);
 };
 
