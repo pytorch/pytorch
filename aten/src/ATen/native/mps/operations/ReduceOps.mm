@@ -13,6 +13,10 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_cdist_forward_native.h>
+#include <ATen/ops/_cummax_helper.h>
+#include <ATen/ops/_cummax_helper_native.h>
+#include <ATen/ops/_cummin_helper.h>
+#include <ATen/ops/_cummin_helper_native.h>
 #include <ATen/ops/all_native.h>
 #include <ATen/ops/amax_native.h>
 #include <ATen/ops/amin_native.h>
@@ -931,6 +935,88 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
   }
 }
 
+static void cum_max_min_helper_mps(const Tensor& input,
+                                   Tensor& values,
+                                   Tensor& indices,
+                                   int64_t dim,
+                                   MPSReductionType reduction_type) {
+  if (!is_macos_13_or_newer()) {
+    TORCH_WARN_ONCE("MPS: cummax_helper_mps op is supported natively starting from macOS 13.0. ",
+                    "Falling back on CPU. This may have performance implications.");
+
+    Tensor values_cpu = at::empty({input.sizes()}, input.options());
+    Tensor indices_cpu = at::empty({input.sizes()}, input.options().dtype(kLong));
+
+    if (reduction_type == MPSReductionType::MAX)
+      at::_cummax_helper(input.to("cpu"), values_cpu, indices_cpu, dim);
+    else
+      at::_cummin_helper(input.to("cpu"), values_cpu, indices_cpu, dim);
+
+    values.copy_(values_cpu);
+    indices.copy_(indices_cpu);
+
+    return;
+  }
+
+  struct CumMaxMinCachedGraph : public MPSCachedGraph {
+    CumMaxMinCachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* inputTensor_ = nil;
+    MPSGraphTensor* valuesTensor_ = nil;
+    MPSGraphTensor* indicesTensor_ = nil;
+  };
+
+  @autoreleasepool {
+    string key = "cum_max_min_helper_mps:" + getTensorsStringKey({input, values, indices}) + ":" + to_string(dim) +
+        ":" + to_string(reduction_type);
+    CumMaxMinCachedGraph* cumMaxMinCachedGraph =
+        LookUpOrCreateCachedGraph<CumMaxMinCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+          MPSGraph* graph = newCachedGraph->graph();
+          newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, input);
+          MPSGraphTensor* inputTensor = newCachedGraph->inputTensor_;
+          MPSShape* shape = [inputTensor shape];
+
+          MPSGraphTensor* valuesTensor = nil;
+          MPSGraphTensor* mask = nil;
+          if (reduction_type == MPSReductionType::MAX) {
+            valuesTensor = [graph cumulativeMaximumWithTensor:inputTensor axis:dim name:nil];
+            mask = [graph greaterThanOrEqualToWithPrimaryTensor:inputTensor secondaryTensor:valuesTensor name:nil];
+          } else {
+            valuesTensor = [graph cumulativeMinimumWithTensor:inputTensor axis:dim name:nil];
+            mask = [graph lessThanOrEqualToWithPrimaryTensor:inputTensor secondaryTensor:valuesTensor name:nil];
+          }
+
+          MPSGraphTensor* baseTensor = [graph constantWithScalar:0.0f shape:shape dataType:MPSDataTypeInt32];
+          MPSGraphTensor* argSortTensor = [graph argSortWithTensor:baseTensor axis:dim name:nil];
+          MPSGraphTensor* indicesTensor = [graph selectWithPredicateTensor:mask
+                                                       truePredicateTensor:argSortTensor
+                                                      falsePredicateTensor:baseTensor
+                                                                      name:nil];
+
+          indicesTensor = [graph cumulativeMaximumWithTensor:indicesTensor axis:dim name:nil];
+          indicesTensor = [graph castTensor:indicesTensor toType:MPSDataTypeInt64 name:nil];
+
+          newCachedGraph->inputTensor_ = inputTensor;
+          newCachedGraph->valuesTensor_ = valuesTensor;
+          newCachedGraph->indicesTensor_ = indicesTensor;
+        });
+
+    Placeholder inputPlaceholder = Placeholder(cumMaxMinCachedGraph->inputTensor_, input);
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
+      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
+    };
+
+    Placeholder valuesPlaceholder = Placeholder(cumMaxMinCachedGraph->valuesTensor_, values);
+    Placeholder indicesPlaceholder = Placeholder(cumMaxMinCachedGraph->indicesTensor_, indices);
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
+      valuesPlaceholder.getMPSGraphTensor() : valuesPlaceholder.getMPSGraphTensorData(),
+      indicesPlaceholder.getMPSGraphTensor() : indicesPlaceholder.getMPSGraphTensorData()
+    };
+
+    MPSStream* stream = getCurrentMPSStream();
+    runMPSGraph(stream, cumMaxMinCachedGraph->graph(), feeds, results);
+  }
+}
+
 } // namespace mps
 
 TORCH_IMPL_FUNC(sum_out_mps)
@@ -1468,6 +1554,14 @@ TORCH_IMPL_FUNC(min_out_mps)
 TORCH_IMPL_FUNC(argmax_out_mps)
 (const Tensor& input_t, c10::optional<int64_t> dim, bool keepdim, const Tensor& output_t) {
   mps::argmax_argmin_out_mps(input_t, dim, keepdim, output_t, mps::MPSReductionType::MAX, "argmax_out_mps");
+}
+
+void cummax_helper_mps(const Tensor& input_t, Tensor& values, Tensor& indices, int64_t dim) {
+  mps::cum_max_min_helper_mps(input_t, values, indices, dim, mps::MPSReductionType::MAX);
+}
+
+void cummin_helper_mps(const Tensor& input_t, Tensor& values, Tensor& indices, int64_t dim) {
+  mps::cum_max_min_helper_mps(input_t, values, indices, dim, mps::MPSReductionType::MIN);
 }
 
 TORCH_IMPL_FUNC(argmin_out_mps)

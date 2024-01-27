@@ -635,8 +635,6 @@ def mps_ops_modifier(ops):
         'cholesky': None,
         'cholesky_inverse': None,
         'cholesky_solve': None,
-        'cummax': None,
-        'cummin': None,
         'erfc': None,
         'frexp': None,
         'gcd': None,
@@ -4975,6 +4973,42 @@ class TestMPS(TestCaseMPS):
         helper(2, 8, 4, 4, "min", torch.int32)
         helper(2, 8, 4, 4, "min", torch.float16)
         helper(2, 8, 4, 4, "min", torch.int64)
+
+    def test_cummax(self):
+        def helper(x, dim):
+            cpu_x = x
+            mps_x = cpu_x.detach().clone().to("mps")
+
+            cpu_result = cpu_x.cummax(dim=dim)
+            mps_result = mps_x.cummax(dim=dim)
+
+            self.assertEqual(mps_result, cpu_result)
+
+        for dtype in [torch.float32, torch.float16, torch.int64, torch.int32, torch.int16, torch.uint8]:
+            x_empty = torch.empty(5, 0, dtype=dtype)
+            helper(x_empty, 0)
+
+            x = torch.randint(0, 32, (10,  10, 10), dtype=dtype)
+            for dim in range(x.dim()):
+                helper(x, dim)
+
+    def test_cummin(self):
+        def helper(x, dim):
+            cpu_x = x
+            mps_x = cpu_x.detach().clone().to("mps")
+
+            cpu_result = cpu_x.cummin(dim=dim)
+            mps_result = mps_x.cummin(dim=dim)
+
+            self.assertEqual(mps_result, cpu_result)
+
+        for dtype in [torch.float32, torch.float16, torch.int64, torch.int32, torch.int16, torch.uint8]:
+            x_empty = torch.empty(5, 0, dtype=dtype)
+            helper(x_empty, 0)
+
+            x = torch.randint(0, 32, (10,  10, 10), dtype=dtype)
+            for dim in range(x.dim()):
+                helper(x, dim)
 
     @unittest.skipIf(product_version < 13.3, "Long data type supported from macOS 13.3 and above")
     def test_reduction_sum_max_long_val(self):
