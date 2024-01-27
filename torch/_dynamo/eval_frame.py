@@ -1519,27 +1519,28 @@ class TorchPatcher:
             sparse_adam,
         }
 
-        disabled_multi_tensor_opt_modules = {
-            radam,  # data-dependent control flow
+        excluded_single_tensor = {
+            radam,  # https://github.com/pytorch/pytorch/issues/117807
         }
 
         for opt_mod in optimizer_modules:
             opt_name = opt_mod.__name__.split(".")[-1]
-            multi_tensor_fn_name = f"_multi_tensor_{opt_name}"
             fused_fn_name = f"_fused_{opt_name}"
-            if (
-                hasattr(opt_mod, multi_tensor_fn_name)
-                and opt_mod in disabled_multi_tensor_opt_modules
-            ):
-                setattr(
-                    opt_mod,
-                    multi_tensor_fn_name,
-                    disable(getattr(opt_mod, multi_tensor_fn_name)),
-                )
+            single_tensor_fn_name = f"_single_tensor_{opt_name}"
 
             if hasattr(opt_mod, fused_fn_name):
                 setattr(
                     opt_mod, fused_fn_name, disable(getattr(opt_mod, fused_fn_name))
+                )
+
+            if (
+                hasattr(opt_mod, single_tensor_fn_name)
+                and opt_mod in excluded_single_tensor
+            ):
+                setattr(
+                    opt_mod,
+                    single_tensor_fn_name,
+                    disable(getattr(opt_mod, single_tensor_fn_name)),
                 )
 
         optimizer_classes = [
@@ -1548,12 +1549,12 @@ class TorchPatcher:
             if inspect.isclass(opt) and issubclass(opt, torch.optim.Optimizer)
         ]
 
-        # Note: we don't support sparsity, data-dependent control, or tracing through backwards
+        # Note: we don't support sparsity or tracing through backwards
         excluded_optimizer_classes = {
             torch.optim.SparseAdam,
-            torch.optim.RAdam,
             torch.optim.LBFGS,
         }
+
         for opt in optimizer_classes:
             if opt in excluded_optimizer_classes:
                 opt.step = disable(opt.step)
