@@ -1398,6 +1398,7 @@ def export(
                         case_name="cond_operands",
                     )
 
+            assert graph is not None
             for node in graph.graph.nodes:
                 if node.op == "get_attr" and isinstance(
                     getattr(graph, node.target), torch.Tensor
@@ -1424,6 +1425,7 @@ def export(
                 flat_args_dynamic_dims,
             )
         # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check
+        assert graph is not None
         graph.meta["input_shape_constraints"] = (
             [constraint.serializable_spec for constraint in constraints]
             if constraints
