@@ -759,6 +759,7 @@ class CommonTemplate:
 
         self.common(fn, [torch.linspace(-10, 10, 41)])
 
+    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     def test_scatter_bf16(self):
         def fn(inp, src, index):
             return inp.scatter_add(0, index, src)
@@ -8408,6 +8409,7 @@ class CommonTemplate:
         actual = torch.compile(fn)(x)
         self.assertEqual(ref, actual)
 
+    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     def test_bfloat16_to_int16(self):
         def fn(a, b):
             x = a + b
