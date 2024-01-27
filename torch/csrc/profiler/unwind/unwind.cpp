@@ -362,7 +362,7 @@ struct Symbolizer {
       return;
     }
     has_pending_results_ = true;
-    auto& entry = getOrCreate(maybe_library->first, addr2line_binary_);
+    auto& entry = getOrCreate(maybe_library->first);
     entry.queried.push_back(addr);
     auto libaddress = maybe_library->second - 1;
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
@@ -402,17 +402,18 @@ struct Symbolizer {
   ska::flat_hash_map<void*, Frame> frame_map_;
   bool has_pending_results_ = true;
 
-  Entry& getOrCreate(const std::string& name, const char* addr2line_bin) {
+  Entry& getOrCreate(const std::string& name) {
     auto it = entries_.find(name);
     if (it == entries_.end()) {
       // NOLINTNEXTLINE(*-c-arrays*)
       const char* args[] = {
-        addr2line_bin, "-C", "-f", "-e", name.c_str(), nullptr};
-      it = entries_
-               .insert_or_assign(
-                   name,
-                   Entry{std::make_unique<Communicate>(addr2line_bin, args), {}})
-               .first;
+          addr2line_binary_, "-C", "-f", "-e", name.c_str(), nullptr};
+      it =
+        entries_
+        .insert_or_assign(
+          name,
+          Entry{std::make_unique<Communicate>(addr2line_binary_, args), {}})
+        .first;
     }
     return it->second;
   }
