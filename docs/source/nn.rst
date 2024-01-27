@@ -131,6 +131,9 @@ Padding Layers
     nn.ConstantPad1d
     nn.ConstantPad2d
     nn.ConstantPad3d
+    nn.CircularPad1d
+    nn.CircularPad2d
+    nn.CircularPad3d
 
 Non-linear Activations (weighted sum, nonlinearity)
 ---------------------------------------------------
