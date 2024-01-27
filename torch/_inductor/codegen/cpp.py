@@ -981,6 +981,10 @@ class CppOverrides(OpOverrides):
         V.kernel.compute.splice(code)
         return result
 
+    @staticmethod
+    def bessel_j0(x):
+        return f"std::cyl_bessel_j(0, std::abs({x}))"
+
 
 class CppVecOverrides(CppOverrides):
     """Map element-wise ops to aten vectorization C++"""
