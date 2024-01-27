@@ -3532,12 +3532,13 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_gather_subgroup(self):
-        if self.rank > 3:
-            # just easier to write the test for exactly 4 gpus
+        world_size = 4
+        if self.rank >= world_size:
+            # just easier to write the test for exactly 4 gpus, even if this test class increased to 8gpu later
             return
 
-        store = c10d.FileStore(self.file_name, self.world_size)
-        torch.distributed.init_process_group(backend="nccl", store=store, rank=self.rank, world_size=self.world_size)
+        store = c10d.FileStore(self.file_name, world_size)
+        torch.distributed.init_process_group(backend="nccl", store=store, rank=self.rank, world_size=world_size)
         process_group = c10d.distributed_c10d._get_default_group()
         a_group = c10d.new_group([0, 1])
         b_group = c10d.new_group([2, 3])
@@ -3557,12 +3558,13 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_gather_object_subgroup(self):
-        if self.rank > 3:
-            # just easier to write the test for exactly 4 gpus
+        world_size = 4
+        if self.rank >= world_size:
+            # just easier to write the test for exactly 4 gpus, even if this test class increased to 8gpu later
             return
 
-        store = c10d.FileStore(self.file_name, self.world_size)
-        torch.distributed.init_process_group(backend="nccl", store=store, rank=self.rank, world_size=self.world_size)
+        store = c10d.FileStore(self.file_name, world_size)
+        torch.distributed.init_process_group(backend="nccl", store=store, rank=self.rank, world_size=world_size)
         process_group = c10d.distributed_c10d._get_default_group()
         a_group = c10d.new_group([0, 1])
         b_group = c10d.new_group([2, 3])
