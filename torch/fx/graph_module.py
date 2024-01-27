@@ -195,10 +195,8 @@ def _deserialize_graph_module(forward, body: Dict[Any, Any], graph_module_cls=No
     # Manually set Tracer class on the reconstructed Graph, to avoid
     # referencing the private local subclass KeepModules.
     graph._tracer_cls = tracer_cls
-    if graph_module_cls is None:
-        from ._lazy_graph_module import get_graph_module_cls
-        graph_module_cls = get_graph_module_cls()
-    gm = graph_module_cls(com, graph, class_name=graphmodule_cls_name)
+    from ._lazy_graph_module import _make_graph_module
+    gm = _make_graph_module(com, graph, class_name=graphmodule_cls_name, graph_module_cls=graph_module_cls)
 
     # The GraphModule constructor only retains attributes referenced by the graph.
     # In this case, our goal is return a GraphModule as close to identical as the one
@@ -814,8 +812,8 @@ class {module_name}(torch.nn.Module):
         return res
 
     def __copy__(self):
-        from ._lazy_graph_module import get_graph_module_cls
-        res = get_graph_module_cls()(self, self.graph)
+        from ._lazy_graph_module import _make_graph_module
+        res = _make_graph_module(self, self.graph)
         res.meta = getattr(self, "meta", {})
         return res
 

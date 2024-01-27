@@ -7,7 +7,11 @@ from unittest.mock import patch
 import torch
 import torch._export
 from torch import fx
-from torch.fx._lazy_graph_module import _LazyGraphModule, _use_lazy_graph_module
+from torch.fx._lazy_graph_module import (
+    _LazyGraphModule,
+    _make_graph_module,
+    _use_lazy_graph_module,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -209,6 +213,20 @@ class TestLazyGraphModule(TestCase):
         gm2 = pickle.loads(serialized)
         self.assertTrue(isinstance(gm2, _LazyGraphModule))
         self.assertTrue("sin" in gm2.code)
+
+    def test_make_graph_module(self):
+        gm = fx.symbolic_trace(lambda x: x.sin())
+        self.assertTrue(isinstance(gm, _LazyGraphModule))
+
+        gm1 = _make_graph_module(
+            gm, gm.graph, class_name="MyGraphModule", graph_module_cls=fx.GraphModule
+        )
+        self.assertFalse(isinstance(gm1, _LazyGraphModule))
+        self.assertTrue(gm1.__class__.__name__ == "MyGraphModule")
+
+        gm2 = _make_graph_module(gm, gm.graph)
+        self.assertTrue(isinstance(gm2, _LazyGraphModule))
+        self.assertTrue(gm2.__class__.__name__ == "GraphModule")
 
 
 if __name__ == "__main__":

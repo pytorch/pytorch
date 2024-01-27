@@ -43,12 +43,43 @@ def _use_lazy_graph_module(should_use: bool):
 
 
 @compatibility(is_backward_compatible=False)
-def get_graph_module_cls():
+def _get_graph_module_cls():
     return _LazyGraphModule if _use_lazy_graph_module_flag else GraphModule
+
+
+def _make_graph_module(*args, graph_module_cls=None, **kwargs):
+    if graph_module_cls is None:
+        graph_module_cls = _get_graph_module_cls()
+
+    return graph_module_cls(*args, **kwargs)
 
 
 @compatibility(is_backward_compatible=False)
 class _LazyGraphModule(GraphModule):
+    """
+    The main difference between _LazyGraphModule and GraphModule is how recompile happens.
+    GraphModule will do a 'recompile' call to generate python code and the forward method when it's
+    constructed. Later on if the graph get updated, recompile method can be called again to refresh
+    the saved python code and forward method.
+
+    However in some cases especially in inductor, the recompilation can be a waste since we never
+    check the python code for the graph module or call its forward method. A few more concreate
+    examples regarding pattern matching fx passes in inductor:
+    1. some passes will update the graph to be compiled and then call recompile on the GraphModule.
+    2. some passes will trace small pattern function to search it in the graph being compiled and
+       replace the match with the traced graph of a replacement function. The pattern graph and
+       replacement graph are quite small but there are large amount of them. Doing GraphModule.recompile
+       for them in GraphModule.__init__ is also a waste of time.
+
+    However simply skip calling GraphModule.recompile in these scenarios is also dangeruous.
+    People may want to check the python code or call the GraphModule's forward method for debugging purposes.
+
+    The way _LazyGraphModule solves it is, we override the recompile method to just mark the
+    need for recompilation but does not do the actual recompilation. Later on if people really
+    access the compiled python code or call the GraphModule's forward method, we do the real
+    recompilation.
+    """
+
     @classmethod
     def from_graphmodule(cls, gm: GraphModule):
         if isinstance(gm, _LazyGraphModule):
