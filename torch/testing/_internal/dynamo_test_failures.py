@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # NOTE: [dynamo_test_failures.py]
 #
 # We generate xFailIfTorchDynamo* for all tests in `dynamo_expected_failures`
@@ -2745,7 +2747,6 @@ dynamo_expected_failures = {
     "TestPythonDispatch.test_subclass_autograd_device_check",  # test_python_dispatch
     "TestPythonDispatch.test_data_ptr_respects_numel_slow_path",  # test_python_dispatch
     "TestPythonDispatch.test_make_subclass_with_modes",  # test_python_dispatch
-    "TestPythonRegistration.test_override_aten_ops_with_multiple_libraries",  # test_python_dispatch
     "TestPythonDispatch.test_dispatch_super_call",  # test_python_dispatch
     "TestPythonDispatch.test_subclass_priority",  # test_python_dispatch
     "TestPythonDispatch.test_exception_handling",  # test_python_dispatch
@@ -7453,6 +7454,9 @@ dynamo_skips = {
     "TestSymbolicShapeAnalysis.test_if_propagation",  # test_jit
     "TestPeephole.test_normalized_rsub",  # test_jit
     "TestPythonIr.test_param_strides",  # test_jit
+    "TestPythonIr.test_permute_inputs_binding",  # test_jit
+    "TestPythonIr.test_python_ir_utils",  # test_jit
+    "TestPythonIr.test_python_ir_utils_graph",  # test_jit
     "TestComplex.test_complex_list_sum",  # test_jit
     "TestUnion.test_union_redundant_arguments_are_skipped_optional",  # test_jit
     "TestNnapiBackend.test_conv2d",  # test_jit
