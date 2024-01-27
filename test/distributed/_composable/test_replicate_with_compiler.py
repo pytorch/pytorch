@@ -81,6 +81,7 @@ class ReplicateTest(MultiProcessTestCase):
         no_sync: bool,
         setup_func: Optional[Callable] = None,
         no_inductor: bool = False,
+        no_compile_forward: bool = False,
     ):
         backend = "nccl" if use_gpu else "gloo"
         dist.init_process_group(
@@ -101,7 +102,11 @@ class ReplicateTest(MultiProcessTestCase):
         model = Net().to(device)
         input = torch.randn([1, DIM], device=device)
 
-        compiled_model = torch.compile(replicate(deepcopy(model)), fullgraph=True)
+        if no_compile_forward:
+            compiled_model = replicate(deepcopy(model))
+            replicate.state(compiled_model)._ddp._force_to_disable_reducer = True
+        else:
+            compiled_model = torch.compile(replicate(deepcopy(model)), fullgraph=True)
         compiled_optim = torch.optim.Adam(compiled_model.parameters())
         model = replicate(model)
         optim = torch.optim.Adam(model.parameters())
@@ -125,7 +130,7 @@ class ReplicateTest(MultiProcessTestCase):
                 loss = model(input).sum()
                 loss.backward()
 
-            compiled_m = compiled_model._orig_mod
+            compiled_m = getattr(compiled_model, "_orig_mod", compiled_model)
             if no_sync and i % 2 == 0:
                 context = replicate.state(compiled_m)._ddp.no_sync()
             else:
@@ -196,6 +201,10 @@ class ReplicateTest(MultiProcessTestCase):
             use_gpu=True, no_sync=False, setup_func=setup, no_inductor=True
         )
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    def test_compile_backward_only(self):
+        self._test_compile(use_gpu=True, no_sync=False, no_compile_forward=True)
 
 if __name__ == "__main__":
     run_tests()
