@@ -768,15 +768,15 @@ static void _get_tensors_to_save(
           tensors_to_save.emplace_back(tensor);
         }
       } else {
-        // TODO: We should really just ALWAYS throw an error here, but
-        // doing so will break some internal tests. We should fix those.
-        TORCH_CHECK_TYPE(
-            !is_executable,
-            "save_for_backward can only save variables, but argument ",
-            i,
-            " is of "
-            "type ",
-            Py_TYPE(obj)->tp_name);
+        if (is_executable) {
+          // TODO: We should really just ALWAYS throw an error here, but
+          // doing so will break some internal tests. We should fix those.
+          throw torch::TypeError(
+              "save_for_backward can only save variables, but argument %ld is of "
+              "type %s",
+              i,
+              Py_TYPE(obj)->tp_name);
+        }
       }
     }
   }

@@ -643,13 +643,11 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
       // new(sequence) binds to this signature but should be treated differently
       // unless the sequences is a torch.Size
       if (ctor_or_new == CtorOrNew::CTOR) {
-        TORCH_CHECK_TYPE(
-            false,
+        throw TypeError(
             "torch.sparse.SparseTensor(sequence) only accepts sizes.  Please use torch.sparse_coo_tensor() "
             "or construct a strided tensor and convert it to sparse via to_sparse.");
       } else {
-        TORCH_CHECK_TYPE(
-            false,
+        throw TypeError(
             "SparseTensor.new(sequence) only accepts sizes.  Please use torch.sparse_coo_tensor() "
             "or construct a strided tensor and convert it to sparse via to_sparse.");
       }

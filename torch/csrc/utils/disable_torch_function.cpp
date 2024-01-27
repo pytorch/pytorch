@@ -209,8 +209,8 @@ PyObject* THPModule_disable_torch_function(PyObject* self, PyObject* a) {
   } else if (PyTuple_Check(args)) {
     py_args = py::reinterpret_borrow<py::tuple>(args);
   } else {
-    TORCH_CHECK_TYPE(
-        false, "expected List or Tuple (got ", Py_TYPE(args)->tp_name, ")");
+    throw torch::TypeError(
+        "expected List or Tuple (got %s)", Py_TYPE(args)->tp_name);
   }
 
   // These are all C-API calls so no exceptions will be raised
@@ -243,8 +243,8 @@ PyObject* THPModule_disable_torch_dispatch(PyObject* self, PyObject* a) {
   } else if (PyTuple_Check(args)) {
     py_args = py::reinterpret_borrow<py::tuple>(args);
   } else {
-    TORCH_CHECK_TYPE(
-        false, "expected List or Tuple (got ", Py_TYPE(args)->tp_name, ")");
+    throw torch::TypeError(
+        "expected List or Tuple (got %s)", Py_TYPE(args)->tp_name);
   }
 
   // This implementation is not completely correct.  The moral

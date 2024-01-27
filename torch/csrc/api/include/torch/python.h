@@ -29,7 +29,7 @@ inline Device py_object_to_device(py::object object) {
   if (THPDevice_Check(obj)) {
     return reinterpret_cast<THPDevice*>(obj)->device;
   }
-  TORCH_CHECK_TYPE(false, "Expected device");
+  throw TypeError("Expected device");
 }
 
 inline Dtype py_object_to_dtype(py::object object) {
@@ -37,7 +37,7 @@ inline Dtype py_object_to_dtype(py::object object) {
   if (THPDtype_Check(obj)) {
     return reinterpret_cast<THPDtype*>(obj)->scalar_type;
   }
-  TORCH_CHECK_TYPE(false, "Expected dtype");
+  throw TypeError("Expected dtype");
 }
 
 template <typename ModuleType>
