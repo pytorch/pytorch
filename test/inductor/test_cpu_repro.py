@@ -1974,27 +1974,17 @@ class CPUReproTests(TestCase):
                 self.common(fn, (x,))
                 assert metrics.generated_cpp_vec_kernel_count == 0
 
-    @unittest.skipIf(
-        not codecache.valid_vec_isa_list(), "Does not support vectorization"
-    )
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_argmin_cpu_only(self):
+    def test_argmin(self):
         def fn(x):
             return torch.argmin(x, -1)
 
         for dtype in vec_dtypes:
             x = torch.randn((10, 10), dtype=dtype)
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            assert metrics.generated_cpp_vec_kernel_count == 0
 
-            with config.patch({"cpp.simdlen": None}):
-                torch._dynamo.reset()
-                metrics.reset()
-                self.common(fn, (x,))
-                assert metrics.generated_cpp_vec_kernel_count == 0
-
-    @unittest.skipIf(
-        not codecache.valid_vec_isa_list(), "Does not support vectorization"
-    )
-    @patch("torch.cuda.is_available", lambda: False)
     def test_argmax_argmin_with_nan_value(self):
         def fn(x):
             return torch.argmax(x)
@@ -2013,18 +2003,17 @@ class CPUReproTests(TestCase):
             x = x.repeat(16, 16)
             x = torch.log1p(x)
 
-            with config.patch({"cpp.simdlen": None}):
-                # Test argmax
-                torch._dynamo.reset()
-                metrics.reset()
-                self.common(fn, (x,))
-                assert metrics.generated_cpp_vec_kernel_count == 0
+            # Test argmax
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            assert metrics.generated_cpp_vec_kernel_count == 0
 
-                # Test argmin
-                torch._dynamo.reset()
-                metrics.reset()
-                self.common(fn2, (x,))
-                assert metrics.generated_cpp_vec_kernel_count == 0
+            # Test argmin
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn2, (x,))
+            assert metrics.generated_cpp_vec_kernel_count == 0
 
     # Currently, we enabled AVX2 and AVX512 for vectorization. If the platform is not
     # supported, the vectorization will not work and skip this test case. For ARM or

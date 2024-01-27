@@ -10,7 +10,6 @@
 #include <ATen/NumericUtils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 #include <ATen/native/Math.h>
-#include <ATen/native/SharedReduceOps.h>
 
 #include <c10/util/Float8_e4m3fn.h>
 #include <c10/util/Float8_e5m2.h>
@@ -97,13 +96,26 @@ Welford<T> welford_combine(const Welford<T> &acc, T data) {
 // aten/src/ATen/native/SharedReduceOps.h#L419-L445
 template <typename scalar_t>
 inline bool greater_or_nan(scalar_t a, scalar_t b, int64_t idx_a, int64_t idx_b) {
-  // TODO<Leslie> Should we include the header file of <ATen/native/SharedReduceOps.h> or copy the implementation
-  return at::native::detail::GreaterOrNan<scalar_t>{}(a, b, idx_a, idx_b);
+  // If (a == b), then choose the one with lower idx, else max(a, b)
+  if (at::_isnan(a)) {
+    if (at::_isnan(b)) {
+      return idx_a < idx_b;
+    }
+    return true;
+  }
+  return (a == b) ? idx_a < idx_b : (a > b);
 }
 
 template <typename scalar_t>
 inline bool less_or_nan(scalar_t a, scalar_t b, int64_t idx_a, int64_t idx_b) {
-  return at::native::detail::LessOrNan<scalar_t>{}(a, b, idx_a, idx_b);
+    // If (a == b), then choose the one with lower idx, else min(a, b)
+    if (at::_isnan(a)) {
+      if (at::_isnan(b)) {
+        return idx_a < idx_b;
+      }
+      return true;
+    }
+    return (a == b) ? idx_a < idx_b : (a < b);
 }
 
 #if INDUCTOR_USE_VECTOR_TYPES()
