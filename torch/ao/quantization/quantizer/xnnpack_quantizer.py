@@ -100,17 +100,20 @@ def _get_supported_symmetric_config_and_operators() -> List[OperatorConfig]:
             )
     return copy.deepcopy(supported_config_and_operators)
 
-
 @functools.lru_cache
 def get_symmetric_quantization_config(
     is_per_channel: bool = False,
     is_qat: bool = False,
     is_dynamic: bool = False,
+    is_weight_only: bool = False,
     act_qmin: int = -128,
     act_qmax: int = 127,
     weight_qmin: int = -127,
     weight_qmax: int = 127,
 ):
+    if is_dynamic and is_weight_only:
+        raise Exception("can't configure quantization as both dynamic and weight only")
+
     extra_args: Dict[str, Any] = {"eps": 2**-12}
     if is_qat:
         if is_dynamic:
@@ -171,6 +174,14 @@ def get_symmetric_quantization_config(
     if is_dynamic:
         quantization_config = QuantizationConfig(
             act_quantization_spec,
+            None,
+            weight_quantization_spec,
+            bias_quantization_spec,
+            is_qat,
+        )
+    elif is_weight_only:
+        quantization_config = QuantizationConfig(
+            None,
             None,
             weight_quantization_spec,
             bias_quantization_spec,
@@ -365,7 +376,7 @@ class XNNPACKQuantizer(Quantizer):
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """just handling global spec for now"""
         # hacked for handling dynamic linear quant. will fix later.
-        if self.global_config and self.global_config.input_activation.is_dynamic:  # type: ignore[union-attr]
+        if self.global_config and self.global_config.input_activation and self.global_config.input_activation.is_dynamic:  # type: ignore[union-attr]
             model = self._annotate_for_dynamic_quantization_config(model)
         else:
             model = self._annotate_for_static_quantization_config(model)

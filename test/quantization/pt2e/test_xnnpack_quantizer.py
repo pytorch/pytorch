@@ -582,6 +582,63 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
                 qconfig_mapping,
             )
 
+    def test_weight_only_linear_int4_weight(self):
+        quantizer = XNNPACKQuantizer()
+        quantization_config = get_symmetric_quantization_config(
+            is_per_channel=True,
+            is_weight_only=True,
+            weight_qmin=0,
+            weight_qmax=15,
+        )
+        quantizer.set_global(quantization_config)
+        m_eager = TestHelperModules.TwoLinearModule().eval()
+
+        node_occurrence = {
+            # note: quantize op for weights are const propagated
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
+        }
+        qconfig = QConfig(
+            activation=observer.PlaceholderObserver,
+            weight=per_channel_weight_observer_range_neg_127_to_127.with_args(
+                quant_min=0, quant_max=15
+            ),
+        )
+        qconfig_mapping = QConfigMapping().set_global(qconfig)
+
+        import torch.ao.quantization.backend_config as bc
+        import torch.ao.nn.quantized.reference as nnqr
+        backend_config = bc.get_executorch_backend_config()
+        observation_type = bc.ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
+        dtype_configs = [
+            bc.DTypeConfig(
+                input_dtype=torch.float,
+                output_dtype=torch.float,
+                weight_dtype=torch.qint8,
+            )
+        ]
+        int4_weight_only_linear = bc.BackendPatternConfig(torch.nn.Linear) \
+            .set_observation_type(observation_type)  \
+            .set_dtype_configs(dtype_configs)  \
+            .set_root_module(torch.nn.Linear)  \
+            .set_reference_quantized_module(nnqr.Linear)   # noqa: E131
+
+        backend_config.set_backend_pattern_configs([int4_weight_only_linear])
+        # Test with 2d inputs
+        example_inputs_2d = (torch.randn(9, 8),)
+        example_inputs_4d = (torch.randn(9, 10, 11, 8),)
+        for example_inputs in [example_inputs_2d, example_inputs_4d]:
+            self._test_quantizer(
+                m_eager,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                [],
+                check_against_fx_quant=True,
+                fx_qconfig_mapping=qconfig_mapping,
+                fx_backend_config=backend_config
+            )
+
     def test_qat_dynamic_linear(self):
         quantizer = XNNPACKQuantizer()
         quantization_config = get_symmetric_quantization_config(

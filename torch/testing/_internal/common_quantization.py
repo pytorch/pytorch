@@ -1158,6 +1158,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         expected_node_list=None,
         check_against_fx_quant=False,
         fx_qconfig_mapping=None,
+        fx_backend_config=None,
         export_with_dynamic_shape=False,
         is_qat=False,
     ):
@@ -1194,7 +1195,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         )
         if check_against_fx_quant:
             qconfig_mapping = fx_qconfig_mapping
-            backend_config = get_executorch_backend_config()
+            backend_config = fx_backend_config or get_executorch_backend_config()
             m_copy = copy.deepcopy(m_eager)
             m_fx = prepare_fx(
                 m_copy, qconfig_mapping, example_inputs, backend_config=backend_config
