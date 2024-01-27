@@ -137,12 +137,12 @@ class LineLoader(YamlLoader):
         mapping["__line__"] = node.start_mark.line + 1
         return mapping
 
+# Parse native_functions.yaml into a sequence of NativeFunctions and Backend Indices.
+ParsedYaml = namedtuple("ParsedYaml", ["native_functions", "backend_indices"])
+
 
 _GLOBAL_PARSE_NATIVE_YAML_CACHE: Dict[str, ParsedYaml] = {}
 _GLOBAL_PARSE_TAGS_YAML_CACHE: Dict[str, Set[str]] = {}
-
-# Parse native_functions.yaml into a sequence of NativeFunctions and Backend Indices.
-ParsedYaml = namedtuple("ParsedYaml", ["native_functions", "backend_indices"])
 
 
 def parse_native_yaml_struct(
