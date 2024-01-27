@@ -408,12 +408,13 @@ struct Symbolizer {
       // NOLINTNEXTLINE(*-c-arrays*)
       const char* args[] = {
           addr2line_binary_, "-C", "-f", "-e", name.c_str(), nullptr};
-      it =
-        entries_
-        .insert_or_assign(
-          name,
-          Entry{std::make_unique<Communicate>(addr2line_binary_, args), {}})
-        .first;
+      it = entries_
+               .insert_or_assign(
+                   name,
+                   Entry{
+                       std::make_unique<Communicate>(addr2line_binary_, args),
+                       {}})
+               .first;
     }
     return it->second;
   }
