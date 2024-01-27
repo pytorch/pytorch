@@ -1,8 +1,12 @@
 from contextlib import contextmanager
 
 from torch.fx import GraphModule
-from torch.fx.graph_module import _format_import_block, reduce_graph_module
-from torch.package import sys_importer
+from torch.fx.graph_module import (
+    _format_import_block,
+    reduce_graph_module,
+    reduce_package_graph_module,
+)
+from torch.package import PackageExporter, sys_importer
 from ._compatibility import compatibility
 
 _use_lazy_graph_module_flag = False
@@ -119,6 +123,31 @@ class _LazyGraphModule(GraphModule):
         return self(*args, **kwargs)
 
     forward = _lazy_forward
+
+    # TODO: we shold handle __reduce_deploy__ the same way as __reduce_package__,
+    # or __reduce__ by calling _real_recompile. But I don't find a good way
+    # to test __reduce_deploy__ out. Also it's very unlikely that LazyGraphModule
+    # will be used in torch::deploy. So it's skipped for now.
+
+    def __reduce_package__(self, exporter: PackageExporter):
+        """
+        Follow GraphModule.__reduce__ but call 'self._real_recompile' rather
+        than 'self.recompile' since for a _LazyGraphModule, self.recompile just
+        mark the need of recompilation and does not return the PythonCode object.
+        """
+        python_code = self._real_recompile()
+        dict_without_graph = self.__dict__.copy()
+        dict_without_graph["_graphmodule_cls_name"] = self.__class__.__name__
+        del dict_without_graph["_graph"]
+
+        generated_module_name = f"fx-generated._{exporter.get_unique_id()}"
+        import_block = _format_import_block(python_code.globals, exporter.importer)
+        module_code = import_block + self.code
+        exporter.save_source_string(generated_module_name, module_code)
+        return (
+            reduce_package_graph_module,
+            (dict_without_graph, generated_module_name),
+        )
 
     def __reduce__(self):
         """
