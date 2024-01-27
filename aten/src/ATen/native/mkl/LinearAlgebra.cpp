@@ -46,6 +46,14 @@ void mkl_gemm_bf16bf16f32(
   TORCH_INTERNAL_ASSERT(false, "mkl_gemm_bf16bf16f32: ATen not compiled with MKL support");
 }
 
+void mkl_gemm_f16f16f32(
+    TransposeType trans_A, TransposeType trans_B,
+    int M, int N, int K, const float alpha,
+    const c10::Half* A, int lda, const c10::Half* B, int ldb,
+    const float beta, float* C, int ldc) {
+  TORCH_INTERNAL_ASSERT(false, "mkl_gemm_f16f16f32: ATen not compiled with MKL support");
+}
+
 }}
 
 #else // AT_MKL_ENABLED
