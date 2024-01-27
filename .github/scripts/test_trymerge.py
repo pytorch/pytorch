@@ -434,7 +434,7 @@ class TestTryMerge(TestCase):
         self.assertGreater(len(pr._reviews), 100)
 
     def get_co_authors(self, *args: Any) -> None:
-        """ Test co-authors are recognized"""
+        """Tests that co-authors are recognized"""
         pr = GitHubPR("pytorch", "pytorch", 118347)
         authors = pr.get_authors()
         self.assertIn("kit1980", authors)
