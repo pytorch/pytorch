@@ -3660,6 +3660,38 @@ class TestNestedTensorSubclass(TestCase):
         self.assertFalse(clone.is_contiguous())
         check_nt_equality(detached, transposed)
 
+    def test_to_copy(self, device):
+        nt, _ = jagged_from_list(
+            [torch.randn(i + 2, 3, 4, requires_grad=True, dtype=torch.float64, device=device) for i in range(3)], None
+        )
+
+        nt_copy_dtype = torch.ops.aten._to_copy(nt, dtype=torch.float16)
+        self.assertEqual(torch.float16, nt_copy_dtype.dtype)
+
+        nt_t = nt.transpose(1, 2)
+        nt_t_copy_dtype = torch.ops.aten._to_copy(nt_t, dtype=torch.float16)
+        self.assertEqual(torch.float16, nt_t_copy_dtype.dtype)
+
+    def test_is_same_size(self, device):
+        def get_3_tensors():
+            return [torch.randn(i + 2, 3, 4, requires_grad=True, dtype=torch.float64, device=device) for i in range(3)]
+
+        nt1, offsets1 = jagged_from_list(get_3_tensors(), None)
+        nt2, offsets1 = jagged_from_list(get_3_tensors(), offsets1)
+
+        nt3, offsets2 = jagged_from_list(get_3_tensors(), None)
+        nt4, offsets2 = jagged_from_list(get_3_tensors(), offsets2)
+
+        def check_size(nt1, nt2, nt3, nt4):
+            self.assertTrue(torch.ops.aten.is_same_size(nt1, nt2))
+            self.assertTrue(torch.ops.aten.is_same_size(nt3, nt4))
+            self.assertFalse(torch.ops.aten.is_same_size(nt1, nt3))
+
+        check_size(nt1, nt2, nt3, nt4)
+
+        nt1_t, nt2_t, nt3_t, nt4_t = (x.transpose(1, 2) for x in (nt1, nt2, nt3, nt4))
+        check_size(nt1_t, nt2_t, nt3_t, nt4_t)
+
     # Note 1: Math fallback doesn't work with bfloat16 on CUDA
     # Note 2: ROCm doesn't support flash attention or mem_efficient attention for NT
     @xfailIfTorchDynamo
