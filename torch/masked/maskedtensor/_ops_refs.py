@@ -1,9 +1,11 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 from functools import partial
-from typing import Callable, Any, Dict
+from typing import Callable, Any, Dict, TYPE_CHECKING
 import torch
-import torch._ops
+
+if TYPE_CHECKING:
+    import torch._ops
 
 from .binary import (
     _apply_native_binary,
@@ -212,7 +214,7 @@ def _function_to_sparse_csr(func, *args, **kwargs):
     return _MaskedToSparseCsr.apply(args[0])
 
 
-_MASKEDTENSOR_DISPATCH_TABLE: Dict[torch._ops.OpOverload, Callable[..., Any]] = {}
+_MASKEDTENSOR_DISPATCH_TABLE: Dict["torch._ops.OpOverload", Callable[..., Any]] = {}
 
 def register_dispatch_func(aten_ops):
     """
