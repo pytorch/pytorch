@@ -6940,6 +6940,12 @@ void test_stack(const at::IntArrayRef input_shape, int64_t dim, int numTensors) 
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, stack_0d) {
+  test_stack({}, 0, 1);
+  test_stack({}, 0, 2);
+  test_stack({}, 0, 3);
+}
+
 TEST_F(VulkanAPITest, stack_1d) {
   test_stack({221}, 0, 2);
   test_stack({193}, 1, 3);

@@ -28,6 +28,7 @@ from torch._C import ScriptObject  # type: ignore[attr-defined]
 from ._compatibility import compatibility
 from .graph import _PyTreeCodeGen, _PyTreeInfo, Graph
 from .graph_module import GraphModule
+from ._lazy_graph_module import _make_graph_module
 from .node import Argument, base_types, map_aggregate
 from .proxy import ParameterProxy, Proxy, TracerBase, Scope, ScopeContextManager
 
@@ -693,6 +694,14 @@ class Tracer(TracerBase):
         _is_fx_tracing_flag = True
         try:
             if isinstance(root, torch.nn.Module):
+
+                # do real recompilation for _LazyGraphModule before retracing since the trace
+                # method can not trace the _lazy_forward method. Got error:
+                #   https://gist.github.com/shunting314/75549c2e82ae07ac1139c94a3583d259
+                # without this.
+                from torch.fx._lazy_graph_module import _LazyGraphModule
+                _LazyGraphModule.force_recompile(root)
+
                 self.root = root
 
                 assert hasattr(
@@ -1185,7 +1194,7 @@ def symbolic_trace(
     name = (
         root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
     )
-    return GraphModule(tracer.root, graph, name)
+    return _make_graph_module(tracer.root, graph, name)
 
 
 @wrap
