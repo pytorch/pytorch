@@ -5,7 +5,7 @@ import os
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
@@ -60,16 +60,16 @@ from .utils import (
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
-lowerings = {}
-layout_constraints = {}
-fallbacks = set()
+lowerings: Dict[torch._ops.OpOverload, Callable[..., Any]] = {}
+layout_constraints: Dict[torch._ops.OpOverload, Callable[..., Any]] = {}
+fallbacks: Set[torch._ops.OpOverload] = set()
 aten = torch.ops.aten
 tr_c10d = torch.ops.tr_c10d
 prims = torch.ops.prims
-needs_realized_inputs = set()
-foreach_ops = set()
-inplace_foreach_ops = set()
-inplaceable_foreach_ops = dict()
+needs_realized_inputs: Set[torch._ops.OpOverload] = set()
+foreach_ops: Set[torch._ops.OpOverload] = set()
+inplace_foreach_ops: Set[torch._ops.OpOverload] = set()
+inplaceable_foreach_ops: Dict[torch._ops.OpOverload, torch._ops.OpOverload] = dict()
 
 
 def assert_nyi(cond, msg):
