@@ -769,7 +769,7 @@ def trunc(x):
 
 
 @register_lowering(
-    aten.special_bessel_j0,
+    [aten.special_bessel_j0, prims.bessel_j0],
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def bessel_j0(x):
