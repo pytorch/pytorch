@@ -65,7 +65,7 @@ try:
 
     LockType = _thread.LockType
 except ImportError:
-    import _dummy_thread
+    import _dummy_thread  # type: ignore[import-not-found]
 
     LockType = _dummy_thread.LockType
 
