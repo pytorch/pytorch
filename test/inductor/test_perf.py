@@ -212,6 +212,20 @@ class NumBytesMetricTests(TestCase):
         inp = [T(10, 10, 10), T(10, 10, 10)]
         self.assertExpectedInline(count_numel(f, *inp), """2600""")
 
+    def test_cat_pointwise(self):
+        def f(a, b):
+            return torch.cat([torch.softmax(a, dim=-1), torch.softmax(b, dim=-1)])
+
+        inp = (T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """400""")
+
+        def f(a, b):
+            return torch.cat([torch.softmax(a, dim=-1), torch.softmax(b, dim=-1)]).cos()
+
+        # potentially beneficial to fuse but we exclude reductions from pointwise cat
+        inp = (T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """800""")
+
     def test_index(self):
         def f(a, b):
             return a[b]

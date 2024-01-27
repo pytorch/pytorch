@@ -1085,7 +1085,16 @@ def cat(inputs, dim=0):
             return should_lower_cat_input(x.data)
 
         if isinstance(x, ir.Pointwise):
-            return True
+            # fusing multiple reducutions into computed concat
+            # buffer can cause regressions.
+            def is_reduction(t):
+                return isinstance(t, ir.ComputedBuffer) and isinstance(
+                    t.data, ir.Reduction
+                )
+
+            return not any(
+                is_reduction(V.graph.get_buffer(read)) for read in x.get_read_names()
+            )
 
         return False
 
