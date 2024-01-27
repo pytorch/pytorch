@@ -220,8 +220,8 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_s
         bwd_outputs
     )
 
-    fwd_module = fx.GraphModule(joint_module, fwd_graph)
-    bwd_module = fx.GraphModule(joint_module, bwd_graph)
+    fwd_module = fx._lazy_graph_module._make_graph_module(joint_module, fwd_graph)
+    bwd_module = fx._lazy_graph_module._make_graph_module(joint_module, bwd_graph)
     return fwd_module, bwd_module
 
 
