@@ -898,10 +898,12 @@ def rot_n_helper(n):
 common_constant_types = {
     int,
     float,
+    complex,
     bool,
     str,
     bytes,
     type(None),
+    Ellipsis.__class__,
     types.CodeType,
     torch.device,
     torch.dtype,
@@ -1110,8 +1112,7 @@ def dict_keys_repr(const_keys, *, local) -> str:
     return "[" + keys_str + "]"
 
 
-def global_key_name(key):
-    return f"__dict_key_{id(key)}"
+GLOBAL_KEY_PREFIX = "__dict_key"
 
 
 from torch._subclasses import (  # noqa: F401
