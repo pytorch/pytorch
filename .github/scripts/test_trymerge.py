@@ -434,6 +434,13 @@ class TestTryMerge(TestCase):
         assert pr._reviews is not None  # to pacify mypy
         self.assertGreater(len(pr._reviews), 100)
 
+    def get_co_authors(self, *args: Any) -> None:
+        """Tests that co-authors are recognized"""
+        pr = GitHubPR("pytorch", "pytorch", 118347)
+        authors = pr.get_authors()
+        self.assertIn("kit1980", authors)
+        self.assertIn("Co-authored-by:", pr.gen_commit_message())
+
     def test_get_checkruns_many_runs(self, *args: Any) -> None:
         """Tests that all checkruns can be fetched"""
         pr = GitHubPR("pytorch", "pytorch", 105260)
