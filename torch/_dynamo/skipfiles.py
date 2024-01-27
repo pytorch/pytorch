@@ -220,6 +220,7 @@ MOD_INLINELIST = {
     "torch.utils._pytree",
     "torch._tensor",
     "torch._higher_order_ops.strict_mode",
+    "torch._dynamo.variables.inline_helper",
 }
 
 
@@ -323,9 +324,7 @@ def check_file(filename, is_inlined_call=False):
             "skipped according skipfiles.FBCODE_SKIP_DIRS",
         )
     # TODO(JackCaoG): need a better way to allow inline helper functions
-    if bool(SKIP_DIRS_RE.match(filename)) and not filename.endswith(
-        "variables/inline_helper.py"
-    ):
+    if bool(SKIP_DIRS_RE.match(filename)):
         return SkipResult(True, "skipped according skipfiles.SKIP_DIRS")
     else:
         return SkipResult(False, "inlined by default")
