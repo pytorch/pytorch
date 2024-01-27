@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 
+#include <ATen/ATen.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <nccl.h>
@@ -337,6 +338,9 @@ class NCCLComm {
     // Set true failure reason if provided by ProcessGroupNCCL (e.g. work
     // timeout)
     commFailureReason_ = commFailureReason;
+    LOG(INFO) << "Aborting ncclComm_ " << ncclComm_ << " with reason: "
+              << (commFailureReason ? *commFailureReason
+                                    : "No abort reason provided.");
 #ifndef NCCL_HAS_COMM_NONBLOCKING
     C10D_NCCL_CHECK(::ncclCommAbort(ncclComm_), commFailureReason_);
 #else
@@ -435,6 +439,8 @@ class NCCLComm {
     return ncclInvalidUsage;
 #endif
   }
+
+  friend class ProcessGroupNCCL;
 
  protected:
   ncclComm_t ncclComm_;
