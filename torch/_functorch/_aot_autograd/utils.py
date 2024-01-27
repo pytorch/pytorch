@@ -6,7 +6,7 @@ import dataclasses
 import warnings
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -122,17 +122,18 @@ class PytreeThunk:
     )
     is_really_simple = None  # if the output spec is a LeafSpec
 
-    def set(self, spec):
+    def set(self, spec: pytree.TreeSpec) -> None:
         assert self.spec is None or self.spec == spec
-        self.spec = spec
-        if type(self.spec) in [tuple, list] and all(
-            isinstance(i, pytree.LeafSpec) for i in spec.children_specs
+        assert spec is not None
+        self.spec: pytree.TreeSpec = spec
+        if type(self.spec) in {tuple, list} and all(
+            child.is_leaf() for child in spec.children_specs
         ):
             self.is_simple = True
-        if isinstance(self.spec, pytree.LeafSpec):
+        if self.spec.is_leaf():
             self.is_really_simple = True
 
-    def unflatten(self, x):
+    def unflatten(self, x: List[Any]) -> Any:
         if self.is_really_simple:
             return x[0]
         if self.is_simple:
