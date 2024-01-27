@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import weakref
 from typing import Dict, List
 

@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 from .base import VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable

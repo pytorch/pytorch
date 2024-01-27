@@ -484,16 +484,16 @@ def _is_valid_quantized_conv_binary_optimization_pattern(output_dtype):
         # the two inputs of binary node should have attribute "meta" and should be tensors
         if not (
             hasattr(binary_node_inputs[0], "meta")
-            and isinstance(binary_node_inputs[0].meta.get("val", None), torch.Tensor)
+            and isinstance(binary_node_inputs[0].meta.get("val", None), torch.Tensor)  # type: ignore[union-attr]
         ) or not (
             hasattr(binary_node_inputs[1], "meta")
-            and isinstance(binary_node_inputs[1].meta.get("val", None), torch.Tensor)
+            and isinstance(binary_node_inputs[1].meta.get("val", None), torch.Tensor)  # type: ignore[union-attr]
         ):
             return False
         # the two inputs of binary node should have the same shape
         if (
-            binary_node_inputs[0].meta["val"].size()
-            != binary_node_inputs[1].meta["val"].size()
+            binary_node_inputs[0].meta["val"].size()  # type: ignore[union-attr]
+            != binary_node_inputs[1].meta["val"].size()  # type: ignore[union-attr]
         ):
             return False
 
@@ -951,12 +951,12 @@ def _is_input_output_same_scale_zp(check_node):
         scales = [
             (
                 mul_node.args[1]
-                if mul_node.args[0].target is check_node
-                else 1.0 / mul_node.args[1]
+                if mul_node.args[0].target is check_node  # type: ignore[union-attr]
+                else 1.0 / mul_node.args[1]  # type: ignore[operator]
             )
             for mul_node in mul_nodes
         ]
-        if not all(math.isclose(scale, scales[0], rel_tol=1e-5) for scale in scales):
+        if not all(math.isclose(scale, scales[0], rel_tol=1e-5) for scale in scales):  # type: ignore[arg-type]
             return False
 
         return True
@@ -1178,7 +1178,7 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
             _user_node = user_node
             while _source_node != dequant_pattern_start_node.args[0]:
                 _user_node = clone_to_new_node(graph, _source_node, _user_node)
-                _source_node = _source_node.args[0]
+                _source_node = _source_node.args[0]  # type: ignore[assignment]
 
         counters["inductor"]["dequant_promotion_matcher_count"] += 1
         counters["inductor"]["dequant_promotion_matcher_nodes"] += len(match.nodes)
@@ -1256,11 +1256,11 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
             mul_node = conv_node.args[0]
         else:
             convert_to_bf16 = conv_node.args[0]
-            mul_node = convert_to_bf16.args[0]
-        sub_node = mul_node.args[0]
-        to_fp32_node = sub_node.args[0]
+            mul_node = convert_to_bf16.args[0]  # type: ignore[union-attr]
+        sub_node = mul_node.args[0]  # type: ignore[union-attr]
+        to_fp32_node = sub_node.args[0]  # type: ignore[union-attr]
         has_clone_to_channel_last_node_in_pattern = (
-            conv_node.args[1].target is aten.clone.default
+            conv_node.args[1].target is aten.clone.default  # type: ignore[union-attr]
         )
         clone_node = (
             conv_node.args[1] if has_clone_to_channel_last_node_in_pattern else None
@@ -1268,20 +1268,20 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
 
         if dtype == torch.float32:
             dequant_per_channel = (
-                clone_node.args[0]
+                clone_node.args[0]  # type: ignore[union-attr]
                 if has_clone_to_channel_last_node_in_pattern
                 else conv_node.args[1]
             )
         else:
             weight_to_bf16_node = (
-                clone_node.args[0]
+                clone_node.args[0]  # type: ignore[union-attr]
                 if has_clone_to_channel_last_node_in_pattern
                 else conv_node.args[1]
             )
-            dequant_per_channel = weight_to_bf16_node.args[0]
+            dequant_per_channel = weight_to_bf16_node.args[0]  # type: ignore[union-attr]
 
         assert (
-            dequant_per_channel.target
+            dequant_per_channel.target  # type: ignore[union-attr]
             is quantized_decomposed.dequantize_per_channel.default
         )
 
