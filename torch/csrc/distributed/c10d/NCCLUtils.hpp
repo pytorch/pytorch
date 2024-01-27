@@ -432,6 +432,8 @@ class NCCLComm {
         c10::str(
             "Failed to deregister segment handle ",
             handle,
+            ", with ptr ",
+            ptr,
             " on ncclComm_ ",
             ncclComm_));
     registeredSegmentHandles_.erase(ptr);
