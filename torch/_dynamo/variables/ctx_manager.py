@@ -632,9 +632,8 @@ class StreamVariable(VariableTracker):
         # Normally, we would do this via codegen for the proxy mapping to an output - we cannot do this yet, as we do not
         # yet have a plan for how we want to handle the case where the stream is used as an input or an output. Pending
         # design, to unblock current work, we lift the stream into a global and then codegen bytecode to load it from there.
-        name = f"_stream_{self.device}_{id(self.value)}"
-        if name not in codegen.tx.output.global_scope:
-            codegen.tx.output.install_global_unsafe(name, self.value)
+        prefix = f"_stream_{self.device}"
+        name = codegen.tx.output.install_global_by_id(prefix, self.value)
 
         return [codegen.create_load_global(name, push_null=False, add=True)]
 
