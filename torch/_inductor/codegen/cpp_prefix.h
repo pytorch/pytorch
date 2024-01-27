@@ -108,14 +108,14 @@ inline bool greater_or_nan(scalar_t a, scalar_t b, int64_t idx_a, int64_t idx_b)
 
 template <typename scalar_t>
 inline bool less_or_nan(scalar_t a, scalar_t b, int64_t idx_a, int64_t idx_b) {
-    // If (a == b), then choose the one with lower idx, else min(a, b)
-    if (at::_isnan(a)) {
-      if (at::_isnan(b)) {
-        return idx_a < idx_b;
-      }
-      return true;
+  // If (a == b), then choose the one with lower idx, else min(a, b)
+  if (at::_isnan(a)) {
+    if (at::_isnan(b)) {
+      return idx_a < idx_b;
     }
-    return (a == b) ? idx_a < idx_b : (a < b);
+    return true;
+  }
+  return (a == b) ? idx_a < idx_b : (a < b);
 }
 
 #if INDUCTOR_USE_VECTOR_TYPES()
