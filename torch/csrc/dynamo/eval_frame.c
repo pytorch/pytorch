@@ -1018,6 +1018,17 @@ static PyObject* _custom_eval_frame(
     // reference seems wrong. Therefore, we directly access the
     // extra->cache_entry. extra wont be NULL here.
     extra->cache_entry = create_cache_entry(extra->cache_entry, result);
+
+    // The frame stores the locals in fast representation (frame->localsplus).
+    // To simplify the implementation of lookup etc, we use
+    // PyFrame_FastToLocalsWithError to create a dictionary from the fast
+    // representation. However, this dictionary can hold the references of
+    // keys/values which can lead to memory leak (see
+    // test_release_input_memory). Therefore, we clear the dictionary here. The
+    // later call to eval_custom_code uses the fast representation for accessing
+    // the locals.
+    PyDict_Clear(frame->f_locals);
+
     Py_DECREF(result);
     // Update the existing cache_entry on the extra object. This extra object is
     // sitting on the extra scratch space, we are just changing the cache_entry
