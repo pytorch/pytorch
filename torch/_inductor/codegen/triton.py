@@ -197,10 +197,10 @@ class BlockPtrOptions:
         for i in range(len(self.shape)):
             if (
                 self.block_shape[i] != "1"
-                and not V.graph.sizevars.statically_known_equals(self.strides[i], 0)
+                and not V.graph.sizevars.statically_known_equals(self.strides[i], 0)  # type: ignore[arg-type]
                 and not V.graph.sizevars.statically_known_multiple_of(
                     self.shape[i],
-                    config.triton.max_block[self.block_shape[i][0]],
+                    config.triton.max_block[self.block_shape[i][0]],  # type: ignore[arg-type]
                 )
                 and not (V.kernel.no_x_dim and self.block_shape[i] == "XBLOCK")
             ):
@@ -1280,7 +1280,7 @@ class TritonKernel(Kernel):
         if hint > threshold:
             return False
         # will need to recompile if we cross a larger power of 2 boundary
-        V.graph.sizevars.guard_leq(self.numels[-1], next_power_of_2(hint))
+        V.graph.sizevars.guard_leq(self.numels[-1], next_power_of_2(hint))  # type: ignore[arg-type]
         return True
 
     def set_last_usage(self, nodes):
@@ -1370,7 +1370,7 @@ class TritonKernel(Kernel):
         for length_group in lengths:
             return_getters = []
             for size in length_group:
-                if sv.statically_known_equals(size, 1):
+                if sv.statically_known_equals(size, 1):  # type: ignore[arg-type]
                     return_getters.append(lambda _: sympy.Integer(0))
                     continue
 
@@ -1461,7 +1461,7 @@ class TritonKernel(Kernel):
             if symbol not in self.range_tree_nodes:
                 # Non-iterated variables, e.g. strides
                 continue
-            entry = self.range_tree_nodes[symbol]
+            entry = self.range_tree_nodes[symbol]  # type: ignore[index]
             assert isinstance(entry.parent, IterationRangesRoot)
             index_numels[entry.parent.index] *= entry.length
 
@@ -1469,7 +1469,7 @@ class TritonKernel(Kernel):
         # numels, then it must be broadcasted.
         simplify = V.graph.sizevars.simplify
         return any(
-            simplify(idx_range) != simplify(iter_range)
+            simplify(idx_range) != simplify(iter_range)  # type: ignore[arg-type]
             for idx_range, iter_range in zip(index_numels, self.numels)
         )
 
@@ -1603,7 +1603,7 @@ class TritonKernel(Kernel):
                     [m[s] for s in strides],
                     m[offset],
                     range_trees,
-                    mask_vars,
+                    mask_vars,  # type: ignore[arg-type]
                 )
 
         expand_str = None
@@ -1630,7 +1630,7 @@ class TritonKernel(Kernel):
         self.filter_masks(mask_vars)
 
         mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
-        return IndexingOptions(index_str, mask_vars, mask_str, expand_str, has_rindex)
+        return IndexingOptions(index_str, mask_vars, mask_str, expand_str, has_rindex)  # type: ignore[arg-type]
 
     def active_range_trees(self, reorder=False):
         trees = [
@@ -1647,7 +1647,7 @@ class TritonKernel(Kernel):
     def filter_masks(self, mask_vars):
         for tree in self.range_trees:
             # Masks are superfluous if we only have one element
-            if V.graph.sizevars.statically_known_equals(tree.numel, 1):
+            if V.graph.sizevars.statically_known_equals(tree.numel, 1):  # type: ignore[arg-type]
                 mask_vars.discard(f"{tree.prefix}mask")
                 continue
             # Masks are superfluous if numel is a multiple of BLOCK
@@ -1659,7 +1659,7 @@ class TritonKernel(Kernel):
             # never need to do a masked load to handle stragglers at the end.
             # It's faster to avoid masking at all.  But it is sound to always
             # mask.
-            if V.graph.sizevars.statically_known_multiple_of(tree.numel, max_block):
+            if V.graph.sizevars.statically_known_multiple_of(tree.numel, max_block):  # type: ignore[arg-type]
                 mask_vars.discard(f"{tree.prefix}mask")
 
     def var_ranges(self):
@@ -1676,13 +1676,13 @@ class TritonKernel(Kernel):
                 # if indexing expression is complicated, we precompute it on the host side
                 # and send the result as a kernel argument
                 replacements = {}
-                for ps in self.range_tree_nodes[sym].precomputed_args():
+                for ps in self.range_tree_nodes[sym].precomputed_args():  # type: ignore[index]
                     replacements[ps] = V.graph.sizevars.lookup_precomputed_size(ps)
                 if len(replacements) > 0:
-                    self.range_tree_nodes[sym].expr = sympy_subs(
-                        self.range_tree_nodes[sym].expr, replacements
+                    self.range_tree_nodes[sym].expr = sympy_subs(  # type: ignore[index]
+                        self.range_tree_nodes[sym].expr, replacements  # type: ignore[index]
                     )
-                self.range_tree_nodes[sym].codegen()
+                self.range_tree_nodes[sym].codegen()  # type: ignore[index]
         return expr
 
     @contextlib.contextmanager
@@ -1735,7 +1735,7 @@ class TritonKernel(Kernel):
         {xindex: 512, rindex: 1024}
         """
         index_to_tile_indexes = {k: v.expr for k, v in self.range_tree_nodes.items()}
-        index_in_tile_vars = sympy_subs(index, index_to_tile_indexes)
+        index_in_tile_vars = sympy_subs(index, index_to_tile_indexes)  # type: ignore[arg-type]
         strides = {}
         for range_tree in self.range_trees:
             s = sympy_index_symbol(range_tree.name)
@@ -1883,7 +1883,7 @@ class TritonKernel(Kernel):
 
         result_var = self.cse.generate(load_buffer, line)
         assert isinstance(result_var, TritonCSEVariable)
-        result_var.mask_vars = indexing.mask_vars
+        result_var.mask_vars = indexing.mask_vars  # type: ignore[assignment]
 
         if append_broadcast:
             line = f"tl.broadcast_to({result_var}, {append_broadcast})"
@@ -2410,7 +2410,7 @@ class TritonKernel(Kernel):
                     # note that random seed is put in V.graph.constants
                     const_tensor = V.graph.constants[arg_name]
                     result.writeline(
-                        f"{var_name} = rand_strided({V.graph.sizevars.size_hints(const_tensor.size())}, {V.graph.sizevars.size_hints(const_tensor.stride())}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({V.graph.sizevars.size_hints(const_tensor.size())}, {V.graph.sizevars.size_hints(const_tensor.stride())}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
                     )
                 elif isinstance(arg_sig, SizeArg):
                     symval_hint = V.graph.sizevars.size_hint(arg_sig.expr)
@@ -3128,9 +3128,9 @@ class TritonScheduling(BaseScheduling):
 
         # Only install guards for 32-bit indexing as there is no correctness
         # issue with using 64-bit for everything
-        V.graph.sizevars.guard_leq(numel, int_max)
+        V.graph.sizevars.guard_leq(numel, int_max)  # type: ignore[arg-type]
         for size in buf_sizes:
-            V.graph.sizevars.guard_leq(size, int_max)
+            V.graph.sizevars.guard_leq(size, int_max)  # type: ignore[arg-type]
         return True
 
     @staticmethod

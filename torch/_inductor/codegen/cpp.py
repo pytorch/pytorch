@@ -311,7 +311,7 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
 @functools.lru_cache
 def stride_at(index: sympy.Expr, var: sympy.Symbol):
     replacement = {var: var + 1}
-    new_index = sympy_subs(index, replacement)
+    new_index = sympy_subs(index, replacement)  # type: ignore[arg-type]
     return sympy.simplify(new_index - index)
 
 
@@ -620,10 +620,10 @@ class CppCSEVariable(CSEVariable):
         """
         for s in index.free_symbols:
             if s in V.kernel.itervars:
-                self.dependent_itervars.add(s)
-            elif s.name in V.kernel.cse.varname_map:
+                self.dependent_itervars.add(s)  # type: ignore[arg-type]
+            elif s.name in V.kernel.cse.varname_map:  # type: ignore[attr-defined]
                 self.dependent_itervars.update(
-                    V.kernel.cse.varname_map[s.name].dependent_itervars
+                    V.kernel.cse.varname_map[s.name].dependent_itervars  # type: ignore[attr-defined]
                 )
 
     def depends_on(self, itervar: sympy.Symbol):
@@ -1512,10 +1512,10 @@ class CppKernel(Kernel):
         Check if an index has free symbol CppCSEVariable that depends on `itervar`.
         """
         return any(
-            self.cse.varname_map[s.name].depends_on(itervar)
+            self.cse.varname_map[s.name].depends_on(itervar)  # type: ignore[attr-defined]
             for s in index.free_symbols
-            if s.name in self.cse.varname_map
-            and isinstance(self.cse.varname_map[s.name], CppCSEVariable)
+            if s.name in self.cse.varname_map  # type: ignore[attr-defined]
+            and isinstance(self.cse.varname_map[s.name], CppCSEVariable)  # type: ignore[attr-defined]
         )
 
     def index_depends_on(self, index: sympy.Expr, itervar: sympy.Symbol):
@@ -1894,9 +1894,9 @@ class CppVecKernel(CppKernel):
             )
             replacements = {}
             for indirect_var in (
-                self.cse.varname_map[s.name]
+                self.cse.varname_map[s.name]  # type: ignore[attr-defined]
                 for s in index.free_symbols
-                if s.name.startswith("tmp")
+                if s.name.startswith("tmp")  # type: ignore[attr-defined]
             ):
                 assert isinstance(indirect_var, CppCSEVariable)
                 if indirect_var.is_vec:
@@ -1911,7 +1911,7 @@ class CppVecKernel(CppKernel):
                     )
                 else:
                     load_mask = f"{self._load_mask} != 0"
-            index = sympy_subs(index, replacements)
+            index = sympy_subs(index, replacements)  # type: ignore[arg-type]
             index = self.scale_index_with_offset(
                 index, itervar_idx=self.tiling_idx, offset=itervar_inner
             )
@@ -1934,7 +1934,7 @@ class CppVecKernel(CppKernel):
                     code.writeline(f"if ({load_mask})")
                     stack.enter_context(code.indent())
                 code.writeline(f"tmpbuf[{itervar_inner}] = {rhs};")
-            load_line = self._get_vec_load_line("tmpbuf.data()", 0, dtype)
+            load_line = self._get_vec_load_line("tmpbuf.data()", 0, dtype)  # type: ignore[arg-type]
             code.writeline(f"return {load_line};")
         code.writeline("()")
         csevar = self.cse.generate(buffer, code)
@@ -2296,7 +2296,7 @@ class CppTile2DKernel(CppVecKernel):
             # vector load inside the kernel inner loop
             loadbuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
             dtype = V.graph.get_dtype(name)
-            line = self._get_vec_load_line(loadbuf, 0, dtype)
+            line = self._get_vec_load_line(loadbuf, 0, dtype)  # type: ignore[arg-type]
             csevar = self.cse.generate(self.loads, line)
             csevar.update_on_args("load", (name, index), {})
             assert isinstance(csevar, CppCSEVariable)

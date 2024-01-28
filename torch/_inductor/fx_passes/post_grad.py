@@ -368,7 +368,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
         if new_size is None:
             new_size = shape
         else:
-            new_size[notdim] = V.graph.sizevars.guard_equals(
+            new_size[notdim] = V.graph.sizevars.guard_equals(  # type: ignore[call-overload]
                 shape[notdim], new_size[notdim]
             )
             new_size[dim] += shape[dim]

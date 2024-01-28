@@ -208,9 +208,9 @@ def ir_node_to_tensor(x, guard_shape=True):
     size = [shape_fn(s) for s in x.get_size()]
     stride: StrideType
     if is_storage_and_layout(x):
-        stride = [shape_fn(s) for s in x.get_layout().stride]
+        stride = [shape_fn(s) for s in x.get_layout().stride]  # type: ignore[misc]
     else:
-        stride = make_contiguous_strides_for(size)
+        stride = make_contiguous_strides_for(size)  # type: ignore[arg-type]
     dtype = x.get_dtype()
     device = x.get_device()
     size = convert_shape_to_symint(size)
@@ -294,7 +294,7 @@ class IRNode:
         return sympy_product(self.get_size())
 
     def is_zero_elements(self):
-        return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))
+        return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))  # type: ignore[arg-type]
 
     def realize(self):
         """
@@ -1150,7 +1150,7 @@ class Reduction(Loops):
     ):
         reindex = View.dynamic_reshape_indexer(reduction_ranges, [reduction_numel])
         need_mask = not V.graph.sizevars.is_expr_static_and_true(
-            sympy.Eq(reduction_numel % split, 0)
+            sympy.Eq(reduction_numel % split, 0)  # type: ignore[arg-type]
         )
 
         def wrapper_fn(index, reduction_index):
@@ -1286,7 +1286,7 @@ class Reduction(Loops):
             wrapper_fn,
             ranges,
             reduction_ranges,
-            [*ranges, split],
+            [*ranges, split],  # type: ignore[list-item]
             [block_size],
             reduction_type,
             split,
@@ -1522,7 +1522,7 @@ class WelfordReduction(Reduction):
         """
         reduction_numel = sympy_product(reduction_ranges)
         need_mask = not V.graph.sizevars.is_expr_static_and_true(
-            sympy.Eq(reduction_numel % split, 0)
+            sympy.Eq(reduction_numel % split, 0)  # type: ignore[arg-type]
         )
 
         if need_mask and reduction_type != "welford_combine":
@@ -1562,7 +1562,7 @@ class WelfordReduction(Reduction):
                 )
                 for loader in inner_fns
             ),
-            [*ranges, split],
+            [*ranges, split],  # type: ignore[list-item]
             [block_size],
             reduction_type,
             reduction_hint,
@@ -1587,7 +1587,7 @@ class WelfordReduction(Reduction):
                 for i in intermediates
             ),
             ranges,
-            [split],
+            [split],  # type: ignore[list-item]
             # welford_reduce turns one input into three outputs, which are combined with welford_combine
             "welford_combine",
             reduction_hint,
@@ -1680,7 +1680,7 @@ class Scan(Loops):
         scan_numel = sizevars.simplify(sympy_product(scan_ranges))
 
         # Scan with a single element is just a copy
-        if sizevars.is_expr_static_and_true(sympy.Le(scan_numel, 1)):
+        if sizevars.is_expr_static_and_true(sympy.Le(scan_numel, 1)):  # type: ignore[arg-type]
             return Pointwise.create(
                 device=device,
                 dtype=dtype,
@@ -1993,7 +1993,7 @@ class PermuteView(BaseView):
 
     def make_reindexer(self):
         inv = {j: i for i, j in enumerate(self.dims)}
-        inv = [inv[i] for i in range(len(self.dims))]
+        inv = [inv[i] for i in range(len(self.dims))]  # type: ignore[index]
         assert set(inv) == set(range(len(self.dims)))
 
         def reindex(index):
@@ -2214,12 +2214,12 @@ class View(GenericView):
 
         while stack_old:
             size_old = stack_old.pop()
-            V.graph.sizevars.guard_equals(size_old, 1)
+            V.graph.sizevars.guard_equals(size_old, 1)  # type: ignore[arg-type]
             view_expr.append(sympy.Integer(0))
 
         while stack_new:
             var, size_new = stack_new.pop()
-            V.graph.sizevars.guard_equals(size_new, 1)
+            V.graph.sizevars.guard_equals(size_new, 1)  # type: ignore[arg-type]
 
         view_expr = list(reversed(view_expr))
         assert len(view_expr) == len(old_size)
@@ -2227,7 +2227,7 @@ class View(GenericView):
         def reindex(index):
             assert len(index) == len(vars), (len(index), len(vars))
             replacements = dict(zip(vars, index))
-            return tuple(sympy_subs(x, replacements) for x in view_expr)
+            return tuple(sympy_subs(x, replacements) for x in view_expr)  # type: ignore[arg-type]
 
         return reindex
 
@@ -2487,7 +2487,7 @@ class Layout(IRNode):
         if ndim not in [4, 5]:
             return False
         for left, right, size in zip(
-            self.stride, make_channels_last_strides_for(self.size), self.size
+            self.stride, make_channels_last_strides_for(self.size), self.size  # type: ignore[arg-type]
         ):
             if size != 1 and left != right:
                 return False
@@ -2564,7 +2564,7 @@ class Layout(IRNode):
         )
 
     def storage_size(self) -> sympy.Expr:
-        return compute_required_storage_length(self.size, self.stride, self.offset)
+        return compute_required_storage_length(self.size, self.stride, self.offset)  # type: ignore[arg-type, return-value]
 
 
 class FixedLayout(Layout):
@@ -2583,9 +2583,9 @@ class FixedLayout(Layout):
         super().__init__(
             device,
             dtype,
-            size,
+            size,  # type: ignore[arg-type]
             stride,
-            offset,
+            offset,  # type: ignore[arg-type]
         )
 
     def make_indexer(self):
@@ -2715,7 +2715,7 @@ class AliasedLayout(Layout):
             return True
         from .compile_fx import ALIGNMENT
 
-        return V.graph.sizevars.statically_known_multiple_of(offset, ALIGNMENT)
+        return V.graph.sizevars.statically_known_multiple_of(offset, ALIGNMENT)  # type: ignore[arg-type]
 
 
 class NoneLayout(IRNode):
@@ -2882,7 +2882,7 @@ class Buffer(IRNode):
         self.layout = self.layout.as_same_order(stride)
 
     def is_zero_elements(self):
-        return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))
+        return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))  # type: ignore[arg-type]
 
     def make_loader(self):
         # Loading from a zero-element buffer is a no-op
@@ -3177,7 +3177,7 @@ class ComputedBuffer(Buffer):
                 else:
                     indices = index_vars
                 stride_lengths = [
-                    V.graph.sizevars.stride_hints(expr, indices) for expr in reads
+                    V.graph.sizevars.stride_hints(expr, indices) for expr in reads  # type: ignore[arg-type]
                 ]
                 from .scheduler import pick_loop_order
 
@@ -3907,13 +3907,13 @@ class ExternKernel(InputsKernel):
                     else:
                         type_ = None
                     kwargs.append(
-                        V.graph.wrapper_code.val_to_cpp_arg_str(
+                        V.graph.wrapper_code.val_to_cpp_arg_str(  # type: ignore[arg-type]
                             type_, v, self.is_legacy_abi_kernel()
                         )
                     )
         else:
             kwargs = [
-                f"{k}={V.graph.wrapper_code.val_to_arg_str(v)}"
+                f"{k}={V.graph.wrapper_code.val_to_arg_str(v)}"  # type: ignore[misc]
                 for k, v in self.kwargs.items()
             ]
         return kwargs
@@ -3962,7 +3962,7 @@ class ExternKernel(InputsKernel):
         _, add_var = var_builder("c")
         replacement = dict(zip(index_vars, reindex([add_var(x) for x in new_sizes])))
 
-        index = sympy_subs(sympy.expand(index), replacement)
+        index = sympy_subs(sympy.expand(index), replacement)  # type: ignore[arg-type]
         return index, tuple(new_sizes)
 
     def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:

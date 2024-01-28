@@ -983,8 +983,8 @@ def pointwise_cat(inputs, dim=0):
     inputs_ranges: List[Tuple[sympy.Expr, sympy.Expr]] = []
     prev_end = 0
     for inp in inputs:
-        inputs_ranges.append((prev_end, prev_end + inp.get_size()[dim]))
-        prev_end = inputs_ranges[-1][-1]
+        inputs_ranges.append((prev_end, prev_end + inp.get_size()[dim]))  # type: ignore[arg-type]
+        prev_end = inputs_ranges[-1][-1]  # type: ignore[assignment]
 
     inputs_loaders = [inp.make_loader() for inp in inputs]
 
@@ -1215,7 +1215,7 @@ def unfold(x, dimension, size, step):
     dim_size = sizes[dim]
     sizevars = V.graph.sizevars
     sizevars.guard_leq(size, dim_size)
-    sizevars.guard_lt(0, step)
+    sizevars.guard_lt(0, step)  # type: ignore[arg-type]
 
     new_dim_size = FloorDiv(dim_size - size, step) + 1
     if sizevars.size_hint(dim_size) > 0:
@@ -2371,8 +2371,8 @@ def select_scatter(x, src, dim: int, index: int):
     dim = _validate_dim(x, dim, 0)
     if V.graph.sizevars.evaluate_expr(sympy.Lt(index, 0)):
         index = index + x.get_size()[dim]
-    V.graph.sizevars.guard_leq(0, index)
-    V.graph.sizevars.guard_lt(index, x.get_size()[dim])
+    V.graph.sizevars.guard_leq(0, index)  # type: ignore[arg-type]
+    V.graph.sizevars.guard_lt(index, x.get_size()[dim])  # type: ignore[arg-type]
     src = expand(unsqueeze(src, dim), x.get_size())
     src_loader = src.make_loader()
 
@@ -3673,7 +3673,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     # if padding is a complicated expression, hoist it
     bounds_precomp: List[Tuple[sympy.Symbol, Any]] = []
     for l, h in bounds:
-        bounds_precomp.append((V.graph.sizevars.lookup_precomputed_size(l), h))
+        bounds_precomp.append((V.graph.sizevars.lookup_precomputed_size(l), h))  # type: ignore[arg-type]
 
     output_size = list(sizes[:n])
     mask_sizes = []
@@ -3770,7 +3770,7 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
         if V.graph.sizevars.size_hint((x_alt - 1) * stride[i] - x - padding[i]) >= 0:
             # Sliding windows must start within the input or left padding
             x_alt -= 1  # type: ignore[assignment]
-            V.graph.sizevars.guard_leq(0, x_alt * stride[i] - x - padding[i])
+            V.graph.sizevars.guard_leq(0, x_alt * stride[i] - x - padding[i])  # type: ignore[arg-type]
         if V.graph.sizevars.size_hint(x_out - x_alt) == 0:
             # ceil mode is actually a no-op, lets guard on that
             V.graph.sizevars.guard_equals(x_out, x_alt)

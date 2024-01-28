@@ -81,7 +81,7 @@ def config_of(args: List[Union[TensorArg, SizeArg]]) -> instance_descriptor:
                 return False
             if isinstance(x.expr, float):
                 return False
-            return V.graph.sizevars.statically_known_multiple_of(x.expr, alignment)
+            return V.graph.sizevars.statically_known_multiple_of(x.expr, alignment)  # type: ignore[arg-type]
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
     if config.triton.divisible_by_16:
