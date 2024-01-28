@@ -757,17 +757,17 @@ class WrapperCodeGen(CodeGen):
         )
 
         for name, shape in graph_inputs_expr:
-            shape = V.graph.sizevars.simplify(shape)
+            shape = V.graph.sizevars.simplify(shape)  # type: ignore[arg-type]
             if shape in needed:
-                needed.remove(shape)
+                needed.remove(shape)  # type: ignore[arg-type]
                 code.writeline(f"{self.declare}{shape} = {name}{self.ending}")
 
         for name, value in graph_inputs_tensors:
             shapes = value.get_size()
             for dim, shape in enumerate(shapes):
-                shape = V.graph.sizevars.simplify(shape)
+                shape = V.graph.sizevars.simplify(shape)  # type: ignore[arg-type]
                 if shape in needed:
-                    needed.remove(shape)
+                    needed.remove(shape)  # type: ignore[arg-type]
                     code.writeline(
                         f"{self.declare}{shape} = {sizeof(name)}[{dim}]{self.ending}"
                     )
@@ -775,9 +775,9 @@ class WrapperCodeGen(CodeGen):
         for name, value in graph_inputs_tensors:
             shapes = value.get_stride()
             for dim, shape in enumerate(shapes):
-                shape = V.graph.sizevars.simplify(shape)
+                shape = V.graph.sizevars.simplify(shape)  # type: ignore[arg-type]
                 if shape in needed:
-                    needed.remove(shape)
+                    needed.remove(shape)  # type: ignore[arg-type]
                     code.writeline(
                         f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
                     )

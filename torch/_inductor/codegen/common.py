@@ -1143,7 +1143,7 @@ class Kernel(CodeGen):
             ):
                 # Skip CSE since this doesn't return an expression
 
-                if var.bounds.lower < 0:
+                if var.bounds.lower < 0:  # type: ignore[operator]
                     new_bounds = ValueRanges.unknown()
                     if var.bounds != ValueRanges.unknown() and isinstance(
                         size, sympy.Number
@@ -1154,13 +1154,13 @@ class Kernel(CodeGen):
                         neg = var.bounds & ValueRanges(-sympy.oo, -1)
                         new_bounds = ValueRanges(neg.lower + size, neg.upper + size)
                         # We don't have a good way of representing the empty range
-                        if var.bounds.upper >= 0:
+                        if var.bounds.upper >= 0:  # type: ignore[operator]
                             pos = var.bounds & ValueRanges(0, sympy.oo)
                             new_bounds = new_bounds | pos
 
                     stm = ops.add(var, self.rename_indexing(size))
                     # Mixed negative and non-negative
-                    if var.bounds.upper >= 0:
+                    if var.bounds.upper >= 0:  # type: ignore[operator]
                         lt = ops.lt(var, "0")
                         stm = ops.where(lt, stm, var)
                     new_var = self.cse.generate(self.compute, stm, bounds=new_bounds)
@@ -1310,7 +1310,7 @@ class Kernel(CodeGen):
         # adds the necessary kernel args for index expressions
         # and renames variables in index expressions to kernel arg names
         if isinstance(index, (list, tuple)):
-            return [self.rename_indexing(x) for x in index]
+            return [self.rename_indexing(x) for x in index]  # type: ignore[return-value]
         index = V.graph.sizevars.simplify(index)
         sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
         replacements = {
