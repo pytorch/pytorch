@@ -379,7 +379,7 @@ class ConvBn1d(_ConvBnNd, nn.Conv1d):
 
     """
     _FLOAT_BN_MODULE = nn.BatchNorm1d
-    _FLOAT_RELU_MODULE = None
+    _FLOAT_RELU_MODULE: None = None
     _FLOAT_MODULE = nni.ConvBn1d
     _FLOAT_CONV_MODULE = nn.Conv1d
 
@@ -468,9 +468,9 @@ class ConvReLU1d(nnqat.Conv1d, nni._FusedModule):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = nni.ConvReLU1d
+    _FLOAT_MODULE = nni.ConvReLU1d  # type: ignore[assignment]
     _FLOAT_CONV_MODULE = nn.Conv1d
-    _FLOAT_BN_MODULE = None
+    _FLOAT_BN_MODULE: None = None
     _FLOAT_RELU_MODULE = nn.ReLU
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
@@ -513,7 +513,7 @@ class ConvBn2d(_ConvBnNd, nn.Conv2d):
     _FLOAT_MODULE = nni.ConvBn2d
     _FLOAT_CONV_MODULE = nn.Conv2d
     _FLOAT_BN_MODULE = nn.BatchNorm2d
-    _FLOAT_RELU_MODULE = None
+    _FLOAT_RELU_MODULE: None = None
 
     def __init__(self,
                  # ConvNd args
@@ -600,9 +600,9 @@ class ConvReLU2d(nnqat.Conv2d, nni._FusedModule):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = nni.ConvReLU2d
+    _FLOAT_MODULE = nni.ConvReLU2d  # type: ignore[assignment]
     _FLOAT_CONV_MODULE = nn.Conv2d
-    _FLOAT_BN_MODULE = None
+    _FLOAT_BN_MODULE: None = None
     _FLOAT_RELU_MODULE = nn.ReLU
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
@@ -645,7 +645,7 @@ class ConvBn3d(_ConvBnNd, nn.Conv3d):
     _FLOAT_MODULE = nni.ConvBn3d
     _FLOAT_CONV_MODULE = nn.Conv3d
     _FLOAT_BN_MODULE = nn.BatchNorm3d
-    _FLOAT_RELU_MODULE = None
+    _FLOAT_RELU_MODULE: None = None
 
     def __init__(
         self,
@@ -773,9 +773,9 @@ class ConvReLU3d(nnqat.Conv3d, nni._FusedModule):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = nni.ConvReLU3d
+    _FLOAT_MODULE = nni.ConvReLU3d  # type: ignore[assignment]
     _FLOAT_CONV_MODULE = nn.Conv3d
-    _FLOAT_BN_MODULE = None
+    _FLOAT_BN_MODULE: None = None
     _FLOAT_RELU_MODULE = nn.ReLU
 
     def __init__(
