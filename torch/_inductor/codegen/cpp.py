@@ -983,7 +983,7 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def bessel_j0(x):
-        return f"std::cyl_bessel_j(0, std::abs({x}))"
+        return f"bessel_j0_forward({x})"
 
 
 class CppVecOverrides(CppOverrides):
