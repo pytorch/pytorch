@@ -466,7 +466,7 @@ class SymPyValueRangeAnalysis:
             ndigits = ndigits.lower
             # We can't use functools.partial here since sympy doesn't support keyword arguments, but we have to bind
             # the second parameter.
-            fn = lambda number: RoundDecimal(number, ndigits)  # noqa: E731
+            fn = lambda number: RoundDecimal(number, ndigits)  # type: ignore[misc, assignment]  # noqa: E731
 
         return ValueRanges.increasing_map(number, fn)
 
