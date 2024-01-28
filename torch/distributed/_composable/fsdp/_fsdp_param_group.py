@@ -30,6 +30,28 @@ from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
 _ModuleToHandleDict = Dict[nn.Module, RemovableHandle]  # for state dict
 
 
+class FSDPCommContext:
+    """This has the communication state shared across FSDP states/parameter groups."""
+
+    default_stream: torch.cuda.Stream
+    all_gather_copy_in_stream: torch.cuda.Stream
+    all_gather_stream: torch.cuda.Stream
+    reduce_scatter_stream: torch.cuda.Stream
+    all_gather_state: AllGatherStateHolder
+
+    def init(self):
+        # Setting the all-gather/reduce-scatter streams to be higher priority
+        # can help avoid some issues where their copies in/out are delayed and
+        # block computation
+        high_priority = -1
+        self.default_stream = torch.cuda.current_stream()
+        self.all_gather_copy_in_stream = torch.cuda.Stream(priority=high_priority)
+        self.all_gather_stream = torch.cuda.Stream(priority=high_priority)
+        self.reduce_scatter_stream = torch.cuda.Stream(priority=high_priority)
+        self.all_gather_state = AllGatherStateHolder()
+        self.post_forward_order: List[FSDPParamGroup] = []
+
+
 class FSDPParamGroup:
     """This class represents a parameter group to communicate together."""
 
@@ -69,13 +91,7 @@ class FSDPParamGroup:
         self._register_state_dict_hooks()
 
         # - Communication and communication/computation overlap
-        default_stream = torch.cuda.current_stream()
-        self.default_stream: torch.cuda.Stream = default_stream
-        self.all_gather_copy_in_stream: torch.cuda.Stream = default_stream
-        self.all_gather_stream: torch.cuda.Stream = default_stream
-        self.reduce_scatter_stream: torch.cuda.Stream = default_stream
-        self.all_gather_state = AllGatherStateHolder()
-        self.post_forward_order: List[FSDPParamGroup] = []
+        self.comm_ctx = FSDPCommContext()
         self._post_forward_indices: List[int] = []
         # Used to avoid mistargeted backward prefetches in the case that some
         # module is used in forward but not in backward
@@ -174,7 +190,7 @@ class FSDPParamGroup:
         if not self._all_gather_result:
             return  # no preceding unshard
         if self._training_state == TrainingState.FORWARD:  # implicit prefetch
-            if prev_all_gather_state := self.all_gather_state.pop():
+            if prev_all_gather_state := self.comm_ctx.all_gather_state.pop():
                 self._wait_all_gather_streams_on_event(prev_all_gather_state.event)
                 del prev_all_gather_state  # free
         foreach_all_gather_copy_out(
@@ -186,7 +202,7 @@ class FSDPParamGroup:
         all_gather_copy_out_event = torch.cuda.Event()
         all_gather_copy_out_event.record()
         if self._training_state == TrainingState.FORWARD:
-            self.all_gather_state.put(
+            self.comm_ctx.all_gather_state.put(
                 AllGatherState(self._all_gather_result, all_gather_copy_out_event)
             )
         else:
@@ -194,8 +210,8 @@ class FSDPParamGroup:
         self._all_gather_result = None  # free unless saved in `all_gather_state`
 
     def _wait_all_gather_streams_on_event(self, event: torch.cuda.Event):
-        self.all_gather_copy_in_stream.wait_event(event)
-        self.all_gather_stream.wait_event(event)
+        self.comm_ctx.all_gather_copy_in_stream.wait_event(event)
+        self.comm_ctx.all_gather_stream.wait_event(event)
 
     def reshard(self):
         if self._training_state == TrainingState.FORWARD:
@@ -228,8 +244,8 @@ class FSDPParamGroup:
     def _record_post_forward(self) -> None:
         # Since a group has one pre-backward unshard for each forward call
         # before the backward, we record each usage (with multiplicity)
-        post_forward_index = len(self.post_forward_order)
-        self.post_forward_order.append(self)
+        post_forward_index = len(self.comm_ctx.post_forward_order)
+        self.comm_ctx.post_forward_order.append(self)
         self._post_forward_indices.append(post_forward_index)
 
     def pre_backward(self, *unused: Any):
@@ -263,7 +279,7 @@ class FSDPParamGroup:
                 fsdp_params_with_grad,
                 unsharded_grads,
                 self._reduce_scatter_process_group,
-                self.reduce_scatter_stream,
+                self.comm_ctx.reduce_scatter_stream,
                 self._orig_dtype,
                 self._reduce_dtype,
                 self.device,
@@ -291,7 +307,7 @@ class FSDPParamGroup:
             curr_index = self._post_forward_indices.pop()
             if (target_index := curr_index - 1) < 0:
                 return
-            target_fsdp_param_group = self.post_forward_order[target_index]
+            target_fsdp_param_group = self.comm_ctx.post_forward_order[target_index]
             if target_fsdp_param_group.expected_backward_unshard_count > 0:
                 with torch.profiler.record_function(
                     "FSDP::backward_prefetch"
@@ -418,24 +434,22 @@ class FSDPParamGroup:
     @property
     def _all_gather_copy_in_stream_for_unshard(self) -> torch.cuda.Stream:
         if self._use_all_gather_stream:
-            return self.all_gather_copy_in_stream
-        return self.default_stream
+            return self.comm_ctx.all_gather_copy_in_stream
+        return self.comm_ctx.default_stream
 
     @property
     def _all_gather_stream_for_unshard(self) -> torch.cuda.Stream:
         if self._use_all_gather_stream:
-            return self.all_gather_stream
-        return self.default_stream
+            return self.comm_ctx.all_gather_stream
+        return self.comm_ctx.default_stream
 
 
 def _get_param_module_infos(
     params: List[nn.Parameter], module: nn.Module
 ) -> List[ParamModuleInfo]:
     """
-    Shared parameter:
-        lin1.weight = lin2.weight
-    Shared module:
-        mlp.lin1 = mlp.lin2
+    Shared parameter: lin1.weight = lin2.weight
+    Shared module: mlp.lin1 = mlp.lin2
     We do not remove duplicates when traversing both modules and parameters to
     find shared modules' parameters and shared parameters within a module.
     """
