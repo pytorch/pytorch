@@ -65,6 +65,7 @@ manual_torch_name_rule_map = {
     "torch.distributed.get_rank": TorchInGraphFunctionVariable,
     "torch.distributed.get_world_size": TorchInGraphFunctionVariable,
     "torch.distributed._tensor.DTensor#from_local": TorchInGraphFunctionVariable,
+    "torch.distributed.distributed_c10d._get_group_size_by_name": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d._get_group_tag": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d.get_process_group_ranks": TorchInGraphFunctionVariable,
     "torch._utils.is_compiling": TorchInGraphFunctionVariable,
