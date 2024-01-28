@@ -1906,6 +1906,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
                 if(PyTuple_GET_SIZE(args) != %s)
                     [[unlikely]] throw std::runtime_error("requires %s args");
                 %s
+                %s
             } catch(std::exception const& e) {
                 PyErr_SetString(PyExc_RuntimeError, e.what());
                 return nullptr;
@@ -1961,17 +1962,20 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         Returns:
             A python version of ENTRY_FUNCTION()
         """
-        parseargs = ", ".join(
-            f"parse_arg<{argtype.replace('const ', '')}>(args, {n})"
+        argtypes = [argtype.replace("const ", "") for argtype in argtypes]
+        call_decl = "\n".join(
+            f"auto arg{n} = parse_arg<{argtype}>(args, {n});"
             for n, argtype in enumerate(argtypes)
         )
+        call_args = ", ".join(f"arg{n}" for n in range(len(argtypes)))
         suffix = cls.suffix_template % (
             cls.entry_function,
             cls.extra_parse_arg,
             cls.entry_function,
             len(argtypes),
             len(argtypes),
-            cls.call_entry_function % parseargs,
+            call_decl,
+            cls.call_entry_function % call_args,
             cls.entry_function,
             cls.entry_function,
             cls.entry_function,
@@ -1996,7 +2000,11 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
         #include <torch/csrc/autograd/python_variable.h>
 
         template <> inline std::vector<at::Tensor> parse_arg<std::vector<at::Tensor>>(PyObject* args, size_t n) {
-            return THPVariable_UnpackList(PyTuple_GET_ITEM(args, n));
+            PyObject* arg = PyTuple_GET_ITEM(args, n);
+            std::vector<at::Tensor> result = THPVariable_UnpackList(arg);
+            // clear the original list so tensors get freed incrementally
+            PyList_SetSlice(arg, 0, PyList_Size(arg), NULL);
+            return result;
         }
         """
     )
