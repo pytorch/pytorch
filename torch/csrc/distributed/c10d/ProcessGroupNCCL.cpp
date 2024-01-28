@@ -1022,29 +1022,31 @@ void ProcessGroupNCCL::waitForDumpOrTimeout(
   TORCH_CHECK(fut.valid(), "Expected a valid future");
 
   auto futStatus = fut.wait_for(std::chrono::seconds(timeout_sec));
-  if (futStatus != std::future_status::ready) {
-    TORCH_CHECK(
-        futStatus != std::future_status::deferred,
-        "Expected the dump future to have been launched eagerly.");
+  TORCH_CHECK(
+      futStatus != std::future_status::deferred, "Expected eager launch.");
+  if (futStatus == std::future_status::ready) {
+    // Calling .get() will re-raise any exception from the future, and we don't
+    // care about the retval
+    try {
+      fut.get();
+      std::this_thread::sleep_until(wakeUpTime);
+    } catch (const std::exception& e) {
+      LOG(ERROR) << logPrefix()
+                 << "Caught exception during async debug dump: \"" << e.what()
+                 << "\"\n";
+    } catch (...) {
+      LOG(ERROR) << logPrefix()
+                 << "Caught unknown exception during async debug dump.";
+    }
+  } else {
     LOG(INFO)
         << logPrefix() << "Debug dump timed out and is being abandoned."
         << " This may be due to slow ADDR2LINE performance processing stacktraces."
         << " Try TORCH_DISABLE_ADDR2LINE=1 and TORCH_NCCL_TRACE_CPP_STACK=0 to work around.";
   }
-
-  // Calling .get() will raise any exception stored in the promise associated
-  // with the future. (but we can ignore the return value, which will be false
-  // if dumping is not enabled)
-  try {
-    fut.get();
-    std::this_thread::sleep_until(wakeUpTime);
-  } catch (const std::exception& e) {
-    LOG(ERROR) << logPrefix() << "Caught exception during async debug dump: \""
-               << e.what() << "\"\n";
-  } catch (...) {
-    LOG(ERROR) << logPrefix()
-               << "Caught unknown exception during async debug dump.";
-  }
+  // Ensure we sleep at least until wakeUpTime regardless of future execution
+  // time
+  std::this_thread::sleep_until(wakeUpTime);
 }
 
 void ProcessGroupNCCL::abortCommsFromMap(
@@ -1058,6 +1060,8 @@ void ProcessGroupNCCL::abortCommsFromMap(
     auto& ncclComms = it.second;
 
     for (const auto& ncclComm : ncclComms) {
+      LOG(INFO) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
+                << ncclComm->ncclComm_ << " on CUDA device: " << devName;
       ncclComm->ncclCommAbort(abortReason);
     }
     // Note that we don't remove the aborted communicators from the
@@ -1078,8 +1082,9 @@ void ProcessGroupNCCL::abortCommsFromMap(
       }
     }
 
-    LOG(INFO) << logPrefix() << "] Destroyed " << ncclComms.size()
-              << "communicators on CUDA device: " << devName
+    LOG(INFO) << logPrefix() << "ProcessGroupNCCL destroyed "
+              << ncclComms.size()
+              << " communicators on CUDA device: " << devName
               << " with stream: " << streamId;
   }
 }
@@ -1697,7 +1702,10 @@ std::exception_ptr ProcessGroupNCCL::checkForNCCLErrorsInternal(
               *commFailureReason)));
     }
     ncclResult_t ncclAsyncErr = ncclComm->checkForNcclError();
-    if (ncclAsyncErr != ncclSuccess) {
+    // When nonblocking mode is enabled by TORCH_NCCL_USE_COMM_NONBLOCKING,
+    // ncclInProgress could be returned when there are pending NCCL calls.
+    // In this case, no exception should be thrown
+    if (ncclAsyncErr != ncclSuccess && ncclAsyncErr != ncclInProgress) {
       return std::make_exception_ptr(C10_BUILD_ERROR(
           DistBackendError,
           "NCCL error: " + ncclGetErrorWithVersion(ncclAsyncErr) + "\n" +
@@ -1969,6 +1977,12 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     C10D_NCCL_CHECK_TIMEOUT_GROUPEND(ncclGroupEnd(), ncclComms, c10::nullopt);
   }
 #endif
+
+  for (const auto i : c10::irange(devices.size())) {
+    int deviceIndex = devices[i].index();
+    LOG(INFO) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
+              << ncclComms[i]->ncclComm_ << " on CUDA device: " << deviceIndex;
+  }
 
   // At this point NCCL should have been initialized, hence we can accurately
   // get the env value even if NCCL sets it by reading from nccl.conf file
