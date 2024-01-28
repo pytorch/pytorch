@@ -11,7 +11,7 @@ import torch
 
 import torch._inductor
 
-# The rest of the optimizers not yet imported: LBFGS, RAdam, SparseAdam
+# LBFGS, SparseAdam not supported
 from torch.optim import (
     Adadelta,
     Adagrad,
@@ -20,6 +20,7 @@ from torch.optim import (
     AdamW,
     ASGD,
     NAdam,
+    RAdam,
     RMSprop,
     Rprop,
     SGD,
@@ -69,6 +70,9 @@ KERNEL_COUNTS = {
     Adagrad: KernelCounts(multitensor=5, singletensor=8),
     ASGD: KernelCounts(multitensor=2, singletensor=12),
     SGD: KernelCounts(multitensor=2, singletensor=8),
+    RAdam: KernelCounts(
+        multitensor=2, singletensor=None
+    ),  # Single tensor eager needs to be refactored to enable tracing
     Adamax: KernelCounts(
         multitensor=2, singletensor=None
     ),  # Single tensor eager needs to be refactored to enable tracing
@@ -234,13 +238,13 @@ def make_test(
             )
 
     if device == "cuda":
-        test_fn = requires_cuda()(test_fn)
+        test_fn = requires_cuda(test_fn)
 
     return test_fn
 
 
 def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
-    @requires_cuda()
+    @requires_cuda
     def test_fn(self):
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
@@ -323,7 +327,7 @@ class CompiledOptimizerTests(TestCase):
         SGD, kernel_count=1, lr=0.01, foreach=True
     )
 
-    @requires_cuda()
+    @requires_cuda
     def test_static_address_finalizer(self):
         import gc
 
