@@ -66,6 +66,8 @@ include_patterns = [
     'aten/src/ATen/native/**/Foreach*.*',
     'aten/src/ATen/native/cuda/fused*.*',
     'aten/src/ATen/native/cuda/Fused*.cu',
+    'aten/src/ATen/native/cudnn/*.h',
+    'aten/src/ATen/native/cudnn/*.cpp',
     'c10/**/*.h',
     'c10/**/*.cpp',
     'torch/csrc/**/*.h',
@@ -120,39 +122,6 @@ include_patterns = [
 ]
 exclude_patterns = [
     '**/fb/**',
-    'torch/include/**',
-    'torch/csrc/**',
-    'torch/_dynamo/**/*.py',
-    'torch/_inductor/**/*.py',
-    'torch/_numpy/**/*.py',
-    'torch/_functorch/aot_autograd.py',
-    'torch/_functorch/benchmark_utils.py',
-    'torch/_functorch/compile_utils.py',
-    'torch/_functorch/compilers.py',
-    'torch/_functorch/eager_transforms.py',
-    'torch/_functorch/fx_minifier.py',
-    'torch/_functorch/partitioners.py',
-    'torch/_functorch/top_operators_github_usage.py',
-    'torch/_functorch/vmap.py',
-    'torch/_subclasses/schema_check_mode.py',
-    'torch/distributed/elastic/agent/server/api.py',
-    'torch/testing/_internal/**',
-    'torch/distributed/fsdp/fully_sharded_data_parallel.py',
-    # TODO(suo): these exclusions were added just to get lint clean on master.
-    # Follow up to do more target suppressions and remove them.
-    'torch/ao/quantization/fx/convert.py',
-    'torch/ao/quantization/_dbr/function_fusion.py',
-    'test/test_datapipe.py',
-    'caffe2/contrib/fakelowp/test/test_batchmatmul_nnpi_fp16.py',
-    'test/test_numpy_interop.py',
-    'torch/torch_version.py',
-    'torch/fx/proxy.py',
-    'torch/fx/passes/shape_prop.py',
-    'torch/fx/node.py',
-    'torch/fx/experimental/symbolic_shapes.py',
-    'torch/fx/experimental/proxy_tensor.py',
-    'torch/_subclasses/fake_utils.py',
-    'torch/_subclasses/fake_tensor.py',
 ]
 command = [
     'python3',
@@ -168,45 +137,19 @@ init_command = [
     'numpy==1.24.3 ; python_version == "3.8"',
     'numpy==1.26.0 ; python_version >= "3.9"',
     'expecttest==0.1.6',
-    'mypy==1.7.0',
+    'mypy==1.8.0',
+    'sympy==1.11.1',
     'types-requests==2.27.25',
     'types-PyYAML==6.0.7',
     'types-tabulate==0.8.8',
     'types-protobuf==3.19.18',
     'types-pkg-resources==0.1.3',
     'types-Jinja2==2.11.9',
+    'types-colorama==0.4.6',
     'junitparser==2.1.1',
     'rich==10.9.0',
     'pyyaml==6.0',
     'optree==0.10.0',
-]
-
-[[linter]]
-code = 'MYPYINDUCTOR'
-include_patterns = [
-    'torch/_dynamo/**/*.py',
-    'torch/_inductor/**/*.py',
-]
-exclude_patterns = [
-    '**/fb/**',
-    'torch/_dynamo/backends/**/*.py',
-    'torch/_dynamo/variables/**/*.py',
-    'torch/_dynamo/polyfill.py',
-    'torch/_inductor/fx_passes/serialized_patterns/**',
-]
-command = [
-    'python3',
-    'tools/linter/adapters/mypy_linter.py',
-    '--config=mypy-inductor.ini',
-    '--code=MYPYINDUCTOR',
-    '--',
-    '@{{PATHSFILE}}'
-]
-init_command = [
-    'python3',
-    'tools/linter/adapters/pip_init.py',
-    '--dry-run={{DRYRUN}}',
-    'types-colorama==0.4.6',
 ]
 
 [[linter]]
@@ -324,6 +267,26 @@ command = [
     """--error-description=\
         This line has an unqualified `type: ignore`; \
         please convert it to `type: ignore[xxxx]`\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'TYPENOSKIP'
+include_patterns = ['mypy.ini']
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=follow_imports\s*=\s*skip',
+    '--linter-name=TYPENOSKIP',
+    '--error-name=use of follow_imports = skip',
+    """--error-description=\
+        follow_imports = skip is forbidden from mypy.ini configuration as it \
+        is extremely easy to accidentally turn off type checking unintentionally.  If \
+        you need to suppress type errors, use a top level # mypy: ignore-errors.  \
+        Do not rely on automatic Any substitution; instead, manually # type: ignore \
+        at use sites or define a pyi type stub with more relaxed types. \
     """,
     '--',
     '@{{PATHSFILE}}'
@@ -2689,7 +2652,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.1.11',
+    'ruff==0.1.14',
 ]
 is_formatter = true
 
