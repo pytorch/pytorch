@@ -152,7 +152,7 @@ TritonMetaParams = Dict[str, int]
 TritonGrid = Union[Tuple[int, ...], Callable[[TritonMetaParams], Tuple[int, ...]]]
 
 
-def user_defined_kernel_grid_fn_code(name: str, configs: List[triton.Config], grids: List[TritonGrid]) -> Tuple[str, str]:
+def user_defined_kernel_grid_fn_code(name: str, configs: List["triton.Config"], grids: List[TritonGrid]) -> Tuple[str, str]:
     output = IndentedBuffer()
 
     fn_name = f"grid_wrapper_for_{name}"
