@@ -2,7 +2,7 @@ import logging
 import os
 import warnings
 import weakref
-from typing import cast, List, Optional
+from typing import cast, Dict, List, Optional
 
 import torch
 import torch.distributed as dist
@@ -48,7 +48,7 @@ def disable_native_funcol():
 
 logger = logging.getLogger(__name__)
 
-data_ptr_to_work = dict()
+data_ptr_to_work: Dict[int, "_WaitRegistration"] = dict()
 work_version = 0
 
 
