@@ -7,6 +7,8 @@ import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo import config
+from torch._dynamo.testing import make_test_cls_with_patches
 
 from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_functional,
@@ -893,21 +895,158 @@ def forward(self, x_1, output_1):
 
 class MutationTests(torch._dynamo.test_case.TestCase):
     @requires_cuda
+    @requires_lark
     def test_find_mutations(self):
-        from torch._higher_order_ops.triton_kernel_wrap import filter_non_mutated
+        from torch._higher_order_ops.triton_kernel_wrap import identify_mutated_tensors
+
+        t = torch.randn(4)
 
         tests = [
-            [add_kernel, ["in_ptr0", "in_ptr1", "out_ptr"], ["out_ptr"]],
-            [add_kernel_2d_autotuned, ["in_ptr0", "in_ptr1", "out_ptr"], ["out_ptr"]],
-            # Cannot remove in_ptr0 since it is used in a external call
-            [indirection_kernel, ["in_ptr0", "out_ptr"], ["in_ptr0", "out_ptr"]],
-            [mul2_inplace_kernel, ["ptr"], ["ptr"]],
+            [
+                add_kernel,
+                {
+                    "in_ptr0": t,
+                    "in_ptr1": t,
+                    "out_ptr": t,
+                    "n_elements": 4,
+                    "BLOCK_SIZE": 4,
+                },
+                ["out_ptr"],
+            ],
+            [
+                add_kernel_out_of_order,
+                {
+                    "in_ptr0": t,
+                    "n_elements": 4,
+                    "in_ptr1": t,
+                    "out_ptr": t,
+                    "BLOCK_SIZE": 4,
+                },
+                ["out_ptr"],
+            ],
+            [
+                add_kernel_2d_autotuned,
+                {
+                    "in_ptr0": t,
+                    "in_ptr1": t,
+                    "out_ptr": t,
+                    "x_elements": 4,
+                    "y_elements": 4,
+                },
+                ["out_ptr"],
+            ],
+            [
+                indirection_kernel,
+                {
+                    "in_ptr0": t,
+                    "out_ptr": t,
+                    "n_elements": 4,
+                    "BLOCK_SIZE": 4,
+                    "ACTIVATION": "mul2_inplace_kernel",
+                },
+                ["in_ptr0", "out_ptr"],
+            ],
+            [
+                indirection_kernel,
+                {
+                    "in_ptr0": t,
+                    "out_ptr": t,
+                    "n_elements": 4,
+                    "BLOCK_SIZE": 4,
+                    "ACTIVATION": "add_kernel",
+                },
+                # TODO(oulgen): Multiple functions is not implemented yet
+                ["in_ptr0", "out_ptr"],
+            ],
+            [
+                mul2_inplace_kernel,
+                {"ptr": t, "n_elements": 4, "BLOCK_SIZE": 4},
+                ["ptr"],
+            ],
+            # Cant optimize since the kernel contains a tl.inline_asm_elementwise
+            [
+                inline_asm_kernel,
+                {"X": t, "Y": t, "Z": t, "n": 4, "BLOCK": 4},
+                ["X", "Y", "Z"],
+            ],
+            [
+                add_kernel_with_block_ptr,
+                {
+                    "x_ptr": t,
+                    "y_ptr": t,
+                    "output_ptr": t,
+                    "n_elements": 4,
+                    "BLOCK_SIZE": 4,
+                },
+                ["output_ptr"],
+            ],
+            [
+                add_kernel_with_import,
+                {
+                    "in_ptr0": t,
+                    "in_ptr1": t,
+                    "out_ptr": t,
+                    "n_elements": 4,
+                    "BLOCK_SIZE": 4,
+                },
+                ["out_ptr"],
+            ],
+            [
+                atomic_add_kernel,
+                {
+                    "in_ptr0": t,
+                    "in_ptr1": t,
+                    "out_ptr": t,
+                    "n_elements": 4,
+                    "BLOCK_SIZE": 4,
+                },
+                ["out_ptr"],
+            ],
+            [
+                add_4_times_kernel,
+                {
+                    "in_ptr0": t,
+                    "in_ptr1": t,
+                    "out_ptr": t,
+                    "n_elements": 4,
+                    "BLOCK_SIZE": 4,
+                },
+                # TODO(oulgen): For loops not implemented yet
+                ["in_ptr0", "in_ptr1", "out_ptr"],
+            ],
+            [
+                cond_op_kernel,
+                {
+                    "in_ptr0": t,
+                    "in_ptr1": t,
+                    "out_ptr": t,
+                    "n_elements": 4,
+                    "BLOCK_SIZE": 4,
+                },
+                # TODO(oulgen): Dynamic control flow is not implemented yet
+                ["in_ptr0", "in_ptr1", "out_ptr"],
+            ],
         ]
+
         for kernel, inputs, outputs in tests:
-            self.assertListEqual(filter_non_mutated(kernel, inputs), outputs)
+            self.assertListEqual(
+                identify_mutated_tensors(kernel, inputs),
+                outputs,
+                msg=f"while testing {kernel.fn.__name__}",
+            )
 
 
 common_utils.instantiate_parametrized_tests(KernelTests)
+
+no_opt_test_class = make_test_cls_with_patches(
+    KernelTests,
+    "NoOptimization",
+    "_no_optimizations",
+    (config, "optimize_user_defined_triton_kernels", False),
+)
+
+globals()[no_opt_test_class.__name__] = no_opt_test_class
+no_opt_test_class.__module__ = __name__
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
