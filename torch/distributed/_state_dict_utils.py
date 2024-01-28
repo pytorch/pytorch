@@ -172,8 +172,9 @@ def _gather_state_dict(
             device_mesh=value.device_mesh,
             placements=placements,
         )
-        value = value.to_local()
-        return value
+        # Call `wait()` to force the tensor is synchronous with respect
+        # to the main stream.
+        return value.to_local().wait()
 
     return _iterate_state_dict(
         state_dict,
