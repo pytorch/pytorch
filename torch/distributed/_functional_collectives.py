@@ -181,9 +181,7 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     """
     if USE_NATIVE_C10D_FUNCTIONAL:
         group_name = _resolve_group_name(group, tag)
-        tensor = torch.ops._c10d_functional.all_reduce(
-            self, reduceOp.lower(), group_name
-        )
+        tensor = torch.ops._c10d_functional.all_reduce(self, reduceOp, group_name)
     else:
         tag, rankset, group_size = _expand_group(group, tag)
         tensor = torch.ops.c10d_functional.all_reduce(  # type: ignore[attr-defined]
@@ -282,7 +280,7 @@ def reduce_scatter_tensor(
     if USE_NATIVE_C10D_FUNCTIONAL:
         tensor = torch.ops._c10d_functional.reduce_scatter_tensor(
             self,
-            reduceOp.lower(),
+            reduceOp,
             group_size,
             group_name,
         )
@@ -321,7 +319,7 @@ def all_reduce_coalesced(
         group_name = _resolve_group_name(group, tag)
         tensor_list = torch.ops._c10d_functional.all_reduce_coalesced(  # type: ignore[attr-defined]
             self,
-            reduceOp.lower(),
+            reduceOp,
             group_name,
         )
     else:
@@ -414,7 +412,7 @@ def reduce_scatter_tensor_coalesced(
     if USE_NATIVE_C10D_FUNCTIONAL:
         tensor_list = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(  # type: ignore[attr-defined]
             inputs,
-            reduceOp.lower(),
+            reduceOp,
             group_size,
             group_name,
         )
@@ -687,7 +685,7 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
             group.ndim == 1
         ), "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
         # TODO: it should run collective in the whole mesh instead of dim 0
-        tag, rankset, _ = group._dim_group_infos[0]
+        tag, rankset = group._dim_group_infos[0]
         group_size = len(rankset)
     elif isinstance(group, tuple):
         if (
@@ -697,7 +695,7 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
         ):
             dmesh = group[0]
             dim = group[1]
-            tag, rankset, _ = dmesh._dim_group_infos[dim]
+            tag, rankset = dmesh._dim_group_infos[dim]
             group_size = len(rankset)
         else:
             raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
@@ -722,23 +720,8 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
         return group.group_name
     elif isinstance(group, str):
         return group
-    elif isinstance(group, DeviceMesh):
-        assert (
-            group.ndim == 1
-        ), "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
-        return group._dim_group_infos[0][2]
-    elif isinstance(group, tuple):
-        if (
-            len(group) == 2
-            and isinstance(group[0], DeviceMesh)
-            and isinstance(group[1], int)
-        ):
-            dmesh = group[0]
-            dim = group[1]
-            return dmesh._dim_group_infos[dim][2]
-        else:
-            raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
     else:
+        # TODO(yifu): DeviceMesh supported will be added in a subsequent PR
         raise ValueError(f"Unsupported group type: {type(group)}, {group}")
 
 

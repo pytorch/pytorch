@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import torch.distributed as dist
 
 from torch._C._distributed_c10d import (
@@ -125,10 +127,6 @@ class FakeProcessGroup(dist.ProcessGroup):
         return ret_work(tensors)
 
     def getBackendName(self):
-        return "fake"
-
-    @property
-    def group_name(self):
         return "fake"
 
     def __repr__(self):
