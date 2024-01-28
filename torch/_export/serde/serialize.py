@@ -30,7 +30,7 @@ import sympy
 
 import torch
 import torch.export.exported_program as ep
-from torch._export.serde.schema import SchemaVersion
+from torch._export.serde.schema import InputToNonPersistentBufferSpec, SchemaVersion
 from torch._export.verifier import load_verifier
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
@@ -52,9 +52,9 @@ from .schema import (  # type: ignore[attr-defined]
     GraphSignature,
     InputSpec,
     InputToBufferSpec,
+    InputToCustomObjSpec,
     InputToParameterSpec,
     InputToTensorConstantSpec,
-    InputToCustomObjSpec,
     Layout,
     LossOutputSpec,
     MemoryFormat,
@@ -733,6 +733,15 @@ class GraphModuleSerializer:
                     buffer_name=spec.target,
                 )
             )
+        elif spec.kind == ep.InputKind.BUFFER_NON_PERSISTENT:
+            assert spec.target is not None
+            assert isinstance(spec.arg, ep.TensorArgument)
+            return InputSpec.create(
+                buffer_non_persistent=InputToNonPersistentBufferSpec(
+                    arg=TensorArgument(name=spec.arg.name),
+                    buffer_name=spec.target,
+                )
+            )
         elif spec.kind == ep.InputKind.CONSTANT_TENSOR:
             assert spec.target is not None
             assert isinstance(spec.arg, ep.TensorArgument)
@@ -1292,6 +1301,12 @@ class GraphModuleDeserializer:
                 arg=ep.TensorArgument(name=i.buffer.arg.name),
                 target=i.buffer.buffer_name,
             )
+        elif i.type == "buffer_non_persistent":
+            return ep.InputSpec(
+                kind=ep.InputKind.BUFFER_NON_PERSISTENT,
+                arg=ep.TensorArgument(name=i.buffer_non_persistent.arg.name),
+                target=i.buffer_non_persistent.buffer_name,
+            )
         elif i.type == "tensor_constant":
             return ep.InputSpec(
                 kind=ep.InputKind.CONSTANT_TENSOR,
@@ -1305,7 +1320,7 @@ class GraphModuleDeserializer:
                 target=i.custom_obj.custom_obj_name,
             )
         else:
-            raise AssertionError(f"Unkown input spec {i}")
+            raise AssertionError(f"Unknown input spec {i}")
 
     def deserialize_output_spec(self, o: OutputSpec) -> ep.OutputSpec:
         if o.type == "user_output":
@@ -2137,15 +2152,17 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
         idx, (arg, spec) = inp
         assert isinstance(spec, InputSpec)
         if spec.type == "user_input":
-            return 4, None, idx
+            return 5, None, idx
         elif spec.type == "parameter":
             return 1, spec.parameter.parameter_name, idx
         elif spec.type == "buffer":
             return 2, spec.buffer.buffer_name, idx
+        elif spec.type == "buffer_non_persistent":
+            return 2, spec.buffer_non_persistent.buffer_name, idx
         elif spec.type == "tensor_constant":
             return 3, spec.tensor_constant.tensor_constant_name, idx
         elif spec.type == "custom_obj":
-            return 3, spec.custom_obj.custom_obj_name, idx
+            return 4, spec.custom_obj.custom_obj_name, idx
         else:
             raise AssertionError(f"Unknown input type: {spec}")
 
@@ -2197,6 +2214,9 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
             t.name = replace_table[t.name]
         elif spec.type == "buffer":
             t = spec.buffer.arg
+            t.name = replace_table[t.name]
+        elif spec.type == "buffer_non_persistent":
+            t = spec.buffer_non_persistent.arg
             t.name = replace_table[t.name]
         elif spec.type == "tensor_constant":
             t = spec.tensor_constant.arg

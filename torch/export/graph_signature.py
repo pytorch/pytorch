@@ -48,6 +48,7 @@ class InputKind(Enum):
     USER_INPUT = auto()
     PARAMETER = auto()
     BUFFER = auto()
+    BUFFER_NON_PERSISTENT = auto()
     CONSTANT_TENSOR = auto()
     CUSTOM_OBJ = auto()
 
@@ -263,7 +264,16 @@ class ExportGraphSignature:
         return [
             s.target
             for s in self.input_specs
-            if s.kind == InputKind.BUFFER
+            if s.kind == InputKind.BUFFER or s.kind == InputKind.BUFFER_NON_PERSISTENT
+            if isinstance(s.target, str)
+        ]
+
+    @property
+    def non_persistent_buffers(self) -> Collection[str]:
+        return [
+            s.target
+            for s in self.input_specs
+            if s.kind == InputKind.BUFFER_NON_PERSISTENT
             if isinstance(s.target, str)
         ]
 
@@ -323,9 +333,10 @@ class ExportGraphSignature:
     @property
     def inputs_to_buffers(self) -> Mapping[str, str]:
         return {
-            s.arg.name: s.target
+            s.arg.name: s.target  # type: ignore[union-attr, misc]
             for s in self.input_specs
             if s.kind == InputKind.BUFFER
+            or s.kind == InputKind.BUFFER_NON_PERSISTENT
             and isinstance(s.arg, TensorArgument)
             and isinstance(s.target, str)
         }

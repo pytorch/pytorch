@@ -222,6 +222,12 @@ class InputToBufferSpec:
 
 
 @dataclass
+class InputToNonPersistentBufferSpec:
+    arg: TensorArgument
+    buffer_name: str
+
+
+@dataclass
 class InputToTensorConstantSpec:
     arg: TensorArgument
     tensor_constant_name: str
@@ -238,6 +244,7 @@ class InputSpec(_Union):
     user_input: UserInputSpec
     parameter: InputToParameterSpec
     buffer: InputToBufferSpec
+    buffer_non_persistent: InputToNonPersistentBufferSpec
     tensor_constant: InputToTensorConstantSpec
     custom_obj: InputToCustomObjSpec
 
