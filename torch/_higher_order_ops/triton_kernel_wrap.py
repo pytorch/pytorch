@@ -81,6 +81,67 @@ class Op:
     args: List[Union[Param, Intermediate]]
 
 
+def generate_ttir(kernel, kwargs):
+    """
+    Uses Triton's internal code generation to create TTIR
+    """
+    import triton
+    from triton.compiler.compiler import ASTSource
+    from triton.runtime.autotuner import Autotuner
+    from triton.runtime.jit import JITFunction
+
+    import torch
+    from torch._subclasses.fake_tensor import FakeTensor
+
+    if isinstance(kernel, Autotuner):
+        if len(kernel.configs) > 0:
+            # If we are autotuning, then it doesn't matter which version gets
+            # picked for tracing purposes, so lets pick the first one
+            kwargs = {**kwargs, **kernel.configs[0].kwargs}
+        kernel = kernel.fn
+
+    assert isinstance(kernel, JITFunction)
+
+    if len(kwargs) != len(kernel.arg_names):
+        raise Exception("Incorrect number of arguments passed to kernel")
+
+    # Drop the keys
+    # Replace all SymExprs with a regular value for TTIR generation
+    # Replace all FakeTensor with real tensors
+    # These replacements are needed for triton's type, key and config functions
+    args: List[Any] = []
+    for name in kernel.arg_names:
+        a = kwargs[name]
+        if isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+            args.append(2)
+        elif isinstance(a, FakeTensor):
+            args.append(torch.empty(2, dtype=a.dtype))
+        else:
+            args.append(a)
+
+    tensor_param_locs = [i for i, arg in enumerate(args) if isinstance(arg, Tensor)]
+    specialization = kernel._get_config(*args)
+    constants = {i: arg for i, arg in enumerate(args) if not isinstance(arg, Tensor)}
+
+    # Build kernel signature -- doesn't include constexpr arguments.
+    signature = {
+        i: kernel._type_of(kernel._key_of(arg))
+        for i, arg in enumerate(args)
+        if i not in kernel.constexprs
+    }
+
+    context = triton._C.libtriton.ir.context()
+    target = triton.runtime.driver.active.get_current_target()
+    backend = triton.compiler.compiler.make_backend(target)
+    options = backend.parse_options(dict())
+    triton._C.libtriton.ir.load_dialects(context)
+    backend.load_dialects(context)
+
+    src = ASTSource(kernel, signature, constants, specialization)
+    ttir_module = src.make_ir(options, context)
+    return str(ttir_module), tensor_param_locs
+
+
 def parse_ttir(ttir, kwargs):
     """
     Given a Triton emitted TTIR text, this function lexes and parses the
@@ -105,7 +166,7 @@ def parse_ttir(ttir, kwargs):
         from lark import Lark, Transformer, v_args
     except ModuleNotFoundError:
         log.debug("Cannot parse TTIR as Lark is not installed")
-        return None
+        raise
 
     ops: Dict[Intermediate, Op] = {}
     next_fake_intermediate = 0
@@ -125,8 +186,8 @@ def parse_ttir(ttir, kwargs):
         decl_block: /.+/ NEWLINE op+ "}" LOC
 
         op: "tt.return" LOC
-          | assign_lhs "=" FN_NAME args rest  -> process_op
-          | FN_NAME args rest                 -> process_op_no_ret
+          | assign_lhs "=" OP_NAME args rest  -> process_op
+          | OP_NAME args rest                 -> process_op_no_ret
 
         ?rest: (":" | "{" | "\\"" | "->" | "<") /.+/ NEWLINE
 
@@ -137,14 +198,11 @@ def parse_ttir(ttir, kwargs):
         ?assign_lhs: INTERMEDIATE | CONSTANT
 
         PARAM.5: "%arg" DIGIT+
-
         INTERMEDIATE.4: "%" DIGIT+
-
         NAME: (LETTER | DIGIT | "_")+
-
         CONSTANT: "%"? NAME+ ("<" DIGIT+ ">")?
 
-        FN_NAME: "\\""? NAME "." NAME "\\""?
+        OP_NAME: "\\""? NAME "." NAME "\\""?
 
         LOC: "loc(#loc" DIGIT* ")"
 
@@ -196,90 +254,13 @@ def parse_ttir(ttir, kwargs):
     return ops
 
 
-def identify_mutated_tensors(kernel, kwargs):
+def analyze_kernel_mutations(ops, kwargs, tensor_param_locs):
     """
-    Given a triton kernel and the arguments for this kernel, this function
-    retrieves the TTIR converted version of the kernel from Triton's API.
-    Parsing the TTIR, it creates a control flow graph, detects all sinks
-    from a predefined list of sinks. NOTE: What if triton exposed this MemWrite Trait
+    Analyzes the graph to detect all sinks from a predefined list of sinks
+    by using triton's MemWrite trait list. NOTE: What if triton exposed this?
     From each sink, it traverses the CFG backwards to identify all the input
     pointers that are mutated
     """
-    import triton
-    from triton.compiler.compiler import ASTSource
-    from triton.runtime.autotuner import Autotuner
-    from triton.runtime.jit import JITFunction
-
-    import torch
-    from torch._subclasses.fake_tensor import FakeTensor
-
-    def bail_out():
-        return [key for key, value in kwargs.items() if isinstance(value, Tensor)]
-
-    if isinstance(kernel, Autotuner):
-        if len(kernel.configs) > 0:
-            # If we are autotuning, then it doesn't matter which version gets
-            # picked for tracing purposes, so lets pick the first one
-            kwargs = {**kwargs, **kernel.configs[0].kwargs}
-        kernel = kernel.fn
-
-    assert isinstance(kernel, JITFunction)
-
-    if len(kwargs) != len(kernel.arg_names):
-        # Incorrect number of arguments passed
-        return bail_out()
-
-    # Drop the keys
-    # Replace all SymExprs with a regular value for TTIR generation
-    # Replace all FakeTensor with real tensors
-    # These replacements are needed for triton's type, key and config functions
-    args: List[Any] = []
-    for name in kernel.arg_names:
-        a = kwargs[name]
-        if isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-            args.append(2)
-        elif isinstance(a, FakeTensor):
-            args.append(torch.empty(2, dtype=a.dtype))
-        else:
-            args.append(a)
-
-    tensor_param_locs = [i for i, arg in enumerate(args) if isinstance(arg, Tensor)]
-    specialization = kernel._get_config(*args)
-    constants = {i: arg for i, arg in enumerate(args) if not isinstance(arg, Tensor)}
-
-    # Build kernel signature -- doesn't include constexpr arguments.
-    signature = {
-        i: kernel._type_of(kernel._key_of(arg))
-        for i, arg in enumerate(args)
-        if i not in kernel.constexprs
-    }
-
-    context = triton._C.libtriton.ir.context()
-    target = triton.runtime.driver.active.get_current_target()
-    backend = triton.compiler.compiler.make_backend(target)
-    options = backend.parse_options(dict())
-    triton._C.libtriton.ir.load_dialects(context)
-    backend.load_dialects(context)
-
-    try:
-        src = ASTSource(kernel, signature, constants, specialization)
-        ttir_module = src.make_ir(options, context)
-        ops = parse_ttir(str(ttir_module), kwargs)
-        if ops is None:
-            raise Exception("Parsing TTIR failed")
-    except Exception as e:
-        import traceback
-
-        log.debug(
-            "Encountered an exception in identify_mutated_tensors, assuming every input is mutated"
-        )
-        log.debug(
-            "".join(
-                traceback.TracebackException.from_exception(e).format()  # noqa: G001
-            )
-        )
-        return bail_out()
-
     # Name of mutation op to mutated parameter indices
     # List from Triton Github include/triton/Dialect/Triton/IR/TritonOps.td
     # All the OPs that have MemWrite trait.
@@ -292,10 +273,9 @@ def identify_mutated_tensors(kernel, kwargs):
     visited = set()
     for op in ops.values():
         if op.name in UNKNOWN_OPS:
-            log.debug(
-                f"ttir analysis hit an op we do not know how to analyze: {op.name}"  # noqa: G004
+            raise Exception(
+                f"ttir analysis hit an op we do not know how to analyze: {op.name}"
             )
-            return bail_out()
 
         for idx in MUTATION_OPS.get(op.name, []):
             stack.append(op.args[idx])
@@ -319,6 +299,32 @@ def identify_mutated_tensors(kernel, kwargs):
         for i, (key, value) in enumerate(kwargs.items())
         if isinstance(value, Tensor) and mutated[i]
     ]
+
+
+def identify_mutated_tensors(kernel, kwargs):
+    """
+    Given a triton kernel and the arguments for this kernel, this function
+    1) Retrieves the TTIR converted version of the kernel from Triton's API.
+    2) Parses the TTIR and creates a control flow graph
+    3) Analyzes the graph to detect all input tensor mutations
+    """
+
+    try:
+        ttir, tensor_param_locs = generate_ttir(kernel, kwargs)
+        ops = parse_ttir(ttir, kwargs)
+        return analyze_kernel_mutations(ops, kwargs, tensor_param_locs)
+    except Exception as e:
+        import traceback
+
+        log.debug(
+            "Encountered an exception in identify_mutated_tensors, assuming every input is mutated"
+        )
+        log.debug(
+            "".join(
+                traceback.TracebackException.from_exception(e).format()  # noqa: G001
+            )
+        )
+        return [key for key, value in kwargs.items() if isinstance(value, Tensor)]
 
 
 ###############################################################################
