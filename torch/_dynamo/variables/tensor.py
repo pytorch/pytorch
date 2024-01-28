@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import functools
 
 import inspect
@@ -509,6 +511,8 @@ class TensorVariable(VariableTracker):
         elif name == "get_device" and isinstance(self.device, torch.device):
             index = self.device.index if self.device.type != "cpu" else -1
             constant_result = ConstantVariable.create(index)
+        elif name == "element_size":
+            constant_result = ConstantVariable.create(self.dtype.itemsize)
         else:
             constant_result = None
 

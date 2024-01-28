@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import enum
 import dis
 import copy
@@ -156,8 +158,8 @@ class TracerBase:
             # nodes as is the case with in-place foreach ops. During the
             # BWD pass we retrieve the sequence_nr stored on the current
             # executing autograd Node. See NOTE [ Sequence Number ].
-            if current_meta.get("in_grad_fn", False):
-                new_seq_nr = current_meta["grad_fn_seq_nr"]
+            if current_meta.get("in_grad_fn", 0) > 0:
+                new_seq_nr = current_meta["grad_fn_seq_nr"][-1]
             node.meta["seq_nr"] = new_seq_nr
 
         elif self.module_stack:
