@@ -983,9 +983,10 @@ class CodeGen:
 class Kernel(CodeGen):
     newvar_prefix = ""
     suffix = ""
-    overrides = None
-    load_format = None
-    store_format = None
+    overrides: Optional[Callable[[OpsHandler[Any]], OpsHandler[Any]]] = None
+    # TODO: these look dead, but with all the getattr it's hard to tell...
+    load_format: None = None
+    store_format: None = None
 
     def __init__(self, args=None, increase_kernel_count=True):
         super().__init__()

@@ -620,7 +620,7 @@ def _check_valid_timeout(timeout: Any) -> None:
         )
 
 # Default process group state
-_default_pg_init_method = None
+_default_pg_init_method: Optional[str] = None
 
 STORE_BASED_BARRIER_PREFIX = "store_based_barrier_key"
 

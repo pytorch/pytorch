@@ -5,7 +5,7 @@ import re
 import sys
 import tempfile
 from os.path import abspath, dirname
-from typing import Any, Dict, Set, Type, TYPE_CHECKING
+from typing import Any, Dict, Optional, Set, Type, TYPE_CHECKING
 
 import torch
 
@@ -17,7 +17,7 @@ import torch
 # Design doc: https://docs.google.com/document/d/1ZRfTWKa8eaPq1AxaiHrq4ASTPouzzlPiuquSBEJYwS8/edit#
 # the name of a file to write the logs to
 # [@compile_ignored: debug]
-log_file_name = None
+log_file_name: Optional[str] = None
 
 # [@compile_ignored: debug] Verbose will print full stack traces on warnings and errors
 verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
@@ -289,20 +289,21 @@ def is_fbcode():
     return not hasattr(torch.version, "git_version")
 
 
-DEBUG_DIR_VAR_NAME = "TORCH_COMPILE_DEBUG_DIR"  # [@compile_ignored: debug]
+def default_debug_dir_root():
+    # [@compile_ignored: debug]
+    DEBUG_DIR_VAR_NAME = "TORCH_COMPILE_DEBUG_DIR"
+    if DEBUG_DIR_VAR_NAME in os.environ:
+        return os.path.join(os.environ[DEBUG_DIR_VAR_NAME], "torch_compile_debug")
+    elif is_fbcode():
+        return os.path.join(
+            tempfile.gettempdir(), getpass.getuser(), "torch_compile_debug"
+        )
+    else:
+        return os.path.join(os.getcwd(), "torch_compile_debug")
 
-if DEBUG_DIR_VAR_NAME in os.environ:
-    debug_dir_root = os.path.join(  # [@compile_ignored: debug]
-        os.environ[DEBUG_DIR_VAR_NAME], "torch_compile_debug"
-    )
-elif is_fbcode():
-    debug_dir_root = os.path.join(  # [@compile_ignored: debug]
-        tempfile.gettempdir(), getpass.getuser(), "torch_compile_debug"
-    )
-else:
-    debug_dir_root = os.path.join(  # [@compile_ignored: debug]
-        os.getcwd(), "torch_compile_debug"
-    )
+
+# [@compile_ignored: debug]
+debug_dir_root = default_debug_dir_root()
 
 # [@compile_ignored: debug]
 _save_config_ignore = {

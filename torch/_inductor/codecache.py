@@ -95,7 +95,7 @@ LOCK_TIMEOUT = 600
 
 # timing metrics for time spent in the compilation
 _cumulative_compile_time = 0.0
-_t0 = None
+_t0: Optional[float] = None
 
 
 def _compile_start() -> None:
