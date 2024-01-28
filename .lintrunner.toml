@@ -273,6 +273,26 @@ command = [
 ]
 
 [[linter]]
+code = 'TYPENOSKIP'
+include_patterns = ['mypy.ini']
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=follow_imports\s*=\s*skip',
+    '--linter-name=TYPENOSKIP',
+    '--error-name=use of follow_imports = skip',
+    """--error-description=\
+        follow_imports = skip is forbidden from mypy.ini configuration as it \
+        is extremely easy to accidentally turn off type checking unintentionally.  If \
+        you need to suppress type errors, use a top level # mypy: ignore-errors.  \
+        Do not rely on automatic Any substitution; instead, manually # type: ignore \
+        at use sites or define a pyi type stub with more relaxed types. \
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'NOQA'
 include_patterns = ['**/*.py', '**/*.pyi']
 exclude_patterns = [
