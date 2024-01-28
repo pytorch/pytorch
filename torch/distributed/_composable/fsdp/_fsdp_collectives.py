@@ -43,7 +43,7 @@ def foreach_all_gather(
     device: torch.device,
     dtype: torch.dtype,
 ) -> Optional[AllGatherResult]:
-    world_size, rank = (group.size(), group.rank())
+    world_size, rank = group.size(), group.rank()
     # - Copy in
     with torch.cuda.stream(all_gather_copy_in_stream):
         param_all_gather_inputs = [
