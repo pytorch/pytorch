@@ -374,7 +374,7 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
         self.assertFalse(model0_in_proj_state._is_root)
         self.assertFalse(model0_out_proj_state._is_root)
 
-        all_states = root_state._all_states
+        all_states = root_state._state_ctx.all_states
         self.assertEqual(len(all_states), 3)
         self.assertEqual(
             all_states, [root_state, model0_in_proj_state, model0_out_proj_state]
