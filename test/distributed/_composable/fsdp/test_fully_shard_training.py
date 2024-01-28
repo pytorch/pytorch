@@ -113,13 +113,10 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
     def test_param_registration_after_backward(self):
         """Tests the parameter registration after backward."""
         device = torch.device("cuda", 0)
-        fully_shard_fn = functools.partial(fully_shard)
         # Single FSDP group
         for reshard_after_forward in (True, False, 2):
             model = MLP(8, device)
-            fully_shard_fn(
-                model, reshard_after_forward=reshard_after_forward
-            )  # root only
+            fully_shard(model, reshard_after_forward=reshard_after_forward)  # root only
             inp = torch.randn((2, 8), device="cuda")
             self._assert_dtensor_params(model.parameters())
             model(inp).sum().backward()
@@ -128,9 +125,9 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
         # Multiple FSDP groups
         for reshard_after_forward in (True, False, 2):
             model = MLP(8, device)
-            fully_shard_fn(model.in_proj, reshard_after_forward=reshard_after_forward)
-            fully_shard_fn(model.out_proj, reshard_after_forward=reshard_after_forward)
-            fully_shard_fn(model, reshard_after_forward=reshard_after_forward)
+            fully_shard(model.in_proj, reshard_after_forward=reshard_after_forward)
+            fully_shard(model.out_proj, reshard_after_forward=reshard_after_forward)
+            fully_shard(model, reshard_after_forward=reshard_after_forward)
             self._assert_dtensor_params(model.parameters())
             model(inp).sum().backward()
             self._assert_dtensor_params(model.parameters())
@@ -191,7 +188,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         self.run_subtests(
             {
                 "reshard_after_forward": [True, False, 2],
-                "device": ["cuda"],
+                "device_type": ["cuda"],
                 "delay_after_forward": [False, True],
                 "delay_before_all_gather": [False, True],
                 "delay_before_reduce_scatter": [False, True],
@@ -203,7 +200,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
     def _test_train_parity_multi_group(
         self,
         reshard_after_forward: Union[bool, int],
-        device: str,
+        device_type: str,
         delay_after_forward: bool,
         delay_before_all_gather: bool,
         delay_before_reduce_scatter: bool,
@@ -218,23 +215,21 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             in (2, 3)
         ):
             return
+        assert device_type in ("cuda", "cpu"), f"{device_type}"
         torch.manual_seed(42)
         lin_dim = 32
         model = nn.Sequential(*[MLP(lin_dim, torch.device("cpu")) for _ in range(3)])
         ref_model = copy.deepcopy(model)
-        if device == "cuda":
+        if device_type == "cuda":
             replicate(ref_model.cuda(), device_ids=[self.rank])
         else:
             gloo_pg = dist.new_group(backend="gloo")
             replicate(ref_model, process_group=gloo_pg)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-        fully_shard_fn = functools.partial(
-            fully_shard,
-            reshard_after_forward=reshard_after_forward,
-        )
+        mesh = init_device_mesh(device_type, (self.world_size,))
         for mlp in model:
-            fully_shard_fn(mlp)
-        fully_shard_fn(model)
+            fully_shard(mlp, mesh=mesh, reshard_after_forward=reshard_after_forward)
+        fully_shard(model, mesh=mesh, reshard_after_forward=reshard_after_forward)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
         delay_in_ms = 100
@@ -256,7 +251,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             delayed_reduce_scatter
         ):
             for iter_idx in range(10):
-                inp = torch.randn((8, lin_dim), device=torch.device(device))
+                inp = torch.randn((8, lin_dim), device=torch.device(device_type))
                 losses: List[torch.Tensor] = []
                 for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                     _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
@@ -270,6 +265,51 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
+    def test_non_root_forward_backward(self):
+        """
+        Tests running forward/backward through the root and then through a
+        non-root. The non-root needs to synchronize streams/queue the callback.
+        """
+        torch.manual_seed(42)
+        lin_dim = 32
+        model = nn.Sequential(*[MLP(lin_dim, torch.device("cpu")) for _ in range(3)])
+        ref_model = copy.deepcopy(model).cuda()
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        for mlp in model:
+            fully_shard(mlp)
+        fully_shard(model)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randn((8, lin_dim), device=torch.device("cuda"))
+
+        ref_root_loss = ref_model(inp).sum()
+        ref_root_loss.backward()
+        for param in ref_model.parameters():
+            dist.all_reduce(param.grad)
+            param.grad.detach().div_(self.world_size)
+        ref_optim.step()
+        ref_optim.zero_grad()
+        ref_nonroot_loss = ref_model[0](inp).sum()
+        ref_nonroot_loss.backward()
+        for param in ref_model.parameters():
+            if param.grad is not None:
+                dist.all_reduce(param.grad)
+                param.grad.detach().div_(self.world_size)
+        ref_optim.step()
+
+        root_loss = model(inp).sum()
+        root_loss.backward()
+        torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+        optim.step()
+        optim.zero_grad()
+        nonroot_loss = model[0](inp).sum()
+        nonroot_loss.backward()
+        optim.step()
+
+        self.assertEqual(ref_root_loss, root_loss)
+        self.assertEqual(ref_nonroot_loss, nonroot_loss)
+        self.assertEqual(ref_model(inp).sum(), model(inp).sum())
+
     def test_multi_forward_module(self):
         """
         Tests parity with DDP when running a module that participates multiple
