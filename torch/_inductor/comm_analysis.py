@@ -154,15 +154,20 @@ def estimate_nccl_collective_runtime(snode: "BaseSchedulerNode") -> float:
     - 8 gpus per node  # TODO: Need to find a way to get accurate "gpus per node" and "# nodes" info.
     - collective is one of: allreduce, reducescatter, allgather
     """
+    print("f00")
     tensor_numel = V.graph.sizevars.size_hint(sympy_product(snode.node.layout.size))
+    print("bar")
+    print(snode.node)
     tensor_dtype = snode.node.layout.dtype
     tensor_storage_size_bytes = tensor_numel * get_dtype_size(tensor_dtype)
     # Convert bytes to GB
     tensor_storage_size_GB = tensor_storage_size_bytes / 1024 / 1024 / 1024
+    print("qux")
 
     # Currently assumes each node has 8 gpus. And when >1 node is used, assumes each node uses all 8 gpus.
     # TODO: Need to find a way to get accurate "gpus per node" and "# nodes" info.
     num_gpus_per_node = 8
+    print(snode.node.constant_args)
     _, _, group_size = snode.node.constant_args  # type: ignore[attr-defined]
     nNodes = math.ceil(group_size / num_gpus_per_node)
     nRanks = group_size  # this is total # of gpus globally that participate in this collective op

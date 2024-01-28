@@ -1216,6 +1216,18 @@ def is_dynamic(*args):
     return False
 
 
+def is_collective(node):
+    from . import ir
+    return isinstance(node, ir.CollectiveKernel) or \
+        type(node) == ir._CollectiveKernel
+
+
+def is_wait(node):
+    from . import ir
+    return isinstance(node, ir.Wait) or \
+        type(node) == ir._WaitKernel
+
+
 # Placeholder strings used in triton codegen.
 class Placeholder(enum.Enum):
     # The placeholder for the actual name of a triton kernel.

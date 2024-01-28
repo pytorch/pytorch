@@ -44,6 +44,8 @@ from .utils import (
     get_dtype_size,
     get_gpu_dram_gbps,
     green_text,
+    is_collective,
+    is_wait,
     red_text,
     sympy_product,
 )
@@ -581,6 +583,18 @@ class BaseSchedulerNode:
             # default to no reordering based on runtime
             return 0
 
+        # Collective kernels
+        if is_collective(self.node):
+            print("is_collective!")
+            # TODO: before land!!!
+            return estimate_nccl_collective_runtime(self)
+        elif is_wait(self.node):
+            # ir.Wait is only used for collective ops.
+            # The time needed for the collective op is already estimated and considered
+            # when we are processing the collective op IR node, so ir.Wait takes 0 time
+            # since it doesn't take extra time to get the result after the collective is completed.
+            return 0
+
         try:
             gpu_memory_bandwidth = get_gpu_dram_gbps()
             gpu_flops = get_device_tflops(dtype) * 10**12
@@ -625,16 +639,6 @@ class BaseSchedulerNode:
         ):
             # Return estimated runtime in nanoseconds (bytes / gbps)
             return self.get_read_write_buffers_sizes() / gpu_memory_bandwidth
-
-        # Collective kernels
-        if isinstance(self.node, ir.CollectiveKernel):
-            return estimate_nccl_collective_runtime(self)
-        elif isinstance(self.node, ir.Wait):
-            # ir.Wait is only used for collective ops.
-            # The time needed for the collective op is already estimated and considered
-            # when we are processing the collective op IR node, so ir.Wait takes 0 time
-            # since it doesn't take extra time to get the result after the collective is completed.
-            return 0
 
         return 0
 
@@ -2227,6 +2231,7 @@ class Scheduler:
                     node.get_estimated_runtime(),
                 )
             except Exception as e:
+                print(e)
                 log.debug(
                     "Generating code for node %s with estimated runtime 0.0",
                     node.get_name(),
