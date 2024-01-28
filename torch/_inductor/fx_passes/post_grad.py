@@ -85,13 +85,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         remove_noop_ops(gm.graph)
         print_graph(gm.graph, "Before split cat in post grad pass.")
         for patterns in pass_patterns:
-            patterns.apply(gm.graph)
+            patterns.apply(gm.graph)  # type: ignore[arg-type]
             print_graph(
                 gm.graph,
                 "Apply split cat pattern matcher PatternMatcherPass in post grad.",
             )
         if is_inference:
-            inference_patterns.apply(gm.graph)
+            inference_patterns.apply(gm.graph)  # type: ignore[arg-type]
 
     if config.post_grad_custom_post_pass is not None:
         config.post_grad_custom_post_pass(gm.graph)
@@ -368,7 +368,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
         if new_size is None:
             new_size = shape
         else:
-            new_size[notdim] = V.graph.sizevars.guard_equals(
+            new_size[notdim] = V.graph.sizevars.guard_equals(  # type: ignore[call-overload]
                 shape[notdim], new_size[notdim]
             )
             new_size[dim] += shape[dim]
