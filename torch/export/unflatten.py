@@ -257,7 +257,7 @@ class UnflattenedModule(torch.nn.Module):
             from torch._export.utils import _check_input_constraints_for_graph
 
             _check_input_constraints_for_graph(
-                self.input_placeholders, flat_args, self.range_constraints
+                self.input_placeholders, flat_args, args, kwargs, self.range_constraints
             )
         tree_out = torch.fx.Interpreter(self, graph=self.graph).run(
             *flat_args, enable_io_processing=False
