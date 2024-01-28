@@ -518,8 +518,16 @@ def is_numpy_float_type(value):
     )
 
 
+def is_function_or_wrapper(value):
+    return (
+        is_function(value)
+        or isinstance(value, functools._lru_cache_wrapper)
+        and is_function(inspect.getattr_static(value, "__wrapped__"))
+    )
+
+
 def is_function(value):
-    return istype(
+    return isinstance(
         value,
         (
             types.FunctionType,
@@ -528,6 +536,12 @@ def is_function(value):
             types.WrapperDescriptorType,
         ),
     )
+
+
+def unwrap_if_wrapper(value):
+    if isinstance(value, functools._lru_cache_wrapper):
+        value = inspect.getattr_static(value, "__wrapped__")
+    return value
 
 
 def is_numpy_ndarray(value):
@@ -1112,8 +1126,7 @@ def dict_keys_repr(const_keys, *, local) -> str:
     return "[" + keys_str + "]"
 
 
-def global_key_name(key):
-    return f"__dict_key_{id(key)}"
+GLOBAL_KEY_PREFIX = "__dict_key"
 
 
 from torch._subclasses import (  # noqa: F401

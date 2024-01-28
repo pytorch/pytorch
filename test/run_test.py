@@ -605,7 +605,7 @@ def run_test(
         argv = [test_file + ".py"] + unittest_args
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
-    if IS_CI:
+    if options.pipe_logs:
         log_fd, log_path = tempfile.mkstemp(
             dir=REPO_ROOT / "test" / "test-reports",
             prefix=f"{sanitize_file_name(str(test_module))}_",
@@ -619,7 +619,9 @@ def run_test(
         "BUILD_ENVRIONMENT", ""
     )
     timeout = (
-        THRESHOLD * 6
+        None
+        if not options.enable_timeout
+        else THRESHOLD * 6
         if is_slow
         else THRESHOLD * 3
         if should_retry
@@ -631,7 +633,7 @@ def run_test(
 
     with ExitStack() as stack:
         output = None
-        if IS_CI:
+        if options.pipe_logs:
             output = stack.enter_context(open(log_path, "w"))
 
         if should_retry:
@@ -664,7 +666,7 @@ def run_test(
             # comes up in the future.
             ret_code = 0 if ret_code == 5 or ret_code == 4 else ret_code
 
-    if IS_CI:
+    if options.pipe_logs:
         handle_log_file(
             test_module, log_path, failed=(ret_code != 0), was_rerun=was_rerun
         )
@@ -1040,30 +1042,30 @@ def handle_log_file(
     test: ShardedTest, file_path: str, failed: bool, was_rerun: bool
 ) -> None:
     test = str(test)
-    with open(file_path, "rb") as f:
-        full_text = f.read().decode("utf-8", errors="ignore")
+    with open(file_path, errors="ignore") as f:
+        full_text = f.read()
+
+    new_file = "test/test-reports/" + sanitize_file_name(
+        f"{test}_{os.urandom(8).hex()}_.log"
+    )
+    os.rename(file_path, REPO_ROOT / new_file)
 
     if not failed and not was_rerun and "=== RERUNS ===" not in full_text:
         # If success + no retries (idk how else to check for test level retries
-        # other than reparse xml), print only what tests ran, rename the log
-        # file so it doesn't get printed later, and do not remove logs.
-        new_file = "test/test-reports/" + sanitize_file_name(
-            f"{test}_{os.urandom(8).hex()}_.log"
-        )
-        os.rename(file_path, REPO_ROOT / new_file)
+        # other than reparse xml), print only what tests ran
         print_to_stderr(
             f"\n{test} was successful, full logs can be found in artifacts with path {new_file}"
         )
         for line in full_text.splitlines():
             if re.search("Running .* items in this shard:", line):
-                print_to_stderr(line.strip())
+                print_to_stderr(line.rstrip())
         print_to_stderr("")
         return
-    # otherwise: print entire file and then remove it
-    print_to_stderr(f"\nPRINTING LOG FILE of {test} ({file_path})")
+
+    # otherwise: print entire file
+    print_to_stderr(f"\nPRINTING LOG FILE of {test} ({new_file})")
     print_to_stderr(full_text)
-    print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})\n")
-    os.remove(file_path)
+    print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({new_file})\n")
 
 
 def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
@@ -1248,6 +1250,18 @@ def parse_args():
         action="store_true",
         help="Runs the full test suite despite one of the tests failing",
         default=strtobool(os.environ.get("CONTINUE_THROUGH_ERROR", "False")),
+    )
+    parser.add_argument(
+        "--pipe-logs",
+        action="store_true",
+        help="Print logs to output file while running tests.  True if in CI and env var is not set",
+        default=IS_CI and not strtobool(os.environ.get("VERBOSE_TEST_LOGS", "False")),
+    )
+    parser.add_argument(
+        "--enable-timeout",
+        action="store_true",
+        help="Set a timeout based on the test times json file.  Only works if there are test times available",
+        default=IS_CI and not strtobool(os.environ.get("NO_TEST_TIMEOUT", "False")),
     )
     parser.add_argument(
         "additional_unittest_args",
