@@ -285,20 +285,21 @@ def is_fbcode():
     return not hasattr(torch.version, "git_version")
 
 
-DEBUG_DIR_VAR_NAME = "TORCH_COMPILE_DEBUG_DIR"  # [@compile_ignored: debug]
+def default_debug_dir_root():
+    # [@compile_ignored: debug]
+    DEBUG_DIR_VAR_NAME = "TORCH_COMPILE_DEBUG_DIR"
+    if DEBUG_DIR_VAR_NAME in os.environ:
+        return os.path.join(os.environ[DEBUG_DIR_VAR_NAME], "torch_compile_debug")
+    elif is_fbcode():
+        return os.path.join(
+            tempfile.gettempdir(), getpass.getuser(), "torch_compile_debug"
+        )
+    else:
+        return os.path.join(os.getcwd(), "torch_compile_debug")
 
-if DEBUG_DIR_VAR_NAME in os.environ:
-    debug_dir_root = os.path.join(  # [@compile_ignored: debug]
-        os.environ[DEBUG_DIR_VAR_NAME], "torch_compile_debug"
-    )
-elif is_fbcode():
-    debug_dir_root = os.path.join(  # [@compile_ignored: debug]
-        tempfile.gettempdir(), getpass.getuser(), "torch_compile_debug"
-    )
-else:
-    debug_dir_root = os.path.join(  # [@compile_ignored: debug]
-        os.getcwd(), "torch_compile_debug"
-    )
+
+# [@compile_ignored: debug]
+debug_dir_root = default_debug_dir_root()
 
 # [@compile_ignored: debug]
 _save_config_ignore = {
