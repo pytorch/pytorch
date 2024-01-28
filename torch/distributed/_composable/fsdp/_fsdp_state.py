@@ -16,8 +16,18 @@ from torch.utils.hooks import RemovableHandle
 from ._fsdp_collectives import AllGatherStateHolder
 from ._fsdp_common import TrainingState
 from ._fsdp_param import FSDPParam
+from ._fsdp_param_group import FSDPCommContext, FSDPParamGroup
 
-from ._fsdp_param_group import FSDPParamGroup
+
+class FSDPStateContext:
+    """This has state shared across FSDP states."""
+
+    def __init__(self):
+        self.all_states: List[FSDPState] = []
+        # Iteration's forward root runs the once-per-forward logic
+        self.iter_forward_root: Optional[FSDPState] = None
+        # Final callback should only be queued once per backward
+        self.post_backward_final_callback_queued: bool = False
 
 
 class FSDPState(_State):
@@ -33,13 +43,14 @@ class FSDPState(_State):
     def __init__(self):
         super().__init__()
         self._fsdp_param_group: Optional[FSDPParamGroup] = None
-        self._is_root: Optional[bool] = None
+        self._is_root: Optional[bool] = None  # root responsible for lazy init
+        self._state_ctx = FSDPStateContext()
+        self._comm_ctx = FSDPCommContext()
         self._training_state: TrainingState = TrainingState.IDLE
         self._pre_forward_hook_handle: Optional[RemovableHandle] = None
         self._pre_backward_hook_handles: List[RemovableHandle] = []
 
         # Attributes only used on the root state:
-        self._all_states: List[FSDPState] = []
         self._root_post_backward_final_callback_queued: Optional[bool] = None
 
     # Define a separate init since `__init__` is called in the contract
@@ -58,13 +69,14 @@ class FSDPState(_State):
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
         self._lazy_init()
-        if not self._is_root:
+        if self._state_ctx.iter_forward_root is not None:
             return args, kwargs
+        self._state_ctx.iter_forward_root = self
         with torch.profiler.record_function("FSDP::root_pre_forward"):
             # Wait for optimizer before implicitly prefetched all-gathers
             current_stream = torch.cuda.current_stream()
-            self._all_gather_copy_in_stream.wait_stream(current_stream)
-            self._all_gather_stream.wait_stream(current_stream)
+            self._comm_ctx.all_gather_copy_in_stream.wait_stream(current_stream)
+            self._comm_ctx.all_gather_stream.wait_stream(current_stream)
             if self._device.type == "cuda":
                 with torch.profiler.record_function("FSDP::inputs_to_device"):
                     args_tuple, kwargs_tuple = _to_kwargs(
@@ -82,29 +94,17 @@ class FSDPState(_State):
             if (state := _get_module_fsdp_state(module)) is not None:
                 if module is not root_module:
                     state._is_root = False
-                self._all_states.append(state)
+                self._state_ctx.all_states.append(state)
         self._init_fqns()
         self._init_shared_state()
 
     def _init_shared_state(self) -> None:
-        # Setting the all-gather/reduce-scatter streams to be higher priority
-        # can help avoid some issues where their copies in/out are delayed and
-        # block computation
-        high_priority = -1
-        self._default_stream = torch.cuda.current_stream()
-        self._all_gather_copy_in_stream = torch.cuda.Stream(priority=high_priority)
-        self._all_gather_stream = torch.cuda.Stream(priority=high_priority)
-        self._reduce_scatter_stream = torch.cuda.Stream(priority=high_priority)
-        self._all_gather_state = AllGatherStateHolder()
-        for state in self._all_states:
+        self._comm_ctx.init()
+        for state in self._state_ctx.all_states:
+            state._state_ctx = self._state_ctx
+            state._comm_ctx = self._comm_ctx
             if fsdp_param_group := state._fsdp_param_group:
-                fsdp_param_group.default_stream = self._default_stream
-                fsdp_param_group.all_gather_copy_in_stream = (
-                    self._all_gather_copy_in_stream
-                )
-                fsdp_param_group.all_gather_stream = self._all_gather_stream
-                fsdp_param_group.reduce_scatter_stream = self._reduce_scatter_stream
-                fsdp_param_group.all_gather_state = self._all_gather_state
+                fsdp_param_group.comm_ctx = self._comm_ctx
 
     def _init_fqns(self) -> None:
         """Sets module and parameter FQN attributes for debugging."""
@@ -112,7 +112,7 @@ class FSDPState(_State):
         root_module = self._module
         param_to_fsdp_param: Dict[nn.Parameter, FSDPParam] = {}
         module_to_fsdp_param_group: Dict[nn.Module, FSDPParamGroup] = {}
-        for state in self._all_states:
+        for state in self._state_ctx.all_states:
             if fsdp_param_group := state._fsdp_param_group:
                 for fsdp_param in fsdp_param_group.fsdp_params:
                     param_to_fsdp_param[fsdp_param.sharded_param] = fsdp_param
@@ -138,28 +138,29 @@ class FSDPState(_State):
             output = self._fsdp_param_group.post_forward(module, input, output)
         output = self._register_pre_backward_hook(output)
         self._training_state = TrainingState.IDLE
-        if self._is_root and (all_gather_state := self._all_gather_state.pop()):
-            self._all_gather_copy_in_stream.wait_event(all_gather_state.event)
-            self._all_gather_stream.wait_event(all_gather_state.event)
-            del all_gather_state  # free
+        if self._state_ctx.iter_forward_root is self:
+            if (all_gather_state := self._comm_ctx.all_gather_state.pop()) is not None:
+                self._comm_ctx.all_gather_copy_in_stream.wait_event(
+                    all_gather_state.event
+                )
+                self._comm_ctx.all_gather_stream.wait_event(all_gather_state.event)
+                del all_gather_state  # free
+            self._state_ctx.iter_forward_root = None
 
     def _pre_backward(self, *unused: Any) -> None:
         self._training_state = TrainingState.PRE_BACKWARD
-        if self._is_root and not self._root_post_backward_final_callback_queued:
-            self._register_root_post_backward_final_callback()
+        self._register_root_post_backward_final_callback()
         if self._fsdp_param_group:
             self._fsdp_param_group.pre_backward(*unused)
 
     def _root_post_backward_final_callback(self) -> None:
-        if not self._is_root:
-            return
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
             self._training_state = TrainingState.IDLE
-            for state in self._all_states:
+            for state in self._state_ctx.all_states:
                 state._training_state = TrainingState.IDLE
                 if state._fsdp_param_group:
                     state._fsdp_param_group.finalize_backward()
-            self._root_post_backward_final_callback_queued = False
+            self._state_ctx.post_backward_final_callback_queued = False
             for handle in self._pre_backward_hook_handles:
                 handle.remove()
             self._pre_backward_hook_handles.clear()
@@ -176,9 +177,9 @@ class FSDPState(_State):
         return output
 
     def _register_root_post_backward_final_callback(self):
-        if self._root_post_backward_final_callback_queued:
+        if self._state_ctx.post_backward_final_callback_queued:
             return
-        self._root_post_backward_final_callback_queued = True
+        self._state_ctx.post_backward_final_callback_queued = True
         Variable._execution_engine.queue_callback(
             self._root_post_backward_final_callback
         )
