@@ -58,7 +58,7 @@ class MetricStream:
         )
 
 
-_metrics_map = {}
+_metrics_map: Dict[str, MetricHandler] = {}
 _default_metrics_handler: MetricHandler = NullMetricHandler()
 
 

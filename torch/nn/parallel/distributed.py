@@ -617,7 +617,7 @@ class DistributedDataParallel(Module, Joinable):
     """
 
     # used to track whether the given thread is inside ddp forward for torchdynamo purposes
-    _active_ddp_module = None
+    _active_ddp_module: Optional["DistributedDataParallel"] = None
 
     def __init__(
         self,

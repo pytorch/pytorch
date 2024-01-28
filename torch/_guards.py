@@ -159,9 +159,9 @@ class Guard:
     obj_weakref: Optional[object] = None
     guarded_class_weakref: Optional[type] = None
 
-    stack = None
-    user_stack = None
-    _hash = None
+    stack: Optional[CapturedTraceback] = None
+    user_stack: Optional[traceback.StackSummary] = None
+    _hash: Optional[int] = None
 
     def __hash__(self):
         if self._hash is None:

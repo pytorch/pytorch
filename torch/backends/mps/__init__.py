@@ -1,5 +1,7 @@
 from functools import lru_cache as _lru_cache
 
+from typing import Optional
+
 import torch
 from ...library import Library as _Library
 
@@ -34,7 +36,7 @@ def is_macos13_or_newer(minor: int = 0) -> bool:
     return torch._C._mps_is_on_macos_or_newer(13, minor)
 
 
-_lib = None
+_lib: Optional[_Library] = None
 
 
 def _init():

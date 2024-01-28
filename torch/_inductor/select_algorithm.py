@@ -983,7 +983,7 @@ class AlgorithmSelectorCache(PersistentCache):
         )
 
 
-_ALGORITHM_SELECTOR_CACHE = None
+_ALGORITHM_SELECTOR_CACHE: Optional[AlgorithmSelectorCache] = None
 
 
 def autotune_select_algorithm(*args, **kwargs):

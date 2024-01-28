@@ -83,7 +83,7 @@ DEFAULT_CACHE_DIR = '~/.cache'
 VAR_DEPENDENCY = 'dependencies'
 MODULE_HUBCONF = 'hubconf.py'
 READ_DATA_CHUNK = 128 * 1024
-_hub_dir = None
+_hub_dir: Optional[str] = None
 
 
 @contextlib.contextmanager

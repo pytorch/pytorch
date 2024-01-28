@@ -10053,7 +10053,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 METHOD = 1
 INPLACE_METHOD = 2
 FUNCTIONAL = 4
-DIM_ARG = None
+DIM_ARG: None = None
 
 def make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim=0):
     def neg_dim_test(self):

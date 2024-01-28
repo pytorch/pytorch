@@ -211,7 +211,7 @@ def _scoped_library(*args, **kwargs):
         lib._destroy()
 
 
-_keep_alive = []
+_keep_alive: List[Library] = []
 
 
 NAMELESS_SCHEMA = re.compile(r"\(.*\) -> .*")

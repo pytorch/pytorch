@@ -849,7 +849,7 @@ class GraphLowering(torch.fx.Interpreter):
                 )
             elif n.op == "call_function" and n.target in layout_constraints:
                 debug("layout_constraints")
-                args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
+                args, kwargs = layout_constraints[n.target](n, *args, **kwargs)  # type: ignore[index]
                 result = self.call_function(n.target, args, kwargs)
             elif is_magic_method(n.target):
                 # TODO: this is sus, it probably should be handled in the
