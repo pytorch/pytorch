@@ -17,9 +17,10 @@ except ModuleNotFoundError:
 
 import torch
 
-from .utils import hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
+from .utils import getfile, hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
 
 from .variables import (
+    BuiltinVariable,
     FunctorchVmapHigherOrderVariable,
     SkipFilesVariable,
     TorchInGraphFunctionVariable,
@@ -151,6 +152,10 @@ manual_torch_name_rule_map = {
     "torch._functorch.vmap.unwrap_batched": UserFunctionVariable,
     "torch._functorch.vmap.vmap_impl": FunctorchVmapHigherOrderVariable,
     "torch._functorch.vmap.wrap_batched": UserFunctionVariable,
+    # "torch._constrain_as_size": UserFunctionVariable,
+    # "torch._constrain_as_value": UserFunctionVariable,
+    "torch._tensor._convert": UserFunctionVariable,
+    "torch.jit._unwrap_optional": UserFunctionVariable,
 }
 
 
@@ -2969,23 +2974,40 @@ def is_numpy(obj) -> bool:
     return isinstance(obj, (np.ndarray, np.generic)) or id(obj) in _numpy_function_ids
 
 
+def lookup_callable(obj):
+    if not hashable(obj):
+        return None
+    # Custom allow/disallow in graph takes precedence over the `torch_name_rule_map`.
+    if is_callable_disallowed(obj):
+        return SkipFilesVariable
+    if is_callable_allowed(obj):
+        return TorchInGraphFunctionVariable
+    if is_builtin_callable(obj):
+        return BuiltinVariable
+
+
 """
 Main entry point for looking up the trace rule (the Dynamo variable) for a given function object.
 E.g, the lookup result of `torch.sin` is `TorchInGraphFunctionVariable`.
 """
 
 
-def lookup(obj):
+def lookup(obj, filename=None, is_direct_call=True):
     # Unwrap if it's a functools.lru_cache wrapper
     obj = unwrap_if_wrapper(obj)
     if not hashable(obj):
         return None
-    # Custom allow/disallow in graph takes precedence over the `torch_name_rule_map`.
-    if callable(obj) and is_callable_disallowed(obj):
+    if obj is not None:
+        if is_aten_op_or_tensor_method(obj):
+            return TorchInGraphFunctionVariable
+        rule = get_torch_obj_rule_map().get(obj, None)
+        if rule is not None:
+            return rule
+
+    if filename is None:
+        filename = getfile(obj)
+
+    if torch._dynamo.skipfiles.check_file(filename, is_direct_call).skipped:
         return SkipFilesVariable
-    if callable(obj) and is_callable_allowed(obj):
-        return TorchInGraphFunctionVariable
-    if is_aten_op_or_tensor_method(obj):
-        return TorchInGraphFunctionVariable
-    rule = get_torch_obj_rule_map().get(obj, None)
-    return rule
+    else:
+        return UserFunctionVariable

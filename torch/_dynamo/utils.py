@@ -521,9 +521,13 @@ def is_numpy_float_type(value):
 
 def is_function_or_wrapper(value):
     return (
-        is_function(value)
-        or isinstance(value, functools._lru_cache_wrapper)
-        and is_function(inspect.getattr_static(value, "__wrapped__"))
+        (
+            is_function(value)
+            or isinstance(value, functools._lru_cache_wrapper)
+            and is_function(inspect.getattr_static(value, "__wrapped__"))
+        )
+        and not inspect.getattr_static(value, "_torchdynamo_inline", False)
+        and not inspect.getattr_static(value, "__script_if_tracing_wrapper", False)
     )
 
 
@@ -535,6 +539,7 @@ def is_function(value):
             types.BuiltinFunctionType,
             types.MethodDescriptorType,
             types.WrapperDescriptorType,
+            torch.jit.ScriptFunction,
         ),
     )
 
