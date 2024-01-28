@@ -3,13 +3,17 @@ CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::Te
 CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_single_segment_prefix_fwd_bwd && \
 CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_nested_segments_dep && \
 CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_nested_segments_non_dep && \
-CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_explicit_schedule_reordering && \
+CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_explicit_schedule_reordering_fwd_segments && \
+CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_explicit_schedule_reordering_fwd_and_bwd_segments && \
 CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_segment_compiled_with_different_backend && \
+CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_debug_mode_catch_issues
+
 CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_graph_break_within_segment
  >output.log 2>&1
 """
 
 import types
+import contextlib
 import copy
 import torch
 import torch.utils._pytree as pytree
@@ -72,6 +76,7 @@ class TestDepSegmentModule(torch.nn.Module):
   """
   def __init__(self):
     super().__init__()
+    self.param = torch.nn.Parameter(torch.randn(4, 4))
 
   def func1(self, x, y):
     return torch.matmul(x, y)
@@ -82,6 +87,7 @@ class TestDepSegmentModule(torch.nn.Module):
   def forward(self, x, y):
     z1 = self.func1(x, y)
     z2 = self.func2(x, z1)
+    z1 = torch.matmul(z1, self.param)
     z = z1 * z2
     return z
 
@@ -95,8 +101,11 @@ def check_segment_for_TestDepSegmentModule_fwd_bwd(lazy_scheduler, is_compile=Fa
         "compiled": ['mm.default', 'permute.default', 'permute.default'],
       }],
       "func2_fwd": [['add.Tensor']],
-      "forward_fwd": [['mul.Tensor']],
-      "forward_bwd": [['mul.Tensor', 'mul.Tensor']],
+      "forward_fwd": [{
+        "eager": ['mm.default', 'mul.Tensor', 't.default', 't.default'],
+        "compiled": ['mm.default', 'mul.Tensor', 'permute.default', 'permute.default'],
+      }],
+      "forward_bwd": [['mul.Tensor', 'mul.Tensor', 'mm.default', 'mm.default']],
       "func2_bwd": [[]],
       "func1_bwd": [['mm.default', 'mm.default']],
     },
@@ -113,6 +122,7 @@ class TestNonDepSegmentModule(torch.nn.Module):
   """
   def __init__(self):
     super().__init__()
+    self.param = torch.nn.Parameter(torch.randn(4, 4))
 
   def func1(self, x, y):
     return torch.matmul(x, y)
@@ -123,8 +133,27 @@ class TestNonDepSegmentModule(torch.nn.Module):
   def forward(self, x, y):
     z1 = self.func1(x, y)
     z2 = self.func2(x, y)
+    z1 = torch.matmul(z1, self.param)
     z = z1 * z2
     return z
+
+
+def check_segment_for_TestNonDepSegmentModule_fwd_only(lazy_scheduler, is_compile=False):
+  return check_segment(
+    lazy_scheduler,
+    {
+      "func1_fwd": [{
+        "eager": ['mm.default', 't.default', 't.default'],
+        "compiled": ['mm.default', 'permute.default', 'permute.default'],
+      }],
+      "func2_fwd": [['add.Tensor']],
+      "forward_fwd": [{
+        "eager": ['mm.default', 'mul.Tensor', 't.default', 't.default'],
+        "compiled": ['mm.default', 'mul.Tensor', 'permute.default', 'permute.default'],
+      }],
+    },
+    is_compile=is_compile,
+  )
 
 
 def check_segment_for_TestNonDepSegmentModule_fwd_bwd(lazy_scheduler, is_compile=False):
@@ -136,8 +165,11 @@ def check_segment_for_TestNonDepSegmentModule_fwd_bwd(lazy_scheduler, is_compile
         "compiled": ['mm.default', 'permute.default', 'permute.default'],
       }],
       "func2_fwd": [['add.Tensor']],
-      "forward_fwd": [['mul.Tensor']],
-      "forward_bwd": [['mul.Tensor', 'mul.Tensor']],
+      "forward_fwd": [{
+        "eager": ['mm.default', 'mul.Tensor', 't.default', 't.default'],
+        "compiled": ['mm.default', 'mul.Tensor', 'permute.default', 'permute.default'],
+      }],
+      "forward_bwd": [['mul.Tensor', 'mul.Tensor', 'mm.default', 'mm.default']],
       "func2_bwd": [[]],
       "func1_bwd": [['mm.default', 'mm.default']],
     },
@@ -146,14 +178,28 @@ def check_segment_for_TestNonDepSegmentModule_fwd_bwd(lazy_scheduler, is_compile
 
 
 class TestLazyScheduler(TestCase):
-  def _validate(self, eager_module, lazy_scheduler_gen, expected_exec_order, inps, fwd_only=False, skip_check=False, test_eager=True, test_compile=True, additional_check=None):
+  def _validate(
+    self,
+    eager_module,
+    lazy_scheduler_gen,
+    expected_execution_order,
+    inps,
+    *,
+    fwd_only=False,
+    skip_check=False,
+    test_eager=True,
+    test_compile=True,
+    test_non_debug_mode_expected_error_regex=None,
+    test_debug_mode_expected_msg_substrs=None,
+    additional_check=None,
+  ):
     def _clone_inps():
       cloned_inps = []
       for inp in inps:
         cloned_inps.append(inp.clone().detach().requires_grad_(inp.requires_grad))
       return cloned_inps
 
-    def _compare_output_and_grad(eager_module, lazy_scheduler_gen, is_compile=False, additional_check=None):
+    def _compare_output_and_grad(eager_module, lazy_scheduler_gen, debug_mode, is_compile=False, additional_check=None):
       inps_no_ls = _clone_inps()
       inps_ls = _clone_inps()
 
@@ -162,9 +208,9 @@ class TestLazyScheduler(TestCase):
       else:
         baseline_fn = eager_module
 
-      num_iterations = 1  # 2
+      num_iterations = 2
 
-      # Original function, 2 iterations
+      # Original function, run several iterations
       for i in range(num_iterations):
         print(f"------------------ eager iter: {i} ------------------")
         torch.manual_seed(0)
@@ -172,40 +218,32 @@ class TestLazyScheduler(TestCase):
         if not fwd_only:
           expected.sum().backward()
 
-      # LazyScheduler function, 2 iterations
-      lazy_scheduler = None
+      eager_module_clone = copy.deepcopy(eager_module)
+      # LazyScheduler function, run several iterations
       for i in range(num_iterations):
         print(f"------------------ LazyScheduler iter: {i} ------------------")
         torch.manual_seed(0)
-        # TODO: currently we re-create LazyScheduler for every iteration, so that the scheduler state is always fresh.
-        # If this is a lot of runtime overhead, we can explore reusing old LazyScheduler instance.
-        lazy_scheduler = lazy_scheduler_gen(eager_module, is_compile=is_compile)
+        lazy_scheduler = lazy_scheduler_gen(eager_module_clone, is_compile=is_compile, debug_mode=debug_mode)
         result = lazy_scheduler(*inps_ls)
         if not fwd_only:
           result.sum().backward()
-        print(f"here1 lazy_scheduler._recorded_exec_order: {lazy_scheduler._recorded_exec_order}")
+        print(f"here1 lazy_scheduler._recorded_execution_order: {lazy_scheduler._recorded_execution_order}")
         print(f"here1 id(lazy_scheduler): {id(lazy_scheduler)}")
-        print(f"here1 lazy_scheduler._registered_segment_prefixes: {lazy_scheduler._registered_segment_prefixes}")
-        print(f"here1 lazy_scheduler._segment_to_gms_map: {lazy_scheduler._segment_to_gms_map}")
-        print(f"here1 id(lazy_scheduler._segment_to_gms_map): {id(lazy_scheduler._segment_to_gms_map)}")
-        if hasattr(eager_module, "func1"):
-          print(f"here1 id(eager_module.func1): {id(eager_module.func1)}")
-        if hasattr(eager_module, "func2"):
-          print(f"here1 id(eager_module.func2): {id(eager_module.func2)}")
-        if hasattr(eager_module, "forward"):
-          print(f"here1 id(eager_module.forward): {id(eager_module.forward)}")
 
       if not skip_check:
-        self.assertEqual(
-          result,
-          expected,
-          msg="Output mismatch between torch.compile and eager versions",
-        )
+        self.assertEqual(result, expected, msg="Output mismatch between torch.compile and eager versions")
         if not fwd_only:
+          # TODO: we need to compare module.param gradients as well, to check whether reusing the same LazyScheduler is a good idea or not.
+          # mainly handle is already scheduled in first iteration and it's not refreshed.
+          print(f"eager_module.param.grad: {eager_module.param.grad}")
+          print(f"eager_module_clone.param.grad: {eager_module_clone.param.grad}")
+          self.assertEqual(
+            eager_module.param.grad, eager_module_clone.param.grad,
+            msg=f"Gradient mismatch between torch.compile and eager versions. eager_module.param.grad: {eager_module.param.grad}, eager_module_clone.param.grad: {eager_module_clone.param.grad}",
+          )
           for inp, cloned_inp in zip(inps_no_ls, inps_ls):
             self.assertEqual(
-              inp.grad,
-              cloned_inp.grad,
+              inp.grad, cloned_inp.grad,
               msg=f"Gradient mismatch between torch.compile and eager versions. inp.grad: {inp.grad}, cloned_inp.grad: {cloned_inp.grad}",
             )
 
@@ -215,28 +253,45 @@ class TestLazyScheduler(TestCase):
         for check in additional_check:
           check(lazy_scheduler, is_compile=is_compile)
 
-      recorded_exec_order = lazy_scheduler._recorded_exec_order
+      # NOTE: We don't care about the execution order of unnamed or unregistered segments.
+      recorded_execution_order = lazy_scheduler.get_recorded_execution_order()
       err_msg = f"""
 Expected execution order to be:
-{expected_exec_order},
+{expected_execution_order},
 
 but got:
-{recorded_exec_order}
+{recorded_execution_order}
 """
-      # NOTE: We don't care about the execution order of unnamed segments.
-      recorded_exec_order_without_unnamed_segments = [s for s in recorded_exec_order if not s.startswith("__unnamed_")]
-      self.assertEqual(len(recorded_exec_order_without_unnamed_segments), len(expected_exec_order), msg=err_msg)
-      self.assertEqual(recorded_exec_order_without_unnamed_segments, expected_exec_order, msg=err_msg)
+      self.assertEqual(len(recorded_execution_order), len(expected_execution_order), msg=err_msg)
+      self.assertEqual(recorded_execution_order, expected_execution_order, msg=err_msg)
 
-    if test_eager:
-      _compare_output_and_grad(copy.deepcopy(eager_module), lazy_scheduler_gen, is_compile=False, additional_check=additional_check)
-      torch._dynamo.reset()
-      print(f"Eager mode test done!")
+    def _test_eager_and_compile(debug_mode):
+      if test_eager:
+        _compare_output_and_grad(copy.deepcopy(eager_module), lazy_scheduler_gen, debug_mode, is_compile=False, additional_check=additional_check)
+        torch._dynamo.reset()
+        print(f"Eager mode test done!")
 
-    if test_compile:
-      _compare_output_and_grad(copy.deepcopy(eager_module), lazy_scheduler_gen, is_compile=True, additional_check=additional_check)
-      torch._dynamo.reset()
-      print(f"Compile mode test done!")
+      if test_compile:
+        _compare_output_and_grad(copy.deepcopy(eager_module), lazy_scheduler_gen, debug_mode, is_compile=True, additional_check=additional_check)
+        torch._dynamo.reset()
+        print(f"Compile mode test done!")
+
+    if test_debug_mode_expected_msg_substrs is not None:
+      try:
+        _test_eager_and_compile(debug_mode=True)
+      except RuntimeError as e:
+        self.assertTrue(
+          all(substr in str(e) for substr in test_debug_mode_expected_msg_substrs),
+          msg=f"Debug mode test failed. Expected substring: {test_debug_mode_expected_msg_substrs}. Actual error message: {str(e)}",
+        )
+      else:
+        raise AssertionError("Debug mode did not throw expected RuntimeError.")
+
+    ctx = contextlib.nullcontext()
+    if test_non_debug_mode_expected_error_regex is not None:
+      ctx = self.assertRaisesRegex(Exception, test_non_debug_mode_expected_error_regex)
+    with ctx:  # debug_mode=False
+      _test_eager_and_compile(debug_mode=False)
 
   def test_single_segment_prefix_fwd(self):
     # Check that output and gradients are correct when there is
@@ -247,7 +302,7 @@ but got:
     x = torch.randn(4, 4, requires_grad=True, device=device)
     y = torch.randn(4, 4, requires_grad=True, device=device)
 
-    def lazy_scheduler_gen(module, is_compile=False):
+    def lazy_scheduler_gen(module, is_compile=False, debug_mode=False):
       return LazyScheduler(
         module,
         segments=[
@@ -259,15 +314,15 @@ but got:
         compile_options=None if not is_compile else {
           "fullgraph": False,
           "backend": "inductor",
-        }
+        },
+        debug_mode=debug_mode,
       )
 
     self._validate(
       m,
       lazy_scheduler_gen,
-      expected_exec_order=[
+      expected_execution_order=[
         "func1_fwd",
-        "__unregistered_func1_bwd",
       ],
       inps=[x, y],
     )
@@ -281,7 +336,7 @@ but got:
     x = torch.randn(4, 4, requires_grad=True, device=device)
     y = torch.randn(4, 4, requires_grad=True, device=device)
 
-    def lazy_scheduler_gen(module, is_compile=False):
+    def lazy_scheduler_gen(module, is_compile=False, debug_mode=False):
       return LazyScheduler(
         module,
         segments=[
@@ -295,13 +350,14 @@ but got:
         compile_options=None if not is_compile else {
           "fullgraph": False,
           "backend": "inductor",
-        }
+        },
+        debug_mode=debug_mode,
       )
 
     self._validate(
       m,
       lazy_scheduler_gen,
-      expected_exec_order=[
+      expected_execution_order=[
         "func1_fwd",
         "func1_bwd",
       ],
@@ -317,7 +373,7 @@ but got:
     x = torch.randn(4, 4, requires_grad=True, device=device)
     y = torch.randn(4, 4, requires_grad=True, device=device)
 
-    expected_exec_order = [
+    expected_execution_order = [
       "func1_fwd",
       "func2_fwd",
       "forward_fwd",
@@ -326,7 +382,7 @@ but got:
       "func1_bwd",
     ]
 
-    def lazy_scheduler_gen(module, is_compile=False):
+    def lazy_scheduler_gen(module, is_compile=False, debug_mode=False):
       return LazyScheduler(
         module,
         segments=[
@@ -337,17 +393,18 @@ but got:
           Segment("func2_bwd", module.func2),
           Segment("forward_bwd", module.forward),
         ],
-        schedule=expected_exec_order,
+        schedule=expected_execution_order,
         compile_options=None if not is_compile else {
           "fullgraph": False,
           "backend": "inductor",
         },
+        debug_mode=debug_mode,
       )
 
     self._validate(
       m,
       lazy_scheduler_gen,
-      expected_exec_order=expected_exec_order,
+      expected_execution_order=expected_execution_order,
       inps=[x, y],
       additional_check=check_segment_for_TestDepSegmentModule_fwd_bwd,
     )
@@ -361,7 +418,7 @@ but got:
     x = torch.randn(4, 4, requires_grad=True, device=device)
     y = torch.randn(4, 4, requires_grad=True, device=device)
 
-    expected_exec_order = [
+    expected_execution_order = [
       "func1_fwd",
       "func2_fwd",
       "forward_fwd",
@@ -370,7 +427,7 @@ but got:
       "func1_bwd",
     ]
 
-    def lazy_scheduler_gen(module, is_compile=False):
+    def lazy_scheduler_gen(module, is_compile=False, debug_mode=False):
       return LazyScheduler(
         module,
         segments=[
@@ -381,38 +438,76 @@ but got:
           Segment("func2_bwd", module.func2),
           Segment("forward_bwd", module.forward),
         ],
-        schedule=expected_exec_order,
+        schedule=expected_execution_order,
         compile_options=None if not is_compile else {
           "fullgraph": False,
           "backend": "inductor",
         },
+        debug_mode=debug_mode,
       )
 
     self._validate(
       m,
       lazy_scheduler_gen,
-      expected_exec_order=expected_exec_order,
+      expected_execution_order=expected_execution_order,
       inps=[x, y],
       additional_check=check_segment_for_TestNonDepSegmentModule_fwd_bwd,
     )
 
-  def test_explicit_schedule_reordering(self):
+  def test_explicit_schedule_reordering_fwd_segments(self):
     device = "cuda"
     m = TestNonDepSegmentModule()
     m = m.to(device)
     x = torch.randn(4, 4, requires_grad=True, device=device)
     y = torch.randn(4, 4, requires_grad=True, device=device)
 
-    expected_exec_order = [
+    expected_execution_order = [
+      "func2_fwd",
+      "func1_fwd",
+      "forward_fwd",
+    ]
+
+    def lazy_scheduler_gen(module, is_compile=False, debug_mode=False):
+      return LazyScheduler(
+        module,
+        segments=[
+          Segment("func1_fwd", module.func1),
+          Segment("func2_fwd", module.func2),
+          Segment("forward_fwd", module.forward),
+        ],
+        schedule=expected_execution_order,
+        compile_options=None if not is_compile else {
+          "fullgraph": False,
+          "backend": "inductor",
+        },
+        debug_mode=debug_mode,
+      )
+
+    self._validate(
+      m,
+      lazy_scheduler_gen,
+      expected_execution_order=expected_execution_order,
+      inps=[x, y],
+      additional_check=check_segment_for_TestNonDepSegmentModule_fwd_only,
+    )
+
+  def test_explicit_schedule_reordering_fwd_and_bwd_segments(self):
+    device = "cuda"
+    m = TestNonDepSegmentModule()
+    m = m.to(device)
+    x = torch.randn(4, 4, requires_grad=True, device=device)
+    y = torch.randn(4, 4, requires_grad=True, device=device)
+
+    expected_execution_order = [
       "func2_fwd",
       "func1_fwd",
       "forward_fwd",
       "forward_bwd",
-      "func2_bwd",
       "func1_bwd",
+      "func2_bwd",
     ]
 
-    def lazy_scheduler_gen(module, is_compile=False):
+    def lazy_scheduler_gen(module, is_compile=False, debug_mode=False):
       return LazyScheduler(
         module,
         segments=[
@@ -423,23 +518,24 @@ but got:
           Segment("func2_bwd", module.func2),
           Segment("forward_bwd", module.forward),
         ],
-        schedule=expected_exec_order,
+        schedule=expected_execution_order,
         compile_options=None if not is_compile else {
           "fullgraph": False,
           "backend": "inductor",
         },
+        debug_mode=debug_mode,
       )
 
     self._validate(
       m,
       lazy_scheduler_gen,
-      expected_exec_order=expected_exec_order,
+      expected_execution_order=expected_execution_order,
       inps=[x, y],
       additional_check=check_segment_for_TestNonDepSegmentModule_fwd_bwd,
     )
 
   def test_segment_compiled_with_different_backend(self):
-    def _run_test(lazy_scheduler_gen, expected_exec_order, additional_check, fwd_only=False):
+    def _run_test(lazy_scheduler_gen, expected_execution_order, additional_check, fwd_only=False):
       device = "cuda"
       m = TestNonDepSegmentModule()
       m = m.to(device)
@@ -449,14 +545,14 @@ but got:
       self._validate(
         m,
         lazy_scheduler_gen,
-        expected_exec_order=expected_exec_order,
+        expected_execution_order=expected_execution_order,
         inps=[x, y],
         fwd_only=fwd_only,
         additional_check=additional_check,
       )
 
     def segment_use_dynamo_eager_fwd_only():
-      expected_exec_order = [
+      expected_execution_order = [
         "func2_fwd",
         "func1_fwd",
         "forward_fwd",
@@ -467,11 +563,11 @@ but got:
           {
             "func1_fwd": [['matmul']],
             "func2_fwd": [['add.Tensor']],
-            "forward_fwd": [['mul.Tensor']],
+            "forward_fwd": [['mm.default', 'mul.Tensor', 'permute.default', 'permute.default']]
           },
           is_compile=is_compile,
         )
-      def _lazy_scheduler_gen(module, is_compile=False):
+      def lazy_scheduler_gen(module, is_compile=False, debug_mode=False):
         return LazyScheduler(
           module,
           segments=[
@@ -479,16 +575,17 @@ but got:
             Segment("func2_fwd", module.func2, backend="aot_eager"),
             Segment("forward_fwd", module.forward, backend="inductor"),
           ],
-          schedule=expected_exec_order,
+          schedule=expected_execution_order,
           compile_options=None if not is_compile else {
             "fullgraph": False,
             "backend": "inductor",
           },
+          debug_mode=debug_mode,
         )
-      return _lazy_scheduler_gen, expected_exec_order, check_segment_fwd_only
+      return lazy_scheduler_gen, expected_execution_order, check_segment_fwd_only
 
     def segment_use_dynamo_aot_eager_fwd_bwd():
-      expected_exec_order = [
+      expected_execution_order = [
         "func2_fwd",
         "func1_fwd",
         "forward_fwd",
@@ -502,14 +599,14 @@ but got:
           {
             "func1_fwd": [['mm.default', 't.default', 't.default']],
             "func2_fwd": [['add.Tensor']],
-            "forward_fwd": [['mul.Tensor']],
-            "forward_bwd": [['mul.Tensor', 'mul.Tensor']],
+            "forward_fwd": [['mm.default', 'mul.Tensor', 'permute.default', 'permute.default']],
+            "forward_bwd": [['mul.Tensor', 'mul.Tensor', 'mm.default', 'mm.default']],
             "func2_bwd": [[]],
             "func1_bwd": [['mm.default', 'mm.default']],
           },
           is_compile=is_compile,
         )
-      def _lazy_scheduler_gen(module, is_compile=False):
+      def lazy_scheduler_gen(module, is_compile=False, debug_mode=False):
         return LazyScheduler(
           module,
           segments=[
@@ -520,142 +617,346 @@ but got:
             Segment("func2_bwd", module.func2, backend="aot_eager"),
             Segment("forward_bwd", module.forward, backend="inductor"),
           ],
-          schedule=expected_exec_order,
+          schedule=expected_execution_order,
           compile_options=None if not is_compile else {
             "fullgraph": False,
             "backend": "inductor",
           },
+          debug_mode=debug_mode,
         )
-      return _lazy_scheduler_gen, expected_exec_order, check_segment_fwd_bwd
+      return lazy_scheduler_gen, expected_execution_order, check_segment_fwd_bwd
 
     _run_test(*segment_use_dynamo_eager_fwd_only(), fwd_only=True)
     _run_test(*segment_use_dynamo_aot_eager_fwd_bwd(), fwd_only=False)
 
-
-  def test_graph_break_within_segment(self):
-    """
-    - Unit test: graph break within segment (i.e. multiple graphs per segment), either in the delayed segment or in the anchored segment
-      - In the delayed segment case, also add output usage within the graph break eager region, to trigger the immediate materialization of AsyncTensor output
-      - Make sure to assert that each GM contains the ops you expect.
-    """
-    # TODO: maybe unify with other `_run_test` functions
-    def _run_test(lazy_scheduler_gen=None, expected_exec_order=None, mod_class=None, additional_check=None):
-      device = "cuda"
-      m = mod_class()
-      m = m.to(device)
-      x = torch.randn(4, 4, requires_grad=True, device=device)
-      y = torch.randn(4, 4, requires_grad=True, device=device)
-
-      self._validate(
-        m,
-        lazy_scheduler_gen,
-        expected_exec_order=expected_exec_order,
-        inps=[x, y],
-        additional_check=additional_check,
-      )
-
-    expected_exec_order = [
+  def test_debug_mode_catch_issues(self):
+    device = "cuda"
+    expected_execution_order = [
       "func2_fwd",
       "func1_fwd",
       "forward_fwd",
-      "forward_bwd",
-      "func2_bwd",
-      "func1_bwd",
     ]
-    def check_segment_fwd_bwd(lazy_scheduler, is_compile=False):
-      return check_segment(
-        lazy_scheduler,
-        {
-          "func1_fwd": [['mm.default', 't.default', 't.default']],
-          "func2_fwd": [['add.Tensor']],
-          "forward_fwd": [['mul.Tensor']],
-          "forward_bwd": [['mul.Tensor', 'mul.Tensor']],
-          "func2_bwd": [[]],
-          "func1_bwd": [['mm.default', 'mm.default']],
-        },
-        is_compile=is_compile,
-      )
-    def _lazy_scheduler_gen(module, is_compile=False):
+
+    def lazy_scheduler_gen(module, is_compile=False, debug_mode=False):
       return LazyScheduler(
         module,
         segments=[
           Segment("func1_fwd", module.func1, backend="aot_eager"),
           Segment("func2_fwd", module.func2, backend="aot_eager"),
           Segment("forward_fwd", module.forward, backend="inductor"),
-          Segment("func1_bwd", module.func1, backend="aot_eager"),
-          Segment("func2_bwd", module.func2, backend="aot_eager"),
-          Segment("forward_bwd", module.forward, backend="inductor"),
         ],
-        schedule=expected_exec_order,
+        schedule=expected_execution_order,
         compile_options=None if not is_compile else {
           "fullgraph": False,
           "backend": "inductor",
         },
+        debug_mode=debug_mode,
       )
 
-    def segment_has_graph_break_not_using_async_tensor_output():
-      class TestModule(torch.nn.Module):
-        def __init__(self):
-          super().__init__()
+    def _run_test(
+      mod_class, lazy_scheduler_gen, expected_execution_order, additional_check=None, extra_input_no_require_grad=False,
+      test_non_debug_mode_expected_error_regex="Tensor-likes are not close",
+      test_debug_mode_expected_msg_substrs=None,
+    ):
+      m = mod_class()
+      m = m.to(device)
+      x = torch.randn(4, 4, requires_grad=True, device=device)
+      y = torch.randn(4, 4, requires_grad=True, device=device)
+      if extra_input_no_require_grad:
+        k = torch.randn(4, 4, requires_grad=False, device=device)
 
-        def func1(self, x, y):
-          y2 = torch.matmul(x, y)
-          print("y2")  # guaranteed graph-break
-          return torch.matmul(x, y2)
+      self._validate(
+        m,
+        lazy_scheduler_gen,
+        expected_execution_order=expected_execution_order,
+        inps=[x, y, k] if extra_input_no_require_grad else [x, y],
+        additional_check=additional_check,
+        test_non_debug_mode_expected_error_regex=test_non_debug_mode_expected_error_regex,
+        test_debug_mode_expected_msg_substrs=test_debug_mode_expected_msg_substrs,
+      )
 
-        def func2(self, x, y):
-          y3 = torch.add(x, y)
-          print("y3")  # guaranteed graph-break
-          return torch.add(x, y3)
+    class test_read_shared_buf_mutated_by_segmentB_in_delayed_segment_Module(torch.nn.Module):
+      def __init__(self):
+        super().__init__()
+        self.param = torch.nn.Parameter(torch.randn(4, 4))
+        self.register_buffer('shared_buf', torch.zeros(4, 4))
 
-        def forward(self, x, y):
-          z1 = self.func1(x, y)
-          z2 = self.func2(x, y)
-          z = z1 * z2
-          return z
+      def func1(self, x, y):
+        y2 = torch.matmul(x, y)
+        y2 = y2 + self.shared_buf
+        return torch.matmul(x, y2)
 
-      return {
-        "mod_class": TestModule,
-        "additional_check": None,
-      }
+      def func2(self, x, y):
+        y3 = torch.add(x, y)
+        self.shared_buf.add_(1.5)
+        return torch.add(x, y3)
 
-    def segment_has_graph_break_using_async_tensor_output():
-      global_dict = {}
-      class TestModule(torch.nn.Module):
-        def __init__(self):
-          super().__init__()
+      def forward(self, x, y):
+        z1 = self.func1(x, y)
+        z2 = self.func2(x, y)
+        z1 = torch.matmul(z1, self.param)
+        z = z1 * z2
+        return z
 
-        def func1(self, x, y):
-          global global_dict
-          y2 = torch.matmul(x, y)
-          global_dict["y2_sum"] = y2.sum()
-          print(global_dict["y2_sum"])  # guaranteed graph-break
-          return torch.matmul(x, y2)
+    class test_read_shared_buf_mutated_by_delayed_segment_in_segmentB_Module(torch.nn.Module):
+      def __init__(self):
+        super().__init__()
+        self.param = torch.nn.Parameter(torch.randn(4, 4))
+        self.register_buffer('shared_buf', torch.zeros(4, 4))
 
-        def func2(self, x, y):
-          global global_dict
-          y3 = torch.add(x, y)
-          global_dict["y3_sum"] = y3.sum()
-          print(global_dict["y3_sum"])  # guaranteed graph-break
-          return torch.add(x, y3)
+      def func1(self, x, y):
+        y2 = torch.matmul(x, y)
+        self.shared_buf.add_(1.5)
+        return torch.matmul(x, y2)
 
-        def forward(self, x, y):
-          z1 = self.func1(x, y)
-          z2 = self.func2(x, y)
-          z = z1 * z2
-          return z
+      def func2(self, x, y):
+        y3 = torch.add(x, y)
+        y3 = y3 + self.shared_buf
+        return torch.add(x, y3)
 
-      def check_async_tensor_is_early_scheduled(lazy_scheduler, is_compile=False):
-        # TODO how to check that AsyncTensor is early scheduled? maybe check the recorded execution order?
-        pass
+      def forward(self, x, y):
+        z1 = self.func1(x, y)
+        z2 = self.func2(x, y)
+        z1 = torch.matmul(z1, self.param)
+        z = z1 * z2
+        return z
 
-      return {
-        "mod_class": TestModule,
-        "additional_check": check_async_tensor_is_early_scheduled,
-      }
+    glb_tensor = torch.zeros(4, 4, device=device)
+    class test_read_global_tensor_mutated_by_segmentB_in_delayed_segment_Module(torch.nn.Module):
+      def __init__(self):
+        global glb_tensor
+        super().__init__()
+        self.param = torch.nn.Parameter(torch.randn(4, 4))
+        glb_tensor = torch.zeros(4, 4, device=device)
 
-    _run_test(_lazy_scheduler_gen, expected_exec_order, **segment_has_graph_break_not_using_async_tensor_output())
-    _run_test(_lazy_scheduler_gen, expected_exec_order, **segment_has_graph_break_using_async_tensor_output())
+      def func1(self, x, y):
+        y2 = torch.matmul(x, y)
+        y2 = y2 + glb_tensor
+        return torch.matmul(x, y2)
+
+      def func2(self, x, y):
+        global glb_tensor
+        y3 = torch.add(x, y)
+        glb_tensor.add_(1.5)
+        return torch.add(x, y3)
+
+      def forward(self, x, y):
+        z1 = self.func1(x, y)
+        z2 = self.func2(x, y)
+        z1 = torch.matmul(z1, self.param)
+        z = z1 * z2
+        return z
+
+    glb_tensor = torch.zeros(4, 4, device=device)
+    class test_read_global_tensor_mutated_by_delayed_segment_in_segmentB_Module(torch.nn.Module):
+      def __init__(self):
+        global glb_tensor
+        super().__init__()
+        self.param = torch.nn.Parameter(torch.randn(4, 4))
+        glb_tensor = torch.zeros(4, 4, device=device)
+
+      def func1(self, x, y):
+        global glb_tensor
+        y2 = torch.matmul(x, y)
+        glb_tensor.add_(1.5)
+        return torch.matmul(x, y2)
+
+      def func2(self, x, y):
+        y3 = torch.add(x, y)
+        y3 = y3 + glb_tensor
+        return torch.add(x, y3)
+
+      def forward(self, x, y):
+        z1 = self.func1(x, y)
+        z2 = self.func2(x, y)
+        z1 = torch.matmul(z1, self.param)
+        z = z1 * z2
+        return z
+
+    class test_read_input_tensor_mutated_by_segmentB_in_delayed_segment_Module(torch.nn.Module):
+      def __init__(self):
+        super().__init__()
+        self.param = torch.nn.Parameter(torch.randn(4, 4))
+
+      def func1(self, x, y, k):
+        y2 = torch.matmul(x, y)
+        y2 = y2 + k
+        return torch.matmul(x, y2)
+
+      def func2(self, x, y, k):
+        y3 = torch.add(x, y)
+        k.add_(1.5)
+        return torch.add(x, y3)
+
+      def forward(self, x, y, k):
+        z1 = self.func1(x, y, k)
+        z2 = self.func2(x, y, k)
+        z1 = torch.matmul(z1, self.param)
+        z = z1 * z2
+        return z
+
+    class test_read_input_tensor_mutated_by_delayed_segment_in_segmentB_Module(torch.nn.Module):
+      def __init__(self):
+        super().__init__()
+        self.param = torch.nn.Parameter(torch.randn(4, 4))
+
+      def func1(self, x, y, k):
+        y2 = torch.matmul(x, y)
+        k.add_(1.5)
+        return torch.matmul(x, y2)
+
+      def func2(self, x, y, k):
+        y3 = torch.add(x, y)
+        y3 = y3 + k
+        return torch.add(x, y3)
+
+      def forward(self, x, y, k):
+        z1 = self.func1(x, y, k)
+        z2 = self.func2(x, y, k)
+        z1 = torch.matmul(z1, self.param)
+        z = z1 * z2
+        return z
+
+    _run_test(test_read_shared_buf_mutated_by_segmentB_in_delayed_segment_Module, lazy_scheduler_gen, expected_execution_order,
+      test_debug_mode_expected_msg_substrs=["Delayed segments: ['func1_fwd']", "Segments that contain in-place mutation ops: ['func2']"])
+    _run_test(test_read_shared_buf_mutated_by_delayed_segment_in_segmentB_Module, lazy_scheduler_gen, expected_execution_order,
+      test_debug_mode_expected_msg_substrs=["Delayed segments: ['func1_fwd']", "Segments that contain in-place mutation ops: ['func1']"])
+    _run_test(test_read_global_tensor_mutated_by_segmentB_in_delayed_segment_Module, lazy_scheduler_gen, expected_execution_order,
+      test_debug_mode_expected_msg_substrs=["Delayed segments: ['func1_fwd']", "Segments that contain in-place mutation ops: ['func2']"])
+    _run_test(test_read_global_tensor_mutated_by_delayed_segment_in_segmentB_Module, lazy_scheduler_gen, expected_execution_order, test_non_debug_mode_expected_error_regex="['func1_fwd', 'func2_fwd', 'forward_fwd']",
+      test_debug_mode_expected_msg_substrs=["end of `func1_fwd` (exclusive) to end of `func2_fwd` (inclusive) depends on output of `func1_fwd`", "Delayed segments: ['func1_fwd']", "Segments that contain in-place mutation ops: ['func1']"])
+    _run_test(test_read_input_tensor_mutated_by_segmentB_in_delayed_segment_Module, lazy_scheduler_gen, expected_execution_order, extra_input_no_require_grad=True,
+      test_debug_mode_expected_msg_substrs=["Delayed segments: ['func1_fwd']", "Segments that contain in-place mutation ops: ['func2']"])
+    _run_test(test_read_input_tensor_mutated_by_delayed_segment_in_segmentB_Module, lazy_scheduler_gen, expected_execution_order, extra_input_no_require_grad=True, test_non_debug_mode_expected_error_regex="['func1_fwd', 'func2_fwd', 'forward_fwd']",
+      test_debug_mode_expected_msg_substrs=["end of `func1_fwd` (exclusive) to end of `func2_fwd` (inclusive) depends on output of `func1_fwd`", "Delayed segments: ['func1_fwd']", "Segments that contain in-place mutation ops: ['func1']"])
+    # TODO add a case to trigger "end of `func2_fwd` (exclusive) to end of `func3_fwd` (inclusive) depends on output of `func1_fwd`" for schedule [2, 1, 3]
+
+  # def DISABLED_test_graph_break_within_segment(self):
+  #   # TODO: maybe unify with other `_run_test` functions
+  #   def _run_test(lazy_scheduler_gen=None, expected_execution_order=None, mod_class=None, additional_check=None):
+  #     device = "cuda"
+  #     m = mod_class()
+  #     m = m.to(device)
+  #     x = torch.randn(4, 4, requires_grad=True, device=device)
+  #     y = torch.randn(4, 4, requires_grad=True, device=device)
+
+  #     self._validate(
+  #       m,
+  #       lazy_scheduler_gen,
+  #       expected_execution_order=expected_execution_order,
+  #       inps=[x, y],
+  #       additional_check=additional_check,
+  #     )
+
+  #   expected_execution_order = [
+  #     "func2_fwd",
+  #     "func1_fwd",
+  #     "forward_fwd",
+  #     "forward_bwd",
+  #     "func2_bwd",
+  #     "func1_bwd",
+  #   ]
+  #   def check_segment_fwd_bwd(lazy_scheduler, is_compile=False):
+  #     return check_segment(
+  #       lazy_scheduler,
+  #       {
+  #         "func1_fwd": [['mm.default', 't.default', 't.default']],
+  #         "func2_fwd": [['add.Tensor']],
+  #         "forward_fwd": "forward_fwd": [{
+  #           'eager': ['mm.default', 'mul.Tensor', 't.default', 't.default'],
+  #           'compiled': ['mm.default', 'mul.Tensor', 'permute.default', 'permute.default'],
+  #         }],
+  #         "forward_bwd": [['mul.Tensor', 'mul.Tensor', 'mm.default', 'mm.default']],
+  #         "func2_bwd": [[]],
+  #         "func1_bwd": [['mm.default', 'mm.default']],
+  #       },
+  #       is_compile=is_compile,
+  #     )
+  #   def lazy_scheduler_gen(module, is_compile=False, debug_mode=False):
+  #     return LazyScheduler(
+  #       module,
+  #       segments=[
+  #         Segment("func1_fwd", module.func1, backend="aot_eager"),
+  #         Segment("func2_fwd", module.func2, backend="aot_eager"),
+  #         Segment("forward_fwd", module.forward, backend="inductor"),
+  #         Segment("func1_bwd", module.func1, backend="aot_eager"),
+  #         Segment("func2_bwd", module.func2, backend="aot_eager"),
+  #         Segment("forward_bwd", module.forward, backend="inductor"),
+  #       ],
+  #       schedule=expected_execution_order,
+  #       compile_options=None if not is_compile else {
+  #         "fullgraph": False,
+  #         "backend": "inductor",
+  #       },
+  #       debug_mode=debug_mode,
+  #     )
+
+  #   def segment_has_graph_break_not_using_async_tensor_output():
+  #     class TestModule(torch.nn.Module):
+  #       def __init__(self):
+  #         super().__init__()
+
+  #       def func1(self, x, y):
+  #         y2 = torch.matmul(x, y)
+  #         print("y2")  # guaranteed graph-break
+  #         return torch.matmul(x, y2)
+
+  #       def func2(self, x, y):
+  #         y3 = torch.add(x, y)
+  #         print("y3")  # guaranteed graph-break
+  #         return torch.add(x, y3)
+
+  #       def forward(self, x, y):
+  #         z1 = self.func1(x, y)
+  #         z2 = self.func2(x, y)
+  #         z = z1 * z2
+  #         return z
+
+  #     return {
+  #       "mod_class": TestModule,
+  #       "additional_check": None,
+  #     }
+
+  #   def segment_has_graph_break_using_async_tensor_output():
+  #     global_dict = {}
+  #     class TestModule(torch.nn.Module):
+  #       def __init__(self):
+  #         super().__init__()
+
+  #       def func1(self, x, y):
+  #         global global_dict
+  #         y2 = torch.matmul(x, y)
+  #         global_dict["y2_sum"] = y2.sum()
+  #         print(global_dict["y2_sum"])  # guaranteed graph-break
+  #         return torch.matmul(x, y2)
+
+  #       def func2(self, x, y):
+  #         global global_dict
+  #         y3 = torch.add(x, y)
+  #         global_dict["y3_sum"] = y3.sum()
+  #         print(global_dict["y3_sum"])  # guaranteed graph-break
+  #         return torch.add(x, y3)
+
+  #       def forward(self, x, y):
+  #         z1 = self.func1(x, y)
+  #         z2 = self.func2(x, y)
+  #         z = z1 * z2
+  #         return z
+
+  #     def check_async_tensor_is_early_scheduled(lazy_scheduler, is_compile=False):
+  #       # TODO how to check that AsyncTensor is early scheduled? maybe check the recorded execution order?
+  #       pass
+
+  #     return {
+  #       "mod_class": TestModule,
+  #       "additional_check": check_async_tensor_is_early_scheduled,
+  #     }
+
+  #   # TODO: if only 1 iteration, the execution order won't be as expected due to need for early materialization during compile
+  #   # if 2 iterations, fails with: `'function' object has no attribute '__self__'`
+  #   # After above is fixed, recorded execution order still has no reordering, because we always recompile per iteration and thus always trigger the early materialization.
+  #   _run_test(lazy_scheduler_gen, expected_execution_order, **segment_has_graph_break_not_using_async_tensor_output())
+  #   _run_test(lazy_scheduler_gen, expected_execution_order, **segment_has_graph_break_using_async_tensor_output())
 
 
   def DISABLED_example_usage(self):
@@ -725,22 +1026,20 @@ but got:
 """
 TODO:
 Design doc: https://docs.google.com/document/d/1vv0H5IMGwUMyzmJKnksJOnRSult1B4YlbBSs_MeAvXM/edit?usp=sharing
-- Unit test: graph break within segment (i.e. multiple graphs per segment), either in the delayed segment or in the anchored segment
-  - In the delayed segment case, also add output usage within the graph break eager region, to trigger the immediate materialization of AsyncTensor output
-  - Make sure to assert that each GM contains the ops you expect.
-- Make debug_mode work
-- Unit test: delayed segment modify global dictionary or module attribute
-- Unit test: in-place op in named segment
-- Remove fake_tensor and fake_mode usage within AsyncTensor
-- For named segments, show its segment ID (prefix + fwd/bwd + nth_call) in profiler annotation in GPU trace
+- Study the GPU trace, make sure everything looks good, make sure we are not spending a lot of time recompiling every iteration.
+- Remove materialized_tensor_container and use materialize_tensor directly
 - Try on Ads model: https://docs.google.com/document/d/1tFLUh4Xe4_eGKOtgpj08kfNDhy7Fqp-dSq0d7lejdZU/edit#bookmark=id.wds06wiqwjh2 figure out integration point with trainer loop
 
+- For named segments, show its segment ID (prefix + fwd/bwd + nth_call) in profiler annotation in GPU trace
 - Integration with DDPOptimizer
 - Integration with FSDP (graph break version, not tracing)
 - Support user calling a method multiple times and only tag a specific call as segment (i.e. make `nth_call=X` work)
 - Integration with (selective) activation checkpointing
 - What if a segment is in the schedule but is never run due to dynamic control flow change? we should either throw error or gracefully fall back to no-scheduler mode
 - (Later) Integration with compiled autograd
+- Support graph break within segment (i.e. multiple graphs per segment), either in the delayed segment or in the anchored segment
+  - In the delayed segment case, also add output usage within the graph break eager region, to trigger the immediate materialization of AsyncTensor output
+  - Make sure to assert that each GM contains the ops you expect.
 - Logging for better user debugging (what is scheduled and when, and the compilation output). Look at the generated graph and the original code.
 - Also log memory usage, how much memory I am keeping above.
 

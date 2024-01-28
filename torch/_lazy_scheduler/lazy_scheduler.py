@@ -1,3 +1,4 @@
+import copy
 import types
 import traceback
 import torch
@@ -92,47 +93,75 @@ class AsyncFuncHandle:
   We use this class to represent the function that needs to be scheduled.
   It also has methods for checking whether the function has been scheduled or completed.
   """
-  def __init__(self, fn, segment, args, outs_async, scheduler):
-    self.cuda_event = torch.cuda.Event()
+  def __init__(self, fn, segment_name, args, outs_fake, scheduler):
+    self.cuda_event = None
     self.fn: Callable = fn
     self.args = args
-    self.outs_async = outs_async
+    self.outs_fake = outs_fake
+    self.scheduler = weakref.ref(scheduler)
+    self.outs_async = tuple(
+      AsyncTensor(
+        # TODO: the handling for out_fake is None case seems dicey here.
+        fake_tensor=out_fake if out_fake is not None else fake_mode.from_tensor(torch.zeros([])),
+        handle=None,
+        materialized_tensor_container=TensorContainer()
+      ) for out_fake in self.outs_fake
+    )
     self.outs = None
-    self.segment = segment
-    self.is_going_to_be_scheduled = False
-    self._scheduler = weakref.ref(scheduler)
+    self.segment_name = segment_name
+    self.args_materialized = None
+
     assert not any(arg is None for arg in args)
+    for out_async in self.outs_async:
+      out_async.set_handle(self)
+
+  # def enable_debug_mode(self):
+  #   self._debug_mode_handle = AsyncFuncHandle(
+  #     self.fn, self.segment_name, args=self.args,
+  #     outs_fake=self.outs_fake,
+  #     scheduler=self.scheduler(),
+  #   )
+  #   self._debug_mode_handle.schedule(record_execution=False)
+  #   self._debug_mode_handle.wait_for_completion()
 
   def schedule(self):
     # make sure to schedule only once
-    if self.is_going_to_be_scheduled:
-      print(f"handle is already scheduled! segment: {self.segment}")
+    scheduler = self.scheduler()
+    if self.cuda_event is not None:
+      print(f"handle is already scheduled! segment name: {self.segment_name}")
+      # if scheduler._debug_mode:
+      #   scheduler.record_early_materialized(self.segment_name)
       return
-    self.is_going_to_be_scheduled = True
+    else:
+      print(f"scheduling handle! segment name: {self.segment_name}")
+    self.cuda_event = torch.cuda.Event()
     assert not any(arg is None for arg in self.args)
     AsyncTensor.wait_until_materialized(self.args)
     assert not any(arg is None for arg in self.args)
-    for arg in self.args:
-      print(f"here8 in schedule: type(arg): {type(arg)}")
     # Since we are doing real computations here, we should disable fake mode if any.
     # with torch.fx.experimental.proxy_tensor.maybe_disable_fake_tensor_mode():
     args_materialized = pytree.tree_map_only(AsyncTensor, lambda x: x.get_materialized_tensor(), self.args)
-    fake_mode = torch._guards.detect_fake_mode()
-    if fake_mode is not None:
-      args_materialized = pytree.tree_map(lambda x: fake_mode.from_tensor(x), args_materialized)
-    else:
-      args_materialized = pytree.tree_map(lambda x: x.detach(), args_materialized)
-    self._scheduler().add_to_recorded_exec_order(self.segment)
-    # print(f"args_materialized: {args_materialized}")
+    # TODO this is a horrible mess. Can we early materialize AsyncTensor to concrete tensor, and only propagate concrete tensor through the Dynamo system?
+    # fake_mode = torch._guards.detect_fake_mode()
+    # if fake_mode is not None:
+    #   args_materialized = pytree.tree_map(lambda x: fake_mode.from_tensor(x), args_materialized)
+    # else:
+    #   args_materialized = pytree.tree_map(lambda x: x.detach(), args_materialized)
+    args_materialized = pytree.tree_map(lambda x: x.detach(), args_materialized)
+    self.args_materialized = args_materialized
+    scheduler.record_execution(self.segment_name)
+    print(f"here333: type of args_materialized: {[type(arg) for arg in args_materialized]}")
     if isinstance(self.fn, CompiledFxGraph):
-      outs = self.fn(list(args_materialized))
+      outs = self.fn(list(self.args_materialized))
     else:
       # TODO: when do we hit this case?
-      outs = self.fn(args_materialized)
+      outs = self.fn(self.args_materialized)
     self.outs = [out.get_materialized_tensor() if isinstance(out, AsyncTensor) else out for out in outs]
     self.cuda_event.record()
 
   def wait_for_completion(self):
+    if self.cuda_event is None:
+      raise RuntimeError("Cannot wait for completion for a handle that's not scheduled yet!")
     self.cuda_event.synchronize()
     for out, out_async in zip(self.outs, self.outs_async):
       # Set the output AsyncTensor's underlying materialized tensor
@@ -141,14 +170,38 @@ class AsyncFuncHandle:
       #   AsyncTensor.wait_until_materialized([out])
       #   out_async.materialize_with_value(out.get_materialized_tensor())
       # else:
-      assert isinstance(out, torch.Tensor) and not isinstance(out, AsyncTensor), f"out: {out}, type(out): {type(out)}"
-      out_async.materialize_with_value(out)
+      assert (isinstance(out, torch.Tensor) and not isinstance(out, AsyncTensor)) or out is None, f"out: {out}, type(out): {type(out)}"
+      out_async.materialize_with_value(out if out is not None else torch.zeros([]))
+    # assert self._debug_mode
+    # if self._debug_mode:
+    #   print("here!77")
+    #   assert all(torch.allclose(arg, arg_orig) for arg, arg_orig in zip(self.args_materialized, self.args_materialized_orig))
+# Future debug mode enhancement ideas (for detecting in-place ops):
+# - Compare input tensor values
+# - Compare input tensor version counter
+
+#     if self._debug_mode_handle is not None:
+#       assert self._debug_mode_handle.is_completed()
+#       assert len(self._debug_mode_handle.outs_async) == len(self.outs_async)
+#       for out_async_debug_mode, out_async in zip(self._debug_mode_handle.outs_async, self.outs_async):
+#         assert torch.allclose(out_async_debug_mode.get_materialized_tensor(), out_async.get_materialized_tensor()), f"""
+# LazyScheduler debug mode identified delayed segment `{self.segment_name}` has mismatching outputs between eager execution and delayed execution.
+
+# It can be due to:
+# 1. A shared tensor (via module attribute, global variable, or input tensor) is mutated by another segment and read by the delayed segment.
+# 2. A shared tensor (via module attribute, global variable, or input tensor) is mutated by the delayed segment and read by another segment.
+
+# Please audit the code of the delayed segment `{self.segment_name}` and all other segments that have data dependency with this segment.
+# Pay special attention to data dependency via shared tensor (module attribute, global variable, or input tensor).
+# """
+#         print("debug mode check passed")
 
   def is_completed(self):
-    return self.cuda_event.query()
+    cuda_event = self.cuda_event
+    return cuda_event.query() if cuda_event is not None else False
 
   def scheduler(self):
-    scheduler = self._scheduler()
+    scheduler = self.scheduler()
     assert scheduler is not None
     return scheduler
 
@@ -194,15 +247,15 @@ class LazySchedulerGraphModule(torch.nn.Module):
   Instead, it calls the scheduler's maybe_run method, which decides
   whether to run the graph module based on the schedule.
   """
-  def __init__(self, segment, gm, compiled_fn):
+  def __init__(self, segment_name, gm, compiled_fn):
     super().__init__()
-    self.segment = segment
+    self.segment_name = segment_name
     self.gm = gm
     self.compiled_fn = compiled_fn
 
   def __call__(self, *args):
     assert self.compiled_fn is not None
-    return LazyScheduler._current_scheduler.maybe_run(self.gm, self.compiled_fn, self.segment, *args)
+    return LazyScheduler._current_scheduler.maybe_run(self.gm, self.compiled_fn, self.segment_name, *args)
 
 
 # def _compiled_nn_method(mod, *args, **kwargs):
@@ -293,6 +346,11 @@ def _compile_fx_inner_boxed_nop(gm, example_inputs, **kwargs):
     return run
 
 
+def extract_method_name(formatted_name):
+  return formatted_name.split("###")[-1]
+
+
+
 class LazyScheduler:
   """
   LazyScheduler is used to decide when to schedule the execution of a graph module (based on the schedule).
@@ -304,21 +362,25 @@ class LazyScheduler:
   # and make sure we don't reuse old LazyScheduler instance.
   _current_scheduler = None
 
-  def __init__(self, module, *, segments=[], schedule=[], compile_options=None):
+  def __init__(self, module, *, segments=[], schedule=[], compile_options=None, debug_mode=False):
     self._module = module
     self._segments = segments
-    self._user_specified_segment_names = set([s.name for s in segments])
-    # If `schedule` is empty list, it means we don't enforce the execution order.
     self._schedule = schedule
     self._compile_options = compile_options
+    self._debug_mode = debug_mode
     # defaults to aot_eager for eager mode LazyScheduler segment backend
+    self._user_specified_segment_names = set([s.name for s in segments])
     self._default_backend = compile_options["backend"] if compile_options is not None else "aot_eager"
     self._segment_prefix_to_backend = {}
     self._registered_segment_prefixes = set()
     self._method_to_segment_prefix_map = {}
     self._gm_to_handle_map = OrderedDict()
     self._segment_to_gms_map = OrderedDict()
-    self._recorded_exec_order = []
+    self._recorded_execution_order = []
+    # self._recorded_early_materialized = set()
+    self._recorded_delayed = set()
+    self._has_inplace_op_segment_prefixes = set()
+    self._access_mod_attr_or_glb_var_segment_prefixes = set()
     self._compile_starting_point_nn_method = None
     LazyScheduler._current_scheduler = self
     # TODO: reset `next_unnamed_segment_id` to 0 after every iteration
@@ -380,29 +442,28 @@ Please do not register the same function with different segment prefixes.
     #   (3) Lower runtime overhead than tensor subclass approach
     # Approach 2. Annotate segment for a method using tensor subclass context manager (see test_subclass.py example).
 
-    method_name = segment.nn_method.__name__
+    method_name = extract_method_name(segment.nn_method.__name__)
     stashed_eager_method_name = f"{method_name}_eager"
+    compiled_method_name = f"{method_name}_compiled"
 
-    def _compiled_nn_method_wrapper(mod, *args, **kwargs):
+    def _private_patched_nn_method(mod, *args, **kwargs):
       # print(f"unknown_arg: {unknown_arg}, mod: {mod}, args: {args}, kwargs: {kwargs}")
       # return _compiled_nn_method(mod, segment=segment, segment_nn_method=segment.nn_method, compile_fx_fn=self._compile_fx_for_graph_in_segment, *args, **kwargs)
-      nn_method = getattr(mod, method_name)
+      eager_nn_method = getattr(mod, stashed_eager_method_name)
+      # TODO: can we unify `_compile_starting_point_nn_method` with `nn_method_stack`?
       if self._compile_starting_point_nn_method is None:
         # If we are calling this method directly in eager mode (and not from an outer method being compiled),
         # then we compile this method.
-        print(f"_compiled_nn_method_wrapper start compile from this method")
-        self._compile_starting_point_nn_method = nn_method
-        out = torch.compile(
-          segment.nn_method,
-          fullgraph=False,
-          backend=self._compile_fx_for_graph_in_segment,
-        )(*args, **kwargs)
+        print(f"_private_patched_nn_method start compile from this method")
+        self._compile_starting_point_nn_method = eager_nn_method
+        compiled_nn_method = getattr(nn_module, compiled_method_name)
+        out = compiled_nn_method(*args, **kwargs)
         self._compile_starting_point_nn_method = None
         return out
       else:
         # Otherwise, if we are calling this method from an outer method being compiled,
         # then we take the eager mode path for this method so that outer method compile can continue successfully.
-        return getattr(mod, stashed_eager_method_name)(*args, **kwargs)
+        return eager_nn_method(*args, **kwargs)
 
     # NOTE: How to do nested segments
     # Fact: If we put a compiled region within a compiled region, outer compile doesn't respect the inner compile result (it overwrite it, see https://gist.github.com/yf225/16d97499e2ecebf7e8867e9fae05e891).
@@ -424,8 +485,14 @@ Please do not register the same function with different segment prefixes.
       eager_method = getattr(nn_module, method_name)
       if not hasattr(nn_module, stashed_eager_method_name):
         setattr(nn_module, stashed_eager_method_name, eager_method)
-      _compiled_nn_method_wrapper.__name__ = f"_compiled_wrapper###{nn_module.__class__.__name__}###{method_name}"
-      setattr(nn_module, method_name, types.MethodType(_compiled_nn_method_wrapper, nn_module))
+      setattr(nn_module, compiled_method_name, torch.compile(
+        # TODO: change this to `getattr(mod, stashed_eager_method_name)`?
+        segment.nn_method,
+        fullgraph=False,
+        backend=self._compile_fx_for_graph_in_segment,
+      ))
+      _private_patched_nn_method.__name__ = f"_compiled_wrapper###{nn_module.__class__.__name__}###{method_name}"
+      setattr(nn_module, method_name, types.MethodType(_private_patched_nn_method, nn_module))
       # Put the newly bound (compiled) method into the segment prefix map.
       bound_nn_method = getattr(nn_module, method_name)
       print(f"bound_nn_method: {bound_nn_method}")
@@ -450,7 +517,7 @@ Please do not register the same function with different segment prefixes.
         # TODO: add unit test for `torch.compile(..., backend=functools.partial(inductor_compile_fx, inner_compile=...))` for inner_compile customization.
         # TODO: allow calling "eager" (fwd only) or "aot_eager" (fwd and bwd) region within the "inductor" region, under compile mode. (How to do this during graph splitting?)
         compile_options_without_backend = {k: v for k, v in self._compile_options.items() if k != "backend"}
-        return torch.compile(self._module, backend=self._compile_fx_for_graph_in_segment, **compile_options_without_backend)(*args, **kwargs)
+        outs = torch.compile(self._module, backend=self._compile_fx_for_graph_in_segment, **compile_options_without_backend)(*args, **kwargs)
       else:  # eager mode
         for segment in self._segments:
           self._register_segment(segment)
@@ -459,17 +526,124 @@ Please do not register the same function with different segment prefixes.
           print(f"here3 id(self._module): {id(self._module)}")
           if hasattr(self._module, "func1"):
             print(f"here3 self._module.func1: {self._module.func1}")
-        return self._module(*args, **kwargs)
+        outs = self._module(*args, **kwargs)
 
-  def add_to_recorded_exec_order(self, segment):
-    print(f"Adding segment {segment} to recorded exec order.")
-    if len(self._recorded_exec_order) > 0 and self._recorded_exec_order[-1] == segment:
-      print("add_to_recorded_exec_order early return")
+    if len(self._schedule) != len(self.get_recorded_execution_order()) or set(self._schedule) != set(self.get_recorded_execution_order()):
+        raise RuntimeError(f"""
+The LazyScheduler's actual execution order has different number of segments or different segments compared to the schedule.
+
+- Schedule: {self._schedule}. Length: {len(self._schedule)}.
+- Recorded execution order: {self.get_recorded_execution_order()}. Length: {len(self.get_recorded_execution_order())}.
+
+Please update the schedule to have the same segments as the recorded execution order.
+""")
+
+    if self._debug_mode:
+      debug_mode_issue_msgs = []
+      debug_mode_msg = """
+=======================================================================================================================
+                                        LazyScheduler Debug Mode Suggestions
+=======================================================================================================================
+
+"""
+      def find_delayed_seg_dependencies_best_effort(schedule_orig, recorded_execution_order_orig):
+        dependencies = {}
+        schedule = copy.deepcopy(schedule_orig)
+        recorded_execution_order = copy.deepcopy(recorded_execution_order_orig)
+        assert len(schedule) == len(recorded_execution_order)
+        while schedule != recorded_execution_order:
+          # Algorithm:
+          # - From end to beginning, find the first segment that is executed earlier than expected.
+          # - The next segment executed after it is the segment that uses its output.
+          # - Remove both segments from schedule and recorded execution order.
+          # - Repeat this process, until schedule and recorded execution order are exactly the same.
+          for index, seg in reversed(list(enumerate(schedule))):
+            index_of_seg_in_execution_order = recorded_execution_order.index(seg)
+            if index_of_seg_in_execution_order < index:  # segment is early materialized
+              dep_seg = recorded_execution_order[index_of_seg_in_execution_order+1]
+              dep_seg_prev = recorded_execution_order[index_of_seg_in_execution_order-1] if index_of_seg_in_execution_order-1 >= 0 else None
+              dependencies[seg] = (dep_seg_prev, dep_seg)
+              schedule.remove(seg)
+              schedule.remove(dep_seg)
+              recorded_execution_order.remove(seg)
+              recorded_execution_order.remove(dep_seg)
+              break
+        dep_msgs = []
+        for delayed_seg, (dep_seg_prev, dep_seg) in dependencies.items():
+          if dep_seg_prev is None:
+            dep_msgs.append(f"- The code starting from end of `{delayed_seg}` (exclusive) to end of `{dep_seg}` (inclusive) depends on output of `{delayed_seg}`")
+          else:
+            dep_msgs.append(f"- The code starting from end of `{dep_seg_prev}` (exclusive) to end of `{dep_seg}` (inclusive) depends on output of `{delayed_seg}`")
+        return "\n".join(dep_msgs)
+
+      if self._schedule != self.get_recorded_execution_order():
+        debug_mode_issue_msgs.append(f"""
+Issue: The LazyScheduler's actual execution order is not the same as the schedule.
+
+Suggestion: This usually happens when a segment A's output (or a tensor it in-place mutates) is immediately used by
+downstream code, causing segment A to not be able to be delayed after it.
+
+For example, if the schedule is [B, C, A], but the recorded execution order is [B, A, C], then we know that
+some code between B (exclusive) and C (inclusive) is using A's output which causes A to not be able to be delayed after C.
+
+For this model, we have:
+- Schedule: {self._schedule}. Length: {len(self._schedule)}.
+- Recorded execution order: {self.get_recorded_execution_order()}. Length: {len(self.get_recorded_execution_order())}.
+
+Best guess on the potential dependencies causing the issue:
+{find_delayed_seg_dependencies_best_effort(self._schedule, self.get_recorded_execution_order())}
+
+With the above information, please audit the code of all of delayed segments and all other segments that have
+data dependency with these delayed segments, to find the root cause.
+-----------------------------------------------------------------------------------------------------------------------
+""")
+
+      if len(debug_mode_issue_msgs) > 0:
+        debug_mode_msg += """
+Identified Issues:
+
+"""
+        debug_mode_msg += "\n\n".join(debug_mode_issue_msgs)
+
+      debug_mode_msg += f"""
+Common Questions:
+
+Q: I found numerical mismatch between LazyScheduler prod mode and LazyScheduler-disabled mode. How to debug?
+
+A: Usually LazyScheduler numerical mismatch is due to:
+- A shared tensor (via module attribute, global variable, or input tensor) is mutated by another function and read by one of the delayed segments.
+- A shared tensor (via module attribute, global variable, or input tensor) is mutated by one of the delayed segments and read by another function.
+
+For this model, we have:
+- Delayed segments: {sorted(list(self._recorded_delayed))}
+- Segments that contain in-place mutation ops: {sorted(list(self._has_inplace_op_segment_prefixes))}
+- Segments that access module attribute or global variable: {sorted(list(self._access_mod_attr_or_glb_var_segment_prefixes))}
+
+With the above information, please audit the code of all of delayed segments and all other functions that have data dependency with these delayed segments.
+Pay special attention to data dependency via shared tensor (module attribute, global variable, or input tensor).
+
+If you are still unable to find the root cause, the best way to debug it is to remove segments one by one from your LazyScheduler schedule and re-run your model.
+If you find that removing a specific segment fixes the issue, then audit that segment and other functions that have data dependency with it.
+-----------------------------------------------------------------------------------------------------------------------
+"""
+      raise RuntimeError(debug_mode_msg)
+    return outs
+
+  def record_execution(self, segment_name):
+    print(f"Adding segment {segment_name} to recorded execution order.")
+    if len(self._recorded_execution_order) > 0 and self._recorded_execution_order[-1] == segment_name:
+      print("record_execution early return")
       return
-    print("add_to_recorded_exec_order add to _recorded_exec_order list")
-    print(f"id(self._recorded_exec_order): {id(self._recorded_exec_order)}")
+    print("record_execution add to _recorded_execution_order list")
+    print(f"id(self._recorded_execution_order): {id(self._recorded_execution_order)}")
     print(f"id(self): {id(self)}")
-    self._recorded_exec_order.append(segment)
+    self._recorded_execution_order.append(segment_name)
+
+  def get_recorded_execution_order(self):
+    return [
+      s for s in self._recorded_execution_order
+      if (not s.startswith("__unnamed_") and not s.startswith("__unregistered_"))
+    ]
 
   def _compile_fx_for_graph_in_segment(
     self,
@@ -478,6 +652,12 @@ Please do not register the same function with different segment prefixes.
     **kwargs,
   ):
     segment_prefix = extract_segment_prefix_from_gm(gm)
+
+    if self._debug_mode:
+      for node in gm.graph.nodes:
+        if is_call_func_node(node) and str(node.target).endswith("_"):  # likely in-place op
+          self._has_inplace_op_segment_prefixes.add(segment_prefix)
+
     backend = self._segment_prefix_to_backend.get(segment_prefix, self._default_backend)
     compiler_fn = None
     if backend == "eager":
@@ -519,7 +699,7 @@ Please do not register the same function with different segment prefixes.
 
     return split_gm
 
-  def maybe_run(self, gm, compiled_fn, segment, *args):
+  def maybe_run(self, gm, compiled_fn, cur_segment_name, *args):
     """
     Decides whether to run the graph module based on the schedule.
 
@@ -531,20 +711,27 @@ Please do not register the same function with different segment prefixes.
     args_fake = []
     for arg in args:
       if isinstance(arg, AsyncTensor):
-        args_fake.append(arg._fake)
+        args_fake.append(arg._fake_tensor)
       elif isinstance(arg, torch.Tensor):
         args_fake.append(fake_mode.from_tensor(arg))
     with fake_mode:
       outs_fake = gm(*args_fake)
 
-    outs_async = tuple(AsyncTensor(unused_real_tensor=None, fake_tensor=out_fake, handle=None, materialized_tensor_container=TensorContainer()) for out_fake in outs_fake)
     if gm in self._gm_to_handle_map:
       cur_handle = self._gm_to_handle_map[gm]
     else:
-      cur_handle = AsyncFuncHandle(compiled_fn, segment, args=args, outs_async=outs_async, scheduler=self)
+      print(f"here777 outs_fake: {outs_fake}")
+      try:
+        cur_handle = AsyncFuncHandle(
+          compiled_fn, cur_segment_name, args=args,
+          outs_fake=outs_fake,
+          scheduler=self,
+          # debug_mode=self._debug_mode,
+        )
+      except Exception as e:
+        print(f"here555 cur_segment_name: {cur_segment_name}")
+        raise
       self._gm_to_handle_map[gm] = cur_handle
-    for out_async in outs_async:
-      out_async.set_handle(cur_handle)
 
     # First, try to schedule all graphs from all segments that are before the incoming graph in the schedule.
     # The incoming graph can be scheduled only if:
@@ -557,12 +744,12 @@ Please do not register the same function with different segment prefixes.
     # We can optimize this by keeping track of which segments have been scheduled already.
     _next_segment_index = 0
     while _next_segment_index < len(self._schedule):
-      segment = self._schedule[_next_segment_index]
-      if segment not in self._segment_to_gms_map:
+      _segment_name = self._schedule[_next_segment_index]
+      if _segment_name not in self._segment_to_gms_map:
         all_preceding_graph_handles_are_created = False
         break
       else:
-        for g in self._segment_to_gms_map[segment]:
+        for g in self._segment_to_gms_map[_segment_name]:
           if str(g.graph) == str(gm.graph):  # TODO: is there a better way to check graph equivalence?
             reached_current_graph = True
             break
@@ -577,7 +764,10 @@ Please do not register the same function with different segment prefixes.
         _next_segment_index += 1
 
     if not all_preceding_graph_handles_are_created:
-      # If not all preceding graph handles are created, then we don't schedule the current graph yet.
+      # If not all preceding graph handles are created, it means current graph is delayed
+      # and we don't schedule the current graph yet.
+      if self._debug_mode:
+        self._recorded_delayed.add(cur_segment_name)
       return cur_handle.outs_async
     else:
       # If all preceding graph handles are created, then we schedule all of them,

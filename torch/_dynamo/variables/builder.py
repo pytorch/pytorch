@@ -301,6 +301,7 @@ class VariableBuilder:
                     torch.nn.Parameter,
                     torch._subclasses.FakeTensor,
                     torch._subclasses.functional_tensor.FunctionalTensor,
+                    torch._subclasses.async_tensor.AsyncTensor,
                 ),
                 cls.wrap_tensor,
             ),
@@ -1376,7 +1377,6 @@ def wrap_fx_proxy_cls(
             # only allow_non_graph_fake in this instance because we handle the non-fake
             # cases properly below.
             example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
-            print("hereA1")
 
         # Handle recursive calls here
         elif maybe_get_fake_mode(example_value) is tx.fake_mode:
@@ -1402,7 +1402,7 @@ def wrap_fx_proxy_cls(
             assert "source" in options and options["source"] is not None
             kwargs["source"] = options["source"]
             if isinstance(example_value, torch._subclasses.async_tensor.AsyncTensor):
-                example_value = example_value._unused_real_tensor
+                example_value = example_value.materialized_tensor
                 print("hereA3")
             example_value = wrap_to_fake_tensor_and_record(
                 example_value, tx=tx, **kwargs
@@ -1842,10 +1842,8 @@ def wrap_to_fake_tensor_and_record(
             )
             tx.output.tracked_fakes_id_to_source[id(e)].append(source)
 
-        print("hereB1")
         return fake_e
     else:
-        print("hereB2")
         return e
 
 

@@ -503,6 +503,7 @@ class MetaConverter:
                     # If we have a subclass that desugars into dense tensors,
                     # perform our callback on each inner tensor.
                     if is_traceable_wrapper_subclass(t):
+                        # print("branch1")
                         # Note: transform_subclass will use __tensor_unflatten__ to generate
                         # a fresh subclass wrapper. We assume that if the inner tensors of
                         # the subclass are given symbolic sizes, their sizes will be used
@@ -528,9 +529,8 @@ class MetaConverter:
                             outer_size=sizes,
                             outer_stride=strides,
                         )
-                        print(f"after transform_subclass: r._is_view(): {r._is_view()}")
-                        print(f"after transform_subclass: t._is_view(): {t._is_view()}")
                     else:
+                        # print("branch2")
                         r = callback(
                             lambda: torch.empty_strided(
                                 sizes,

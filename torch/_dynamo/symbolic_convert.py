@@ -123,7 +123,14 @@ graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
 tls = threading.local()
+tls.instance_bound_nn_method_stack = []
 
+
+def instance_bound_nn_method_stack_to_str_list():
+    str_list = []
+    for nn_method in tls.instance_bound_nn_method_stack:
+        str_list.append(nn_method.__name__)
+    return str_list
 
 @dataclasses.dataclass
 class SpeculationEntry:
@@ -2210,11 +2217,12 @@ class InstructionTranslator(InstructionTranslatorBase):
         ):
             raise exc.SkipFrame("because no content in function call")
         self.instruction_pointer = None
-        # Done tracing this NN method, so reset state.
-        # If tracer fails, we don't reset state, so that the next InstructionTranslator
-        # still knows which NN method we are in, so that the instance bound NN method is correctly associated.
-        tls.instance_bound_nn_method = None
-        print(f"Root: Set tls.instance_bound_nn_method to None")
+        if not self.f_code.co_name == "_private_patched_nn_method":
+            # Done tracing this NN method, so pop it from NN method stack.
+            # If tracer fails, we don't reset state, so that the next InstructionTranslator
+            # still knows which NN method we are in, so that the instance bound NN method is correctly associated.
+            tls.instance_bound_nn_method_stack = tls.instance_bound_nn_method_stack[:-1]
+            print(f"Root: popped from tls.instance_bound_nn_method_stack, now stack is {instance_bound_nn_method_stack_to_str_list()}")
         _step_logger()(
             logging.INFO,
             f"torchdynamo done tracing {self.f_code.co_name} (RETURN_VALUE)",
@@ -2346,7 +2354,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 # NOTE: instead of mapping from code object (module instance agnostic) to a module,
                 # we need to map from module instance bound method to a module,
                 # to ensure uniqueness and disambiguate between different instances of same NN module class.
-                instance_bound_nn_method = getattr(module, code.co_name)
+                if code.co_name != "_private_patched_nn_method":
+                    instance_bound_nn_method = getattr(module, code.co_name)
                 # code_context.get_context(instance_bound_nn_method)[
                 #     "orig_nnmodule"
                 # ] = module
@@ -2363,7 +2372,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # Detect inline module method calls in order to propagate node metadata,
             # by checking if the first argument (self) is a variable tracking a nn.Module.
             # print(f"code: {code}")
-            if code.co_name != "_compiled_nn_method_wrapper":
+            if code.co_name != "_private_patched_nn_method":
                 instance_bound_nn_method = getattr(module, code.co_name)
             # code_context.get_context(instance_bound_nn_method)[
             #     "orig_nnmodule"
@@ -2389,9 +2398,14 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         try:
             with strict_ctx:
                 # Store current NN method being traced into.
-                if instance_bound_nn_method is not None:
-                    tls.instance_bound_nn_method = instance_bound_nn_method
-                    print(f"Inlining: Set tls.instance_bound_nn_method to {instance_bound_nn_method.__name__}")
+                if instance_bound_nn_method is not None and not (len(tls.instance_bound_nn_method_stack) > 0 and tls.instance_bound_nn_method_stack[-1] == instance_bound_nn_method):
+                    tls.instance_bound_nn_method_stack.append(instance_bound_nn_method)
+                    print(f"Inlining: appended to tls.instance_bound_nn_method_stack, now it is {instance_bound_nn_method_stack_to_str_list()}")
+                else:
+                    if len(tls.instance_bound_nn_method_stack) > 0:
+                        print(f"Inlining: Use previously set tls.instance_bound_nn_method_stack, stack: {instance_bound_nn_method_stack_to_str_list()}")
+                    else:
+                        print(f"Inlining: tls.instance_bound_nn_method_stack is empty")
                 tracer.run()
         except exc.SkipFrame as e:
             msg = f"SKIPPED INLINING {code}: {e}"
@@ -2539,11 +2553,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def RETURN_VALUE(self, inst):
         self.symbolic_result = self.pop()
         self.instruction_pointer = None
-        # Done tracing this NN method, so reset state.
-        # If tracer fails, we don't reset state, so that the next InstructionTranslator
-        # still knows which NN method we are in, so that the instance bound NN method is correctly associated.
-        tls.instance_bound_nn_method = None
-        print(f"Inlining: Set tls.instance_bound_nn_method to None")
+        if not self.f_code.co_name == "_private_patched_nn_method":
+            # Done tracing this NN method, so pop it from the NN method stack.
+            # If tracer fails, we don't reset state, so that the next InstructionTranslator
+            # still knows which NN method we are in, so that the instance bound NN method is correctly associated.
+            tls.instance_bound_nn_method_stack = tls.instance_bound_nn_method_stack[:-1]
+            print(f"Inlining: popped from tls.instance_bound_nn_method_stack, now stack is {instance_bound_nn_method_stack_to_str_list()}")
 
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):

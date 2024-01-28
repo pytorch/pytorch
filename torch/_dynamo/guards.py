@@ -251,6 +251,9 @@ class GuardBuilder(GuardBuilderBase):
     # (like its type) which is what you permanently install into the
     # guard code.
     def get(self, name: str) -> Any:
+        print(f"name: {name}")
+        print(f"self.scope.keys(): {self.scope.keys()}")
+        print(f"CLOSURE_VARS.keys(): {CLOSURE_VARS.keys()}")
         return eval(name, self.scope, CLOSURE_VARS)
 
     # Registers the usage of the source name referenced by the
@@ -664,6 +667,8 @@ class GuardBuilder(GuardBuilderBase):
         else:
             if isinstance(value, TensorWeakRef):
                 value = value()
+            if isinstance(value, torch._subclasses.async_tensor.AsyncTensor):
+                value = value.get_materialized_tensor()
 
             value = value if value is not None else self.get(guard.name)
             assert isinstance(value, torch.Tensor)
@@ -993,7 +998,16 @@ class CheckFunctionManager:
             ):
                 continue
 
-            guard.create(builder)
+            # # TODO: still need to understand what this guard is.
+            # # Currently, the next line `guard.create(builder)` throws `'function' object has no attribute '__self__'`.
+            # if guard.name == "L['___stack0'].__self__":
+            #     continue
+
+            try:
+                guard.create(builder)
+            except Exception as e:
+                print(f"guard: {guard}, builder: {builder}")
+                raise
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
         self._weakrefs.clear()
         # Keep track of weak references of objects with ID_MATCH guard. This
@@ -1078,10 +1092,11 @@ class CheckFunctionManager:
 
             # TODO: is this the right thing to do?
             def maybe_unpack(tensor):
-                if isinstance(tensor, torch._subclasses.async_tensor.AsyncTensor):
-                    return tensor._unused_real_tensor
-                else:
-                    return tensor
+                # if isinstance(tensor, torch._subclasses.async_tensor.AsyncTensor):
+                #     return tensor._unused_real_tensor
+                # else:
+                #     return tensor
+                return tensor
 
             dynamic_dims_sizes = [
                 convert(self.output_graph.tensor_weakref_to_sizes_strides[maybe_unpack(t)]["size"])

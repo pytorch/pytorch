@@ -1756,9 +1756,11 @@ class SubgraphTracer(fx.Tracer):
             #     print(f"node: {node}, node.op: {node.op}, node.target: {node.target}, node.args: {node.args}, node.kwargs: {node.kwargs}")
             #     # breakpoint()
             #     raise
-            instance_bound_nn_method = torch._dynamo.symbolic_convert.tls.instance_bound_nn_method
-            assert instance_bound_nn_method is not None
-            node.meta['nn_module_method'] = instance_bound_nn_method
+            instance_bound_nn_method = None
+            if len(torch._dynamo.symbolic_convert.tls.instance_bound_nn_method_stack) > 0:
+                instance_bound_nn_method = torch._dynamo.symbolic_convert.tls.instance_bound_nn_method_stack[-1]
+                # assert instance_bound_nn_method is not None
+                node.meta['nn_module_method'] = instance_bound_nn_method
             # print(f"node.meta['nn_module_method']: {node.meta['nn_module_method']}")
         return node
 
