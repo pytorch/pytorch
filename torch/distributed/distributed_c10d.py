@@ -53,7 +53,7 @@ __all__ = [
     'all_to_all_single', 'barrier', 'batch_isend_irecv', 'broadcast',
     'broadcast_object_list', 'destroy_process_group',
     'gather', 'gather_object', 'get_backend_config', 'get_backend', 'get_rank',
-    'get_world_size', 'get_pg_config', 'get_pg_count', 'group', 'init_process_group', 'irecv',
+    'get_world_size', 'group', 'init_process_group', 'irecv',
     'is_gloo_available', 'is_initialized', 'is_mpi_available', 'is_backend_available',
     'is_nccl_available', 'is_torchelastic_launched', 'is_ucc_available',
     'isend', 'monitored_barrier', 'new_group', 'new_subgroups',
@@ -624,7 +624,7 @@ def _check_valid_timeout(timeout: Any) -> None:
         )
 
 # Default process group state
-_default_pg_init_method = None
+_default_pg_init_method: Optional[str] = None
 
 STORE_BASED_BARRIER_PREFIX = "store_based_barrier_key"
 
@@ -1059,32 +1059,6 @@ def get_backend(group: Optional[ProcessGroup] = None) -> Backend:
     pg_store = _world.pg_map[pg] if pg in _world.pg_map else None
     return Backend(not_none(pg_store)[0])
 
-def get_pg_config() -> List[Dict[str, Union[int, str, List[int]]]]:
-    """
-    Return the pg configuration of all the process groups.
-
-    """
-    config_info: List[Dict[str, Union[int, str, List[int]]]] = []
-    for pg, pg_store in _world.pg_map.items():
-        backend_type = Backend.backend_type_map[pg_store[0]]
-        config_info.append(
-            {
-                "pg_name": _get_process_group_name(pg),
-                "backend_id": pg._backend_id(backend_type),
-                "backend_config": get_backend_config(pg),
-                "pg_size": _get_group_size(pg),
-                "ranks": get_process_group_ranks(pg),
-            }
-        )
-    return config_info
-
-def get_pg_count() -> int:
-    """
-    Return the number of process groups.
-
-    """
-    return _world.group_count
-
 def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) -> None:
     """
     Set the timeout for the given process group when users want to use a different timeout instead of
@@ -1292,6 +1266,23 @@ def init_process_group(
     _world.pg_group_ranks[GroupMember.WORLD] = {i: i for i in range(GroupMember.WORLD.size())}  # type: ignore[attr-defined, index]
     _backend = _world.pg_map[not_none(GroupMember.WORLD)][0]
     _default_pg_init_method = init_method
+
+    old_hook = sys.excepthook
+
+    def _distributed_excepthook(*args):
+        old_stderr = sys.stderr
+        sys.stderr = buf = io.StringIO()
+        try:
+            old_hook(*args)
+        finally:
+            sys.stderr = old_stderr
+        msg = buf.getvalue()
+        prefix = f"[rank{get_rank()}]"
+        msg = "\n".join(f"{prefix}: {s}" if s != "" else "" for s in msg.split("\n"))
+        sys.stderr.write(msg)
+        sys.stderr.flush()
+
+    sys.excepthook = _distributed_excepthook
 
     if _is_barrier_after_init() == 1:
         # barrier at the end to ensure that once we return from this method, all
@@ -2381,7 +2372,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
             should be correctly sized as the size of the group for this
             collective and will contain the output. Must be ``None`` on non-dst
             ranks. (default is ``None``)
-        dst (int, optional): Destination rank. (default is 0)
+        dst (int, optional): Destination rank on global process group (regardless of 'group' argument). (default is 0)
         group: (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used. Default is ``None``.
 
@@ -3003,7 +2994,7 @@ def gather(tensor, gather_list=None, dst=0, group=None, async_op=False):
         gather_list (list[Tensor], optional): List of appropriately-sized
             tensors to use for gathered data (default is None, must be specified
             on the destination rank)
-        dst (int, optional): Destination rank (default is 0)
+        dst (int, optional): Destination rank on global process group (regardless of 'group' argument). (default is 0)
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
