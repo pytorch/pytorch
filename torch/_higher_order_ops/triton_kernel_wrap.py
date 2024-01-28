@@ -1,6 +1,7 @@
 import dataclasses
 import logging
 import threading
+import warnings
 from typing import Any, Dict, List, Union
 
 import torch.utils._pytree as pytree
@@ -165,7 +166,9 @@ def parse_ttir(ttir, kwargs):
         import lark
         from lark import Lark, Transformer, v_args
     except ModuleNotFoundError:
-        log.debug("Cannot parse TTIR as Lark is not installed")
+        warnings.warn(
+            "Using slow path for user-defined Triton kernels. `pip install lark` to fix this."
+        )
         raise
 
     ops: Dict[Intermediate, Op] = {}
@@ -310,6 +313,11 @@ def identify_mutated_tensors(kernel, kwargs):
     """
 
     try:
+        from torch._dynamo import config
+
+        if not config.optimize_user_defined_triton_kernels:
+            raise Exception("optimize_user_defined_triton_kernels is False")
+
         ttir, tensor_param_locs = generate_ttir(kernel, kwargs)
         ops = parse_ttir(ttir, kwargs)
         return analyze_kernel_mutations(ops, kwargs, tensor_param_locs)

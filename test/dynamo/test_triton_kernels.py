@@ -7,6 +7,8 @@ import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo import config
+from torch._dynamo.testing import make_test_cls_with_patches
 
 from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_functional,
@@ -1035,6 +1037,16 @@ class MutationTests(torch._dynamo.test_case.TestCase):
 
 
 common_utils.instantiate_parametrized_tests(KernelTests)
+
+no_opt_test_class = make_test_cls_with_patches(
+    KernelTests,
+    "NoOptimization",
+    "_no_optimizations",
+    (config, "optimize_user_defined_triton_kernels", False),
+)
+
+globals()[no_opt_test_class.__name__] = no_opt_test_class
+no_opt_test_class.__module__ = __name__
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
