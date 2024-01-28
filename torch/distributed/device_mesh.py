@@ -254,13 +254,9 @@ else:
             return _get_default_group()
 
         def _init_process_groups(self):
-            # tag/ranks/group_name associated with each mesh dimension, each
-            # mesh dimension should have one sub-group per rank
-            #
-            # TODO(yifu): remove tag and ranks once we fully migrate to native
-            # functional collectives. See details in:
-            # https://github.com/pytorch/pytorch/issues/93173#issuecomment-1907095208
-            dim_group_infos: List[Tuple[str, List[int], str]] = []
+            # group tag/ranks associated with each mesh dimension, each mesh dimension should
+            # have one sub-group per rank
+            dim_group_infos: List[Tuple[str, List[int]]] = []
 
             if self.mesh.ndim == 1 and self.mesh.numel() == get_world_size():
                 # if the mesh is the same as world_pg, we just append the default
@@ -270,7 +266,6 @@ else:
                     (
                         _get_group_tag(_get_default_group()),
                         list(range(get_world_size())),
-                        _get_default_group().group_name,
                     )
                 )
             else:
@@ -303,11 +298,7 @@ else:
                                     f"in {subgroup_ranks}!"
                                 )
                             dim_group_infos.append(
-                                (
-                                    _get_group_tag(not_none(dim_group)),
-                                    subgroup_ranks,
-                                    not_none(dim_group).group_name,
-                                )
+                                (_get_group_tag(not_none(dim_group)), subgroup_ranks)
                             )
             self._dim_group_infos = dim_group_infos
 
@@ -401,24 +392,20 @@ else:
                 raise RuntimeError("DeviceMesh process groups not initialized!")
 
             if self.mesh.ndim == 1:
-                return not_none(
-                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[0][:2])
-                )
+                return not_none(_find_pg_by_ranks_and_tag(*self._dim_group_infos[0]))
 
             if mesh_dim is not None:
                 if isinstance(mesh_dim, str):
                     mesh_dim = _mesh_resources.get_mesh_dim_by_name(self, mesh_dim)
                 return not_none(
-                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim][:2])
+                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim])
                 )
             else:
                 dim_groups = []
                 for ith_dim in range(self.mesh.ndim):
                     dim_groups.append(
                         not_none(
-                            _find_pg_by_ranks_and_tag(
-                                *self._dim_group_infos[ith_dim][:2]
-                            )
+                            _find_pg_by_ranks_and_tag(*self._dim_group_infos[ith_dim])
                         )
                     )
                 return dim_groups

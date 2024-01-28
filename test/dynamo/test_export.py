@@ -2293,60 +2293,6 @@ def forward(self, x):
         out_graph = exported[0]
         self.assertTrue(torch._dynamo.utils.same(torch.ones(3, 3), out_graph()))
 
-    def test_none_out(self):
-        def f(x, y):
-            _ = x + y
-
-        with self.assertRaisesRegex(
-            UserError,
-            "It looks like one of the outputs with type .*None.* "
-            "is not supported or pytree-flattenable",
-        ):
-            torch._dynamo.export(f, aten_graph=False)(torch.randn(10), torch.randn(10))
-
-    def test_primitive_constant_output(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x):
-                # return a constant of primitive type
-                y = 5
-                return y * x, y
-
-        foo = Foo()
-
-        with self.assertRaisesRegex(
-            UserError,
-            "It looks like one of the outputs with type .*int.* "
-            "is not supported or pytree-flattenable",
-        ):
-            torch.export.export(foo, (torch.tensor(3),))
-
-        class Bar(torch.nn.Module):
-            def forward(self, x, y):
-                return y * x, y
-
-        bar = Bar()
-
-        # new behavior
-        with self.assertRaisesRegex(
-            UserError,
-            "It looks like one of the outputs with type .*int.* "
-            "is not supported or pytree-flattenable",
-        ):
-            torch.export.export(bar, (torch.tensor(3), 5))
-
-        class Qux(torch.nn.Module):
-            def forward(self, x, y):
-                return y * x, y - 1
-
-        qux = Qux()
-
-        with self.assertRaisesRegex(
-            UserError,
-            "It looks like one of the outputs with type .*int.* "
-            "is not supported or pytree-flattenable",
-        ):
-            torch.export.export(qux, (torch.tensor(3), 5))
-
     @unittest.skipIf(not TEST_CUDA, "No CUDA available.")
     def test_export_with_parameters(self):
         class MyModule(torch.nn.Module):
