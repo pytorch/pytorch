@@ -489,15 +489,15 @@ def _multi_tensor_adam(params: List[Tensor],
         device_state_steps,
     ), _) in grouped_tensors.values():
 
-        if maximize:
-            device_grads = torch._foreach_neg(device_grads)
-
         # Handle complex parameters
         if has_complex:
             if amsgrad:
                 _view_as_real(device_params, device_grads, device_exp_avgs, device_exp_avg_sqs, device_max_exp_avg_sqs)
             else:
                 _view_as_real(device_params, device_grads, device_exp_avgs, device_exp_avg_sqs)
+
+        if maximize:
+            device_grads = torch._foreach_neg(device_grads)
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
