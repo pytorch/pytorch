@@ -34,6 +34,7 @@ import torch
 import torch._inductor.test_operators
 import torch.distributed
 import torch.utils._content_store
+from ..utils import _config_module
 from .utils import getfile
 
 from .variables.functions import (
@@ -41,7 +42,6 @@ from .variables.functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
-
 
 """
 A note on skipfiles:
@@ -124,7 +124,6 @@ BUILTIN_SKIPLIST = (
 # third party libraries skiplist is defined by str, because users may not use these libraries.
 # we should use lazy import & skip in the future.
 THIRDPARTY_SKIPLIST = (
-    "functorch",
     "fx2trt_oss",
     "networkx",
     "numpy",
@@ -159,6 +158,7 @@ FUNC_INLINELIST = {
     "torch._constrain_as_size",
     "torch._constrain_as_value",
     "torch._tensor._convert",
+    "torch.jit._unwrap_optional",
 }
 
 
@@ -201,10 +201,12 @@ MOD_INLINELIST = {
     "torch._dynamo._trace_wrapped_higher_order_op",
     "torch._dynamo.comptime",
     "torch._dynamo.polyfill",
+    "torch._functorch.vmap",
     "torch._inductor.test_operators",
     "torch.amp.autocast_mode",
     "torch.ao.nn",
     "torch.autograd.function",
+    "torch.backends.cuda",
     "torch.cuda.amp.autocast_mode",
     "torch.distributions",
     "torch.export.wrapper",
@@ -260,6 +262,7 @@ def get_mod_inlinelist():
 SKIP_DIRS = [
     "<frozen importlib",
     "<__array_function__ internals>",
+    _config_module.__file__,
 ] + [_module_dir(m) for m in BUILTIN_SKIPLIST]
 
 SKIP_DIRS_RE = re.compile(r"match nothing^")

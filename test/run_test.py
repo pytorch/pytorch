@@ -303,6 +303,14 @@ ROCM_BLOCKLIST = [
     "test_jit_cuda_fuser",
 ]
 
+XPU_BLOCKLIST = [
+    "test_autograd",
+]
+
+XPU_TEST = [
+    "test_xpu",
+]
+
 # The tests inside these files should never be run in parallel with each other
 RUN_PARALLEL_BLOCKLIST = [
     "test_cpp_extensions_jit",
@@ -443,6 +451,7 @@ JIT_EXECUTOR_TESTS = [
 
 INDUCTOR_TESTS = [test for test in TESTS if test.startswith(INDUCTOR_TEST_PREFIX)]
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith(DISTRIBUTED_TEST_PREFIX)]
+TORCH_EXPORT_TESTS = [test for test in TESTS if test.startswith("export")]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
 CPP_TESTS = [test for test in TESTS if test.startswith(CPP_TEST_PREFIX)]
@@ -520,11 +529,11 @@ def run_test(
     else:
         unittest_args.extend(
             [
-                f"--shard-id={test_module.shard - 1}",
+                f"--shard-id={test_module.shard}",
                 f"--num-shards={test_module.num_shards}",
             ]
         )
-        stepcurrent_key = f"{test_file}_{test_module.shard - 1}_{os.urandom(8).hex()}"
+        stepcurrent_key = f"{test_file}_{test_module.shard}_{os.urandom(8).hex()}"
 
     if options.verbose:
         unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
@@ -543,7 +552,6 @@ def run_test(
         unittest_args.extend(
             get_pytest_args(
                 options,
-                stepcurrent_key,
                 is_cpp_test=is_cpp_test,
                 is_distributed_test=is_distributed_test,
             )
@@ -597,7 +605,7 @@ def run_test(
         argv = [test_file + ".py"] + unittest_args
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
-    if IS_CI:
+    if options.pipe_logs:
         log_fd, log_path = tempfile.mkstemp(
             dir=REPO_ROOT / "test" / "test-reports",
             prefix=f"{sanitize_file_name(str(test_module))}_",
@@ -606,15 +614,17 @@ def run_test(
         os.close(log_fd)
 
     command = (launcher_cmd or []) + executable + argv
-    num_retries = 0 if "--subprocess" in command or RERUN_DISABLED_TESTS else 2
+    should_retry = "--subprocess" not in command and not RERUN_DISABLED_TESTS
     is_slow = "slow" in os.environ.get("TEST_CONFIG", "") or "slow" in os.environ.get(
         "BUILD_ENVRIONMENT", ""
     )
     timeout = (
-        THRESHOLD * 6
+        None
+        if not options.enable_timeout
+        else THRESHOLD * 6
         if is_slow
         else THRESHOLD * 3
-        if num_retries > 0
+        if should_retry
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
         else None
@@ -623,15 +633,21 @@ def run_test(
 
     with ExitStack() as stack:
         output = None
-        if IS_CI:
+        if options.pipe_logs:
             output = stack.enter_context(open(log_path, "w"))
 
-        if options.continue_through_error and "--subprocess" not in command:
-            # I think subprocess is better handled by common_utils? but it's not working atm
-            ret_code, was_rerun = run_test_continue_through_error(
-                command, test_directory, env, timeout, stepcurrent_key, output
+        if should_retry:
+            ret_code, was_rerun = run_test_retries(
+                command,
+                test_directory,
+                env,
+                timeout,
+                stepcurrent_key,
+                output,
+                options.continue_through_error,
             )
         else:
+            command.extend([f"--sc={stepcurrent_key}", "--print-items"])
             ret_code, was_rerun = retry_shell(
                 command,
                 test_directory,
@@ -639,7 +655,6 @@ def run_test(
                 stderr=output,
                 env=env,
                 timeout=timeout,
-                retries=num_retries,
             )
 
             # Pytest return code 5 means no test is collected. This is needed
@@ -651,45 +666,56 @@ def run_test(
             # comes up in the future.
             ret_code = 0 if ret_code == 5 or ret_code == 4 else ret_code
 
-    if IS_CI:
+    if options.pipe_logs:
         handle_log_file(
             test_module, log_path, failed=(ret_code != 0), was_rerun=was_rerun
         )
     return ret_code
 
 
-def run_test_continue_through_error(
-    command, test_directory, env, timeout, stepcurrent_key, output
+def run_test_retries(
+    command,
+    test_directory,
+    env,
+    timeout,
+    stepcurrent_key,
+    output,
+    continue_through_error,
 ):
     # Run the test with -x to stop at first failure. Try again, skipping the
     # previously run tests, repeating this until there is a test that fails 3
-    # times (same number of rVetries we typically give).  Then we skip that
-    # test, and keep going. Basically if the same test fails 3 times in a row,
-    # skip the test on the next run, but still fail in the end. I take advantage
-    # of the value saved in stepcurrent to keep track of the most recently run
-    # test (which is the one that failed if there was a failure).
+    # times (same number of rVetries we typically give).
+    #
+    # If continue through error is not set, then we fail fast.
+    #
+    # If continue through error is set, then we skip that test, and keep going.
+    # Basically if the same test fails 3 times in a row, skip the test on the
+    # next run, but still fail in the end. I take advantage of the value saved
+    # in stepcurrent to keep track of the most recently run test (which is the
+    # one that failed if there was a failure).
+
+    def print_to_file(s):
+        print(s, file=output, flush=True)
 
     num_failures = defaultdict(int)
 
+    print_items = ["--print-items"]
     sc_command = f"--sc={stepcurrent_key}"
     while True:
-        ret_code = shell(
-            command + [sc_command],
+        ret_code, _ = retry_shell(
+            command + [sc_command] + print_items,
             test_directory,
             stdout=output,
             stderr=output,
             env=env,
             timeout=timeout,
+            retries=0,  # no retries here, we do it ourselves, this is because it handles timeout exceptions well
         )
         ret_code = 0 if ret_code == 5 or ret_code == 4 else ret_code
         if ret_code == 0:
             break  # Got to the end of the test suite successfully
         signal_name = f" ({SIGNALS_TO_NAMES_DICT[-ret_code]})" if ret_code < 0 else ""
-        print(
-            f"Got exit code {ret_code}{signal_name}, retrying...",
-            file=output,
-            flush=True,
-        )
+        print_to_file(f"Got exit code {ret_code}{signal_name}")
 
         # Read what just failed
         with open(
@@ -699,25 +725,24 @@ def run_test_continue_through_error(
 
         num_failures[current_failure] += 1
         if num_failures[current_failure] >= 3:
+            if not continue_through_error:
+                print_to_file("Stopping at first consistent failure")
+                break
             sc_command = f"--scs={stepcurrent_key}"
         else:
             sc_command = f"--sc={stepcurrent_key}"
+        print_to_file("Retrying...")
+        print_items = []  # do not continue printing them, massive waste of space
 
     consistent_failures = [x[1:-1] for x in num_failures.keys() if num_failures[x] >= 3]
     flaky_failures = [x[1:-1] for x in num_failures.keys() if 0 < num_failures[x] < 3]
     if len(flaky_failures) > 0:
-        print(
-            "The following tests failed flakily (had to be rerun in a new process,"
-            + f" doesn't include reruns froms same process): {flaky_failures}",
-            file=output,
-            flush=True,
+        print_to_file(
+            "The following tests failed and then succeeded when run in a new process"
+            + f"{flaky_failures}",
         )
     if len(consistent_failures) > 0:
-        print(
-            f"The following tests failed consistently: {consistent_failures}",
-            file=output,
-            flush=True,
-        )
+        print_to_file(f"The following tests failed consistently: {consistent_failures}")
         return 1, True
     return 0, any(x > 0 for x in num_failures.values())
 
@@ -1017,35 +1042,33 @@ def handle_log_file(
     test: ShardedTest, file_path: str, failed: bool, was_rerun: bool
 ) -> None:
     test = str(test)
-    with open(file_path, "rb") as f:
-        full_text = f.read().decode("utf-8", errors="ignore")
+    with open(file_path, errors="ignore") as f:
+        full_text = f.read()
+
+    new_file = "test/test-reports/" + sanitize_file_name(
+        f"{test}_{os.urandom(8).hex()}_.log"
+    )
+    os.rename(file_path, REPO_ROOT / new_file)
 
     if not failed and not was_rerun and "=== RERUNS ===" not in full_text:
         # If success + no retries (idk how else to check for test level retries
-        # other than reparse xml), print only what tests ran, rename the log
-        # file so it doesn't get printed later, and do not remove logs.
-        new_file = "test/test-reports/" + sanitize_file_name(
-            f"{test}_{os.urandom(8).hex()}_.log"
-        )
-        os.rename(file_path, REPO_ROOT / new_file)
+        # other than reparse xml), print only what tests ran
         print_to_stderr(
             f"\n{test} was successful, full logs can be found in artifacts with path {new_file}"
         )
         for line in full_text.splitlines():
             if re.search("Running .* items in this shard:", line):
-                print_to_stderr(line.strip())
+                print_to_stderr(line.rstrip())
         print_to_stderr("")
         return
-    # otherwise: print entire file and then remove it
-    print_to_stderr(f"\nPRINTING LOG FILE of {test} ({file_path})")
+
+    # otherwise: print entire file
+    print_to_stderr(f"\nPRINTING LOG FILE of {test} ({new_file})")
     print_to_stderr(full_text)
-    print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})\n")
-    os.remove(file_path)
+    print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({new_file})\n")
 
 
-def get_pytest_args(
-    options, stepcurrent_key, is_cpp_test=False, is_distributed_test=False
-):
+def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
     if RERUN_DISABLED_TESTS:
         # Distributed tests are too slow, so running them x50 will cause the jobs to timeout after
         # 3+ hours. So, let's opt for less number of reruns. We need at least 150 instances of the
@@ -1066,9 +1089,8 @@ def get_pytest_args(
     ]
     if not is_cpp_test:
         # C++ tests need to be run with pytest directly, not via python
+        # We have a custom pytest shard that conflicts with the normal plugin
         pytest_args.extend(["-p", "no:xdist", "--use-pytest"])
-        if not options.continue_through_error and IS_CI:
-            pytest_args.append(f"--sc={stepcurrent_key}")
     else:
         # Use pytext-dist to run C++ tests in parallel as running them sequentially using run_test
         # is much slower than running them directly
@@ -1153,6 +1175,12 @@ def parse_args():
         help=("If this flag is present, we will only run test_mps and test_metal"),
     )
     parser.add_argument(
+        "--xpu",
+        "--xpu",
+        action="store_true",
+        help=("If this flag is present, we will run xpu tests except XPU_BLOCK_LIST"),
+    )
+    parser.add_argument(
         "--cpp",
         "--cpp",
         action="store_true",
@@ -1224,6 +1252,18 @@ def parse_args():
         default=strtobool(os.environ.get("CONTINUE_THROUGH_ERROR", "False")),
     )
     parser.add_argument(
+        "--pipe-logs",
+        action="store_true",
+        help="Print logs to output file while running tests.  True if in CI and env var is not set",
+        default=IS_CI and not strtobool(os.environ.get("VERBOSE_TEST_LOGS", "False")),
+    )
+    parser.add_argument(
+        "--enable-timeout",
+        action="store_true",
+        help="Set a timeout based on the test times json file.  Only works if there are test times available",
+        default=IS_CI and not strtobool(os.environ.get("NO_TEST_TIMEOUT", "False")),
+    )
+    parser.add_argument(
         "additional_unittest_args",
         nargs="*",
         help="additional arguments passed through to unittest, e.g., "
@@ -1241,6 +1281,11 @@ def parse_args():
         "--exclude-jit-executor",
         action="store_true",
         help="exclude tests that are run for a specific jit config",
+    )
+    parser.add_argument(
+        "--exclude-torch-export-tests",
+        action="store_true",
+        help="exclude torch export tests",
     )
     parser.add_argument(
         "--exclude-distributed-tests",
@@ -1315,6 +1360,7 @@ def must_serial(file: Union[str, ShardedTest]) -> bool:
         or file in CI_SERIAL_LIST
         or file in JIT_EXECUTOR_TESTS
         or file in ONNX_SERIAL_LIST
+        or NUM_PROCS == 1
     )
 
 
@@ -1359,6 +1405,12 @@ def get_selected_tests(options) -> List[str]:
         # Exclude all mps tests otherwise
         options.exclude.extend(["test_mps", "test_metal"])
 
+    if options.xpu:
+        selected_tests = exclude_tests(XPU_BLOCKLIST, selected_tests, "on XPU")
+    else:
+        # Exclude all xpu specifc tests otherwise
+        options.exclude.extend(XPU_TEST)
+
     # Filter to only run onnx tests when --onnx option is specified
     onnx_tests = [tname for tname in selected_tests if tname in ONNX_TESTS]
     if options.onnx:
@@ -1376,6 +1428,9 @@ def get_selected_tests(options) -> List[str]:
 
     if options.exclude_inductor_tests:
         options.exclude.extend(INDUCTOR_TESTS)
+
+    if options.exclude_torch_export_tests:
+        options.exclude.extend(TORCH_EXPORT_TESTS)
 
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
     if torch.version.cuda is not None:
@@ -1641,7 +1696,6 @@ def run_tests(
 def check_pip_packages() -> None:
     packages = [
         "pytest-rerunfailures",
-        "pytest-shard",
         "pytest-flakefinder",
         "pytest-xdist",
     ]

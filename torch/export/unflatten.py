@@ -2,6 +2,7 @@ import abc
 import copy
 import operator
 from copy import deepcopy
+from itertools import chain
 from typing import Any, cast, Dict, List, Optional, Union
 
 import torch
@@ -36,6 +37,10 @@ def _assign_attr(
             setattr(to_module, item, t)
         to_module = t
 
+    if isinstance(from_obj, torch.ScriptObject):
+        setattr(to_module, field, from_obj)
+        return
+
     # If it is a tensor and not a parameter attribute of a module, it should be a named buffer.
     # So, we register it as a named buffer in the target module.
     if not isinstance(from_obj, torch.Tensor):
@@ -56,12 +61,10 @@ class InterpreterModule(torch.nn.Module):
     def __init__(
         self,
         graph: torch.fx.Graph,
-        module_call_signature: Optional[ModuleCallSignature],
     ):
         super().__init__()
         self.graph = graph
         self.graph.owning_module = self
-        self.module_call_signature = module_call_signature
 
     def forward(self, *args, **kwargs):
         assert self.graph_module is not None, "Didn't finalize this InterpreterModule"
@@ -168,9 +171,25 @@ class UnflattenedModule(torch.nn.Module):
                 is_parameter=False,
             )
 
+        for fqn in chain(
+            self.graph_signature.lifted_tensor_constants,
+            self.graph_signature.lifted_custom_objs,
+        ):
+            constant = export_module.constants[fqn]
+            if isinstance(constant, torch.Tensor):
+                constant = constant.clone()
+            _assign_attr(
+                constant,
+                self,
+                fqn,
+                is_parameter=False,
+            )
+
         inputs_to_state: Dict[str, str] = {
             **self.graph_signature.inputs_to_parameters,
             **self.graph_signature.inputs_to_buffers,
+            **self.graph_signature.inputs_to_lifted_tensor_constants,
+            **self.graph_signature.inputs_to_lifted_custom_objs,
         }
 
         _sink_params(self, inputs_to_state, [])
@@ -437,9 +456,7 @@ class _ModuleFrame:
         if module is not None:
             self.module = module
         else:
-            self.module = InterpreterModule(
-                torch.fx.Graph(), module_call_graph.get(self.fqn)
-            )
+            self.module = InterpreterModule(torch.fx.Graph())
         if self.module_id in self.seen_modules:
             self.cached_graph_module = self.seen_modules[self.module_id]
         else:
@@ -605,12 +622,19 @@ class _ModuleFrame:
         if parent_out is None:
             return
 
+        parent_out.meta["val"] = (
+            graph_outputs.meta.get("val")
+            if isinstance(graph_outputs, torch.fx.Node)
+            else [o.meta.get("val") for o in graph_outputs]
+        )
+
         if len(orig_outputs) == 1 and signature is None:
             self.parent.node_map[orig_outputs[0]] = parent_out
         else:
             for i, orig_output in enumerate(orig_outputs):
                 # Use Proxy to record getitem access.
                 proxy_out = torch.fx.Proxy(parent_out)[i].node  # type: ignore[index]
+                proxy_out.meta["val"] = orig_output.meta.get("val")
                 self.parent.node_map[orig_output] = proxy_out
 
         if self.cached_graph_module is not None:
@@ -737,7 +761,7 @@ def _sink_params(
     inputs_to_state: Dict[str, str],
     scope: List[str],
 ):
-    """Sink params and buffers from graph inputs into get_attr nodes.
+    """Sink params, buffers, and constants from graph inputs into get_attr nodes.
 
     Exported modules are purely functional, so they pass their parameters and
     buffers in as inputs to the graph.
@@ -785,7 +809,7 @@ def _sink_params(
                 continue
             attr_path = state_name[len(scope) :]
             state_attr = _recursive_getattr(module, attr_path)
-            assert isinstance(state_attr, torch.Tensor)
+            assert isinstance(state_attr, (torch.Tensor, torch.ScriptObject))
 
             # Make sure the newly created get_attr node is placed after the last placeholder node
             with graph.inserting_after(the_last_input):
