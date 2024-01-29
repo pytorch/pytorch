@@ -246,12 +246,18 @@ class ExportedProgram:
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         import torch._export.error as error
 
-        reordered_kwargs = reorder_kwargs(kwargs, self.call_spec.in_spec)
-        flat_args, received_spec = pytree.tree_flatten((args, reordered_kwargs))
-        if received_spec != self.call_spec.in_spec:
+        in_spec = self.call_spec.in_spec
+        if in_spec is not None:
+            kwargs = reorder_kwargs(kwargs, in_spec)
+
+        flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
+            (args, kwargs)
+        )
+
+        if in_spec is not None and received_spec != in_spec:
             raise ValueError(
                 "Trying to flatten user inputs with exported input tree spec: \n"
-                f"{self.call_spec.in_spec}\n"
+                f"{in_spec}\n"
                 "but actually got inputs with tree spec of: \n"
                 f"{received_spec}"
             )
@@ -266,7 +272,8 @@ class ExportedProgram:
                 additional_inputs.append(self.constants[input_.target])
         additional_inputs = tuple(additional_inputs)
 
-        self._check_input_constraints(flat_args, args, kwargs)
+        self._check_input_constraints(flat_args_with_path)
+        flat_args = [x[1] for x in flat_args_with_path]
 
         # NOTE: calling convention is first params, then buffers, then args as user supplied them.
         # See: torch/_functorch/aot_autograd.py#L1034
@@ -562,7 +569,7 @@ class ExportedProgram:
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
         return transformed_ep
 
-    def _check_input_constraints(self, flat_args, args, kwargs):
+    def _check_input_constraints(self, flat_args_with_path):
         from torch._export.utils import _check_input_constraints_for_graph
 
         placeholders = [p for p in self.graph.nodes if p.op == "placeholder"]
@@ -572,7 +579,7 @@ class ExportedProgram:
             if s.kind == InputKind.USER_INPUT
         ]
         _check_input_constraints_for_graph(
-            input_placeholders, flat_args, args, kwargs, self.range_constraints
+            input_placeholders, flat_args_with_path, self.range_constraints
         )
 
     def _validate(self):
