@@ -2945,7 +2945,7 @@ class CPUReproTests(TestCase):
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
-    def test_symbolic_shape(self):
+    def test_symbolic_shape_scalar_value_reduction(self):
         def fn(x, y):
             return y + torch.ones(x).sum()
 
