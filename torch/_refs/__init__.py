@@ -1675,7 +1675,8 @@ def rsub(
     if isinstance(a, Number):
         msg = "Received a Number for the first argument, but expected a Tensor"
         raise ValueError(msg)
-    return sub(b, a, alpha=alpha)
+
+    return torch.sub(b, a, alpha=alpha if alpha else 1)
 
 
 # TODO: consider refactoring this with add impl
