@@ -351,13 +351,8 @@ configure_file("${TORCH_SRC_DIR}/csrc/api/include/torch/version.h.in"
 
 set(GENERATED_CXX_TORCH
   "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/ViewFuncs.cpp"
   )
-
-if(NOT INTERN_DISABLE_AUTOGRAD)
-  list(APPEND GENERATED_CXX_TORCH
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/ViewFuncs.cpp"
-  )
-endif()
 
 if(NOT INTERN_DISABLE_AUTOGRAD AND NOT BUILD_LITE_INTERPRETER)
   list(APPEND GENERATED_CXX_TORCH
@@ -386,12 +381,12 @@ endif()
 set(GENERATED_H_TORCH
   "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.h"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/variable_factories.h"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/ViewFuncs.h"
   )
 
 if(NOT INTERN_DISABLE_AUTOGRAD)
   list(APPEND GENERATED_H_TORCH
     "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.h"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/ViewFuncs.h"
     "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyIr.h"
     "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyNonNativeIr.h"
     "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyNativeFunctions.h"
