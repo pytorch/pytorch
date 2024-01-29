@@ -8,7 +8,7 @@ from torch._dynamo import disable
 import functools
 import itertools
 from typing import Any, Optional, Dict, Callable, List
-from torch._subclasses.async_tensor import AsyncTensor, fake_mode, TensorContainer
+from torch._subclasses.async_tensor import AsyncTensor, get_fake_mode, TensorContainer
 from collections import defaultdict, OrderedDict
 import weakref
 import threading
@@ -102,7 +102,7 @@ class AsyncFuncHandle:
     self.outs_async = tuple(
       AsyncTensor(
         # TODO: the handling for `out_fake is None` case seems dicey here.
-        fake_tensor=out_fake if out_fake is not None else fake_mode.from_tensor(torch.zeros([])),
+        fake_tensor=out_fake if out_fake is not None else get_fake_mode().from_tensor(torch.zeros([])),
         handle=None,
         materialized_tensor_container=TensorContainer()
       ) for out_fake in self.outs_fake
@@ -546,8 +546,8 @@ Please do not register the same function with different segment prefixes.
       if isinstance(arg, AsyncTensor):
         args_fake.append(arg._fake_tensor)
       elif isinstance(arg, torch.Tensor):
-        args_fake.append(fake_mode.from_tensor(arg))
-    with fake_mode:
+        args_fake.append(get_fake_mode().from_tensor(arg))
+    with get_fake_mode():
       outs_fake = gm(*args_fake)
 
     if gm in self._gm_to_handle_map:

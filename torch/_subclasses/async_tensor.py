@@ -7,11 +7,15 @@ from torch.overrides import get_default_nowrap_functions
 from torch._tensor import _convert
 from torch._functorch._aot_autograd.functional_utils import is_fun
 
-from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
 import traceback
 
 # TODO: what's the point of using fake_tensor in AsyncTensor class?
-fake_mode = FakeTensorMode()
+fake_mode = None
+def get_fake_mode():
+  global fake_mode
+  if fake_mode is None:
+    fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+  return fake_mode
 
 
 class TensorContainer:
@@ -29,7 +33,7 @@ class TensorContainer:
 
 class AsyncTensor(torch.Tensor):
   # _unused_real_tensor: torch.Tensor
-  _fake_tensor: FakeTensor
+  _fake_tensor: "FakeTensor"
   _handle: "AsyncFuncHandle"
   _materialized_tensor_container: TensorContainer
   __slots__ = ["_fake_tensor", "_handle", "_materialized_tensor_container"]
@@ -180,7 +184,7 @@ class AsyncTensor(torch.Tensor):
           return False
         """
         # breakpoint()
-        out = AsyncTensor(fake_tensor=fake_mode.from_tensor(out), handle=None, materialized_tensor_container=TensorContainer(out))
+        out = AsyncTensor(fake_tensor=get_fake_mode().from_tensor(out), handle=None, materialized_tensor_container=TensorContainer(out))
       # print(f"in dispatch: out._is_view(): {out._is_view()}")
       return out
       # return return_and_correct_aliasing(func, args, kwargs, out)

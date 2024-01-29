@@ -283,12 +283,12 @@ class TestLazyScheduler(TestCase):
           result = lazy_scheduler(*inps_ls)
           if not fwd_only:
             result.sum().backward()
-      prof.export_chrome_trace(profiler_trace_path)
-      if not os.path.exists(profiler_trace_path):
-        raise Exception(f"[ERROR] The trace file doesn't exist: {profiler_trace_path}")
-      manifold_path = upload_trace_file(profiler_trace_path)
-      if manifold_path:
-          print_perfetto_ui_url(manifold_path)
+      # prof.export_chrome_trace(profiler_trace_path)
+      # if not os.path.exists(profiler_trace_path):
+      #   raise Exception(f"[ERROR] The trace file doesn't exist: {profiler_trace_path}")
+      # manifold_path = upload_trace_file(profiler_trace_path)
+      # if manifold_path:
+      #     print_perfetto_ui_url(manifold_path)
 
       if debug_mode:
         lazy_scheduler.debug()
