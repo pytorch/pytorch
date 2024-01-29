@@ -496,6 +496,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
     def make(value, source=None, **kwargs):
         if value.__name__ == "cond":
             return CondHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "while_loop":
+            return WhileLoopHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in ("map", "map_impl"):
             return MapHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "executorch_call_delegate":
@@ -726,6 +728,144 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         return _call_function_and_unflatten_output(
             tx, torch.ops.higher_order.cond, p_args, {}, true_r, true_treespec
+        )
+
+
+class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    @raise_hard_error_if_graph_break(
+        reason="while_loop doesn't work unless it is captured completely with torch.compile."
+    )
+    def call_function(
+        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+    ) -> VariableTracker:
+        from . import NestedUserFunctionVariable, TensorVariable, UserFunctionVariable
+
+        args, kwargs = VariableTracker.apply(lambda x: x.realize(), (args, kwargs))
+
+        for i, k in enumerate(["cond_fn", "body_fn", "operands"]):
+            if v := kwargs.pop(k, None):
+                assert i == len(
+                    args
+                ), "did not provide the right number of non-keyword args"
+                args.append(v)
+
+        if kwargs:
+            unimplemented(
+                f"torch.while_loop: Got unexpected kwargs: {list(kwargs.keys())}"
+            )
+
+        if len(args) != 3:
+            unimplemented(
+                f"Expected 3 arguments but got {len(args)}.\n"
+                f"Usage: while_loop(cond_fn, body_fn, operands)",
+            )
+
+        def _check_supported_callable(fn_var):
+            assert isinstance(
+                fn_var,
+                (
+                    UserFunctionVariable,
+                    NestedUserFunctionVariable,
+                    NNModuleVariable,
+                    UnspecializedNNModuleVariable,
+                ),
+            ), str(type(fn_var))
+
+        _check_supported_callable(args[0])
+        _check_supported_callable(args[1])
+
+        # operands
+        if not isinstance(args[2], (ListVariable, TupleVariable)):
+            unimplemented(
+                f"Expected a tuple but got {args[2].python_type()}",
+            )
+
+        operands = args[2].unpack_var_sequence(tx)
+        if not only_consist_of(args[2], (TensorVariable,)):
+            unimplemented(
+                "Expect operands to be a tuple of pytrees that only consists of tensor leaves."
+            )
+
+        (
+            (cond_r, cond_treespec),
+            cond_graph,
+            cond_lifted_freevars,
+        ) = speculate_subgraph(
+            tx, args[0], operands, {}, "while_loop", source_target=self.value
+        )
+        cond_nn_modules = dict(tx.output.nn_modules)
+        if not isinstance(cond_r, TensorVariable):
+            unimplemented(
+                f"Expected cond_fn to return a tensor but got {cond_r.python_type()}",
+            )
+
+        cond_r_meta = _extract_tensor_metadata(
+            cond_r.proxy.node.meta["example_value"], include_contiguity=False
+        )
+        if not cond_r_meta.dtype == torch.bool or not cond_r_meta.shape == torch.Size(
+            []
+        ):
+            unimplemented(
+                f"Expected cond_fn to return a tensor with shape (,) but got {cond_r_meta.shape}"
+            )
+
+        (
+            (body_r, body_treespec),
+            body_graph,
+            body_lifted_freevars,
+        ) = speculate_subgraph(
+            tx,
+            args[1],
+            operands,
+            {},
+            "while_loop",
+            source_target=self.value,
+            should_flatten_outputs=True,
+        )
+        body_nn_modules = dict(tx.output.nn_modules)
+
+        (
+            cond_graph,
+            body_graph,
+            cond_shared,
+            body_shared,
+            cond_unique,
+            body_unique,
+        ) = _merge_graph_inputs(
+            cond_graph,
+            cond_lifted_freevars,
+            "cond_fn",
+            body_graph,
+            body_lifted_freevars,
+            "body_fn",
+        )
+        # We pick cond_shared but it shouldn't matter
+        merged_input = tuple(cond_shared + cond_unique + body_unique)
+
+        cond_name = add_subgraph(
+            tx,
+            self.source,
+            "cond_fn",
+            torch.fx.GraphModule(cond_nn_modules, cond_graph),
+        )
+        body_name = add_subgraph(
+            tx,
+            self.source,
+            "body_fn",
+            torch.fx.GraphModule(body_nn_modules, body_graph),
+        )
+
+        cond_node = make_attr(tx, cond_name)
+        body_node = make_attr(tx, body_name)
+
+        p_args = (
+            cond_node,
+            body_node,
+            merged_input,
+        )
+
+        return _call_function_and_unflatten_output(
+            tx, torch.ops.higher_order.while_loop, p_args, {}, body_r, body_treespec
         )
 
 
