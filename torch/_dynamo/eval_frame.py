@@ -370,6 +370,14 @@ class _TorchDynamoContext:
 
         # add context containing GraphModule to any GraphModule forward functions
         if isinstance(fn, torch.fx.GraphModule):
+            # Since dynamo will run the forward method for the GraphModule shortly
+            # anyways, it does not hurt to do the real recompilation here if
+            # this is a _LazyGraphModule. This makes it easier for dynamo to
+            # optimize a _LazyGraphModule.
+            from torch.fx._lazy_graph_module import _LazyGraphModule
+
+            _LazyGraphModule.force_recompile(fn)
+
             # Assume that the underlying node metadata of `fn`,
             # a GraphModule instance, accurately represents
             # all instances of type(fn).
@@ -1390,6 +1398,7 @@ def export(
                         case_name="cond_operands",
                     )
 
+            assert graph is not None
             for node in graph.graph.nodes:
                 if node.op == "get_attr" and isinstance(
                     getattr(graph, node.target), torch.Tensor
@@ -1416,6 +1425,7 @@ def export(
                 flat_args_dynamic_dims,
             )
         # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check
+        assert graph is not None
         graph.meta["input_shape_constraints"] = (
             [constraint.serializable_spec for constraint in constraints]
             if constraints
@@ -1511,27 +1521,28 @@ class TorchPatcher:
             sparse_adam,
         }
 
-        disabled_multi_tensor_opt_modules = {
-            radam,  # data-dependent control flow
+        excluded_single_tensor = {
+            radam,  # https://github.com/pytorch/pytorch/issues/117807
         }
 
         for opt_mod in optimizer_modules:
             opt_name = opt_mod.__name__.split(".")[-1]
-            multi_tensor_fn_name = f"_multi_tensor_{opt_name}"
             fused_fn_name = f"_fused_{opt_name}"
-            if (
-                hasattr(opt_mod, multi_tensor_fn_name)
-                and opt_mod in disabled_multi_tensor_opt_modules
-            ):
-                setattr(
-                    opt_mod,
-                    multi_tensor_fn_name,
-                    disable(getattr(opt_mod, multi_tensor_fn_name)),
-                )
+            single_tensor_fn_name = f"_single_tensor_{opt_name}"
 
             if hasattr(opt_mod, fused_fn_name):
                 setattr(
                     opt_mod, fused_fn_name, disable(getattr(opt_mod, fused_fn_name))
+                )
+
+            if (
+                hasattr(opt_mod, single_tensor_fn_name)
+                and opt_mod in excluded_single_tensor
+            ):
+                setattr(
+                    opt_mod,
+                    single_tensor_fn_name,
+                    disable(getattr(opt_mod, single_tensor_fn_name)),
                 )
 
         optimizer_classes = [
@@ -1540,12 +1551,12 @@ class TorchPatcher:
             if inspect.isclass(opt) and issubclass(opt, torch.optim.Optimizer)
         ]
 
-        # Note: we don't support sparsity, data-dependent control, or tracing through backwards
+        # Note: we don't support sparsity or tracing through backwards
         excluded_optimizer_classes = {
             torch.optim.SparseAdam,
-            torch.optim.RAdam,
             torch.optim.LBFGS,
         }
+
         for opt in optimizer_classes:
             if opt in excluded_optimizer_classes:
                 opt.step = disable(opt.step)
