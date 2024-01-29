@@ -187,6 +187,20 @@ class TestInductorDynamic(TestCase):
         opt_r = opt_f(x, y)
         self.assertEqual(r, opt_r)
 
+    @unittest.expectedFailure
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unwrap_storage_didnt_work_repro(self, device):
+        def f():
+            full = torch.full((), 11)
+            i0 = full.item()
+            torch._check_is_size(i0)
+            return torch.full((i0,), 0)
+
+        opt_f = torch.compile(f, fullgraph=True)
+        r = f()
+        opt_r = opt_f()
+        self.assertEqual(r, opt_r)
+
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_nonzero_size_factory_nobreak(self, device):
         def f(x, b):
@@ -296,6 +310,19 @@ class TestInductorDynamic(TestCase):
             return x.item()
 
         f(torch.tensor([3.0], device=device))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_index_select(self, device):
+        # Tests if unbacked symbols captured by inner_fn are properly tracked
+        def f(x):
+            y = x.item()
+            return torch.index_select(
+                torch.ones(y, device=device), 0, torch.tensor([0, 2, 1], device=device)
+            )
+
+        cf = torch.compile(fullgraph=True)(f)
+        arg = torch.tensor(5, device=device)
+        self.assertEqual(f(arg), cf(arg))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unbacked_matmul(self, device):
