@@ -5,8 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace torch {
-namespace xpu {
+namespace torch::xpu {
 
 /// Returns the number of XPU devices available.
 size_t TORCH_API device_count();
@@ -17,5 +16,4 @@ bool TORCH_API is_available();
 /// Waits for all kernels in all streams on a XPU device to complete.
 void TORCH_API synchronize(int64_t device_index);
 
-} // namespace xpu
-} // namespace torch
+} // namespace torch::xpu
