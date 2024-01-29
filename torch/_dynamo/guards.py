@@ -657,7 +657,10 @@ class GuardBuilder(GuardBuilderBase):
             # Export keeps static.
             ignore_static=(not self.check_fn_manager.output_graph.export),
         )
-        output_graph.shape_env.freeze()
+        # When exporting, we may work with the shape constraints some more in
+        # postprocessing, so don't freeze yet
+        if not self.check_fn_manager.output_graph.export:
+            output_graph.shape_env.freeze()
         for shape_guard in guards:
             self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
