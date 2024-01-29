@@ -748,7 +748,7 @@ class GitHubPR:
         # work for ghstack where the base is the custom branch, i.e. gh/USER/ID/base,
         # so let's just use main instead
         self.merge_base = gh_fetch_merge_base(
-            self.org, self.project, last_commit_oid, "main"
+            self.org, self.project, last_commit_oid, self.default_branch()
         )
 
         # Fallback to baseRefOid if the API call fails, i.e. rate limit. Note that baseRefOid
@@ -2307,7 +2307,6 @@ def main() -> None:
             get_ghstack_prs(repo, pr)  # raises error if out of sync
         pr.merge_changes(
             repo,
-            branch="main",
             skip_mandatory_checks=True,
             skip_all_rule_checks=True,
         )
