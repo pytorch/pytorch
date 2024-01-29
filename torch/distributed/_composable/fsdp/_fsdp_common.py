@@ -58,9 +58,15 @@ class HSDPMeshInfo(FSDPMeshInfo, DDPMeshInfo):
 
 
 class TrainingState(Enum):
+    """Describes the training state of one FSDP state / parameter group."""
+
+    # Transition to forward starting pre-forward until post-forward
     FORWARD = auto()
+    # Transition to pre-backward when unsharding in backward
     PRE_BACKWARD = auto()
+    # Transition to post-backward when resharding and reducing gradients
     POST_BACKWARD = auto()
+    # Idle before/after forward or before pre-backward/after post-backward
     IDLE = auto()
 
 
@@ -75,7 +81,7 @@ def _is_composable_with_fsdp(module: nn.Module) -> bool:
     registry = _get_registry(module)
     if registry is None:
         return True
-    # TODO: Add the TorchRec composable API name.
+    # Registry keys by function name
     return "replicate" not in registry
 
 
