@@ -1354,6 +1354,52 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         self.assertEqual(backend.comm_split_count(), 1)
         self.assertEqual(tensor, original_tensor)
 
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_non_blocking_init(self):
+        # Test creating a pg using nonblocking mode but not eagerly
+        os.environ["TORCH_NCCL_USE_COMM_NONBLOCKING"] = "1"
+        os.environ["TORCH_NCCL_NONBLOCKING_TIMEOUT"] = "100"
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = self.rank_to_GPU[self.rank][0]
+        pg = self._create_process_group_nccl(store, self.opts())
+        backend = pg._get_backend(torch.device(device))
+        self.assertEqual(backend.comm_split_count(), 0)
+        reduce_tensor = torch.rand(10, 10, device=device)
+        # Run an allreduce, which should trigger a comm init for pg
+        pg.allreduce(reduce_tensor).wait()
+        new_pg = c10d.new_group()
+        # even after pg's collective call, new pg's comm is not initialized until its own collectcive calls
+        self.assertEqual(backend.comm_split_count(), 0)
+        broadcast_tensor = torch.tensor([self.rank]).cuda(device)
+        new_pg.broadcast(broadcast_tensor, 0).wait()
+        self.assertEqual(backend.comm_split_count(), 1)
+
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_non_blocking_with_eager_init(self):
+        # Test creating a pg eagerly with nonblocking mode when
+        # we've passed a specific device_id to init_process_group.
+        os.environ["TORCH_NCCL_USE_COMM_NONBLOCKING"] = "1"
+        os.environ["TORCH_NCCL_NONBLOCKING_TIMEOUT"] = "100"
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f'cuda:{self.rank}')
+        # bound device to triger eager init mode
+        pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
+        backend = pg._get_backend(torch.device(device))
+        self.assertEqual(backend.comm_split_count(), 0)
+        reduce_tensor = torch.rand(10, 10, device=device)
+        # Run an allreduce, comm should have already started initilizaing,
+        # but allreduce is issued to CUDA STREAM only after the initialization is a success
+        pg.allreduce(reduce_tensor).wait()
+        new_pg = c10d.new_group()
+        # even after pg's collective call, new pg's comm is not initialized until its own collectcive calls
+        self.assertEqual(backend.comm_split_count(), 0)
+        broadcast_tensor = torch.tensor([self.rank]).cuda(device)
+        new_pg.broadcast(broadcast_tensor, 0).wait()
+        self.assertEqual(backend.comm_split_count(), 1)
+
 
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
