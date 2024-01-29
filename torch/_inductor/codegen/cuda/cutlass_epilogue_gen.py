@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Optional
 from unittest.mock import patch
 
 import sympy
@@ -45,7 +45,9 @@ class CutlassEVTEpilogueTypeFormatter:
 
     """
 
-    def __init__(self, accumulator_node_name, evt_type_name):
+    def __init__(
+        self, accumulator_node_name, evt_type_name, pre_fused_evt: Optional[str] = None
+    ):
         """
 
         Initialize an instance of CutlassEVTEpilogueTypeFormatter.
@@ -54,19 +56,23 @@ class CutlassEVTEpilogueTypeFormatter:
         - accumulator_node_name (str): The name of the output Buffer for the GEMM operation in the original (unfused)
                                        IR graph.
         - evt_type_name (str):      The output name of the EVT type we are generating.
+        - pre_fused_evt (Optional[str]): Optional EVT expression declaration that is pre-fused into the template
+                                    (typically addmm style bias addition etc.)
 
         """
         self.accumulator_node_name = accumulator_node_name
         self.output = IndentedBuffer(0)
         self.var_counter = 0
         self.evt_type_name = evt_type_name
-        self.aliases = dict()
+        self.aliases: Dict[str, Optional[str]] = dict()
+        self.pre_fused_evt = pre_fused_evt
 
     @staticmethod
     def ir_to_evt_string(
         template_output_node_name: str,
         evt_type_name: str,
         epilogue_nodes: List[IRNode],
+        pre_fused_evt: Optional[str] = None,
     ):
         """
         Formats IR nodes into a string representation compatible with Cutlass EVT format.
@@ -76,17 +82,26 @@ class CutlassEVTEpilogueTypeFormatter:
             evt_type_name (str): The name of the EVT type.
             epilogue_nodes (List[IRNode]): A list of IR nodes representing the epilogue nodes. As of now, these must be
                 ComputedBuffer nodes wrapping Pointwise nodes.
+            pre_fused_evt: Optional EVT expression declaration that is pre-fused into the template
+                           (typically addmm style bias addition etc.)
 
         Returns:
             A string representation of the IR nodes formatted according to the Cutlass EVT format.
         """
+        if epilogue_nodes is None:
+            epilogue_nodes = []
+        if pre_fused_evt is None and len(epilogue_nodes) == 0:
+            return f"using {evt_type_name} = cutlass::epilogue::fusion::Sm90AccFetch"
+
         formatter = CutlassEVTEpilogueTypeFormatter(
-            template_output_node_name, evt_type_name
+            template_output_node_name, evt_type_name, pre_fused_evt
         )
 
-        with virtualized.V.set_ops_handler(formatter), patch.object(
+        with virtualized.V.set_ops_handler(formatter), patch.object(  # type: ignore[call-arg]
             FlexibleLayout, "allow_indexing", True
         ):
+            if pre_fused_evt is not None:
+                result = formatter.pre_fused_expr(pre_fused_evt)
             for node in epilogue_nodes:
                 if isinstance(node, ComputedBuffer):
                     pnode = node.data
@@ -98,14 +113,32 @@ class CutlassEVTEpilogueTypeFormatter:
                 index = pnode._index(pnode.ranges)
                 result = pnode.inner_fn(index)
                 # each epilogue node results in a single "using" statement and may refer to the previous steps by name
-                formatter.aliases[node.name] = result
-            res = formatter.getvalue(result)  # type: ignore[possibly-undefined]
+                if node.name is not None:
+                    formatter.aliases[node.name] = result
+            res = formatter.getvalue(result)
             if _MAGIC_SYMPY_ERROR_STRING in res:
                 raise CUTLASSEVTOpNotImplementedError(
                     "sympy / indexing expressions not yet supported in EVT fusion"
                 )
             else:
                 return res
+
+    @staticmethod
+    def create_pre_fused_addmm_evt_type() -> str:
+        """returns the name of the ADDMM EVT type which has been declared like this:
+
+        using ADDMM_EVT =  // alpha * acc + beta * C
+            cutlass::epilogue::fusion::Sm90EVT<cutlass::epilogue::fusion::Sm90Compute<cutlass::homogeneous_multiply_add,
+                        ElementD, ElementCompute, RoundStyle>, // beta * C + (alpha * acc)
+                  cutlass::epilogue::fusion::Sm90ScalarBroadcast<ElementScalar>, // beta
+                  cutlass::epilogue::fusion::Sm90SrcFetch, // C
+                  cutlass::epilogue::fusion::Sm90EVT<cutlass::epilogue::fusion::Sm90Compute<cutlass::multiplies,
+                        ElementCompute, ElementCompute, RoundStyle>, // alpha * acc
+                    cutlass::epilogue::fusion::Sm90ScalarBroadcast<ElementScalar>, // alpha
+                    cutlass::epilogue::fusion::Sm90AccFetch // acc
+              >>
+        """
+        return "ADDMM_EVT"
 
     def __getattr__(self, name):
         """
@@ -134,14 +167,16 @@ class CutlassEVTEpilogueTypeFormatter:
         # Load an input to an operation. Might be the output of the matmul, the result
         # of a previous epilogue node, a constant or (TODO) an auxiliary input.
         if name == self.accumulator_node_name:
-            return f"cutlass::epilogue::fusion::Sm90AccFetch /* :={name} (matmul output in accumulator) */"
+            if self.pre_fused_evt is None:
+                return f"cutlass::epilogue::fusion::Sm90AccFetch /* :={name} (matmul output in accumulator) */"
+            else:
+                return self.pre_fused_evt
         elif name in self.aliases:
             return self.aliases[name]
         else:
-            # return f"cutlass::epilogue::fusion::Sm90SrcFetch /* :={name} */"
-            raise CUTLASSEVTOpNotImplementedError(
-                f"Operand {name} not found. Auxiliary inputs not supported yet."
-            )
+            return f"""cutlass::epilogue::fusion::Sm90EVT<
+                                cutlass::epilogue::fusion::Sm90Compute<identity_op,ElementAcc, ElementC, RoundStyle >,
+                                cutlass::epilogue::fusion::Sm90SrcFetch> /* :={name} as operand C, cast to accumulator dtype */"""
 
     def _op_constant(self, value, dtype):
         # Load a constant
@@ -208,6 +243,9 @@ class CutlassEVTEpilogueTypeFormatter:
         self.output.writeline(f"using {self.evt_type_name} = {dtype_converted_expr};")
         return self.output.getvalue()
 
+    def _op_pre_fused_expr(self, expr):
+        return expr
+
 
 class CutlassEVTEpilogueArgumentFormatter:
     """
@@ -227,7 +265,11 @@ class CutlassEVTEpilogueArgumentFormatter:
 
     """
 
-    def __init__(self, accumulator_node_name: str):
+    def __init__(
+        self,
+        accumulator_node_name: str,
+        pre_fused_evt_args: Optional[str] = None,
+    ):
         """
 
         Initializes a CutlassEVTEpilogueArgumentFormatter object. Do not instantiate directly.
@@ -236,24 +278,31 @@ class CutlassEVTEpilogueArgumentFormatter:
         Args:
             accumulator_node_name (str): The name of the accumulator node which should contain
                                           the Matmul result before fusion according to the IR graph.
+            pre_fused_evt_args (Optional[str]): Optional arguments for a pre-fused EVT expression (typically addmm args).
         """
         self.accumulator_node_name: str = accumulator_node_name  #
         self.output: IndentedBuffer = IndentedBuffer(0)  # The output buffer for codegen
         self.var_counter: int = (
             0  # used to generate variable names, incremented for each new variable
         )
+        self.pre_fused_evt_args: Optional[str] = pre_fused_evt_args
         self.aliases: Dict[str, str] = dict()  # Aliases for subexpression functors
 
     @staticmethod
     def ir_to_evt_argument_string(
         template_output_node_name: str,
         epilogue_nodes: List[IRNode],
+        pre_fused_evt_args: Optional[str] = None,
     ) -> str:
         formatter = CutlassEVTEpilogueArgumentFormatter(
-            template_output_node_name,
+            template_output_node_name, pre_fused_evt_args
         )
-
-        with virtualized.V.set_ops_handler(formatter), patch.object(
+        result = pre_fused_evt_args
+        if (pre_fused_evt_args is None) and (
+            (epilogue_nodes is None) or len(epilogue_nodes) == 0
+        ):
+            return "{}"
+        with virtualized.V.set_ops_handler(formatter), patch.object(  # type: ignore[call-arg]
             FlexibleLayout, "allow_indexing", True
         ):
             for node in epilogue_nodes:
@@ -263,8 +312,8 @@ class CutlassEVTEpilogueArgumentFormatter:
                 index = pnode._index(pnode.ranges)
                 result = pnode.inner_fn(index)
                 # each epilogue node results in a single "using" statement and may refer to the previous steps by name
-                if node.name is not None:
-                    formatter.aliases[node.name] = result
+                if node.name is not None and result is not None:
+                    formatter.aliases[node.name] = result  # type: ignore[assignment]
 
             res: str = formatter.getvalue(result)  # type: ignore[possibly-undefined]
             if _MAGIC_SYMPY_ERROR_STRING in res:
@@ -273,6 +322,24 @@ class CutlassEVTEpilogueArgumentFormatter:
                 )
             else:
                 return res
+
+    @staticmethod
+    def create_pre_fused_addmm_arg_str(alpha: float, beta: float) -> str:
+        return """
+        {  // ADDMM Arguments: ternary op : beta * C + (alpha * acc)
+          {{static_cast<ElementAcc>(%f)}}, // leaf op+args : beta
+          {},               // leaf op+args : C
+          {                 // binary op : alpha * acc
+            {{static_cast<ElementAcc>(%f)}}, // leaf op+args : alpha
+            {},                // leaf op+args : acc
+            {}              // binary args : multiplies
+          },                // end binary op
+          {} // ternary args : multiply_add
+        }   // end ternary op
+        """ % (  # noqa: UP031
+            beta,
+            alpha,
+        )
 
     def __getattr__(self, name):
         def inner(*args, **kwargs):
@@ -292,13 +359,14 @@ class CutlassEVTEpilogueArgumentFormatter:
 
     def _op_load(self, name, index_expr):
         if name == self.accumulator_node_name:
-            return "{}"
+            if self.pre_fused_evt_args is None:
+                return "{}"
+            else:
+                return self.pre_fused_evt_args
         elif name in self.aliases:
             return self.aliases[name]
         else:
-            raise CUTLASSEVTOpNotImplementedError(
-                f"Operand {name} not found. Auxiliary inputs not supported yet."
-            )
+            return "{}"
 
     def _op_constant(self, value, dtype):
         if str(dtype) in ("torch.float16", "torch.float32"):
