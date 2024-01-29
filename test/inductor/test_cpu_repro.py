@@ -63,6 +63,14 @@ aten = torch.ops.aten
 check_model = test_torchinductor.check_model
 
 
+@contextlib.contextmanager
+def set_num_threads(num_threads):
+    orig_num_threads = torch.get_num_threads()
+    torch.set_num_threads(num_threads)
+    yield
+    torch.set_num_threads(orig_num_threads)
+
+
 class LstmModule(torch.nn.Module):
     def __init__(
         self,
@@ -596,6 +604,39 @@ class CPUReproTests(TestCase):
                 fn,
                 (x,),
             )
+
+    def test_acosh_with_negative_large_input(self):
+        # https://github.com/pytorch/pytorch/issues/118267.
+
+        def fn(input):
+            out = torch.acosh(input)
+            return out
+
+        x = torch.Tensor(
+            [
+                [
+                    -8493.9854,
+                    431654.1250,
+                    71741.5859,
+                    608234.5000,
+                    -103814.7500,
+                    -699397.0000,
+                    -910685.8125,
+                    -832737.1875,
+                    875343.5000,
+                ]
+            ]
+        ).repeat(3, 9)
+
+        for dtype in [torch.float32, torch.bfloat16, torch.double]:
+            with torch.no_grad():
+                torch._dynamo.reset()
+                metrics.reset()
+                _x = x.to(dtype)
+                self.common(
+                    fn,
+                    (_x,),
+                )
 
     @config.patch(implicit_fallbacks=True)
     def test_repeat_interleave(self):
@@ -1171,13 +1212,6 @@ class CPUReproTests(TestCase):
         def fn(x1, x2):
             return x1 + x2
 
-        @contextlib.contextmanager
-        def set_num_threads(num_threads):
-            orig_num_threads = torch.get_num_threads()
-            torch.set_num_threads(num_threads)
-            yield
-            torch.set_num_threads(orig_num_threads)
-
         x1 = torch.randn((10, 20))
         x2 = torch.randn((10, 20))
         with set_num_threads(1):
@@ -1396,15 +1430,37 @@ class CPUReproTests(TestCase):
             torch.randn(1, 1, 10),
         )
 
-        fn_opt = torch.compile()(fn)
-        with config.patch({"cpp.fallback_scatter_reduce_sum": False}):
-            _, code = run_and_get_cpp_code(fn_opt, *inps)
-            FileCheck().check("atomic_add").run(code)
+        def _internal_check(
+            _fn,
+            _inps,
+            _target_code_check=None,
+            _target_code_check_not=None,
+        ):
+            torch._dynamo.reset()
+            metrics.reset()
+            _fn_opt = torch.compile()(_fn)
+            _, code = run_and_get_cpp_code(_fn_opt, *inps)
+            if _target_code_check:
+                FileCheck().check(_target_code_check).run(code)
+            if _target_code_check_not:
+                FileCheck().check_not(_target_code_check_not).run(code)
 
             self.assertEqual(
-                fn(*inps),
-                fn_opt(*inps),
+                _fn(*_inps),
+                _fn_opt(*_inps),
             )
+
+        with config.patch({"cpp.fallback_scatter_reduce_sum": False}):
+            _internal_check(fn, inps, "atomic_add")
+
+        with config.patch({"cpp.fallback_scatter_reduce_sum": True}):
+            _internal_check(fn, inps, "aten.scatter_reduce_")
+
+        with set_num_threads(1):
+            _internal_check(fn, inps, _target_code_check_not="aten.scatter_reduce_")
+
+        with config.patch({"cpp.dynamic_threads": True}), set_num_threads(1):
+            _internal_check(fn, inps, "aten.scatter_reduce_")
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
