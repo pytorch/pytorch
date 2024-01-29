@@ -66,6 +66,7 @@ from .source import (
     NNModuleSource,
     NotNNModuleSource,
     NumpyTensorSource,
+    ODictGetItemSource,
     ShapeEnvSource,
     TupleIteratorGetItemSource,
     TypeSource,
@@ -369,6 +370,8 @@ class GuardBuilder(GuardBuilderBase):
                 return build(source.base).lambda_manager(from_numpy)
             elif istype(source, TupleIteratorGetItemSource):
                 return build(source.base).tuple_iterator_getitem_manager(source.index)
+            elif istype(source, ODictGetItemSource):
+                pass
             else:
                 raise AssertionError(
                     f"missing guard manager builder {source} - {source.name()}"
@@ -412,6 +415,9 @@ class GuardBuilder(GuardBuilderBase):
         version = dict_version(self.get(guard.name))
         code = f"___dict_version({ref}) == {version}"
         self._produce_guard_code(guard, [code])
+        self.get_guard_manager(guard).add_dict_version_guard(
+            self.get(guard.name), self.get_guard_str(guard, [code])
+        )
 
     def DICT_CONTAINS(self, guard: Guard, key: str, invert: bool):
         dict_ref = self.arg_ref(guard)
@@ -829,7 +835,10 @@ class GuardBuilder(GuardBuilderBase):
             # Export keeps static.
             ignore_static=(not self.check_fn_manager.output_graph.export),
         )
-        output_graph.shape_env.freeze()
+        # When exporting, we may work with the shape constraints some more in
+        # postprocessing, so don't freeze yet
+        if not self.check_fn_manager.output_graph.export:
+            output_graph.shape_env.freeze()
         for shape_guard in guards:
             self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
@@ -1375,7 +1384,9 @@ class CheckFunctionManager:
         for gcl in builder.shape_env_code:
             for code in gcl.code_list:
                 symbolic_shape_code_parts.add(code)
-                symbolic_shape_guard_str += builder.get_guard_str(gcl.guard, [code]) + "\n"
+                symbolic_shape_guard_str += (
+                    builder.get_guard_str(gcl.guard, [code]) + "\n"
+                )
                 add_code_part(code, gcl.guard)
 
         global_state = convert_frame.initial_global_state
@@ -1392,7 +1403,9 @@ class CheckFunctionManager:
             **SYMPY_INTERP,
             **CLOSURE_VARS,
         }
-        builder.add_python_lambda_leaf_guard_to_root(symbolic_shape_code_parts, symbolic_shape_guard_str, closure_vars)
+        builder.add_python_lambda_leaf_guard_to_root(
+            symbolic_shape_code_parts, symbolic_shape_guard_str, closure_vars
+        )
 
         unique_code_parts = list(unique(code_parts))
         make_guard_fn_args = ", ".join(closure_vars.keys())

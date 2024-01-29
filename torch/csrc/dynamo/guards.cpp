@@ -7,6 +7,11 @@
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_symnode.h>
 #include <torch/extension.h>
+
+#ifdef USE_CUDA
+#include <ATen/cuda/EmptyTensor.h>
+#endif
+
 #include <sstream>
 
 // For TupleIteratorGetItemAccessor, we need a fast way to retrieve the
@@ -621,27 +626,47 @@ inline static void unwrap_size_tuple(PyObject* obj, T& output) {
   }
 }
 
+template <typename T>
+inline static void _parse_empty_strided_args(
+    PyObject* args,
+    T& sizes,
+    T& strides,
+    at::ScalarType& dtype) {
+  TORCH_CHECK(PyTuple_CheckExact(args));
+  TORCH_CHECK(PyTuple_GET_SIZE(args) == 3);
+  // note PyTuple_GET_ITEM returns a borrowed ref, so no need for refcounts
+  unwrap_size_tuple(PyTuple_GET_ITEM(args, 0), sizes);
+  unwrap_size_tuple(PyTuple_GET_ITEM(args, 1), strides);
+  PyObject* py_dtype = PyTuple_GET_ITEM(args, 2);
+  TORCH_CHECK(THPDtype_Check(py_dtype));
+  dtype = reinterpret_cast<THPDtype*>(py_dtype)->scalar_type;
+}
+
 static PyObject* _empty_strided_cpu(PyObject* dummy, PyObject* args) {
   // at::empty_strided is surprising slow.  This is a lower-overhead
   // version that saves ~2us on every allocation.
   HANDLE_TH_ERRORS;
-
-  TORCH_CHECK(PyTuple_CheckExact(args));
-  TORCH_CHECK(PyTuple_GET_SIZE(args) == 3);
-
-  // note PyTuple_GET_ITEM returns a borrowed ref, so no need for refcounts
   at::SmallVector<int64_t, 8> sizes;
-  unwrap_size_tuple(PyTuple_GET_ITEM(args, 0), sizes);
-
   at::SmallVector<int64_t, 8> strides;
-  unwrap_size_tuple(PyTuple_GET_ITEM(args, 1), strides);
-
-  PyObject* py_dtype = PyTuple_GET_ITEM(args, 2);
-  TORCH_CHECK(THPDtype_Check(py_dtype));
-  at::ScalarType dtype = reinterpret_cast<THPDtype*>(py_dtype)->scalar_type;
-
+  at::ScalarType dtype;
+  _parse_empty_strided_args(args, sizes, strides, dtype);
   return THPVariable_Wrap(at::detail::empty_strided_cpu(sizes, strides, dtype));
+  END_HANDLE_TH_ERRORS;
+}
 
+static PyObject* _empty_strided_cuda(PyObject* dummy, PyObject* args) {
+  // at::empty_strided is surprising slow.  This is lower-overhead.
+  HANDLE_TH_ERRORS;
+#ifdef USE_CUDA
+  at::SmallVector<int64_t, 8> sizes;
+  at::SmallVector<int64_t, 8> strides;
+  at::ScalarType dtype;
+  _parse_empty_strided_args(args, sizes, strides, dtype);
+  return THPVariable_Wrap(at::detail::empty_strided_cuda(
+      sizes, strides, dtype, c10::DeviceType::CUDA));
+#else
+  TORCH_CHECK(false, "PyTorch compiled without USE_CUDA");
+#endif
   END_HANDLE_TH_ERRORS;
 }
 
@@ -652,6 +677,7 @@ static PyMethodDef _methods[] = {
     {"assert_size_stride", assert_size_stride, METH_VARARGS, nullptr},
     {"dict_version", dict_version, METH_VARARGS, nullptr},
     {"_empty_strided_cpu", _empty_strided_cpu, METH_VARARGS, nullptr},
+    {"_empty_strided_cuda", _empty_strided_cuda, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 static struct PyModuleDef _module = {
@@ -900,6 +926,31 @@ class TUPLE_ITERATOR_LEN : public LeafGuard {
  private:
   // Length of the guarded list
   Py_ssize_t _length;
+};
+
+class DICT_VERSION : public LeafGuard {
+ public:
+  DICT_VERSION(py::object value, py::object guard_str) : LeafGuard(guard_str) {
+    if (!PyDict_Check(value.ptr())) {
+      throw py::type_error("DICT_VERSION expects a dict");
+    }
+    _tag = get_dict_version(value.ptr());
+  }
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    return PyDict_Check(value) && get_dict_version(value) == _tag;
+  }
+
+  std::string repr_prefix() override {
+    return "DICT_VERSION";
+  }
+
+ private:
+  int64_t get_dict_version(PyObject* dict) {
+    return ((PyDictObject*)dict)->ma_version_tag;
+  }
+
+  // Length of the guarded list
+  int64_t _tag;
 };
 
 class GLOBAL_STATE : public LeafGuard {
@@ -1824,6 +1875,10 @@ PyObject* torch_c_dynamo_guards_init() {
       std::shared_ptr<TUPLE_ITERATOR_LEN>>(py_m, "TUPLE_ITERATOR_LEN")
       .def(py::init<py::object, py::str>())
       .def("__call__", &TUPLE_ITERATOR_LEN::check);
+  py::class_<DICT_VERSION, LeafGuard, std::shared_ptr<DICT_VERSION>>(
+      py_m, "DICT_VERSION")
+      .def(py::init<py::object, py::str>())
+      .def("__call__", &DICT_VERSION::check);
   py::class_<GLOBAL_STATE, LeafGuard, std::shared_ptr<GLOBAL_STATE>>(
       py_m, "GLOBAL_STATE")
       .def(py::init<py::str>())
@@ -1929,6 +1984,14 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object value,
              py::object guard_str) -> void {
             self.add_leaf_guard(std::make_shared<DICT_KEYS>(value, guard_str));
+          })
+      .def(
+          "add_dict_version_guard",
+          [](GuardManager& self,
+             py::object value,
+             py::object guard_str) -> void {
+            self.add_leaf_guard(
+                std::make_shared<DICT_VERSION>(value, guard_str));
           })
       .def(
           "add_global_state_guard",
