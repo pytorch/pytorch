@@ -725,6 +725,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   // still legacy b/c teturns multiple tensors
   m.impl("split.Tensor", split_batching_rule);
   m.impl("split_with_sizes", split_with_sizes_batching_rule);
+  m.impl("split_with_sizes_copy", split_with_sizes_batching_rule);
   m.impl("unbind.int", unbind_batching_rule);
   m.impl("cat", cat_batching_rule);
   m.impl("block_diag", block_diag_batching_rule);
