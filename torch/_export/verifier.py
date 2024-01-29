@@ -7,7 +7,6 @@ from typing import Any, Dict, final, List, Optional, Tuple, Type
 import torch
 from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.export.custom_obj import ScriptObjectMeta
 from torch.export.exported_program import ExportedProgram
 from torch.export.graph_signature import (
     CustomObjArgument,
@@ -45,7 +44,7 @@ def _check_val(node: torch.fx.Node) -> None:
             return True
         elif isinstance(val, (SymInt, SymFloat, SymBool)):
             return True
-        elif isinstance(val, ScriptObjectMeta):
+        elif isinstance(val, CustomObjArgument):
             return True
         elif isinstance(val, Iterable):
             return all(_check_correct_val(x) for x in val)
