@@ -1,7 +1,7 @@
 import logging
 import typing
 from collections import Counter
-from typing import Dict, Set
+from typing import Dict, List, Set
 
 import torch
 import torch._guards
@@ -178,6 +178,7 @@ class UniformValueConstantFolder(ConstantFolder):
         self.node_storages_ptrs: Dict[torch.fx.Node, int] = {}
         self.constant_data_ptrs: Dict[torch.fx.Node, StorageWeakRef] = {}
         # we may constant fold a tensor which in the graph has a sym size
+        # see: [constant folding refining of sym sizes of sizes]
         self.node_replacements_shapes: Dict[torch.fx.Node, List[int]] = {}
 
     def insertable_tensor_check(self, t: torch.Tensor) -> bool:
@@ -208,6 +209,14 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
     cf.run()
 
     node_replacements = cf.node_replacements
+
+    # note: [constant folding refining of sym sizes of sizes]
+    # constant folding will partially evaluate a graph such that values which have dependencies which
+    # are entirely known at compile time may also become compile time constants. in some cases,
+    # this will include symints which we had not yet previously deduced are guaranteed a
+    # constant value and is then deduced in constant folding. an example is:
+    # unbacked_symint_eq_11 = torch.full((), 11).item()
+    # torch.full((unbacked_symint_eq_11,), 0)
     node_replacements_shapes = cf.node_replacements_shapes
 
     graph = gm.graph
