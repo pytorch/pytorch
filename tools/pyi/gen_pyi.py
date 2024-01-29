@@ -1111,7 +1111,9 @@ def gen_pyi(
                     )
                 )
             ],
-            "cpu": ["def cpu(self, memory_format: torch.memory_format = torch.preserve_format) -> Tensor: ..."],
+            "cpu": [
+                "def cpu(self, memory_format: torch.memory_format = torch.preserve_format) -> Tensor: ..."
+            ],
             "numpy": ["def numpy(self, *, force: _bool = False) -> Any: ..."],
             "apply_": ["def apply_(self, callable: Callable) -> Tensor: ..."],
             "map_": [
