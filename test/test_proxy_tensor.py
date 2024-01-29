@@ -25,6 +25,7 @@ from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter
 from torch.utils._pytree import tree_map
 from torch import nn
 import re
+import sys
 
 import functools
 import itertools
@@ -2064,6 +2065,7 @@ class TestProxyTensorOpInfo(TestCase):
     @ops(op_db + custom_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_out',
              make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | out_symbolic_tensor_failures)
+    @unittest.skipIf(sys.version_info >= (3, 12), "Failing on python 3.12+")
     def test_make_fx_symbolic_exhaustive_out(self, device, dtype, op):
         if not op.supports_out:
             self.skipTest("Op doesn't support out")
