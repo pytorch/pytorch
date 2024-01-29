@@ -132,7 +132,7 @@ class CUDACPPScheduling(BaseScheduling):
                 check_layouts = [n.layout for n in template.input_nodes[:2]] + [
                     added_node.layout
                 ]
-                if not template.are_inputs_layout_compatible(
+                if not template._are_inputs_layout_compatible(
                     [n.layout for n in template.input_nodes[:2]] + [added_node.layout]
                 ):
                     log.warning(
@@ -171,7 +171,6 @@ class CUDACPPScheduling(BaseScheduling):
                     f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}. Reason: {not_implemented_op}"  # noqa: G004, B950, G004
                 )
                 return False
-        return True
         compilation_result = self.try_fused_template_compilation(
             cuda_template_buffer, epilogue_nodes + [additional_node]
         )

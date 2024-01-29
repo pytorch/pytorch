@@ -1,4 +1,3 @@
-import math
 from typing import Dict, List, Optional, Tuple
 from unittest.mock import patch
 
@@ -6,6 +5,9 @@ import sympy
 
 import torch._inductor.virtualized as virtualized
 from torch._inductor.codegen.cuda.cuda_template import CUTLASSTemplate
+from torch._inductor.codegen.cuda.pointwise_stride_utils import (
+    map_pointwise_index_to_read_strides,
+)
 from torch._inductor.ir import ComputedBuffer, FlexibleLayout, IRNode, Layout, Pointwise
 from torch._inductor.utils import IndentedBuffer
 
@@ -13,43 +15,6 @@ from torch._inductor.utils import IndentedBuffer
 # Used as a magic string to indicate an unsupported sympy expression
 # became part of generated C++ code.
 _MAGIC_SYMPY_ERROR_STRING = "[!sympy: unsupported expr!]"
-
-
-def map_pointwise_index_to_read_strides(
-    index_expr: sympy.Expr, master_layout: Layout, flip_mn: bool
-) -> List[int]:
-    """
-    Converts a sympy index expression to a list of strides, mapped to the master layout
-    """
-    free_symbols = list(index_expr.free_symbols)
-    assert len(free_symbols) <= len(
-        master_layout.stride
-    ), f"Too many free symbols in index expression {index_expr} for layout {master_layout}"
-    subs = {sym: 0 for sym in free_symbols}
-    result_strides = [0] * len(master_layout.stride)
-    sym_idx_map = list(range(len(result_strides)))
-    # flip m and n dimensions in this mapping
-    if flip_mn and len(master_layout.stride) >= 2:
-        sym_idx_map[-1] = len(master_layout.stride) - 2
-        sym_idx_map[-2] = len(master_layout.stride) - 1
-    for i in range(len(free_symbols)):
-        sym_name = free_symbols[i].name
-        assert sym_name[0] == "i"
-        sym_idx = sym_idx_map[int(sym_name[1:])]
-        assert sym_idx >= 0 and sym_idx < len(
-            master_layout.stride
-        ), f"Invalid symbol name {sym_name} in index expression {index_expr} for layout {master_layout}"
-        if i > 0:
-            subs[free_symbols[i - 1]] = 0
-        subs[free_symbols[i]] = 1
-        stride = index_expr.evalf(subs=subs)
-        assert (
-            math.isfinite(stride) and stride >= 0.0
-        ), f"Invalid stride {stride} for symbol {free_symbols[i]} in index expression {index_expr}"
-        stride = int(stride)
-        result_strides[sym_idx] = stride
-
-    return result_strides
 
 
 def _arg_parse(a):
@@ -265,6 +230,14 @@ class CutlassEVTEpilogueTypeFormatter:
             # ColBroadcast only supports 0 stages, since it doesn't use smem
             aux_load_template_args = (
                 f"0, TileShapeMNK, typename {ALD}::Element, typename {ALD}::Stride"
+            )
+        elif (
+            strides_mnl in ((0, 0, 0), (1, 1, 0), (0, 0, 1), (1, 1, 1))
+            or (strides_mnl[1] == 0 and strides_mnl[0] > 1)
+            or (strides_mnl[0] == 0 and strides_mnl[1] > 1)
+        ):
+            raise CUTLASSEVTOpNotImplementedError(
+                f"Unsupported broadcast strides for aux input {name}: {strides_mnl=}"
             )
         else:
             aux_load_op = "Sm90AuxLoad"
