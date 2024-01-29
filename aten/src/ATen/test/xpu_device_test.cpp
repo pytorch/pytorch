@@ -1,8 +1,7 @@
 #include <gtest/gtest.h>
 
-#include <aten/src/ATen/xpu/XPUContext.h>
-#include <aten/src/ATen/xpu/XPUDevice.h>
-#include <c10/xpu/XPUFunctions.h>
+#include <ATen/xpu/XPUContext.h>
+#include <ATen/xpu/XPUDevice.h>
 #include <torch/torch.h>
 
 #define ASSERT_EQ_XPU(X, Y) \
