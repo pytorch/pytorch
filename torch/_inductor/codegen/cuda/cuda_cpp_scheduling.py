@@ -4,7 +4,9 @@ from typing import cast, List, Set
 from ...._dynamo.utils import counters
 
 from ... import config, ir
-from ...codecache import code_hash, get_path
+from ...codecache import code_hash, CUDACodeCache, get_path
+
+from ...exc import CUDACompileError
 from ...ir import ComputedBuffer, CUDATemplateBuffer, Pointwise
 from ...scheduler import (
     BaseSchedulerNode,
@@ -13,6 +15,7 @@ from ...scheduler import (
     Scheduler,
     SchedulerNode,
 )
+from ...select_algorithm import NoValidChoicesError
 from ...utils import get_fused_kernel_name, get_kernel_metadata, sympy_product
 from ...virtualized import V
 from ..common import IndentedBuffer
@@ -143,10 +146,16 @@ class CUDACPPScheduling(BaseScheduling):
             )
 
             CutlassEVTEpilogueTypeFormatter.ir_to_evt_string(
-                cast(str, cuda_template_buffer.name), "anything", [additional_node]
+                cast(str, cuda_template_buffer.name),
+                "anything",
+                [additional_node],
+                gemm_output_layout=cuda_template_buffer.layout,
             )
             CutlassEVTEpilogueArgumentFormatter.ir_to_evt_argument_string(
-                cast(str, cuda_template_buffer.name), [additional_node]
+                cast(str, cuda_template_buffer.name),
+                [additional_node],
+                dry_run=True,
+                gemm_output_layout=cuda_template_buffer.layout,
             )
         except CUTLASSEVTOpNotImplementedError as e:
             not_implemented_op = str(e)
@@ -162,9 +171,21 @@ class CUDACPPScheduling(BaseScheduling):
                     f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}. Reason: {not_implemented_op}"  # noqa: G004, B950, G004
                 )
                 return False
-        if len(after_fuse_reading_buffers) > 3:
+        return True
+        compilation_result = self.try_fused_template_compilation(
+            cuda_template_buffer, epilogue_nodes + [additional_node]
+        )
+        if not compilation_result:
             log.warning(
-                f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}, since that would require auxiliary input support."  # noqa: G004, B950, G004
+                f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}, due to compilation failure, this most likely means that the fused kernel would require too much shared memory."  # noqa: G004, B950, G004
+            )
+            return False
+        try:
+            # If retuning is enabled, let's try to run the Kernel
+            cuda_template_buffer.retune(epilogue_nodes + [additional_node])
+        except NoValidChoicesError:
+            log.warning(
+                f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}, retuning did not return any viable kernel choices. This can indicate that the shared memory requirement would be too high."  # noqa: G004, B950, G004
             )
             return False
         return True
@@ -224,6 +245,22 @@ class CUDACPPScheduling(BaseScheduling):
             )
         return kernel_name
 
+    def try_fused_template_compilation(self, ctb, epilogue_ir_nodes) -> bool:
+        # Try codegen and see if we can compile the generated source
+        # this is the only reliable way to detect whether we would use too much
+        # shared memory for the fused kernel
+        if not all(isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes):
+            return False
+        kernel, render = ctb.make_kernel_render(ctb, epilogue_nodes=epilogue_ir_nodes)
+        with kernel:
+            src_code = render()
+        try:
+            CUDACodeCache.compile(src_code, "so")
+        except CUDACompileError as e:
+            log.debug(e, exc_info=False)
+            return False
+        return True
+
     def codegen_template(
         self, template_node: BaseSchedulerNode, epilogue_nodes: List[SchedulerNode]
     ):
@@ -242,6 +279,9 @@ class CUDACPPScheduling(BaseScheduling):
         assert all(
             isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes
         ), "Epilogue nodes must all be instances of ir.ComputedBuffer"
+        ctb.retune(
+            epilogue_ir_nodes  # type: ignore[arg-type]
+        )  # Retune for the epilogue nodes, if enabled ( cached )
         kernel, render = ctb.make_kernel_render(ctb, epilogue_nodes=epilogue_ir_nodes)
         with kernel:
             for node in [template_node, *epilogue_nodes]:

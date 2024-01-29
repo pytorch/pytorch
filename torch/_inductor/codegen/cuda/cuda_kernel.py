@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 from ... import ir
 from ...autotune_process import CUDABenchmarkRequest
@@ -183,6 +183,21 @@ class CUDATemplateKernel(CUDAKernel):
             return "void"
         return DTYPE_TO_CPP.get(node.get_layout().dtype)
 
+    def cutlass_dtype(self, node: IRNode, default_dtype="void") -> Optional[str]:
+        if node is None:
+            return default_dtype
+        from torch._inductor.codegen.cuda.cuda_template import CUTLASSTemplate
+
+        return CUTLASSTemplate._DTYPE_TO_CUTLASS[node.get_layout().dtype]
+
+    def max_valid_index(self, node: IRNode, default=-1):
+        if node is None:
+            return default
+        max_valid_offset = 0
+        for i in range(len(node.get_size())):
+            max_valid_offset += (node.get_size()[i] - 1) * node.get_stride()[i]
+        return max_valid_offset
+
     def offset(self, node: IRNode) -> str:
         """
         Generates code which represents offset of a given node.
@@ -228,7 +243,7 @@ class CUDATemplateKernel(CUDAKernel):
             end_index = start_index
         end_index = _normalize_idx(end_index, len(node.get_size()))
 
-        sizes = node.get_size()[start_index : end_index + 1]
+        sizes = node.get_size()[start_index : end_index + 1]  # type: ignore[union-attr]
         if len(sizes) == 0:
             return str(default_value)
 
@@ -315,9 +330,8 @@ class CUDATemplateCaller(ChoiceCaller):
 
     def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
-        return self.bmreq.benchmark(
-            *args, output_tensor=out
-        )  # @TODO: Hack for ensuring that Cutlass Kernel is preferred
+        res = self.bmreq.benchmark(*args, output_tensor=out)
+        return res
 
     def __str__(self):
         return f"CUDATemplateCaller(source_file={self.bmreq.source_file})"
