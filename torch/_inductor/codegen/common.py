@@ -224,10 +224,10 @@ class DataTypePropagation:
             "store_reduction",
         ):
             buf_name = node.args[1]
-            return V.graph.get_dtype(buf_name)
+            return V.graph.get_dtype(buf_name)  # type: ignore[arg-type]
 
         if node.target == operator.getitem:
-            return self.deduce_node_dtype(node.args[0])
+            return self.deduce_node_dtype(node.args[0])  # type: ignore[arg-type]
 
         assert isinstance(node.target, str)
 
@@ -235,7 +235,7 @@ class DataTypePropagation:
             return node.args[1]
 
         if node.target == "constant":
-            return DTYPE_TO_COMPUTATION_DTYPE[node.args[-1]]
+            return DTYPE_TO_COMPUTATION_DTYPE[node.args[-1]]  # type: ignore[index]
 
         if node.target.startswith("masked_subblock"):
             return self.deduce_node_dtype_by_subgraph(node)
@@ -983,9 +983,10 @@ class CodeGen:
 class Kernel(CodeGen):
     newvar_prefix = ""
     suffix = ""
-    overrides = None
-    load_format = None
-    store_format = None
+    overrides: Optional[Callable[[OpsHandler[Any]], OpsHandler[Any]]] = None
+    # TODO: these look dead, but with all the getattr it's hard to tell...
+    load_format: None = None
+    store_format: None = None
 
     def __init__(self, args=None, increase_kernel_count=True):
         super().__init__()
@@ -1142,7 +1143,7 @@ class Kernel(CodeGen):
             ):
                 # Skip CSE since this doesn't return an expression
 
-                if var.bounds.lower < 0:
+                if var.bounds.lower < 0:  # type: ignore[operator]
                     new_bounds = ValueRanges.unknown()
                     if var.bounds != ValueRanges.unknown() and isinstance(
                         size, sympy.Number
@@ -1153,13 +1154,13 @@ class Kernel(CodeGen):
                         neg = var.bounds & ValueRanges(-sympy.oo, -1)
                         new_bounds = ValueRanges(neg.lower + size, neg.upper + size)
                         # We don't have a good way of representing the empty range
-                        if var.bounds.upper >= 0:
+                        if var.bounds.upper >= 0:  # type: ignore[operator]
                             pos = var.bounds & ValueRanges(0, sympy.oo)
                             new_bounds = new_bounds | pos
 
                     stm = ops.add(var, self.rename_indexing(size))
                     # Mixed negative and non-negative
-                    if var.bounds.upper >= 0:
+                    if var.bounds.upper >= 0:  # type: ignore[operator]
                         lt = ops.lt(var, "0")
                         stm = ops.where(lt, stm, var)
                     new_var = self.cse.generate(self.compute, stm, bounds=new_bounds)
@@ -1309,7 +1310,7 @@ class Kernel(CodeGen):
         # adds the necessary kernel args for index expressions
         # and renames variables in index expressions to kernel arg names
         if isinstance(index, (list, tuple)):
-            return [self.rename_indexing(x) for x in index]
+            return [self.rename_indexing(x) for x in index]  # type: ignore[return-value]
         index = V.graph.sizevars.simplify(index)
         sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
         replacements = {
