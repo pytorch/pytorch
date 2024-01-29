@@ -151,6 +151,10 @@ ALLOW_LIST = [
     ("aten::quantized_rnn_tanh_cell", datetime.date(2024, 12, 31)),
     ("quantized::make_quantized_cell_params", datetime.date(2024, 12, 31)),
     ("profiler::_record_function_exit", datetime.date(2024, 12, 31)),
+    ("aten::fbgemm_pack_quantized_matrix", datetime.date(2024, 12, 31)),
+    ("aten::fbgemm_linear_int8_weight_fp32_activation", datetime.date(2024, 12, 31)),
+    ("aten::fbgemm_linear_int8_weight", datetime.date(2024, 12, 31)),
+    ("aten::fbgemm_linear_quantize_weight", datetime.date(2024, 12, 31)),
 ]
 
 ALLOW_LIST_COMPILED = [
