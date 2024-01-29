@@ -338,7 +338,8 @@ vTensor::vTensor(
     const std::vector<int64_t>& sizes,
     const api::ScalarType dtype,
     const api::StorageType storage_type,
-    const api::GPUMemoryLayout memory_layout)
+    const api::GPUMemoryLayout memory_layout,
+    const bool allocate_memory)
     : dtype_(dtype),
       memory_layout_(memory_layout),
       // Calculate sizes and strides
@@ -358,7 +359,8 @@ vTensor::vTensor(
           storage_type,
           memory_layout_,
           gpu_sizes_,
-          dtype_)) {}
+          dtype_,
+          allocate_memory)) {}
 
 vTensor::vTensor(
     api::Context* const context,
@@ -441,7 +443,8 @@ api::VulkanImage allocate_image(
     api::Context* const context_ptr,
     api::utils::uvec3& extents,
     const api::StorageType storage_type,
-    const VkFormat image_format) {
+    const VkFormat image_format,
+    const bool allocate_memory) {
   api::Adapter* adapter_ptr = context_ptr->adapter_ptr();
 
   api::ImageSampler::Properties sampler_props{
@@ -477,14 +480,16 @@ api::VulkanImage allocate_image(
       image_view_type,
       sampler_props,
       sampler,
-      true);
+      /*allow_transfer = */ true,
+      /*allocate_memory = */ allocate_memory);
 }
 
 api::VulkanBuffer allocate_buffer(
     api::Context* const context_ptr,
     const int64_t numel,
     const api::StorageType storage_type,
-    const api::ScalarType dtype) {
+    const api::ScalarType dtype,
+    const bool allocate_memory) {
   api::Adapter* adapter_ptr = context_ptr->adapter_ptr();
 
   switch (storage_type) {
@@ -496,7 +501,7 @@ api::VulkanBuffer allocate_buffer(
   }
 
   return adapter_ptr->vma().create_storage_buffer(
-      api::element_size(dtype) * numel, true);
+      api::element_size(dtype) * numel, /*gpu_only = */ true, allocate_memory);
 }
 
 vTensorStorage::vTensorStorage(
@@ -504,7 +509,8 @@ vTensorStorage::vTensorStorage(
     const api::StorageType storage_type,
     const api::GPUMemoryLayout gpu_memory_layout,
     const std::vector<int64_t>& gpu_sizes,
-    const api::ScalarType dtype)
+    const api::ScalarType dtype,
+    const bool allocate_memory)
     : context_(context),
       storage_type_{storage_type},
       extents_(
@@ -514,8 +520,14 @@ vTensorStorage::vTensorStorage(
           context_,
           extents_,
           storage_type_,
-          api::to_vkformat(dtype))),
-      buffer_(allocate_buffer(context_, buffer_length_, storage_type_, dtype)),
+          api::to_vkformat(dtype),
+          allocate_memory)),
+      buffer_(allocate_buffer(
+          context_,
+          buffer_length_,
+          storage_type_,
+          dtype,
+          allocate_memory)),
       last_access_{} {}
 
 vTensorStorage::~vTensorStorage() {
