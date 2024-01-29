@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import contextlib
 import functools
 import inspect
@@ -1304,8 +1306,6 @@ class BuiltinVariable(VariableTracker):
             if is_utils_checkpoint(member):
                 options["source"] = source
                 return build_checkpoint_variable(**options)
-            elif trace_rules.lookup(member) is not None:
-                return trace_rules.lookup(member)(member, **options)
             elif source is not None:
                 return VariableBuilder(tx, source)(member)
             else:
