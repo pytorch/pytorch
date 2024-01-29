@@ -41,7 +41,6 @@ import dataclasses
 import functools
 import gc
 import itertools
-import logging
 import operator
 import sys
 import threading
@@ -102,7 +101,8 @@ else:
         pass
 
 
-log = logging.getLogger(__name__)
+log = torch._logging.getArtifactLogger(__name__, "cudagraphs")
+
 
 from . import config
 
