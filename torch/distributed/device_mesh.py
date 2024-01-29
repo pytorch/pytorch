@@ -205,9 +205,7 @@ else:
             )
             self.mesh_dim_names = mesh_dim_names
 
-            # private field to pre-generate DeviceMesh's hash
-            self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
-            self._hash = hash((self._flatten_mesh_list, self.mesh.shape, id(self)))
+            self._hash = hash(id(self))
 
             # Skip process group initialization if xla device.
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
@@ -326,11 +324,7 @@ else:
         def __eq__(self, other: object) -> bool:
             if not isinstance(other, DeviceMesh):
                 return False
-            return (
-                self.mesh.shape == other.mesh.shape
-                and self._flatten_mesh_list == other._flatten_mesh_list
-                and id(self.mesh) == id(other.mesh)
-            )
+            return id(self) == id(other)
 
         def __getitem__(self, mesh_dim_name: str) -> "DeviceMesh":
             """

@@ -1,7 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import os
-from copy import copy
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -250,21 +249,18 @@ class DeviceMeshTestNDim(DTensorTestBase):
         mesh_tensor_2d = torch.arange(8).reshape(4, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor_2d)
         mesh2 = DeviceMesh(self.device_type, mesh_tensor_2d)
-        # we do a shallow copy here since we want the hash of mesh and mesh_copy to be the same.
-        mesh_copy = copy(mesh)
         self.assertNotEqual(hash(mesh), hash(mesh2))
         self.assertNotEqual(mesh, mesh2)
+
+        # We make a duplicate by = to make sure mesh and mesh_copy have the same reference id.
+        mesh_copy = mesh
         self.assertEqual(hash(mesh), hash(mesh_copy))
         self.assertEqual(mesh, mesh_copy)
 
         mesh_tensor_3d = torch.arange(8).reshape(2, 2, 2)
         mesh3 = DeviceMesh(self.device_type, mesh_tensor_3d)
-        # we do a shallow copy here since we want the hash of mesh3 and mesh3_copy to be the same.
-        mesh3_copy = copy(mesh3)
         self.assertNotEqual(hash(mesh), hash(mesh3))
         self.assertNotEqual(hash(mesh2), hash(mesh3))
-        self.assertEqual(hash(mesh3), hash(mesh3_copy))
-        self.assertEqual(mesh3, mesh3_copy)
 
 
 class InitDeviceMeshTest(DTensorTestBase):
