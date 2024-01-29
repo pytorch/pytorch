@@ -19,8 +19,9 @@ namespace torch::utils {
  *
  * It's important to do this correctly, because if you forget to add it you'll
  * get an oblique error message seems like "Cannot initialize CUDA without
- * ATen_cuda library" if you try to use CUDA functionality from a CPU-only
- * build, which is not good UX.
+ * ATen_cuda library" or "Cannot initialize XPU without ATen_xpu library" if you
+ * try to use CUDA or XPU functionality from a CPU-only build, which is not good
+ * UX.
  */
 void device_lazy_init(at::DeviceType device_type);
 void set_requires_device_init(at::DeviceType device_type, bool value);
