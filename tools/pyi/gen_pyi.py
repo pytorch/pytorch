@@ -710,7 +710,6 @@ def gen_pyi(
                             "dtype: _dtype",
                             "count: int = -1",
                             "offset: int = 0",
-                            "device: Optional[DeviceLikeType] = None",
                             "requires_grad: _bool = False",
                         ]
                     )
