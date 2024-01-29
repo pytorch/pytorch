@@ -225,7 +225,7 @@ def start_processes(
         redirect_std = redirs[local_rank]
         redirs[local_rank] = redirect_std | tee_std
 
-    SYS_STREAM = "" # special case to indicate to output to console
+    SYS_STREAM = ""  # special case to indicate to output to console
     stdouts = {local_rank: SYS_STREAM for local_rank in range(nprocs)}
     stderrs = {local_rank: SYS_STREAM for local_rank in range(nprocs)}
     tee_stdouts: Dict[int, str] = {}
@@ -254,7 +254,7 @@ def start_processes(
             if t & Std.ERR == Std.ERR:
                 tee_stderrs[local_rank] = stderrs[local_rank]
 
-            if local_rank not in filter_ranks:
+            if filter_ranks and local_rank not in filter_ranks:
                 # If stream is tee'd, only write to file, but don't tail
                 if local_rank in tee_stdouts:
                     tee_stdouts.pop(local_rank, None)

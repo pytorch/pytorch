@@ -376,7 +376,7 @@ import os
 import sys
 import uuid
 from argparse import REMAINDER, ArgumentParser
-from typing import Callable, List, Tuple, Union
+from typing import Callable, List, Tuple, Union, Optional, Set
 
 import torch
 from torch.distributed.argparse_util import check_env, env
@@ -554,7 +554,8 @@ def get_args_parser() -> ArgumentParser:
         action=env,
         type=str,
         default="",
-        help="Only show logs from specified ranks in console (e.g. [--filter-ranks 0 1 2] will only show logs from rank 0, 1 and 2). When used with --tee, logs will still be saved to files",
+        help="Only show logs from specified ranks in console (e.g. [--filter-ranks 0 1 2] will "
+        "only show logs from rank 0, 1 and 2). When used with --tee, logs will still be saved to files",
     )
 
     #
@@ -733,7 +734,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
 
     rdzv_endpoint = get_rdzv_endpoint(args)
 
-    ranks: Optional[List[int]] = None
+    ranks: Optional[Set[int]] = None
     if args.filter_ranks:
         try:
             ranks = set(map(int, args.filter_ranks.split(",")))
