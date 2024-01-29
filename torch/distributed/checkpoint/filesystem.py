@@ -22,11 +22,9 @@ from typing import (
 )
 
 import torch
-import torch.distributed as dist
 from torch import Tensor
 from torch._utils import _get_device_module
 from torch.distributed._shard._utils import narrow_tensor_by_index
-from torch.distributed.checkpoint._checkpointer import _Checkpointer
 from torch.futures import Future
 
 from .metadata import Metadata, MetadataIndex
@@ -337,13 +335,20 @@ class FileSystemWriter(StorageWriter):
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
         super().__init__()
-        if not isinstance(path, Path):
-            path = Path(path)
-        self.path = path
+        self._init_path(path)
         self.single_file_per_rank = single_file_per_rank
         self.sync_files = sync_files
         self.thread_count = thread_count
         self.per_thread_copy_ahead = per_thread_copy_ahead
+
+    def _init_path(self, path: Union[str, os.PathLike]) -> None:
+        if not isinstance(path, Path):
+            path = Path(path)
+        self.path = path
+
+    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+        if checkpoint_id:
+            self._init_path(checkpoint_id)
 
     def set_up_storage_writer(self, is_coordinator: bool) -> None:
         pass
@@ -440,13 +445,21 @@ class FileSystemWriter(StorageWriter):
 class FileSystemReader(StorageReader):
     def __init__(self, path: Union[str, os.PathLike]) -> None:
         super().__init__()
+        self._init_path(path)
+        self.storage_data: Dict[MetadataIndex, _StorageInfo] = dict()
+
+    def _init_path(self, path: Union[str, os.PathLike]) -> None:
         if not isinstance(path, Path):
             path = Path(path)
         self.path = path
-        self.storage_data: Dict[MetadataIndex, _StorageInfo] = dict()
 
     def _slice_file(self, file, sinfo: _StorageInfo) -> io.IOBase:
         return _create_file_view(file, sinfo.offset, sinfo.length)
+
+    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+        self.storage_data = dict()
+        if checkpoint_id:
+            self._init_path(checkpoint_id)
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         # group requests by file
@@ -500,57 +513,3 @@ class FileSystemReader(StorageReader):
 
     def prepare_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
         return global_plan
-
-
-class _FileSystemCheckpointer(_Checkpointer):
-    """An implementation of :py:class:`torch.distributed.checkpoint.checkpointer.Checkpointer`
-    for the file system. Wraps the creation and usage of ``FileSystemWriter`` and ``FileSystemReader``.
-
-    .. warning::
-        This feature is experimental and subject to removal/change.
-
-    """
-
-    def __init__(
-        self,
-        path: Union[str, os.PathLike],
-        *,
-        single_file_per_rank: bool = True,
-        sync_files: bool = True,
-        thread_count: int = 1,
-        per_thread_copy_ahead: int = 10_000_000,
-        process_group: Optional[dist.ProcessGroup] = None,
-        coordinator_rank: int = 0,
-        no_dist: bool = False,
-        load_planner: Optional[LoadPlanner] = None,
-        save_planner: Optional[SavePlanner] = None,
-    ) -> None:
-        """Initializes Checkpointing defualts, including ``FileSystemWriter`` and ``FileSystemReader``
-
-        Args:
-            path: The directory to store/load checkpoints.
-            single_file_per_rank: Produce one file per rank instead of one file per tensor/blob. Default to True.
-            sync_files: force files to be synced to permanent storage. Default to True.
-            thread_count: Number of IO threads to use to write. Default to 1.
-            per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving then. Default 10Mb.
-            process_group: ProcessGroup to be used for cross-rank synchronization.
-            coordinator_rank: Rank to use to coordinate the checkpoint. rank0 is used by default.
-            no_dist: If ``True``, distributed checkpoint will not load in SPMD style. (Default: ``False``)
-            loader_planner: Instance of LoadPlanner to use when loading.
-            save_planner: Instance of SavePlanner to use when saving.
-        """
-
-        storage_writer = FileSystemWriter(
-            path, single_file_per_rank, sync_files, thread_count, per_thread_copy_ahead
-        )
-        storage_reader = FileSystemReader(path)
-
-        super().__init__(
-            storage_writer,
-            storage_reader,
-            process_group=process_group,
-            coordinator_rank=coordinator_rank,
-            no_dist=no_dist,
-            load_planner=load_planner,
-            save_planner=save_planner,
-        )

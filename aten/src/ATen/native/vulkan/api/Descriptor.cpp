@@ -44,7 +44,9 @@ DescriptorSet& DescriptorSet::operator=(DescriptorSet&& other) noexcept {
 DescriptorSet& DescriptorSet::bind(
     const uint32_t idx,
     const VulkanBuffer& buffer) {
-  VK_CHECK_COND(buffer.has_memory(), "Buffer must be bound to memory for it to be usable");
+  VK_CHECK_COND(
+      buffer.has_memory(),
+      "Buffer must be bound to memory for it to be usable");
 
   DescriptorSet::ResourceBinding binder{};
   binder.binding_idx = idx; // binding_idx
@@ -61,7 +63,8 @@ DescriptorSet& DescriptorSet::bind(
 DescriptorSet& DescriptorSet::bind(
     const uint32_t idx,
     const VulkanImage& image) {
-  VK_CHECK_COND(image.has_memory(), "Image must be bound to memory for it to be usable");
+  VK_CHECK_COND(
+      image.has_memory(), "Image must be bound to memory for it to be usable");
 
   VkImageLayout binding_layout = image.layout();
   if (shader_layout_signature_[idx] == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {

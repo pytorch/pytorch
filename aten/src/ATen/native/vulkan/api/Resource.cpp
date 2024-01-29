@@ -92,6 +92,7 @@ VulkanBuffer::VulkanBuffer()
     : buffer_properties_{},
       allocator_(VK_NULL_HANDLE),
       memory_{},
+      owns_memory_(false),
       handle_(VK_NULL_HANDLE) {}
 
 VulkanBuffer::VulkanBuffer(
@@ -155,6 +156,7 @@ VulkanBuffer::VulkanBuffer(VulkanBuffer&& other) noexcept
 
 VulkanBuffer& VulkanBuffer::operator=(VulkanBuffer&& other) noexcept {
   VkBuffer tmp_buffer = handle_;
+  bool tmp_owns_memory = owns_memory_;
 
   buffer_properties_ = other.buffer_properties_;
   allocator_ = other.allocator_;
@@ -163,6 +165,7 @@ VulkanBuffer& VulkanBuffer::operator=(VulkanBuffer&& other) noexcept {
   handle_ = other.handle_;
 
   other.handle_ = tmp_buffer;
+  other.owns_memory_ = tmp_owns_memory;
 
   return *this;
 }
@@ -346,6 +349,7 @@ VulkanImage::VulkanImage()
       sampler_properties_{},
       allocator_(VK_NULL_HANDLE),
       memory_{},
+      owns_memory_(false),
       handles_{
           VK_NULL_HANDLE,
           VK_NULL_HANDLE,
@@ -464,11 +468,13 @@ VulkanImage::VulkanImage(VulkanImage&& other) noexcept
   other.handles_.image = VK_NULL_HANDLE;
   other.handles_.image_view = VK_NULL_HANDLE;
   other.handles_.sampler = VK_NULL_HANDLE;
+  other.owns_memory_ = false;
 }
 
 VulkanImage& VulkanImage::operator=(VulkanImage&& other) noexcept {
   VkImage tmp_image = handles_.image;
   VkImageView tmp_image_view = handles_.image_view;
+  bool tmp_owns_memory = owns_memory_;
 
   image_properties_ = other.image_properties_;
   view_properties_ = other.view_properties_;
@@ -481,6 +487,7 @@ VulkanImage& VulkanImage::operator=(VulkanImage&& other) noexcept {
 
   other.handles_.image = tmp_image;
   other.handles_.image_view = tmp_image_view;
+  other.owns_memory_ = tmp_owns_memory;
 
   return *this;
 }
