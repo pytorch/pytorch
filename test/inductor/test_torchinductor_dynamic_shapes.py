@@ -105,6 +105,33 @@ if HAS_GPU and not TEST_WITH_ASAN:
 class TestInductorDynamic(TestCase):
     compile_fn = partial(torch.compile, dynamic=True)
 
+    def setUp(self):
+        # HAS_CUDA also checks compute capability to skip tests
+        # on older devices
+        if not HAS_GPU:
+            self.skipTest("Triton not available")
+        torch._dynamo.reset()
+        super(TestCase, self).setUp()
+        # this should be in setUpClass, but device-generic tests
+        # don't work with setUpClass well (non-deterministically the wrong setUpClass is resolved),
+        # so put it in test setUp, it's cheap
+        self._stack = contextlib.ExitStack()
+        self._stack.enter_context(
+            torch._inductor.config.patch(
+                {
+                    "debug": False,
+                    "cpp.min_chunk_size": 1,
+                    "triton.autotune_pointwise": False,  # too slow
+                    "implicit_fallbacks": False,
+                }
+            )
+        )
+
+    def tearDown(self):
+        self._stack.close()
+        super(TestCase, self).tearDown()
+        torch._dynamo.reset()
+
     def test_arange_dynamic(self, device):
         def fn(a):
             batch_size = a.numel()
