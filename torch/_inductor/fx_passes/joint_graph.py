@@ -250,6 +250,12 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
             ):
                 value = node.args[1]
 
+            # refines symints, see [constant folding refining of symints] above
+            for runtime_size, compile_time_size in zip(
+                node_replacements_shapes[node], fake_tensor.shape
+            ):
+                torch._check(runtime_size == compile_time_size)
+
             # zeros, and ones just get traced into full, so we insert those
             new_node = graph.call_function(
                 aten.full.default,
