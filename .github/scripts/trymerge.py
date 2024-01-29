@@ -152,12 +152,14 @@ GH_COMMIT_AUTHORS_FRAGMENT = """
 fragment CommitAuthors on PullRequestCommitConnection {
   nodes {
     commit {
-      author {
-        user {
-          login
+      authors(first: 2) {
+        nodes {
+          user {
+            login
+          }
+          email
+          name
         }
-        email
-        name
       }
       oid
     }
@@ -608,6 +610,7 @@ def parse_args() -> Any:
     parser.add_argument("--revert", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--ignore-current", action="store_true")
+    parser.add_argument("--check-mergeability", action="store_true")
     parser.add_argument("--comment-id", type=int)
     parser.add_argument("--reason", type=str)
     parser.add_argument("pr_num", type=int)
@@ -845,14 +848,14 @@ class GitHubPR:
 
         def add_authors(info: Dict[str, Any]) -> None:
             for node in info["commits_with_authors"]["nodes"]:
-                author_node = node["commit"]["author"]
-                user_node = author_node["user"]
-                author = f"{author_node['name']} <{author_node['email']}>"
-                if user_node is None:
-                    # If author is not github user, user node will be null
-                    authors.append(("", author))
-                else:
-                    authors.append((cast(str, user_node["login"]), author))
+                for author_node in node["commit"]["authors"]["nodes"]:
+                    user_node = author_node["user"]
+                    author = f"{author_node['name']} <{author_node['email']}>"
+                    if user_node is None:
+                        # If author is not github user, user node will be null
+                        authors.append(("", author))
+                    else:
+                        authors.append((cast(str, user_node["login"]), author))
 
         info = self.info
         for _ in range(100):
@@ -948,11 +951,6 @@ class GitHubPR:
 
     def get_authors(self) -> Dict[str, str]:
         rc = {}
-        # TODO: replace with  `self.get_commit_count()` when GraphQL pagination can be used
-        # to fetch all commits, see https://gist.github.com/malfet/4f35321b0c9315bcd7116c7b54d83372
-        # and https://support.github.com/ticket/enterprise/1642/1659119
-        if self.get_commit_count() <= 250:
-            assert len(self._fetch_authors()) == self.get_commit_count()
         for idx in range(len(self._fetch_authors())):
             rc[self.get_committer_login(idx)] = self.get_committer_author(idx)
 
@@ -1068,6 +1066,7 @@ class GitHubPR:
         repo: GitRepo,
         skip_mandatory_checks: bool,
         comment_id: Optional[int] = None,
+        skip_all_rule_checks: bool = False,
     ) -> List["GitHubPR"]:
         assert self.is_ghstack_pr()
         ghstack_prs = get_ghstack_prs(
@@ -1082,7 +1081,7 @@ class GitHubPR:
             commit_msg = pr.gen_commit_message(
                 filter_ghstack=True, ghstack_deps=pr_dependencies
             )
-            if pr.pr_num != self.pr_num:
+            if pr.pr_num != self.pr_num and not skip_all_rule_checks:
                 # Raises exception if matching rule is not found
                 find_matching_merge_rule(
                     pr,
@@ -1113,6 +1112,12 @@ class GitHubPR:
             msg_body = re.sub(RE_GHSTACK_DESC, "", msg_body)
         msg = self.get_title() + f" (#{self.pr_num})\n\n"
         msg += msg_body
+
+        # Mention PR co-authors
+        for author_login, author_name in self.get_authors().items():
+            if author_login != self.get_pr_creator_login():
+                msg += f"\nCo-authored-by: {author_name}"
+
         msg += f"\nPull Request resolved: {self.get_pr_url()}\n"
         msg += f"Approved by: {approved_by_urls}\n"
         if ghstack_deps:
@@ -1199,7 +1204,11 @@ class GitHubPR:
         skip_mandatory_checks: bool = False,
         comment_id: Optional[int] = None,
         branch: Optional[str] = None,
+        skip_all_rule_checks: bool = False,
     ) -> List["GitHubPR"]:
+        """
+        :param skip_all_rule_checks: If true, skips all rule checks, useful for dry-running merge locally
+        """
         branch_to_merge_into = self.default_branch() if branch is None else branch
         if repo.current_branch() != branch_to_merge_into:
             repo.checkout(branch_to_merge_into)
@@ -1215,6 +1224,7 @@ class GitHubPR:
                 repo,
                 skip_mandatory_checks,
                 comment_id=comment_id,
+                skip_all_rule_checks=skip_all_rule_checks,
             )
 
 
@@ -2292,6 +2302,17 @@ def main() -> None:
         )
         return
 
+    if args.check_mergeability:
+        if pr.is_ghstack_pr():
+            get_ghstack_prs(repo, pr)  # raises error if out of sync
+        pr.merge_changes(
+            repo,
+            branch="main",
+            skip_mandatory_checks=True,
+            skip_all_rule_checks=True,
+        )
+        return
+
     if not args.force and pr.has_invalid_submodule_updates():
         message = (
             f"This PR updates submodules {', '.join(pr.get_changed_submodules())}\n"
@@ -2340,9 +2361,10 @@ def main() -> None:
         else:
             print("Missing comment ID or PR number, couldn't upload to Rockset")
     finally:
-        gh_remove_label(
-            org, project, args.pr_num, MERGE_IN_PROGRESS_LABEL, args.dry_run
-        )
+        if not args.check_mergeability:
+            gh_remove_label(
+                org, project, args.pr_num, MERGE_IN_PROGRESS_LABEL, args.dry_run
+            )
 
 
 if __name__ == "__main__":
