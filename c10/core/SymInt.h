@@ -364,4 +364,21 @@ DECLARE_SYMINT_OP(size_t, SymInt)
 
 C10_API std::ostream& operator<<(std::ostream& os, const SymInt& s);
 C10_API SymInt operator-(const SymInt& s);
+
+inline bool sym_eq(int64_t a, int64_t b) {
+  return a == b;
+}
+
+inline SymBool sym_eq(const SymInt& a, const SymInt& b) {
+  return a.sym_eq(b);
+}
+
+inline bool sym_ne(int64_t a, int64_t b) {
+  return a != b;
+}
+
+inline SymBool sym_ne(const SymInt& a, const SymInt& b) {
+  return a.sym_ne(b);
+}
+
 } // namespace c10

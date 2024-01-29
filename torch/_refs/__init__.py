@@ -46,6 +46,7 @@ from torch._prims_common.wrappers import (
     elementwise_unary_scalar_wrapper,
     out_wrapper,
 )
+from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, sym_eq
 
 # Experimental module containing prototype Python references for existing
 #   PyTorch operations.
@@ -3558,11 +3559,11 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
     shape = utils.infer_size(shape, a.numel())
 
     # Short-circuits if shape is the same
-    if tuple(a.shape) == tuple(shape):
+    if guard_size_oblivious(sym_eq(tuple(a.shape), tuple(shape))):
         return prims.view_of(a)
 
     # Special-cases tensors with no elements
-    if a.numel() == 0:
+    if guard_size_oblivious(a.numel() == 0):
         return as_strided(a, shape, utils.make_contiguous_strides_for(shape))
 
     # Special-cases reshaping zero dim tensors
@@ -3614,7 +3615,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             continue
 
         # Skips dimensions that are already the correct length
-        if length == a_.shape[idx]:
+        if guard_size_oblivious(length == a_.shape[idx]):
             idx = idx + 1
             continue
 
@@ -3623,7 +3624,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         # specify the same number of elements above
         accum = a_.shape[idx]
         end = idx
-        while accum % length != 0:
+        while guard_size_oblivious(accum % length != 0):
             end = end + 1
             accum = accum * a_.shape[end]
         if end != idx:
@@ -3645,7 +3646,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             a_ = flatten(a_, idx, end)
 
         # Splits the (possibly flattened) dimension to create the desired dim length
-        if accum != length:
+        if guard_size_oblivious(accum != length):
             a_ = prims.split_dim(a_, idx, length)
 
         idx = idx + 1

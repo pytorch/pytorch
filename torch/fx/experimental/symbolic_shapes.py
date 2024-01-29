@@ -84,6 +84,7 @@ __all__ = [
     "is_concrete_bool", "is_singleton", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
     "has_free_symbols", "sym_eq", "SymbolicContext", "StatelessSymbolicContext",
     "StatefulSymbolicContext", "SubclassSymbolicContext", "statically_known_true",
+    "guard_size_oblivious",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -162,6 +163,12 @@ def is_concrete_int(a: Union[int, SymInt]):
         return True
 
     return False
+
+def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
+    if isinstance(expr, torch.SymBool):
+        return expr.node.guard_size_oblivious("", 0)
+    else:
+        return expr
 
 def canonicalize_bool_expr(expr: sympy.Expr):
     r""" Canonicalize a boolean expression by transforming it into a lt / le
@@ -411,21 +418,19 @@ def guard_scalar(a):
 
 
 @record_shapeenv_event()
-def _constrain_symbol_range(shape_env, s: sympy.Symbol, compiler_min: int, compiler_max: int, runtime_min: int, runtime_max: int):
-    log.debug("_constrain_symbol_range %s [%s, %s] [%s, %s]", s, compiler_min, compiler_max, runtime_min, runtime_max)
+def _constrain_symbol_range(shape_env, s: sympy.Symbol, compiler_min: int, compiler_max: int):
+    changed = False
     if r := shape_env.var_to_range.get(s, None):
-        shape_env.var_to_range[s] = ValueRanges(
+        ret = shape_env.var_to_range[s] = ValueRanges(
             builtins.max(r.lower, compiler_min), builtins.min(r.upper, compiler_max)
         )
+        if compiler_min > r.lower or compiler_max < r.upper:
+            changed = True
     else:
-        shape_env.var_to_range[s] = ValueRanges(compiler_min, compiler_max)
-
-    if r := shape_env.runtime_var_to_range.get(s, None):
-        shape_env.runtime_var_to_range[s] = ValueRanges(
-            builtins.max(r.lower, runtime_min), builtins.min(r.upper, runtime_max)
-        )
-    else:
-        shape_env.runtime_var_to_range[s] = ValueRanges(runtime_min, runtime_max)
+        changed = True
+        ret = shape_env.var_to_range[s] = ValueRanges(compiler_min, compiler_max)
+    if changed:
+        log.info("_constrain_symbol_range %s [%s, %s]", s, ret.lower, ret.upper)
 
 
 def _advise_is_size(a):
@@ -485,25 +490,19 @@ def _constrain_range_for_size(a, min: Optional[int] = None, max: Optional[int] =
     if max is None:
         max = sympy.oo
 
-    if max <= 2:
-        raise ValueError(f"Maximum value to constrain_as_size must be greater than 2, but was {max}")
-
     if max < min:
         raise ValueError(
             "Maximum value to constrain_as_size can't be less than the specified min value, "
             "received min={min} and max={max}"
         )
 
-    compiler_min = 2 if min < 2 else min
-
     _constrain_symbol_range(
         a.node.shape_env,
         a.node.expr,
-        compiler_min=compiler_min,
+        compiler_min=min,
         compiler_max=max,
-        runtime_min=min,
-        runtime_max=max
     )
+    a.node.shape_env.size_like.add(a.node.expr)
 
 
 # inclusive both ways
@@ -532,14 +531,6 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     equal to 0/1 (even though these are perfectly possible values at runtime),
     because we generally expect graphs that are valid for N=2 to also be valid
     for N=1.
-
-    .. warning::
-        If you use constrain_range in the context of tracing, we do NOT check
-        that the constraint was actually valid at runtime!  In fact, we
-        cannot (easily) do so, as we currently unsoundly assume that unbacked
-        SymInt can never be zero/one, even if it may actually take on these
-        values at runtime (we assume that a graph that is valid for N=2 will
-        also be valid for N=1).
     """
     if min is None:
         min = -sympy.oo
@@ -572,8 +563,6 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
         a.node.expr,
         compiler_min=min,
         compiler_max=max,
-        runtime_min=min,
-        runtime_max=max
     )
 
 
@@ -584,6 +573,8 @@ def constrain_unify(a, b):
     this will not work with SymInts that represent nontrivial expressions
     (yet!)
     """
+    # TODO: this does not install a deferred runtime assert yet
+
     # TODO: Maybe dedupe this with _maybe_guard_eq?
     if not isinstance(a, SymInt):
         if not isinstance(b, SymInt):
@@ -1776,10 +1767,6 @@ class ShapeEnv:
         # practice
         self.var_to_range: Dict[sympy.Symbol, ValueRanges] = {}
         self.source_name_to_debug_name: Dict[str, str] = {}
-        # Maps symbolic ints to their min/max range for runtime checks.
-        # This is because we assume a graph generated with N=2 is general enough
-        # for N < 2. Therefore, it will be too strict to assert N=2 at runtime.
-        self.runtime_var_to_range: Dict[sympy.Symbol, ValueRanges] = {}
         self.var_to_sources: Dict[sympy.Symbol, List[Source]] = {}
         self.var_to_stack: Dict[sympy.Symbol, CapturedTraceback] = {}
         # Maps symbolic ints to the guards that refine their lower/upper
@@ -1791,6 +1778,9 @@ class ShapeEnv:
         self.replacements: Dict[sympy.Symbol, sympy.Expr] = {}  #
         # Set holds a % b expressions that evaluate to 0.
         self.divisible: Set[sympy.Expr] = set()
+        # Set that holds "size-like" expressions.  When we perform
+        # "size-oblivious" tests, these can be assumed to be >= 2.
+        self.size_like: Set[sympy.Expr] = set()
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_var: Dict[int, sympy.Expr] = {}
@@ -2539,10 +2529,6 @@ class ShapeEnv:
                 if val not in vr:
                     raise ConstraintViolationError(f"{val} not in range [{vr.lower}, {vr.upper}]")
 
-                # Initialize default runtime range to match compile time range,
-                # for backed SymInts (this is allowed to diverge for unbacked)
-                self.runtime_var_to_range[sympy_expr] = vr
-
                 range_str = f"[{vr.lower}, {vr.upper}]"
             else:
                 # Skip var_range logic for SingletonInt
@@ -3016,7 +3002,7 @@ class ShapeEnv:
         # these should probably get reported in tests too
         if not _simplified:
             for symbol, sources in symbol_to_source.items():
-                r = self.runtime_var_to_range.get(symbol)
+                r = self.var_to_range.get(symbol)
                 if r is None:
                     if symbol not in self.var_to_range:
                         continue
@@ -3092,9 +3078,6 @@ class ShapeEnv:
             # Add value range bound guards for all symbols with no trivial bounds.
             # Reason: '_maybe_evaluate_static' may eliminate guards based on the
             # refined value ranges.
-            #
-            # NB: do NOT use runtime var ranges, they're unsound!  You will
-            # only get correct TV with the compile-time ranges.
             for sym, vr in self.var_to_range.items():
                 if vr.lower != -sympy.oo:
                     self._add_target_expr(sympy.Le(vr.lower, sym))
@@ -3203,7 +3186,7 @@ class ShapeEnv:
     @_lru_cache
     def _maybe_evaluate_static(
         self, expr: "sympy.Expr", *, unbacked_only: bool = False, compute_hint: bool = False,
-        expect_rational=True,
+        expect_rational=True, size_oblivious: bool = False
     ) -> "Optional[sympy.Expr]":
         """
         Tries to evaluate expr without introducing guards
@@ -3267,6 +3250,10 @@ class ShapeEnv:
             ):
                 new_range_env[k] = vr
                 continue
+            if size_oblivious and k in self.size_like:
+                lower = 2
+            else:
+                lower = vr.lower
             # Positive means >= 1
             # Positive - 1 means >= 0
             # Positive + lower - 1 means >= lower
@@ -3275,7 +3262,7 @@ class ShapeEnv:
             # variables have to have their value range bounds adjusted as
             # well)
             s = sympy.Symbol(f"shape_{idx}", positive=True, integer=True)
-            offset = vr.lower - 1
+            offset = lower - 1
             new_shape_env[k] = s + offset
             new_range_env[s] = SymPyValueRangeAnalysis.add(vr, -offset)
 
@@ -3395,7 +3382,9 @@ class ShapeEnv:
         for s in expr.free_symbols:
             stacktrace = ''.join(self.var_to_stack[s].format())
             self.log.debug("Data dependent variable '%s' allocated at:\n%s", s, stacktrace)
+        # cpp_stack = CapturedTraceback.extract(cpp=True)
         return GuardOnDataDependentSymNode(
+            # "C++ stack trace:\n" + ''.join(cpp_stack.format()) + "\n\n"
             "It appears that you're trying to get a value out of symbolic int/float "
             "whose value is data-dependent (and thus we do not know the true value.)  "
             f"The expression we were trying to evaluate is {expr} (unhinted: {unhinted_expr}).  "
@@ -3531,9 +3520,6 @@ class ShapeEnv:
                             self.var_to_range[i1] = SymPyValueRangeAnalysis.truediv(
                                 self.var_to_range[i0], ValueRanges.wrap(d)
                             )
-                            self.runtime_var_to_range[i1] = SymPyValueRangeAnalysis.truediv(
-                                self.runtime_var_to_range[i0], ValueRanges.wrap(d)
-                            )
                             self._set_replacement(i0, d * i1)
 
             except NotImplementedError:
@@ -3635,14 +3621,25 @@ class ShapeEnv:
     @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
     def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None,
-                      expect_rational=True):
+                      expect_rational=True, size_oblivious: bool = False):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
-        if hint is None:
-            concrete_val = self.size_hint(orig_expr)
-        else:
-            concrete_val = sympy.sympify(hint)
+
+        concrete_val = None
+
+        if size_oblivious:
+            mb_static = self._maybe_evaluate_static(orig_expr,
+                                                    expect_rational=expect_rational,
+                                                    size_oblivious=True)
+            if mb_static is not None:
+                concrete_val = mb_static
+
+        if concrete_val is None:
+            if hint is None:
+                concrete_val = self.size_hint(orig_expr)
+            else:
+                concrete_val = sympy.sympify(hint)
 
         # Check if:
         #   1. 'translation_validation' is set
@@ -3696,7 +3693,8 @@ class ShapeEnv:
             expr = orig_expr
 
             static_expr = self._maybe_evaluate_static(expr,
-                                                      expect_rational=expect_rational)
+                                                      expect_rational=expect_rational,
+                                                      size_oblivious=size_oblivious)
             if static_expr is not None:
                 self.log.debug("eval %s == %s [statically known]", orig_expr, static_expr)
                 # NB: don't test float as there may be precision issues
