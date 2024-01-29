@@ -2,6 +2,7 @@ import abc
 import io
 from dataclasses import dataclass
 from enum import auto, Enum
+from functools import reduce
 from typing import Any, List, Optional, Tuple, Union
 
 import torch
@@ -48,11 +49,27 @@ class TensorWriteData:
 
 @dataclass(frozen=True)
 class WriteItem:
+    """Dataclass which holds information about what needs to be written to storage."""
+
     index: MetadataIndex
     type: WriteItemType
 
     # Value present if it's a tensor write
     tensor_data: Optional[TensorWriteData] = None
+
+    def tensor_storage_size(self) -> Optional[int]:
+        """
+        Calculates the storage size of the underlying tensor, or None if this is not a tensor write.
+
+        Returns:
+            Optional[int] storage size, in bytes of underlying tensor if any.
+        """
+        if self.tensor_data is None:
+            return None
+
+        numels = reduce(lambda x, y: x * y, self.tensor_data.size, 1)
+        dtype_size = torch._utils._element_size(self.tensor_data.properties.dtype)
+        return numels * dtype_size
 
 
 @dataclass(frozen=True)
