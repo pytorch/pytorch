@@ -3,6 +3,7 @@ import math
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Type
 
 import torch
+from torch.export._tree_utils import reorder_kwargs
 
 from torch._export import ExportedProgram
 from torch._subclasses.fake_tensor import FakeTensor
@@ -12,11 +13,11 @@ from torch.utils._pytree import (
     DumpableContext,
     FlattenFunc,
     FromDumpableContextFn,
+    KeyPath,
     keystr,
     MappingKey,
     SequenceKey,
     ToDumpableContextFn,
-    tree_flatten,
     tree_flatten_with_path,
     UnflattenFunc,
 )
@@ -27,7 +28,8 @@ SERIALIZED_DATACLASS_TO_PYTHON_DATACLASS: Dict[str, Type[Any]] = {}
 
 @torch._dynamo.disable
 def _check_input_constraints_pre_hook(self, args, kwargs):
-    flat_args, received_spec = tree_flatten((args, kwargs))
+    reordered_kwargs = reorder_kwargs(kwargs, self._in_spec)
+    flat_args_with_path, received_spec = tree_flatten_with_path((args, reordered_kwargs))
 
     if received_spec != self._in_spec:
         raise TypeError(  # noqa: TRY200
@@ -39,22 +41,18 @@ def _check_input_constraints_pre_hook(self, args, kwargs):
 
     return _check_input_constraints_for_graph(
         [node for node in self.graph.nodes if node.op == "placeholder"],
-        flat_args,
-        args,
-        kwargs,
+        flat_args_with_path,
         self.range_constraints,
     )
 
 
 def _check_input_constraints_for_graph(
-    input_placeholders: List[torch.fx.Node], flat_args, args, kwargs, range_constraints
+    input_placeholders: List[torch.fx.Node], flat_args_with_path, range_constraints
 ):
-    def get_keystr(idx: int) -> str:
+    def get_keystr(key_path: KeyPath) -> str:
         """For a given index into the flat_args, return a human readable string
         describing how to access it, e.g. "*args["foo"][0].bar"
         """
-        key_path_vals, _ = tree_flatten_with_path((args, kwargs))
-        key_path, val = key_path_vals[idx]
         # Prefix the keypath with "*args" or "**kwargs" to make it clearer where
         # the arguments come from. Ultimately we ought to serialize the
         # original arg names for the best error message here.
@@ -74,26 +72,26 @@ def _check_input_constraints_for_graph(
         _convert_range_to_int,
     )
 
-    if len(flat_args) != len(input_placeholders):
+    if len(flat_args_with_path) != len(input_placeholders):
         raise RuntimeError(
             "Unexpected number of inputs "
-            f"(expected {len(input_placeholders)}, got {len(flat_args)})"
+            f"(expected {len(input_placeholders)}, got {len(flat_args_with_path)})"
         )
     # NOTE: export already guarantees that the same symbol is used in metadata
     # for all InputDims related by equality constraints, so we can just unify
     # symbols with given input dimension values to check equality constraints.
     unification_map: "Dict[sympy.Symbol, Any]" = {}
-    for idx, (arg, node) in enumerate(zip(flat_args, input_placeholders)):
+    for ((key_path, arg), node) in zip(flat_args_with_path, input_placeholders):
         node_val = node.meta.get("val")
         if isinstance(node_val, FakeTensor):
             if not isinstance(arg, torch.Tensor):
                 raise RuntimeError(
-                    f"Expected input at {get_keystr(idx)} to be a tensor, but got {type(arg)}",
+                    f"Expected input at {get_keystr(key_path)} to be a tensor, but got {type(arg)}",
                 )
 
             if len(node_val.shape) != len(arg.shape):
                 raise RuntimeError(
-                    f"Unexpected number of dimensions in input at {get_keystr(idx)}.shape "
+                    f"Unexpected number of dimensions in input at {get_keystr(key_path)}.shape "
                     f"(expected {node_val.shape}, got {arg.shape})"
                 )
 
@@ -103,7 +101,7 @@ def _check_input_constraints_for_graph(
                         existing_dim = unification_map[node_dim.node.expr]
                         if arg_dim != existing_dim:
                             raise RuntimeError(
-                                f"Expected input at {get_keystr(idx)}.shape[{j}] to be equal to "
+                                f"Expected input at {get_keystr(key_path)}.shape[{j}] to be equal to "
                                 f"{existing_dim}, but got {arg_dim}",
                             )
                     else:
@@ -117,25 +115,25 @@ def _check_input_constraints_for_graph(
                         if min_val > 2:
                             if arg_dim < min_val:
                                 raise RuntimeError(
-                                    f"Expected input at {get_keystr(idx)}.shape[{j}] to be >= "
+                                    f"Expected input at {get_keystr(key_path)}.shape[{j}] to be >= "
                                     f"{min_val}, but got {arg_dim}",
                                 )
                         if max_val < math.inf:
                             if arg_dim > max_val:
                                 raise RuntimeError(
-                                    f"Expected input at {get_keystr(idx)}.shape[{j}] to be <= "
+                                    f"Expected input at {get_keystr(key_path)}.shape[{j}] to be <= "
                                     f"{max_val}, but got {arg_dim}",
                                 )
                 else:
                     if arg_dim != node_dim:
                         raise RuntimeError(
-                            f"Expected input at {get_keystr(idx)}.shape[{j}] to be equal to "
+                            f"Expected input at {get_keystr(key_path)}.shape[{j}] to be equal to "
                             f"{node_dim}, but got {arg_dim}",
                         )
         elif isinstance(node_val, (int, float, str)):
             if type(arg) != type(node_val) or arg != node_val:
                 raise RuntimeError(
-                    f"Expected input at {get_keystr(idx)} to be equal to {node_val}, but got {arg}",
+                    f"Expected input at {get_keystr(key_path)} to be equal to {node_val}, but got {arg}",
                 )
 
 
