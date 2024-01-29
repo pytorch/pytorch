@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import dataclasses
 import inspect
 from typing import Callable, Dict, List, Optional
