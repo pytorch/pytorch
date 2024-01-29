@@ -1,7 +1,7 @@
 import logging
 import warnings
 import weakref
-from typing import cast, List, Optional
+from typing import cast, Dict, List, Optional
 
 import torch
 import torch.distributed as dist
@@ -25,7 +25,7 @@ _wait_all
 
 logger = logging.getLogger(__name__)
 
-data_ptr_to_work = dict()
+data_ptr_to_work: Dict[int, "_WaitRegistration"] = dict()
 work_version = 0
 
 
