@@ -13,7 +13,6 @@ from .. import device as _device
 from ._utils import _dummy_type, _get_device_index
 
 _device_t = Union[_device, str, int, None]
-has_half: bool = True
 
 
 def _is_compiled() -> bool:
@@ -198,7 +197,6 @@ __all__ = [
     "get_device_capability",
     "get_device_name",
     "get_device_properties",
-    "has_half",
     "is_available",
     "is_bf16_supported",
     "set_device",
