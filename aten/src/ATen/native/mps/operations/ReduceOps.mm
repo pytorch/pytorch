@@ -1012,8 +1012,7 @@ static void cum_max_min_helper_mps(const Tensor& input,
       indicesPlaceholder.getMPSGraphTensor() : indicesPlaceholder.getMPSGraphTensorData()
     };
 
-    MPSStream* stream = getCurrentMPSStream();
-    runMPSGraph(stream, cumMaxMinCachedGraph->graph(), feeds, results);
+    runMPSGraph(getCurrentMPSStream(), cumMaxMinCachedGraph->graph(), feeds, results);
   }
 }
 
