@@ -251,9 +251,6 @@ class GuardBuilder(GuardBuilderBase):
     # (like its type) which is what you permanently install into the
     # guard code.
     def get(self, name: str) -> Any:
-        print(f"name: {name}")
-        print(f"self.scope.keys(): {self.scope.keys()}")
-        print(f"CLOSURE_VARS.keys(): {CLOSURE_VARS.keys()}")
         return eval(name, self.scope, CLOSURE_VARS)
 
     # Registers the usage of the source name referenced by the

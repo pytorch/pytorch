@@ -1403,11 +1403,9 @@ def wrap_fx_proxy_cls(
             kwargs["source"] = options["source"]
             if isinstance(example_value, torch._subclasses.async_tensor.AsyncTensor):
                 example_value = example_value.materialized_tensor
-                print("hereA3")
             example_value = wrap_to_fake_tensor_and_record(
                 example_value, tx=tx, **kwargs
             )
-            print("hereA2")
         if isinstance(example_value, torch.Tensor) and (
             maybe_get_fake_mode(example_value) is not tx.fake_mode
         ):

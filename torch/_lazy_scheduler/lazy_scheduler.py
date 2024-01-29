@@ -101,7 +101,7 @@ class AsyncFuncHandle:
     self.scheduler = weakref.ref(scheduler)
     self.outs_async = tuple(
       AsyncTensor(
-        # TODO: the handling for out_fake is None case seems dicey here.
+        # TODO: the handling for `out_fake is None` case seems dicey here.
         fake_tensor=out_fake if out_fake is not None else fake_mode.from_tensor(torch.zeros([])),
         handle=None,
         materialized_tensor_container=TensorContainer()
@@ -115,22 +115,11 @@ class AsyncFuncHandle:
     for out_async in self.outs_async:
       out_async.set_handle(self)
 
-  # def enable_debug_mode(self):
-  #   self._debug_mode_handle = AsyncFuncHandle(
-  #     self.fn, self.segment_name, args=self.args,
-  #     outs_fake=self.outs_fake,
-  #     scheduler=self.scheduler(),
-  #   )
-  #   self._debug_mode_handle.schedule(record_execution=False)
-  #   self._debug_mode_handle.wait_for_completion()
-
   def schedule(self):
     # make sure to schedule only once
     scheduler = self.scheduler()
     if self.cuda_event is not None:
       print(f"handle is already scheduled! segment name: {self.segment_name}")
-      # if scheduler._debug_mode:
-      #   scheduler.record_early_materialized(self.segment_name)
       return
     else:
       print(f"scheduling handle! segment name: {self.segment_name}")
@@ -141,12 +130,6 @@ class AsyncFuncHandle:
     # Since we are doing real computations here, we should disable fake mode if any.
     # with torch.fx.experimental.proxy_tensor.maybe_disable_fake_tensor_mode():
     args_materialized = pytree.tree_map_only(AsyncTensor, lambda x: x.get_materialized_tensor(), self.args)
-    # TODO this is a horrible mess. Can we early materialize AsyncTensor to concrete tensor, and only propagate concrete tensor through the Dynamo system?
-    # fake_mode = torch._guards.detect_fake_mode()
-    # if fake_mode is not None:
-    #   args_materialized = pytree.tree_map(lambda x: fake_mode.from_tensor(x), args_materialized)
-    # else:
-    #   args_materialized = pytree.tree_map(lambda x: x.detach(), args_materialized)
     args_materialized = pytree.tree_map(lambda x: x.detach(), args_materialized)
     self.args_materialized = args_materialized
     scheduler.record_execution(self.segment_name)
@@ -164,37 +147,8 @@ class AsyncFuncHandle:
       raise RuntimeError("Cannot wait for completion for a handle that's not scheduled yet!")
     self.cuda_event.synchronize()
     for out, out_async in zip(self.outs, self.outs_async):
-      # Set the output AsyncTensor's underlying materialized tensor
-      # to be the actual output tensor.
-      # if isinstance(out, AsyncTensor):
-      #   AsyncTensor.wait_until_materialized([out])
-      #   out_async.materialize_with_value(out.get_materialized_tensor())
-      # else:
       assert (isinstance(out, torch.Tensor) and not isinstance(out, AsyncTensor)) or out is None, f"out: {out}, type(out): {type(out)}"
       out_async.materialize_with_value(out if out is not None else torch.zeros([]))
-    # assert self._debug_mode
-    # if self._debug_mode:
-    #   print("here!77")
-    #   assert all(torch.allclose(arg, arg_orig) for arg, arg_orig in zip(self.args_materialized, self.args_materialized_orig))
-# Future debug mode enhancement ideas (for detecting in-place ops):
-# - Compare input tensor values
-# - Compare input tensor version counter
-
-#     if self._debug_mode_handle is not None:
-#       assert self._debug_mode_handle.is_completed()
-#       assert len(self._debug_mode_handle.outs_async) == len(self.outs_async)
-#       for out_async_debug_mode, out_async in zip(self._debug_mode_handle.outs_async, self.outs_async):
-#         assert torch.allclose(out_async_debug_mode.get_materialized_tensor(), out_async.get_materialized_tensor()), f"""
-# LazyScheduler debug mode identified delayed segment `{self.segment_name}` has mismatching outputs between eager execution and delayed execution.
-
-# It can be due to:
-# 1. A shared tensor (via module attribute, global variable, or input tensor) is mutated by another segment and read by the delayed segment.
-# 2. A shared tensor (via module attribute, global variable, or input tensor) is mutated by the delayed segment and read by another segment.
-
-# Please audit the code of the delayed segment `{self.segment_name}` and all other segments that have data dependency with this segment.
-# Pay special attention to data dependency via shared tensor (module attribute, global variable, or input tensor).
-# """
-#         print("debug mode check passed")
 
   def is_completed(self):
     cuda_event = self.cuda_event
@@ -256,22 +210,6 @@ class LazySchedulerGraphModule(torch.nn.Module):
   def __call__(self, *args):
     assert self.compiled_fn is not None
     return LazyScheduler._current_scheduler.maybe_run(self.gm, self.compiled_fn, self.segment_name, *args)
-
-
-# def _compiled_nn_method(mod, *args, **kwargs):
-#   print(f"here2 _compiled_nn_method is called")
-#   segment = kwargs["segment"]
-#   del kwargs["segment"]
-#   print(f"_compiled_nn_method: segment: {segment}")
-#   segment_nn_method = kwargs["segment_nn_method"]
-#   del kwargs["segment_nn_method"]
-#   compile_fx_fn = kwargs["compile_fx_fn"]
-#   del kwargs["compile_fx_fn"]
-#   return torch.compile(
-#     segment_nn_method,
-#     fullgraph=False,
-#     backend=functools.partial(compile_fx_fn, backend="aot_eager"),
-#   )(mod, *args, **kwargs)
 
 
 def _compile_fx_inner_for_graph_in_segment(
@@ -362,12 +300,11 @@ class LazyScheduler:
   # and make sure we don't reuse old LazyScheduler instance.
   _current_scheduler = None
 
-  def __init__(self, module, *, segments=[], schedule=[], compile_options=None, debug_mode=False):
+  def __init__(self, module, *, segments=[], schedule=[], compile_options=None):
     self._module = module
     self._segments = segments
     self._schedule = schedule
     self._compile_options = compile_options
-    self._debug_mode = debug_mode
     # defaults to aot_eager for eager mode LazyScheduler segment backend
     self._user_specified_segment_names = set([s.name for s in segments])
     self._default_backend = compile_options["backend"] if compile_options is not None else "aot_eager"
@@ -377,7 +314,6 @@ class LazyScheduler:
     self._gm_to_handle_map = OrderedDict()
     self._segment_to_gms_map = OrderedDict()
     self._recorded_execution_order = []
-    # self._recorded_early_materialized = set()
     self._recorded_delayed = set()
     self._has_inplace_op_segment_prefixes = set()
     self._access_mod_attr_or_glb_var_segment_prefixes = set()
@@ -435,20 +371,18 @@ Please do not register the same function with different segment prefixes.
 
     # For each method, swap the original function with a patched function that maybe schedule the execution.
     # Solutions how to hook into the backward pass of this segment:
-    # Approach 1. [Preferred] Use torch.compile (e.g. with "eager" or "aot_eager" backend) for this segment.
+    # Approach 1 [Chosen]: Use torch.compile (e.g. with "eager" or "aot_eager" backend) for this segment.
     #   Pros:
     #   (1) Better for handling control flow.
     #   (2) More shared code with compile mode code path.
     #   (3) Lower runtime overhead than tensor subclass approach
-    # Approach 2. Annotate segment for a method using tensor subclass context manager (see test_subclass.py example).
+    # Approach 2: Annotate segment for a method using tensor subclass context manager (see test_subclass.py example).
 
     method_name = extract_method_name(segment.nn_method.__name__)
     stashed_eager_method_name = f"{method_name}_eager"
     compiled_method_name = f"{method_name}_compiled"
 
     def _private_patched_nn_method(mod, *args, **kwargs):
-      # print(f"unknown_arg: {unknown_arg}, mod: {mod}, args: {args}, kwargs: {kwargs}")
-      # return _compiled_nn_method(mod, segment=segment, segment_nn_method=segment.nn_method, compile_fx_fn=self._compile_fx_for_graph_in_segment, *args, **kwargs)
       eager_nn_method = getattr(mod, stashed_eager_method_name)
       # TODO: can we unify `_compile_starting_point_nn_method` with `nn_method_stack`?
       if self._compile_starting_point_nn_method is None:
@@ -527,106 +461,6 @@ Please do not register the same function with different segment prefixes.
           if hasattr(self._module, "func1"):
             print(f"here3 self._module.func1: {self._module.func1}")
         outs = self._module(*args, **kwargs)
-
-    if len(self._schedule) != len(self.get_recorded_execution_order()) or set(self._schedule) != set(self.get_recorded_execution_order()):
-        raise RuntimeError(f"""
-The LazyScheduler's actual execution order has different number of segments or different segments compared to the schedule.
-
-- Schedule: {self._schedule}. Length: {len(self._schedule)}.
-- Recorded execution order: {self.get_recorded_execution_order()}. Length: {len(self.get_recorded_execution_order())}.
-
-Please update the schedule to have the same segments as the recorded execution order.
-""")
-
-    if self._debug_mode:
-      debug_mode_issue_msgs = []
-      debug_mode_msg = """
-=======================================================================================================================
-                                        LazyScheduler Debug Mode Suggestions
-=======================================================================================================================
-
-"""
-      def find_delayed_seg_dependencies_best_effort(schedule_orig, recorded_execution_order_orig):
-        dependencies = {}
-        schedule = copy.deepcopy(schedule_orig)
-        recorded_execution_order = copy.deepcopy(recorded_execution_order_orig)
-        assert len(schedule) == len(recorded_execution_order)
-        while schedule != recorded_execution_order:
-          # Algorithm:
-          # - From end to beginning, find the first segment that is executed earlier than expected.
-          # - The next segment executed after it is the segment that uses its output.
-          # - Remove both segments from schedule and recorded execution order.
-          # - Repeat this process, until schedule and recorded execution order are exactly the same.
-          for index, seg in reversed(list(enumerate(schedule))):
-            index_of_seg_in_execution_order = recorded_execution_order.index(seg)
-            if index_of_seg_in_execution_order < index:  # segment is early materialized
-              dep_seg = recorded_execution_order[index_of_seg_in_execution_order+1]
-              dep_seg_prev = recorded_execution_order[index_of_seg_in_execution_order-1] if index_of_seg_in_execution_order-1 >= 0 else None
-              dependencies[seg] = (dep_seg_prev, dep_seg)
-              schedule.remove(seg)
-              schedule.remove(dep_seg)
-              recorded_execution_order.remove(seg)
-              recorded_execution_order.remove(dep_seg)
-              break
-        dep_msgs = []
-        for delayed_seg, (dep_seg_prev, dep_seg) in dependencies.items():
-          if dep_seg_prev is None:
-            dep_msgs.append(f"- The code starting from end of `{delayed_seg}` (exclusive) to end of `{dep_seg}` (inclusive) depends on output of `{delayed_seg}`")
-          else:
-            dep_msgs.append(f"- The code starting from end of `{dep_seg_prev}` (exclusive) to end of `{dep_seg}` (inclusive) depends on output of `{delayed_seg}`")
-        return "\n".join(dep_msgs)
-
-      if self._schedule != self.get_recorded_execution_order():
-        debug_mode_issue_msgs.append(f"""
-Issue: The LazyScheduler's actual execution order is not the same as the schedule.
-
-Suggestion: This usually happens when a segment A's output (or a tensor it in-place mutates) is immediately used by
-downstream code, causing segment A to not be able to be delayed after it.
-
-For example, if the schedule is [B, C, A], but the recorded execution order is [B, A, C], then we know that
-some code between B (exclusive) and C (inclusive) is using A's output which causes A to not be able to be delayed after C.
-
-For this model, we have:
-- Schedule: {self._schedule}. Length: {len(self._schedule)}.
-- Recorded execution order: {self.get_recorded_execution_order()}. Length: {len(self.get_recorded_execution_order())}.
-
-Best guess on the potential dependencies causing the issue:
-{find_delayed_seg_dependencies_best_effort(self._schedule, self.get_recorded_execution_order())}
-
-With the above information, please audit the code of all of delayed segments and all other segments that have
-data dependency with these delayed segments, to find the root cause.
------------------------------------------------------------------------------------------------------------------------
-""")
-
-      if len(debug_mode_issue_msgs) > 0:
-        debug_mode_msg += """
-Identified Issues:
-
-"""
-        debug_mode_msg += "\n\n".join(debug_mode_issue_msgs)
-
-      debug_mode_msg += f"""
-Common Questions:
-
-Q: I found numerical mismatch between LazyScheduler prod mode and LazyScheduler-disabled mode. How to debug?
-
-A: Usually LazyScheduler numerical mismatch is due to:
-- A shared tensor (via module attribute, global variable, or input tensor) is mutated by another function and read by one of the delayed segments.
-- A shared tensor (via module attribute, global variable, or input tensor) is mutated by one of the delayed segments and read by another function.
-
-For this model, we have:
-- Delayed segments: {sorted(list(self._recorded_delayed))}
-- Segments that contain in-place mutation ops: {sorted(list(self._has_inplace_op_segment_prefixes))}
-- Segments that access module attribute or global variable: {sorted(list(self._access_mod_attr_or_glb_var_segment_prefixes))}
-
-With the above information, please audit the code of all of delayed segments and all other functions that have data dependency with these delayed segments.
-Pay special attention to data dependency via shared tensor (module attribute, global variable, or input tensor).
-
-If you are still unable to find the root cause, the best way to debug it is to remove segments one by one from your LazyScheduler schedule and re-run your model.
-If you find that removing a specific segment fixes the issue, then audit that segment and other functions that have data dependency with it.
------------------------------------------------------------------------------------------------------------------------
-"""
-      raise RuntimeError(debug_mode_msg)
     return outs
 
   def record_execution(self, segment_name):
@@ -642,7 +476,7 @@ If you find that removing a specific segment fixes the issue, then audit that se
   def get_recorded_execution_order(self):
     return [
       s for s in self._recorded_execution_order
-      if (not s.startswith("__unnamed_") and not s.startswith("__unregistered_"))
+      if (not s.startswith("__unnamed_")) and not (s.startswith("__unregistered_"))
     ]
 
   def _compile_fx_for_graph_in_segment(
@@ -653,10 +487,9 @@ If you find that removing a specific segment fixes the issue, then audit that se
   ):
     segment_prefix = extract_segment_prefix_from_gm(gm)
 
-    if self._debug_mode:
-      for node in gm.graph.nodes:
-        if is_call_func_node(node) and str(node.target).endswith("_"):  # likely in-place op
-          self._has_inplace_op_segment_prefixes.add(segment_prefix)
+    for node in gm.graph.nodes:
+      if is_call_func_node(node) and str(node.target).endswith("_"):  # likely in-place op
+        self._has_inplace_op_segment_prefixes.add(segment_prefix)
 
     backend = self._segment_prefix_to_backend.get(segment_prefix, self._default_backend)
     compiler_fn = None
@@ -720,13 +553,11 @@ If you find that removing a specific segment fixes the issue, then audit that se
     if gm in self._gm_to_handle_map:
       cur_handle = self._gm_to_handle_map[gm]
     else:
-      print(f"here777 outs_fake: {outs_fake}")
       try:
         cur_handle = AsyncFuncHandle(
           compiled_fn, cur_segment_name, args=args,
           outs_fake=outs_fake,
           scheduler=self,
-          # debug_mode=self._debug_mode,
         )
       except Exception as e:
         print(f"here555 cur_segment_name: {cur_segment_name}")
@@ -766,8 +597,7 @@ If you find that removing a specific segment fixes the issue, then audit that se
     if not all_preceding_graph_handles_are_created:
       # If not all preceding graph handles are created, it means current graph is delayed
       # and we don't schedule the current graph yet.
-      if self._debug_mode:
-        self._recorded_delayed.add(cur_segment_name)
+      self._recorded_delayed.add(cur_segment_name)
       return cur_handle.outs_async
     else:
       # If all preceding graph handles are created, then we schedule all of them,
@@ -776,6 +606,107 @@ If you find that removing a specific segment fixes the issue, then audit that se
         handle.schedule()
       cur_handle.schedule()
       return cur_handle.outs_async
+
+  def debug(self):
+    if len(self._schedule) != len(self.get_recorded_execution_order()) or set(self._schedule) != set(self.get_recorded_execution_order()):
+      raise RuntimeError(f"""
+The LazyScheduler's actual execution order has different number of segments or different segments compared to the schedule.
+
+- Schedule: {self._schedule}. Length: {len(self._schedule)}.
+- Recorded execution order: {self.get_recorded_execution_order()}. Length: {len(self.get_recorded_execution_order())}.
+
+Please update the schedule to have the same segments as the recorded execution order.
+""")
+
+    debug_mode_issue_msgs = []
+    debug_mode_msg = """
+=======================================================================================================================
+                                        LazyScheduler Debug Mode Suggestions
+=======================================================================================================================
+
+"""
+
+    if self._schedule != self.get_recorded_execution_order():
+      debug_mode_issue_msgs.append(f"""
+Issue: The LazyScheduler's actual execution order is not the same as the schedule.
+
+Suggestion: This usually happens when a segment A's output (or a tensor it in-place mutates) is immediately used by
+downstream code, causing segment A to not be able to be delayed after it.
+
+For example, if the schedule is [B, C, A], but the recorded execution order is [B, A, C], then we know that
+some code between B (exclusive) and C (inclusive) is using A's output which causes A to not be able to be delayed after C.
+
+For this model, we have:
+- Schedule: {self._schedule}. Length: {len(self._schedule)}.
+- Recorded execution order: {self.get_recorded_execution_order()}. Length: {len(self.get_recorded_execution_order())}.
+
+Best guess on the potential dependencies causing the issue:
+{find_delayed_seg_dependencies_best_effort(self._schedule, self.get_recorded_execution_order())}
+
+With the above information, please audit the code of all of delayed segments and all other segments that have
+data dependency with these delayed segments, to find the root cause.
+-----------------------------------------------------------------------------------------------------------------------
+""")
+
+    if len(debug_mode_issue_msgs) > 0:
+      debug_mode_msg += """
+Identified Issues:
+
+"""
+      debug_mode_msg += "\n\n".join(debug_mode_issue_msgs)
+
+    debug_mode_msg += f"""
+Common Questions:
+
+Q: I found numerical mismatch between LazyScheduler prod mode and LazyScheduler-disabled mode. How to debug?
+
+A: Usually LazyScheduler numerical mismatch is due to:
+- A shared tensor (via module attribute, global variable, or input tensor) is mutated by another function and read by one of the delayed segments.
+- A shared tensor (via module attribute, global variable, or input tensor) is mutated by one of the delayed segments and read by another function.
+
+For this model, we have:
+- Delayed segments: {sorted(list(self._recorded_delayed))}
+- Segments that contain in-place mutation ops: {sorted(list(self._has_inplace_op_segment_prefixes))}
+- Segments that access module attribute or global variable: {sorted(list(self._access_mod_attr_or_glb_var_segment_prefixes))}
+
+With the above information, please audit the code of all of delayed segments and all other functions that have data dependency with these delayed segments.
+Pay special attention to data dependency via shared tensor (module attribute, global variable, or input tensor).
+
+If you are still unable to find the root cause, the best way to debug it is to remove segments one by one from your LazyScheduler schedule and re-run your model.
+If you find that removing a specific segment fixes the issue, then audit that segment and other functions that have data dependency with it.
+-----------------------------------------------------------------------------------------------------------------------
+"""
+    raise RuntimeError(debug_mode_msg)
+
+def find_delayed_seg_dependencies_best_effort(schedule_orig, recorded_execution_order_orig):
+  dependencies = {}
+  schedule = copy.deepcopy(schedule_orig)
+  recorded_execution_order = copy.deepcopy(recorded_execution_order_orig)
+  assert len(schedule) == len(recorded_execution_order)
+  while schedule != recorded_execution_order:
+    # Algorithm:
+    # - From end to beginning, find the first segment that is executed earlier than expected.
+    # - The next segment executed after it is the segment that uses its output.
+    # - Remove both segments from schedule and recorded execution order.
+    # - Repeat this process, until schedule and recorded execution order are exactly the same.
+    for index, seg in reversed(list(enumerate(schedule))):
+      index_of_seg_in_execution_order = recorded_execution_order.index(seg)
+      if index_of_seg_in_execution_order < index:  # segment is early materialized
+        dep_seg = recorded_execution_order[index_of_seg_in_execution_order+1]
+        dep_seg_prev = recorded_execution_order[index_of_seg_in_execution_order-1] if index_of_seg_in_execution_order-1 >= 0 else None
+        dependencies[seg] = (dep_seg_prev, dep_seg)
+        schedule.remove(seg)
+        schedule.remove(dep_seg)
+        recorded_execution_order.remove(seg)
+        recorded_execution_order.remove(dep_seg)
+        break
+  dep_msgs = []
+  for delayed_seg, (dep_seg_prev, dep_seg) in dependencies.items():
+    if dep_seg_prev is None:
+      dep_msgs.append(f"- The code starting from end of `{delayed_seg}` (exclusive) to end of `{dep_seg}` (inclusive) depends on output of `{delayed_seg}`")
+    else:
+      dep_msgs.append(f"- The code starting from end of `{dep_seg_prev}` (exclusive) to end of `{dep_seg}` (inclusive) depends on output of `{delayed_seg}`")
+  return "\n".join(dep_msgs)
 
 class SubmoduleReplacer(torch.fx.interpreter.Interpreter):
   # This is a copy of DDPOptimizer `SubmoduleReplacer` class.

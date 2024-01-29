@@ -10,9 +10,7 @@ from torch._functorch._aot_autograd.functional_utils import is_fun
 from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
 import traceback
 
-# TODO: how to use Dynamo's fake mode instead of creating our own? is there a global singleton we can access?
-# see _dynamo/variables/builder.py line 1406
-# Broader question: what's the point of using fake_tensor in AsyncTensor class?
+# TODO: what's the point of using fake_tensor in AsyncTensor class?
 fake_mode = FakeTensorMode()
 
 
@@ -72,6 +70,8 @@ class AsyncTensor(torch.Tensor):
   def materialized_tensor(self):
     return self.get_materialized_tensor()
 
+  # NOTE: we explicitly don't want this tensor subclass to propagate through the Dynamo tracing system.
+  # Instead, we want it to be treated as real tensor starting from beginning of Dynamo so that model is traced normally.
   # def __tensor_flatten__(self):
   #   """
   #   protocol to inform how to flatten a DTensor to local tensor

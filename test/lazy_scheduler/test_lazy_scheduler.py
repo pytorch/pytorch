@@ -8,7 +8,6 @@ CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::Te
 CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_segment_compiled_with_different_backend && \
 CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_debug_mode_catch_issues
 
-CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_graph_break_within_segment
  >output.log 2>&1
 """
 
@@ -223,12 +222,13 @@ class TestLazyScheduler(TestCase):
       for i in range(num_iterations):
         print(f"------------------ LazyScheduler iter: {i} ------------------")
         torch.manual_seed(0)
-        lazy_scheduler = lazy_scheduler_gen(eager_module_clone, is_compile=is_compile, debug_mode=debug_mode)
+        lazy_scheduler = lazy_scheduler_gen(eager_module_clone, is_compile=is_compile)
         result = lazy_scheduler(*inps_ls)
         if not fwd_only:
           result.sum().backward()
-        print(f"here1 lazy_scheduler._recorded_execution_order: {lazy_scheduler._recorded_execution_order}")
-        print(f"here1 id(lazy_scheduler): {id(lazy_scheduler)}")
+
+      if debug_mode:
+        lazy_scheduler.debug()
 
       if not skip_check:
         self.assertEqual(result, expected, msg="Output mismatch between torch.compile and eager versions")
@@ -302,7 +302,7 @@ but got:
     x = torch.randn(4, 4, requires_grad=True, device=device)
     y = torch.randn(4, 4, requires_grad=True, device=device)
 
-    def lazy_scheduler_gen(module, is_compile=False, debug_mode=False):
+    def lazy_scheduler_gen(module, is_compile=False):
       return LazyScheduler(
         module,
         segments=[
@@ -315,7 +315,6 @@ but got:
           "fullgraph": False,
           "backend": "inductor",
         },
-        debug_mode=debug_mode,
       )
 
     self._validate(
@@ -336,7 +335,7 @@ but got:
     x = torch.randn(4, 4, requires_grad=True, device=device)
     y = torch.randn(4, 4, requires_grad=True, device=device)
 
-    def lazy_scheduler_gen(module, is_compile=False, debug_mode=False):
+    def lazy_scheduler_gen(module, is_compile=False):
       return LazyScheduler(
         module,
         segments=[
@@ -351,7 +350,6 @@ but got:
           "fullgraph": False,
           "backend": "inductor",
         },
-        debug_mode=debug_mode,
       )
 
     self._validate(
@@ -382,7 +380,7 @@ but got:
       "func1_bwd",
     ]
 
-    def lazy_scheduler_gen(module, is_compile=False, debug_mode=False):
+    def lazy_scheduler_gen(module, is_compile=False):
       return LazyScheduler(
         module,
         segments=[
@@ -398,7 +396,6 @@ but got:
           "fullgraph": False,
           "backend": "inductor",
         },
-        debug_mode=debug_mode,
       )
 
     self._validate(
@@ -427,7 +424,7 @@ but got:
       "func1_bwd",
     ]
 
-    def lazy_scheduler_gen(module, is_compile=False, debug_mode=False):
+    def lazy_scheduler_gen(module, is_compile=False):
       return LazyScheduler(
         module,
         segments=[
@@ -443,7 +440,6 @@ but got:
           "fullgraph": False,
           "backend": "inductor",
         },
-        debug_mode=debug_mode,
       )
 
     self._validate(
@@ -467,7 +463,7 @@ but got:
       "forward_fwd",
     ]
 
-    def lazy_scheduler_gen(module, is_compile=False, debug_mode=False):
+    def lazy_scheduler_gen(module, is_compile=False):
       return LazyScheduler(
         module,
         segments=[
@@ -480,7 +476,6 @@ but got:
           "fullgraph": False,
           "backend": "inductor",
         },
-        debug_mode=debug_mode,
       )
 
     self._validate(
@@ -507,7 +502,7 @@ but got:
       "func2_bwd",
     ]
 
-    def lazy_scheduler_gen(module, is_compile=False, debug_mode=False):
+    def lazy_scheduler_gen(module, is_compile=False):
       return LazyScheduler(
         module,
         segments=[
@@ -523,9 +518,10 @@ but got:
           "fullgraph": False,
           "backend": "inductor",
         },
-        debug_mode=debug_mode,
       )
 
+    # from torch.profiler import profile, record_function, ProfilerActivity
+    # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
     self._validate(
       m,
       lazy_scheduler_gen,
@@ -533,6 +529,7 @@ but got:
       inps=[x, y],
       additional_check=check_segment_for_TestNonDepSegmentModule_fwd_bwd,
     )
+    # prof.export_chrome_trace("trace.json")
 
   def test_segment_compiled_with_different_backend(self):
     def _run_test(lazy_scheduler_gen, expected_execution_order, additional_check, fwd_only=False):
@@ -567,7 +564,7 @@ but got:
           },
           is_compile=is_compile,
         )
-      def lazy_scheduler_gen(module, is_compile=False, debug_mode=False):
+      def lazy_scheduler_gen(module, is_compile=False):
         return LazyScheduler(
           module,
           segments=[
@@ -580,8 +577,7 @@ but got:
             "fullgraph": False,
             "backend": "inductor",
           },
-          debug_mode=debug_mode,
-        )
+          )
       return lazy_scheduler_gen, expected_execution_order, check_segment_fwd_only
 
     def segment_use_dynamo_aot_eager_fwd_bwd():
@@ -606,7 +602,7 @@ but got:
           },
           is_compile=is_compile,
         )
-      def lazy_scheduler_gen(module, is_compile=False, debug_mode=False):
+      def lazy_scheduler_gen(module, is_compile=False):
         return LazyScheduler(
           module,
           segments=[
@@ -622,8 +618,7 @@ but got:
             "fullgraph": False,
             "backend": "inductor",
           },
-          debug_mode=debug_mode,
-        )
+          )
       return lazy_scheduler_gen, expected_execution_order, check_segment_fwd_bwd
 
     _run_test(*segment_use_dynamo_eager_fwd_only(), fwd_only=True)
@@ -637,7 +632,7 @@ but got:
       "forward_fwd",
     ]
 
-    def lazy_scheduler_gen(module, is_compile=False, debug_mode=False):
+    def lazy_scheduler_gen(module, is_compile=False):
       return LazyScheduler(
         module,
         segments=[
@@ -650,7 +645,6 @@ but got:
           "fullgraph": False,
           "backend": "inductor",
         },
-        debug_mode=debug_mode,
       )
 
     def _run_test(
@@ -872,7 +866,7 @@ but got:
   #       },
   #       is_compile=is_compile,
   #     )
-  #   def lazy_scheduler_gen(module, is_compile=False, debug_mode=False):
+  #   def lazy_scheduler_gen(module, is_compile=False):
   #     return LazyScheduler(
   #       module,
   #       segments=[
@@ -1027,7 +1021,7 @@ but got:
 TODO:
 Design doc: https://docs.google.com/document/d/1vv0H5IMGwUMyzmJKnksJOnRSult1B4YlbBSs_MeAvXM/edit?usp=sharing
 - Study the GPU trace, make sure everything looks good, make sure we are not spending a lot of time recompiling every iteration.
-- Remove materialized_tensor_container and use materialize_tensor directly
+- Rebase to latest master, make sure everything works
 - Try on Ads model: https://docs.google.com/document/d/1tFLUh4Xe4_eGKOtgpj08kfNDhy7Fqp-dSq0d7lejdZU/edit#bookmark=id.wds06wiqwjh2 figure out integration point with trainer loop
 
 - For named segments, show its segment ID (prefix + fwd/bwd + nth_call) in profiler annotation in GPU trace
