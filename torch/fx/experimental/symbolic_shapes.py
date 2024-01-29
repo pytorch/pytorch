@@ -3251,7 +3251,7 @@ class ShapeEnv:
                 new_range_env[k] = vr
                 continue
             if size_oblivious and k in self.size_like:
-                lower = 2
+                lower = max(2, vr.lower)
             else:
                 lower = vr.lower
             # Positive means >= 1
