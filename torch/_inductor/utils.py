@@ -569,8 +569,8 @@ def sympy_subs(expr: sympy.Expr, replacements: Dict[sympy.Expr, Any]) -> sympy.E
         if isinstance(replacement, str):
             return sympy.Symbol(
                 replacement,
-                integer=replaced.is_integer,
-                nonnegative=replaced.is_nonnegative,
+                integer=replaced.is_integer,  # type: ignore[attr-defined]
+                nonnegative=replaced.is_nonnegative,  # type: ignore[attr-defined]
             )
         else:
             return replacement
@@ -582,11 +582,11 @@ def sympy_subs(expr: sympy.Expr, replacements: Dict[sympy.Expr, Any]) -> sympy.E
 
 
 def free_symbol_startswith(index: sympy.Expr, prefix: str):
-    return any(v.name.startswith(prefix) for v in index.free_symbols)
+    return any(v.name.startswith(prefix) for v in index.free_symbols)  # type: ignore[attr-defined]
 
 
 def free_symbol_has(index: sympy.Expr, pattern: str):
-    return any(pattern in v.name for v in index.free_symbols)
+    return any(pattern in v.name for v in index.free_symbols)  # type: ignore[attr-defined]
 
 
 def is_symbolic(a: Any) -> bool:
@@ -1081,7 +1081,7 @@ def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
     assert isinstance(
         val, sympy.Expr
     ), "only support sympy.Expr as input to get_sympy_Expr_dtype"
-    if val.is_integer:
+    if val.is_integer:  # type: ignore[attr-defined]
         return torch.int64
     else:
         return torch.float64
@@ -1105,6 +1105,13 @@ def triton_config_to_hashable(cfg):
     items.append(("num_warps", cfg.num_warps))
     items.append(("num_stages", cfg.num_stages))
     return tuple(items)
+
+
+def parallel_num_threads():
+    threads = config.cpp.threads
+    if threads < 1:
+        threads = torch.get_num_threads()
+    return threads
 
 
 HAS_COLORAMA = True
