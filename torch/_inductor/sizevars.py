@@ -10,7 +10,7 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import bound_sympy
 
-from .utils import sympy_subs, sympy_symbol, VarRanges
+from .utils import sympy_index_symbol, sympy_subs, VarRanges
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -191,7 +191,7 @@ class SizeVarAllocator:
                     # approximate test passed, try sound version
                     va = index_vars[a]
                     vb = index_vars[b]
-                    v = sympy_symbol("_merge_tester")
+                    v = sympy_index_symbol("_merge_tester")
                     expr1 = sympy_subs(index_formulas[k], {va: v * sizes[a], vb: 0})
                     expr2 = sympy_subs(index_formulas[k], {va: 0, vb: v})
                     if self.simplify(expr1) == self.simplify(expr2):
@@ -547,7 +547,7 @@ class SizeVarAllocator:
             return expr
         expr = self.remove_precomputed_replacements(expr)
         if expr not in self.precomputed_replacements:
-            sym = sympy_symbol(f"ps{len(self.precomputed_replacements)}")
+            sym = sympy_index_symbol(f"ps{len(self.precomputed_replacements)}")
             self.precomputed_replacements[expr] = sym
             self.inv_precomputed_replacements[sym] = expr
         return self.precomputed_replacements[expr]

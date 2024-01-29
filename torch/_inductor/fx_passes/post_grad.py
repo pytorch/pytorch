@@ -85,13 +85,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         remove_noop_ops(gm.graph)
         print_graph(gm.graph, "Before split cat in post grad pass.")
         for patterns in pass_patterns:
-            patterns.apply(gm.graph)
+            patterns.apply(gm.graph)  # type: ignore[arg-type]
             print_graph(
                 gm.graph,
                 "Apply split cat pattern matcher PatternMatcherPass in post grad.",
             )
         if is_inference:
-            inference_patterns.apply(gm.graph)
+            inference_patterns.apply(gm.graph)  # type: ignore[arg-type]
 
     if config.post_grad_custom_post_pass is not None:
         config.post_grad_custom_post_pass(gm.graph)
