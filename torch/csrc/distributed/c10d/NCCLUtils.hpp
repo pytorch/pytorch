@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <mutex>
+#include <thread>
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
@@ -79,6 +80,18 @@
   do {                                                                        \
     ncclResult_t result = cmd;                                                \
     if (result != ncclSuccess) {                                              \
+      std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +     \
+          std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(result) + \
+          "\n" + getNcclErrorDetailStr(result, failureReason);                \
+      TORCH_CHECK_WITH(DistBackendError, false, err);                         \
+    }                                                                         \
+  } while (0)
+
+// Macro to throw on a non-successful NCCL return value for NONBLOCKING calls.
+#define C10D_NCCL_CHECK_NONBLOCKING(cmd, failureReason)                       \
+  do {                                                                        \
+    ncclResult_t result = cmd;                                                \
+    if (result != ncclSuccess && result != ncclInProgress) {                  \
       std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +     \
           std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(result) + \
           "\n" + getNcclErrorDetailStr(result, failureReason);                \
@@ -209,7 +222,8 @@ class NCCLComm {
       : ncclComm_(ncclComm),
         aborted_(false),
         ncclAsyncErr_(ncclSuccess),
-        commFailureReason_(c10::nullopt) {}
+        commFailureReason_(c10::nullopt),
+        initialized_(false) {}
 
   NCCLComm() : NCCLComm(nullptr) {}
 
@@ -239,6 +253,7 @@ class NCCLComm {
         c10::nullopt);
     comm->ncclId_ = commId;
     comm->rank_ = rank;
+    comm->initialized_ = true;
     return comm;
   }
 
@@ -249,21 +264,26 @@ class NCCLComm {
       ncclUniqueId commId,
       ncclConfig_t& config) {
     auto comm = std::make_shared<NCCLComm>();
+    bool isInitialized = false;
     if (nccl_use_nonblocking()) {
       config.blocking = 0;
-      C10D_NCCL_CHECK_TIMEOUT(
+      LOG(INFO) << "Rank " << rank
+                << ": creating NCCL communicator in nonblocking mode";
+      C10D_NCCL_CHECK_NONBLOCKING(
           ncclCommInitRankConfig(
               &(comm->ncclComm_), numRanks, commId, rank, &config),
-          comm->ncclComm_,
           c10::nullopt);
     } else {
       C10D_NCCL_CHECK(
           ncclCommInitRankConfig(
               &(comm->ncclComm_), numRanks, commId, rank, &config),
           c10::nullopt);
+      // under blocking mode, comm is initialized after NCCL CHECK
+      isInitialized = true;
     }
     comm->ncclId_ = commId;
     comm->rank_ = rank;
+    comm->initialized_ = isInitialized;
     return comm;
   }
 #endif
@@ -280,6 +300,7 @@ class NCCLComm {
             source->ncclComm_, color_id, rank, &(comm->ncclComm_), &config),
         c10::nullopt);
     ++source->ncclCommSplitCounter_;
+    comm->rank_ = rank;
     return comm;
   }
 #endif
@@ -303,6 +324,7 @@ class NCCLComm {
     std::swap(ncclComm_, other.ncclComm_);
     std::swap(aborted_, other.aborted_);
     std::swap(ncclAsyncErr_, other.ncclAsyncErr_);
+    std::swap(initialized_, other.initialized_);
   }
 
   ncclComm_t getNcclComm();
@@ -446,6 +468,8 @@ class NCCLComm {
   friend class ProcessGroupNCCL;
 
  protected:
+  // a helper function to wait until the communicator is initialized;
+  void waitUntilInitialized(int timeoutSecs);
   ncclComm_t ncclComm_;
   // Unique nccl_id for this communicator.
   ncclUniqueId ncclId_;
@@ -458,6 +482,7 @@ class NCCLComm {
   // Optional reason for communicator failure, provided by ProcessGroupNCCL for
   // better error messaging.
   c10::optional<std::string> commFailureReason_;
+  bool initialized_{false};
 #ifdef NCCL_HAS_COMM_REGISTER
   // Stores handlers for tensors registered by NCCL
   std::unordered_map<void*, void*> registeredSegmentHandles_;

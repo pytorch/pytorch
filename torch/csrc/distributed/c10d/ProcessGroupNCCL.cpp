@@ -1709,7 +1709,15 @@ std::exception_ptr ProcessGroupNCCL::checkForNCCLErrorsInternal(
               *commFailureReason)));
     }
     ncclResult_t ncclAsyncErr = ncclComm->checkForNcclError();
+// When nonblocking mode is enabled by TORCH_NCCL_USE_COMM_NONBLOCKING,
+// ncclInProgress could be returned when there are pending NCCL calls.
+// In this case, no exception should be thrown
+#ifdef NCCL_HAS_COMM_NONBLOCKING
+    // ncclInProgress is defined only if NCCL_HAS_COMM_NONBLOCKING is defined
+    if (ncclAsyncErr != ncclSuccess && ncclAsyncErr != ncclInProgress) {
+#else
     if (ncclAsyncErr != ncclSuccess) {
+#endif
       return std::make_exception_ptr(C10_BUILD_ERROR(
           DistBackendError,
           "NCCL error: " + ncclGetErrorWithVersion(ncclAsyncErr) + "\n" +
@@ -1975,10 +1983,12 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 #ifndef NCCL_HAS_COMM_NONBLOCKING
   C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
 #else
-  if (!nccl_use_nonblocking()) {
-    C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
+  if (nccl_use_nonblocking()) {
+    // If we use nonblocking mode, allow communicators to be
+    // uninitialized/ncclInProgress until the first communication
+    C10D_NCCL_CHECK_NONBLOCKING(ncclGroupEnd(), c10::nullopt);
   } else {
-    C10D_NCCL_CHECK_TIMEOUT_GROUPEND(ncclGroupEnd(), ncclComms, c10::nullopt);
+    C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
   }
 #endif
 
