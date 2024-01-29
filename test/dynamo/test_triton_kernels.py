@@ -909,7 +909,40 @@ def make_mutation_test(fn):
 
 class MutationTests(torch._dynamo.test_case.TestCase):
     # Tests injected below
-    pass
+
+    @requires_cuda
+    @requires_lark
+    @make_mutation_test
+    def test_out_of_order_kernel():
+        @triton.jit
+        def add_kernel_out_of_order(
+            in_ptr0,
+            n_elements,
+            in_ptr1,
+            out_ptr,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        t = torch.randn(4)
+        return (
+            add_kernel_out_of_order,
+            {
+                "in_ptr0": t,
+                "n_elements": 4,
+                "in_ptr1": t,
+                "out_ptr": t,
+                "BLOCK_SIZE": 4,
+            },
+            ["out_ptr"],
+        )
 
 
 if HAS_CUDA and HAS_LARK:
@@ -922,17 +955,6 @@ if HAS_CUDA and HAS_LARK:
                 "in_ptr1": t,
                 "out_ptr": t,
                 "n_elements": 4,
-                "BLOCK_SIZE": 4,
-            },
-            ["out_ptr"],
-        ],
-        [
-            add_kernel_out_of_order,
-            {
-                "in_ptr0": t,
-                "n_elements": 4,
-                "in_ptr1": t,
-                "out_ptr": t,
                 "BLOCK_SIZE": 4,
             },
             ["out_ptr"],
