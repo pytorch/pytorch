@@ -246,12 +246,16 @@ class ExportedProgram:
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         import torch._export.error as error
 
-        reordered_kwargs = reorder_kwargs(kwargs, self.call_spec.in_spec)
-        flat_args, received_spec = pytree.tree_flatten((args, reordered_kwargs))
-        if received_spec != self.call_spec.in_spec:
+        in_spec = self.call_spec.in_spec
+        if in_spec is not None:
+            kwargs = reorder_kwargs(kwargs, in_spec)
+
+        flat_args, received_spec = pytree.tree_flatten((args, kwargs))
+
+        if in_spec is not None and received_spec != in_spec:
             raise ValueError(
                 "Trying to flatten user inputs with exported input tree spec: \n"
-                f"{self.call_spec.in_spec}\n"
+                f"{in_spec}\n"
                 "but actually got inputs with tree spec of: \n"
                 f"{received_spec}"
             )
