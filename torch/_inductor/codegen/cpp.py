@@ -27,9 +27,10 @@ from ..utils import (
     cache_on_self,
     get_fused_kernel_name,
     is_welford_reduction,
+    parallel_num_threads,
+    sympy_index_symbol,
     sympy_product,
     sympy_subs,
-    sympy_symbol,
 )
 
 from ..virtualized import ops, OpsValue, V
@@ -305,13 +306,6 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
             ]
         )
     return prefix
-
-
-def parallel_num_threads():
-    threads = config.cpp.threads
-    if threads < 1:
-        threads = torch.get_num_threads()
-    return threads
 
 
 @functools.lru_cache
@@ -1254,9 +1248,7 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def acosh(x):
-        # For real x, acosh(x) = log(x + sqrt(x**2 -1))
-        vec_one = f"decltype({x})(1)"
-        return f"({x} + ({x}*{x} - {vec_one}).sqrt()).log()"
+        return f"{x}.acosh()"
 
     @staticmethod
     def relu(x):
@@ -1628,7 +1620,9 @@ class CppKernel(Kernel):
         else:
             self.call_ranges = tuple(lengths) + tuple(reduction_lengths)
             self.ranges = [self.rename_indexing(x) for x in self.call_ranges]
-            self.itervars = [sympy_symbol(f"x{n}") for n in range(len(self.ranges))]
+            self.itervars = [
+                sympy_index_symbol(f"x{n}") for n in range(len(self.ranges))
+            ]
             self.reduction_depth = len(lengths)
         return (
             self.itervars[: self.reduction_depth],
@@ -1895,7 +1889,9 @@ class CppVecKernel(CppKernel):
                 f"__at_align__ std::array<{result_type}, {result_size}> tmpbuf;"
             )
             code.writeline(result_declare)
-            itervar_inner = sympy_symbol(f"{self.itervars[self.tiling_idx]}_inner")
+            itervar_inner = sympy_index_symbol(
+                f"{self.itervars[self.tiling_idx]}_inner"
+            )
             replacements = {}
             for indirect_var in (
                 self.cse.varname_map[s.name]
@@ -2001,7 +1997,7 @@ class CppVecKernel(CppKernel):
         else:
             line = f"{value}.store({var_expr}, {self.tiling_factor});"
         if non_contiguous:
-            inner = sympy_symbol(f"{tiling_var}_inner")
+            inner = sympy_index_symbol(f"{tiling_var}_inner")
             new_index = self.scale_index_with_offset(
                 index, itervar_idx=self.tiling_idx, offset=inner
             )
@@ -2238,7 +2234,7 @@ class CppTile2DKernel(CppVecKernel):
         self.tiling_indices = tiling_indices
 
     def inner_itervar(self):
-        return sympy_symbol(f"{self.itervars[self.outer_idx]}_inner")
+        return sympy_index_symbol(f"{self.itervars[self.outer_idx]}_inner")
 
     def need_vec_transpose(self, index):
         outer_var = self.itervars[self.outer_idx]
@@ -2749,7 +2745,7 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def indirect_indexing(index_var, size, check=True):
-                return sympy_symbol(str(index_var))
+                return sympy_index_symbol(str(index_var))
 
             @staticmethod
             def masked(mask, body, other):
@@ -2772,7 +2768,7 @@ class CppVecKernelChecker(CppVecKernel):
                             # Support masked_load for BF16/FP16. Because the legalization will
                             # insert to_dtype to convert the BF16/FP16 input to FP32.
                             dtype = (
-                                V.graph.get_dtype(input_value.args[1])
+                                V.graph.get_dtype(input_value.args[1])  # type: ignore[arg-type]
                                 if input_value.target == "load"
                                 else input_value.args[-1]
                             )
@@ -2788,7 +2784,7 @@ class CppVecKernelChecker(CppVecKernel):
                                 dtype in [torch.int32, torch.int64]
                                 and input_value.target == "load"
                             ):
-                                buffer = V.graph.get_buffer(input_value.args[1])
+                                buffer = V.graph.get_buffer(input_value.args[1])  # type: ignore[arg-type]
                                 # Check if load of a scalar tensor of integer
                                 if not (
                                     isinstance(buffer, TensorBox)
@@ -2911,14 +2907,14 @@ class CppKernelProxy(CppKernel):
                 if node.target not in ["load"]:
                     return False
                 assert len(node.args) == 3
-                load_dtype = V.graph.get_dtype(node.args[1])
+                load_dtype = V.graph.get_dtype(node.args[1])  # type: ignore[arg-type]
                 return load_dtype in DTYPE_LOWP_FP
 
             def is_lowp_fp_store(node: torch.fx.Node):
                 if node.target != "store":
                     return False
                 _, store_var, _, _, _ = node.args
-                store_dtype = V.graph.get_dtype(store_var)
+                store_dtype = V.graph.get_dtype(store_var)  # type: ignore[arg-type]
                 return store_dtype in DTYPE_LOWP_FP
 
             sub_graph_nodes = list(sub_graph.nodes)

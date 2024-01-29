@@ -52,6 +52,7 @@ from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
 from .dependencies import (
+    extract_free_unbacked_symbols,
     extract_input_node_reduction_ranges,
     extract_read_writes,
     var_builder,
@@ -66,9 +67,9 @@ from .utils import (
     is_dynamic,
     pad_listlike,
     sympy_dot,
+    sympy_index_symbol,
     sympy_product,
     sympy_subs,
-    sympy_symbol,
 )
 from .virtualized import ops, V
 
@@ -332,6 +333,31 @@ class IRNode:
     realize_hint: Callable[[], None]
 
 
+class _OpCounterCSE:
+    """Shim to count how many ops are used"""
+
+    def __init__(self, inner):
+        super().__init__()
+        self.parent_handler = inner
+        self.op_count = 0
+        self.var_names = {}
+
+    def __getattr__(self, name):
+        def inner(*args, **kwargs):
+            val = getattr(self.parent_handler, name)(*args, **kwargs)
+            if name == "indirect_indexing":
+                return val
+            if val not in self.var_names:
+                varname = f"tmp{self.op_count}"
+                self.op_count += 1
+                self.var_names[val] = varname
+                return varname
+            else:
+                return self.var_names[val]
+
+        return inner
+
+
 @dataclasses.dataclass
 class Loops(IRNode):
     device: torch.device
@@ -340,7 +366,10 @@ class Loops(IRNode):
     ranges: List[Expr]
 
     def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
-        return set().union(*(free_unbacked_symbols(e) for e in self.ranges))
+        return set().union(
+            *(free_unbacked_symbols(e) for e in self.ranges),
+            self.inner_fn_free_unbacked_symbols(),
+        )
 
     def __str__(self, names=("ranges",)):
         return self.str_helper(
@@ -391,17 +420,36 @@ class Loops(IRNode):
     @staticmethod
     def _index(ranges, prefix="i"):
         return [
-            sympy.Integer(0) if s == 1 else sympy_symbol(f"{prefix}{n}")
+            sympy.Integer(0) if s == 1 else sympy_index_symbol(f"{prefix}{n}")
             for n, s in enumerate(ranges)
         ]
 
     @cache_on_self
-    def inner_fn_str_len(self):
-        return len(self.inner_fn_str())
+    def inner_fn_opcount(self):
+        from .ir import FlexibleLayout
+
+        opcounter = _OpCounterCSE(V.MockHandler())
+
+        with V.set_ops_handler(opcounter), patch.object(
+            FlexibleLayout, "allow_indexing", True
+        ):
+            result = self.inner_fn(*self.inner_fn_args())
+            return opcounter.op_count
+
+    def inner_fn_args(self):
+        return (self._index(self.ranges),)
 
     def inner_fn_str(self):
+        return V.KernelFormatterHandler.ir_to_string(
+            self.inner_fn, *self.inner_fn_args()
+        )
+
+    def has_large_inner_fn(self):
+        return self.inner_fn_opcount() > config.realize_opcount_threshold
+
+    def inner_fn_free_unbacked_symbols(self):
         index = self._index(self.ranges)
-        return V.KernelFormatterHandler.ir_to_string(self.inner_fn, index)
+        return extract_free_unbacked_symbols(self.inner_fn, index)
 
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
@@ -604,14 +652,15 @@ class Reduction(Loops):
     def index_length(self):
         return len(self.ranges) + len(self.reduction_ranges)
 
-    def inner_fn_str(self):
+    def inner_fn_args(self):
         index = self._index(self.ranges)
         rindex = self._index(self.reduction_ranges, "r")
-        return V.KernelFormatterHandler.ir_to_string(
-            self.inner_fn,
-            index,
-            rindex,
-        )
+        return (index, rindex)
+
+    def inner_fn_free_unbacked_symbols(self):
+        index = self._index(self.ranges)
+        rindex = self._index(self.reduction_ranges, "r")
+        return extract_free_unbacked_symbols(self.inner_fn, index, rindex)
 
     def constant_to_device(self, device):
         """Move this to a given device. Requires that all reads are to constants."""
@@ -1592,14 +1641,17 @@ class Scan(Loops):
     def index_length(self):
         return len(self.ranges) + len(self.scan_ranges)
 
-    def inner_fn_str(self):
+    def inner_fn_args(self):
         index = self._index(self.ranges)
         rindex = self._index(self.scan_ranges, "r")
-        return V.KernelFormatterHandler.ir_to_string(
-            self.inner_fn,
-            index,
-            rindex,
-        )
+        idx = self.reindex(index, rindex)
+        return (idx,)
+
+    def inner_fn_free_unbacked_symbols(self):
+        index = self._index(self.ranges)
+        rindex = self._index(self.scan_ranges, "r")
+        idx = self.reindex(index, rindex)
+        return extract_free_unbacked_symbols(self.inner_fn, idx)
 
     @classmethod
     def create(
@@ -2017,7 +2069,7 @@ class GenericView(BaseView):
         return self.reindex
 
     def reindex_str(self):
-        index_old = [sympy_symbol(f"i{n}") for n in range(len(self.size))]
+        index_old = [sympy_index_symbol(f"i{n}") for n in range(len(self.size))]
         index_new = list(self.reindex(index_old))
         return f"lambda {', '.join(map(str, index_old))}: {index_new}"
 
@@ -2122,7 +2174,7 @@ class View(GenericView):
         Perform a reshape entirely by modifying indexing math
         """
         size_hint = V.graph.sizevars.size_hint
-        vars = [sympy_symbol(f"view{i}") for i in range(len(new_size))]
+        vars = [sympy_index_symbol(f"view{i}") for i in range(len(new_size))]
 
         stack_new = list(zip(vars, new_size))
         stack_old = list(old_size)
@@ -3006,12 +3058,7 @@ class ShapeAsConstantBuffer(IRNode):
         self.shape = shape
 
     def codegen_reference(self, writer=None):
-        expr = V.graph.wrapper_code.expr_printer(V.graph.sizevars.simplify(self.shape))
-        if V.graph.cpp_wrapper:
-            # wrap scalar to 0-d tensor for cpp wrapper
-            return f"torch::tensor({expr})"
-        else:
-            return expr
+        return V.graph.wrapper_code.expr_printer(V.graph.sizevars.simplify(self.shape))
 
 
 @dataclasses.dataclass
@@ -3656,7 +3703,6 @@ class ExternKernel(InputsKernel):
         )
         for t in example_out_li:
             if isinstance(t, torch.Tensor) and t.is_sparse:
-                V.graph.disable_cudagraphs = True
                 msg = "sparsity not handled. Please file issue for sparse inference weights."
                 if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
                     msg = f"{msg} Found from : \n {stack_trace}"
@@ -3898,7 +3944,7 @@ class ExternKernel(InputsKernel):
         sizes = self.get_size()
         strides = self.get_stride()
         strides = [sizevars.size_hint(x) for x in strides]
-        index_vars = [sympy_symbol(f"d{i}") for i in range(len(sizes))]
+        index_vars = [sympy_index_symbol(f"d{i}") for i in range(len(sizes))]
         # reorder index vars according to stride
         index_order = sorted(range(len(strides)), key=strides.__getitem__, reverse=True)
         lookup = {pos: idx for idx, pos in enumerate(index_order)}
@@ -4401,6 +4447,7 @@ class DynamicScalar(ExternKernel):
 
     # TODO: handle bools carefully
     def __init__(self, sym, data):
+        data.realize()
         super().__init__(None, NoneLayout(torch.device("cpu")), self.unwrap_storage([data]))  # type: ignore[arg-type]
         if isinstance(sym, sympy.Symbol):
             self.sym = sym
@@ -6459,7 +6506,7 @@ class StorageBox(MutableBox):
     def has_exceeded_max_reads(self):
         return isinstance(self.data, Pointwise) and (
             self.num_reads() > config.realize_acc_reads_threshold
-            or self.inner_fn_str_len() > config.realize_bytes_threshold
+            or self.has_large_inner_fn()
         )
 
     def mark_reuse(self, users):
@@ -6481,7 +6528,7 @@ class StorageBox(MutableBox):
             and isinstance(self.data, (Pointwise, Reduction))
             and (
                 self.num_reads() > config.realize_reads_threshold
-                or len(self.inner_fn_str()) > config.realize_bytes_threshold
+                or self.has_large_inner_fn()
                 or (is_cpu(self.data) and should_realize_on_cpu(self.data))
             )
         ):
@@ -6531,7 +6578,7 @@ class InterpreterShim(torch.fx.Interpreter):
         # call super() with a placeholder to avoid constructing a
         # GraphModule which is very expensive (it does codegen).
         super().__init__(self._dummy_gm(), garbage_collect_values=False)
-        self.module = self
+        self.module = self  # type: ignore[assignment]
         self.graph = graph
         self.submodules = submodules
         self.extra_traceback = False
@@ -6618,7 +6665,7 @@ class LoopBody:
 
     def add_indirect(self, size):
         name = f"indirect{len(self.indirect_vars)}"
-        var = sympy_symbol(name)
+        var = sympy_index_symbol(name)
         self.indirect_vars.append(var)
         return var
 
@@ -7360,7 +7407,13 @@ class _CollectiveKernel(FallbackKernel):
             non_tensor_args,
             unflatten_args,
         )
-        pytree.tree_map(lambda x: MutationOutput(x.layout, x, packed), inputs)
+
+        def mark_mutation(x):
+            if isinstance(x.data, BaseView):
+                x = x.data.unwrap_view()
+            MutationOutput(x.layout, x, packed)
+
+        pytree.tree_map(lambda inp: mark_mutation(inp), inputs)
 
     # NOTE: [Out-of-Place Collective Safety]
     # Between the initiation and completion of an out-of-place collective:
@@ -7461,6 +7514,8 @@ class _WaitKernel(_CollectiveKernel):
             non_tensor_args,
             unflatten_args,
         )
+        if isinstance(inp.data, BaseView):
+            inp = inp.data.unwrap_view()
         MutationOutput(inp.layout, inp, packed)
 
     def get_read_writes(self):

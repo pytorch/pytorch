@@ -35,8 +35,8 @@ from ..utils import (
     free_symbol_startswith,
     IndentedBuffer,
     sympy_dot,
+    sympy_index_symbol,
     sympy_subs,
-    sympy_symbol,
     unique,
 )
 from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
@@ -224,10 +224,10 @@ class DataTypePropagation:
             "store_reduction",
         ):
             buf_name = node.args[1]
-            return V.graph.get_dtype(buf_name)
+            return V.graph.get_dtype(buf_name)  # type: ignore[arg-type]
 
         if node.target == operator.getitem:
-            return self.deduce_node_dtype(node.args[0])
+            return self.deduce_node_dtype(node.args[0])  # type: ignore[arg-type]
 
         assert isinstance(node.target, str)
 
@@ -235,7 +235,7 @@ class DataTypePropagation:
             return node.args[1]
 
         if node.target == "constant":
-            return DTYPE_TO_COMPUTATION_DTYPE[node.args[-1]]
+            return DTYPE_TO_COMPUTATION_DTYPE[node.args[-1]]  # type: ignore[index]
 
         if node.target.startswith("masked_subblock"):
             return self.deduce_node_dtype_by_subgraph(node)
@@ -1193,7 +1193,7 @@ class Kernel(CodeGen):
                         )
 
                     self.indirect_max_sizes[map_key] = (size, self.index_to_str(size))
-                return sympy_symbol(str(var))
+                return sympy_index_symbol(str(var))
 
             @staticmethod
             def load(name: str, index: sympy.Expr) -> CSEVariable:
