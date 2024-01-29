@@ -1688,7 +1688,7 @@ def isend(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, 
 
     Args:
         tensor (Tensor): Tensor to send.
-        dst (int): Destination rank.
+        dst (int): Destination rank on global process group (regardless of 'group' argument)
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match send with remote recv
@@ -1720,8 +1720,8 @@ def irecv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proce
 
     Args:
         tensor (Tensor): Tensor to fill with received data.
-        src (int, optional): Source rank. Will receive from any
-            process if unspecified.
+        src (int, optional): Source rank on global process group (regardless of 'group' argument).
+            Will receive from any process if unspecified.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match recv with remote send
@@ -1757,8 +1757,8 @@ def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, t
 
     Args:
         tensor (Tensor): Tensor to send.
-        dst (int): Destination rank. Destination rank should not be the same
-            as the rank of the current process.
+        dst (int): Destination rank on global process group (regardless of 'group' argument).
+            Destination rank should not be the same as the rank of the current process.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match send with remote recv
@@ -1789,8 +1789,8 @@ def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proces
 
     Args:
         tensor (Tensor): Tensor to fill with received data.
-        src (int, optional): Source rank. Will receive from any
-            process if unspecified.
+        src (int, optional): Source rank on global process group (regardless of 'group' argument).
+            Will receive from any process if unspecified.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match recv with remote send
@@ -2005,7 +2005,7 @@ def broadcast(tensor, src, group=None, async_op=False):
     Args:
         tensor (Tensor): Data to be sent if ``src`` is the rank of current
             process, and tensor to be used to save received data otherwise.
-        src (int): Source rank.
+        src (int): Source rank on global process group (regardless of 'group' argument).
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
@@ -2192,7 +2192,7 @@ def reduce(tensor, dst, op=ReduceOp.SUM, group=None, async_op=False):
     Args:
         tensor (Tensor): Input and output of the collective. The function
             operates in-place.
-        dst (int): Destination rank
+        dst (int): Destination rank on global process group (regardless of 'group' argument)
         op (optional): One of the values from
             ``torch.distributed.ReduceOp``
             enum.  Specifies an operation used for element-wise reductions.
@@ -2471,6 +2471,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
             Each object must be picklable. Only objects on the ``src`` rank will
             be broadcast, but each rank must provide lists of equal sizes.
         src (int): Source rank from which to broadcast ``object_list``.
+            Source rank is based on global process group (regardless of 'group' argument)
         group: (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used. Default is ``None``.
         device (``torch.device``, optional): If not None, the objects are
@@ -2584,8 +2585,8 @@ def scatter_object_list(
         scatter_object_input_list (List[Any]): List of input objects to scatter.
             Each object must be picklable. Only objects on the ``src`` rank will
             be scattered, and the argument can be ``None`` for non-src ranks.
-        src (int): Source rank from which to scatter
-            ``scatter_object_input_list``.
+        src (int): Source rank from which to scatter ``scatter_object_input_list``.
+            Source rank is based on global process group (regardless of 'group' argument).
         group: (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used. Default is ``None``.
 
@@ -3041,7 +3042,8 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
         tensor (Tensor): Output tensor.
         scatter_list (list[Tensor]): List of tensors to scatter (default is
             None, must be specified on the source rank)
-        src (int): Source rank (default is 0)
+        src (int): Source rank on global process group (regardless of 'group' argument).
+            Default is 0
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
