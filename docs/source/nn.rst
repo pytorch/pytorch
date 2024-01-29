@@ -131,6 +131,9 @@ Padding Layers
     nn.ConstantPad1d
     nn.ConstantPad2d
     nn.ConstantPad3d
+    nn.CircularPad1d
+    nn.CircularPad2d
+    nn.CircularPad3d
 
 Non-linear Activations (weighted sum, nonlinearity)
 ---------------------------------------------------
@@ -527,7 +530,6 @@ Lazy Modules Initialization
 
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
-.. py:module:: torch.nn.attention
 .. py:module:: torch.nn.backends
 .. py:module:: torch.nn.utils.stateless
 .. py:module:: torch.nn.backends.thnn
