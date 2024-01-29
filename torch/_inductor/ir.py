@@ -3028,6 +3028,41 @@ class InputBuffer(Buffer):
     pass
 
 
+@dataclasses.dataclass
+class WorkspaceBuffer(Buffer):
+    """Buffer that represents temporary workspace memory for a computation of another node."""
+
+    user_node: IRNode  # the node that uses this workspace buffer
+
+    @classmethod
+    def create(cls, workspace_size, user_node: IRNode):
+        layout = FixedLayout(
+            user_node.get_device(),
+            torch.int8,
+            [workspace_size],
+            [1],
+        )
+        res = cls(layout=layout, name=None, user_node=user_node)
+        return res
+
+    def resize(self, workspace_size):
+        self.layout = FixedLayout(
+            self.get_device(),
+            torch.int8,
+            [workspace_size],
+            [1],
+        )
+
+    def should_allocate(self):
+        return True
+
+    def get_device(self):
+        return self.user_node.get_device()
+
+    def is_no_op(self):
+        return True
+
+
 class ConstantBuffer(InputBuffer):
     override_device: Optional[torch.device] = None
 
@@ -3415,6 +3450,8 @@ class CUDATemplateBuffer(TemplateBuffer):
         self.template = template
 
     def get_workspace_size(self):
+        if callable(self.workspace_size):
+            return self.workspace_size()
         return self.workspace_size if self.workspace_size is not None else 0
 
 
