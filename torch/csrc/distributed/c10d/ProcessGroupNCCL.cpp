@@ -1532,6 +1532,15 @@ void ProcessGroupNCCL::watchdogHandler() {
 
         // Report desync state in case of timeout
         if (timedOut) {
+          LOG(ERROR) << c10::str(
+              logPrefix(),
+              "Timeout at NCCL work: ",
+              work.seq_,
+              ", last enqueued NCCL work: ",
+              lastEnqueuedSeq_,
+              ", last completeted NCCL work: ",
+              lastCompletedSeq_,
+              ".");
           try {
             if (desyncDebug_ || dumpOnTimeout_) {
               // Set shutdown mode, so the heartbeat monitor thread will not
@@ -1584,6 +1593,7 @@ void ProcessGroupNCCL::watchdogHandler() {
 
       // Clean up completed work
       if (work.isCompleted()) {
+        lastCompletedSeq_ = work.seq_;
         NCCLTraceBuffer::get()->retire_id(work.trace_id_, true);
         if (onCompletionHook_) {
           // Move Work object to completedWorkList_ to be consumed by the hook
@@ -2321,6 +2331,7 @@ void ProcessGroupNCCL::workEnqueue(
     // needs to be destructed in user thread. Otherwise will
     // get deadlock. Here we enqueue work without outputs_.
     workMetaList_.emplace_back(*work);
+    lastEnqueuedSeq_ = work->seq_;
     lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
   }
 }
