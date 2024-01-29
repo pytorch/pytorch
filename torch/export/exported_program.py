@@ -25,8 +25,8 @@ if TYPE_CHECKING:
     from torch.utils._sympy.value_ranges import ValueRanges
 
 import torch
-import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
+from torch.export._tree_utils import reorder_kwargs
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
 
@@ -246,20 +246,15 @@ class ExportedProgram:
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         import torch._export.error as error
 
-        if self.call_spec.in_spec is not None:
-            try:
-                user_args = (args, kwargs)
-                flat_args = fx_pytree.tree_flatten_spec(
-                    user_args, self.call_spec.in_spec, exact_structural_match=True
-                )  # type: ignore[assignment]
-            except Exception:
-                _, received_spec = pytree.tree_flatten(user_args)
-                raise TypeError(  # noqa: TRY200
-                    "Trying to flatten user inputs with exported input tree spec: \n"
-                    f"{self.call_spec.in_spec}\n"
-                    "but actually got inputs with tree spec of: \n"
-                    f"{received_spec}"
-                )
+        reordered_kwargs = reorder_kwargs(kwargs, self.call_spec.in_spec)
+        flat_args, received_spec = pytree.tree_flatten((args, reordered_kwargs))
+        if received_spec != self.call_spec.in_spec:
+            raise ValueError(
+                "Trying to flatten user inputs with exported input tree spec: \n"
+                f"{self.call_spec.in_spec}\n"
+                "but actually got inputs with tree spec of: \n"
+                f"{received_spec}"
+            )
 
         additional_inputs = []
         for input_ in self.graph_signature.input_specs:
