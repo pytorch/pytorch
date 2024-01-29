@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <aten/src/ATen/xpu/XPUEvent.h>
+#include <ATen/xpu/XPUEvent.h>
 #include <c10/util/irange.h>
 
 #define ASSERT_EQ_XPU(X, Y) \
