@@ -18,7 +18,6 @@ _initialized = False
 _initialization_lock = threading.Lock()
 _is_in_bad_fork = getattr(torch._C, "_xpu_isInBadFork", lambda: False)
 _device_t = Union[_device, str, int, None]
-has_half: bool = True
 
 
 def _is_compiled() -> bool:
@@ -237,7 +236,6 @@ __all__ = [
     "get_device_capability",
     "get_device_name",
     "get_device_properties",
-    "has_half",
     "init",
     "is_available",
     "is_bf16_supported",
