@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import contextlib
 import functools
 import inspect
@@ -843,6 +845,13 @@ class BuiltinVariable(VariableTracker):
             tx, [arg, ConstantVariable.create("__abs__")], {}
         )
         return abs_method.call_function(tx, [], {})
+
+    def call_pos(self, tx, arg: "VariableTracker"):
+        # Call arg.__pos__()
+        pos_method = BuiltinVariable(getattr).call_function(
+            tx, [arg, ConstantVariable.create("__pos__")], {}
+        )
+        return pos_method.call_function(tx, [], {})
 
     def call_round(self, tx, arg, *args, **kwargs):
         # Call arg.__round__()

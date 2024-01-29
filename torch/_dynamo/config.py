@@ -1,3 +1,4 @@
+import getpass
 import inspect
 import os
 import re
@@ -50,6 +51,10 @@ specialize_int = False
 
 # legacy config, does nothing now!
 dynamic_shapes = True
+
+use_lazy_graph_module = (
+    os.environ.get("TORCH_COMPILE_USE_LAZY_GRAPH_MODULE", "1") == "1"
+)
 
 # This is a temporarily flag, which changes the behavior of dynamic_shapes=True.
 # When assume_static_by_default is True, we only allocate symbols for shapes marked dynamic via mark_dynamic.
@@ -292,7 +297,7 @@ if DEBUG_DIR_VAR_NAME in os.environ:
     )
 elif is_fbcode():
     debug_dir_root = os.path.join(  # [@compile_ignored: debug]
-        tempfile.gettempdir(), "torch_compile_debug"
+        tempfile.gettempdir(), getpass.getuser(), "torch_compile_debug"
     )
 else:
     debug_dir_root = os.path.join(  # [@compile_ignored: debug]
@@ -356,6 +361,10 @@ _experimental_support_context_fn_in_torch_utils_checkpoint = False
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
+
+    def _make_closure_patcher(**changes):
+        ...
+
 
 from torch.utils._config_module import install_config_module
 

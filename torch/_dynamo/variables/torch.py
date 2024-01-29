@@ -1,3 +1,6 @@
+# mypy: ignore-errors
+
+import functools
 import inspect
 import logging
 
@@ -29,6 +32,7 @@ from ..utils import (
     check_unspec_python_args,
     guard_if_dyn,
     has_torch_function,
+    hashable,
     product,
     proxy_args_kwargs,
 )
@@ -45,6 +49,21 @@ from .torch_function import can_dispatch_torch_function, dispatch_torch_function
 
 log = logging.getLogger(__name__)
 
+supported_ctx_manager_classes = {
+    torch.profiler.profiler.profile,
+    torch.autograd.profiler.profile,
+    torch.autograd.profiler.record_function,
+    torch._C.DisableTorchFunctionSubclass,
+    torch._functorch.vmap.vmap_increment_nesting,
+    torch.amp.autocast_mode.autocast,
+    torch.autograd.grad_mode.enable_grad,
+    torch.autograd.grad_mode.inference_mode,
+    torch.autograd.grad_mode.no_grad,
+    torch.autograd.grad_mode.set_grad_enabled,
+    torch.cpu.amp.autocast_mode.autocast,
+    torch.cuda.amp.autocast_mode.autocast,
+}
+
 
 REWRITE_OPS_TO_TENSOR_SIZE_METHOD = [
     torch.onnx.operators.shape_as_tensor,
@@ -54,6 +73,7 @@ REWRITE_OPS_TO_TENSOR_SIZE_METHOD = [
 constant_fold_functions = [
     torch._assert,
     torch._utils._get_device_index,
+    torch._C._get_cublas_allow_tf32,
     torch.cuda.is_available,
     torch.distributed.is_available,
     torch.get_autocast_gpu_dtype,
@@ -137,6 +157,16 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
 
     def __repr__(self):
         return f"TorchCtxManagerClassVariable({self.value})"
+
+    @staticmethod
+    def is_matching_cls(value):
+        # Unwrap if it's a functools.lru_cache wrapper
+        if isinstance(value, functools._lru_cache_wrapper):
+            value = value.__wrapped__
+        # We can't do isinstance(value, type) check because some ctx managers
+        # are implemented as a function decorated by contextlib.contextmanager,
+        # E.g., torch._functorch.vmap.vmap_increment_nesting.
+        return hashable(value) and value in supported_ctx_manager_classes
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
