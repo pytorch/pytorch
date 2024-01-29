@@ -331,7 +331,7 @@ def timed(
         synchronize(device)
     t1 = time.perf_counter()
     # GC the result after timing
-    assert result is not None  # type: ignore[possibly-undefined]
+    assert result is not None  # type: ignore[possibly-undefined]  # TODO: audit
     return t1 - t0
 
 

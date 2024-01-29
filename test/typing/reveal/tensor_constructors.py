@@ -30,7 +30,7 @@ reveal_type(torch.sparse_coo_tensor(torch.empty([1, 0]),
 
 # torch.as_tensor
 if TEST_NUMPY:
-    a = np.array([1, 2, 3])
+    a = np.array([1, 2, 3])  # type: ignore[possibly-undefined]
     reveal_type(torch.as_tensor(a))  # E: {Tensor}
     reveal_type(torch.as_tensor(a, device=torch.device('cuda')))  # E: {Tensor}
 
@@ -41,7 +41,7 @@ reveal_type(torch.as_strided(x, (2, 2), (1, 2), 1))  # E: {Tensor}
 
 # torch.from_numpy
 if TEST_NUMPY:
-    a = np.array([1, 2, 3])
+    a = np.array([1, 2, 3])  # type: ignore[possibly-undefined]
     reveal_type(torch.from_numpy(a))  # E: {Tensor}
 
 # torch.zeros/zeros_like

@@ -1430,7 +1430,7 @@ def export(
                 example_fake_inputs,
                 graph_captured_input,
                 graph_captured_result,
-                result_traced,  # type: ignore[possibly-undefined]
+                result_traced,  # type: ignore[possibly-undefined]  # TODO: audit
                 flat_args_dynamic_dims,
             )
         # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check
