@@ -432,7 +432,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             == cutlass_lib.OpcodeClass.Simt
         ):
             return None
-
+        supports_evt: bool = self.supports_evt(op)
+        if (self.can_fuse_epilogue is not None) and (
+            self.can_fuse_epilogue != supports_evt
+        ):
+            return None
         # Only keep GemmUniversal kernels
         if op.gemm_kind not in {
             cutlass_lib.GemmKind.Universal,
