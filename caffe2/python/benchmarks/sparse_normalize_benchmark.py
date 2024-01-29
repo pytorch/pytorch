@@ -26,7 +26,7 @@ def benchmark_sparse_normalize(
     if fp16:
         op = core.CreateOperator("FloatToHalf", "X", "X_fp16")
         init_net.Proto().op.extend([op])
-    l3_cache_size = 30 * 2 ** 20 // 4
+    l3_cache_size = 30 * 2**20 // 4
 
     # In order to produce truly random lengths and indices, we will embed a
     # Python operator in the net to generate them.
@@ -83,7 +83,7 @@ def benchmark_sparse_normalize(
     )
 
 
-if __name__ == "__main__":
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="minimal benchmark for sparse lengths sum."
     )
@@ -119,3 +119,7 @@ if __name__ == "__main__":
         args.flush_cache,
         args.fp16,
     )
+
+
+if __name__ == "__main__":
+    main()  # pragma: no cover

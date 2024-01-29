@@ -17,7 +17,7 @@ def benchmark_concat(num_inputs, input_dim, axis, add_axis, iterations):
     print(f"{num_inputs * np.prod(input_dim) * 4 / runtimes[1] / 1e6} GB/s")
 
 
-if __name__ == "__main__":
+def main() -> None:
     parser = argparse.ArgumentParser(description="minimal benchmark for concat.")
     parser.add_argument("--num_inputs", type=int, default=2)
     parser.add_argument("--input_dim", nargs="+", type=int, required=True)
@@ -29,3 +29,7 @@ if __name__ == "__main__":
     benchmark_concat(
         args.num_inputs, args.input_dim, args.axis, args.add_axis, args.iterations
     )
+
+
+if __name__ == "__main__":
+    main()  # pragma: no cover
