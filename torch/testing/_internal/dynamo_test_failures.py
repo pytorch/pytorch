@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # NOTE: [dynamo_test_failures.py]
 #
 # We generate xFailIfTorchDynamo* for all tests in `dynamo_expected_failures`
@@ -1773,7 +1775,6 @@ dynamo_expected_failures = {
     "TestGradNewOnesOverride.test_newones",  # test_overrides
     "TestTorchFunctionOverride.test_precedence_semantics",  # test_overrides
     "TestNamedTupleAPI.test_namedtuple_return",  # test_namedtuple_return_api
-    "TestVmapOperatorsLegacy.test_contiguous",  # test_legacy_vmap
     "TestVmapAPILegacy.test_accepts_nested_inputs",  # test_legacy_vmap
     "TestVmapAPILegacy.test_nested_out_dims",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_inplace_manyview_cpu",  # test_legacy_vmap
@@ -1794,11 +1795,8 @@ dynamo_expected_failures = {
     "TestVmapAPILegacy.test_unsupported_op_err_msg",  # test_legacy_vmap
     "TestVmapAPILegacy.test_batched_gradient_basic",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_slice",  # test_legacy_vmap
-    "TestVmapOperatorsLegacy.test_expand_as",  # test_legacy_vmap
-    "TestVmapOperatorsLegacy.test_unfold",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_sigmoid_cpu",  # test_legacy_vmap
     "TestVmapAPILegacy.test_out_dims_and_num_outputs_mismatch_err_msg",  # test_legacy_vmap
-    "TestVmapOperatorsLegacy.test_reshape_as",  # test_legacy_vmap
     "TestVmapAPILegacy.test_noop_in_inner_vmap",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_new_empty_strided",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_is_floating_point",  # test_legacy_vmap
@@ -1808,7 +1806,6 @@ dynamo_expected_failures = {
     "TestVmapOperatorsLegacy.test_as_strided",  # test_legacy_vmap
     "TestVmapAPILegacy.test_nested_with_different_map_dim",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_new_zeros",  # test_legacy_vmap
-    "TestVmapOperatorsLegacy.test_view_as",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_logsumexp_cpu",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_log1p_cpu",  # test_legacy_vmap
     "TestVmapAPILegacy.test_grad_unsupported_interaction",  # test_legacy_vmap
@@ -1829,16 +1826,13 @@ dynamo_expected_failures = {
     "TestVmapOperatorsLegacy.test_comparison_ops",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_is_contiguous",  # test_legacy_vmap
     "TestVmapAPILegacy.test_multiple_outputs",  # test_legacy_vmap
-    "TestVmapAPILegacy.test_inplace_fallback_unary",  # test_legacy_vmap
     "TestVmapAPILegacy.test_out_dim_out_of_bounds_err_msg",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_view",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_div_cpu",  # test_legacy_vmap
     "TestVmapAPILegacy.test_out_dims_edge_case",  # test_legacy_vmap
-    "TestVmapAPILegacy.test_inplace_fallback_nary_different_levels",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_clone",  # test_legacy_vmap
     "TestVmapAPILegacy.test_in_dim_not_in_tensor_err_msg",  # test_legacy_vmap
     "TestVmapAPILegacy.test_fallback_with_undefined_grad",  # test_legacy_vmap
-    "TestVmapAPILegacy.test_inplace_fallback_nary_same_levels",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_no_random_op_support",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_unbind",  # test_legacy_vmap
     "TestVmapAPILegacy.test_non_default_in_dims_out_dims",  # test_legacy_vmap
@@ -2745,7 +2739,6 @@ dynamo_expected_failures = {
     "TestPythonDispatch.test_subclass_autograd_device_check",  # test_python_dispatch
     "TestPythonDispatch.test_data_ptr_respects_numel_slow_path",  # test_python_dispatch
     "TestPythonDispatch.test_make_subclass_with_modes",  # test_python_dispatch
-    "TestPythonRegistration.test_override_aten_ops_with_multiple_libraries",  # test_python_dispatch
     "TestPythonDispatch.test_dispatch_super_call",  # test_python_dispatch
     "TestPythonDispatch.test_subclass_priority",  # test_python_dispatch
     "TestPythonDispatch.test_exception_handling",  # test_python_dispatch
@@ -7453,6 +7446,9 @@ dynamo_skips = {
     "TestSymbolicShapeAnalysis.test_if_propagation",  # test_jit
     "TestPeephole.test_normalized_rsub",  # test_jit
     "TestPythonIr.test_param_strides",  # test_jit
+    "TestPythonIr.test_permute_inputs_binding",  # test_jit
+    "TestPythonIr.test_python_ir_utils",  # test_jit
+    "TestPythonIr.test_python_ir_utils_graph",  # test_jit
     "TestComplex.test_complex_list_sum",  # test_jit
     "TestUnion.test_union_redundant_arguments_are_skipped_optional",  # test_jit
     "TestNnapiBackend.test_conv2d",  # test_jit

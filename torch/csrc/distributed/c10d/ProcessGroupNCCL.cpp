@@ -1060,6 +1060,8 @@ void ProcessGroupNCCL::abortCommsFromMap(
     auto& ncclComms = it.second;
 
     for (const auto& ncclComm : ncclComms) {
+      LOG(INFO) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
+                << ncclComm->ncclComm_ << " on CUDA device: " << devName;
       ncclComm->ncclCommAbort(abortReason);
     }
     // Note that we don't remove the aborted communicators from the
@@ -1080,8 +1082,9 @@ void ProcessGroupNCCL::abortCommsFromMap(
       }
     }
 
-    LOG(INFO) << logPrefix() << "] Destroyed " << ncclComms.size()
-              << "communicators on CUDA device: " << devName
+    LOG(INFO) << logPrefix() << "ProcessGroupNCCL destroyed "
+              << ncclComms.size()
+              << " communicators on CUDA device: " << devName
               << " with stream: " << streamId;
   }
 }
@@ -1699,7 +1702,10 @@ std::exception_ptr ProcessGroupNCCL::checkForNCCLErrorsInternal(
               *commFailureReason)));
     }
     ncclResult_t ncclAsyncErr = ncclComm->checkForNcclError();
-    if (ncclAsyncErr != ncclSuccess) {
+    // When nonblocking mode is enabled by TORCH_NCCL_USE_COMM_NONBLOCKING,
+    // ncclInProgress could be returned when there are pending NCCL calls.
+    // In this case, no exception should be thrown
+    if (ncclAsyncErr != ncclSuccess && ncclAsyncErr != ncclInProgress) {
       return std::make_exception_ptr(C10_BUILD_ERROR(
           DistBackendError,
           "NCCL error: " + ncclGetErrorWithVersion(ncclAsyncErr) + "\n" +
@@ -1971,6 +1977,12 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     C10D_NCCL_CHECK_TIMEOUT_GROUPEND(ncclGroupEnd(), ncclComms, c10::nullopt);
   }
 #endif
+
+  for (const auto i : c10::irange(devices.size())) {
+    int deviceIndex = devices[i].index();
+    LOG(INFO) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
+              << ncclComms[i]->ncclComm_ << " on CUDA device: " << deviceIndex;
+  }
 
   // At this point NCCL should have been initialized, hence we can accurately
   // get the env value even if NCCL sets it by reading from nccl.conf file
