@@ -121,10 +121,10 @@ class Match:
             self, self.ctx.graph, replacement_graph, args
         )
 
-    def replace_by_example(self, replacement_fn, args, trace_fn=None):
+    def replace_by_example(self, replacement_fn, args, trace_fn=None, run_dce=True):
         assert self.ctx
         if trace_fn is None:
-            trace_fn = fwd_only
+            trace_fn = functools.partial(fwd_only, run_dce=run_dce)
         replacement = trace_fn(
             replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])
         )
@@ -828,34 +828,89 @@ class ReplacementPatternEntry(PatternEntry):
                     arg.meta["recompute"] = recompute_tag
                     queue.extend(arg.all_input_nodes)
 
+        breakpoint()
         with graph.inserting_before(last_node):
             replacement = Replacer(replacement_graph).run(*args)
             if isinstance(replacement, torch.fx.Node):
                 replacement = [replacement]
-            breakpoint()
-            assert len(replacement) == len(output_nodes)
-            for old, new in zip(output_nodes, replacement):
-                if old is None:
-                    assert new is None
-                elif new is None:
-                    old.replace_all_uses_with(None)
-                else:
-                    if "val" not in new.meta:
-                        new.meta.update(old.meta)
+            if len(replacement) != len(output_nodes) and len(output_nodes) == 1:
+                # We replaced a node that has a single packed return
+                # with multiple unpacked returns. This means we need
+                # to do some graph surgery.
+                #
+                # Example:
+                #   def original_graph(x):
+                #      a = op(x)
+                #      b = a[0]
+                #      c = a[1]
+                #      ...
+                #
+                # Assume that we want to replace op(x) with the graph
+                #   def new_op(x):
+                #      w = x + 1
+                #      z = x + 2
+                #      return (w, z)
+                #
+                # We need to replace `op` with the contents of `new_op`,
+                # and then rewrite a[0] to be w and a[1] to be z, as so:
+                #   def new_graph(x):
+                #     w = x + 1
+                #     z = x + 2
+                #     b = w
+                #     c = z
+                #     ...
+                def maybe_getitem(node):
+                    if node.op != "call_function":
+                        return None
+                    if str(node.target) != "<built-in function getitem>":
+                        return None
+                    assert len(node.args) == 2
+                    return node.args[1]
 
-                    # Preserve the recompute tags in the replacement graph. We
-                    # look at the recompute tags of the original output node to
-                    # propagate the tag from the output all the way to the input
-                    # args (named as args in the replace_with_graph).
-                    # Note that this is best effort. Since patterns are from
-                    # many to many, there is no easy way to correctly map the
-                    # recomputable tags. It is possible in some scenarios that we
-                    # incorrectly tag some nodes as recomputables.
-                    if "recompute" in old.meta:
-                        percolate_tags(new, old.meta["recompute"], args)
+                def replace(old, replacement):
+                    assert isinstance(old, torch.fx.Node)
+                    if replacement is None:
+                        old.replace_all_uses_with(None)
+                        graph.erase_node(old)
+                        return
+                    if isinstance(replacement, torch.fx.Node):
+                        old.replace_all_uses_with(replacement)
+                        graph.erase_node(old)
+                        return
+                    old_uses = list(old.users.keys())
+                    for user in old_uses:
+                        idx = maybe_getitem(user)
+                        if idx is None:
+                            raise RuntimeError("can't handle")
+                        replace(user, replacement[idx])
+                    graph.erase_node(old)
 
-                    old.replace_all_uses_with(new)
+                replace(output_nodes[0], replacement)
+            else:
+                assert len(replacement) == len(output_nodes)
+                for old, new in zip(output_nodes, replacement):
+                    if old is None:
+                        assert new is None
+                    elif new is None:
+                        old.replace_all_uses_with(None)
+                    else:
+                        if "val" not in new.meta:
+                            new.meta.update(old.meta)
 
+                        # Preserve the recompute tags in the replacement graph. We
+                        # look at the recompute tags of the original output node to
+                        # propagate the tag from the output all the way to the input
+                        # args (named as args in the replace_with_graph).
+                        # Note that this is best effort. Since patterns are from
+                        # many to many, there is no easy way to correctly map the
+                        # recomputable tags. It is possible in some scenarios that we
+                        # incorrectly tag some nodes as recomputables.
+                        if "recompute" in old.meta:
+                            percolate_tags(new, old.meta["recompute"], args)
+
+                        old.replace_all_uses_with(new)
+
+        breakpoint()
         match.erase_nodes(graph)
 
     def apply(self, match: Match, graph: torch.fx.Graph, node: torch.fx.Node):
@@ -1290,7 +1345,7 @@ def fx_to_pattern(
 
 
 @torch.no_grad()
-def fwd_only(fn, args) -> torch.fx.GraphModule:
+def fwd_only(fn, args, *, run_dce=True) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
     # TODO - look into using aot autograd, asserting no mutating ops here
     with enable_python_dispatcher():
@@ -1298,7 +1353,8 @@ def fwd_only(fn, args) -> torch.fx.GraphModule:
             "real" if not torch._inductor.utils.any_is_symbolic(*args) else "symbolic"
         )
         gm = make_fx(fn, select_decomp_table(), tracing_mode=mode)(*args)
-    gm.graph.eliminate_dead_code()
+    if run_dce:
+        gm.graph.eliminate_dead_code()
     gm.recompile()
     return gm
 

@@ -110,6 +110,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     gm.recompile()
     gm.graph.lint()
 
+    print(gm.graph)
     print_graph(gm.graph, "After recompile in post grad pass.")
 
 
@@ -648,7 +649,7 @@ def lower_auto_functionalized(graph):
     def replacement(match: Match, *args):
         from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
         with V.fake_mode:
-            match.replace_by_example(auto_functionalized_dense, args)
+            match.replace_by_example(auto_functionalized_dense, args, run_dce=False)
 
     graph_pass.apply(graph)
 
