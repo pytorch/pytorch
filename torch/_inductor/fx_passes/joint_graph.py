@@ -178,7 +178,7 @@ class UniformValueConstantFolder(ConstantFolder):
         self.node_storages_ptrs: Dict[torch.fx.Node, int] = {}
         self.constant_data_ptrs: Dict[torch.fx.Node, StorageWeakRef] = {}
         # we may constant fold a tensor which in the graph has a sym size
-        # see: [constant folding refining of sym sizes of sizes]
+        # see: [constant folding refining of symints]
         self.node_replacements_shapes: Dict[torch.fx.Node, List[int]] = {}
 
     def insertable_tensor_check(self, t: torch.Tensor) -> bool:
@@ -210,7 +210,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
 
     node_replacements = cf.node_replacements
 
-    # note: [constant folding refining of sym sizes of sizes]
+    # note: [constant folding refining of symints]
     # constant folding will partially evaluate a graph such that values which have dependencies which
     # are entirely known at compile time may also become compile time constants. in some cases,
     # this will include symints which we had not yet previously deduced are guaranteed a
