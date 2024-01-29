@@ -136,7 +136,7 @@ void XPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   if (!no_philox_seed) {
     memcpy(&philox_offset, new_rng_state + seed_size, offset_size);
   }
-  this->set_philox_offset_per_thread( philox_offset) ;
+  this->set_philox_offset_per_thread(philox_offset);
 }
 
 void XPUGeneratorImpl::set_philox_offset_per_thread(uint64_t offset) {
