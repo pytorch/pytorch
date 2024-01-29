@@ -180,8 +180,8 @@ C10_DEFINE_TLS_static(std::shared_ptr<ReadyQueue>, tls_local_ready_queue);
 
 // Note [Streaming backwards]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
-// On CUDA/privateuse1 devices the autograd engine's device operations are run on the
-// same stream that ran them in forward. This requires automatically
+// On CUDA/privateuse1 devices the autograd engine's device operations are run
+// on the same stream that ran them in forward. This requires automatically
 // syncing the streams so that function A finishes producing its
 // output before function B consumes it.
 //
@@ -190,9 +190,10 @@ C10_DEFINE_TLS_static(std::shared_ptr<ReadyQueue>, tls_local_ready_queue);
 // recording their streams from forward, and during backward this
 // data is used to sync the producer's stream with the consumer's.
 //
-// When a CUDA/privateuse1 function is run either all its inputs were accumulated on the
-// stream used to run the function OR the inputs are on different devices
-// and the function is responsible for properly acquiring them.
+// When a CUDA/privateuse1 function is run either all its inputs were
+// accumulated on the stream used to run the function OR the inputs are on
+// different devices and the function is responsible for properly acquiring
+// them.
 //
 // User-facing stream semantics of a backward() (or torch.autograd.grad())
 // call with respect to surrounding ops are the same as for any other call.
@@ -703,12 +704,13 @@ void GraphTask::exec_post_processing() {
   // any grad on its device's current stream.
   if (!leaf_streams.empty()) {
     for (const auto& leaf_stream : leaf_streams) {
-      // stash_current_cuda/privateuse1_streams() stashed streams for all device IDs that already
-      // had a CUDA/privateuse1 context before the GraphTask executed. For inactive devices,
-      // it stashed a c10::nullopt. I don't expect GraphTask's backward pass ran
-      // leaf nodes on any new devices, so the stashed streams should be enough.
-      // If leaf_stream.device_index() happens to be for a new device,
-      // operator* on the c10::nullopt should throw an error.
+      // stash_current_cuda/privateuse1_streams() stashed streams for all device
+      // IDs that already had a CUDA/privateuse1 context before the GraphTask
+      // executed. For inactive devices, it stashed a c10::nullopt. I don't
+      // expect GraphTask's backward pass ran leaf nodes on any new devices, so
+      // the stashed streams should be enough. If leaf_stream.device_index()
+      // happens to be for a new device, operator* on the c10::nullopt should
+      // throw an error.
       const auto caller_current_stream =
           // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
           *caller_current_streams_[leaf_stream.device_index()];
@@ -1175,8 +1177,9 @@ auto Engine::compute_dependencies(
   }
 
   if (will_use_cuda) {
-    // Collects current streams for CUDA/ROCM devices where this process has a context,
-    // so GraphTask::exec_post_processing can sync them with leaf_streams.
+    // Collects current streams for CUDA/ROCM devices where this process has a
+    // context, so GraphTask::exec_post_processing can sync them with
+    // leaf_streams.
     task.stash_current_cuda_streams();
   }
 
@@ -1550,9 +1553,9 @@ void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
   thread_pool_shared_->work_.notify_one();
 }
 
-// Remembers current streams on all CUDA/ROCM devices where a context has been created.
-// Only called if Engine::execute detects at least one node runs on a cuda/rocm
-// stream.
+// Remembers current streams on all CUDA/ROCM devices where a context has been
+// created. Only called if Engine::execute detects at least one node runs on a
+// cuda/rocm stream.
 void GraphTask::stash_current_cuda_streams() {
   const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
   auto num_gpus = guard.deviceCount();

@@ -270,8 +270,9 @@ void DistEngine::computeDependencies(
   }
 
   if (will_use_cuda) {
-    // Collects current streams for CUDA/ROCM devices where this process has a context,
-    // so graphTask::exec_post_processing can sync them with leaf_streams.
+    // Collects current streams for CUDA/ROCM devices where this process has a
+    // context, so graphTask::exec_post_processing can sync them with
+    // leaf_streams.
     graphTask->stash_current_cuda_streams();
   }
 
