@@ -4,7 +4,7 @@ from typing import Optional
 import torch
 
 
-@dataclass
+@dataclass(frozen=True)
 class MixedPrecisionPolicy:
     """
     Attributes:

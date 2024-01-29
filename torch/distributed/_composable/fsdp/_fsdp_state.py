@@ -56,9 +56,6 @@ class FSDPState(_State):
         # Shared post-forward order for explicit backward prefetching
         self._post_forward_order: List[FSDPParamGroup] = []  # will cause ref cycles
 
-        # Attributes only used on the root state:
-        self._root_post_backward_final_callback_queued: Optional[bool] = None
-
     # Define a separate init since `__init__` is called in the contract
     def init(
         self, module: nn.Module, device: torch.device, mp_policy: MixedPrecisionPolicy
