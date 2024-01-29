@@ -1,11 +1,11 @@
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import torch
 import torch.nn as nn
 
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
 
-from ._fsdp_common import FSDPMeshInfo
+from ._fsdp_common import FSDPMeshInfo, TrainingState
 from ._fsdp_param import FSDPParam, ParamModuleInfo
 
 
@@ -27,6 +27,8 @@ class FSDPParamGroup:
         ]
         self.mesh_info = mesh_info
         self.device = device
+        self._training_state = TrainingState.IDLE
+        self._module_fqn: Optional[str] = None  # prefixed from root module
 
 
 def _get_param_module_infos(
