@@ -5,19 +5,19 @@ from typing import List, Tuple, Union
 
 import torch
 import torch.distributed as dist
-from _test_fully_shard_common import (
-    patch_all_gather,
-    patch_post_backward,
-    patch_reduce_scatter,
-    patch_unshard,
-)
 
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp._fsdp_common import TrainingState
 from torch.distributed._composable.fsdp._fsdp_param import ShardedState
 from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import (
+    FSDPTest,
+    patch_all_gather,
+    patch_post_backward,
+    patch_reduce_scatter,
+    patch_unshard,
+)
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,

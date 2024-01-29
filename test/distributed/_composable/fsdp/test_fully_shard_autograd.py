@@ -9,11 +9,14 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 
-from _test_fully_shard_common import check_1d_sharded_parity, DoubleLinear
 from torch.distributed._composable.fsdp import fully_shard
 from torch.nn.parallel.scatter_gather import _is_namedtuple
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import (
+    check_1d_sharded_parity,
+    DoubleLinear,
+    FSDPTest,
+)
 from torch.testing._internal.common_utils import run_tests
 
 
