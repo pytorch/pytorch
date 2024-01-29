@@ -133,12 +133,12 @@ class AsyncFuncHandle:
     args_materialized = pytree.tree_map(lambda x: x.detach(), args_materialized)
     self.args_materialized = args_materialized
     scheduler.record_execution(self.segment_name)
-    print(f"here333: type of args_materialized: {[type(arg) for arg in args_materialized]}")
-    if isinstance(self.fn, CompiledFxGraph):
-      outs = self.fn(list(self.args_materialized))
-    else:
-      # TODO: when do we hit this case?
-      outs = self.fn(self.args_materialized)
+    with torch.profiler.record_function(f"{self.segment_name} (LazyScheduler)"):
+      if isinstance(self.fn, CompiledFxGraph):
+        outs = self.fn(list(self.args_materialized))
+      else:
+        # TODO: when do we hit this case?
+        outs = self.fn(self.args_materialized)
     self.outs = [out.get_materialized_tensor() if isinstance(out, AsyncTensor) else out for out in outs]
     self.cuda_event.record()
 

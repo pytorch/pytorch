@@ -32,6 +32,61 @@ from torch._inductor.compile_fx import compile_fx_inner as inductor_compile_fx_i
 from torch._dynamo.output_graph import GraphCompileReason
 from torch._lazy_scheduler import LazyScheduler, Segment
 
+profiler_trace_path = "trace.json"
+
+# ======== REMOVE WHEN READY TO MERGE ========
+import argparse
+import os
+import subprocess
+import sys
+import urllib
+import urllib.parse
+import uuid
+
+from typing import Optional
+
+PERFETTO_UI_ROOT_URL = (
+    "https://interncache-all.fbcdn.net/manifold/perfetto-artifacts/tree/ui/index.html"
+)
+MANIFOLD_FOLDER = "perfetto_internal_traces/tree/shared_trace"
+DEFAULT_TTL_SEC = 28 * 24 * 60 * 60
+
+
+def upload_trace_file(local_path: str, overwrite: bool = False) -> Optional[str]:
+    file_name = os.path.basename(local_path)
+    manifold_path = os.path.join(
+        MANIFOLD_FOLDER, f"{os.getlogin()}_{str(uuid.uuid4())}_{file_name}"
+    )
+    cmd = [
+        "manifold",
+        "put",
+        local_path,
+        manifold_path,
+        "--ttl",
+        str(DEFAULT_TTL_SEC),
+        "--userData",
+        "false",
+    ]
+    ret = subprocess.run(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True
+    )
+    if ret.returncode == 0:
+        print("Upload trace successfully.")
+        return manifold_path
+    else:
+        print("[ERROR] Upload failed, maybe the trace file exists.")
+        return None
+
+
+def print_perfetto_ui_url(manifold_path: str) -> None:
+    url = (
+        PERFETTO_UI_ROOT_URL
+        + "#!/?url=https://interncache-all.fbcdn.net/manifold/"
+        + urllib.parse.quote_plus(manifold_path)
+    )
+    print(f"The trace is accessible at:\n{url}")
+# ======== REMOVE WHEN READY TO MERGE ========
+
 
 class TestCase(TorchTestCase):
   def setUp(self):
@@ -64,7 +119,7 @@ def check_segment(lazy_scheduler, segment_name_to_expected_ops_in_gms, is_compil
       else:
         expected_ops = expected_ops_dict_or_list
       ops_from_gm = extract_ops_from_gm(gm)
-      print(f"ops_from_gm: {ops_from_gm}")
+      # print(f"ops_from_gm: {ops_from_gm}")
       assert ops_from_gm == expected_ops
 
 
@@ -119,9 +174,9 @@ class TestNonDepSegmentModule(torch.nn.Module):
           -> mul -> output
   func2 ->
   """
-  def __init__(self):
+  def __init__(self, hidden_size=4):
     super().__init__()
-    self.param = torch.nn.Parameter(torch.randn(4, 4))
+    self.param = torch.nn.Parameter(torch.randn(hidden_size, hidden_size))
 
   def func1(self, x, y):
     return torch.matmul(x, y)
@@ -218,14 +273,22 @@ class TestLazyScheduler(TestCase):
           expected.sum().backward()
 
       eager_module_clone = copy.deepcopy(eager_module)
-      # LazyScheduler function, run several iterations
-      for i in range(num_iterations):
-        print(f"------------------ LazyScheduler iter: {i} ------------------")
-        torch.manual_seed(0)
-        lazy_scheduler = lazy_scheduler_gen(eager_module_clone, is_compile=is_compile)
-        result = lazy_scheduler(*inps_ls)
-        if not fwd_only:
-          result.sum().backward()
+      from torch.profiler import profile, record_function, ProfilerActivity
+      with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
+        # LazyScheduler function, run several iterations
+        for i in range(num_iterations):
+          print(f"------------------ LazyScheduler iter: {i} ------------------")
+          torch.manual_seed(0)
+          lazy_scheduler = lazy_scheduler_gen(eager_module_clone, is_compile=is_compile)
+          result = lazy_scheduler(*inps_ls)
+          if not fwd_only:
+            result.sum().backward()
+      prof.export_chrome_trace(profiler_trace_path)
+      if not os.path.exists(profiler_trace_path):
+        raise Exception(f"[ERROR] The trace file doesn't exist: {profiler_trace_path}")
+      manifold_path = upload_trace_file(profiler_trace_path)
+      if manifold_path:
+          print_perfetto_ui_url(manifold_path)
 
       if debug_mode:
         lazy_scheduler.debug()
@@ -235,8 +298,8 @@ class TestLazyScheduler(TestCase):
         if not fwd_only:
           # TODO: we need to compare module.param gradients as well, to check whether reusing the same LazyScheduler is a good idea or not.
           # mainly handle is already scheduled in first iteration and it's not refreshed.
-          print(f"eager_module.param.grad: {eager_module.param.grad}")
-          print(f"eager_module_clone.param.grad: {eager_module_clone.param.grad}")
+          # print(f"eager_module.param.grad: {eager_module.param.grad}")
+          # print(f"eager_module_clone.param.grad: {eager_module_clone.param.grad}")
           self.assertEqual(
             eager_module.param.grad, eager_module_clone.param.grad,
             msg=f"Gradient mismatch between torch.compile and eager versions. eager_module.param.grad: {eager_module.param.grad}, eager_module_clone.param.grad: {eager_module_clone.param.grad}",
@@ -488,10 +551,13 @@ but got:
 
   def test_explicit_schedule_reordering_fwd_and_bwd_segments(self):
     device = "cuda"
-    m = TestNonDepSegmentModule()
+    hidden_size = 10240
+    m = TestNonDepSegmentModule(hidden_size=hidden_size)  # hidden_size=4
     m = m.to(device)
-    x = torch.randn(4, 4, requires_grad=True, device=device)
-    y = torch.randn(4, 4, requires_grad=True, device=device)
+    # x = torch.randn(4, 4, requires_grad=True, device=device)
+    # y = torch.randn(4, 4, requires_grad=True, device=device)
+    x = torch.randn(hidden_size, hidden_size, requires_grad=True, device=device)
+    y = torch.randn(hidden_size, hidden_size, requires_grad=True, device=device)
 
     expected_execution_order = [
       "func2_fwd",
@@ -520,8 +586,6 @@ but got:
         },
       )
 
-    # from torch.profiler import profile, record_function, ProfilerActivity
-    # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
     self._validate(
       m,
       lazy_scheduler_gen,
@@ -529,7 +593,6 @@ but got:
       inps=[x, y],
       additional_check=check_segment_for_TestNonDepSegmentModule_fwd_bwd,
     )
-    # prof.export_chrome_trace("trace.json")
 
   def test_segment_compiled_with_different_backend(self):
     def _run_test(lazy_scheduler_gen, expected_execution_order, additional_check, fwd_only=False):
@@ -1020,7 +1083,6 @@ but got:
 """
 TODO:
 Design doc: https://docs.google.com/document/d/1vv0H5IMGwUMyzmJKnksJOnRSult1B4YlbBSs_MeAvXM/edit?usp=sharing
-- Study the GPU trace, make sure everything looks good, make sure we are not spending a lot of time recompiling every iteration.
 - Rebase to latest master, make sure everything works
 - Try on Ads model: https://docs.google.com/document/d/1tFLUh4Xe4_eGKOtgpj08kfNDhy7Fqp-dSq0d7lejdZU/edit#bookmark=id.wds06wiqwjh2 figure out integration point with trainer loop
 
