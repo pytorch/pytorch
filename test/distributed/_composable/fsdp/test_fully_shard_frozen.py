@@ -10,20 +10,20 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-from _test_fully_shard_common import (
-    check_1d_sharded_parity,
-    MLP,
-    patch_reduce_scatter,
-    patch_register_post_backward_hook_backward,
-    reduce_scatter_with_assert,
-)
 from torch.distributed._composable import checkpoint, replicate
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp._fsdp_param_group import (
     RegisterPostBackwardHook,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import (
+    check_1d_sharded_parity,
+    FSDPTest,
+    MLP,
+    patch_reduce_scatter,
+    patch_register_post_backward_hook_backward,
+    reduce_scatter_with_assert,
+)
 from torch.testing._internal.common_utils import run_tests
 
 
