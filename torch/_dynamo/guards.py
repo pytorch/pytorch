@@ -99,6 +99,7 @@ check_obj_id = torch._C._dynamo.guards.check_obj_id
 check_type_id = torch._C._dynamo.guards.check_type_id
 dict_version = torch._C._dynamo.guards.dict_version
 RootGuardManager = torch._C._dynamo.guards.RootGuardManager
+install_tensor_aliasing_guard = torch._C._dynamo.guards.install_tensor_aliasing_guard
 
 
 class GuardManager:
@@ -326,7 +327,7 @@ class GuardBuilder(GuardBuilderBase):
 
         return name
 
-    def get_guard_manager(self, guard: Guard):
+    def _get_guard_manager_from_source(self, originating_source):
         # eval_frame calls check_fn with f_locals dict, which is then later
         # wrapped up into a "L" dict.
         root_guard_manager = self.guard_manager.root
@@ -377,8 +378,11 @@ class GuardBuilder(GuardBuilderBase):
                     f"missing guard manager builder {source} - {source.name()}"
                 )
 
-        mgr = build(guard.originating_source)
+        mgr = build(originating_source)
         return mgr
+
+    def get_guard_manager(self, guard: Guard):
+        return self._get_guard_manager_from_source(guard.originating_source)
 
     def get_guard_str(self, guard, code):
         guard_strs = []
@@ -424,7 +428,10 @@ class GuardBuilder(GuardBuilderBase):
 
         maybe_not = "not " if invert else ""
         code = f"{maybe_not}___dict_contains({key!r}, {dict_ref})"
-        return self._produce_guard_code(guard, [code])
+        self._produce_guard_code(guard, [code])
+        self.get_guard_manager(guard).add_dict_contains_guard(
+            key, self.get_guard_str(guard, [code]), invert
+        )
 
     def BOOL_FALSE(self, guard: Guard):
         # Guard on the runtime value being 'False',
@@ -448,7 +455,6 @@ class GuardBuilder(GuardBuilderBase):
 
     def ID_MATCH(self, guard: Guard):
         # ___check_obj_id is same as `id(x) == y`
-        self.get_guard_manager(guard)
         if isinstance(guard.originating_source, TypeSource):
             # optional optimization to produce cleaner/faster guard code
             return self.TYPE_MATCH(
@@ -479,6 +485,9 @@ class GuardBuilder(GuardBuilderBase):
         obj = self.get(guard.name)
         code = f"{self.arg_ref(guard)}.__name__ == '{obj.__name__}'"
         self._produce_guard_code(guard, [code])
+        self.get_guard_manager(guard).add_name_match_guard(
+            obj, self.get_guard_str(guard, [code])
+        )
 
     def DATA_PTR_MATCH(self, guard: Guard):
         obj = self.get(guard.name)
@@ -694,6 +703,11 @@ class GuardBuilder(GuardBuilderBase):
 
         code = [f"{ref_b} is {ref_a}"]
         self._produce_guard_code(guard, code)
+        install_tensor_aliasing_guard(
+            self.get_guard_manager(guard),
+            self._get_guard_manager_from_source(source_b),
+            self.get_guard_str(guard, code),
+        )
 
     def DICT_KEYS(self, guard):
         # Guard on the keys and their order
@@ -722,7 +736,11 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, code)
 
     def WEAKREF_ALIVE(self, guard):
-        self._produce_guard_code(guard, [f"{self.arg_ref(guard)} is not None"])
+        code = [f"{self.arg_ref(guard)} is not None"]
+        self._produce_guard_code(guard, code)
+        self.get_guard_manager(guard).add_weakref_alive_guard(
+            self.get_guard_str(guard, code)
+        )
 
     def NN_MODULE_PARAM_NAMES(self, guard):
         ref = self.arg_ref(guard)
@@ -731,7 +749,8 @@ class GuardBuilder(GuardBuilderBase):
         keys = {k for k, v in value.named_parameters()}
 
         code = list()
-        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
+        # code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
+        self.TYPE_MATCH(guard)
         code.append(f"{{k for k, v in {ref}.named_parameters()}} == {keys!r}")
 
         self._produce_guard_code(guard, code)
@@ -766,8 +785,9 @@ class GuardBuilder(GuardBuilderBase):
         import torch.utils._device as m
 
         code = [f"utils_device.CURRENT_DEVICE == {m.CURRENT_DEVICE!r}"]
-        self.add_python_lambda_leaf_guard_to_root(code, self.get_guard_str(guard, code))
+        # self.add_python_lambda_leaf_guard_to_root(code, self.get_guard_str(guard, code))
         self._produce_guard_code(guard, code)
+        self.get_guard_manager(guard).add_default_device_guard(self.get_guard_str(guard, code))
 
     def BACKEND_MATCH(self, guard: Guard):
         """Guard on backend matching based on id of current_backend"""
