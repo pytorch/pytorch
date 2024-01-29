@@ -23,10 +23,19 @@ SERIALIZED_DATACLASS_TO_PYTHON_DATACLASS: Dict[str, Type[Any]] = {}
 
 @torch._dynamo.disable
 def _check_input_constraints_pre_hook(self, *args, **kwargs):
-    flat_args, _ = tree_flatten(args)
+    args, received_spec = tree_flatten(args)
+
+    if received_spec != self._in_spec:
+        raise TypeError(  # noqa: TRY200
+            "Trying to flatten user inputs with exported input tree spec: \n"
+            f"{self._in_spec}\n"
+            "but actually got inputs with tree spec of: \n"
+            f"{received_spec}"
+        )
+
     return _check_input_constraints_for_graph(
         [node for node in self.graph.nodes if node.op == "placeholder"],
-        flat_args,
+        args,
         self.range_constraints,
     )
 
@@ -55,7 +64,7 @@ def _check_input_constraints_for_graph(
     # symbols with given input dimension values to check equality constraints.
     unification_map: "Dict[sympy.Symbol, Any]" = {}
     for arg, node in zip(args, input_placeholders):
-        node_val = node.meta["val"]
+        node_val = node.meta.get("val")
         if isinstance(node_val, FakeTensor):
             check(
                 isinstance(arg, torch.Tensor),
