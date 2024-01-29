@@ -63,7 +63,7 @@ implementations of the parent :class:`api.PContext` class.
 """
 
 import os
-from typing import Callable, Dict, Optional, Tuple, Union
+from typing import Callable, Dict, Optional, Tuple, Union, Set
 
 from torch.distributed.elastic.multiprocessing.api import (  # noqa: F401
     _validate_full_rank,
@@ -103,6 +103,7 @@ def start_processes(
     start_method: str = "spawn",
     redirects: Union[Std, Dict[int, Std]] = Std.NONE,
     tee: Union[Std, Dict[int, Std]] = Std.NONE,
+    filter_ranks: Optional[Set[int]] = None,
 ) -> PContext:
     """
     Start ``n`` copies of ``entrypoint`` processes with the provided options.
@@ -269,6 +270,7 @@ def start_processes(
             tee_stderrs=tee_stderrs,
             error_files=error_files,
             log_line_prefixes=log_line_prefixes,
+            filter_ranks=filter_ranks,
         )
     else:
         context = MultiprocessContext(
@@ -283,6 +285,7 @@ def start_processes(
             error_files=error_files,
             log_line_prefixes=log_line_prefixes,
             start_method=start_method,
+            filter_ranks=filter_ranks,
         )
 
     try:
