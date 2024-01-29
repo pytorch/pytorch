@@ -633,7 +633,30 @@ MemoryAllocator::~MemoryAllocator() {
 MemoryAllocation MemoryAllocator::create_allocation(
     const VkMemoryRequirements& memory_requirements,
     const VmaAllocationCreateInfo& create_info) {
-  return MemoryAllocation(allocator_, memory_requirements, create_info);
+  VmaAllocationCreateInfo alloc_create_info = create_info;
+  // Protect against using VMA_MEMORY_USAGE_AUTO_* flags when allocating memory
+  // directly, since those usage flags require that VkBufferCreateInfo and/or
+  // VkImageCreateInfo also be available.
+  switch (create_info.usage) {
+    // The logic for the below usage options are too complex, therefore prevent
+    // those from being used with direct memory allocation.
+    case VMA_MEMORY_USAGE_AUTO:
+    case VMA_MEMORY_USAGE_AUTO_PREFER_HOST:
+      VK_THROW(
+          "Only the VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE usage flag is compatible with create_allocation()");
+      break;
+    // Most of the time, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE will simply set the
+    // DEVICE_LOCAL_BIT as a preferred memory flag. Therefore the below is a
+    // decent approximation for VMA behaviour.
+    case VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE:
+      alloc_create_info.preferredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+      alloc_create_info.usage = VMA_MEMORY_USAGE_UNKNOWN;
+      break;
+    default:
+      break;
+  }
+
+  return MemoryAllocation(allocator_, memory_requirements, alloc_create_info);
 }
 
 VulkanImage MemoryAllocator::create_image(
@@ -654,7 +677,7 @@ VulkanImage MemoryAllocator::create_image(
 
   VmaAllocationCreateInfo alloc_create_info = {};
   alloc_create_info.flags = DEFAULT_ALLOCATION_STRATEGY;
-  alloc_create_info.preferredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+  alloc_create_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
 
   const VulkanImage::ImageProperties image_props{
       image_type,
@@ -689,12 +712,17 @@ VulkanBuffer MemoryAllocator::create_storage_buffer(
 
   VmaAllocationCreateInfo alloc_create_info = {};
   alloc_create_info.flags = DEFAULT_ALLOCATION_STRATEGY;
-  alloc_create_info.preferredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+  alloc_create_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
 
   // The create storage buffer will be accessed by both the CPU and GPU, so set
   // the appropriate flags to indicate that the host device will be accessing
   // the data from this buffer.
   if (!gpu_only) {
+    // Deferred memory allocation should only be used for GPU only buffers.
+    VK_CHECK_COND(
+        allocate_memory,
+        "Only GPU-only buffers should use deferred memory allocation");
+
     alloc_create_info.flags |= VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
     alloc_create_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
     alloc_create_info.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
