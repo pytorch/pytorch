@@ -17,22 +17,18 @@
 # Module caffe2.experiments.python.net_construct_bench
 
 
-
-
-
 import argparse
 import logging
 import time
 
-from caffe2.python import workspace, data_parallel_model
-from caffe2.python import cnn
-
 import caffe2.python.models.resnet as resnet
 
-'''
+from caffe2.python import cnn, data_parallel_model, workspace
+
+"""
 Simple benchmark that creates a data-parallel resnet-50 model
 and measures the time.
-'''
+"""
 
 
 logging.basicConfig()
@@ -41,22 +37,28 @@ log.setLevel(logging.DEBUG)
 
 
 def AddMomentumParameterUpdate(train_model, LR):
-    '''
+    """
     Add the momentum-SGD update.
-    '''
+    """
     params = train_model.GetParams()
-    assert(len(params) > 0)
+    assert len(params) > 0
     ONE = train_model.param_init_net.ConstantFill(
-        [], "ONE", shape=[1], value=1.0,
+        [],
+        "ONE",
+        shape=[1],
+        value=1.0,
     )
     NEGONE = train_model.param_init_net.ConstantFill(
-        [], 'NEGONE', shape=[1], value=-1.0,
+        [],
+        "NEGONE",
+        shape=[1],
+        value=-1.0,
     )
 
     for param in params:
         param_grad = train_model.param_to_grad[param]
         param_momentum = train_model.param_init_net.ConstantFill(
-            [param], param + '_momentum', value=0.0
+            [param], param + "_momentum", value=0.0
         )
 
         # Update param_grad and param_momentum in place
@@ -64,14 +66,11 @@ def AddMomentumParameterUpdate(train_model, LR):
             [param_grad, param_momentum, LR],
             [param_grad, param_momentum],
             momentum=0.9,
-            nesterov=1
+            nesterov=1,
         )
 
         # Update parameters by applying the moment-adjusted gradient
-        train_model.WeightedSum(
-            [param, ONE, param_grad, NEGONE],
-            param
-        )
+        train_model.WeightedSum([param, ONE, param_grad, NEGONE], param)
 
 
 def Create(args):
@@ -80,10 +79,7 @@ def Create(args):
 
     # Create CNNModeLhelper object
     train_model = cnn.CNNModelHelper(
-        order="NCHW",
-        name="resnet50",
-        use_cudnn=True,
-        cudnn_exhaustive_search=False
+        order="NCHW", name="resnet50", use_cudnn=True, cudnn_exhaustive_search=False
     )
 
     # Model building functions
@@ -138,15 +134,18 @@ def main():
     parser = argparse.ArgumentParser(
         description="Caffe2: Benchmark for net construction"
     )
-    parser.add_argument("--num_gpus", type=int, default=1,
-                        help="Number of GPUs.")
+    parser.add_argument("--num_gpus", type=int, default=1, help="Number of GPUs.")
     args = parser.parse_args()
 
     Create(args)
 
 
-if __name__ == '__main__':
-    workspace.GlobalInit(['caffe2', '--caffe2_log_level=2'])
+def invoke_main() -> None:
+    workspace.GlobalInit(["caffe2", "--caffe2_log_level=2"])
     import cProfile
 
-    cProfile.run('main()', sort="cumulative")
+    cProfile.run("main()", sort="cumulative")
+
+
+if __name__ == "__main__":
+    invoke_main()  # pragma: no cover
