@@ -166,6 +166,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             s.wait_stream(current_stream)
             with torch.cuda.stream(s):
                 x = torch.relu(x)
+            current_stream.wait_stream(s)
             x = torch.add(x, 1)
             x = torch.cos(x)
             return x
@@ -177,7 +178,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 11)
+        self.assertEqual(cnts.op_count, 12)
 
     @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/118204
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
@@ -232,6 +233,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             with torch.cuda.stream(s2):
                 x = torch.relu(x)
 
+            current_stream.wait_stream(s2)
             x = torch.add(x, 1)
             x = torch.cos(x)
             return x
