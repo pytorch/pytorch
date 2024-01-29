@@ -1014,7 +1014,6 @@ class NAME_MATCH : public LeafGuard {
   const char* _name;
 };
 
-
 class DEFAULT_DEVICE : public LeafGuard {
  public:
   DEFAULT_DEVICE(py::object guard_str) : LeafGuard(guard_str) {
@@ -1024,7 +1023,8 @@ class DEFAULT_DEVICE : public LeafGuard {
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     py::object device = _utils_device.attr("CURRENT_DEVICE");
-    bool result = PyObject_RichCompareBool(device.ptr(), _current_device.ptr(), Py_EQ);
+    bool result =
+        PyObject_RichCompareBool(device.ptr(), _current_device.ptr(), Py_EQ);
     return result;
   }
 
@@ -2114,8 +2114,7 @@ PyObject* torch_c_dynamo_guards_init() {
           })
       .def(
           "add_default_device_guard",
-          [](GuardManager& self,
-             py::object guard_str) -> void {
+          [](GuardManager& self, py::object guard_str) -> void {
             self.add_leaf_guard(std::make_shared<DEFAULT_DEVICE>(guard_str));
           })
       .def(
