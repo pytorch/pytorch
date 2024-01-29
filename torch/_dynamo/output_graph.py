@@ -29,6 +29,7 @@ from torch._guards import (
     TracingContext,
 )
 from torch._utils_internal import signpost_event
+from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -1058,7 +1059,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # free a bit of memory
         self.real_value_cache.clear()
 
-        gm = fx.GraphModule(root, self.graph)
+        gm = _make_graph_module(root, self.graph)
         for register_finalizer in self.register_finalizer_fns:
             register_finalizer(gm)
 
@@ -1126,8 +1127,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             # TODO: Why isn't this stored in meta :think:
             pl._dynamo_source = arg.source
 
-        gm._param_name_to_source = self.param_name_to_source
-        gm._source_to_user_stacks = self.source_to_user_stacks
+        gm._param_name_to_source = self.param_name_to_source  # type: ignore[assignment]
+        gm._source_to_user_stacks = self.source_to_user_stacks  # type: ignore[assignment]
 
         try:
             name = (

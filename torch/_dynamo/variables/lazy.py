@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import functools
 from typing import Optional
 

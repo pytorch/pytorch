@@ -70,7 +70,7 @@ from .code_context import code_context
 from .exc import CondOpArgsMismatchError, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
 from .types import CacheEntry, DynamoCallback
-from .utils import compile_times
+from .utils import common_constant_types, compile_times
 
 log = logging.getLogger(__name__)
 
@@ -275,6 +275,10 @@ def nothing():
     pass
 
 
+def always_false():
+    return False
+
+
 def innermost_fn(fn):
     """
     In case of nesting of _TorchDynamoContext calls, find the innermost
@@ -370,6 +374,14 @@ class _TorchDynamoContext:
 
         # add context containing GraphModule to any GraphModule forward functions
         if isinstance(fn, torch.fx.GraphModule):
+            # Since dynamo will run the forward method for the GraphModule shortly
+            # anyways, it does not hurt to do the real recompilation here if
+            # this is a _LazyGraphModule. This makes it easier for dynamo to
+            # optimize a _LazyGraphModule.
+            from torch.fx._lazy_graph_module import _LazyGraphModule
+
+            _LazyGraphModule.force_recompile(fn)
+
             # Assume that the underlying node metadata of `fn`,
             # a GraphModule instance, accurately represents
             # all instances of type(fn).
@@ -407,11 +419,16 @@ class _TorchDynamoContext:
 
         callback = self.callback
 
+        if isinstance(self, DisableContext):
+            is_jit_tracing = always_false
+            is_fx_tracing = always_false
+        else:
+            is_jit_tracing = torch._C._is_tracing
+            is_fx_tracing = torch.fx._symbolic_trace.is_fx_tracing
+
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
-            if torch.fx._symbolic_trace.is_fx_tracing() and not isinstance(
-                self, DisableContext
-            ):
+            if is_fx_tracing():
                 if config.error_on_nested_fx_trace:
                     raise RuntimeError(
                         "Detected that you are using FX to symbolically trace "
@@ -420,7 +437,7 @@ class _TorchDynamoContext:
                 else:
                     return fn(*args, **kwargs)
 
-            if torch.jit.is_tracing():
+            if is_jit_tracing():
                 if config.error_on_nested_jit_trace:
                     raise RuntimeError(
                         "Detected that you are using FX to torch.jit.trace "
@@ -813,6 +830,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         m: torch.fx.GraphModule,
         flat_args: Tuple[Any],
         matched_input_elements_positions: List[int],
+        flat_results: List[Any],
         matched_output_elements_positions: List[int],
         example_fake_inputs: List[torch.Tensor],
         flat_args_dynamic_dims: List[Set[int]],
@@ -851,6 +869,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
             self.new_args.append(arg)
         self.old_args_gen = (self.new_args[i] for i in matched_input_elements_positions)
         self.matched_output_elements_positions = matched_output_elements_positions
+        self.flat_results = flat_results
 
     def placeholder(self, target, args, kwargs):
         arg = next(self.old_args_gen)
@@ -865,8 +884,17 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
     def output(self, target, args, kwargs):
         dynamo_result_flat = args[0]
         lookup = [*dynamo_result_flat, *self.new_args]
-        new_result_flat = [lookup[i] for i in self.matched_output_elements_positions]
-        return super().output(target, (new_result_flat,), {})
+        new_results_flat = []
+        for i in range(len(self.flat_results)):
+            if self.matched_output_elements_positions[i] is not None:
+                new_results_flat.append(
+                    lookup[self.matched_output_elements_positions[i]]
+                )
+            else:
+                const_val = self.flat_results[i]
+                assert isinstance(const_val, tuple(common_constant_types))
+                new_results_flat.append(const_val)
+        return super().output(target, (new_results_flat,), {})
 
     def run_node(self, n):
         self.current_node = n
@@ -955,17 +983,6 @@ def rewrite_signature(
 ):
     orig_args, orig_kwargs = pytree.tree_unflatten(flat_args, in_spec)
 
-    constant_types = [
-        int,
-        str,
-        bool,
-        float,
-        torch.memory_format,
-        torch.device,
-        torch.dtype,
-        torch.layout,
-    ]
-
     def check_user_input_output(flat_values, error_type):
         supported_types = [
             torch.Tensor,
@@ -973,9 +990,7 @@ def rewrite_signature(
             torch.SymFloat,
             torch.SymBool,
             torch._C.ScriptObject,
-        ]
-        if error_type == UserErrorType.INVALID_INPUT:
-            supported_types.extend(constant_types)
+        ] + list(common_constant_types)
 
         def is_supported_type(val):
             return isinstance(val, tuple(supported_types))
@@ -1004,19 +1019,21 @@ def rewrite_signature(
     check_user_input_output(flat_results_traced, UserErrorType.INVALID_OUTPUT)
 
     def produce_matching(debug_type, sources, candidates):
-        matched_elements_positions = []
+        matched_elements_positions: List[Optional[int]] = []
         dict_of_source_vals = {}
         for i, val in enumerate(sources):
             dict_of_source_vals[id(val)] = i
 
         for i, val in enumerate(candidates):
-            if id(val) not in dict_of_source_vals:
+            if isinstance(val, tuple(common_constant_types)):
+                matched_elements_positions.append(None)
+            elif id(val) not in dict_of_source_vals:
                 raise AssertionError(
                     f"Unexpectedly found a {type(val)} in the {debug_type}.\n"
                     'Please file an issue along with a paste of the logs from TORCH_LOGS="+export"'
                 )
-
-            matched_elements_positions.append(dict_of_source_vals[id(val)])
+            else:
+                matched_elements_positions.append(dict_of_source_vals[id(val)])
 
         return matched_elements_positions
 
@@ -1033,6 +1050,7 @@ def rewrite_signature(
         graph,
         flat_args,
         matched_input_elements_positions,
+        flat_results_traced,
         matched_output_elements_positions,
         example_fake_inputs,
         flat_args_dynamic_dims,
@@ -1389,6 +1407,7 @@ def export(
                         case_name="cond_operands",
                     )
 
+            assert graph is not None
             for node in graph.graph.nodes:
                 if node.op == "get_attr" and isinstance(
                     getattr(graph, node.target), torch.Tensor
@@ -1415,6 +1434,7 @@ def export(
                 flat_args_dynamic_dims,
             )
         # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check
+        assert graph is not None
         graph.meta["input_shape_constraints"] = (
             [constraint.serializable_spec for constraint in constraints]
             if constraints
@@ -1510,27 +1530,28 @@ class TorchPatcher:
             sparse_adam,
         }
 
-        disabled_multi_tensor_opt_modules = {
-            radam,  # data-dependent control flow
+        excluded_single_tensor = {
+            radam,  # https://github.com/pytorch/pytorch/issues/117807
         }
 
         for opt_mod in optimizer_modules:
             opt_name = opt_mod.__name__.split(".")[-1]
-            multi_tensor_fn_name = f"_multi_tensor_{opt_name}"
             fused_fn_name = f"_fused_{opt_name}"
-            if (
-                hasattr(opt_mod, multi_tensor_fn_name)
-                and opt_mod in disabled_multi_tensor_opt_modules
-            ):
-                setattr(
-                    opt_mod,
-                    multi_tensor_fn_name,
-                    disable(getattr(opt_mod, multi_tensor_fn_name)),
-                )
+            single_tensor_fn_name = f"_single_tensor_{opt_name}"
 
             if hasattr(opt_mod, fused_fn_name):
                 setattr(
                     opt_mod, fused_fn_name, disable(getattr(opt_mod, fused_fn_name))
+                )
+
+            if (
+                hasattr(opt_mod, single_tensor_fn_name)
+                and opt_mod in excluded_single_tensor
+            ):
+                setattr(
+                    opt_mod,
+                    single_tensor_fn_name,
+                    disable(getattr(opt_mod, single_tensor_fn_name)),
                 )
 
         optimizer_classes = [
@@ -1539,12 +1560,12 @@ class TorchPatcher:
             if inspect.isclass(opt) and issubclass(opt, torch.optim.Optimizer)
         ]
 
-        # Note: we don't support sparsity, data-dependent control, or tracing through backwards
+        # Note: we don't support sparsity or tracing through backwards
         excluded_optimizer_classes = {
             torch.optim.SparseAdam,
-            torch.optim.RAdam,
             torch.optim.LBFGS,
         }
+
         for opt in optimizer_classes:
             if opt in excluded_optimizer_classes:
                 opt.step = disable(opt.step)
