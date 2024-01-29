@@ -8,12 +8,24 @@ import os
 import re
 import sys
 from itertools import chain, count
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
 import sympy
 from sympy import Expr
 
 import torch
+import torch._ops
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
 
@@ -37,11 +49,17 @@ from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
 from .triton_utils import config_of, signature_to_meta
 
+if TYPE_CHECKING:
+    import triton
+
 
 pexpr = PythonPrinter().doprint
 
 
-def buffer_reuse_key(node: ir.Buffer):
+ReuseKey = Tuple[torch.device, torch.dtype, str]
+
+
+def buffer_reuse_key(node: ir.Buffer) -> ReuseKey:
     return (
         node.get_device(),
         node.get_dtype(),
@@ -52,7 +70,7 @@ def buffer_reuse_key(node: ir.Buffer):
     )
 
 
-def is_int(s: str):
+def is_int(s: str) -> bool:
     # Cpp code gen adds L at the end of ints
     # Lets remove it for checking whether we have an int or not
     if s and s[-1] == "L":
@@ -66,7 +84,7 @@ def is_int(s: str):
     return True
 
 
-def is_float(s: str):
+def is_float(s: str) -> bool:
     try:
         float(s)
     except ValueError:
@@ -74,7 +92,7 @@ def is_float(s: str):
     return True
 
 
-def convert_arg_type(arg: torch.Argument):
+def convert_arg_type(arg: torch.Argument) -> str:
     from .cpp import CONTAINER_PYTHON_TO_CPP, PYTHON_TO_CPP
 
     # use x.real_type instead of x.type so that we get ScalarType instead of int
@@ -105,7 +123,7 @@ def convert_arg_type(arg: torch.Argument):
     raise AssertionError(f"unsupport python_type: {python_type}")
 
 
-def convert_return_type(ret: torch.Argument):
+def convert_return_type(ret: torch.Argument) -> str:
     # use x.real_type instead of x.type so that we get ScalarType instead of int
     python_type = repr(ret.real_type)  # type: ignore[attr-defined]
     python_to_cpp = {
@@ -123,7 +141,7 @@ def convert_return_type(ret: torch.Argument):
     return cpp_type
 
 
-def get_cpp_op_schema(kernel):
+def get_cpp_op_schema(kernel: torch._ops.OpOverload) -> str:
     args = kernel._schema.arguments
     returns = kernel._schema.returns
 
@@ -140,7 +158,14 @@ def get_cpp_op_schema(kernel):
     return f"{cpp_return_value}({', '.join(cpp_arg_type)})"
 
 
-def user_defined_kernel_grid_fn_code(name, configs, grids):
+# TODO: Move to a well known place
+TritonMetaParams = Dict[str, int]
+TritonGrid = Union[Tuple[int, ...], Callable[[TritonMetaParams], Tuple[int, ...]]]
+
+
+def user_defined_kernel_grid_fn_code(
+    name: str, configs: List["triton.Config"], grids: List[TritonGrid]
+) -> Tuple[str, str]:
     output = IndentedBuffer()
 
     fn_name = f"grid_wrapper_for_{name}"
@@ -166,7 +191,7 @@ def user_defined_kernel_grid_fn_code(name, configs, grids):
 
 @dataclasses.dataclass
 class SymbolicCallArg:
-    inner: Any
+    inner: str
     # the original symbolic expression represented by inner
     inner_expr: sympy.Expr
 
@@ -185,20 +210,20 @@ MAX_STACK_ALLOCATION_SIZE = 1024 * 100
 class MemoryPlanningState:
     def __init__(self):
         super().__init__()
-        self.reuse_pool: Dict[Any, List[FreeIfNotReusedLine]] = collections.defaultdict(
-            list
-        )
+        self.reuse_pool: Dict[
+            ReuseKey, List[FreeIfNotReusedLine]
+        ] = collections.defaultdict(list)
         self.total_allocated_buffer_size: int = 0
 
-    def __contains__(self, key):
+    def __contains__(self, key: ReuseKey) -> bool:
         return bool(self.reuse_pool.get(key, None))
 
-    def pop(self, key) -> "FreeIfNotReusedLine":
+    def pop(self, key: ReuseKey) -> "FreeIfNotReusedLine":
         item = self.reuse_pool[key].pop()
         assert not item.is_reused
         return item
 
-    def push(self, key, item: "FreeIfNotReusedLine"):
+    def push(self, key: ReuseKey, item: "FreeIfNotReusedLine") -> None:
         assert not item.is_reused
         self.reuse_pool[key].append(item)
 
@@ -208,7 +233,9 @@ class EnterDeviceContextManagerLine:
     device_idx: int
     last_seen_device_guard_index: Optional[int]
 
-    def codegen(self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack):
+    def codegen(
+        self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack
+    ) -> None:
         if V.graph.cpp_wrapper:
             code.writeline("\n")
             if V.graph.aot_mode:
@@ -245,7 +272,9 @@ class EnterDeviceContextManagerLine:
 
 
 class ExitDeviceContextManagerLine:
-    def codegen(self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack):
+    def codegen(
+        self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack
+    ) -> None:
         if not V.graph.cpp_wrapper:
             device_cm_stack.close()
 
@@ -258,11 +287,11 @@ class MemoryPlanningLine:
         """First pass to find reuse"""
         return self
 
-    def codegen(self, code: IndentedBuffer):
+    def codegen(self, code: IndentedBuffer) -> None:
         """Second pass to output code"""
         pass
 
-    def __str__(self):
+    def __str__(self) -> str:
         """
         Emits a string representation that fits on one line.
         """
@@ -281,7 +310,7 @@ class MemoryPlanningLine:
 class AllocateLine(MemoryPlanningLine):
     node: ir.Buffer
 
-    def plan(self, state: MemoryPlanningState):
+    def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
         if self.node.get_name() in V.graph.removed_buffers:
             return NullLine(self.wrapper)
 
@@ -301,7 +330,7 @@ class AllocateLine(MemoryPlanningLine):
 
         return self
 
-    def codegen(self, code: IndentedBuffer):
+    def codegen(self, code: IndentedBuffer) -> None:
         assert self.node.get_name() not in V.graph.removed_buffers
         line = self.wrapper.make_buffer_allocation(self.node)
         code.writeline(line)
@@ -312,7 +341,7 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
     node: ir.Buffer
     is_reused: bool = False
 
-    def plan(self, state: MemoryPlanningState):
+    def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
         if isinstance(self.node.layout, (ir.AliasedLayout, ir.MultiOutputLayout)):
             return self
         assert not self.is_reused
@@ -322,7 +351,7 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
             state.push(buffer_reuse_key(self.node), self)
         return self
 
-    def codegen(self, code: IndentedBuffer):
+    def codegen(self, code: IndentedBuffer) -> None:
         assert self.node.get_name() not in V.graph.removed_buffers
         if not self.is_reused:
             code.writeline(self.wrapper.make_buffer_free(self.node))
@@ -334,14 +363,14 @@ class ReuseLine(MemoryPlanningLine):
     reused_as: ir.Buffer
     delete_old: bool = True
 
-    def plan(self, state: MemoryPlanningState):
+    def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
         if self.node.get_name() in V.graph.removed_buffers:
             assert self.reused_as.get_name() in V.graph.removed_buffers
             return NullLine(self.wrapper)
         assert self.reused_as.get_name() not in V.graph.removed_buffers
         return self
 
-    def codegen(self, code: IndentedBuffer):
+    def codegen(self, code: IndentedBuffer) -> None:
         assert self.node.get_name() not in V.graph.removed_buffers
         assert self.reused_as.get_name() not in V.graph.removed_buffers
         code.writeline(
@@ -353,6 +382,9 @@ class NullLine(MemoryPlanningLine):
     pass
 
 
+BufferName = str
+
+
 class WrapperCodeGen(CodeGen):
     """
     Generate outer wrapper in Python that calls the kernels.
@@ -360,14 +392,16 @@ class WrapperCodeGen(CodeGen):
 
     def __init__(self):
         super().__init__()
-        self._names_iter = count()
+        self._names_iter: Iterator[int] = count()
         self.header = IndentedBuffer()
         self.prefix = IndentedBuffer()
         self.suffix = IndentedBuffer()
         self.wrapper_call = IndentedBuffer()
-        self.src_to_kernel = {}
-        self.kenel_numel_expr = set()
-        self.lines = []
+        # If the generated source code is exactly the same, reuse the
+        # pre-existing kernel for it
+        self.src_to_kernel: Dict[str, str] = {}
+        self.kernel_numel_expr: Set[str] = set()
+        self.lines: List[Union[MemoryPlanningLine, LineContext]] = []
         self.declare = ""
         self.declare_maybe_reference = ""
         self.ending = ""
@@ -378,14 +412,14 @@ class WrapperCodeGen(CodeGen):
         self.none_str = "None"
         self.size = "size()"
         self.stride = "stride()"
-        self.last_seen_device_guard_index = None
+        self.last_seen_device_guard_index: Optional[int] = None
         self.supports_intermediate_hooks = True
         self.expr_printer = pexpr
         self.user_defined_kernel_cache: Dict[Tuple[Any, ...], str] = {}
-        self.unbacked_symbol_decls = set()
-        self.allow_stack_allocation = None
-        self.stack_allocated_buffers = {}
-        self.computed_sizes = set()
+        self.unbacked_symbol_decls: Set[str] = set()  # str of sympy.Symbol
+        self.allow_stack_allocation: Optional[bool] = None
+        self.stack_allocated_buffers: Dict[BufferName, ir.Buffer] = {}
+        self.computed_sizes: Set[sympy.Symbol] = set()
 
         self.write_header()
         self.write_prefix()
@@ -395,28 +429,28 @@ class WrapperCodeGen(CodeGen):
                 # include a hash so our code cache puts different constants into different files
                 self.write_constant(name, hashed)
 
-        self.allocated = set()
-        self.freed: Set[str] = set()
+        self.allocated: Set[BufferName] = set()
+        self.freed: Set[BufferName] = set()
 
         # maps from reusing buffer to reused buffer
-        self.reuses = dict()
+        self.reuses: Dict[BufferName, BufferName] = dict()
 
         self.write_get_raw_stream = functools.lru_cache(None)(  # type: ignore[assignment]
             self.write_get_raw_stream
         )
 
         @functools.lru_cache(None)
-        def add_import_once(line):
+        def add_import_once(line: str) -> None:
             self.header.writeline(line)
 
         self.add_import_once = add_import_once
-        self._metas = {}
+        self._metas: Dict[str, str] = {}
         self.multi_kernel_state = MultiKernelState()
 
-    def write_constant(self, name, hashed):
+    def write_constant(self, name: str, hashed: str) -> None:
         self.header.writeline(f"{name} = None  # {hashed}")
 
-    def write_header(self):
+    def write_header(self) -> None:
         self.header.splice(
             f"""
                 from ctypes import c_void_p, c_long
@@ -448,7 +482,7 @@ class WrapperCodeGen(CodeGen):
         )
 
     @cache_on_self
-    def write_triton_header_once(self):
+    def write_triton_header_once(self) -> None:
         self.header.splice(
             """
             import triton
@@ -460,7 +494,7 @@ class WrapperCodeGen(CodeGen):
             )
         )
 
-    def add_meta_once(self, meta):
+    def add_meta_once(self, meta: TritonMetaParams) -> str:
         meta = repr(meta)
         if meta not in self._metas:
             var = f"meta{len(self._metas)}"
@@ -469,13 +503,13 @@ class WrapperCodeGen(CodeGen):
         return self._metas[meta]
 
     @cache_on_self
-    def get_output_refs(self):
+    def get_output_refs(self) -> List[str]:
         return [x.codegen_reference(self.wrapper_call) for x in V.graph.graph_outputs]
 
-    def mark_output_type(self):
+    def mark_output_type(self) -> None:
         return
 
-    def codegen_input_size_asserts(self):
+    def codegen_input_size_asserts(self) -> None:
         for name, buf in V.graph.graph_inputs.items():
             if isinstance(buf, sympy.Expr):
                 continue
@@ -487,7 +521,7 @@ class WrapperCodeGen(CodeGen):
             stride = self.codegen_shape_tuple(buf.get_stride())
             self.prefix.writeline(f"assert_size_stride({name}, {size}, {stride})")
 
-    def codegen_input_nan_asserts(self):
+    def codegen_input_nan_asserts(self) -> None:
         self.prefix.writeline("# make sure graph inputs are not nan/inf")
         for name, buf in V.graph.graph_inputs.items():
             if isinstance(buf, sympy.Expr):
@@ -498,7 +532,7 @@ class WrapperCodeGen(CodeGen):
             line = f"assert not {name}.isinf().any().item()"
             self.prefix.writeline(line)
 
-    def write_prefix(self):
+    def write_prefix(self) -> None:
         self.prefix.splice(
             """
 
@@ -523,34 +557,34 @@ class WrapperCodeGen(CodeGen):
             if config.nan_asserts:
                 self.codegen_input_nan_asserts()
 
-    def write_get_raw_stream(self, index):
+    def write_get_raw_stream(self, device_idx: int) -> str:
         self.write_triton_header_once()
-        name = f"stream{index}"
-        self.writeline(f"{name} = get_raw_stream({index})")
+        name = f"stream{device_idx}"
+        self.writeline(f"{name} = get_raw_stream({device_idx})")
         return name
 
-    def next_kernel_suffix(self):
+    def next_kernel_suffix(self) -> str:
         return f"{next(self._names_iter)}"
 
-    def codegen_device_guard_enter(self, device_idx):
+    def codegen_device_guard_enter(self, device_idx: int) -> None:
         self.writeline(
             EnterDeviceContextManagerLine(device_idx, self.last_seen_device_guard_index)
         )
         self.last_seen_device_guard_index = device_idx
 
-    def codegen_device_guard_exit(self):
+    def codegen_device_guard_exit(self) -> None:
         self.writeline(ExitDeviceContextManagerLine())
 
-    def generate_return(self, output_refs):
+    def generate_return(self, output_refs: List[str]) -> None:
         if output_refs:
             self.wrapper_call.writeline("return (" + ", ".join(output_refs) + ", )")
         else:
             self.wrapper_call.writeline("return ()")
 
-    def generate_before_suffix(self, result):
+    def generate_before_suffix(self, result: IndentedBuffer) -> None:
         return
 
-    def generate_end(self, result):
+    def generate_end(self, result: IndentedBuffer) -> None:
         return
 
     def generate_fallback_kernel(self, fallback_kernel, args):
@@ -713,8 +747,9 @@ class WrapperCodeGen(CodeGen):
         # codegen allocations in two passes
         planning_state = MemoryPlanningState()
         for i in range(len(self.lines)):
-            if isinstance(self.lines[i], MemoryPlanningLine):
-                self.lines[i] = self.lines[i].plan(planning_state)
+            line = self.lines[i]
+            if isinstance(line, MemoryPlanningLine):
+                self.lines[i] = line.plan(planning_state)
 
         self.allow_stack_allocation = (
             self.allow_stack_allocation is not False
@@ -757,17 +792,17 @@ class WrapperCodeGen(CodeGen):
         )
 
         for name, shape in graph_inputs_expr:
-            shape = V.graph.sizevars.simplify(shape)
+            shape = V.graph.sizevars.simplify(shape)  # type: ignore[arg-type]
             if shape in needed:
-                needed.remove(shape)
+                needed.remove(shape)  # type: ignore[arg-type]
                 code.writeline(f"{self.declare}{shape} = {name}{self.ending}")
 
         for name, value in graph_inputs_tensors:
             shapes = value.get_size()
             for dim, shape in enumerate(shapes):
-                shape = V.graph.sizevars.simplify(shape)
+                shape = V.graph.sizevars.simplify(shape)  # type: ignore[arg-type]
                 if shape in needed:
-                    needed.remove(shape)
+                    needed.remove(shape)  # type: ignore[arg-type]
                     code.writeline(
                         f"{self.declare}{shape} = {sizeof(name)}[{dim}]{self.ending}"
                     )
@@ -775,9 +810,9 @@ class WrapperCodeGen(CodeGen):
         for name, value in graph_inputs_tensors:
             shapes = value.get_stride()
             for dim, shape in enumerate(shapes):
-                shape = V.graph.sizevars.simplify(shape)
+                shape = V.graph.sizevars.simplify(shape)  # type: ignore[arg-type]
                 if shape in needed:
-                    needed.remove(shape)
+                    needed.remove(shape)  # type: ignore[arg-type]
                     code.writeline(
                         f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
                     )
@@ -1055,8 +1090,8 @@ class WrapperCodeGen(CodeGen):
 
     def generate_numel_expr(self, kernel_name: str, tree):
         expr = f"{kernel_name}_{tree.prefix}numel"
-        if expr not in self.kenel_numel_expr:
-            self.kenel_numel_expr.add(expr)
+        if expr not in self.kernel_numel_expr:
+            self.kernel_numel_expr.add(expr)
             self.writeline(
                 f"{self.declare}{expr} = {self.expr_printer(tree.numel)}{self.ending}"
             )
