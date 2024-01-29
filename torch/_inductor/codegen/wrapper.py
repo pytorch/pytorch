@@ -8,15 +8,26 @@ import os
 import re
 import sys
 from itertools import chain, count
-from typing import Any, Dict, List, Optional, Set, Tuple, Union, TYPE_CHECKING, Callable, Iterator
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
 import sympy
 from sympy import Expr
 
 import torch
+import torch._ops
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
-import torch._ops
 
 from torch._inductor.codegen.multi_kernel import MultiKernelState
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
@@ -152,7 +163,9 @@ TritonMetaParams = Dict[str, int]
 TritonGrid = Union[Tuple[int, ...], Callable[[TritonMetaParams], Tuple[int, ...]]]
 
 
-def user_defined_kernel_grid_fn_code(name: str, configs: List["triton.Config"], grids: List[TritonGrid]) -> Tuple[str, str]:
+def user_defined_kernel_grid_fn_code(
+    name: str, configs: List["triton.Config"], grids: List[TritonGrid]
+) -> Tuple[str, str]:
     output = IndentedBuffer()
 
     fn_name = f"grid_wrapper_for_{name}"
@@ -197,9 +210,9 @@ MAX_STACK_ALLOCATION_SIZE = 1024 * 100
 class MemoryPlanningState:
     def __init__(self):
         super().__init__()
-        self.reuse_pool: Dict[ReuseKey, List[FreeIfNotReusedLine]] = collections.defaultdict(
-            list
-        )
+        self.reuse_pool: Dict[
+            ReuseKey, List[FreeIfNotReusedLine]
+        ] = collections.defaultdict(list)
         self.total_allocated_buffer_size: int = 0
 
     def __contains__(self, key: ReuseKey) -> bool:
@@ -220,7 +233,9 @@ class EnterDeviceContextManagerLine:
     device_idx: int
     last_seen_device_guard_index: Optional[int]
 
-    def codegen(self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack) -> None:
+    def codegen(
+        self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack
+    ) -> None:
         if V.graph.cpp_wrapper:
             code.writeline("\n")
             if V.graph.aot_mode:
@@ -257,7 +272,9 @@ class EnterDeviceContextManagerLine:
 
 
 class ExitDeviceContextManagerLine:
-    def codegen(self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack) -> None:
+    def codegen(
+        self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack
+    ) -> None:
         if not V.graph.cpp_wrapper:
             device_cm_stack.close()
 
