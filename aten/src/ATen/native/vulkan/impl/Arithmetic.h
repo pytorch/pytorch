@@ -14,6 +14,7 @@ enum class OpType : uint32_t {
   SUB,
   MUL,
   DIV,
+  FLOOR_DIV,
 };
 
 api::ShaderInfo get_shader(const OpType type);
