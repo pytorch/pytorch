@@ -493,19 +493,17 @@ def _compile(
 
         try:
             with tracing(tracer.output.tracing_context), tracer.set_current_tx():
-                # breakpoint()
                 if "self" in locals.keys() and isinstance(locals["self"], torch.nn.Module) and not code.co_name.startswith('resume_in_'):
                     module = locals["self"]
                     method_name = code.co_name
                     instance_bound_nn_method = getattr(module, method_name)
+                    # Store current NN method being traced into.
+                    # Root can append NN method to stack only if the stack is empty.
                     if len(tls.instance_bound_nn_method_stack) == 0:
-                        # Store current NN method being traced into.
-                        # Root can append NN method to stack only if the stack is empty.
                         tls.instance_bound_nn_method_stack.append(instance_bound_nn_method)
                         print(f"Root: appended to tls.instance_bound_nn_method_stack, now it is {instance_bound_nn_method_stack_to_str_list()}")
                 else:
-                    # TODO you need a stack, otherwise returning from func1 to forward doesn't track that we are still in forward
-                    # ["forward", "func1"] is the right stack, and then do pushing and poping
+                    # NOTE: we need this stack otherwise returning from func1 to forward doesn't track that we are still in forward
                     if len(tls.instance_bound_nn_method_stack) > 0:
                         print(f"Root: Use previously set tls.instance_bound_nn_method_stack, stack: {instance_bound_nn_method_stack_to_str_list()}")
                     else:

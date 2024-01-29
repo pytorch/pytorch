@@ -167,11 +167,7 @@ class WeakIdKeyDictionary(MutableMapping):
         del self.data[self.ref_type(key)]  # CHANGED
 
     def __getitem__(self, key):
-        try:
-            return self.data[self.ref_type(key)]  # CHANGED
-        except Exception as e:
-            breakpoint()
-            raise
+        return self.data[self.ref_type(key)]  # CHANGED
 
     def __len__(self):
         if self._dirty_len and self._pending_removals:

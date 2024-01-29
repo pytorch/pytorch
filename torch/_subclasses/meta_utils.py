@@ -503,7 +503,6 @@ class MetaConverter:
                     # If we have a subclass that desugars into dense tensors,
                     # perform our callback on each inner tensor.
                     if is_traceable_wrapper_subclass(t):
-                        # print("branch1")
                         # Note: transform_subclass will use __tensor_unflatten__ to generate
                         # a fresh subclass wrapper. We assume that if the inner tensors of
                         # the subclass are given symbolic sizes, their sizes will be used
@@ -530,7 +529,6 @@ class MetaConverter:
                             outer_stride=strides,
                         )
                     else:
-                        # print("branch2")
                         r = callback(
                             lambda: torch.empty_strided(
                                 sizes,
@@ -548,9 +546,7 @@ class MetaConverter:
                                 # preserve_format is the default, but we want to
                                 # emphasize how important it is to preserve
                                 # format here
-                                print(f"here234 before: type(r): {type(r)}")
                                 r = r.clone(memory_format=torch.preserve_format)
-                                print(f"here234 after: type(r): {type(r)}")
 
                     # Graph-Break for wrapped tensors
                     if not is_batchedtensor(
