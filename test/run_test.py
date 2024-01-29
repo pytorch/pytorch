@@ -2,7 +2,6 @@
 
 import argparse
 import copy
-import glob
 import json
 import os
 import pathlib
@@ -46,6 +45,13 @@ from tools.stats.import_test_stats import (
     TEST_TIMES_FILE,
 )
 from tools.stats.upload_metrics import add_global_metric, emit_metric
+from tools.testing.discover_tests import (
+    CPP_TEST_PATH,
+    CPP_TEST_PREFIX,
+    CPP_TESTS_DIR,
+    parse_test_module,
+    TESTS,
+)
 from tools.testing.target_determination.determinator import (
     AggregatedHeuristics,
     get_prediction_confidences,

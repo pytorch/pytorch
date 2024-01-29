@@ -1,14 +1,22 @@
+import glob
+import os
+import sys
+from pathlib import Path
+from typing import List, Optional, Union
+
 CPP_TEST_PREFIX = "cpp"
 CPP_TEST_PATH = "build/bin"
+CPP_TESTS_DIR = os.path.abspath(os.getenv("CPP_TESTS_DIR", default=CPP_TEST_PATH))
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
-def parse_test_module(test):
+def parse_test_module(test: str) -> str:
     return test.split(".")[0]
 
 
 def discover_tests(
-    base_dir: Optional[pathlib.Path] = None,
-    cpp_tests_dir: Optional[pathlib.Path] = None,
+    base_dir: Path = REPO_ROOT / "test",
+    cpp_tests_dir: Optional[Union[str, Path]] = None,
     blocklisted_patterns: Optional[List[str]] = None,
     blocklisted_tests: Optional[List[str]] = None,
     extra_tests: Optional[List[str]] = None,
@@ -27,22 +35,21 @@ def discover_tests(
             rc |= name in blocklisted_tests
         return rc
 
-    cwd = pathlib.Path(__file__).resolve().parent if base_dir is None else base_dir
     # This supports symlinks, so we can link domain library tests to PyTorch test directory
     all_py_files = [
-        pathlib.Path(p) for p in glob.glob(f"{cwd}/**/test_*.py", recursive=True)
+        Path(p) for p in glob.glob(f"{base_dir}/**/test_*.py", recursive=True)
     ]
 
     cpp_tests_dir = (
-        f"{cwd.parent}/{CPP_TEST_PATH}" if cpp_tests_dir is None else cpp_tests_dir
+        f"{base_dir.parent}/{CPP_TEST_PATH}" if cpp_tests_dir is None else cpp_tests_dir
     )
     # CPP test files are located under pytorch/build/bin. Unlike Python test, C++ tests
     # are just binaries and could have any name, i.e. basic or atest
     all_cpp_files = [
-        pathlib.Path(p) for p in glob.glob(f"{cpp_tests_dir}/**/*", recursive=True)
+        Path(p) for p in glob.glob(f"{cpp_tests_dir}/**/*", recursive=True)
     ]
 
-    rc = [str(fname.relative_to(cwd))[:-3] for fname in all_py_files]
+    rc = [str(fname.relative_to(base_dir))[:-3] for fname in all_py_files]
     # Add the cpp prefix for C++ tests so that we can tell them apart
     rc.extend(
         [
@@ -60,7 +67,6 @@ def discover_tests(
     return sorted(rc)
 
 
-CPP_TESTS_DIR = os.path.abspath(os.getenv("CPP_TESTS_DIR", default=CPP_TEST_PATH))
 TESTS = discover_tests(
     cpp_tests_dir=CPP_TESTS_DIR,
     blocklisted_patterns=[
@@ -124,9 +130,10 @@ TESTS = discover_tests(
         "distributed/elastic/utils/util_test",
         "distributed/elastic/utils/distributed_test",
         "distributed/elastic/multiprocessing/api_test",
+        "doctests",
     ],
 )
 
-# The doctests are a special case that don't correspond to a file that discover
-# tests can enable.
-TESTS = TESTS + ["doctests"]
+
+if __name__ == "__main__":
+    print(TESTS)
