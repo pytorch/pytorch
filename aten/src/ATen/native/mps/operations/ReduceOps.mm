@@ -945,8 +945,9 @@ static void cum_max_min_helper_mps(const Tensor& input,
     TORCH_WARN_ONCE("MPS: cum_max_min ops are supported natively starting from macOS 13.0. ",
                     "Falling back on CPU. This may have performance implications.");
 
-    Tensor values_cpu = at::empty({input.sizes()}, input.options());
-    Tensor indices_cpu = at::empty({input.sizes()}, input.options().dtype(kLong));
+    auto values_cpu = at::empty_like(input, TensorOptions(kCPU)));
+    auto indices_cpu = at::empty(input, TensorOptions(kCPU).dtype(kLong));
+    auto input_cpu = input.to("cpu");
 
     if (reduction_type == MPSReductionType::MAX)
       at::_cummax_helper(input.to("cpu"), values_cpu, indices_cpu, dim);
