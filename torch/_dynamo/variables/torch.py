@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import functools
 import inspect
 import logging
@@ -71,6 +73,7 @@ REWRITE_OPS_TO_TENSOR_SIZE_METHOD = [
 constant_fold_functions = [
     torch._assert,
     torch._utils._get_device_index,
+    torch._C._get_cublas_allow_tf32,
     torch.cuda.is_available,
     torch.distributed.is_available,
     torch.get_autocast_gpu_dtype,
