@@ -8,19 +8,20 @@ from typing import Dict, Optional, Union
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from _test_fully_shard_common import (
-    check_1d_sharded_parity,
-    MLP,
-    patch_reduce_scatter,
-    reduce_scatter_with_assert,
-)
 from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     SaveForwardInputsModel,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_fsdp import FSDPTest, FSDPTestMultiThread
+from torch.testing._internal.common_fsdp import (
+    check_1d_sharded_parity,
+    FSDPTest,
+    FSDPTestMultiThread,
+    MLP,
+    patch_reduce_scatter,
+    reduce_scatter_with_assert,
+)
 from torch.testing._internal.common_utils import run_tests
 
 

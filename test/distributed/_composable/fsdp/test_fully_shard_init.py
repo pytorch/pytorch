@@ -6,9 +6,7 @@ from typing import List
 
 import torch
 import torch.nn as nn
-from _test_fully_shard_common import MLP
 from torch.distributed._composable import replicate
-
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp._fsdp_init import (
     _get_managed_modules,
@@ -24,7 +22,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_fsdp import FSDPTestMultiThread
+from torch.testing._internal.common_fsdp import FSDPTestMultiThread, MLP
 from torch.testing._internal.common_utils import run_tests
 
 
