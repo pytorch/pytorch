@@ -307,7 +307,8 @@ def _export(name: str):
 
     def wrapper(func):
         globals()[name] = func
-        __all__.append(name)
+        global __all__
+        __all__ += name
         return func
 
     return wrapper
