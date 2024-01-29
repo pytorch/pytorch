@@ -675,12 +675,15 @@ class cuda:
     # 2）CUDACXX environment variable
     # 3）CUDA_HOME environment variable
     # 4) default system search PATH.
-    cuda_cxx: Optional[str] = None
+    cuda_cxx : Optional[str] = os.environ.get("CUDA_NVCC_EXECUTABLE", None)
 
     # If set to True, it will ensure that only GEMM ops capable of
     # epilogue fusion via CUTLASS Epilogue Visitor Trees ( EVT )
     # are enabled for the CUTLASS backend.
     cutlass_only_evt_capable_ops: bool = False
+
+    # Minimum of M*N*N to consider the CUTLASS backend for GEMM ops.
+    cutlass_backend_min_gemm_size: int = 1
 
 
 # create a directory containing lots of debug information
