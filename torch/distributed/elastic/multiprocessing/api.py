@@ -202,7 +202,6 @@ class PContext(abc.ABC):
         tee_stderrs: Dict[int, str],
         error_files: Dict[int, str],
         log_line_prefixes: Optional[Dict[int, str]] = None,
-        filter_ranks: Optional[Set[int]] = None,
     ):
         self.name = name
         # validate that all mappings have the same number of keys and
@@ -219,15 +218,8 @@ class PContext(abc.ABC):
         self.error_files = error_files
         self.nprocs = nprocs
 
-        if filter_ranks:
-            tail_stdouts = {k: v for k, v in tee_stdouts.items() if k in filter_ranks}
-            tail_stderrs = {k: v for k, v in tee_stderrs.items() if k in filter_ranks}
-        else:
-            tail_stdouts = tee_stdouts
-            tail_stderrs = tee_stderrs
-
-        self._stdout_tail = TailLog(name, tail_stdouts, sys.stdout, log_line_prefixes)
-        self._stderr_tail = TailLog(name, tail_stderrs, sys.stderr, log_line_prefixes)
+        self._stdout_tail = TailLog(name, tee_stdouts, sys.stdout, log_line_prefixes)
+        self._stderr_tail = TailLog(name, tee_stderrs, sys.stderr, log_line_prefixes)
 
     def start(self) -> None:
         """Start processes using parameters defined in the constructor."""
@@ -383,7 +375,6 @@ class MultiprocessContext(PContext):
         error_files: Dict[int, str],
         start_method: str,
         log_line_prefixes: Optional[Dict[int, str]] = None,
-        filter_ranks: Optional[Set[int]] = None,
     ):
         super().__init__(
             name,
@@ -396,7 +387,6 @@ class MultiprocessContext(PContext):
             tee_stderrs,
             error_files,
             log_line_prefixes,
-            filter_ranks,
         )
 
         self.start_method = start_method
@@ -613,7 +603,6 @@ class SubprocessContext(PContext):
         tee_stderrs: Dict[int, str],
         error_files: Dict[int, str],
         log_line_prefixes: Optional[Dict[int, str]] = None,
-        filter_ranks: Optional[Set[int]] = None,
     ):
         super().__init__(
             name,
@@ -626,7 +615,6 @@ class SubprocessContext(PContext):
             tee_stderrs,
             error_files,
             log_line_prefixes,
-            filter_ranks,
         )
 
         # state vector; _vdone[local_rank] -> is local_rank finished or not
