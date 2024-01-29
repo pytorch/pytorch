@@ -966,7 +966,7 @@ class KinetoStepTracker:
     We fix this by adding a layer of abstraction before calling step()
     to the kineto library. The idea is to maintain steps per requester in a dict:
 
-    .. code-block:: json
+    .. code-block::
 
         {
            "ProfilerStep": 100,  # triggered by profiler step() call
@@ -978,7 +978,7 @@ class KinetoStepTracker:
 
     If one of the count increments the max will go up.
 
-    .. code-block:: json
+    .. code-block::
 
         {
            "ProfilerStep": 100,
