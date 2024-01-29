@@ -353,7 +353,7 @@ def gather_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
         all_replicate: List[Placement] = [Replicate()] * 3
         single_mesh_dim_strategies.append(all_replicate)
 
-        # input sharding, output is mask partial, input shard on gather dim, index accepts mask partial
+        # input sharding, input sharded, index accepts mask partial, output follows index
         # this only works when the input is sharded on the gather dimension, and
         # index has size 1 on the gather dimension
         if index_shape[dim] == 1:
@@ -365,10 +365,10 @@ def gather_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
             ]
             single_mesh_dim_strategies.append(input_sharding)
 
-        # index sharding, input replicated, index sharded, output sharded
+        # index sharding, input replicated, index sharded, output follows index
         # this only works when the sharding dimension is the gather dimension
-        batch_sharding = [Shard(dim), Replicate(), Shard(dim)]
-        single_mesh_dim_strategies.append(batch_sharding)
+        index_sharding = [Shard(dim), Replicate(), Shard(dim)]
+        single_mesh_dim_strategies.append(index_sharding)
 
         all_mesh_dim_strategies.append(single_mesh_dim_strategies)
 
