@@ -2,7 +2,7 @@ import copy
 import functools
 import itertools
 import logging
-from typing import cast, Generator, Iterable, List, Optional
+from typing import Any, Dict, Generator, List, Optional, Sequence
 from unittest.mock import patch
 
 import sympy
@@ -25,6 +25,35 @@ from ..common import KernelTemplate
 from .cuda_kernel import CUDATemplateCaller, CUDATemplateKernel
 
 log = logging.getLogger(__name__)
+
+
+class MakeCUDAKernelRender:
+    def __init__(self, template: "CUDATemplate", render_kwargs: Dict[Any, Any]):
+        self.template = template
+        self.render_kwargs = render_kwargs
+
+    def __call__(
+        self,
+        template_node: CUDATemplateBuffer,
+        epilogue_nodes: Optional[List[IRNode]] = None,
+        **kwargs_override,
+    ):
+        kernel = CUDATemplateKernel(
+            kernel_name="KERNEL_NAME",
+        )
+        if len(kwargs_override) > 0:
+            render_kwargs = dict(self.render_kwargs)
+            render_kwargs.update(kwargs_override)
+        else:
+            render_kwargs = self.render_kwargs
+        render_kwargs["epilogue_nodes"] = epilogue_nodes
+        render_kwargs["template_buffer_node"] = template_node
+        render = functools.partial(
+            self.template.render,
+            kernel=kernel,
+            **render_kwargs,  # includes "op" argument in case of CUTLASSGemmTemplate
+        )
+        return kernel, render
 
 
 class CUDATemplate(KernelTemplate):
@@ -70,91 +99,35 @@ class CUDATemplate(KernelTemplate):
         """
 
         # Generate Row-Major and Column-Major variants of all flexible input tensor layouts
-        input_layout_alternatives: List[List[TensorMeta]] = []
-        for input_node in self.input_nodes:
-            unchanged_variant = cast(TensorMeta, TensorMeta.from_irnodes(input_node))
-            input_tensor_meta_variants = [unchanged_variant]
-            if (
-                hasattr(input_node, "layout")
-                and isinstance(input_node.layout, FlexibleLayout)
-                and len(input_node.layout.stride) >= 2
-                and (
-                    input_node.layout.stride[-1] == 1
-                    and input_node.layout.stride[-2] == input_node.layout.size[-1]
-                )
-                or (
-                    input_node.layout.stride[-2] == 1
-                    and input_node.layout.stride[-1] == input_node.layout.size[-2]
-                )
-            ):
-                layout_variant = copy.deepcopy(unchanged_variant)
-                new_strides = list(layout_variant.strides)
-                # switch between row-major and column-major
-                if input_node.layout.stride[-1] == 1:
-                    # row to col major
-                    new_strides[-1] = input_node.layout.size[-2]
-                    new_strides[-2] = 1
-                else:
-                    # col to row major
-                    new_strides[-1] = 1
-                    new_strides[-2] = input_node.layout.size[-1]
-                layout_variant.strides = tuple(new_strides)
-                input_tensor_meta_variants.append(layout_variant)
-            input_layout_alternatives.append(input_tensor_meta_variants)
-        all_variant_combinations: List[List[TensorMeta]] = list(
-            cast(
-                Iterable[List[TensorMeta]],
-                itertools.product(*input_layout_alternatives),
-            )
-        )
-        if len(all_variant_combinations) != 1:
+        input_nodes = list(self.input_nodes)
+        Bias, aux_inputs = self.determine_additional_inputs(**kwargs)
+        if Bias is not None and len(input_nodes) < 3:
+            input_nodes.append(Bias)
+        input_nodes.extend(aux_inputs)
+        for aux_inp in aux_inputs:
+            assert isinstance(
+                aux_inp.get_layout(), FixedLayout
+            ), "Auxiliary inputs must have a fixed layout."
+
+        all_input_layout_combinations: List[
+            List[TensorMeta]
+        ] = self.generate_input_layout_combinations(input_nodes)
+        if len(all_input_layout_combinations) != 1:
             log.debug(
                 "Generating %d input layout variants of %s",
-                len(all_variant_combinations),
+                len(all_input_layout_combinations),
                 str(self),
             )
-        for kernel_idx, input_tensor_meta in enumerate(all_variant_combinations):
+        for kernel_idx, input_tensor_meta in enumerate(all_input_layout_combinations):
             kernel_name = f"cuda_{self.name}_{kernel_idx}"
             with patch.object(
                 V.graph, "get_dtype", self._fake_get_dtype(self.output_node)
             ), CUDATemplateKernel(
                 kernel_name=kernel_name,
             ) as kernel:
-                original_layouts = [
-                    getattr(input_node, "layout", None)
-                    for input_node in self.input_nodes
-                ]
-                try:
-                    # temporarily set the strides of input nodes with FlexibleLayouts
-                    # to the strides of the input_tensor_meta
-                    for input_node, input_tensor_meta_variant in zip(
-                        self.input_nodes, input_tensor_meta
-                    ):
-                        if isinstance(input_node.layout, FlexibleLayout):
-                            lo = input_node.layout
-                            new_layout = FixedLayout(
-                                lo.device,
-                                lo.dtype,
-                                lo.size,
-                                input_tensor_meta_variant.strides,
-                                lo.offset,
-                            )
-                            if isinstance(input_node, ir.MutableBox):
-                                input_node.data.layout = new_layout  # type: ignore[attr-defined]
-                            else:
-                                input_node.layout = new_layout  # type: ignore[attr-defined]
-                    code = self.render(kernel=kernel, **kwargs)
-                finally:
-                    # restore the original (still flexible until Autotuning has been resolved) strides
-                    for input_node, original_layout in zip(
-                        self.input_nodes, original_layouts
-                    ):
-                        if isinstance(original_layout, FlexibleLayout):
-                            if isinstance(input_node, ir.MutableBox):
-                                input_node.data.layout = original_layout  # type: ignore[attr-defined]
-                            else:
-                                input_node.layout = original_layout  # type: ignore[attr-defined]
-
+                code = self.generate_kernel_source_for_benchmark(
+                    input_tensor_meta, kernel, kwargs
+                )
                 _, call_args, _ = kernel.args.python_argdefs()
                 log.debug("Generated Code:\n%s", code)
                 log.debug(
@@ -166,37 +139,26 @@ class CUDATemplate(KernelTemplate):
             input_reorder = (
                 self.input_reorder
                 if self.input_reorder is not None
-                else list(range(len(self.input_nodes)))
+                else list(range(len(input_nodes)))
             )
             expected_args = list(
-                unique(self.input_nodes[idx].get_name() for idx in input_reorder)
+                unique(input_nodes[idx].get_name() for idx in input_reorder)
             )
-            expected_args.extend([self.output_node.get_name()])
-            assert list(call_args)[: len(expected_args)] == expected_args, (
-                call_args,
-                expected_args,
-            )
+
+            assert (
+                list(call_args)[: len(expected_args)] == expected_args
+            ), "Template arguments not populated correctly."
+            assert (
+                list(call_args)[-1] == self.output_node.get_name()
+            ), "Output node must be last argument."
+            expected_args.append(self.output_node.get_name())
             extra_args = V.graph.sizevars.size_hints(
                 map(sympy.expand, call_args[len(expected_args) :])
             )
 
             kernel_hash_name = f"cuda_{self.name}_{next(self.index_counter)}"
 
-            def make_kernel_render(
-                template_node: CUDATemplateBuffer,
-                epilogue_nodes: Optional[List[IRNode]] = None,
-            ):
-                kernel = CUDATemplateKernel(
-                    kernel_name="KERNEL_NAME",
-                )
-                render = functools.partial(
-                    self.render,
-                    kernel=kernel,
-                    template_buffer_node=template_node,
-                    epilogue_nodes=epilogue_nodes,
-                    **kwargs,  # includes "op" argument in case of CUTLASSGemmTemplate
-                )
-                return kernel, render
+            make_kernel_render = MakeCUDAKernelRender(self, kwargs)
 
             # create the BenchmarkRequest
             bmreq = CUDABenchmarkRequest(
@@ -217,6 +179,112 @@ class CUDATemplate(KernelTemplate):
                 self,
                 kwargs,
             )
+
+    def determine_additional_inputs(self, **kwargs):
+        """Determines Bias and auxiliary input nodes for the fused epilogue nodes
+        based on existing input nodes (including their Layout), presence of a Bias node
+         and additional nodes that are read by the epilogue nodes
+        """
+        raise NotImplementedError()
+
+    def generate_kernel_source_for_benchmark(self, input_tensor_meta, kernel, kwargs):
+        original_layouts = [
+            getattr(input_node, "layout", None) for input_node in self.input_nodes
+        ]
+        try:
+            # temporarily set the strides of input nodes with FlexibleLayouts
+            # to the strides of the input_tensor_meta
+            for input_node, input_tensor_meta_variant in zip(
+                self.input_nodes, input_tensor_meta
+            ):
+                if isinstance(input_node.layout, FlexibleLayout):
+                    lo = input_node.layout
+                    new_layout = FixedLayout(
+                        lo.device,
+                        lo.dtype,
+                        lo.size,
+                        input_tensor_meta_variant.strides,
+                        lo.offset,
+                    )
+                    if isinstance(input_node, ir.MutableBox):  # type: ignore[attr-defined]
+                        input_node.data.layout = new_layout  # type: ignore[attr-defined]
+                    else:
+                        input_node.layout = new_layout
+            code = self.render(kernel=kernel, **kwargs)
+        finally:
+            # restore the original (still flexible until Autotuning has been resolved) strides
+            for input_node, original_layout in zip(self.input_nodes, original_layouts):
+                if isinstance(original_layout, FlexibleLayout):
+                    if isinstance(input_node, ir.MutableBox):
+                        input_node.data.layout = original_layout  # type: ignore[attr-defined]
+                    else:
+                        input_node.layout = original_layout
+        return code
+
+    def generate_input_layout_combinations(self, input_nodes) -> List[List[TensorMeta]]:
+        input_layout_alternatives: List[List[TensorMeta]] = []
+        for input_node in input_nodes:
+            unchanged_variant = TensorMeta.from_irnodes(input_node)
+            input_tensor_meta_variants = [unchanged_variant]
+            if (
+                hasattr(input_node, "layout")
+                and isinstance(input_node.layout, FlexibleLayout)
+                and len(input_node.layout.stride) >= 2
+                and (
+                    (
+                        input_node.layout.stride[-1] == 1
+                        and input_node.layout.stride[-2] == input_node.layout.size[-1]
+                    )
+                    or (
+                        input_node.layout.stride[-2] == 1
+                        and input_node.layout.stride[-1] == input_node.layout.size[-2]
+                    )
+                )
+            ):
+                layout_variant = copy.deepcopy(unchanged_variant)
+                new_strides = list(layout_variant.strides)  # type: ignore[union-attr]
+                # switch between row-major and column-major
+                if input_node.layout.stride[-1] == 1:
+                    # row to col major
+                    new_strides[-1] = input_node.layout.size[-2]
+                    new_strides[-2] = 1
+                else:
+                    # col to row major
+                    new_strides[-1] = 1
+                    new_strides[-2] = input_node.layout.size[-1]
+                layout_variant.strides = tuple(new_strides)  # type: ignore[union-attr]
+                input_tensor_meta_variants.append(layout_variant)
+            input_layout_alternatives.append(input_tensor_meta_variants)  # type: ignore[arg-type]
+        all_variant_combinations = list(itertools.product(*input_layout_alternatives))
+        return all_variant_combinations  # type: ignore[return-value]
+
+    def generate_variants_after_fusion(
+        self,
+        template_buffer: CUDATemplateBuffer,
+        epilogue_nodes: List[IRNode],
+        kwarg_override_variants: Sequence[Dict],  # type: ignore[type-arg]
+    ) -> Generator[CUDATemplateCaller, None, None]:
+        """
+        Generates variants of the given CUDATemplateBuffer after fusion with the given epilogue nodes.
+        May be used to determine the best configuration for a fused kernel, which may differ from
+        the best configuration for the unfused kernel.
+
+        Args:
+            template_buffer (CUDATemplateBuffer): The CUDATemplateBuffer to generate variants of.
+            epilogue_nodes (List[IRNode]): The epilogue nodes to fuse with the given CUDATemplateBuffer.
+            kwarg_override_variants (Sequence[Dict]): A sequence of keyword argument overrides to use for
+            generating the variants. Will typically be used to override the "op" argument for
+            CUTLASSGemmTemplates and provide a sequence of ops to try.
+        """
+        original_kwargs = template_buffer.make_kernel_render.render_kwargs
+        original_template = template_buffer.make_kernel_render.template
+        assert original_template is self
+        for kwarg_override in kwarg_override_variants:
+            variant_kwargs = dict(original_kwargs)
+            variant_kwargs["epilogue_nodes"] = epilogue_nodes
+            variant_kwargs["template_buffer_node"] = template_buffer
+            variant_kwargs.update(kwarg_override)
+            yield from self.generate(**variant_kwargs)
 
     def are_inputs_layout_compatible(self, layouts: List[Layout]) -> bool:
         raise NotImplementedError()

@@ -20,6 +20,7 @@ from typing import (
     List,
     Optional,
     Sequence,
+    Tuple,
     TYPE_CHECKING,
     Union,
 )
@@ -391,6 +392,7 @@ class TensorMeta:
     sizes: torch._prims_common.ShapeType
     strides: torch._prims_common.StrideType
     offset: int
+    name: Optional[str] = None
 
     @classmethod
     def from_irnodes(
@@ -407,7 +409,11 @@ class TensorMeta:
 
         dtype = node.get_dtype()
         assert dtype is not None
-
+        node_name = None
+        try:
+            node_name = node.get_name()
+        except Exception:
+            pass
         return TensorMeta(
             device=node.get_device(),
             dtype=dtype,
@@ -423,6 +429,7 @@ class TensorMeta:
                 node.get_layout().offset,
                 fallback=config.unbacked_symint_fallback,
             ),
+            name=node_name,
         )
 
     def to_tensor(self) -> torch.Tensor:
@@ -486,8 +493,12 @@ class BenchmarkRequest:
         # create args and out tensor
         if output_tensor is None:
             assert len(input_tensors) == 0
-            input_tensors = tuple(x.to_tensor() for x in self.input_tensor_meta)
-            output_tensor = self.output_tensor_meta.to_tensor()
+            # We need unique tensors, so we use that the non-unique tensor list
+            (
+                _,
+                input_tensors,
+                output_tensor,
+            ) = self.create_argument_tensors_from_metadata()
 
         if debug:
             create_tensor_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
@@ -513,6 +524,25 @@ class BenchmarkRequest:
             )
         self.cleanup_run_fn()
         return out
+
+    def create_argument_tensors_from_metadata(
+        self,
+    ) -> Tuple[Tuple[torch.Tensor, ...], Tuple[torch.Tensor, ...], torch.Tensor]:
+        """
+        Creates argument tensor from metadata.
+        Returns a tuple of (input_tensors, unique_input_tensors, output_tensor)
+        """
+        seen_names = set()
+        input_tensors = tuple(x.to_tensor() for x in self.input_tensor_meta)
+        unique_input_tensors = []
+        for tensor, tensor_meta in zip(input_tensors, self.input_tensor_meta):
+            if tensor_meta.name is not None:
+                if tensor_meta.name in seen_names:
+                    continue
+            seen_names.add(tensor_meta.name)
+            unique_input_tensors.append(tensor)
+        output_tensor: torch.Tensor = self.output_tensor_meta.to_tensor()
+        return tuple(input_tensors), tuple(unique_input_tensors), output_tensor
 
 
 class TestBenchmarkRequest(BenchmarkRequest):
@@ -612,6 +642,20 @@ class CUDABenchmarkRequest(BenchmarkRequest):
         self.hash_key: str = ""
         self.source_file: str = ""
         self.hash_key, self.source_file = CUDACodeCache.write(self.source_code, "so")
+        self.unique_input_tensor_meta = self._create_unique_tensor_meta(
+            input_tensor_meta
+        )
+
+    def _create_unique_tensor_meta(self, input_tensor_meta):
+        unique_input_tensor_meta: List[TensorMeta] = []
+        seen = set()
+        for tm in input_tensor_meta:
+            if tm.name is None:
+                unique_input_tensor_meta.append(tm)
+            elif tm.name not in seen:
+                unique_input_tensor_meta.append(tm)
+                seen.add(tm.name)
+        return unique_input_tensor_meta
 
     def precompile(self):
         # Prepopulate CUDACodeCache
@@ -629,6 +673,7 @@ class CUDABenchmarkRequest(BenchmarkRequest):
             c_void_p(tensor.data_ptr())
             for tensor in list(input_tensors) + [output_tensor]
         ]
+        assert len(args) == len(self.unique_input_tensor_meta) + 1
         log.debug(
             "make_run_fn: self.kernel_name=%s, self.source_file=%s, self.hash_key=%s, self.DLL=%s, args=%s, self.extra_args=%s",
             self.kernel_name,
