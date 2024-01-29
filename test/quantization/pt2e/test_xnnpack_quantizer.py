@@ -587,8 +587,8 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
         quantization_config = get_symmetric_quantization_config(
             is_per_channel=True,
             is_weight_only=True,
-            weight_qmin=0,
-            weight_qmax=15,
+            weight_qmin=-8,
+            weight_qmax=7,
         )
         quantizer.set_global(quantization_config)
         m_eager = TestHelperModules.TwoLinearModule().eval()
