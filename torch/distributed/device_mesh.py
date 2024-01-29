@@ -387,7 +387,6 @@ else:
                 a DeviceMesh with more than 1 dimension; otherwise, returns a single
                 :class:`ProcessGroup` object.
             """
-            print(f"{self._dim_group_infos=}")
             if not hasattr(self, "_dim_group_infos"):
                 raise RuntimeError("DeviceMesh process groups not initialized!")
 
