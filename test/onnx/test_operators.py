@@ -6,6 +6,8 @@ Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --produce-onnx-test-data: generate onnx test data
           --accept: accept onnx updates and overwrite models
 """
+import onnxruntime
+import copy
 import glob
 import inspect
 import io
@@ -14,6 +16,7 @@ import operator
 import os
 import shutil
 import tempfile
+import warnings
 
 # Full diff for expect files
 import unittest
@@ -45,6 +48,7 @@ unittest.TestCase.maxDiff = None
 
 _onnx_test = False  # flag to produce onnx test cases.
 _onnx_dep = True  # flag to import onnx package.
+_onnxrt_backend = True  # flag to test onnxrt backend
 
 
 def export_to_pbtxt(model, inputs, *args, **kwargs):
@@ -72,12 +76,136 @@ class FuncModule(Module):
         return self.f(*itertools.chain(args, self.params))
 
 
+def make_aot_ort(dynamic: bool = False, opset_version=None):
+    from torch.onnx import (
+        _OrtBackend as OrtBackend,
+        _OrtBackendOptions as OrtBackendOptions,
+        ExportOptions,
+    )
+
+    opts = ExportOptions(
+        dynamic_shapes=dynamic,
+    )
+    # TODO: uncomment when opset_version != 18 is supported
+    # if opset_version:
+    #     opts.opset_version = opset_version
+    ort_backend = OrtBackend(options=OrtBackendOptions(export_options=opts))
+    return ort_backend, ort_backend
+
+
 class TestOperators(common_utils.TestCase):
     def setUp(self):
+        from torch.onnx import _OrtBackend as OrtBackend
+
         super().setUp()
         diagnostics.engine.clear()
+        torch._dynamo.reset()
+        OrtBackend.clear_cached_instances()
 
-    def assertONNX(self, f, args, params=None, **kwargs):
+    def tearDown(self):
+        from torch.onnx import _OrtBackend as OrtBackend
+
+        super().tearDown()
+        torch._dynamo.reset()
+        OrtBackend.clear_cached_instances()
+
+    def assertBackendONNXRT(
+        self,
+        f,
+        args,
+        params=None,
+        fullgraph: bool = False,
+        test_backend_backward: bool = True,
+        atol: float = 1e-5,
+        rtol: float = 1e-6,
+        opset_version=None,
+        **kwargs,
+    ):
+        if isinstance(args, torch.Tensor):
+            args = [args]
+        if params is None:
+            params = ()
+        if isinstance(f, nn.Module):
+            model = f
+        else:
+            model = FuncModule(f, params)
+        model.eval()
+
+        counter = [0]
+
+        local_aot_ort, local_ort = make_aot_ort(
+            dynamic=True, opset_version=opset_version
+        )
+
+        if test_backend_backward and args[0].requires_grad:
+            # forward/backward
+            compiled_model = torch.compile(
+                copy.deepcopy(model),
+                backend=local_aot_ort,
+                dynamic=False,
+                fullgraph=fullgraph,
+            )
+
+            baseline_result = model(*args)
+            result = compiled_model(*args)
+
+            if isinstance(baseline_result, torch.Tensor):
+                torch.testing.assert_close(
+                    baseline_result,
+                    result,
+                    atol=atol,
+                    rtol=rtol,
+                    equal_nan=True,
+                    msg=f"{baseline_result}\n---\n{result}",
+                )
+
+                baseline_result.sum().backward()
+                result.sum().backward()
+
+                for baseline_param, param in zip(
+                    model.parameters(), compiled_model.parameters()
+                ):
+                    torch.testing.assert_close(
+                        baseline_param.grad,
+                        param.grad,
+                        atol=atol,
+                        rtol=rtol,
+                        equal_nan=True,
+                        msg=f"{baseline_param.grad}\n---\n{param.grad}",
+                    )
+            else:
+                raise AssertionError(f"Unexpected type {type(baseline_result)}.")
+        else:
+            # forward only
+            compiled_model = torch.compile(
+                copy.deepcopy(model),
+                backend=local_aot_ort,
+                dynamic=False,
+                fullgraph=fullgraph,
+            )
+
+            baseline_result = model(*args)
+            result = compiled_model(*args)
+
+            if isinstance(baseline_result, torch.Tensor):
+                torch.testing.assert_close(
+                    baseline_result,
+                    result,
+                    atol=atol,
+                    rtol=rtol,
+                    equal_nan=True,
+                    msg=f"{baseline_result}\n---\n{result}",
+                )
+
+    def assertONNX(
+        self,
+        f,
+        args,
+        params=None,
+        test_onnxrt_backend=True,
+        test_backend_backward=True,
+        **kwargs,
+    ):
         if params is None:
             params = ()
         if isinstance(f, nn.Module):
@@ -129,6 +257,16 @@ class TestOperators(common_utils.TestCase):
                         os.path.join(data_dir, f"output_{index}.pb"), "wb"
                     ) as file:
                         file.write(tensor.SerializeToString())
+            if _onnxrt_backend and test_onnxrt_backend:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    self.assertBackendONNXRT(
+                        f,
+                        args,
+                        params=params,
+                        test_backend_backward=test_backend_backward,
+                        **kwargs,
+                    )
 
     def assertONNXRaises(self, err, f, args, params=None, **kwargs):
         if params is None:
@@ -215,7 +353,7 @@ class TestOperators(common_utils.TestCase):
 
     def test_chunk(self):
         x = torch.tensor([0.0, 1.0, 2.0], requires_grad=True)
-        self.assertONNX(lambda x: x.chunk(2), x)
+        self.assertONNX(lambda x: x.chunk(2), x, test_onnxrt_backend=False)
 
     def test_split(self):
         x = torch.tensor(
@@ -232,7 +370,9 @@ class TestOperators(common_utils.TestCase):
     def test_concat2(self):
         x = torch.randn(2, 3)
         y = torch.randn(2, 3)
-        self.assertONNX(lambda inputs: torch.cat(inputs, 1), ((x, y),))
+        self.assertONNX(
+            lambda inputs: torch.cat(inputs, 1), ((x, y),), test_backend_backward=False
+        )
 
     def test_mm(self):
         m1 = torch.randn(2, 3, requires_grad=True)
@@ -455,11 +595,13 @@ class TestOperators(common_utils.TestCase):
 
     def test_full(self):
         x = torch.randn(3, 4, requires_grad=True)
-        self.assertONNX(lambda x: torch.full(x.shape, 2.0), x)
+        self.assertONNX(
+            lambda x: torch.full(x.shape, 2.0), x, test_backend_backward=False
+        )
 
     def test_full_like(self):
         x = torch.randn(3, 4, requires_grad=True)
-        self.assertONNX(lambda x: torch.full_like(x, 2), x)
+        self.assertONNX(lambda x: torch.full_like(x, 2), x, test_backend_backward=False)
 
     def test_max(self):
         x = torch.randn(3, 4, requires_grad=True)
@@ -485,11 +627,19 @@ class TestOperators(common_utils.TestCase):
 
     def test_mean_dtype(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNX(lambda x: torch.mean(x, dtype=torch.double), x)
+        self.assertONNX(
+            lambda x: torch.mean(x, dtype=torch.double),
+            x,
+            test_onnxrt_backend=False,  # TODO: fix export of torch.mean with dtype
+        )
 
     def test_reduced_mean_dtype(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNX(lambda x: torch.mean(x, dim=0, dtype=torch.double), x)
+        self.assertONNX(
+            lambda x: torch.mean(x, dim=0, dtype=torch.double),
+            x,
+            test_onnxrt_backend=False,  # TODO: fix export of torch.mean with dtype
+        )
 
     def test_sum(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
@@ -626,7 +776,7 @@ class TestOperators(common_utils.TestCase):
 
     def test_argmax(self):
         x = torch.randn(4, 4, requires_grad=True)
-        self.assertONNX(lambda x: torch.argmax(x, dim=1), x)
+        self.assertONNX(lambda x: torch.argmax(x, dim=1), x, test_onnxrt_backend=False)
 
     def test_logsoftmax(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
@@ -716,11 +866,15 @@ class TestOperators(common_utils.TestCase):
 
     def test_randn(self):
         x = torch.randn(1, 2, 3, 4)
-        self.assertONNX(lambda x: torch.randn(1, 2, 3, 4) + x, x)
+        self.assertONNX(
+            lambda x: torch.randn(1, 2, 3, 4) + x, x, test_onnxrt_backend=False
+        )
 
     def test_rand(self):
         x = torch.rand(1, 2, 3, 4)
-        self.assertONNX(lambda x: torch.rand(1, 2, 3, 4) + x, x)
+        self.assertONNX(
+            lambda x: torch.rand(1, 2, 3, 4) + x, x, test_onnxrt_backend=False
+        )
 
     def test_rrelu(self):
         x = torch.randn(1, 2, 3, 4)
@@ -742,15 +896,15 @@ class TestOperators(common_utils.TestCase):
 
     def test_empty_like(self):
         x = torch.randn(5, 8, requires_grad=True)
-        self.assertONNX(lambda x: torch.empty_like(x), x)
+        self.assertONNX(lambda x: torch.empty_like(x), x, test_onnxrt_backend=False)
 
     def test_zeros_like(self):
         x = torch.randn(5, 8, requires_grad=True)
-        self.assertONNX(lambda x: torch.zeros_like(x), x)
+        self.assertONNX(lambda x: torch.zeros_like(x), x, test_backend_backward=False)
 
     def test_ones_like(self):
         x = torch.randn(6, 10, requires_grad=True)
-        self.assertONNX(lambda x: torch.ones_like(x), x)
+        self.assertONNX(lambda x: torch.ones_like(x), x, test_backend_backward=False)
 
     def test_expand(self):
         x = torch.randn(6, 1, requires_grad=True)
@@ -786,6 +940,7 @@ class TestOperators(common_utils.TestCase):
                 )
             ),
             x,
+            test_onnxrt_backend=False,
         )
 
     def test_dropout_training(self):
@@ -794,6 +949,7 @@ class TestOperators(common_utils.TestCase):
             lambda x: torch.max(functional.dropout(x)),
             x,
             training=torch.onnx.TrainingMode.TRAINING,
+            test_onnxrt_backend=False,
         )
 
     def test_dropout_opset12(self):
@@ -802,6 +958,7 @@ class TestOperators(common_utils.TestCase):
             lambda x: torch.max(functional.dropout(x, training=False)),
             x,
             opset_version=12,
+            test_onnxrt_backend=False,
         )
 
     def test_dropout_training_opset12(self):
@@ -811,13 +968,14 @@ class TestOperators(common_utils.TestCase):
             x,
             opset_version=12,
             training=torch.onnx.TrainingMode.TRAINING,
+            test_onnxrt_backend=False,
         )
 
     def test_nonzero(self):
         x = torch.tensor(
             [[[2.0, 2.0], [1.0, 0.0]], [[0.0, 0.0], [1.0, 1.0]]], requires_grad=True
         )
-        self.assertONNX(lambda x: torch.nonzero(x), x)
+        self.assertONNX(lambda x: torch.nonzero(x), x, test_onnxrt_backend=False)
 
     def test_gather(self):
         data = torch.randn(3, 4, 3, requires_grad=True)
@@ -912,7 +1070,7 @@ class TestOperators(common_utils.TestCase):
                 return x_out
 
         x = {torch.tensor(1.0): torch.randn(1, 2, 3)}
-        self.assertONNX(MyModel(), (x, {}))
+        self.assertONNX(MyModel(), (x, {}), test_onnxrt_backend=False)
 
     def test_dict_str(self):
         class MyModel(torch.nn.Module):
@@ -922,7 +1080,7 @@ class TestOperators(common_utils.TestCase):
                 return x_out
 
         x = {"test_key_in": torch.randn(1, 2, 3)}
-        self.assertONNX(MyModel(), (x, {}))
+        self.assertONNX(MyModel(), (x, {}), test_onnxrt_backend=False)
 
     def test_arange_dynamic(self):
         class TestModel(torch.nn.Module):
@@ -930,7 +1088,7 @@ class TestOperators(common_utils.TestCase):
                 return torch.arange(input.shape[0], input.shape[0] + 5, 0.5)
 
         input = torch.randn(5, 3, 2)
-        self.assertONNX(TestModel(), input, opset_version=11)
+        self.assertONNX(TestModel(), input, opset_version=11, test_onnxrt_backend=False)
 
     def test_bitshift(self):
         class BitshiftModel(torch.nn.Module):
@@ -992,7 +1150,11 @@ class TestOperators(common_utils.TestCase):
         x = torch.ones(3, requires_grad=True)
         y = torch.zeros(4, requires_grad=True)
         z = torch.ones(5, requires_grad=True)
-        self.assertONNX(lambda x, y, z: torch.meshgrid(x, y, z), (x, y, z))
+        self.assertONNX(
+            lambda x, y, z: torch.meshgrid(x, y, z),
+            (x, y, z),
+            test_onnxrt_backend=False,  # TODO: enable when test_expand is fixed
+        )
 
     def test_meshgrid_indexing(self):
         x = torch.ones(3, requires_grad=True)
@@ -1002,12 +1164,18 @@ class TestOperators(common_utils.TestCase):
             lambda x, y, z: torch.meshgrid(x, y, z, indexing="xy"),
             (x, y, z),
             opset_version=9,
+            test_onnxrt_backend=False,  # TODO: enable when test_expand is fixed
         )
 
     def test_topk(self):
         x = torch.arange(1.0, 6.0, requires_grad=True)
         k = torch.tensor(3)
-        self.assertONNX(lambda x, k: torch.topk(x, k), (x, k), opset_version=10)
+        self.assertONNX(
+            lambda x, k: torch.topk(x, k),
+            (x, k),
+            opset_version=10,
+            test_backend_backward=False,
+        )
 
     def test_topk_smallest_unsorted(self):
         x = torch.arange(1.0, 6.0, requires_grad=True)
@@ -1016,6 +1184,7 @@ class TestOperators(common_utils.TestCase):
             lambda x, k: torch.topk(x, k, largest=False, sorted=False),
             (x, k),
             opset_version=11,
+            test_backend_backward=False,
         )
 
     def test_baddbmm(self):
@@ -1030,7 +1199,9 @@ class TestOperators(common_utils.TestCase):
 
     def test_dim(self):
         x = torch.ones((2, 2), requires_grad=True)
-        self.assertONNX(lambda x: torch.scalar_tensor(x.dim()), x)
+        self.assertONNX(
+            lambda x: torch.scalar_tensor(x.dim()), x, test_onnxrt_backend=False
+        )
 
     @skipIfNoLapack
     def test_det(self):
