@@ -202,9 +202,11 @@ class ReplicateTest(MultiProcessTestCase):
         )
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_rocm
     @skip_if_lt_x_gpu(2)
     def test_compile_backward_only(self):
         self._test_compile(use_gpu=True, no_sync=False, no_compile_forward=True)
+
 
 if __name__ == "__main__":
     run_tests()
