@@ -7,14 +7,19 @@ from typing import List, Tuple
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from _test_fully_shard_common import MLP, patch_all_gather, patch_reduce_scatter
 from torch.distributed._composable import replicate
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import init_device_mesh
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest, FSDPTestMultiThread
+from torch.testing._internal.common_fsdp import (
+    FSDPTest,
+    FSDPTestMultiThread,
+    MLP,
+    patch_all_gather,
+    patch_reduce_scatter,
+)
 from torch.testing._internal.common_utils import get_cycles_per_ms, run_tests
 
 
