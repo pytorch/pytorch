@@ -2030,6 +2030,47 @@ class CPUReproTests(TestCase):
                 self.common(fn, (x,))
                 assert metrics.generated_cpp_vec_kernel_count == 0
 
+    def test_argmin(self):
+        def fn(x):
+            return torch.argmin(x, -1)
+
+        for dtype in vec_dtypes:
+            x = torch.randn((10, 10), dtype=dtype)
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            assert metrics.generated_cpp_vec_kernel_count == 0
+
+    def test_argmax_argmin_with_nan_value(self):
+        def fn(x):
+            return torch.argmax(x)
+
+        def fn2(x):
+            return torch.argmin(x)
+
+        inputs = [
+            torch.Tensor([-755832.1250, 100]),
+            torch.Tensor([-755832.1250, 100, 200]),
+            torch.Tensor([100, -755832.1250]),
+            torch.Tensor([100, 200, -755832.1250]),
+        ]
+
+        for x in inputs:
+            x = x.repeat(16, 16)
+            x = torch.log1p(x)
+
+            # Test argmax
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            assert metrics.generated_cpp_vec_kernel_count == 0
+
+            # Test argmin
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn2, (x,))
+            assert metrics.generated_cpp_vec_kernel_count == 0
+
     # Currently, we enabled AVX2 and AVX512 for vectorization. If the platform is not
     # supported, the vectorization will not work and skip this test case. For ARM or
     # other platforms support, we just need to add the ISA info to the supported_vector_isa
@@ -2891,6 +2932,16 @@ class CPUReproTests(TestCase):
             o2 = torch.rand([3, 3, 2, 8, 9, 2], dtype=dtype)
             with torch.no_grad():
                 self.common(fn, (o1, o2, x, y))
+
+    def test_constant_bool_vec(self):
+        def fn(x):
+            mask = torch.zeros(1, dtype=torch.bool)
+            return torch.where(mask, x, -1.0)
+
+        x = torch.rand(1000)
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
