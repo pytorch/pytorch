@@ -2040,7 +2040,10 @@ class CppVecKernel(CppKernel):
         }
         assert dtype == torch.float
         assert src_dtype == torch.float
-        assert isinstance(value, CppCSEVariable) and value.is_vec, value
+        assert isinstance(value, CppCSEVariable), value
+
+        if not value.is_vec:
+            value = self.broadcast(value)
 
         vec_ns = "at::vec"
         vec = f"{vec_ns}::Vectorized<{DTYPE_TO_CPP[dtype]}>"
