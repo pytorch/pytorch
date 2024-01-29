@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import os
 from abc import ABC, abstractmethod
 
