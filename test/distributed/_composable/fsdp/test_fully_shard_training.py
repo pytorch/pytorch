@@ -8,12 +8,6 @@ from typing import Iterable, List, Tuple, Union
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from _test_fully_shard_common import (
-    check_1d_sharded_parity,
-    MLP,
-    patch_all_gather,
-    patch_reduce_scatter,
-)
 from torch.distributed._composable import checkpoint, replicate
 from torch.distributed._composable.fsdp import FSDP, fully_shard
 from torch.distributed._tensor import DTensor, init_device_mesh
@@ -30,7 +24,14 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest, FSDPTestMultiThread
+from torch.testing._internal.common_fsdp import (
+    check_1d_sharded_parity,
+    FSDPTest,
+    FSDPTestMultiThread,
+    MLP,
+    patch_all_gather,
+    patch_reduce_scatter,
+)
 from torch.testing._internal.common_utils import get_cycles_per_ms, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
