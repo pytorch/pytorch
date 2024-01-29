@@ -1473,6 +1473,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 #define alloc_from_pool torch::inductor::_alloc_from_pool
                 """
             )
+            if "cuda" in V.graph.device_types:
+                self.header.splice(
+                    """
+                    #include <ATen/cuda/EmptyTensor.h>
+                    """
+                )
 
         self.header.splice("#include <c10/util/generic_math.h>")
 
@@ -2384,7 +2390,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self, name, device, dtype, shape, stride, buffer_if_can_stack_allocate=None
     ):
         orig_stride = stride
-        device = self.codegen_device(device)
+        device_str = self.codegen_device(device)
         dtype_code = self.codegen_dtype(dtype)
         size = self.codegen_shape_tuple(shape)
         stride = self.codegen_shape_tuple(orig_stride)
@@ -2399,7 +2405,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 self.wrapper_call,
                 known_statically=self.is_statically_known_list_of_ints(orig_stride),
             )
-            device_type, device_id = device.split(",")
+            device_type, device_id = device_str.split(",")
             device_idx = "this->device_idx_" if V.graph.aot_mode else device_id
             if buffer_if_can_stack_allocate is not None:
                 from .cpp import DTYPE_TO_CPP
@@ -2435,11 +2441,18 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
             return f"RAIIAtenTensorHandle {name}({name}_handle);"
 
-        if V.graph.aot_mode and device.startswith("c10::Device("):
-            tensor_device = f"{device.split(',')[0]}, this->device_idx_)"
+        if V.graph.aot_mode and device_str.startswith("c10::Device("):
+            tensor_device = f"{device_str.split(',')[0]}, this->device_idx_)"
         else:
-            tensor_device = device
+            tensor_device = device_str
 
+        if device.type == "cpu":
+            return f"at::Tensor {name} = at::detail::empty_strided_cpu({size}, {stride}, {dtype_code});"
+        if device.type == "cuda":
+            return (
+                f"at::Tensor {name} = at::detail::empty_strided_cuda("
+                f"{size}, {stride}, {dtype_code}, c10::DeviceType::CUDA);"
+            )
         return (
             f"{self.declare}{name} = {self.namespace}empty_strided("
             f"{size}, {stride}, at::TensorOptions({tensor_device}).dtype({dtype_code})){self.ending}"
