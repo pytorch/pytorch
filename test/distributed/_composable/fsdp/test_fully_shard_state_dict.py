@@ -7,9 +7,7 @@ from typing import Dict
 
 import torch
 import torch.nn as nn
-from _test_fully_shard_common import MLP
 from torch.distributed._composable.fsdp import fully_shard
-
 from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.tensor.parallel import (
@@ -18,7 +16,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import FSDPTest, MLP
 from torch.testing._internal.common_utils import run_tests
 
 
