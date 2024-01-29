@@ -11,7 +11,7 @@
 
 #include <pthread.h>
 
-namespace torch::xpu {
+using namespace torch;
 
 static bool in_bad_fork = false; // True for children forked after xpu init
 
@@ -31,13 +31,13 @@ static void poison_fork() {
 
 // XPU management methods
 
-static PyObject* XPUModule_isInBadFork_wrap(PyObject* self, PyObject* noargs) {
+static PyObject* THXPModule_isInBadFork_wrap(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   return PyBool_FromLong(in_bad_fork);
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* XPUModule_setDevice_wrap(PyObject* self, PyObject* arg) {
+PyObject* THXPModule_setDevice_wrap(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to set_device");
 
@@ -48,7 +48,7 @@ PyObject* XPUModule_setDevice_wrap(PyObject* self, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* XPUModule_exchangeDevice_wrap(PyObject* self, PyObject* arg) {
+PyObject* THXPModule_exchangeDevice_wrap(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to exchange_device");
 
@@ -64,7 +64,7 @@ PyObject* XPUModule_exchangeDevice_wrap(PyObject* self, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* XPUModule_maybeExchangeDevice_wrap(PyObject* self, PyObject* arg) {
+PyObject* THXPModule_maybeExchangeDevice_wrap(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       THPUtils_checkLong(arg), "invalid argument to maybe_exchange_device");
@@ -81,7 +81,7 @@ PyObject* XPUModule_maybeExchangeDevice_wrap(PyObject* self, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* XPUModule_getDevice_wrap(PyObject* self, PyObject* noargs) {
+PyObject* THXPModule_getDevice_wrap(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
 
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
@@ -91,14 +91,14 @@ PyObject* XPUModule_getDevice_wrap(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* XPUModule_getDeviceCount_wrap(PyObject* self, PyObject* noargs) {
+PyObject* THXPModule_getDeviceCount_wrap(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   poison_fork();
   return THPUtils_packUInt64(at::xpu::device_count());
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* XPUModule_getCurrentStream_wrap(
+PyObject* THXPModule_getCurrentStream_wrap(
     PyObject* self,
     PyObject* device_index) {
   HANDLE_TH_ERRORS
@@ -121,7 +121,7 @@ PyObject* XPUModule_getCurrentStream_wrap(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* XPUModule_getCurrentStream_raw(
+PyObject* THXPModule_getCurrentStream_raw(
     PyObject* self,
     PyObject* device_index) {
   HANDLE_TH_ERRORS
@@ -133,7 +133,7 @@ PyObject* XPUModule_getCurrentStream_raw(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* XPUModule_setStream_wrap(
+PyObject* THXPModule_setStream_wrap(
     PyObject* self,
     PyObject* args,
     PyObject* kwargs) {
@@ -167,7 +167,7 @@ PyObject* XPUModule_setStream_wrap(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* XPUModule_xpuSynchronize(PyObject* self, PyObject* arg) {
+PyObject* THXPModule_xpuSynchronize(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to synchronize");
   int device = THPUtils_unpackInt(arg);
@@ -254,7 +254,7 @@ static void bindGetDeviceProperties(PyObject* module) {
 
 // Callback for python part. Used for additional initialization of python
 // classes
-static PyObject* XPUModule_initExtension(PyObject* self, PyObject* noargs) {
+static PyObject* THXPModule_initExtension(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   TORCH_INTERNAL_ASSERT(!in_bad_fork); // Handled at python level
   poison_fork();
@@ -272,38 +272,40 @@ static PyObject* XPUModule_initExtension(PyObject* self, PyObject* noargs) {
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,
 // cppcoreguidelines-avoid-non-const-global-variables,
 // cppcoreguidelines-avoid-c-arrays)
-static struct PyMethodDef _XPUModule_methods[] = {
-    {"_xpu_init", XPUModule_initExtension, METH_NOARGS, nullptr},
-    {"_xpu_setDevice", XPUModule_setDevice_wrap, METH_O, nullptr},
-    {"_xpu_exchangeDevice", XPUModule_exchangeDevice_wrap, METH_O, nullptr},
+static struct PyMethodDef _THXPModule_methods[] = {
+    {"_xpu_init", THXPModule_initExtension, METH_NOARGS, nullptr},
+    {"_xpu_setDevice", THXPModule_setDevice_wrap, METH_O, nullptr},
+    {"_xpu_exchangeDevice", THXPModule_exchangeDevice_wrap, METH_O, nullptr},
     {"_xpu_maybeExchangeDevice",
-     XPUModule_maybeExchangeDevice_wrap,
+     THXPModule_maybeExchangeDevice_wrap,
      METH_O,
      nullptr},
-    {"_xpu_getDevice", XPUModule_getDevice_wrap, METH_NOARGS, nullptr},
+    {"_xpu_getDevice", THXPModule_getDevice_wrap, METH_NOARGS, nullptr},
     {"_xpu_getDeviceCount",
-     XPUModule_getDeviceCount_wrap,
+     THXPModule_getDeviceCount_wrap,
      METH_NOARGS,
      nullptr},
-    {"_xpu_isInBadFork", XPUModule_isInBadFork_wrap, METH_NOARGS, nullptr},
+    {"_xpu_isInBadFork", THXPModule_isInBadFork_wrap, METH_NOARGS, nullptr},
     {"_xpu_getCurrentStream",
-     XPUModule_getCurrentStream_wrap,
+     THXPModule_getCurrentStream_wrap,
      METH_O,
      nullptr},
     {"_xpu_getCurrentRawStream",
-     XPUModule_getCurrentStream_raw,
+     THXPModule_getCurrentStream_raw,
      METH_O,
      nullptr},
     {"_xpu_setStream",
      castPyCFunctionWithKeywords(XPUModule_setStream_wrap),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
-    {"_xpu_synchronize", XPUModule_xpuSynchronize, METH_O, nullptr},
+    {"_xpu_synchronize", THXPModule_xpuSynchronize, METH_O, nullptr},
     {nullptr}};
 
-PyMethodDef* python_functions() {
-  return _XPUModule_methods;
+PyMethodDef* THXPModule_methods() {
+  return _THXPModule_methods;
 }
+
+namespace torch::xpu {
 
 void initModule(PyObject* module) {
   registerXpuDeviceProperties(module);
