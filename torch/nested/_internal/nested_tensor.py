@@ -194,7 +194,8 @@ class NestedTensor(torch.Tensor):
         # during aot autograd, FunctionalTensors are not fake but hold
         # symbolic sizes.
         ragged_source = offsets if lengths is None else lengths
-        if has_free_symbols(ragged_source) or has_free_symbols(values):
+        # if has_free_symbols(ragged_source) or has_free_symbols(values):
+        if True:
             # Associate offsets or lengths (possibly fake, possibly functionalized)
             # with the ragged_size.
             ragged_size = outer_size[ragged_idx]
