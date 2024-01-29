@@ -486,8 +486,9 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
   THPObjectPtr arg = six::maybeAsTuple(args[i]);
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
-  TORCH_CHECK_TYPE(
-      size == N, "expected tuple of ", N, " elements but got ", size);
+  if (size != N) {
+    throw TypeError("expected tuple of %d elements but got %d", N, (int)size);
+  }
   for (const auto idx : c10::irange(size)) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx)
                           : PyList_GET_ITEM(arg.get(), idx);
@@ -523,16 +524,12 @@ inline void throw_intlist_exception(
       ? e.what()
       : std::string("type must be ") + args->signature.params[i].type_name() +
           ",but got " + Py_TYPE(obj)->tp_name;
-  TORCH_CHECK_TYPE(
-      false,
-      args->signature.name,
-      "(): argument '",
-      args->signature.params[i].name,
-      "' failed to unpack the object at pos ",
+  throw TypeError(
+      "%s(): argument '%s' failed to unpack the object at pos %zu with error \"%s\"",
+      args->signature.name.c_str(),
+      args->signature.params[i].name.c_str(),
       idx + 1,
-      " with error \"",
-      error,
-      "\"");
+      error.c_str());
 }
 
 inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
@@ -706,16 +703,12 @@ inline std::vector<double> PythonArgs::getDoublelist(int i) {
     try {
       res[idx] = THPUtils_unpackDouble(obj);
     } catch (const std::exception& e) {
-      TORCH_CHECK_TYPE(
-          false,
-          signature.name,
-          "(): argument '",
-          signature.params[i].name,
-          "' must be ",
-          signature.params[i].type_name(),
-          ", but found element of type ",
+      throw TypeError(
+          "%s(): argument '%s' must be %s, but found element of type %s at pos %zu",
+          signature.name.c_str(),
+          signature.params[i].name.c_str(),
+          signature.params[i].type_name().c_str(),
           Py_TYPE(obj)->tp_name,
-          " at pos ",
           idx + 1);
     }
   }
@@ -1108,11 +1101,10 @@ inline c10::Stream PythonArgs::stream(int i) {
   if (!args[i])
     return c10::Stream(
         c10::Stream::Default::DEFAULT, c10::Device(c10::DeviceType::CPU, -1));
-  TORCH_CHECK_TYPE(
-      THPStream_Check(args[i]),
-      "expected Stream object. Got '",
-      Py_TYPE(args[i])->tp_name,
-      "'");
+  if (!THPStream_Check(args[i])) {
+    throw TypeError(
+        "expected Stream object. Got '%s'", Py_TYPE(args[i])->tp_name);
+  }
   return c10::Stream::unpack3(
       ((THPStream*)args[i])->stream_id,
       static_cast<c10::DeviceIndex>(((THPStream*)args[i])->device_index),
