@@ -50,9 +50,6 @@ class FSDPState(_State):
         self._pre_forward_hook_handle: Optional[RemovableHandle] = None
         self._pre_backward_hook_handles: List[RemovableHandle] = []
 
-        # Attributes only used on the root state:
-        self._root_post_backward_final_callback_queued: Optional[bool] = None
-
     # Define a separate init since `__init__` is called in the contract
     def init(self, module: nn.Module, device: torch.device) -> None:
         _insert_module_state(module, self)
