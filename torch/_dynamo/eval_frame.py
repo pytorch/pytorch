@@ -348,9 +348,9 @@ class _TorchDynamoContext:
                 "to use torch._dynamo.optimize(...) as an annotation/decorator. "
             )
         self.on_enter()
-        self.prior = set_eval_frame(self.callback)
         tls.eval_frame_stack = CapturedTraceback.extract()
         tls.context_init_stack = self.stack
+        self.prior = set_eval_frame(self.callback)
         self.cleanup_fns.append(self.set_backend_cache())
         self.backend_ctx = self.extra_ctx_ctor()
         self.backend_ctx.__enter__()
@@ -441,9 +441,9 @@ class _TorchDynamoContext:
                     return fn(*args, **kwargs)
 
             on_enter()
-            prior = set_eval_frame(callback)
             tls.eval_frame_stack = CapturedTraceback.extract()
             tls.context_init_stack = self.stack
+            prior = set_eval_frame(callback)
             cleanups = (self.set_backend_cache(),)
             backend_ctx = backend_ctx_ctor()
             backend_ctx.__enter__()
