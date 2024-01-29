@@ -282,6 +282,7 @@ class BackwardCFunction(_C._FunctionBase, FunctionCtx, _HookMixin):
     r"""
     This class is used for internal autograd work. Do not use.
     """
+
     def apply(self, *args):
         r"""
         Apply method used when executing this Node during the backward
@@ -652,6 +653,7 @@ class InplaceFunction(Function):
     This class is here only for backward compatibility reasons.
     Use :class:`Function` instead of this for any new use case.
     """
+
     def __init__(self, inplace=False):
         super().__init__()
         self.inplace = inplace

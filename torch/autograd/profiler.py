@@ -965,7 +965,7 @@ class KinetoStepTracker:
 
     We fix this by adding a layer of abstraction before calling step()
     to the kineto library. The idea is to maintain steps per requester in a dict:
-    
+
     .. code-block:: json
 
         {
@@ -977,7 +977,7 @@ class KinetoStepTracker:
     To figure out the global step count just take the max of dict values (100).
 
     If one of the count increments the max will go up.
-    
+
     .. code-block:: json
 
         {
