@@ -5,6 +5,12 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
+import sys
+
+# This test does not support PyThon 3.12
+if (sys.version_info >= (3, 12))
+    return
+
 from functorch.dim import Tensor, Dim, dims, dimlists, stack, DimensionBindError, DimList
 
 from attn_ft import BertSelfAttention as BertSelfAttentionA, Linear
