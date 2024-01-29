@@ -2,9 +2,9 @@
 
 #include <torch/csrc/python_headers.h>
 
-PyMethodDef* THXPModule_methods();
-
 namespace torch::xpu {
+
+PyMethodDef* python_functions();
 
 void initModule(PyObject* module);
 
