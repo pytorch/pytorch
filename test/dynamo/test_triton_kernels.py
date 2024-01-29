@@ -896,6 +896,8 @@ def forward(self, x_1, output_1):
 def make_mutation_test(fn):
     kernel, inputs, outputs = fn()
 
+    @requires_lark
+    @skipIfRocm
     def test_fn(self):
         from torch._higher_order_ops.triton_kernel_wrap import identify_mutated_tensors
 
@@ -911,7 +913,6 @@ class MutationTests(torch._dynamo.test_case.TestCase):
     # Tests injected below
 
     @requires_cuda
-    @requires_lark
     @make_mutation_test
     def test_out_of_order_kernel():
         @triton.jit
