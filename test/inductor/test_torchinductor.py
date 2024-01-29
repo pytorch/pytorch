@@ -8397,6 +8397,12 @@ class CommonTemplate:
         res = torch.compile(fn)(20)
         self.assertTrue(torch.all((0 <= res) & (res < 10)).item())
 
+    def test_bessel_j0(self):
+        def fn(x):
+            return torch.special.bessel_j0(x)
+
+        self.common(fn, (torch.randn(8, 8),))
+
 
 @dataclasses.dataclass
 class TestFailure:
