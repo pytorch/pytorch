@@ -29,6 +29,7 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo import (
     compiled_autograd,
+    config as dynamo_config,
     logging as dynamo_logging,
     utils as dynamo_utils,
 )
@@ -42,6 +43,7 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
 from .._dynamo.backends.common import aot_autograd
+from ..fx._lazy_graph_module import _use_lazy_graph_module  # type: ignore[attr-defined]
 from ..fx.graph import _PyTreeCodeGen
 from . import config, metrics
 from .debug import DebugContext
@@ -146,26 +148,42 @@ def _warn_tf32_disabled():
 def _unlift_graph(mod, gm, graph_signature):
     state_dict = {}
     for name, param in mod.named_parameters(remove_duplicate=False):
+        gm.register_parameter(name.replace(".", "_"), param)
         state_dict[name] = param
-    for name, param in mod.named_buffers(remove_duplicate=False):
-        state_dict[name] = param
+    for name, buffer in mod.named_buffers(remove_duplicate=False):
+        gm.register_buffer(name.replace(".", "_"), buffer)
+        state_dict[name] = buffer
 
-    from torch.export._unlift import _construct_inp_pos_to_param_buffer_name, _unlift
+    placeholder_nodes = [node for node in gm.graph.nodes if node.op == "placeholder"]
+    lifted_inputs = []
+    for node in placeholder_nodes:
+        node_name = node.name
+        if node_name in graph_signature.inputs_to_parameters:
+            lifted_inputs.append(graph_signature.inputs_to_parameters[node_name])
+        elif node_name in graph_signature.inputs_to_buffers:
+            lifted_inputs.append(graph_signature.inputs_to_buffers[node_name])
+        else:
+            assert node_name in graph_signature.user_inputs
+            lifted_inputs.append(None)
 
-    inp_pos_to_param_buffer_name = _construct_inp_pos_to_param_buffer_name(
-        gm,
-        graph_signature,
-        state_dict,
-        {},
-    )
+    from torch.export._unlift import _unlift
+
+    outputs = list(gm.graph.nodes)[-1].args[0]
+    mutated_outputs = []
+    for out in outputs:
+        if out in graph_signature.buffers_to_mutate:
+            mutated_outputs.append(graph_signature.buffers_to_mutate[out.name])
+        else:
+            mutated_outputs.append(None)
+
     unlifted_gm = _unlift(
         gm,
-        inp_pos_to_param_buffer_name,
+        lifted_inputs,
+        mutated_outputs,
         pytree.LeafSpec(),
         None,
         state_dict,
         {},
-        graph_signature.buffers_to_mutate,
     )
     return unlifted_gm
 
@@ -244,6 +262,11 @@ def fake_tensor_prop(
 @DebugContext.wrap
 @torch.utils._python_dispatch._disable_current_modes()
 @time_and_log(attr="compilation time (in seconds)")
+# Need this decorator for compile_fx_inner even if we already have one for
+# compile_fx. The reason is the compilation for backward graph may happen after
+# compile_fx return and we may want to use the _LazyGraphModule for compiling
+# the backward graph as well.
+@_use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
@@ -266,6 +289,11 @@ def compile_fx_inner(
     also update the call to save_args_for_compile_fx_inner below accordingly.
     """
     if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
+        # trigger the real recompilation for _LazyGraphModule before returning
+        # the forward method.
+        from torch.fx._lazy_graph_module import _LazyGraphModule
+
+        _LazyGraphModule.force_recompile(gm)
         return make_boxed_func(gm.forward)
 
     assert isinstance(
@@ -360,7 +388,6 @@ def compile_fx_inner(
             compiled_graph.disabled_cudagraphs_reason = has_mutation_str
 
         cudagraph_tests = [
-            (set(compiled_graph.device_types) == {"cuda"}, "non-cuda device in graph"),
             (not has_mutation, "mutated inputs"),
             (not has_incompatible_cudagraph_ops(gm), "incompatible ops"),
             (not complex_memory_overlap_inputs, "complex memory overlap"),
@@ -369,13 +396,6 @@ def compile_fx_inner(
                     isinstance(t, (torch.Tensor, torch.SymInt)) for t in example_inputs
                 ),
                 "non-Tensor inputs",
-            ),
-            (
-                (
-                    len(compiled_graph.device_idxs) == 1
-                    or not config.triton.cudagraph_trees
-                ),
-                "multiple device indices with cudagraph_trees",
             ),
         ]
         cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
@@ -563,6 +583,15 @@ def fx_codegen_and_compile(
 
             if V.aot_compilation is True:
                 return compiled_fn
+
+            if cudagraphs and not V.graph.disable_cudagraphs_reason:
+                from torch._inductor.cudagraph_utils import (
+                    check_lowering_disable_cudagraph,
+                )
+
+                V.graph.disable_cudagraphs_reason = check_lowering_disable_cudagraph(
+                    V.graph.device_node_mapping
+                )
 
             compiled_graph = CompiledFxGraph(
                 compiled_fn, graph, output_strides, V.graph.disable_cudagraphs_reason
@@ -947,6 +976,7 @@ def fw_compiler_freezing(
     return wrapper
 
 
+@_use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
 def compile_fx(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],
