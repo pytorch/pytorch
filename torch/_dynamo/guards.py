@@ -500,7 +500,10 @@ class GuardBuilder(GuardBuilderBase):
 
         code = list()
         code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
-        code.append(f"len({ref}) == {len(value)}")
+        if len(value) == 0:
+            code.append(f"not {ref}")
+        else:
+            code.append(f"len({ref}) == {len(value)}")
 
         self._produce_guard_code(guard, code)
 
