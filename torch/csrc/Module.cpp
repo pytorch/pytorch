@@ -1442,10 +1442,10 @@ void initModule(PyObject* module);
 #endif
 
 #ifdef USE_XPU
+PyMethodDef* THXPModule_methods();
 void THXPStream_init(PyObject* module);
 void THXPEvent_init(PyObject* module);
 namespace torch::xpu {
-PyMethodDef* python_functions();
 void initModule(PyObject* module);
 } // namespace torch::xpu
 #endif
@@ -1510,7 +1510,7 @@ PyObject* initModule() {
   THPUtils_addPyMethodDefs(methods, THCPModule_methods());
 #endif
 #ifdef USE_XPU
-  THPUtils_addPyMethodDefs(methods, torch::xpu::python_functions());
+  THPUtils_addPyMethodDefs(methods, THXPModule_methods());
 #endif
 #if defined(USE_DISTRIBUTED) && defined(USE_C10D)
   THPUtils_addPyMethodDefs(
