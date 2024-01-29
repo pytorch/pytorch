@@ -1771,7 +1771,7 @@ class Module:
         return handle
 
     def register_state_dict_pre_hook(self, hook):
-        r"""Register a pre-hook for the :meth:`~torch.nn.Module.load_state_dict` method.
+        r"""Register a pre-hook for the :meth:`~torch.nn.Module.state_dict` method.
 
         These hooks will be called with arguments: ``self``, ``prefix``,
         and ``keep_vars`` before calling ``state_dict`` on ``self``. The registered
