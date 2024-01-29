@@ -94,7 +94,12 @@ class _MaskPartial(_Partial):
         assert self.mask_buffer.data is not None
 
         # apply the mask to the tensor that pending reduction
-        tensor[self.mask_buffer.data, :] = 0.0
+        # NOTE: Depending on the use case (gather op or embedding op),
+        # tensor dim can be equal or larger than the mask dim, respectively.
+        if tensor.ndim == self.mask_buffer.data.ndim:
+            tensor[self.mask_buffer.data] = 0.0
+        else:
+            tensor[self.mask_buffer.data, :] = 0.0
 
         # clear the mask buffer
         self.mask_buffer.release_mask()
@@ -115,7 +120,12 @@ class _MaskPartial(_Partial):
         assert self.mask_buffer.data is not None
 
         # apply the mask to the tensor that pending reduction
-        tensor[self.mask_buffer.data, :] = 0.0
+        # NOTE: Depending on the use case (gather op or embedding op),
+        # tensor dim can be equal or larger than the mask dim, respectively.
+        if tensor.ndim == self.mask_buffer.data.ndim:
+            tensor[self.mask_buffer.data] = 0.0
+        else:
+            tensor[self.mask_buffer.data, :] = 0.0
 
         # clear the mask buffer
         self.mask_buffer.release_mask()
