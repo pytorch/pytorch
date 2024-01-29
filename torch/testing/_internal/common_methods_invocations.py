@@ -15411,6 +15411,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_split_with_sizes,
            autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
            autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
+           supports_autograd=False,
            supports_out=True),
     BinaryUfuncInfo('__radd__',
                     op=torch.Tensor.__radd__,
