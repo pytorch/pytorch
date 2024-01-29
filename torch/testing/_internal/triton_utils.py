@@ -14,7 +14,9 @@ def has_lark():
         return False
 
 
-requires_lark = unittest.skipUnless(has_lark(), "requires lark")
+HAS_LARK = has_lark()
+
+requires_lark = unittest.skipUnless(HAS_LARK, "requires lark")
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 if HAS_CUDA:
