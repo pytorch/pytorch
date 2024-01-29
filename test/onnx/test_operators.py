@@ -6,7 +6,6 @@ Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --produce-onnx-test-data: generate onnx test data
           --accept: accept onnx updates and overwrite models
 """
-import onnxruntime
 import copy
 import glob
 import inspect
