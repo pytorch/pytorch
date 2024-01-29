@@ -116,7 +116,7 @@ class Tracker:
 input_codes = Tracker()
 output_codes = Tracker()
 
-initial_global_state = None
+initial_global_state: Optional[GlobalStateGuard] = None
 
 
 @functools.wraps(original_forward_from_src)
