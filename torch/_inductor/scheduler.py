@@ -33,7 +33,7 @@ from torch.utils._triton import has_triton
 from . import comms, config, dependencies, ir, metrics
 from .codegen.common import get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
-from .dependencies import StarDep, WeakDep
+from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
 from .sizevars import SimplifyIndexing
 from .utils import (
@@ -1996,26 +1996,32 @@ class Scheduler:
         We can fuse them if all the reads of node2 either match
         corresponding writes in node1, or are written by nodes that can
         be scheduled before the fusion of node1 and node2.
+
+        We also disable fusion of a write subsequent to a read if the reads
+        and writes do not align.
         """
         node1_names = node1.get_names()
         computed_deps = set()
         why = WhyNoFuse(node1, node2)
 
+        # StarDep doesn't match MemoryDep, different indices don't match
+        # However, broadcasting sometimes strips dimensions, and if that's the case
+        # we still can match unmet dep
+        # if there's indirect indexing, don't match it
+        def fusable_read_and_write(read: Dep, write: Dep):
+            return (
+                self.mutation_renames.get(read.name, read.name) == write.name
+                and (isinstance(read, MemoryDep) and isinstance(write, MemoryDep))
+                and not free_symbol_has(read.index, "tmp")
+                and not free_symbol_has(write.index, "tmp")
+                and read.index == write.index
+                and len(read.size) >= len(write.size)
+                and read.size[: len(write.size)] == write.size
+            )
+
         for rd in node2.unmet_dependencies:
             for cd in node1.read_writes.writes:
-                # StarDep doesn't match MemoryDep, different indices don't match
-                # However, broadcasting sometimes strips dimensions, and if that's the case
-                # we still can match unmet dep
-                # if there's indirect indexing, don't match it
-                if (
-                    rd.name == cd.name
-                    and type(rd) == type(cd)
-                    and not free_symbol_has(rd.index, "tmp")
-                    and not free_symbol_has(cd.index, "tmp")
-                    and rd.index == cd.index
-                    and len(rd.size) >= len(cd.size)
-                    and rd.size[: len(cd.size)] == cd.size
-                ):
+                if fusable_read_and_write(rd, cd):
                     computed_deps.add(rd)
 
         remaining_deps = {dep.name for dep in node2.unmet_dependencies - computed_deps}
@@ -2030,6 +2036,19 @@ class Scheduler:
             if node1_names & self.name_to_fused_node[name].ancestors:
                 why("intermediate nodes between node1 & node2")
                 return False
+
+        # similar to can_inplace, if we are going to fuse a write subsequent to a read
+        # require that the indexing and size is the same
+        for write in node2.read_writes.writes:
+            for read in node1.read_writes.reads:
+                if write.name != self.mutation_renames.get(read.name, read.name):
+                    continue
+
+                # bail on StarDep
+                if not fusable_read_and_write(read=read, write=write):
+                    why("fusing a write into a read with different indexing formula")
+                    return False
+
         return True
 
     def score_fusion(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
