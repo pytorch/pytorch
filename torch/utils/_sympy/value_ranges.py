@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import dataclasses
 import itertools
 import sympy
@@ -6,7 +8,8 @@ import operator
 import math
 import logging
 import torch
-from typing import Union, Dict, Optional, SupportsFloat
+from typing import Union, Dict, Optional, SupportsFloat, TypeVar, Generic, cast
+from typing_extensions import TypeGuard
 
 from torch._prims_common import dtype_to_type
 from .interp import sympy_interp
@@ -15,6 +18,8 @@ from .functions import Round, RoundDecimal
 log = logging.getLogger(__name__)
 
 __all__ = ["ValueRanges", "ValueRangeAnalysis", "bound_sympy"]
+
+T = TypeVar('T', sympy.Expr, SympyBoolean)
 
 class ValueRangeError(RuntimeError):
     pass
@@ -57,16 +62,24 @@ def sympy_generic_le(lower, upper):
         return not (lower and not upper)
 
 
+def vr_is_bool(vr: ValueRanges[T]) -> TypeGuard[ValueRanges[SympyBoolean]]:
+    return vr.is_bool
+
+
+def vr_is_expr(vr: ValueRanges[T]) -> TypeGuard[ValueRanges[sympy.Expr]]:
+    return not vr.is_bool
+
+
 @dataclasses.dataclass(frozen=True)
-class ValueRanges:
+class ValueRanges(Generic[T]):
     # Although the type signature here suggests you can pass any
     # sympy expression, in practice the analysis here only works
     # with constant sympy expressions
-    lower: Union[sympy.Expr, SympyBoolean]
-    upper: Union[sympy.Expr, SympyBoolean]
+    lower: T
+    upper: T
     is_bool: bool
 
-    def __init__(self, lower, upper):
+    def __init__(self, lower: T, upper: T) -> None:
         lower = simple_sympify(lower)
         upper = simple_sympify(upper)
         # TODO: when the bounds have free variables, this may be
@@ -96,40 +109,42 @@ class ValueRanges:
         return self & other
 
     # Intersection
-    def __and__(self, other) -> "ValueRanges":
+    def __and__(self: ValueRanges[T], other: ValueRanges[T]) -> ValueRanges[T]:
         if other == ValueRanges.unknown():
             return self
         if self == ValueRanges.unknown():
             return other
         assert self.is_bool == other.is_bool, (self, other)
-        if self.is_bool:
-            range = ValueRanges(sympy.Or(self.lower, other.lower), sympy.And(self.upper, other.upper))
+        if vr_is_bool(self):
+            return cast(ValueRanges[T], ValueRanges(sympy.Or(self.lower, other.lower), sympy.And(self.upper, other.upper)))
+        elif vr_is_expr(self):
+            return cast(ValueRanges[T], ValueRanges(sympy.Max(self.lower, other.lower), sympy.Min(self.upper, other.upper)))
         else:
-            range = ValueRanges(sympy.Max(self.lower, other.lower), sympy.Min(self.upper, other.upper))
-        return range
+            raise AssertionError("impossible")
 
     # Union
     def __or__(self, other) -> "ValueRanges":
         if ValueRanges.unknown() in (self, other):
             return ValueRanges.unknown()
         assert self.is_bool == other.is_bool, (self, other)
-        if self.is_bool:
-            range = ValueRanges(sympy.And(self.lower, other.lower), sympy.Or(self.upper, other.upper))
+        if vr_is_bool(self):
+            return cast(ValueRanges[T], ValueRanges(sympy.And(self.lower, other.lower), sympy.Or(self.upper, other.upper)))
+        elif vr_is_expr(self):
+            return cast(ValueRanges[T], ValueRanges(sympy.Min(self.lower, other.lower), sympy.Max(self.upper, other.upper)))
         else:
-            range = ValueRanges(sympy.Min(self.lower, other.lower), sympy.Max(self.upper, other.upper))
-        return range
+            raise AssertionError("impossible")
 
     def is_singleton(self) -> bool:
         return self.lower == self.upper
 
     # TODO: this doesn't work with bools but arguably it should
-    @classmethod
-    def unknown(cls):
-        return cls(-sympy.oo, sympy.oo)
+    @staticmethod
+    def unknown() -> ValueRanges[sympy.Expr]:
+        return ValueRanges(-sympy.oo, sympy.oo)
 
-    @classmethod
-    def unknown_bool(cls):
-        return cls(sympy.false, sympy.true)
+    @staticmethod
+    def unknown_bool() -> ValueRanges[SympyBoolean]:
+        return ValueRanges(sympy.false, sympy.true)
 
     @classmethod
     def wrap(cls, arg):
