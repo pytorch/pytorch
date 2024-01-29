@@ -3,10 +3,10 @@ import math
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Type
 
 import torch
-from torch.export._tree_utils import reorder_kwargs
 
 from torch._export import ExportedProgram
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.export._tree_utils import reorder_kwargs
 from torch.utils._pytree import (
     _register_pytree_node,
     Context,
@@ -29,7 +29,9 @@ SERIALIZED_DATACLASS_TO_PYTHON_DATACLASS: Dict[str, Type[Any]] = {}
 @torch._dynamo.disable
 def _check_input_constraints_pre_hook(self, args, kwargs):
     reordered_kwargs = reorder_kwargs(kwargs, self._in_spec)
-    flat_args_with_path, received_spec = tree_flatten_with_path((args, reordered_kwargs))
+    flat_args_with_path, received_spec = tree_flatten_with_path(
+        (args, reordered_kwargs)
+    )
 
     if received_spec != self._in_spec:
         raise TypeError(  # noqa: TRY200
@@ -81,7 +83,7 @@ def _check_input_constraints_for_graph(
     # for all InputDims related by equality constraints, so we can just unify
     # symbols with given input dimension values to check equality constraints.
     unification_map: "Dict[sympy.Symbol, Any]" = {}
-    for ((key_path, arg), node) in zip(flat_args_with_path, input_placeholders):
+    for (key_path, arg), node in zip(flat_args_with_path, input_placeholders):
         node_val = node.meta.get("val")
         if isinstance(node_val, FakeTensor):
             if not isinstance(arg, torch.Tensor):

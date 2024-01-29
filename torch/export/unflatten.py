@@ -3,7 +3,7 @@ import copy
 import operator
 from copy import deepcopy
 from itertools import chain
-from typing import Any, cast, Dict, List, Optional, Tuple, Union
+from typing import Any, cast, Dict, List, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -268,12 +268,12 @@ class UnflattenedModule(torch.nn.Module):
                 # TODO(suo): The FlatArgsAdapter returns a list of flat args,
                 # which we don't have keypaths for. For now, just create a dummy
                 # keypath to associate with the arg.
-                new_flat_args_with_path = [
+                new_flat_args_with_path = [  # type: ignore[var-annotated]
                     ((SequenceKey(idx=0), GetAttrKey(name="<unknown location>")), arg)
                     for arg in flat_args
                 ]
             else:
-                new_flat_args_with_path = flat_args_with_path
+                new_flat_args_with_path = flat_args_with_path  # type: ignore[assignment]
 
             _check_input_constraints_for_graph(
                 self.input_placeholders, new_flat_args_with_path, self.range_constraints
