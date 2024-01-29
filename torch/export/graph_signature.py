@@ -48,7 +48,6 @@ class InputKind(Enum):
     USER_INPUT = auto()
     PARAMETER = auto()
     BUFFER = auto()
-    BUFFER_NON_PERSISTENT = auto()
     CONSTANT_TENSOR = auto()
     CUSTOM_OBJ = auto()
 
@@ -58,8 +57,13 @@ class InputSpec:
     kind: InputKind
     arg: ArgumentSpec
     target: Optional[str]
+    persistent: Optional[bool] = None
 
     def __post_init__(self):
+        if self.kind == InputKind.BUFFER:
+            assert (
+                self.persistent is not None
+            ), "Failed to specify persistent flag on BUFFER."
         assert isinstance(
             self.arg,
             (TensorArgument, SymIntArgument, ConstantArgument, CustomObjArgument),
@@ -113,7 +117,14 @@ def _sig_to_specs(
             )
         elif name in inputs_to_buffers:
             return InputSpec(
-                kind=InputKind.BUFFER, arg=i, target=inputs_to_buffers[name]
+                kind=InputKind.BUFFER,
+                arg=i,
+                target=inputs_to_buffers[name],
+                # Mark as True for now; we will fix this up to distinguish
+                # persistent from non-persistent later in tracing.
+                # See: rewrite_non_persistent_buffers()
+                # TODO(suo): this is horrible.
+                persistent=True,
             )
         else:
             raise AssertionError(f"Unknown tensor input kind: {name}")
@@ -264,7 +275,7 @@ class ExportGraphSignature:
         return [
             s.target
             for s in self.input_specs
-            if s.kind == InputKind.BUFFER or s.kind == InputKind.BUFFER_NON_PERSISTENT
+            if s.kind == InputKind.BUFFER
             if isinstance(s.target, str)
         ]
 
@@ -273,7 +284,8 @@ class ExportGraphSignature:
         return [
             s.target
             for s in self.input_specs
-            if s.kind == InputKind.BUFFER_NON_PERSISTENT
+            if s.kind == InputKind.BUFFER
+            if s.persistent is False
             if isinstance(s.target, str)
         ]
 
@@ -336,7 +348,6 @@ class ExportGraphSignature:
             s.arg.name: s.target  # type: ignore[union-attr, misc]
             for s in self.input_specs
             if s.kind == InputKind.BUFFER
-            or s.kind == InputKind.BUFFER_NON_PERSISTENT
             and isinstance(s.arg, TensorArgument)
             and isinstance(s.target, str)
         }

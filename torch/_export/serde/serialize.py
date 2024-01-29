@@ -30,7 +30,7 @@ import sympy
 
 import torch
 import torch.export.exported_program as ep
-from torch._export.serde.schema import InputToNonPersistentBufferSpec, SchemaVersion
+from torch._export.serde.schema import SchemaVersion
 from torch._export.verifier import load_verifier
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
@@ -727,19 +727,12 @@ class GraphModuleSerializer:
         elif spec.kind == ep.InputKind.BUFFER:
             assert spec.target is not None
             assert isinstance(spec.arg, ep.TensorArgument)
+            assert spec.persistent is not None
             return InputSpec.create(
                 buffer=InputToBufferSpec(
                     arg=TensorArgument(name=spec.arg.name),
                     buffer_name=spec.target,
-                )
-            )
-        elif spec.kind == ep.InputKind.BUFFER_NON_PERSISTENT:
-            assert spec.target is not None
-            assert isinstance(spec.arg, ep.TensorArgument)
-            return InputSpec.create(
-                buffer_non_persistent=InputToNonPersistentBufferSpec(
-                    arg=TensorArgument(name=spec.arg.name),
-                    buffer_name=spec.target,
+                    persistent=spec.persistent,
                 )
             )
         elif spec.kind == ep.InputKind.CONSTANT_TENSOR:
@@ -1300,12 +1293,7 @@ class GraphModuleDeserializer:
                 kind=ep.InputKind.BUFFER,
                 arg=ep.TensorArgument(name=i.buffer.arg.name),
                 target=i.buffer.buffer_name,
-            )
-        elif i.type == "buffer_non_persistent":
-            return ep.InputSpec(
-                kind=ep.InputKind.BUFFER_NON_PERSISTENT,
-                arg=ep.TensorArgument(name=i.buffer_non_persistent.arg.name),
-                target=i.buffer_non_persistent.buffer_name,
+                persistent=i.buffer.persistent,
             )
         elif i.type == "tensor_constant":
             return ep.InputSpec(
@@ -2157,8 +2145,6 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
             return 1, spec.parameter.parameter_name, idx
         elif spec.type == "buffer":
             return 2, spec.buffer.buffer_name, idx
-        elif spec.type == "buffer_non_persistent":
-            return 2, spec.buffer_non_persistent.buffer_name, idx
         elif spec.type == "tensor_constant":
             return 3, spec.tensor_constant.tensor_constant_name, idx
         elif spec.type == "custom_obj":
@@ -2214,9 +2200,6 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
             t.name = replace_table[t.name]
         elif spec.type == "buffer":
             t = spec.buffer.arg
-            t.name = replace_table[t.name]
-        elif spec.type == "buffer_non_persistent":
-            t = spec.buffer_non_persistent.arg
             t.name = replace_table[t.name]
         elif spec.type == "tensor_constant":
             t = spec.tensor_constant.arg

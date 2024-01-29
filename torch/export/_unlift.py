@@ -262,7 +262,6 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
         if in_spec.kind
         in (
             InputKind.BUFFER,
-            InputKind.BUFFER_NON_PERSISTENT,
             InputKind.CONSTANT_TENSOR,
             InputKind.PARAMETER,
             InputKind.CUSTOM_OBJ,

@@ -109,18 +109,18 @@ def _convert_input_to_fake(gm, args, kwargs):
 
 def _replace_param_buffer_names(param_buffer_table, sig, constants):
     for spec in sig.input_specs:
-        if spec.kind == InputKind.BUFFER_NON_PERSISTENT:
-            # we store non-persistent buffers in the constant table, so rewrite
-            # there as well
-            non_persistent_buffer = constants[spec.target]
-            del constants[spec.target]
-            constants[param_buffer_table[spec.target]] = non_persistent_buffer
         if spec.kind in (
             InputKind.PARAMETER,
             InputKind.BUFFER,
-            InputKind.BUFFER_NON_PERSISTENT,
         ):
             spec.target = param_buffer_table[spec.target]
+
+            if spec.persistent is False:
+                # we store non-persistent buffers in the constant table, so rewrite
+                # there as well
+                non_persistent_buffer = constants[spec.target]
+                del constants[spec.target]
+                constants[param_buffer_table[spec.target]] = non_persistent_buffer
     for spec in sig.output_specs:
         if spec.kind in (
             OutputKind.BUFFER_MUTATION,
@@ -541,7 +541,7 @@ def rewrite_non_persistent_buffers(
             assert spec.target is not None
             if spec.target not in state_dict:
                 assert spec.target not in constants
-                spec.kind = InputKind.BUFFER_NON_PERSISTENT
+                spec.persistent = False
                 constants[spec.target] = orig_mod.get_buffer(spec.target)
 
 

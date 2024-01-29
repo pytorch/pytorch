@@ -120,13 +120,14 @@ def is_magic_method(op):
     return op in magic_ops
 
 
-
 def getattr_recursive(obj, target):
-    target_atoms = target.split('.')
+    target_atoms = target.split(".")
     attr_itr = obj
     for i, atom in enumerate(target_atoms):
         if not hasattr(attr_itr, atom):
-            raise RuntimeError(f"Node referenced nonexistent target {'.'.join(target_atoms[:i])}")
+            raise RuntimeError(
+                f"Node referenced nonexistent target {'.'.join(target_atoms[:i])}"
+            )
         attr_itr = getattr(attr_itr, atom)
     return attr_itr
 

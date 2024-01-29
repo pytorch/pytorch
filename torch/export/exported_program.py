@@ -274,11 +274,15 @@ class ExportedProgram:
                 InputKind.PARAMETER,
                 InputKind.BUFFER,
             ):
-                additional_inputs.append(self.state_dict[input_.target])
+                if input_.persistent is False:
+                    # This is a non-persistent buffer, grab it from our
+                    # constants instead of the state dict.
+                    additional_inputs.append(self.constants[input_.target])
+                else:
+                    additional_inputs.append(self.state_dict[input_.target])
             elif input_.kind in (
                 InputKind.CONSTANT_TENSOR,
                 InputKind.CUSTOM_OBJ,
-                InputKind.BUFFER_NON_PERSISTENT,
             ):
                 additional_inputs.append(self.constants[input_.target])
         additional_inputs = tuple(additional_inputs)
@@ -535,7 +539,12 @@ class ExportedProgram:
                     else type(old_input_spec.arg)(node.name)
                 )
                 new_input_specs.append(
-                    InputSpec(old_input_spec.kind, arg, old_input_spec.target)
+                    InputSpec(
+                        old_input_spec.kind,
+                        arg,
+                        old_input_spec.target,
+                        old_input_spec.persistent,
+                    )
                 )
 
             output_node = list(new_gm.graph.nodes)[-1]
