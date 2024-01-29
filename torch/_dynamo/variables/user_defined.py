@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import collections
 import contextlib
 import functools
@@ -612,8 +614,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             obj = self.value.__self__
             if (
                 func is torch.utils._contextlib._DecoratorContextManager.clone
-                and trace_rules.lookup(obj.__class__)
-                == variables.TorchCtxManagerClassVariable
+                and variables.TorchCtxManagerClassVariable.is_matching_cls(
+                    obj.__class__
+                )
                 and not (args or kwargs)
             ):
                 return variables.TorchCtxManagerClassVariable(
@@ -787,6 +790,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and type(value).__module__.startswith("torch.")
             and "torch.optim" not in type(value).__module__
             and not callable(value)
+            and not isinstance(subobj, types.MethodDescriptorType)
         ):
             if not source:
                 assert getattr(

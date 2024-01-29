@@ -1,6 +1,7 @@
 
 import torch
-from torch._export import aot_compile, dynamic_dim
+from torch._export import aot_compile
+from torch.export import Dim
 
 torch.manual_seed(1337)
 
@@ -23,12 +24,9 @@ for device in ["cpu", "cuda"]:
 
     torch._dynamo.reset()
     with torch.no_grad():
-        constraints = [
-            dynamic_dim(x, 0) >= 1,
-            dynamic_dim(x, 0) <= 1024,
-            dynamic_dim(x, 0) == dynamic_dim(y, 0),
-        ]
-        model_so_path = aot_compile(model, (x, y), constraints=constraints)
+        dim0_x = Dim("dim0_x", min=1, max=1024)
+        dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_x}}
+        model_so_path = aot_compile(model, (x, y), dynamic_shapes=dynamic_shapes)
 
     params = dict(model.named_parameters())
     data.update({
