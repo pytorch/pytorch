@@ -1,8 +1,9 @@
 import copy
 import logging
 import re
-from typing import cast, Dict, List, Optional, Tuple
+from typing import cast, Dict, List, Optional, Set, Tuple
 
+from ... import ir
 from ...config import cuda as inductor_cuda_config
 from ...ir import Buffer, CUDATemplateBuffer, FixedLayout, IRNode, Layout
 from ..common import IndentedBuffer
@@ -183,6 +184,43 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         self.alpha = alpha
         self.beta = beta
         self.can_fuse_epilogue = can_fuse_epilogue
+        assert len(input_nodes) == 2 or len(input_nodes) == 3
+        assert self.are_inputs_layout_compatible(
+            [node.get_layout() for node in input_nodes]
+        )
+
+    def are_inputs_layout_compatible(self, layouts: List[Layout]) -> bool:
+        assert len(layouts) == 2 or len(layouts) == 3
+        A_layout, B_layout = layouts[:2]
+        if A_layout.dtype != B_layout.dtype:
+            return False
+        if len(A_layout.size) < 2:
+            return False
+        if len(B_layout.size) != len(A_layout.size):
+            return False
+        K = A_layout.size[-1]
+        M = A_layout.size[-2]
+        N = B_layout.size[-1]
+        if K != B_layout.size[-2]:
+            return False
+        if len(A_layout.size) == 3 and A_layout.size[0] != B_layout.size[0]:
+            # batch dim mismatch
+            return False
+        if len(layouts) == 3:
+            C_layout = layouts[2]
+            # @TODO: dtype check
+            # C may have accumulator dtype or lower precision dtype
+            # but not higher precision
+            if len(C_layout.size) != len(A_layout.size):
+                return False
+            if len(A_layout.size) == 3 and A_layout.size[0] != C_layout.size[0]:
+                # batch dim mismatch
+                return False
+            if M != C_layout.size[-2]:
+                return False
+            if N != C_layout.size[-1]:
+                return False
+        return True
 
     @staticmethod
     def add_cutlass_gemm_choices(
@@ -337,10 +375,20 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         template_output_node_name: str,
         evt_type_name: str,
         epilogue_nodes: List[IRNode],
+        Bias: Optional[Buffer] = None,
     ) -> str:
         """Generates the epilogue for the EVT epilogue fusion"""
+        if len(self.input_nodes) > 2:  # if no bias arg passed in at construction
+            pre_fused_addmm_evt = (
+                CutlassEVTEpilogueTypeFormatter.create_pre_fused_addmm_evt_type()
+            )
+        else:
+            pre_fused_addmm_evt = None
         return CutlassEVTEpilogueTypeFormatter.ir_to_evt_string(
-            template_output_node_name, evt_type_name, epilogue_nodes
+            template_output_node_name,
+            evt_type_name,
+            epilogue_nodes,
+            pre_fused_addmm_evt,
         )
 
     def define_gemm_instance(
@@ -348,6 +396,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
         output_buffer_name: str,
         epilogue_nodes: Optional[List[IRNode]] = None,
+        Bias: Optional[Buffer] = None,
     ) -> Tuple[str, str]:
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.gemm_operation as cutlass_gemm_op
@@ -357,11 +406,20 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             EmitGemmUniversal3xInstanceWithEVT,
         )
 
+        if epilogue_nodes is None:
+            epilogue_nodes = []
+
         if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
-            if epilogue_nodes is not None and len(epilogue_nodes) > 0:
+            use_evt = self.supports_evt(op) and (
+                (Bias is not None) or (len(epilogue_nodes) > 0)
+            )
+            if use_evt:
                 emitter = EmitGemmUniversal3xInstanceWithEVT()
                 op.epilogue_functor = lambda epilogue_functor_type_name: self.render_evt_epilogue_declaration(
-                    output_buffer_name, epilogue_functor_type_name, epilogue_nodes
+                    output_buffer_name,
+                    epilogue_functor_type_name,
+                    epilogue_nodes,
+                    Bias=Bias,
                 )
             else:
                 emitter = cutlass_gemm_op.EmitGemmUniversal3xInstance()
@@ -419,6 +477,52 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         new_op.D.layout = CUTLASSGemmTemplate.flip_cutlass_layout(new_op.D.layout)
         return new_op
 
+    def fix_op_layout(
+        self,
+        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined] # noqa: F821
+        X: Buffer,
+        W: Buffer,
+        Bias: Optional[Buffer],
+        Y: Buffer,
+    ) -> "cutlass_library.gemm_op.GemmOperation":  # type: ignore[name-defined]  # noqa: F821
+        # This is a workaround to deal with cases where the input layouts have changed
+        # between autotuning and rendering. This happens if the inputs layout
+        # are FlexibleLayout instances. In this case, we need to update the
+        # op's input layouts. It is a hack, because now the op
+        # we benchmarked is not the same as the op we render,
+        # but there is no simple way to fix this in the autotuner, since that would
+        # potentially disable other optimizations.
+        # @TODO kadeng: This is a workaround. Find a better way to solve the issue of dealing with FlexibleLayout during autotuning.
+        a_layout = X.get_layout()
+        b_layout = W.get_layout()
+        c_layout = Bias.get_layout() if Bias is not None else None
+        d_layout = Y.get_layout()
+        all_match = all(
+            CUTLASSGemmTemplate.layout_match(buf.get_layout(), op_layout)
+            for buf, op_layout in zip(
+                (X, W, Bias, Y),
+                (op.A.layout, op.B.layout, op.C.layout, op.D.layout),
+            )
+            if buf is not None
+        )
+        if all_match:
+            return op
+        log.warning(
+            f"Cutlass GEMM Layout change: Input and/or output layouts have changed between autotuning and call to render on {self}. Applying workaround. This can lead to suboptimal performance."  # noqa: G004, B950
+        )
+        new_op = copy.deepcopy(op)
+
+        if a_layout is not None:
+            new_op.A.layout = CUTLASSGemmTemplate.cutlass_layout(a_layout)
+        if b_layout is not None:
+            new_op.B.layout = CUTLASSGemmTemplate.cutlass_layout(b_layout)
+        if c_layout is not None:
+            new_op.C.layout = CUTLASSGemmTemplate.cutlass_layout(c_layout)
+            new_op.C.element = cutlass_utils.torch_dtype_to_cutlass_type(c_layout.dtype)
+        if d_layout is not None:
+            new_op.D.layout = CUTLASSGemmTemplate.cutlass_layout(d_layout)
+        return new_op
+
     def filter_op(
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
@@ -436,6 +540,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         if (self.can_fuse_epilogue is not None) and (
             self.can_fuse_epilogue != supports_evt
         ):
+            return None
+        # StreamK seems to lead to extreme spilling for certain shapes
+        # and might take forever during autotuning. @TODO kadeng: investigate
+        if op.tile_scheduler == cutlass_lib.TileSchedulerType.StreamK:
             return None
         # Only keep GemmUniversal kernels
         if op.gemm_kind not in {
@@ -620,6 +728,34 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             )
         return arguments
 
+    def get_additional_input_nodes(
+        self,
+        cuda_template_buffer: CUDATemplateBuffer,
+        epilogue_nodes: List[ir.ComputedBuffer],
+    ):
+        template_buffer_names: Set[str] = cuda_template_buffer.get_read_names()
+        fused_reading_buffer_names: Set[str] = set(template_buffer_names)
+
+        for epilogue_node in epilogue_nodes:
+            fused_reading_buffer_names.update(epilogue_node.get_read_names())
+
+        # We need to remove all reads which were written as intermediate results
+        fused_written_names = set()
+        fused_written_names.add(cuda_template_buffer.get_name())
+        for epilogue_node in epilogue_nodes:
+            fused_written_names.add(epilogue_node.get_name())
+        fused_reading_buffer_names -= fused_written_names
+
+        if len(fused_reading_buffer_names) > len(template_buffer_names):
+            # Check that the layout of the additional input is compatible
+            added_names = sorted(fused_reading_buffer_names - template_buffer_names)
+
+            from torch._inductor.virtualized import V
+
+            added_nodes = [V.graph.get_buffer(added_name) for added_name in added_names]
+            return added_nodes
+        return []
+
     def render(  # type: ignore[override]
         self,
         kernel: CUDATemplateKernel,
@@ -647,6 +783,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         template_output_node_name = (
             template_buffer_node.name if template_buffer_node is not None else None
         )
+        if epilogue_nodes is None:
+            epilogue_nodes = []
 
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.gemm_operation as cutlass_gemm_op
@@ -664,7 +802,31 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         X, W = self.input_nodes[0], self.input_nodes[1]
         Y = self.output_node
         Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
-
+        if (
+            Bias is None
+            and template_buffer_node is not None
+            and epilogue_nodes is not None
+            and len(epilogue_nodes) > 0
+        ):
+            additional_input_nodes: List[ir.ComputedBuffer] = cast(
+                List[ir.ComputedBuffer],
+                self.get_additional_input_nodes(
+                    template_buffer_node, cast(List[ir.ComputedBuffer], epilogue_nodes)
+                ),
+            )
+            assert (
+                len(additional_input_nodes) <= 1
+            ), "Only one additional input node is supported at the moment"
+            if len(additional_input_nodes) == 1:
+                Bias = additional_input_nodes[0]
+                assert self.are_inputs_layout_compatible(
+                    [X.get_layout(), W.get_layout(), Bias.get_layout()]
+                ), "Input layouts are not compatible"
+        # The layouts might have changed between autotuning and this call if they were FlexibleLayout
+        # we need to adapt, which might lead to suboptimal performance.
+        # Also there might be a Bias / additional input node which was not present during autotuning
+        # @TODO kadeng: Find a way to solve this better
+        op = self.fix_op_layout(op, X, W, Bias, Y)
         epilogue_template: Optional[str] = None
         should_swap_xw: bool = False
         epilogue_args = f"{{ElementComputeEpilogue({self.alpha}), ElementComputeEpilogue({self.beta})}}"
@@ -674,10 +836,18 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                     # TMA epilogue requires bias vector in column major to get best perf.
                     op = self.swap_XW(op)
                     should_swap_xw = True
-            if epilogue_nodes is not None and len(epilogue_nodes) > 0:
+            if self.supports_evt(op):
+                if len(self.input_nodes) > 2:  # if bias arg passed in at construction
+                    pre_fused_evt_args = CutlassEVTEpilogueArgumentFormatter.create_pre_fused_addmm_arg_str(
+                        self.alpha, self.beta
+                    )
+                else:
+                    pre_fused_evt_args = None
                 epilogue_args = (
                     CutlassEVTEpilogueArgumentFormatter.ir_to_evt_argument_string(
-                        cast(str, template_output_node_name), epilogue_nodes
+                        cast(str, template_output_node_name),
+                        epilogue_nodes,
+                        pre_fused_evt_args,
                     )
                 )
             epilogue_template = GEMM_ARGS_CUTLASS_3X_EPILOGUE
@@ -687,7 +857,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             argument_template = GEMM_ARGS_CUTLASS_2X
 
         instance_definition, instance_type = self.define_gemm_instance(
-            op, cast(str, template_output_node_name), epilogue_nodes
+            op,
+            cast(str, template_output_node_name),
+            epilogue_nodes,
+            Bias=Bias,
         )
         options = dict(
             alpha=self.alpha,

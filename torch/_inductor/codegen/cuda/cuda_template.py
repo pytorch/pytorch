@@ -129,6 +129,9 @@ class CUDATemplate(KernelTemplate):
             kwargs,
         )
 
+    def are_inputs_layout_compatible(self, layouts: List[Layout]) -> bool:
+        raise NotImplementedError()
+
     def header(self) -> IndentedBuffer:
         res = IndentedBuffer()
         res.splice(
