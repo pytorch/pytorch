@@ -31,10 +31,24 @@ class FSDPMeshInfo(DataParallelMeshInfo):
         if self.shard_mesh_dim is None:
             raise AssertionError("Expects non-None shard_mesh_dim")
         self.shard_mesh_size: int = self.mesh.size(self.shard_mesh_dim)
-        self.shard_process_group = cast(
+        self.shard_process_group: dist.ProcessGroup = cast(
             dist.ProcessGroup, self.mesh.get_group(self.shard_mesh_dim)
         )
         self.shard_mesh_rank: int = self.shard_process_group.rank()
+
+    def __hash__(self):
+        return hash(
+            (self.mesh._flatten_mesh_list, self.mesh.mesh.shape, self.shard_mesh_dim)
+        )
+
+    def __eq__(self, other: object):
+        if not isinstance(other, FSDPMeshInfo):
+            return False
+        return (
+            self.mesh._flatten_mesh_list == other.mesh._flatten_mesh_list
+            and self.mesh.mesh.shape == other.mesh.mesh.shape
+            and self.shard_mesh_dim == other.shard_mesh_dim
+        )
 
 
 @dataclass

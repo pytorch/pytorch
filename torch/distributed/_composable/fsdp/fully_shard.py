@@ -1,4 +1,4 @@
-from typing import Any, cast, Optional, Union
+from typing import Any, cast, Dict, List, Optional, Set, Tuple, Union
 
 import typing_extensions
 
@@ -158,3 +158,45 @@ class FSDP:
         for state in states:
             if state and (fsdp_param_group := state._fsdp_param_group):
                 fsdp_param_group.all_reduce_grads = requires_all_reduce
+
+    @staticmethod
+    def fuse_comm_groups(*modules: nn.Module) -> None:
+        for module in modules:
+            if not isinstance(module, FSDP):
+                raise ValueError(
+                    f"Requires FSDP modules but got {type(module)}:\n{module}"
+                )
+        root_modules = _get_root_modules(modules)
+        if len(modules) != len(root_modules):  # enforce for simplicity
+            nonroot_modules = set(modules) - set(root_modules)
+            raise NotImplementedError(
+                f"Fusing parent-child modules is not supported. Children: {nonroot_modules}"
+            )
+        if len(modules) < 2:
+            return  # no-op
+        fsdp_states = tuple(fully_shard.state(module) for module in modules)
+        FSDPState.fuse(fsdp_states)
+
+
+def _get_root_modules(modules: Tuple[nn.Module, ...]) -> Tuple[nn.Module, ...]:
+    """
+    Returns a tuple of the modules in ``modules`` that are root modules with
+    respect to the given modules. These are the ones that are not the child of
+    any other module in ``modules``.
+    """
+    root_modules: List[nn.Module] = []
+    module_to_submodules: Dict[nn.Module, Set[nn.Module]] = {
+        module: set(module.modules()) for module in modules
+    }
+    for candidate_module in modules:
+        is_root_module = True
+        for module, submodules in module_to_submodules.items():
+            is_child_module = (
+                candidate_module is not module and candidate_module in submodules
+            )
+            if is_child_module:
+                is_root_module = False
+                break
+        if is_root_module:
+            root_modules.append(candidate_module)
+    return tuple(root_modules)

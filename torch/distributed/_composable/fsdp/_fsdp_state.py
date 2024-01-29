@@ -1,6 +1,6 @@
 import functools
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 import torch
 import torch.nn as nn
@@ -10,6 +10,7 @@ from torch.autograd.graph import register_multi_grad_hook
 from torch.distributed._composable_state import (
     _get_module_state,
     _insert_module_state,
+    _replace_module_state,
     _State,
 )
 from torch.distributed.utils import _to_kwargs
@@ -34,7 +35,7 @@ class FSDPStateContext:
 
 
 class FSDPState(_State):
-    _module: nn.Module  # permit ref cycle since module and state lifetimes are 1:1
+    _modules: Tuple[nn.Module, ...]  # permit ref cycle since lifetimes are 1:1
     _device: torch.device
     _mp_policy: MixedPrecisionPolicy
     _default_stream: torch.cuda.Stream
@@ -52,6 +53,7 @@ class FSDPState(_State):
         self._comm_ctx = FSDPCommContext()
         self._training_state: TrainingState = TrainingState.IDLE
         self._pre_forward_hook_handle: Optional[RemovableHandle] = None
+        self._post_forward_hook_handle: Optional[RemovableHandle] = None
         self._pre_backward_hook_handles: List[RemovableHandle] = []
         # Shared post-forward order for explicit backward prefetching
         self._post_forward_order: List[FSDPParamGroup] = []  # will cause ref cycles
@@ -61,13 +63,13 @@ class FSDPState(_State):
         self, module: nn.Module, device: torch.device, mp_policy: MixedPrecisionPolicy
     ) -> None:
         _insert_module_state(module, self)
-        self._module = module
+        self._modules = (module,)
         self._device = device
         self._mp_policy = mp_policy
-        self._pre_forward_hook_handle = self._module.register_forward_pre_hook(
+        self._pre_forward_hook_handle = module.register_forward_pre_hook(
             self._pre_forward, prepend=True, with_kwargs=True
         )
-        self._post_forward_hook_handle = self._module.register_forward_hook(
+        self._post_forward_hook_handle = module.register_forward_hook(
             self._post_forward, prepend=False
         )
 
@@ -95,12 +97,19 @@ class FSDPState(_State):
         if self._is_root is not None:
             return  # no-op: already initialized
         self._is_root = True
-        root_module = self._module
-        for module in root_module.modules():
-            if (state := _get_module_fsdp_state(module)) is not None:
-                if module is not root_module:
-                    state._is_root = False
-                self._state_ctx.all_states.append(state)
+        root_modules = self._modules
+        visited_states: Set[FSDPState] = set()
+        for root_module in root_modules:
+            for module in root_module.modules():
+                if (state := _get_module_fsdp_state(module)) is not None:
+                    if state in visited_states:
+                        continue
+                    visited_states.add(state)
+                    if module is not root_module:
+                        state._is_root = False
+                    self._state_ctx.all_states.append(state)
+                    if state._fsdp_param_group:
+                        state._fsdp_param_group.lazy_init()
         if self._fsdp_param_group:
             # For the root, do not reshard after forward since for training,
             # the parameters would be freed and all-gathered immediately
@@ -119,20 +128,26 @@ class FSDPState(_State):
     def _init_fqns(self) -> None:
         """Sets module and parameter FQN attributes for debugging."""
         assert self._is_root
-        root_module = self._module
-        param_to_fsdp_param: Dict[nn.Parameter, FSDPParam] = {}
-        module_to_fsdp_param_group: Dict[nn.Module, FSDPParamGroup] = {}
-        for state in self._state_ctx.all_states:
-            if fsdp_param_group := state._fsdp_param_group:
-                for fsdp_param in fsdp_param_group.fsdp_params:
-                    param_to_fsdp_param[fsdp_param.sharded_param] = fsdp_param
-                module_to_fsdp_param_group[fsdp_param_group.module] = fsdp_param_group
-        for param_name, param in root_module.named_parameters():
-            if param in param_to_fsdp_param:
-                param_to_fsdp_param[param]._param_fqn = param_name
-        for module_name, module in root_module.named_modules():
-            if module in module_to_fsdp_param_group:
-                module_to_fsdp_param_group[module]._module_fqn = module_name
+        for root_module in self._modules:
+            param_to_fsdp_param: Dict[nn.Parameter, FSDPParam] = {}
+            module_to_fsdp_param_group: Dict[nn.Module, FSDPParamGroup] = {}
+            for state in self._state_ctx.all_states:
+                if fsdp_param_group := state._fsdp_param_group:
+                    for fsdp_param in fsdp_param_group.fsdp_params:
+                        param_to_fsdp_param[fsdp_param.sharded_param] = fsdp_param
+                    for module in fsdp_param_group.modules:
+                        module_to_fsdp_param_group[module] = fsdp_param_group
+            for param_name, param in root_module.named_parameters():
+                if param in param_to_fsdp_param:
+                    param_to_fsdp_param[param]._param_fqn = param_name
+            for module_name, module in root_module.named_modules():
+                if module in module_to_fsdp_param_group:
+                    if (
+                        fsdp_param_group := module_to_fsdp_param_group[module]
+                    )._module_fqn:
+                        fsdp_param_group._module_fqn += f", {module_name}"
+                    else:
+                        fsdp_param_group._module_fqn = module_name
 
     def _pre_forward(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
@@ -218,9 +233,126 @@ class FSDPState(_State):
             self._root_post_backward_final_callback
         )
 
+    @staticmethod
+    def check_fusible(fsdp_states: Sequence["FSDPState"]) -> None:
+        devices: Set[torch.device] = set()
+        mp_policies: Set[MixedPrecisionPolicy] = set()
+        fsdp_param_groups: List[FSDPParamGroup] = []
+        for fsdp_state in fsdp_states:
+            if len(fsdp_state._modules) > 1:
+                raise NotImplementedError(
+                    f"Fusing already-fused modules is not supported: {fsdp_state._modules}"
+                )
+            if fsdp_state._is_root is not None:
+                raise NotImplementedError("Fusing after lazy init is not supported")
+            devices.add(fsdp_state._device)
+            mp_policies.add(fsdp_state._mp_policy)
+            if fsdp_state._fsdp_param_group:
+                fsdp_param_groups.append(fsdp_state._fsdp_param_group)
+        prefix = "Cannot fuse with different "
+        if len(devices) > 1:
+            raise ValueError(prefix + f"devices: {devices}")
+        if len(mp_policies) > 1:
+            raise ValueError(prefix + f"mixed precision policies: {mp_policies}")
+        FSDPParamGroup.check_fusible(fsdp_param_groups)
+
+    @staticmethod
+    def fuse(fsdp_states: Sequence["FSDPState"]) -> "FSDPState":
+        FSDPState.check_fusible(fsdp_states)
+        # Coalesce all parameter groups
+        fsdp_param_groups = [
+            state._fsdp_param_group
+            for state in fsdp_states
+            if state._fsdp_param_group is not None
+        ]
+        if fsdp_param_groups:
+            new_fsdp_param_group = FSDPParamGroup.fuse(fsdp_param_groups)
+        # Coalesce all modules to use the 1st module's state
+        modules: List[nn.Module] = []
+        for fsdp_state in fsdp_states:
+            modules.extend(list(fsdp_state._modules))
+        new_state = fsdp_states[0]
+        new_state._fsdp_param_group = new_fsdp_param_group
+        for module in modules[1:]:
+            _replace_module_state(module, new_state)
+        new_state._modules = tuple(modules)
+        for fsdp_state in fsdp_states:
+            if hook_handle := fsdp_state._pre_forward_hook_handle:
+                hook_handle.remove()
+            if hook_handle := fsdp_state._post_forward_hook_handle:
+                hook_handle.remove()
+        hook_handle = _register_group_forward_hooks(
+            modules, new_state._pre_forward, new_state._post_forward
+        )
+        new_state._pre_forward_hook_handle = hook_handle
+        new_state._post_forward_hook_handle = hook_handle
+        # TODO: Add something to module repr to indicate fused.
+        return new_state
+
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[FSDPState]:
     state = _get_module_state(module)
     if isinstance(state, FSDPState):
         return state
     return None
+
+
+class MultiHandle(RemovableHandle):
+    handles: Tuple[RemovableHandle, ...]
+
+    def __init__(self, handles: Tuple[RemovableHandle, ...]):
+        self.handles = handles
+
+    def remove(self):
+        for handle in self.handles:
+            handle.remove()
+
+    def __getstate__(self):
+        return self.handles
+
+    def __setstate__(self, state):
+        self.handles = state
+
+
+def _register_group_forward_hooks(
+    modules: Sequence[nn.Module],
+    pre_hook: Callable,
+    post_hook: Callable,
+):
+    """
+    Registers group forward pre and post-hooks. The pre-hook runs upon the
+    first module pre-forward, and the post-hook runs upon the last. If at least
+    one module does not run forward, then the post-hook does not run.
+    """
+    modules_set = set(modules)
+    modules_to_run: Set[nn.Module] = set()
+
+    @functools.wraps(pre_hook)
+    def wrapped_pre_hook(*args: Any, **kwargs: Any):
+        nonlocal modules_to_run
+        if len(modules_to_run) == 0:  # first to run
+            modules_to_run.update(modules_set)
+            return pre_hook(*args, **kwargs)
+
+    def get_wrapped_post_hook(module: nn.Module):
+        @functools.wraps(post_hook)
+        def wrapped_post_hook(*args: Any, **kwargs: Any):
+            modules_to_run.discard(module)
+            if len(modules_to_run) == 0:
+                return post_hook(*args, **kwargs)
+
+        return wrapped_post_hook
+
+    pre_handles = [
+        module.register_forward_pre_hook(
+            wrapped_pre_hook, prepend=True, with_kwargs=True
+        )
+        for module in modules
+    ]
+    post_handles = [
+        module.register_forward_hook(
+            get_wrapped_post_hook(module), prepend=False, with_kwargs=False
+        )
+        for module in modules
+    ]
+    return MultiHandle(tuple(pre_handles + post_handles))

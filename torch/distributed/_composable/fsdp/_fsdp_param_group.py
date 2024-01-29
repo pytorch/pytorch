@@ -1,7 +1,7 @@
 import contextlib
 import functools
 
-from typing import Any, cast, Dict, List, Optional, Set, Tuple
+from typing import Any, cast, Dict, List, Optional, Sequence, Set, Tuple
 
 import torch
 import torch.distributed as dist
@@ -68,7 +68,8 @@ class FSDPParamGroup:
         device: torch.device,
         mp_policy: MixedPrecisionPolicy,
     ):
-        self.module = module  # permit ref cycle because 1:1 lifetime
+        # Permit ref cycle because 1:1 lifetime
+        self.modules: Tuple[nn.Module, ...] = (module,)
         param_module_infos = _get_param_module_infos(params, module)
         self.fsdp_params = [
             FSDPParam(
@@ -88,7 +89,6 @@ class FSDPParamGroup:
         # - Hook state
         self._module_to_pre_save_state_dict_hook_handle: _ModuleToHandleDict = {}
         self._module_to_pre_load_state_dict_hook_handle: _ModuleToHandleDict = {}
-        self._register_state_dict_hooks()
 
         # - Communication and communication/computation overlap
         self.comm_ctx = FSDPCommContext()
@@ -156,6 +156,9 @@ class FSDPParamGroup:
         self._grad_postdivide_factor: float = (
             data_parallel_world_size / self._grad_predivide_factor
         )
+
+    def lazy_init(self):
+        self._register_state_dict_hooks()
 
     # Runtime #
     def unshard(self, async_op: bool = False):
@@ -350,6 +353,33 @@ class FSDPParamGroup:
             yield
         finally:
             self._training_state = old_training_state
+
+    @staticmethod
+    def check_fusible(fsdp_param_groups: Sequence["FSDPParamGroup"]) -> None:
+        mesh_infos: Set[FSDPMeshInfo] = set()
+        post_forward_mesh_infos: Set[Optional[FSDPMeshInfo]] = set()
+        for fsdp_param_group in fsdp_param_groups:
+            mesh_infos.add(fsdp_param_group.mesh_info)
+            post_forward_mesh_infos.add(fsdp_param_group.post_forward_mesh_info)
+        prefix = "Cannot fuse with different "
+        if len(mesh_infos) > 1:
+            raise ValueError(prefix + f"meshes: {mesh_infos}")
+        if len(post_forward_mesh_infos) > 1:
+            raise ValueError(prefix + f"post forward meshes: {post_forward_mesh_infos}")
+
+    @staticmethod
+    def fuse(fsdp_param_groups: Sequence["FSDPParamGroup"]) -> "FSDPParamGroup":
+        FSDPParamGroup.check_fusible(fsdp_param_groups)
+        for fsdp_param_group in fsdp_param_groups:
+            fsdp_param_group._to_sharded()
+        # Coalesce into the 1st parameter group
+        new_fsdp_param_group = fsdp_param_groups[0]
+        modules: List[nn.Module] = list(new_fsdp_param_group.modules)
+        for fsdp_param_group in fsdp_param_groups[1:]:
+            new_fsdp_param_group.fsdp_params.extend(fsdp_param_group.fsdp_params)
+            modules.extend(fsdp_param_group.modules)
+        new_fsdp_param_group.modules = tuple(modules)
+        return new_fsdp_param_group
 
     # Hook Registration #
     def _register_post_backward_hook(

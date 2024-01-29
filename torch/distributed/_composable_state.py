@@ -16,6 +16,12 @@ def _insert_module_state(module: nn.Module, state: _State) -> None:
     _module_state_mapping[module] = state
 
 
+def _replace_module_state(module: nn.Module, state: _State) -> None:
+    global _module_state_mapping
+    assert module in _module_state_mapping, f"Replacing {module} that does not exist."
+    _module_state_mapping[module] = state
+
+
 def _get_module_state(module: nn.Module) -> Optional[_State]:
     """
     Return the ``_State`` in ``model``.
