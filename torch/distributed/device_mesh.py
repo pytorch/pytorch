@@ -326,11 +326,10 @@ else:
         def __eq__(self, other: object) -> bool:
             if not isinstance(other, DeviceMesh):
                 return False
-            if id(self.mesh) == id(other.mesh):
-                return True
             return (
                 self.mesh.shape == other.mesh.shape
                 and self._flatten_mesh_list == other._flatten_mesh_list
+                and id(self.mesh) == id(other.mesh)
             )
 
         def __getitem__(self, mesh_dim_name: str) -> "DeviceMesh":
