@@ -4,8 +4,7 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <iostream>
-namespace torch {
-namespace utils {
+namespace torch::utils {
 namespace {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
@@ -41,5 +40,4 @@ void set_requires_device_init(at::DeviceType device_type, bool value) {
   is_initialized[static_cast<int>(device_type)] = !value;
 }
 
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils
