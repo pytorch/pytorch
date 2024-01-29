@@ -4,8 +4,7 @@
 
 // device_lazy_init() is always compiled, even for CPU-only builds.
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
 /**
  * This mechanism of lazy initialization is designed for each device backend.
@@ -44,5 +43,4 @@ static inline void maybe_initialize_device(const at::TensorOptions& options) {
   maybe_initialize_device(device);
 }
 
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils
