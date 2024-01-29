@@ -30,7 +30,7 @@ Dep = Union["MemoryDep", "StarDep", "WeakDep"]
 
 class MemoryDep(typing.NamedTuple):
     name: str
-    index: sympy.Expr
+    index: sympy.Expr  # type: ignore[assignment]
     var_names: Tuple[sympy.Symbol, ...]
     size: Tuple[sympy.Expr, ...]
 
@@ -77,7 +77,7 @@ class MemoryDep(typing.NamedTuple):
         return isinstance(self.index, (int, sympy.Integer))
 
     def is_indirect(self) -> bool:
-        return any(is_indirect(v.name) for v in self.index.free_symbols)
+        return any(is_indirect(v.name) for v in self.index.free_symbols)  # type: ignore[attr-defined]
 
 
 class StarDep(typing.NamedTuple):
@@ -146,7 +146,7 @@ class WeakDep(typing.NamedTuple):
 
 
 class IndexExprDep(typing.NamedTuple):
-    index: sympy.Expr
+    index: sympy.Expr  # type: ignore[assignment]
     var_names: Tuple[sympy.Symbol, ...]
     size: Tuple[sympy.Expr, ...]
 
@@ -235,7 +235,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
                 k for k, v in zip(self._var_ranges.keys(), sizes) if v != 1
             )
             sizes = tuple(v for v in sizes if v != 1)
-            return index, var_names, sizes
+            return index, var_names, sizes  # type: ignore[return-value]
 
         # Try to further simplify the indexes even if simplify_loops didn't
         # convert it to the simplest form because of the interference from
@@ -269,7 +269,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
             # downstream users won't.  Normalize this away.
             new_vars.pop()
             new_sizes.pop()
-        return index, tuple(new_vars), tuple(new_sizes)
+        return index, tuple(new_vars), tuple(new_sizes)  # type: ignore[arg-type]
 
     def load(self, name: str, index: sympy.Expr) -> str:
         self._reads.add(MemoryDep(name, *self.canonicalize(index)))
