@@ -668,7 +668,7 @@ class TritonTemplateCaller(ChoiceCaller):
             )
         )
 
-    def info_dict(self) -> Dict[str, PrimitiveInfoType]:
+    def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return self.log_info
 
@@ -739,7 +739,7 @@ class ExternKernelCaller(ChoiceCaller):
             )
         )
 
-    def info_dict(self) -> Dict[str, PrimitiveInfoType]:
+    def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return {
             "backend": "extern",
@@ -826,10 +826,12 @@ class AlgorithmSelectorCache(PersistentCache):
                         try:
                             next(iterator)
                         except CUDACompileError:
-                            log.error("CUDA Compilation error", exc_info=True)
+                            log.error(  # noqa: G201
+                                "CUDA Compilation error", exc_info=True
+                            )
                 except TimeoutError:
                     log.warning(
-                        f"Precompilation timed out after {precompilation_timeout_seconds} seconds."
+                        f"Precompilation timed out after {precompilation_timeout_seconds} seconds."  # noqa: G004
                     )
                 except StopIteration:
                     pass
