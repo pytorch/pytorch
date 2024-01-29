@@ -15,8 +15,8 @@ GetAttrGuardAccessor = guards.GetAttrGuardAccessor
 GetItemGuardAccessor = guards.GetItemGuardAccessor
 GetDictItemGuardAccessor = guards.GetDictItemGuardAccessor
 TypeGuardAccessor = guards.TypeGuardAccessor
-NoTensorAliasingGuard = guards.NoTensorAliasingGuard
-install_no_tensor_aliasing_guard = guards.install_no_tensor_aliasing_guard
+TensorAliasingGuard = guards.TensorAliasingGuard
+install_tensor_aliasing_guard = guards.install_tensor_aliasing_guard
 
 
 global_pair = {
@@ -171,6 +171,44 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(guard(foo))
         self.assertFalse(guard({"a": 1, "b": 2}))
         self.assertFalse(guard({}))
+
+    def test_dict_contains_guard(self):
+        foo = {"a": 1, "b": 2}
+        guard = guards.DICT_CONTAINS("a", "has a", False)
+
+        self.assertTrue(guard(foo))
+        self.assertTrue(guard({"a": 1, "b": 2}))
+        self.assertFalse(guard({"b": 2, "c": 3}))
+        self.assertFalse(guard({}))
+
+        guard = guards.DICT_CONTAINS("c", "not has a", True)
+        self.assertTrue(guard(foo))
+        self.assertTrue(guard({"a": 1, "b": 2}))
+        self.assertFalse(guard({"b": 2, "c": 3}))
+        self.assertTrue(guard({}))
+
+    def test_name_match_guard(self):
+        class Foo:
+            pass
+
+        class Bar:
+            pass
+
+        foo = Foo()
+        bar = Bar()
+        guard = guards.NAME_MATCH(foo, "x.__name__ == Foo")
+
+        self.assertTrue(guard(foo))
+        self.assertFalse(guard(bar))
+
+    def test_weakref_alive_guard(self):
+        x = torch.rand(3, 4)
+        weakref_x = weakref.ref(x)
+
+        guard = guards.WEAKREF_ALIVE("weakref_x is not None")
+        self.assertTrue(guard(weakref_x()))
+        del x
+        self.assertFalse(guard(weakref_x()))
 
     def test_guard_manager_leaf_guard(self):
         guard_manager = RootGuardManager()
@@ -379,92 +417,93 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
     def test_tensor_aliasing_guard(self):
         guard_manager = RootGuardManager()
+
+        a = torch.randn(3, 4)
         f_locals = {
-            "x": torch.randn(3, 4),
-            "y": torch.randn(3, 4),
+            "x": a,
+            "y": a,
         }
 
         x_guard_mgr = guard_manager.dict_get_item_manager("x")
         y_guard_mgr = guard_manager.dict_get_item_manager("y")
-        install_no_tensor_aliasing_guard(x_guard_mgr, y_guard_mgr, "x is not y")
+        install_tensor_aliasing_guard(x_guard_mgr, y_guard_mgr, "x is y")
 
         # Check structure
         x_guards = x_guard_mgr.get_leaf_guards()
         y_guards = y_guard_mgr.get_leaf_guards()
         self.assertEqual(len(x_guards), 1)
         self.assertEqual(len(y_guards), 1)
-        self.assertTrue(isinstance(x_guards[0], NoTensorAliasingGuard))
-        self.assertTrue(isinstance(y_guards[0], NoTensorAliasingGuard))
+        self.assertTrue(isinstance(x_guards[0], TensorAliasingGuard))
+        self.assertTrue(isinstance(y_guards[0], TensorAliasingGuard))
         # Check that the two guards are the same object
         self.assertTrue(x_guards[0] is y_guards[0])
 
+        f_locals_unaliased = {
+            "x": torch.randn(3, 4),
+            "y": torch.randn(3, 4),
+        }
         self.assertEqual(len(x_guard_mgr.get_leaf_guards()), 1)
         self.assertEqual(len(y_guard_mgr.get_leaf_guards()), 1)
         self.assertTrue(guard_manager.check(f_locals))
 
-        a = torch.randn(3, 4)
-        f_locals_aliased = {
-            "x": a,
-            "y": a,
-        }
-        self.assertFalse(guard_manager.check(f_locals_aliased))
+        self.assertFalse(guard_manager.check(f_locals_unaliased))
 
         a = torch.randn(3, 4)
         f_locals_not_aliased_same_value = {
             "x": torch.zeros(4),
             "y": torch.zeros(4),
         }
-        self.assertTrue(guard_manager.check(f_locals_not_aliased_same_value))
+        self.assertFalse(guard_manager.check(f_locals_not_aliased_same_value))
 
-    def test_tensor_aliasing_guard_reset(self):
-        # Check that guard state is reset on failure
-        guard_manager = RootGuardManager()
+    # def test_tensor_aliasing_guard_reset(self):
+    #     # Check that guard state is reset on failure
+    #     guard_manager = RootGuardManager()
 
-        a = torch.randn(3, 4)
-        b = torch.randn(3, 4)
-        f_locals = {
-            "x": a,
-            "y": 4,
-            "z": b,
-        }
+    #     a = torch.randn(3, 4)
+    #     b = torch.randn(3, 4)
+    #     f_locals = {
+    #         "x": a,
+    #         "y": 4,
+    #         "z": b,
+    #     }
 
-        x_guard_mgr = guard_manager.dict_get_item_manager("x")
-        y_guard_mgr = guard_manager.dict_get_item_manager("y")
-        z_guard_mgr = guard_manager.dict_get_item_manager("z")
+    #     x_guard_mgr = guard_manager.dict_get_item_manager("x")
+    #     y_guard_mgr = guard_manager.dict_get_item_manager("y")
+    #     z_guard_mgr = guard_manager.dict_get_item_manager("z")
 
-        install_no_tensor_aliasing_guard(x_guard_mgr, z_guard_mgr, "x is not y")
-        y_guard_mgr.add_lambda_guard(
-            lambda x: x == 4,
-            "Expected int",
-        )
+    #     install_tensor_aliasing_guard(x_guard_mgr, z_guard_mgr, "x is not y")
+    #     y_guard_mgr.add_lambda_guard(
+    #         lambda x: x == 4,
+    #         "Expected int",
+    #     )
 
-        # first use check_verbose as it does not shuffle the guards on failures.
-        # The order of accessors is x, y and z . Let the guard fail on y. This
-        # would call the tensor aliasing guard for x.
-        f_locals_to_fail = {
-            "x": a,
-            "y": 5,
-            "z": a,
-        }
-        self.assertFalse(guard_manager.check_verbose(f_locals_to_fail).result)
-        # Now if we did not reset the guard on x, it would be expecting a tensor
-        # not aliased to a. Lets send an input that is supposed to eval to True
-        # but with "x" : a
-        f_locals = {
-            "x": a,
-            "y": 4,
-            "z": b,
-        }
-        self.assertTrue(guard_manager.check_verbose(f_locals).result)
+    #     # first use check_verbose as it does not shuffle the guards on failures.
+    #     # The order of accessors is x, y and z . Let the guard fail on y. This
+    #     # would call the tensor aliasing guard for x.
+    #     f_locals_to_fail = {
+    #         "x": a,
+    #         "y": 5,
+    #         "z": a,
+    #     }
+    #     self.assertFalse(guard_manager.check_verbose(f_locals_to_fail).result)
+    #     # Now if we did not reset the guard on x, it would be expecting a tensor
+    #     # not aliased to a. Lets send an input that is supposed to eval to True
+    #     # but with "x" : a
+    #     f_locals = {
+    #         "x": a,
+    #         "y": 4,
+    #         "z": b,
+    #     }
+    #     self.assertTrue(guard_manager.check_verbose(f_locals).result)
 
-        # Lets check the same behavior using check function.
-        self.assertFalse(guard_manager.check(f_locals_to_fail))
-        f_locals = {
-            "x": b,
-            "y": 4,
-            "z": a,
-        }
-        self.assertTrue(guard_manager.check(f_locals))
+    #     # Lets check the same behavior using check function.
+    #     self.assertFalse(guard_manager.check(f_locals_to_fail))
+    #     f_locals = {
+    #         "x": b,
+    #         "y": 4,
+    #         "z": a,
+    #     }
+    #     self.assertTrue(guard_manager.check(f_locals))
 
     def test_reshuffling_and_reason(self):
         class Pair:

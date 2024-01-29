@@ -949,8 +949,93 @@ class DICT_VERSION : public LeafGuard {
     return ((PyDictObject*)dict)->ma_version_tag;
   }
 
-  // Length of the guarded list
+  // Saved dict version.
   int64_t _tag;
+};
+
+class DICT_CONTAINS : public LeafGuard {
+ public:
+  DICT_CONTAINS(py::object value, py::object guard_str, py::object invert)
+      : LeafGuard(guard_str),
+        _key(value.ptr()),
+        _invert(py::cast<bool>(invert)) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    bool ret = PyDict_Contains(value, _key);
+    if (_invert) {
+      ret = !ret;
+    }
+    return ret;
+  }
+
+  std::string repr_prefix() override {
+    return "DICT_CONTAINS";
+  }
+
+ private:
+  // Saved key
+  PyObject* _key; // TODO(janimesh) - Check owenrship
+  bool _invert;
+};
+
+class WEAKREF_ALIVE : public LeafGuard {
+ public:
+  WEAKREF_ALIVE(py::object guard_str) : LeafGuard(guard_str) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    // TODO(janimesh) - The call of weakref to get the object is sitting in
+    // GlobalWeakRef. This is to have 1:1 mapping with Python guards and Cpp
+    // guard manager. Move the call here for better readability.
+    return value != Py_None;
+  }
+
+  std::string repr_prefix() override {
+    return "WEAKREF_ALIVE";
+  }
+};
+
+class NAME_MATCH : public LeafGuard {
+ public:
+  NAME_MATCH(py::object value, py::object guard_str)
+      : LeafGuard(guard_str), _name(Py_TYPE(value.ptr())->tp_name) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    // This checks pointer equality, not string equality.
+    return Py_TYPE(value)->tp_name == _name;
+  }
+
+  std::string repr_prefix() override {
+    return "NAME_MATCH";
+  }
+
+ private:
+  // Saved name
+  // TODO(janimesh) - Check ownership
+  const char* _name;
+};
+
+
+class DEFAULT_DEVICE : public LeafGuard {
+ public:
+  DEFAULT_DEVICE(py::object guard_str) : LeafGuard(guard_str) {
+    _utils_device = py::module::import("torch.utils._device");
+    _current_device = _utils_device.attr("CURRENT_DEVICE");
+  }
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    py::object device = _utils_device.attr("CURRENT_DEVICE");
+    bool result = PyObject_RichCompareBool(device.ptr(), _current_device.ptr(), Py_EQ);
+    return result;
+  }
+
+  std::string repr_prefix() override {
+    return "DEFAULT_DEVICE";
+  }
+
+ private:
+  // Saved
+  py::object _utils_device;
+  py::object _current_device;
 };
 
 class GLOBAL_STATE : public LeafGuard {
@@ -1031,11 +1116,11 @@ class RelationalGuard : public LeafGuard {
 };
 
 /**
- * Checks that tensor x in tensor y.
+ * Checks that tensor x is tensor y.
  */
-class NoTensorAliasingGuard : public RelationalGuard {
+class TensorAliasingGuard : public RelationalGuard {
  public:
-  NoTensorAliasingGuard(py::object guard_str)
+  TensorAliasingGuard(py::object guard_str)
       : RelationalGuard(guard_str), _is_first_call(true) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
@@ -1044,7 +1129,7 @@ class NoTensorAliasingGuard : public RelationalGuard {
       _is_first_call = false;
       return true;
     }
-    bool result = _first_tensor != value;
+    bool result = _first_tensor == value;
     _is_first_call = true;
     return result;
   }
@@ -1054,7 +1139,7 @@ class NoTensorAliasingGuard : public RelationalGuard {
   }
 
   std::string repr_prefix() override {
-    return "NoTensorAliasingGuard";
+    return "TensorAliasingGuard";
   }
 
  private:
@@ -1747,15 +1832,15 @@ class PythonLambdaGuardAccessor : public GuardAccessor {
   PyObject* _accessor_fn;
 };
 
-void install_no_tensor_aliasing_guard(
+void install_tensor_aliasing_guard(
     GuardManager* x,
     GuardManager* y,
     py::object guard_str) {
-  // TODO(anijain2305) - Support arbitrary number of tensors instead of just
-  // two. Adds tensor X is not tensor Y. This is a an example of relational
-  // guard. There is one guard object that is shared between two guard managers.
+  // TODO(anijain2305) - Adds tensor X is tensor Y guard. This is a an example
+  // of relational guard. There is one guard object that is shared between two
+  // guard managers.
   std::shared_ptr<RelationalGuard> guard =
-      std::make_shared<NoTensorAliasingGuard>(guard_str);
+      std::make_shared<TensorAliasingGuard>(guard_str);
 
   // Register the resetter on the toor gaurd mananger, so that it can reset the
   // newly added relational guard when the guard eval fails.
@@ -1879,12 +1964,30 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DICT_VERSION")
       .def(py::init<py::object, py::str>())
       .def("__call__", &DICT_VERSION::check);
+  py::class_<NAME_MATCH, LeafGuard, std::shared_ptr<NAME_MATCH>>(
+      py_m, "NAME_MATCH")
+      .def(py::init<py::object, py::str>())
+      .def("__call__", &NAME_MATCH::check);
+  py::class_<DEFAULT_DEVICE, LeafGuard, std::shared_ptr<DEFAULT_DEVICE>>(
+      py_m, "DEFAULT_DEVICE")
+      .def(py::init<py::str>())
+      .def("__call__", &DEFAULT_DEVICE::check);
+  py::class_<WEAKREF_ALIVE, LeafGuard, std::shared_ptr<WEAKREF_ALIVE>>(
+      py_m, "WEAKREF_ALIVE")
+      .def(py::init<py::str>())
+      .def("__call__", &WEAKREF_ALIVE::check);
+  py::class_<DICT_CONTAINS, LeafGuard, std::shared_ptr<DICT_CONTAINS>>(
+      py_m, "DICT_CONTAINS")
+      .def(py::init<py::object, py::str, py::object>())
+      .def("__call__", &DICT_CONTAINS::check);
   py::class_<GLOBAL_STATE, LeafGuard, std::shared_ptr<GLOBAL_STATE>>(
       py_m, "GLOBAL_STATE")
       .def(py::init<py::str>())
       .def("__call__", &GLOBAL_STATE::check);
-  py::class_<NoTensorAliasingGuard, std::shared_ptr<NoTensorAliasingGuard>>(
-      py_m, "NoTensorAliasingGuard");
+  py::class_<
+      TensorAliasingGuard,
+      LeafGuard,
+      std::shared_ptr<TensorAliasingGuard>>(py_m, "TensorAliasingGuard");
 
   // Guard Accessors - These are present so that we can iterate over the
   // GuardManager hierarchy. We intentionally do not provide even an init
@@ -1994,6 +2097,33 @@ PyObject* torch_c_dynamo_guards_init() {
                 std::make_shared<DICT_VERSION>(value, guard_str));
           })
       .def(
+          "add_dict_contains_guard",
+          [](GuardManager& self,
+             py::object value,
+             py::object guard_str,
+             py::object invert) -> void {
+            self.add_leaf_guard(
+                std::make_shared<DICT_CONTAINS>(value, guard_str, invert));
+          })
+      .def(
+          "add_name_match_guard",
+          [](GuardManager& self,
+             py::object value,
+             py::object guard_str) -> void {
+            self.add_leaf_guard(std::make_shared<NAME_MATCH>(value, guard_str));
+          })
+      .def(
+          "add_default_device_guard",
+          [](GuardManager& self,
+             py::object guard_str) -> void {
+            self.add_leaf_guard(std::make_shared<DEFAULT_DEVICE>(guard_str));
+          })
+      .def(
+          "add_weakref_alive_guard",
+          [](GuardManager& self, py::object guard_str) -> void {
+            self.add_leaf_guard(std::make_shared<WEAKREF_ALIVE>(guard_str));
+          })
+      .def(
           "add_global_state_guard",
           [](GuardManager& self, py::object guard_str) -> void {
             self.add_leaf_guard(std::make_shared<GLOBAL_STATE>(guard_str));
@@ -2070,8 +2200,7 @@ PyObject* torch_c_dynamo_guards_init() {
                 std::make_unique<PythonLambdaGuard>(lambda, guard_str));
           });
 
-  py_m.def(
-      "install_no_tensor_aliasing_guard", install_no_tensor_aliasing_guard);
+  py_m.def("install_tensor_aliasing_guard", install_tensor_aliasing_guard);
 
   return m;
 }
