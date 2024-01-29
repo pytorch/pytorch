@@ -1,11 +1,7 @@
+#include <ATen/Context.h>
 #include <torch/xpu.h>
 
-#include <ATen/Context.h>
-
-#include <cstddef>
-
-namespace torch {
-namespace xpu {
+namespace torch::xpu {
 
 size_t device_count() {
   return at::detail::getXPUHooks().getNumGPUs();
@@ -21,5 +17,4 @@ void synchronize(int64_t device_index) {
       static_cast<c10::DeviceIndex>(device_index));
 }
 
-} // namespace xpu
-} // namespace torch
+} // namespace torch::xpu
