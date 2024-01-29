@@ -56,7 +56,7 @@ from torch._prims_common import DeviceLikeType
 
 # This module is defined in torch/csrc/Module.cpp
 
-from . import _functorch, _lazy, _lazy_ts_backend, _nn, _onnx, _VariableFunctions, _cpu, _aoti
+from . import _functorch, _lazy, _lazy_ts_backend, _nn, _onnx, _VariableFunctions, _cpu, _aoti, _verbose
 
 K = TypeVar("K")
 T = TypeVar("T")

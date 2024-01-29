@@ -9,6 +9,10 @@ import typing
 import weakref
 from typing import Any, Callable, Dict, List, Optional, Set
 
+from torch.fx._lazy_graph_module import (  # type: ignore[attr-defined]
+    _use_lazy_graph_module,
+)
+
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -112,7 +116,7 @@ class Tracker:
 input_codes = Tracker()
 output_codes = Tracker()
 
-initial_global_state = None
+initial_global_state: Optional[GlobalStateGuard] = None
 
 
 @functools.wraps(original_forward_from_src)
@@ -432,6 +436,7 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
     return handle
 
 
+@_use_lazy_graph_module(config.use_lazy_graph_module)
 @maybe_cprofile
 def _compile(
     code: types.CodeType,
@@ -807,8 +812,7 @@ def replay(filename):
             hooks=Hooks(),
             cache_size=CacheSizeRelevantForFrame(0, 0),
             frame=None,
+            frame_state={},
         )
-    except Exception:
-        pass
     finally:
         config.replay_record_enabled = original_replay_val
