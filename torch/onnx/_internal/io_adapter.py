@@ -315,7 +315,7 @@ class ConvertComplexToRealRepresentationInputStep(InputAdaptStep):
         """
         return (
             tuple(
-                torch.view_as_real(arg)
+                torch.view_as_real(arg.resolve_conj())
                 if isinstance(arg, torch.Tensor) and arg.is_complex()
                 else arg
                 for arg in model_args
@@ -531,7 +531,7 @@ class ConvertComplexToRealRepresentationOutputStep(OutputAdaptStep):
             A tuple of the model output.
         """
         return [
-            torch.view_as_real(output)
+            torch.view_as_real(output.resolve_conj())
             if isinstance(output, torch.Tensor) and torch.is_complex(output)
             else output
             for output in model_outputs
@@ -615,7 +615,7 @@ class PrependParamsBuffersConstantAotAutogradInputStep(InputAdaptStep):
             model.state_dict[name] for name in model.graph_signature.buffers  # type: ignore[union-attr,index]
         )
         ordered_constant_tensors = tuple(
-            getattr(model.module(), name) for name in model.graph_signature.lifted_tensor_constants  # type: ignore[union-attr,index]
+            model.constants[fqn] for fqn in model.graph_signature.lifted_tensor_constants  # type: ignore[union-attr,index]
         )
 
         # NOTE: calling convention is first params, then buffers, then args as user supplied them.

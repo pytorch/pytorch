@@ -636,55 +636,98 @@ class TestConfigFilter(TestCase):
 
     @mock.patch("subprocess.check_output")
     def test_perform_misc_tasks(self, mocked_subprocess: Any) -> None:
+        def _gen_expected_string(
+            keep_going: bool = False,
+            ci_verbose_test_logs: bool = False,
+            ci_no_test_timeout: bool = False,
+            is_unstable: bool = False,
+            reenabled_issues: str = "",
+        ) -> str:
+            return (
+                f"keep-going={keep_going}\n"
+                f"ci-verbose-test-logs={ci_verbose_test_logs}\n"
+                f"ci-no-test-timeout={ci_no_test_timeout}\n"
+                f"is-unstable={is_unstable}\n"
+                f"reenabled-issues={reenabled_issues}\n"
+            )
+
         mocked_subprocess.return_value = b""
         testcases: List[Dict[str, Any]] = [
             {
                 "labels": {},
                 "test_matrix": '{include: [{config: "default"}]}',
                 "job_name": "A job name",
-                "expected": "keep-going=False\nis-unstable=False\nreenabled-issues=\n",
+                "expected": _gen_expected_string(),
                 "description": "No keep-going, no is-unstable",
             },
             {
                 "labels": {"keep-going"},
                 "test_matrix": '{include: [{config: "default"}]}',
                 "job_name": "A job name",
-                "expected": "keep-going=True\nis-unstable=False\nreenabled-issues=\n",
+                "expected": _gen_expected_string(keep_going=True),
                 "description": "Has keep-going, no is-unstable",
             },
             {
                 "labels": {},
                 "test_matrix": '{include: [{config: "default"}]}',
+                "job_name": "A job name",
+                "pr_body": "[keep-going]",
+                "expected": _gen_expected_string(keep_going=True),
+                "description": "Keep-going in PR body",
+            },
+            {
+                "labels": {"ci-verbose-test-logs"},
+                "test_matrix": '{include: [{config: "default"}]}',
+                "job_name": "A job name",
+                "pr_body": "[ci-no-test-timeout]",
+                "expected": _gen_expected_string(
+                    ci_verbose_test_logs=True, ci_no_test_timeout=True
+                ),
+                "description": "No pipe logs label and no test timeout in PR body",
+            },
+            {
+                "labels": {"ci-no-test-timeout"},
+                "test_matrix": '{include: [{config: "default"}]}',
+                "job_name": "A job name",
+                "pr_body": "[ci-verbose-test-logs]",
+                "expected": _gen_expected_string(
+                    ci_verbose_test_logs=True, ci_no_test_timeout=True
+                ),
+                "description": "No pipe logs in PR body and no test timeout in label (same as the above but swapped)",
+            },
+            {
+                "labels": {},
+                "test_matrix": '{include: [{config: "default"}]}',
                 "job_name": None,
-                "expected": "keep-going=False\nis-unstable=False\nreenabled-issues=\n",
+                "expected": _gen_expected_string(),
                 "description": "No job name",
             },
             {
                 "labels": {},
                 "test_matrix": '{include: [{config: "default"}]}',
-                "job_name": "macos-12-py3-arm64 / test (default, 1, 3, macos-m1-12, unstable)",
-                "expected": "keep-going=False\nis-unstable=True\nreenabled-issues=\n",
+                "job_name": "macos-12-py3-arm64 / test (default, 1, 3, macos-m1-stable, unstable)",
+                "expected": _gen_expected_string(is_unstable=True),
                 "description": "Unstable job",
             },
             {
                 "labels": {},
                 "test_matrix": '{include: [{config: "default"}]}',
-                "job_name": "macos-12-py3-arm64 / test (default, 1, 3, macos-m1-12, unstable)",
-                "expected": "keep-going=False\nis-unstable=True\nreenabled-issues=\n",
+                "job_name": "macos-12-py3-arm64 / test (default, 1, 3, macos-m1-stable, unstable)",
+                "expected": _gen_expected_string(is_unstable=True),
                 "description": "Unstable job",
             },
             {
                 "labels": {},
                 "test_matrix": '{include: [{config: "1", unstable: "unstable"}, {config: "2", unstable: "unstable"}]}',
                 "job_name": "macos-12-py3-arm64 / build",
-                "expected": "keep-going=False\nis-unstable=True\nreenabled-issues=\n",
+                "expected": _gen_expected_string(is_unstable=True),
                 "description": "All configs are unstable",
             },
             {
                 "labels": {},
                 "test_matrix": '{include: [{config: "1", unstable: "unstable"}, {config: "2"}]}',
                 "job_name": "macos-12-py3-arm64 / build",
-                "expected": "keep-going=False\nis-unstable=False\nreenabled-issues=\n",
+                "expected": _gen_expected_string(is_unstable=False),
                 "description": "Only mark some configs as unstable",
             },
             {
@@ -692,7 +735,7 @@ class TestConfigFilter(TestCase):
                 "test_matrix": '{include: [{config: "default"}]}',
                 "job_name": "A job name",
                 "pr_body": "resolves #123 fixes #234",
-                "expected": "keep-going=False\nis-unstable=False\nreenabled-issues=123,234\n",
+                "expected": _gen_expected_string(reenabled_issues="123,234"),
                 "description": "Reenable some issues",
             },
         ]
