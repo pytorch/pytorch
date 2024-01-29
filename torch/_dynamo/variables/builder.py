@@ -688,6 +688,26 @@ class VariableBuilder:
         elif istype(value, type) and value in itertools.__dict__.values():
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return ItertoolsVariable(value, source=self.source)
+        elif isinstance(value, torch.SymInt):
+            value_hint = value.node.require_hint()
+
+            sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                type(value),
+                source=self.source,
+            )
+
+            sym_node_proxy.node.meta["grapharg"] = GraphArg(
+                self.source,
+                value,
+                False,
+                None,
+                is_tensor=False,
+                example_strong_ref=value,
+            )
+            self.tx.output.bound_symbols.add(value.node.expr)
+            self.tx.output.tracked_fakes.append(TrackedFake(value, self.source, None))
+            return SymNodeVariable.create(self.tx, sym_node_proxy, value)
         elif isinstance(value, torch.SymBool):
             # Note: the idea here is to re-use the infra we've built for SymInt by simulating the
             # user provided SymBool with a SymInt in dynamo.

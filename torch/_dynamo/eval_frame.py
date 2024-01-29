@@ -1211,8 +1211,8 @@ def export(
                             value, static_shapes=True
                         )
 
-                    fake_graph_inputs = pytree.tree_map(
-                        ambient_fake_mode.from_tensor, graph_inputs
+                    fake_graph_inputs = pytree.tree_map_only(
+                        torch.Tensor, ambient_fake_mode.from_tensor, graph_inputs
                     )
                     graph_captured_result = torch.func.functional_call(
                         graph, fake_params_buffers, fake_graph_inputs
@@ -1310,7 +1310,9 @@ def export(
             check_signature_rewritable(graph)
 
         # NB: This is mostly hitting the cache; Dynamo already converted these
-        example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
+        example_fake_inputs = pytree.tree_map_only(
+            torch.Tensor, fake_mode.from_tensor, example_inputs
+        )
 
         if aten_graph:
             # Running graph with interpreter is needed for propagating the stack_trace
