@@ -199,7 +199,9 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 tx, args[0].as_python_constant(), initialized=True
             )
         elif self.value is torch.inference_mode:
-            return InferenceModeVariable.create(tx, args[0].as_python_constant())
+            assert len(args) <= 1 and len(kwargs) == 0
+            inf_mode = args[0].as_python_constant() if len(args) == 1 else True
+            return InferenceModeVariable.create(tx, inf_mode)
         elif inspect.isclass(self.value) and issubclass(self.value, _StreamBase):
             from torch._dynamo.variables.builder import wrap_fx_proxy_cls
 
