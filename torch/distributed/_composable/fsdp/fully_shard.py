@@ -1,25 +1,60 @@
-from typing import Any
+from typing import Any, Optional
 
 import typing_extensions
 
 import torch.nn as nn
 
 from torch.distributed._composable import contract
-from torch.distributed._composable_state import _insert_module_state
+from torch.distributed._tensor import DeviceMesh
+
+from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
+from ._fsdp_init import (
+    _get_device_from_mesh,
+    _get_managed_modules,
+    _get_managed_states,
+    _init_default_fully_shard_mesh,
+    _move_states_to_device,
+)
+from ._fsdp_state import FSDPState
 
 
 # The decorator adds a state object to `module` that can be accessed via
 # `fully_shard.state(module)`. The state object and module are 1:1.
-@contract()
+@contract(state_cls=FSDPState)
 def fully_shard(
     module: nn.Module,
+    *,
+    mesh: Optional[DeviceMesh] = None,
 ):
+    """
+    Args:
+        mesh (Optional[DeviceMesh]): This mesh defines the sharding and device.
+            If this is a 1D mesh, then this fully shards across the 1D mesh
+            (i.e. FSDP). If this is a 2D mesh, then this shards across the 0th
+            dimension and replicates across the 1st dimension (i.e. HSDP).
+            FSDP/HSDP uses the device given by the mesh's device type. For CUDA
+            or CUDA-like devices, FSDP expects uses the current device.
+    """
     if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
         raise ValueError(
             f"fully_shard does not support containers that do not implement forward: {module}"
         )
+    mesh = mesh or _init_default_fully_shard_mesh()
+    if mesh.ndim not in (1, 2):
+        raise ValueError(f"fully_shard expects a 1D or 2D DeviceMesh but got {mesh}")
+    elif mesh.ndim == 1:
+        mesh_info = FSDPMeshInfo(mesh, shard_mesh_dim=0)
+    elif mesh.ndim == 2:
+        mesh_info = HSDPMeshInfo(mesh, shard_mesh_dim=1, replicate_mesh_dim=0)
+    device = _get_device_from_mesh(mesh)
+
     state = fully_shard.state(module)
-    _insert_module_state(module, state)
+    state.init(module, device)
+
+    managed_modules = _get_managed_modules(module)
+    params, buffers = _get_managed_states(managed_modules)
+    _move_states_to_device(params, buffers, device, mesh_info)
+
     # Place FSDP leftmost for highest priority in the method resolution order
     cls = module.__class__
     dct = {"__deepcopy__": unimplemented_deepcopy}
