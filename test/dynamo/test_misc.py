@@ -9090,6 +9090,30 @@ ShapeEnv not equal: field values don't match:
         with set_default_dtype(torch.double):
             foo()
 
+    def test_numpy_ufunc_out(self):
+        @torch.compile(backend="eager")
+        def foo():
+            x = np.arange(5)
+            out = np.empty((x.shape[0], x.shape[0]))
+            res_out = np.sin(x, out=out)
+            assert res_out is out
+
+        foo()
+
+    # Unfortunately, we don't currently preserve the ids of
+    # res_out and out correctly across the graph break
+    @unittest.expectedFailure
+    def test_numpy_ufunc_out_graph_break(self):
+        @torch.compile(backend="eager")
+        def foo():
+            x = np.arange(5)
+            out = np.empty((x.shape[0], x.shape[0]))
+            res_out = np.sin(x, out=out)
+            torch._dynamo.graph_break()
+            assert res_out is out
+
+        foo()
+
     def test_dict_subclass_cannot_be_initialized_in_graph(self):
         for super_class in (
             collections.OrderedDict,

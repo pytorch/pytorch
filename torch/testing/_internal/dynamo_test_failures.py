@@ -34,8 +34,6 @@ dynamo_expected_failures = {
     "TestCppExtensionJIT.test_custom_compound_op_autograd",
     "TestCppExtensionJIT.test_cpp_frontend_module_has_up_to_date_attributes",
     "TestCppExtensionOpenRgistration.test_open_device_registration",
-    "TestAutogradFallback.test_inplace_autograd_function_registered_to_cpu_mode_warn",
-    "TestAutogradFallback.test_inplace_autograd_function_registered_to_cpu_mode_nothing",
     "TestIndexingCPU.test_invalid_index_cpu",
     "NumpyTestsCPU.test_boolean_shape_mismatch_cpu",
     "TestIndexingCPU.test_empty_ndim_index_bool_cpu",
@@ -237,229 +235,6 @@ dynamo_expected_failures = {
     "TestModuleInitCPU.test_quantized_BatchNorm3d_cpu_float32",
     "TestModuleInitCPU.test_nn_LSTM_cpu_float32",
     "TestModuleInitCPU.test_qat_Conv1d_cpu_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc10_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc9_out_dtype_float64",
-    "TestUnaryUfuncs.test_x_and_out_casting_casting_same_kind_ufunc0_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc8_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc1_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc12_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc4_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc16_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc6_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc0_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc11_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc1_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc16",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc14_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc8_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc1_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc5",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc14_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc2_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc15_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc0_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc12_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc11_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc16_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc4_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc15_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc3_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc1_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc12_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc12_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc12_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc0_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc16_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc13_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc4_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc9_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc12_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc0_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc11_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc15_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc8_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc0_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc10_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc13_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc8_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc9_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc7_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc8_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc0_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc6_out_dtype_float32",
-    "TestUnaryUfuncs.test_x_and_out_casting_casting_unsafe_ufunc0_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc7",
-    "TestUnaryUfuncs.test_x_and_out_casting_casting_equiv_ufunc0_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc9_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc0_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc4",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc14_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc13_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc9_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc7_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc6_out_dtype_float64",
-    "TestUnaryUfuncs.test_x_and_out_casting_casting_safe_ufunc0_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc5_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc4_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc9_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc8_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc7_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc14_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc10_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc9_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc4_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc8_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc8_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc0",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc7_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc6_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc15_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc12_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc11_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc1_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc0_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc2_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc15",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc16_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc12_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc16_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc1_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc2_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc3_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc6_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc3",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc5_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc3_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc7_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc6_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc5_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc7_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc2_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc10_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc10",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc16_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc5_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc2_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc5_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc3_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc7_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc15_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc5_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc15_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc11_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc14_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc2_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc2_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc11_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc12_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc8_out_dtype_float64",
-    "TestUnaryUfuncs.test_x_and_out_casting_casting_same_kind_ufunc0_out_dtype_float64",
-    "TestUfuncDtypeKwd.test_binary_ufunc_dtype_and_out",
-    "TestUnaryUfuncs.test_x_and_out_casting_casting_same_kind_ufunc0_out_dtype_complex128",
-    "TestUnaryUfuncs.test_x_and_out_casting_casting_unsafe_ufunc0_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc1_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc12_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc13_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc5_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc14_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc9_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc14_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc13_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc10_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc3_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc11",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc7_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc13_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc6_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc1",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc0_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc9_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc16_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc16_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc5_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc12",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc3_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc6_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc14_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc15_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc13_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc7_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc14_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc4_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc6_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc4_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc11_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc3_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc9",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc10_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc3_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc11_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc15_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc14",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc15_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc6",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc16_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc5_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc9_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc16_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc4_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc5_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc6_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc11_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc13_out_dtype_float64",
-    "TestUnaryUfuncs.test_x_and_out_casting_casting_unsafe_ufunc0_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc14_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc15_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc15_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc4_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc14_out_dtype_complex128",
-    "TestUnaryUfuncs.test_x_and_out_casting_casting_no_ufunc0_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc10_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc13_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc12_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc2_out_dtype_float64",
-    "TestUnaryUfuncs.test_x_and_out_broadcast_ufunc0",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc16_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc13_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc5_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc8_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc3_out_dtype_complex128",
-    "TestUnaryUfuncs.test_x_and_out_casting_casting_safe_ufunc0_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc15_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc12_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc6_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc8_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc11_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc8_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc14_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc10_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc7_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc11_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc9_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc10_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc16_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc9_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc1_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc3_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc10_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc7_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc7_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc0_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc8",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc11_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc13_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc13_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc2_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc1_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc10_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc5_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc4_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc6_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc13",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc2_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc2",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc10_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc1_out_dtype_float64",
     "TestIsScalar.test_is_not_scalar_value6",
     "TestGenericReductions.test_bad_axis_func0",
     "TestGenericReductions.test_bad_axis_func11",
@@ -475,38 +250,30 @@ dynamo_expected_failures = {
     "TestGenericReductions.test_bad_axis_func1",
     "TestGenericCumSumProd.test_bad_axis_func0",
     "TestGenericReductions.test_bad_axis_func9",
-    "TestWritebackIfCopy.test_take_mode_raise",
     "TestArange.test_infinite",
     "TestArrayConstruction.test_array_empty",
     "TestAttributes.test_fill_readonly",
     "TestArrayAttributeDeletion.test_multiarray_writable_attributes_deletion",
-    "TestMatmul.test_out_contiguous",
     "TestMinMax.test_scalar",
     "TestFromBuffer.test_basic_little_dtype2",
     "TestArrayCreationCopyArgument.test_striding_not_ok",
     "TestArange.test_require_range",
     "TestArange.test_nan_step",
-    "TestWritebackIfCopy.test_argmin_with_out",
     "TestArrayAttributeDeletion.test_multiarray_not_writable_attributes_deletion",
     "TestLexsort.test_datetime",
     "TestMinMax.test_axis",
     "TestLexsort.test_mixed",
-    "TestWritebackIfCopy.test_dot_out",
     "TestAttributes.test_fill_struct_array",
     "TestFromBuffer.test_empty",
     "TestAssignment.test_assignment_broadcasting",
-    "TestMatmul.test_out_arg",
     "TestAttributes.test_set_stridesattr",
     "TestStats.test_out",
     "TestScalarIndexing.test_invalid_subscript",
     "TestWhere.test_error",
-    "TestWritebackIfCopy.test_argmax_with_out",
     "TestBool.test_sum_2",
     "TestScalarIndexing.test_invalid_newaxis",
-    "TestTake.test_out_overlap",
     "TestScalarIndexing.test_invalid_subscript_assignment",
     "TestFromBuffer.test_basic_little_dtype1",
-    "TestWritebackIfCopy.test_choose_mod_raise",
     "TestAttributes.test_fill_max_uint64",
     "TestPutmask.test_byteorder_dtype_<i4",
     "TestPutmask.test_byteorder_dtype_>i4",
@@ -520,12 +287,6 @@ dynamo_expected_failures = {
     "TestFromBuffer.test_basic_little_dtype0",
     "TestMatmul.test_exceptions",
     "TestFlag.test_writeable_from_readonly",
-    "TestArgmaxArgminCommon.test_np_vs_ndarray_positional_arr_method_argmax_np_method0",
-    "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmin",
-    "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmax",
-    "TestArgmaxArgminCommon.test_np_vs_ndarray_positional_arr_method_argmin_np_method1",
-    "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmax",
-    "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmin",
     "TestArgmax.test_combinations_data66",
     "TestArgmax.test_combinations_data65",
     "TestArgmax.test_combinations_data63",
@@ -601,42 +362,25 @@ dynamo_expected_failures = {
     "TestCov.test_aweights",
     "TestQuantile.test_quantile_monotonic_method_interpolated_inverted_cdf",
     "TestQuantile.test_quantile_monotonic_method_inverted_cdf",
-    "TestPercentile.test_keepdims_out_q1_axis_1",
     "TestSortComplex.test_sort_real_type_in_g_type_out_G",
-    "TestMedian.test_keepdims_out_axis2",
     "TestMeshgrid.test_invalid_arguments",
     "TestGradient.test_specific_axes",
-    "TestPercentile.test_keepdims_out_q_7_axis4",
-    "TestPercentile.test_keepdims_out_q1_axis4",
     "TestDelete.test_slices",
     "TestPercentile.test_extended_axis_invalid",
     "TestGradient.test_second_order_accurate",
-    "TestMedian.test_keepdims_out_axis0",
     "TestDiff.test_prepend",
-    "TestMedian.test_keepdims_out_axis_1",
-    "TestPercentile.test_keepdims_out_q1_axis0",
     "TestQuantile.test_quantile_monotonic_method_averaged_inverted_cdf",
-    "TestMedian.test_keepdims_out_axis4",
     "TestBincount.test_with_incorrect_minlength",
     "TestSortComplex.test_sort_real_type_in_H_type_out_F",
     "TestDiff.test_n",
     "TestMeshgrid.test_indexing",
     "TestQuantile.test_quantile_monotonic_method_closest_observation",
     "TestFlip.test_axes",
-    "TestPercentile.test_keepdims_out_q1_axis3",
-    "TestPercentile.test_keepdims_out_q_7_axis0",
-    "TestMedian.test_keepdims_out_axis3",
     "TestCov.test_fweights",
     "TestDiff.test_append",
     "TestPercentile.test_scalar_q",
     "TestMedian.test_extended_axis_invalid",
-    "TestMedian.test_out",
-    "TestPercentile.test_keepdims_out_q_7_axis2",
-    "TestPercentile.test_keepdims_out_q1_axis2",
     "TestQuantile.test_quantile_monotonic_method_hazen",
-    "TestPercentile.test_keepdims_out_q_7_axis3",
-    "TestPercentile.test_keepdims_out_q_7_axis_1",
-    "TestPercentile.test_api",
     "TestQuantile.test_quantile_monotonic_method_normal_unbiased",
     "TestSetOps.test_in1d_table_timedelta_fails",
     "TestUnique.test_unique_axis_errors",
@@ -646,47 +390,15 @@ dynamo_expected_failures = {
     "TestUnique.test_unique_axis",
     "TestConstant.test_check_constant_float3",
     "TestConstant.test_check_constant_pad_2d",
-    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_f8_casting_safe",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_c8_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
-    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_f8_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_f8_casting_no",  # torch_np/numpy_tests/core/test_shape_base
     "TestConcatenate.test_exceptions",  # torch_np/numpy_tests/core/test_shape_base
-    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_c8_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
-    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_i8_casting_equiv",  # torch_np/numpy_tests/core/test_shape_base
     "TestConcatenate.test_large_concatenate_axis_None",  # torch_np/numpy_tests/core/test_shape_base
     "TestConcatenate.test_concatenate",  # torch_np/numpy_tests/core/test_shape_base
     "TestVstack.test_empty_input",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_i8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
-    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_i8_casting_no",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_f8_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_f8_casting_no",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_f4_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
-    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_f8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
     "TestVstack.test_non_iterable",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_i8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_f4_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_f8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_f8_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
-    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_f8_casting_safe",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_f4_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
-    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_i8_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_c8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_f8_casting_safe",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_c8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
-    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_f4_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_f4_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
     "TestStackMisc.test_stack",  # torch_np/numpy_tests/core/test_shape_base
-    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_c8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_f8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
-    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_i8_casting_safe",  # torch_np/numpy_tests/core/test_shape_base
     "TestConcatenate.test_bad_out_shape",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_f8_casting_equiv",  # torch_np/numpy_tests/core/test_shape_base
     "TestHstack.test_non_iterable",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_c8_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
     "TestHstack.test_empty_input",  # torch_np/numpy_tests/core/test_shape_base
-    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_f4_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_f8_casting_equiv",  # torch_np/numpy_tests/core/test_shape_base
-    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_i8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
     "TestNegative.test_exceptions",  # torch_np/numpy_tests/core/test_scalarmath
     "TestPower.test_modular_power",  # torch_np/numpy_tests/core/test_scalarmath
     "TestBaseMath.test_lower_align",  # torch_np/numpy_tests/core/test_scalarmath
@@ -707,37 +419,20 @@ dynamo_expected_failures = {
     "TestScalarTypeNames.test_names_reflect_attributes_t8",  # torch_np/numpy_tests/core/test_numerictypes
     "TestScalarTypeNames.test_names_reflect_attributes_t0",  # torch_np/numpy_tests/core/test_numerictypes
     "TestScalarTypeNames.test_names_reflect_attributes_t3",  # torch_np/numpy_tests/core/test_numerictypes
-    "TestClip.test_clip_inplace_array",  # torch_np/numpy_tests/core/test_numeric
     "TestRequire.test_require_each",  # torch_np/numpy_tests/core/test_numeric
-    "TestClip.test_clip_with_out_simple_int32",  # torch_np/numpy_tests/core/test_numeric
-    "TestClip.test_simple_inplace_01",  # torch_np/numpy_tests/core/test_numeric
-    "TestStdVar.test_out_scalar",  # torch_np/numpy_tests/core/test_numeric
     "TestClip.test_simple_int32_inout_casting_unsafe",  # torch_np/numpy_tests/core/test_numeric
     "TestMoveaxis.test_errors",  # torch_np/numpy_tests/core/test_numeric
     "TestNonzeroAndCountNonzero.test_count_nonzero_axis",  # torch_np/numpy_tests/core/test_numeric
-    "TestClip.test_clip_with_out_memory_overlap",  # torch_np/numpy_tests/core/test_numeric
     "TestClip.test_clip_func_takes_out",  # torch_np/numpy_tests/core/test_numeric
-    "TestClip.test_noncontig_inplace",  # torch_np/numpy_tests/core/test_numeric
-    "TestClip.test_type_cast_12",  # torch_np/numpy_tests/core/test_numeric
-    "TestClip.test_simple_int64_out",  # torch_np/numpy_tests/core/test_numeric
     "TestRollaxis.test_exceptions",  # torch_np/numpy_tests/core/test_numeric
-    "TestClip.test_simple_inplace_02",  # torch_np/numpy_tests/core/test_numeric
     "TestRequire.test_C_and_F_simul",  # torch_np/numpy_tests/core/test_numeric
     "TestNonarrayArgs.test_dunder_round_edgecases_val_2147483647_ndigits_-1",  # torch_np/numpy_tests/core/test_numeric
     "TestClip.test_simple_complex",  # torch_np/numpy_tests/core/test_numeric
-    "TestBoolArray.test_logical_not_abs",  # torch_np/numpy_tests/core/test_numeric
-    "TestClip.test_simple_out",  # torch_np/numpy_tests/core/test_numeric
     "TestBroadcast.test_broadcast_single_arg",  # torch_np/numpy_tests/core/test_numeric
     "TestRequire.test_unknown_requirement",  # torch_np/numpy_tests/core/test_numeric
-    "TestBoolArray.test_logical_and_or_xor",  # torch_np/numpy_tests/core/test_numeric
     "TestBroadcast.test_broadcast_error_kwargs",  # torch_np/numpy_tests/core/test_numeric
     "TestNonarrayArgs.test_dunder_round_edgecases_val_2147483647_ndigits_-9",  # torch_np/numpy_tests/core/test_numeric
     "TestNonarrayArgs.test_dunder_round_edgecases_val_2147483647_ndigits_-10",  # torch_np/numpy_tests/core/test_numeric
-    "TestClip.test_type_cast_10",  # torch_np/numpy_tests/core/test_numeric
-    "TestOuterMisc.test_outer_out_param",  # torch_np/numpy_tests/core/test_numeric
-    "TestClip.test_clip_inplace_simple",  # torch_np/numpy_tests/core/test_numeric
-    "TestClip.test_clip_with_out_transposed",  # torch_np/numpy_tests/core/test_numeric
-    "TestClip.test_clip_with_out_simple",  # torch_np/numpy_tests/core/test_numeric
     "TestCross.test_broadcasting_shapes",  # torch_np/numpy_tests/core/test_numeric
     "TestIndexing.test_index_no_floats",  # torch_np/numpy_tests/core/test_indexing
     "TestBooleanIndexing.test_boolean_indexing_weirdness",  # torch_np/numpy_tests/core/test_indexing
