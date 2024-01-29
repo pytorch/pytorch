@@ -28,7 +28,7 @@ jobs:
           BRANCH="${BRANCH%/base}/orig"
           echo "$BRANCH"
 
-          WAIT_SECONDS=600
+          WAIT_SECONDS=300
           END_WAIT=$((SECONDS+WAIT_SECONDS))
           BRANCH_EXISTS=0
 
