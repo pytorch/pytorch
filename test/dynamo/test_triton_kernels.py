@@ -902,7 +902,6 @@ def make_mutation_test(fn):
         self.assertListEqual(
             identify_mutated_tensors(kernel, inputs),
             outputs,
-            msg=f"while testing {kernel.fn.__name__}",
         )
 
     return test_fn
@@ -1047,10 +1046,7 @@ if HAS_CUDA and HAS_LARK:
             return kernel, inputs, outputs
 
         test = make_mutation_test(test)
-        fn = kernel
-        if isinstance(kernel, triton.runtime.autotuner.Autotuner):
-            fn = kernel.fn
-        setattr(MutationTests, f"test_mutations_{fn.__name__}", test)
+        setattr(MutationTests, f"test_mutations_{kernel.fn.__name__}", test)
 
 
 common_utils.instantiate_parametrized_tests(KernelTests)
