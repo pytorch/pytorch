@@ -490,6 +490,8 @@ class VariableBuilder:
             keywords = {}
             keywords_source = AttrSource(self.get_source(), "keywords")
             for k, v in value.keywords.items():
+                if not ConstantVariable.is_literal(k):
+                    unimplemented("functools.partial with non-literal keyword")
                 keywords[k] = VariableBuilder(
                     self.tx, GetItemSource(keywords_source, k)
                 )(v)
@@ -499,7 +501,7 @@ class VariableBuilder:
                 keywords_source.make_guard(GuardBuilder.DICT_KEYS),
                 args_source.make_guard(GuardBuilder.LIST_LENGTH),
             )
-            return FunctoolsPartialVariable(func_obj, args, keywords, original=value)
+            return FunctoolsPartialVariable(func_obj, args, keywords)
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.
             self.install_guards(GuardBuilder.ID_MATCH)

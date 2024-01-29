@@ -12,7 +12,7 @@ from .. import variables
 from ..bytecode_transformation import create_call_function, create_rot_n
 from ..exc import unimplemented, Unsupported
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
-from ..utils import get_first_attr, make_cell
+from ..utils import get_first_attr, identity, make_cell
 from .base import typestr, VariableTracker
 
 if TYPE_CHECKING:
@@ -617,14 +617,13 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
 
 
 class FunctoolsPartialVariable(VariableTracker):
-    def __init__(self, func: VariableTracker, args, keywords, original=None, **kwargs):
+    def __init__(self, func: VariableTracker, args, keywords, **kwargs):
         super().__init__(**kwargs)
         self.func = func
         assert isinstance(args, list)
         self.args = args
         assert isinstance(keywords, dict)
         self.keywords = keywords
-        self.original = original
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -634,30 +633,31 @@ class FunctoolsPartialVariable(VariableTracker):
         return self.func.call_function(tx, merged_args, merged_kwargs)
 
     def call_hasattr(self, tx, name: str) -> VariableTracker:
-        from .constant import ConstantVariable
-
-        # reconstruct the partial without the keyword arguments
-        # This works as PyTorch does not allow mutating the partial variable
-        p = functools.partial(self.func.get_function())
-        r = hasattr(p, name)
-        return ConstantVariable.create(r)
+        # functools.partial uses slots, so attributes are constant
+        return variables.ConstantVariable.create(
+            hasattr(functools.partial(identity), name)
+        )
 
     def as_python_constant(self):
-        if self.original:
-            return self.original
-        else:
+        return functools.partial(
+            self.func.as_python_constant(),
+            *[arg.as_python_constant() for arg in self.args],
+            **{k: v.as_python_constant() for k, v in self.keywords.items()},
+        )
 
-            def get_val(v):
-                if isinstance(v, variables.UserDefinedObjectVariable):
-                    return v.value
-                else:
-                    return v.as_python_constant()
+    def reconstruct(self, codegen):
+        codegen.load_import_from("functools", "partial")
+        codegen(self.func)
+        if self.args:
+            codegen.foreach(self.args)
+        if not self.keywords:
+            return create_call_function(len(self.args) + 1, True)
 
-            return functools.partial(
-                self.func.get_function(),
-                *[get_val(arg) for arg in self.args],
-                **{k: get_val(v) for k, v in self.keywords.items()},
-            )
+        codegen.foreach(self.keywords.values())
+        keys = tuple(self.keywords.keys())
+        return codegen.create_call_function_kw(
+            len(keys) + len(self.args) + 1, keys, True
+        )
 
 
 class TritonKernelVariable(VariableTracker):
