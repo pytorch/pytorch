@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import functools
 
 import inspect
@@ -111,7 +113,6 @@ class TensorVariable(VariableTracker):
         size=None,
         stride=None,
         is_contiguous=None,
-        specialized_value=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -127,7 +128,6 @@ class TensorVariable(VariableTracker):
         self.is_contiguous = is_contiguous
         self.is_sparse = is_sparse
         self.class_type = class_type
-        self.specialized_value = specialized_value
 
     def as_proxy(self):
         return self.proxy
@@ -197,13 +197,8 @@ class TensorVariable(VariableTracker):
                     )
                 else:
                     # attributes in the ctx returned by tensor_flatten are assumed to be constants
-                    from . import ConstantVariable, ListVariable, TupleVariable
+                    from . import ConstantVariable
 
-                    # TODO: figure out a good way to dispatch on all possible variable trackers for constants here.
-                    if isinstance(example_value, list):
-                        return ListVariable([ConstantVariable(x) for x in example_value])
-                    elif isinstance(example_value, tuple):
-                        return TupleVariable([ConstantVariable(x) for x in example_value])
                     return ConstantVariable(example_value)
         if not self.source:
             raise NotImplementedError()
@@ -543,6 +538,8 @@ class TensorVariable(VariableTracker):
         elif name == "get_device" and isinstance(self.device, torch.device):
             index = self.device.index if self.device.type != "cpu" else -1
             constant_result = ConstantVariable.create(index)
+        elif name == "element_size":
+            constant_result = ConstantVariable.create(self.dtype.itemsize)
         else:
             constant_result = None
 
