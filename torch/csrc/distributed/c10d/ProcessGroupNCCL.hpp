@@ -313,6 +313,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Reference to the store so that we can write aborted communicators
     // to the store.
     c10::intrusive_ptr<Store> store_;
+    std::unordered_set<std::string>* abortedComms_ = NULL;
 
     // Store a reference to NCCL collective's outputs, used by result and to
     // give a more descriptive message when representing the Work as a string.
@@ -740,6 +741,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   virtual std::string getNCCLWatchdogDebugInfo();
 
   static const int64_t kWatchdogThreadSleepMillis;
+  static const int64_t kWaitForAbortCommStoreKey;
 
   // The store is used to broadcast the NCCL unique ID of rank 0. This store
   // comes with prefix and it is different across ProcessGroup NCCL instances
