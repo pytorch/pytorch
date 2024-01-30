@@ -538,6 +538,15 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if not x.is_cuda:
             return x + 1
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @make_test
+    def test_get_device_properties_tensor_device(a):
+        x = a.to("cuda")
+        prop = torch.cuda.get_device_properties(x.device)
+        if prop.major == 8:
+            return x + prop.multi_processor_count
+        return x + prop.max_threads_per_multi_processor
+
     @make_test
     def test_tensor_type(a, b):
         m = a.to(torch.float16)
@@ -729,6 +738,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         tmp["c"] = v + tmp["d"]
         if "c" in tmp and "missing" not in tmp:
             return tmp["c"] - tmp["a"] + len(tmp)
+
+    @make_test
+    def test_inline_jit__unwrap_optional(x):
+        if torch.jit._unwrap_optional(x) is None:
+            return torch.ones(2, 2)
+        return x.sin()
 
     def test_dict_param_keys(self):
         a_param = torch.nn.Parameter(torch.ones([4, 4]))
