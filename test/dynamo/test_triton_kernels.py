@@ -1063,7 +1063,15 @@ if HAS_CUDA and HAS_LARK:
         ],
     ]
     for kernel, inputs, outputs in tests:
-        fn = make_mutation_test(lambda: (kernel, inputs, outputs))
+        fn = make_mutation_test(
+            # Add default arguments to avoid Python lambda capture pitfall
+            # This forces the capture at lambda creation
+            lambda kernel=kernel, inputs=inputs, outputs=outputs: (
+                kernel,
+                inputs,
+                outputs,
+            )
+        )
         name = f"test_mutations_{kernel.fn.__name__}"
         # Poor way to make test names be unique
         while name in MutationTests.__dict__:
