@@ -768,6 +768,15 @@ def trunc(x):
     return make_pointwise(fn)(x)
 
 
+@register_lowering(
+    [aten.special_bessel_j0, prims.bessel_j0],
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def bessel_j0(x):
+    fn = ops_wrapper("bessel_j0")
+    return make_pointwise(fn)(x)
+
+
 @register_lowering(aten.expand, type_promotion_kind=None)
 def expand(x, sizes):
     (x,) = promote_constants([x])
@@ -2052,7 +2061,7 @@ make_fallback(aten._embedding_bag_forward_only, require_contiguous)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
 make_fallback(aten.grid_sampler_2d_backward, require_dense)
-make_fallback(aten.randperm)
+make_fallback(aten.randperm)  # needs sort
 
 
 def sdpa_constraint(fx_node, *args, **kwargs):
@@ -2224,7 +2233,6 @@ make_fallback(aten.resize_as)
 make_fallback(aten.resize_as_)
 make_fallback(aten.searchsorted)
 make_fallback(aten.special_airy_ai)
-make_fallback(aten.special_bessel_j0, warn=False)
 make_fallback(aten.special_bessel_j1, warn=False)
 make_fallback(aten.special_bessel_y0, warn=False)
 make_fallback(aten.special_bessel_y1)
@@ -2265,7 +2273,7 @@ make_fallback(aten.soft_margin_loss_backward, warn=False)
 make_fallback(aten.linalg_pinv.atol_rtol_tensor)
 make_fallback(aten.segment_reduce.default)
 make_fallback(aten._segment_reduce_backward.default)
-make_fallback(aten.angle)
+make_fallback(aten.angle)  # needs complex
 make_fallback(aten.cholesky_inverse)
 make_fallback(aten.cholesky_solve)
 make_fallback(aten._fft_r2c)

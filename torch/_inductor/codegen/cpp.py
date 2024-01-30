@@ -972,6 +972,10 @@ class CppOverrides(OpOverrides):
         V.kernel.compute.splice(code)
         return result
 
+    @staticmethod
+    def bessel_j0(x):
+        return f"bessel_j0_forward({x})"
+
 
 class CppVecOverrides(CppOverrides):
     """Map element-wise ops to aten vectorization C++"""

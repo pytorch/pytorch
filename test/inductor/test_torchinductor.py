@@ -8428,6 +8428,12 @@ class CommonTemplate:
             # should_pad_bench always returns False if has_triton returns False
             self.assertFalse(should_pad)
 
+    def test_bessel_j0(self):
+        def fn(x):
+            return torch.special.bessel_j0(x)
+
+        self.common(fn, (torch.randn(8, 8),))
+
 
 @dataclasses.dataclass
 class TestFailure:
