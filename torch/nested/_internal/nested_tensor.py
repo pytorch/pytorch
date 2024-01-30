@@ -195,7 +195,13 @@ class NestedTensor(torch.Tensor):
         # symbolic sizes.
         ragged_source = offsets if lengths is None else lengths
         # if has_free_symbols(ragged_source) or has_free_symbols(values):
-        if True:
+        def is_tracing_tensor(x):
+            return isinstance(x, (
+                torch._subclasses.fake_tensor.FakeTensor,
+                torch._subclasses.functional_tensor.FunctionalTensor
+            ))
+        should_update_symint_registry = is_tracing_tensor(ragged_source) or is_tracing_tensor(values)
+        if should_update_symint_registry:
             # Associate offsets or lengths (possibly fake, possibly functionalized)
             # with the ragged_size.
             ragged_size = outer_size[ragged_idx]
