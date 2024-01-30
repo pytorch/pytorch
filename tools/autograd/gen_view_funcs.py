@@ -35,6 +35,7 @@ from .gen_inplace_or_view_type import (
 
 FUNCTION_DECLARATION = CodeTemplate(
     """\
+#define ${uppercase_op}_AVAILABLE
 #ifdef _WIN32
 struct ${op} : public ${superclass} {
 #else
@@ -227,6 +228,7 @@ def process_function(fn: NativeFunction, template: CodeTemplate) -> str:
 
     return template.substitute(
         op=view_func_name(fn),
+        uppercase_op=view_func_name(fn, camel_case=False).upper(),
         superclass="torch::autograd::ViewFunc",
         initializer_list=initializer_list,
         state=state_variables,
