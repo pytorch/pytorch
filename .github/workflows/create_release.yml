@@ -5,8 +5,9 @@ on:
     branches:
       - main
       - release/*
+  # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#release
   release:
-    types: [published]
+    types: [published, edited]
   pull_request:
     paths: [.github/workflows/create_release.yml]
 
