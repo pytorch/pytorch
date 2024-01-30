@@ -581,7 +581,10 @@ class MinCutPartitioningTests(TestCase):
 
 
 def unfusible(x):
-    return aten.special_bessel_j0(x)
+    # For the purpose of noop tests, we want inductor to fall back to
+    # eager mode, so, below we must use a aten operator that does not
+    # have decomposition nor lowering:
+    return aten._lazy_clone(x)
 
 
 class NoopTests(TestCase):

@@ -1348,6 +1348,7 @@ class CPUReproTests(TestCase):
                 cpp_op_list.append(k)
 
         diff = [
+            "bessel_j0",
             "constant",
             "index_expr",
             "signbit",
