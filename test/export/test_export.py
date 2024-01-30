@@ -6,6 +6,7 @@ import io
 import unittest
 from contextlib import contextmanager
 from dataclasses import dataclass
+from re import escape
 
 import torch
 import torch._dynamo as torchdynamo
@@ -242,7 +243,7 @@ class TestExport(TestCase):
             torch.ones(4),
         )
         with self.assertRaisesRegex(
-            RuntimeError, "Expected input arg3_1.shape\[0\] to be equal to 6, but got 5"
+            RuntimeError, escape("Expected input at *args[1][0].shape[0] to be equal to 6, but got 5")
         ):
             ep_ns.module()(*bad_runtime_inp1)
 
@@ -253,7 +254,7 @@ class TestExport(TestCase):
             torch.ones(6),
         )
         with self.assertRaisesRegex(
-            RuntimeError, "Expected input arg7_1.shape\[0\] to be equal to 4, but got 6"
+            RuntimeError, escape("Expected input at *args[3].shape[0] to be equal to 4, but got 6")
         ):
             ep_ns.module()(*bad_runtime_inp2)
 
@@ -409,7 +410,6 @@ class TestExport(TestCase):
             constraints = [dynamic_dim(inp_for_g, 0)]
 
     @testing.expectedFailureRetraceability
-    @testing.expectedFailureNonStrict
     def test_map(self):
         def list_tensor_map(xs, y, z):
             def body(x, y, z):
@@ -457,7 +457,6 @@ class TestExport(TestCase):
         kwargs3 = {"b": 1}
         self._test_export_same_as_eager(kw_func2, args, kwargs3)
 
-    @testing.expectedFailureNonStrict
     def test_export_func_with_var_postional_args(self):
         def kw_func(arg1, arg2, *args):
             return arg1 + args[0], arg2 + args[1]
@@ -1542,7 +1541,7 @@ def forward(self, arg_0):
             torch.allclose(exported.module()(torch.ones(8, 5), 5), foo(torch.ones(8, 5), 5))
         )
         with self.assertRaisesRegex(
-            RuntimeError, "Expected input arg1 to be equal to 5, but got 6"
+            RuntimeError, escape("Expected input at *args[1] to be equal to 5, but got 6")
         ):
             _ = exported.module()(torch.ones(8, 5), 6)
 
@@ -1550,7 +1549,7 @@ def forward(self, arg_0):
             foo, (tensor_inp, 5.0), dynamic_shapes=dynamic_shapes
         )
         with self.assertRaisesRegex(
-            RuntimeError, "Expected input arg1 to be equal to 5.0, but got 6.0"
+            RuntimeError, escape("Expected input at *args[1] to be equal to 5.0, but got 6.0")
         ):
             _ = exported.module()(torch.ones(7, 5), 6.0)
 
@@ -1671,7 +1670,7 @@ def forward(self, arg_0):
             Foo(), (inp,), dynamic_shapes={"x": {0: dim0_x_v2}}
         )
         with self.assertRaisesRegex(
-            RuntimeError, "Expected input l_x_.shape\[0\] to be >= 3, but got 2"
+            RuntimeError, escape("Expected input at *args[0].shape[0] to be >= 3, but got 2")
         ):
             torch.export.export(exported_v2.module(), (torch.randn(2, 2),))
 
@@ -2175,10 +2174,10 @@ def forward(self, l_x_):
             Foo(), (inp,), constraints=[dynamic_dim(inp, 0) >= 3], pre_dispatch=True
         ).module()
 
-        with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\]"):
+        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[0]")):
             gm(torch.randn(2, 2))
 
-        with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\]"):
+        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[0]")):
             torch.export.export(gm, (torch.randn(2, 2),))
 
         ep = torch.export.export(
@@ -2975,7 +2974,7 @@ def forward(self, l_q_, l_k_, l_v_):
         self.assertEqual(res[0], torch.tensor(20))
         self.assertEqual(res[1], 5)
 
-        with self.assertRaisesRegex(RuntimeError, "Expected input arg1 to be equal to 5, but got 20"):
+        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[1] to be equal to 5, but got 20")):
             res = ep(torch.tensor(4), 20)
 
         class F(torch.nn.Module):
