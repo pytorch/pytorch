@@ -14,39 +14,49 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = DeviceType::XPU;
 
   XPUGuardImpl() = default;
+
   explicit XPUGuardImpl(DeviceType t) {
     TORCH_INTERNAL_ASSERT(t == DeviceType::XPU);
   }
+
   DeviceType type() const override {
     return DeviceType::XPU;
   }
+
   Device exchangeDevice(Device d) const override {
     TORCH_INTERNAL_ASSERT(d.is_xpu());
     auto old_device_index = c10::xpu::exchange_device(d.index());
     return Device(DeviceType::XPU, old_device_index);
   }
+
   Device getDevice() const override {
     auto device = c10::xpu::current_device();
     return Device(DeviceType::XPU, device);
   }
+
   c10::optional<Device> uncheckedGetDevice() const noexcept {
     auto device = c10::xpu::current_device();
     return Device(DeviceType::XPU, device);
   }
+
   void setDevice(Device d) const override {
     TORCH_INTERNAL_ASSERT(d.is_xpu());
     c10::xpu::set_device(d.index());
   }
+
   void uncheckedSetDevice(Device d) const noexcept override {
     c10::xpu::set_device(d.index());
   }
+
   Stream getStream(Device d) const noexcept override {
     return getCurrentXPUStream(d.index()).unwrap();
   }
+
   Stream getStreamFromGlobalPool(Device d, bool isHighPriority = false)
       const override {
     return getStreamFromPool(isHighPriority, d.index());
   }
+
   // NB: These do NOT set the current device
   Stream exchangeStream(Stream s) const noexcept override {
     XPUStream stream(s);
@@ -54,6 +64,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     setCurrentXPUStream(stream);
     return old_stream.unwrap();
   }
+
   DeviceIndex deviceCount() const noexcept override {
     return c10::xpu::device_count();
   }
