@@ -1289,7 +1289,7 @@ def tensor_split_tensor_indices_or_sections_py_impl(
     self: Tensor,
     tensor_indices_or_sections: Tensor,
     dim: int = 0,
-) -> List[Tensor]:
+) -> Tuple[Tensor, ...]:
     assert tensor_indices_or_sections.device.type == "cpu"
     assert tensor_indices_or_sections.dtype == torch.int64
     split_dim = tensor_indices_or_sections.dim()
@@ -3845,13 +3845,15 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor) -> bool:
 
     t1, t2 = (tensor1, tensor2) if tensor1.ndim >= tensor2.ndim else (tensor2, tensor1)
 
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     if not (t1.ndim >= 3 and t2.ndim <= 2):
         return False
     if t2.requires_grad:
         return True
     if tensor1.ndim == 2:
         return False
-    if t1.numel() == 0:
+    if guard_size_oblivious(t1.numel() == 0):
         return True
 
     t1_shape = t1.shape

@@ -620,7 +620,7 @@ def _check_valid_timeout(timeout: Any) -> None:
         )
 
 # Default process group state
-_default_pg_init_method = None
+_default_pg_init_method: Optional[str] = None
 
 STORE_BASED_BARRIER_PREFIX = "store_based_barrier_key"
 
@@ -1257,6 +1257,23 @@ def init_process_group(
     _world.pg_group_ranks[GroupMember.WORLD] = {i: i for i in range(GroupMember.WORLD.size())}  # type: ignore[attr-defined, index]
     _backend = _world.pg_map[not_none(GroupMember.WORLD)][0]
     _default_pg_init_method = init_method
+
+    old_hook = sys.excepthook
+
+    def _distributed_excepthook(*args):
+        old_stderr = sys.stderr
+        sys.stderr = buf = io.StringIO()
+        try:
+            old_hook(*args)
+        finally:
+            sys.stderr = old_stderr
+        msg = buf.getvalue()
+        prefix = f"[rank{get_rank()}]"
+        msg = "\n".join(f"{prefix}: {s}" if s != "" else "" for s in msg.split("\n"))
+        sys.stderr.write(msg)
+        sys.stderr.flush()
+
+    sys.excepthook = _distributed_excepthook
 
     if _is_barrier_after_init() == 1:
         # barrier at the end to ensure that once we return from this method, all
@@ -2343,7 +2360,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
             should be correctly sized as the size of the group for this
             collective and will contain the output. Must be ``None`` on non-dst
             ranks. (default is ``None``)
-        dst (int, optional): Destination rank. (default is 0)
+        dst (int, optional): Destination rank on global process group (regardless of 'group' argument). (default is 0)
         group: (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used. Default is ``None``.
 
@@ -2965,7 +2982,7 @@ def gather(tensor, gather_list=None, dst=0, group=None, async_op=False):
         gather_list (list[Tensor], optional): List of appropriately-sized
             tensors to use for gathered data (default is None, must be specified
             on the destination rank)
-        dst (int, optional): Destination rank (default is 0)
+        dst (int, optional): Destination rank on global process group (regardless of 'group' argument). (default is 0)
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
@@ -3530,6 +3547,10 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
     Returns:
         Async work handle, if async_op is set to True.
         None, if not async_op or if not part of the group
+
+    .. note:: `ProcessGroupNCCL` now relies on stream synchronization instead of
+              device synchronization to block the CPU. Thus, please do not assume that
+              `barrier()` would perform a device synchronization.
     """
     if _rank_not_in_group(group):
         _warn_not_in_group("barrier")

@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import functools
 import itertools
 import unittest
@@ -263,9 +265,7 @@ def get_error_inputs_for_all_optims(device, dtype):
 def optim_inputs_func_adadelta(device=None):
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
-        OptimizerInput(
-            params=None, kwargs={"lr": 0.01}, desc="non-default lr"
-        ),  # TODO: Move out to testing in param_group?
+        OptimizerInput(params=None, kwargs={"lr": 0.01}, desc="non-default lr"),
         OptimizerInput(
             params=None, kwargs={"weight_decay": 0.1}, desc="nonzero weight_decay"
         ),
@@ -275,8 +275,8 @@ def optim_inputs_func_adadelta(device=None):
             desc="maximize",
         ),
         OptimizerInput(
-            params=None, kwargs={"rho": 0.95, "weight_decay": 0.1}, desc="rho"
-        ),  # TODO: Move out to testing in param_group?
+            params=None, kwargs={"rho": 0.95, "weight_decay": 0.9}, desc="rho"
+        ),
     ]
 
 
@@ -494,6 +494,7 @@ def optim_inputs_func_asgd(device=None):
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 0.02}, desc="non-default lr"),
         OptimizerInput(params=None, kwargs={"t0": 100}, desc="t0"),
+        OptimizerInput(params=None, kwargs={"maximize": True}, desc="maximize"),
         OptimizerInput(
             params=None, kwargs={"weight_decay": 0.1}, desc="nonzero weight_decay"
         ),
@@ -538,13 +539,42 @@ def optim_inputs_func_lbfgs(device=None):
 
 
 def optim_error_inputs_func_lbfgs(device, dtype):
-    return get_error_inputs_for_all_optims(device, dtype)
+    error_inputs = get_error_inputs_for_all_optims(device, dtype)
+    if str(device) == "cpu":
+        complex_param = torch.rand(2, 3, device=device, dtype=torch.complex64)
+        error_inputs += [
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[complex_param],
+                    kwargs=dict(),
+                    desc="complex not supported",
+                ),
+                error_type=ValueError,
+                error_regex="LBFGS doesn't support complex parameters",
+            ),
+        ]
+    return error_inputs
 
 
 # Weird story bro, NAdam and RAdam do not have maximize.
 def optim_inputs_func_nadam(device=None):
     cuda_supported_configs = [
         OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.9, "momentum_decay": 6e-3, "capturable": True},
+            desc="weight_decay, capturable",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "weight_decay": 0.9,
+                "momentum_decay": 6e-3,
+                "decoupled_weight_decay": True,
+                "capturable": True,
+            },
+            desc="decoupled_weight_decay, capturable",
+        ),
     ]
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
@@ -599,6 +629,26 @@ def optim_error_inputs_func_nadam(device, dtype):
 
 # Weird story bro, NAdam and RAdam do not have maximize.
 def optim_inputs_func_radam(device=None):
+    cuda_supported_configs = [
+        OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "capturable": True,
+                "weight_decay": 0.1,
+            },
+            desc="capturable, weight_decay",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "capturable": True,
+                "weight_decay": 0.1,
+                "decoupled_weight_decay": True,
+            },
+            desc="capturable, weight_decay, decoupled_weight_decay",
+        ),
+    ]
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 2e-3}, desc="non-default lr"),
@@ -611,7 +661,7 @@ def optim_inputs_func_radam(device=None):
             kwargs={"weight_decay": 0.1, "decoupled_weight_decay": True},
             desc="decoupled_weight_decay",
         ),
-    ]
+    ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
 
 def optim_error_inputs_func_radam(device, dtype):
@@ -828,6 +878,15 @@ def optim_error_inputs_func_sparseadam(device, dtype):
                 ),
                 error_type=ValueError,
                 error_regex="SparseAdam requires dense parameter tensors",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[torch.rand(2, 3, device=device, dtype=torch.complex64)],
+                    kwargs=dict(),
+                    desc="complex not supported",
+                ),
+                error_type=ValueError,
+                error_regex="SparseAdam does not support complex parameters",
             ),
         ]
     return error_inputs
@@ -1107,6 +1166,11 @@ optim_db: List[OptimizerInfo] = [
                 "test_forloop_goes_right_direction_multigpu",
             ),
             DecorateInfo(
+                skipIfTorchDynamo("Mismatched _foreach_addcdiv_ types, see #118159"),
+                "TestOptimRenewed",
+                "test_complex",
+            ),
+            DecorateInfo(
                 skipIfTorchDynamo(
                     "See https://github.com/pytorch/pytorch/issues/115607"
                 ),
@@ -1319,6 +1383,11 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction_multigpu",
             ),
+            DecorateInfo(
+                unittest.skip("Missing complex support, see #118148"),
+                "TestOptimRenewed",
+                "test_complex",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1439,6 +1508,104 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115607"
+                ),
+                "TestOptimRenewed",
+                "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        # previously atol=1e-7, rtol=1e-7
+                        torch.float64: tol(atol=1.5e-7, rtol=1.1e-7)
+                    }
+                ),
+                "TestOptimRenewed",
+                "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_deterministic",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/115607"
+                ),
+                "TestOptimRenewed",
+                "test_can_load_older_state_dict",
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                toleranceOverride(
+                    {  # previously atol=5-05, rtol=0.001, https://github.com/pytorch/pytorch/issues/116202
+                        torch.float32: tol(atol=5e-04, rtol=0.01),
+                    }
+                ),
+                "TestOptimRenewed",
+                "test_mixed_device_dtype",
+                active_if=TEST_WITH_TORCHDYNAMO,
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_complex",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_step_is_noop_when_params_have_no_grad",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_load_nontensor_step",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_param_groups_weight_decay",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_param_groups_lr",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_step_is_noop_for_zero_grads",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_with_cuda_params",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_mixed_device_dtype",
             ),
         ),
     ),
@@ -1746,6 +1913,11 @@ optim_db: List[OptimizerInfo] = [
                 skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
+            ),
+            DecorateInfo(
+                unittest.skip("Missing complex support, see #118153"),
+                "TestOptimRenewed",
+                "test_complex",
             ),
         ),
     ),

@@ -516,7 +516,9 @@ class ExportedProgram:
                 old_input_spec = old_signature.input_specs[i]
                 arg = (
                     old_input_spec.arg
-                    if isinstance(old_input_spec.arg, ConstantArgument)
+                    if isinstance(
+                        old_input_spec.arg, (ConstantArgument, CustomObjArgument)
+                    )
                     else type(old_input_spec.arg)(node.name)
                 )
                 new_input_specs.append(
@@ -534,7 +536,9 @@ class ExportedProgram:
                 old_output_spec = old_signature.output_specs[i]
                 arg = (
                     old_output_spec.arg
-                    if isinstance(old_output_spec.arg, ConstantArgument)
+                    if isinstance(
+                        old_output_spec.arg, (ConstantArgument, CustomObjArgument)
+                    )
                     else type(old_output_spec.arg)(node.name)
                 )
                 new_output_specs.append(
@@ -622,7 +626,7 @@ def _get_updated_range_constraints(
         for k, v in shape_env.var_to_range.items()
         if k not in shape_env.replacements
     }
-    for k, v in shape_env.runtime_var_to_range.items():
+    for k, v in shape_env.var_to_range.items():
         if k not in shape_env.replacements:
             range_constraints[k] = v
     return range_constraints

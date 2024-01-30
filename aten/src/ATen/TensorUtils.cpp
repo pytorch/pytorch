@@ -343,12 +343,13 @@ inline c10::optional<ResultVec> computeStride_impl(
   // This could perhaps be combined with the below code, but the complexity
   // didn't seem worth it.
   const Numel numel = c10::multiply_integers(oldshape);
-  if (numel == 0 && oldshape.equals(newshape)) {
+  bool zero_numel = TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(numel, 0));
+  if (zero_numel && oldshape.equals(newshape)) {
     return toResult(oldstride);
   }
 
   ResultVec newstride(newshape.size());
-  if (numel == 0) {
+  if (zero_numel) {
     for (int64_t view_d = newshape.size() - 1; view_d >= 0; view_d--) {
       if (view_d == (int64_t)(newshape.size() - 1)) {
         newstride[view_d] = 1;
@@ -370,10 +371,10 @@ inline c10::optional<ResultVec> computeStride_impl(
     tensor_numel *= oldshape[tensor_d];
     // if end of tensor size chunk, check view
     if ((tensor_d == 0) ||
-        (oldshape[tensor_d - 1] != 1 &&
+        (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(oldshape[tensor_d - 1], 1)) &&
          oldstride[tensor_d - 1] != tensor_numel * chunk_base_stride)) {
       while (view_d >= 0 &&
-            (view_numel < tensor_numel || newshape[view_d] == 1)) {
+            (TORCH_GUARD_SIZE_OBLIVIOUS(sym_lt(view_numel, tensor_numel)) || TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(newshape[view_d], 1)))) {
         newstride[view_d] = view_numel * chunk_base_stride;
         view_numel *= newshape[view_d];
         view_d--;
