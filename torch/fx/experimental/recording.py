@@ -275,6 +275,7 @@ def replay_shape_env_events(events):
             # change after each event is replayed.
             event.run(shape_env)
         except Exception as e:
+            raise
             raise RuntimeError(f"failed when running event: {event}") from e
 
     return shape_env

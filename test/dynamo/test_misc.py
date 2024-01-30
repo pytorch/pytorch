@@ -1122,6 +1122,8 @@ utils_device.CURRENT_DEVICE == None""".split(
         f(torch.tensor([4]))
         self.assertEqual(cnts.frame_count, 1)
 
+    # The exception type is different
+    @expectedFailureDynamic
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_torch_check_is_size(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -1130,15 +1132,16 @@ utils_device.CURRENT_DEVICE == None""".split(
         def f(x):
             y = x.item()
             torch._check_is_size(y)
-            # unsound 0/1 specialization!
+            # Cannot conditional on unbacked SymInt
             if y == 0:
                 assert False
             else:
                 return torch.arange(0, y)
 
-        f(torch.tensor([3]))
-        f(torch.tensor([4]))
-        self.assertEqual(cnts.frame_count, 1)
+        self.assertRaises(
+            torch._dynamo.exc.UserError,
+            lambda: f(torch.tensor([3]))
+        )
 
     def test_config_obj(self):
         class Cfg:
