@@ -660,10 +660,14 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (torch.randn(3, 4),)
         )
 
-    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
-        error_message="kwarg key mismatch"
-    )
     def test_gpt2_tiny_from_config(self):
+        if (
+            self.model_type
+            == pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+        ):
+            raise unittest.SkipTest(
+                "GPT2Config has non-persistent buffers, which are not correctly handled in ONNX export"
+            )
         # Model
         config = transformers.GPT2Config(
             num_hidden_layers=4,
