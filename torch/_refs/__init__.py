@@ -4875,16 +4875,16 @@ def arange(
     # other integral dtypes we don't. Weird... but needed to match ATen shapes.
     if dtype == torch.int64:
         # Uses floordiv to avoid ceil in inductor.
-        sgn = bool(xstep > 0) - bool(xstep < 0)  # type: ignore[possibly-undefined]
-        length = (xend - xstart + xstep - sgn) // xstep  # type: ignore[possibly-undefined]
+        sgn = bool(xstep > 0) - bool(xstep < 0)
+        length = (xend - xstart + xstep - sgn) // xstep
     else:
         length = math.ceil((end - start) / step)
 
     if is_integer:
         return prims.iota(
             length,
-            start=xstart,  # type: ignore[possibly-undefined]
-            step=xstep,  # type: ignore[possibly-undefined]
+            start=xstart,
+            step=xstep,
             dtype=dtype,
             device=device,
             requires_grad=requires_grad,
