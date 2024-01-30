@@ -40,6 +40,7 @@ from torch._C._distributed_c10d import (
     _unregister_all_process_groups,
     _unregister_process_group,
 )
+from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
 from .constants import default_pg_timeout, default_pg_nccl_timeout
 from .c10d_logger import _exception_logger, _time_logger
 from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
@@ -1191,6 +1192,8 @@ def init_process_group(
         "cpu:gloo,cuda:custom_backend".
 
     """
+    set_pytorch_distributed_envs_from_justknobs()
+
     global _world
 
     global _backend
@@ -1942,9 +1945,9 @@ def _coalescing_manager(
         work = group._end_coalescing(device)
 
     if async_ops:
-        cm.append(work)
+        cm.append(work)  # type: ignore[possibly-undefined]
     else:
-        work.wait()
+        work.wait()  # type: ignore[possibly-undefined]
 
 
 def batch_isend_irecv(p2p_op_list):
@@ -2457,7 +2460,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     # All ranks call gather with equal-sized tensors.
     gather(
         input_tensor,
-        gather_list=output_tensors if my_rank == dst else None,
+        gather_list=output_tensors if my_rank == dst else None,  # type: ignore[possibly-undefined]
         dst=dst,
         group=group,
     )
@@ -2556,7 +2559,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
     # Note: torch.cat will do an extra memory copy to the current device, if the tensor_list
     # has only one element, we can skip the copy.
     if my_rank == src:
-        if len(tensor_list) == 1:
+        if len(tensor_list) == 1:  # type: ignore[possibly-undefined]
             object_tensor = tensor_list[0]
         else:
             object_tensor = torch.cat(tensor_list)
@@ -2659,8 +2662,8 @@ def scatter_object_list(
     # Src rank broadcasts the maximum tensor size. This is because all ranks are
     # expected to call into scatter() with equal-sized tensors.
     if my_rank == src:
-        max_tensor_size = max(tensor_sizes)
-        for tensor in tensor_list:
+        max_tensor_size = max(tensor_sizes)  # type: ignore[possibly-undefined]
+        for tensor in tensor_list:  # type: ignore[possibly-undefined]
             tensor.resize_(max_tensor_size)
     else:
         max_tensor_size = torch.tensor([0], dtype=torch.long, device=pg_device)
@@ -2670,7 +2673,7 @@ def scatter_object_list(
     output_tensor = torch.empty(max_tensor_size.item(), dtype=torch.uint8, device=pg_device)
     scatter(
         output_tensor,
-        scatter_list=None if my_rank != src else tensor_list,
+        scatter_list=None if my_rank != src else tensor_list,  # type: ignore[possibly-undefined]
         src=src,
         group=group,
     )
@@ -2679,7 +2682,7 @@ def scatter_object_list(
     obj_tensor_size = torch.tensor([0], dtype=torch.long, device=pg_device)
     scatter(
         obj_tensor_size,
-        scatter_list=None if my_rank != src else tensor_sizes,
+        scatter_list=None if my_rank != src else tensor_sizes,  # type: ignore[possibly-undefined]
         src=src,
         group=group,
     )
