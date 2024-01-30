@@ -37,7 +37,7 @@ template <typename T>
 __inline__ __device__ T WarpReduceMax(T val) {
 #pragma unroll
   for (int offset = (C10_WARP_SIZE >> 1); offset > 0; offset >>= 1) {
-    val = max(val, WARP_SHFL_DOWN(val, offset));
+    val = max_propagate_nan(val, WARP_SHFL_DOWN(val, offset));
   }
   return val;
 }

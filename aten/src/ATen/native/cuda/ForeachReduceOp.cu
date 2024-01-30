@@ -62,7 +62,7 @@ struct LpNormFunctor {
         for (int ii = 0; ii < kILP; ii++) {
           opmath_t next = static_cast<opmath_t>(r_x[ii]);
           if constexpr (norm_type == NormType::LInf) {
-            vals[ii] = ::max(vals[ii], ::abs(next));
+            vals[ii] = max_propagate_nan(vals[ii], ::abs(next));
           } else {
             vals[ii] += norm_type == NormType::L1 ? ::abs(next) : next * next;
           }
@@ -77,7 +77,7 @@ struct LpNormFunctor {
           if (i < n && i < chunk_size) {
             opmath_t next = static_cast<opmath_t>(x[i]);
             if constexpr (norm_type == NormType::LInf) {
-              vals[ii] = ::max(vals[ii], ::abs(next));
+              vals[ii] = max_propagate_nan(vals[ii], ::abs(next));
             } else {
               vals[ii] += norm_type == NormType::L1 ? ::abs(next) : next * next;
             }
@@ -89,7 +89,7 @@ struct LpNormFunctor {
     auto val = opmath_t(0);
     for (int i = 0; i < kILP; i++) {
       if constexpr (norm_type == NormType::LInf) {
-        val = ::max(val, vals[i]);
+        val = max_propagate_nan(val, vals[i]);
       } else {
         val += vals[i];
       }
@@ -121,7 +121,7 @@ __global__ void lpnorm_cleanup(
   opmath_t val = 0;
   for (int i = threadIdx.x; i < max_chunks_per_tensor; i += blockDim.x) {
     if constexpr (norm_type == NormType::LInf) {
-      val = ::max(val, output_this_tensor[i]);
+      val = max_propagate_nan(val, output_this_tensor[i]);
     } else {
       val += output_this_tensor[i];
     }
