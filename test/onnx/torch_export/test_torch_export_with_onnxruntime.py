@@ -203,8 +203,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     def test_exported_program_as_input_lifting_buffers_mutation(self):
-        # non-persistent buffers not currently fed correctly in io_adapter.py
-        for persistent in (True,):
+        for persistent in (True, False):
 
             class CustomModule(torch.nn.Module):
                 def __init__(self):
