@@ -279,16 +279,23 @@ def inverse_view_name(f: NativeFunction) -> str:
     return f"{copy_variant}{overload}_inverse"
 
 
-# e.g. as_strided -> AsStridedViewFunc
-def view_func_name(f: NativeFunction, include_namespace: bool = False) -> str:
+# e.g. as_strided -> AsStridedViewFunc for camel case or
+# as_strided_view_func otherwise
+def view_func_name(
+    f: NativeFunction, include_namespace: bool = False, camel_case: bool = True
+) -> str:
     name = f.func.name.unambiguous_name()
-    is_private = name.startswith("_")
-    camel_case = "".join([p.title() for p in name.replace(".", "_").split("_")])
-    if is_private:
-        # put the leading underscore back in
-        camel_case = f"_{camel_case}"
+    view_func_name = f"{name.replace('.', '_')}_view_func"
+    if camel_case:
+        is_private = view_func_name.startswith("_")
+        view_func_name = "".join(
+            [p.title() for p in view_func_name.replace(".", "_").split("_")]
+        )
+        if is_private:
+            # put the leading underscore back in
+            view_func_name = f"_{view_func_name}"
     namespace = "torch::autograd::generated::" if include_namespace else ""
-    return f"{namespace}{camel_case}ViewFunc"
+    return f"{namespace}{view_func_name}"
 
 
 def extract_bindings(f: NativeFunction) -> List[Binding]:
