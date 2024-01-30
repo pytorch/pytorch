@@ -1196,7 +1196,7 @@ class PatternMatcherPass:
                     if (
                         self.prevent_match_across_mutations
                         and is_match(m)
-                        and len(set(map(get_mutation_region_id_partial, m.nodes))) != 1
+                        and len(set(map(get_mutation_region_id_partial, m.nodes))) != 1  # type: ignore[possibly-undefined]
                     ):
                         continue
                     if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:

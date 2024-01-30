@@ -607,7 +607,7 @@ def register_pointwise(
         fn,
         override_return_dtype=override_return_dtype,
         override_fn_when_input_bool=override_fn_when_input_bool,
-        override_fn_when_cuda_float64=fn_libdevice if use_libdevice_for_f64 else None,
+        override_fn_when_cuda_float64=fn_libdevice if use_libdevice_for_f64 else None,  # type: ignore[possibly-undefined]
         allow_alpha=allow_alpha,
     )
     fn = register_lowering(
@@ -3622,8 +3622,8 @@ def _reflection_padnd_backward(grad_output, x, padding):
                     out = right_reflect[i]
                     index_range = (xyz[i], dhw[i] - padding_right[i], dhw[i] - 1)
 
-                outs.append(out)
-                index_ranges.append(index_range)
+                outs.append(out)  # type: ignore[possibly-undefined]
+                index_ranges.append(index_range)  # type: ignore[possibly-undefined]
 
             grad = accumulate(grad, outs, index_ranges)
 

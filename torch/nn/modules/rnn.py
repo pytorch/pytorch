@@ -575,8 +575,8 @@ class RNN(RNNBase):
             output_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
             return output_packed, self.permute_hidden(hidden, unsorted_indices)
 
-        if not is_batched:
-            output = output.squeeze(batch_dim)
+        if not is_batched:  # type: ignore[possibly-undefined]
+            output = output.squeeze(batch_dim)  # type: ignore[possibly-undefined]
             hidden = hidden.squeeze(1)
 
         return output, self.permute_hidden(hidden, unsorted_indices)
@@ -888,8 +888,8 @@ class LSTM(RNNBase):
             output_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
             return output_packed, self.permute_hidden(hidden, unsorted_indices)
         else:
-            if not is_batched:
-                output = output.squeeze(batch_dim)
+            if not is_batched:  # type: ignore[possibly-undefined]
+                output = output.squeeze(batch_dim)  # type: ignore[possibly-undefined]
                 hidden = (hidden[0].squeeze(1), hidden[1].squeeze(1))
             return output, self.permute_hidden(hidden, unsorted_indices)
 
@@ -1111,8 +1111,8 @@ class GRU(RNNBase):
             output_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
             return output_packed, self.permute_hidden(hidden, unsorted_indices)
         else:
-            if not is_batched:
-                output = output.squeeze(batch_dim)
+            if not is_batched:  # type: ignore[possibly-undefined]
+                output = output.squeeze(batch_dim)  # type: ignore[possibly-undefined]
                 hidden = hidden.squeeze(1)
 
             return output, self.permute_hidden(hidden, unsorted_indices)

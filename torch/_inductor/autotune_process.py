@@ -440,25 +440,25 @@ class BenchmarkRequest:
             output_tensor = self.output_tensor_meta.to_tensor()
 
         if debug:
-            create_tensor_elapse = time.time() - start_ts
+            create_tensor_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             start_ts = time.time()
 
         fn = self.make_run_fn(*input_tensors, output_tensor=output_tensor)
 
         if debug:
-            load_elapse = time.time() - start_ts
+            load_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             start_ts = time.time()
 
         out = do_bench(fn)
         torch.cuda.synchronize()  # shake out any CUDA errors
 
         if debug:
-            bench_elapse = time.time() - start_ts
+            bench_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             log.debug(
                 "InChildProcess %s: load %f, create tensor %f, bench %f",
                 str(self),
-                load_elapse,
-                create_tensor_elapse,
+                load_elapse,  # type: ignore[possibly-undefined]
+                create_tensor_elapse,  # type: ignore[possibly-undefined]
                 bench_elapse,
             )
         self.cleanup_run_fn()

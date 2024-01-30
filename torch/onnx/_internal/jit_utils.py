@@ -293,7 +293,7 @@ def _create_node(
             for _ in range(1, n_outputs):
                 node.addOutput()
 
-    node_ouputs = tuple(node.outputs())
+    node_ouputs = tuple(node.outputs())  # type: ignore[possibly-undefined]
     assert len(node_ouputs) == n_outputs
 
     aten = domain_op.startswith("aten::")

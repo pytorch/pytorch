@@ -254,7 +254,7 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
         if assert_compiled:
             hits = compiled_fn.hits
         out = model(*args)
-        if assert_compiled and compiled_fn.hits == hits:
+        if assert_compiled and compiled_fn.hits == hits:  # type: ignore[possibly-undefined]
             raise RuntimeError("failed to use the compiled function")
         if not isinstance(out, tuple):
             out = (out,)
@@ -280,7 +280,7 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
         assert model.has_trace_for(*args)
 
     if is_module:
-        model.load_state_dict(saved_state)
+        model.load_state_dict(saved_state)  # type: ignore[possibly-undefined]
     compiled_outs, compiled_grads = run_fwd_bwd(args, assert_compiled=True)
 
     _verify_equal(uncompiled_outs, compiled_outs)

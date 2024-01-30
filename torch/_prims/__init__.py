@@ -246,10 +246,10 @@ def TensorMeta(
         assert dtype is not None
         assert device is not None
 
-    shape = inferred_shape if shape is None else tuple(shape)
-    strides = inferred_strides if strides is None else tuple(strides)
-    dtype = inferred_dtype if dtype is None else dtype
-    device = inferred_device if device is None else device
+    shape = inferred_shape if shape is None else tuple(shape)  # type: ignore[possibly-undefined]
+    strides = inferred_strides if strides is None else tuple(strides)  # type: ignore[possibly-undefined]
+    dtype = inferred_dtype if dtype is None else dtype  # type: ignore[possibly-undefined]
+    device = inferred_device if device is None else device  # type: ignore[possibly-undefined]
 
     if isinstance(device, str):
         device = torch.device(device)

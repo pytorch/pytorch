@@ -253,7 +253,7 @@ class ExportedProgram:
                     user_args, self.call_spec.in_spec, exact_structural_match=True
                 )  # type: ignore[assignment]
             except Exception:
-                _, received_spec = pytree.tree_flatten(user_args)
+                _, received_spec = pytree.tree_flatten(user_args)  # type: ignore[possibly-undefined]
                 raise TypeError(  # noqa: TRY200
                     "Trying to flatten user inputs with exported input tree spec: \n"
                     f"{self.call_spec.in_spec}\n"

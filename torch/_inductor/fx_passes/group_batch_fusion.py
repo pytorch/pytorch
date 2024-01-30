@@ -170,9 +170,9 @@ class PostGradBatchLinearFusion(BatchFusion):
                 input, weight = node.args
                 bias = None
             batch_nodes.append(node)
-            batch_inputs.append(input)
-            batch_weights.append(weight)
-            batch_biases.append(bias)
+            batch_inputs.append(input)  # type: ignore[possibly-undefined]
+            batch_weights.append(weight)  # type: ignore[possibly-undefined]
+            batch_biases.append(bias)  # type: ignore[possibly-undefined]
 
         with graph.inserting_before(subset[-1]):
             fused_inputs = decompose_stack(graph, batch_inputs)
@@ -191,7 +191,7 @@ class PostGradBatchLinearFusion(BatchFusion):
                     new_bias_add = graph.call_function(
                         aten.add, args=((batch_biases[i], new_mm))
                     )
-            new_mm_cont = new_bias_add if has_bias else new_mm
+            new_mm_cont = new_bias_add if has_bias else new_mm  # type: ignore[possibly-undefined]
             original_mm.replace_all_uses_with(new_mm_cont)
             new_mm_cont.meta.update(original_mm.meta)
             graph.erase_node(original_mm)

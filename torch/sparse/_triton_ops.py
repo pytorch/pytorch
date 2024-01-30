@@ -1662,7 +1662,7 @@ if has_triton():
         acc_block = tl.zeros((TILE_M, TILE_N), dtype=dot_out_dtype)
 
         if is_compressed:
-            A_ptr += r0 * blocks_stride_P
+            A_ptr += r0 * blocks_stride_P  # type: ignore[possibly-undefined]
             for _ in range(nnz):
                 q = tl.load(q_ptr)
                 B = tl.load(B_ptr + q)
@@ -1889,7 +1889,7 @@ if has_triton():
 
         # alpha is never 0
         if beta_is_nonzero:
-            output_acc_block = tl.load(input_ptrs).to(acc_dtype)
+            output_acc_block = tl.load(input_ptrs).to(acc_dtype)  # type: ignore[possibly-undefined]
             if not (beta_is_one and alpha_is_one):
                 beta_alpha = beta / alpha
                 output_acc_block *= beta_alpha
