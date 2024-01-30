@@ -4173,8 +4173,9 @@ def mark_node_as_mutating(cur_buffer, *mutated_ops):
     indicates to the scheduler that these ops depend on cur_buffer.
     """
     for op in mutated_ops:
-        assert isinstance(op, (TensorBox, Buffer, BaseView)), op
+        assert isinstance(op, IRNode), op
         V.graph.mark_buffer_mutated(op.get_name())
+        assert hasattr(op, "layout")
         MutationOutput(op.layout, op, cur_buffer)
 
 
