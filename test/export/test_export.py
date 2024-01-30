@@ -2870,6 +2870,25 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         # this doesn't work today
         gm_unflat_strict = unflatten(ep)
 
+    def test_nonstrict_retrace_preserves_metadata(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        inp = torch.randn(4, 4)
+        m = MyModule()
+        ep = torch.export.export(m, (inp,), {}, strict=False)
+        # retrace
+        ep2 = torch.export.export(ep.module(), (inp,), {}, strict=False)
+
+        for n1, n2 in zip(list(ep.graph.nodes), list(ep2.graph.nodes)):
+            self.assertEqual(n1.meta.get("stack_trace"), n2.meta.get("stack_trace"))
+
+
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
     def test_scaled_dot_product_attention_cpu(self):
