@@ -8539,7 +8539,7 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
             make((6, 64)).view(-1, 8, 8).unsqueeze(0),
             bias=None,
             cu_seqlens_q=torch.tensor((0, 2, 4, 6, 8), dtype=torch.int32, device=device),
-            cu_seqlens_k=torch.tensor((0, 1, 4, 5, 6), dtype=torch.int32, device=device),
+            cu_seqlens_k=torch.tensor((0, 1, 3, 5, 6), dtype=torch.int32, device=device),
             max_seqlen_q=2,
             max_seqlen_k=2,
             dropout_p=0.0,
