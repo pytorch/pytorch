@@ -401,22 +401,24 @@ def assert_ref_meta_equal(test_case, func, meta_rs, rs, msg_callable):
         if not isinstance(r, torch.Tensor):
             continue
         test_assert(isinstance(meta_r, torch.Tensor), f"but real {i}th result is Tensor")
-        test_assert(meta_r.dtype == r.dtype, f"but real dtype was {r.dtype}")
-        test_assert(meta_r.shape == r.shape, f"but real shape was {r.shape}")
+        test_assert(meta_r.dtype == r.dtype, f"for element {i}, was {meta_r.dtype} but real dtype was {r.dtype}")
+        test_assert(meta_r.shape == r.shape, f"for element {i}, was {meta_r.shape} but real shape was {r.shape}")
         # See https://github.com/pytorch/pytorch/issues/78050
         if should_check_strides(func) == CheckStrides.ALL:
             same_strides, _ = torch._prims_common.check_all_strides(meta_r, r)
-            test_assert(same_strides, f"but real stride was {r.stride()}")
+            test_assert(same_strides, f"for element {i}, was {meta_r.stride()} but real stride was {r.stride()}")
         elif should_check_strides(func) == CheckStrides.SIGNIFICANT:
             same_strides, _ = torch._prims_common.check_significant_strides(meta_r, r)
-            test_assert(same_strides, f"but real stride was {r.stride()}")
+            test_assert(same_strides, f"for element {i}, was {meta_r.stride()} but real stride was {r.stride()}")
         test_assert(
             meta_r.storage_offset() == r.storage_offset(),
-            f"but real storage_offset was {r.storage_offset()}")
-        test_assert(meta_r.requires_grad == r.requires_grad, f"but real requires_grad was {r.requires_grad}")
+            f"for element {i}, was {meta_r.storage_offset()} but real storage_offset was {r.storage_offset()}")
+        test_assert(meta_r.requires_grad == r.requires_grad,
+                    f"for element {i}, was {meta_r.requires_grad} but real requires_grad was {r.requires_grad}")
         if func not in CHECK_CONJ_SKIPS:
-            test_assert(meta_r.is_conj() == r.is_conj(), f"but real is_conj was {r.is_conj()}")
-        test_assert(meta_r.is_neg() == r.is_neg(), f"but real is_neg was {r.is_neg()}")
+            test_assert(meta_r.is_conj() == r.is_conj(),
+                        f"for element {i}, was {meta_r.is_conj()} but real is_conj was {r.is_conj()}")
+        test_assert(meta_r.is_neg() == r.is_neg(), f"for element {i}, was {meta_r.is_neg()} but real is_neg was {r.is_neg()}")
 
 
 # This environment variable controls whether or not we print expected failure

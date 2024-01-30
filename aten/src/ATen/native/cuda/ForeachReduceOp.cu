@@ -267,7 +267,8 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
   int i = 0;
   for (const auto& t : tensors) {
     if (t.numel() != 0) {
-      result.emplace_back(ret_per_tensor[i]);
+      result.emplace_back(at::zeros({}, ret_per_tensor.options())
+                              .fill_(ret_per_tensor[i].item()));
       i++;
     } else {
       result.emplace_back(at::zeros({}, options));

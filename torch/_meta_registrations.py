@@ -3179,6 +3179,24 @@ def _meta_foreach_inplace(*args, _scalar_op=None, **kwargs):
     return
 
 
+@register_meta([aten._foreach_norm])
+def meta__foreach_norm(self, ord=2):
+    torch._check(
+        isinstance(self, List),
+        lambda: f"self must be a tensor list but got {type(self)}",
+    )
+    n_tensors = len(self)
+    torch._check(
+        n_tensors > 0,
+        lambda: "input tensor list must not be empty.",
+    )
+    res = [t.new_empty(()) for t in self]
+    for i, t in enumerate(res):
+        if t.is_complex():
+            res[i] = t.to(corresponding_real_dtype(t.dtype))
+    return res
+
+
 @register_meta([aten._foreach_pow.ScalarAndTensor])
 def meta__foreach_pow_scalar_and_tensor(self, exponent):
     # Only foreach_pow has a ScalarAndTensor method and needs special
