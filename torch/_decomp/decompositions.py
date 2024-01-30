@@ -1253,13 +1253,15 @@ def split_with_sizes(
 
 
 # out_wrapper currently does not allow optional outputs
-@register_decomposition([aten.split_with_sizes_copy.default, aten.split_with_sizes_copy.out])
+@register_decomposition(
+    [aten.split_with_sizes_copy.default, aten.split_with_sizes_copy.out]
+)
 def split_with_sizes_copy(
     self: Tensor,
     split_sizes: List[int],
     dim: int = 0,
     out: Optional[List[Tensor]] = None,
-) -> List[Tensor]:
+) -> Optional[List[Tensor]]:
     splits = split_with_sizes(self, split_sizes, dim=dim)
     if out is None:
         return [s.clone() for s in splits]
@@ -1267,6 +1269,7 @@ def split_with_sizes_copy(
         for output, split in zip(out, splits):
             _maybe_resize_out(output, split.shape)
             _safe_copy_out(copy_from=split, copy_to=output, exact_dtype=True)
+        return None
 
 
 @register_decomposition(aten.unsafe_split.Tensor)
