@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import abc
 import collections
 import contextlib
@@ -63,7 +65,7 @@ from ..utils import (
     common_constant_types,
     get_fake_value,
     get_static_address_type,
-    is_function,
+    is_function_or_wrapper,
     is_namedtuple,
     is_typing,
     is_utils_checkpoint,
@@ -74,6 +76,7 @@ from ..utils import (
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
+    unwrap_if_wrapper,
     wrap_fake_exception,
 )
 
@@ -149,7 +152,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import TorchInGraphFunctionVariable
+from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
@@ -697,7 +700,12 @@ class VariableBuilder:
                 ],
                 source=self.source,
             )
-        elif trace_rules.lookup(value) is not None:
+        elif TorchCtxManagerClassVariable.is_matching_cls(value):
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return TorchCtxManagerClassVariable(value, source=self.source)
+        elif (is_function_or_wrapper(value) or callable(value)) and trace_rules.lookup(
+            value
+        ) is not None:
             if is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup(value).create_with_source(
@@ -713,11 +721,12 @@ class VariableBuilder:
                 source=self.source,
             )
         elif (
-            is_function(value)
+            is_function_or_wrapper(value)
             and skipfiles.check(value, is_inlined_call=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
             and not inspect.getattr_static(value, "__script_if_tracing_wrapper", False)
         ):
+            value = unwrap_if_wrapper(value)
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return SkipFilesVariable(
                 value,
@@ -784,7 +793,6 @@ class VariableBuilder:
                 ),
             )
         else:
-            # breakpoint()
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = UserDefinedObjectVariable(value, source=self.source)
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
@@ -1507,6 +1515,9 @@ def wrap_fx_proxy_cls(
         torch._utils._element_size,
         torch.seed,
         operator.mod,
+        torch._C._functorch._vmap_increment_nesting,
+        torch._C._functorch._vmap_decrement_nesting,
+        torch._functorch.vmap._validate_and_get_batch_size,
         # some mac builds are missing torch.distributed.get_rank()
         getattr(torch.distributed, "get_rank", _missing),
         getattr(torch.distributed, "get_world_size", _missing),
@@ -1776,10 +1787,11 @@ def wrap_to_fake_tensor_and_record(
             symbolic_context = parent_context.inner_contexts[inner_context_name]
 
         log.debug(
-            "wrap_to_fake %s %s %s",
+            "wrap_to_fake %s %s %s %s",
             source.name(),
             tuple(e.shape),
             symbolic_context,
+            type(e),
         )
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
@@ -1809,7 +1821,11 @@ def wrap_to_fake_tensor_and_record(
             "stride": fake_e.stride(),
         }
 
-        if is_tensor and not (static_shapes and source.is_nn_module()):
+        if (
+            is_tensor
+            and not (static_shapes and source.is_nn_module())
+            and not is_constant_source(source)
+        ):
             tx.output.tracked_fakes.append(
                 TrackedFake(fake_e, source, symbolic_context)
             )
@@ -1843,7 +1859,10 @@ class SourcelessBuilder:
             return SourcelessBuilder.wrap_constant_literal(value)
         elif is_builtin_callable(value):
             return BuiltinVariable(value)
-        elif trace_rules.lookup(value) is not None:
+        elif (is_function_or_wrapper(value) or callable(value)) and trace_rules.lookup(
+            value
+        ) is not None:
+            value = unwrap_if_wrapper(value)
             if is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup(value)(value)

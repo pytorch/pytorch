@@ -25,9 +25,9 @@ def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
         if isinstance(x, Tensor)
     )
     from torch._functorch._aot_autograd.schemas import SubclassCreationMeta
+
     any_subclass_outputs = any(
-        type(x) is SubclassCreationMeta
-        for x in fw_metadata.subclass_fw_graph_out_meta
+        type(x) is SubclassCreationMeta for x in fw_metadata.subclass_fw_graph_out_meta
     )
     # This tells us whether or not we need to perform any unwrapping/wrapping of tensor subclasses at runtime.
     return any_subclass_args or any_subclass_outputs
