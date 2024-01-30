@@ -761,10 +761,10 @@ def round(x, decimals=0):
         return make_pointwise(fn)(x)
     elif decimals > 0:
         ten_pow = 10.0**decimals
-        return div(round(mul(a, ten_pow)), ten_pow)
+        return div(round(mul(x, ten_pow)), ten_pow)
     else:
-        ten_pow = 10.0**(-decimals)
-        return mul(round(div(a, ten_pow)), ten_pow)
+        ten_pow = 10.0 ** (-decimals)
+        return mul(round(div(x, ten_pow)), ten_pow)
 
 
 @register_lowering(aten.trunc)
