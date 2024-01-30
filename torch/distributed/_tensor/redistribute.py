@@ -252,6 +252,7 @@ class Redistribute(torch.autograd.Function):
         input: "dtensor.DTensor",
         device_mesh: DeviceMesh,
         placements: Tuple[Placement, ...],
+        force_wait: bool = False,
     ):
         current_spec = input._spec
         ctx.current_spec = current_spec
@@ -261,6 +262,8 @@ class Redistribute(torch.autograd.Function):
 
         local_tensor = input._local_tensor
         output = redistribute_local_tensor(local_tensor, current_spec, target_spec)
+        if force_wait:
+            output = torch.distributed._functional_collectives.wait_tensor(output)
 
         return dtensor.DTensor(
             output,
@@ -315,6 +318,7 @@ class Redistribute(torch.autograd.Function):
 
         return (
             output_dtensor,
+            None,
             None,
             None,
         )

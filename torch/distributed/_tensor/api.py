@@ -307,13 +307,14 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             Replicate() if isinstance(p, _Partial) else p for p in self.placements
         ]
         return self.redistribute(
-            device_mesh=self.device_mesh, placements=placements
+            device_mesh=self.device_mesh, placements=placements, force_wait=True
         )
 
     def __force_same_metadata__(self, metadata_tensor):
         return self.redistribute(
             device_mesh=self.device_mesh,
             placements=metadata_tensor.placements,
+            force_wait=True,
         )
 
     @classmethod
@@ -443,6 +444,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         self,
         device_mesh: Optional[DeviceMesh] = None,
         placements: Optional[Sequence[Placement]] = None,
+        force_wait: bool = False,
     ) -> "DTensor":
         """
         `redistribute` performs necessary collective operations that redistribute the current
@@ -489,7 +491,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             return self
 
         # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
-        return Redistribute.apply(self, device_mesh, placements)
+        return Redistribute.apply(self, device_mesh, placements, force_wait)
 
     def full_tensor(
         self, *, grad_placements: Optional[Sequence[Placement]] = None

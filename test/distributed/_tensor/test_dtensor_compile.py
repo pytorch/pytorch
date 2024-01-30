@@ -285,6 +285,23 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = opt_kwargs_fn(x)
         self.assertEqual(res, ref)
 
+    def test_dtensor_partial_placement_graph_output(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x):
+            return x + x
+
+        x = torch.randn(4, 4, requires_grad=True)
+        x_dt = DTensor.from_local(x, mesh, [_Partial()], run_check=False)
+
+        y = torch.randn(4, 4, requires_grad=True)
+        y_dt = DTensor.from_local(y, mesh, [Replicate()], run_check=False)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        tmp_dt = opt_fn(x_dt)
+        out_dt = torch.matmul(tmp_dt, y_dt)
+        out_dt.sum().backward()
+
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(1)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
