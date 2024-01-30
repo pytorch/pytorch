@@ -6,7 +6,6 @@ import torch
 
 from torch._export import ExportedProgram
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.export._tree_utils import reorder_kwargs
 from torch.utils._pytree import (
     _register_pytree_node,
     Context,
@@ -18,34 +17,11 @@ from torch.utils._pytree import (
     MappingKey,
     SequenceKey,
     ToDumpableContextFn,
-    tree_flatten_with_path,
     UnflattenFunc,
 )
 
 
 SERIALIZED_DATACLASS_TO_PYTHON_DATACLASS: Dict[str, Type[Any]] = {}
-
-
-@torch._dynamo.disable
-def _check_input_constraints_pre_hook(self, args, kwargs):
-    reordered_kwargs = reorder_kwargs(kwargs, self._in_spec)
-    flat_args_with_path, received_spec = tree_flatten_with_path(
-        (args, reordered_kwargs)
-    )
-
-    if received_spec != self._in_spec:
-        raise TypeError(  # noqa: TRY200
-            "Trying to flatten user inputs with exported input tree spec: \n"
-            f"{self._in_spec}\n"
-            "but actually got inputs with tree spec of: \n"
-            f"{received_spec}"
-        )
-
-    return _check_input_constraints_for_graph(
-        [node for node in self.graph.nodes if node.op == "placeholder"],
-        flat_args_with_path,
-        self.range_constraints,
-    )
 
 
 def _check_input_constraints_for_graph(

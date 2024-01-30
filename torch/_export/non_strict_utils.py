@@ -44,6 +44,9 @@ def key_path_to_source(kp: KeyPath) -> Source:
             source = GetItemSource(source, k.key)
         elif isinstance(k, GetAttrKey):
             source = AttrSource(source, k.name)
+        else:
+            raise ValueError(f"Unknown KeyEntry {k}")
+
     return source
 
 
