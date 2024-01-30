@@ -93,7 +93,7 @@ static PyObject* THXPStream_priority_range(
 
 static PyObject* THXPStream_query(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = (THXPStream*)_self;
+  auto* self = (THXPStream*)_self;
   return PyBool_FromLong(self->xpu_stream.query());
   END_HANDLE_TH_ERRORS
 }
@@ -101,7 +101,7 @@ static PyObject* THXPStream_query(PyObject* _self, PyObject* noargs) {
 static PyObject* THXPStream_synchronize(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil;
-    auto self = (THXPStream*)_self;
+    auto* self = (THXPStream*)_self;
     self->xpu_stream.synchronize();
   }
   Py_RETURN_NONE;
@@ -110,8 +110,8 @@ static PyObject* THXPStream_synchronize(PyObject* _self, PyObject* noargs) {
 
 static PyObject* THXPStream_eq(PyObject* _self, PyObject* _other) {
   HANDLE_TH_ERRORS
-  auto self = (THXPStream*)_self;
-  auto other = (THXPStream*)_other;
+  auto* self = (THXPStream*)_self;
+  auto* other = (THXPStream*)_other;
   return PyBool_FromLong(self->xpu_stream == other->xpu_stream);
   END_HANDLE_TH_ERRORS
 }
