@@ -179,9 +179,6 @@ def mps_ops_grad_modifier(ops):
         'nn.functional.conv_transpose1d': [torch.float16],
         'nn.functional.conv_transpose2d': [torch.float16],
         'nn.functional.conv_transpose3d': [torch.float16],
-        # Segfaults
-        'all': [torch.float16, torch.float32],
-        'any': [torch.float16, torch.float32],
     }
 
     MACOS_13_3_XFAILLIST_GRAD = {
@@ -239,7 +236,6 @@ def mps_ops_modifier(ops):
         'broadcast_tensors',
         'broadcast_to',
         'cfloat',
-        'chalf',
         'chunk',
         'clone',
         'contiguous',
@@ -266,11 +262,8 @@ def mps_ops_modifier(ops):
         'isreal',
         'item',
         'kron',
-        'linalg.inv',
-        'linalg.inv_ex',
         'linalg.diagonal',
         'linalg.svd',
-        'linalg.tensorinv',
         'linspace',
         'logspace',
         'linspacetensor_overload',
@@ -325,6 +318,82 @@ def mps_ops_modifier(ops):
         'vsplit',
         'zero_',
         'zeros',
+    }
+
+    AFTER_MACOS_14_0_SUPPORTED_COMPLEX_OPS = {
+        '__rdiv__',
+        'acos',
+        'acosh',
+        'all',
+        'any',
+        'argwhere',
+        'asin',
+        'atan',
+        'atanh',
+        'bool',
+        'cartesian_prod',
+        'cat',
+        'chalf',
+        'char',
+        'column_stack',
+        'combinations',
+        'constant_pad_nd',
+        'cos',
+        'cosh',
+        'count_nonzero',
+        'diff',
+        'dot',
+        'dstack',
+        'exp2',
+        'exp',
+        'expm1',
+        'fft.fftshift',
+        'fft.ifftshift',
+        'flip',
+        'fliplr',
+        'flipud',
+        'float',
+        'half',
+        'hstack',
+        'int',
+        'ldexp',
+        'log10',
+        'log1p',
+        'log2',
+        'log',
+        'logical_not',
+        'long',
+        'masked.prod',
+        'masked.sum',
+        'mean',
+        'neg',
+        'nn.functional.padconstant',
+        'nn.functional.padreflect',
+        'nn.functional.padreplicate',
+        'nn.functional.pixel_shuffle',
+        'nn.functional.pixel_unshuffle',
+        'nn.functional.tanhshrink',
+        'nonzero',
+        'prod',
+        'reciprocal',
+        'roll',
+        'rot90',
+        'rsqrt',
+        'short',
+        'sigmoid',
+        'sin',
+        'sinh',
+        'sqrt',
+        'stack',
+        'sum',
+        'sum_to_size',
+        'tan',
+        'tanh',
+        'trace',
+        'tril',
+        'triu',
+        'vstack',
+        'where',
     }
     # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
     MACOS_12_3_XFAILLIST = {
@@ -483,6 +552,12 @@ def mps_ops_modifier(ops):
         'linalg.vander': [torch.int64],
     }
 
+    MACOS_BEFORE_14_0_XFAILLIST = {
+        'cfloat': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8, torch.float16, torch.float32],
+        'chalf': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8, torch.float16, torch.float32],
+    }
+
+
     MACOS_AFTER_13_1_XFAILLIST = {
         # before macOS 13.2 it falls back to cpu and pass the forward pass
         'grid_sampler_2d': [torch.float32],  # Unsupported Border padding mode
@@ -626,7 +701,8 @@ def mps_ops_modifier(ops):
         'nn.functional.interpolatelinear': None,
         'nn.functional.interpolatetrilinear': None,
         # TODO: max_pool2d for integral types fails the numerical test
-        'nn.functional.max_pool2d': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'nn.functional.max_pool2d': (integral_types() if product_version < 14.0 else
+                                     [torch.int64, torch.int32, torch.int16, torch.int8]),
         'nn.functional.max_unpool1dgrad': None,
         'nn.functional.max_unpool2dgrad': None,
         'nn.functional.max_unpool3dgrad': None,
@@ -709,8 +785,6 @@ def mps_ops_modifier(ops):
         'log_normal': None,
         'bfloat16': None,
         'cdouble': None,
-        'cfloat': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8, torch.float16, torch.float32],
-        'chalf': None,
         'double': None,
         'nn.functional.softminwith_dtype': None,
         'log_softmaxwith_dtype': None,
@@ -862,8 +936,6 @@ def mps_ops_modifier(ops):
     }
 
     SKIPLIST = {
-        'all': None,
-        'any': None,
         # Unsupported
         # input types 'tensor<1x3x9x9xf16>' and 'tensor<1xf32>' are not broadcast compatible
         'nn.functional.avg_pool2d': [torch.float16],
@@ -906,8 +978,14 @@ def mps_ops_modifier(ops):
             addDecorator(op, DecorateInfo(
                          unittest.expectedFailure,
                          dtypes=MACOS_12_3_XFAILLIST[key]))
+
+        if key in MACOS_BEFORE_14_0_XFAILLIST and product_version < 14.0:
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=MACOS_BEFORE_14_0_XFAILLIST[key]))
+
         # If ops is not supported for complex types, expect it to fail
-        if key not in SUPPORTED_COMPLEX_OPS:
+        if key not in SUPPORTED_COMPLEX_OPS and (key not in AFTER_MACOS_14_0_SUPPORTED_COMPLEX_OPS or product_version < 14.0):
             addDecorator(op, DecorateInfo(unittest.expectedFailure, dtypes=[torch.complex32, torch.complex64]))
 
         yield op
@@ -937,8 +1015,6 @@ def mps_ops_error_inputs_modifier(ops):
 
         # unsupported complex dtypes
         'masked_fill',
-        'fft.hfft',
-        'fft.irfft',
 
         # MPS does not support tensor dimensions > 16
         'amax',
@@ -951,6 +1027,12 @@ def mps_ops_error_inputs_modifier(ops):
         # unimplemented
         'logcumsumexp',
     }
+    if product_version < 14.0:
+        XFAILLIST.update({
+            # unsupported complex dtypes
+            'fft.hfft',
+            'fft.irfft',
+        })
 
     def addDecorator(op, d) -> None:
         op.decorators = list(op.decorators) if op.decorators is not None else []
@@ -6769,6 +6851,40 @@ class TestMPS(TestCaseMPS):
         # test float16
         helper((2,), 0, [1], (1,), 6.0, x_dtype=torch.float16)
 
+    def test_index_64bit(self):
+        """ Test that index operations work for 4Gb+ tensors """
+        if product_version < 14.0:
+            raise unittest.SkipTest("Sonoma is needed for large tensors, see https://github.com/pytorch/pytorch/issues/84039")
+        # Cleanup memory
+        gc.collect()
+        torch.mps.empty_cache()
+        # Check that index operations work for 4+GB tensors
+        x = torch.rand(16000, 67120, device="mps")
+        self.assertGreater(x.element_size() * x.numel(), 2**32)
+        idx = torch.arange(0, 2, device="mps")
+        x_sampled = x[:, idx]
+        self.assertEqual(x[:, 0], x_sampled[:, 0])
+        # Reclaim memory after running the tests
+        del x
+        gc.collect()
+        torch.mps.empty_cache()
+
+    def test_mm_large(self):
+        """ Test that MM works for matrices with index larger than 32K """
+        x = torch.rand(10, 1, device="mps")
+        y = torch.rand(1, 32769, device="mps")
+        # This used to crash with:
+        # error: subRange.start (24576) is not less than length of dimension[0] (16384)
+        # See https://github.com/pytorch/pytorch/issues/116769#issuecomment-1888302095
+        self.assertNotEqual(torch.mm(x, y[:, 16384:32768]).abs().max().item(), 0.0)
+        # And below used to produce incorrect results
+        m, n, k = 1024, 1, 32769
+        x = torch.rand(m, n, device="mps")
+        y = torch.rand(n, k, device="mps")
+        z = torch.mm(x, y).to("cpu")
+        z_cpu = torch.mm(x.to("cpu"), y.to("cpu"))
+        self.assertEqual(z, z_cpu)
+
     # Test flip
     def test_flip(self):
         def helper(shape, dims):
@@ -11115,6 +11231,9 @@ class TestConsistency(TestCaseMPS):
         'nextafter',
         'native_layer_norm',
         'nn.functional.layer_norm',
+        'nn.functional.interpolate',
+        'nn.functional.upsample_bilinear',
+        'nn.functional.upsample_nearest',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',

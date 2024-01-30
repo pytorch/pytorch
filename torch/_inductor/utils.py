@@ -546,7 +546,10 @@ def sympy_str(expr: sympy.Expr) -> str:
     return str(expr)
 
 
-def sympy_symbol(name: str) -> sympy.Symbol:
+def sympy_index_symbol(name: str) -> sympy.Symbol:
+    """
+    Used to generate an integer-nonnegative symbol.
+    """
     # This should never be used for creating shape/stride symbols, as those
     # should all be allocated before Inductor.
     assert name[0] != "s"
@@ -555,18 +558,26 @@ def sympy_symbol(name: str) -> sympy.Symbol:
     return sympy.Symbol(name, integer=True, nonnegative=True)
 
 
-def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]) -> sympy.Expr:
+def sympy_subs(expr: sympy.Expr, replacements: Dict[sympy.Expr, Any]) -> sympy.Expr:
     """
-    xreplace is faster than subs, but is way more picky
+    When the passed replacement symbol v is a string, it is converted to a symbol with name v that
+    have the same replaced expression integer and nonnegative properties.
     """
 
-    def promote_strings(key):
-        if isinstance(key, str):
-            return sympy_symbol(key)
-        return key
+    def to_symbol(replaced, replacement):
+        assert isinstance(replaced, sympy.Expr)
+        if isinstance(replacement, str):
+            return sympy.Symbol(
+                replacement,
+                integer=replaced.is_integer,
+                nonnegative=replaced.is_nonnegative,
+            )
+        else:
+            return replacement
 
+    # xreplace is faster than subs, but is way more picky
     return sympy.sympify(expr).xreplace(
-        {promote_strings(k): promote_strings(v) for k, v in replacements.items()}
+        {k: to_symbol(k, v) for k, v in replacements.items()}
     )
 
 
@@ -576,6 +587,17 @@ def free_symbol_startswith(index: sympy.Expr, prefix: str):
 
 def free_symbol_has(index: sympy.Expr, pattern: str):
     return any(pattern in v.name for v in index.free_symbols)
+
+
+def is_symbolic(a: Any) -> bool:
+    return isinstance(a, torch.SymInt) or (
+        isinstance(a, torch.Tensor)
+        and any(is_symbolic(x) for x in itertools.chain(a.size(), a.stride()))
+    )
+
+
+def any_is_symbolic(*args: Any) -> bool:
+    return any(is_symbolic(a) for a in args)
 
 
 def has_incompatible_cudagraph_ops(gm):
@@ -1085,6 +1107,13 @@ def triton_config_to_hashable(cfg):
     return tuple(items)
 
 
+def parallel_num_threads():
+    threads = config.cpp.threads
+    if threads < 1:
+        threads = torch.get_num_threads()
+    return threads
+
+
 HAS_COLORAMA = True
 try:
     import colorama
@@ -1125,14 +1154,14 @@ def get_device_tflops(dtype):
         # Triton API change in https://github.com/openai/triton/pull/2293
         from triton.testing import nvsmi
 
-        cur_sm_clock = nvsmi(["clocks.current.sm"])[0]
+        sm_clock = nvsmi(["clocks.max.sm"])[0]
         if dtype in (torch.float16, torch.bfloat16):
-            return get_max_tensorcore_tflops(dtype, cur_sm_clock)
+            return get_max_tensorcore_tflops(dtype, sm_clock)
 
         if torch.backends.cuda.matmul.allow_tf32:
-            return get_max_tensorcore_tflops(torch.float32, cur_sm_clock)
+            return get_max_tensorcore_tflops(torch.float32, sm_clock)
         else:
-            return get_max_simd_tflops(torch.float32, cur_sm_clock)
+            return get_max_simd_tflops(torch.float32, sm_clock)
     else:
         if dtype in (torch.float16, torch.bfloat16):
             return get_max_tensorcore_tflops(dtype)
@@ -1196,37 +1225,3 @@ class Placeholder(enum.Enum):
     # The descriptive name of the triton kernel; when unique_kernel_names = False, this
     # placeholder will be replaced with a string with more information.
     DESCRIPTIVE_NAME = "DESCRIPTIVE_NAME"
-
-
-# A utility function for easier AOTInductor testing
-def aot_inductor_launcher(so_path: str, device: str):
-    if device == "cuda":
-        return f"""
-            #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
-
-            torch::inductor::AOTIModelContainerRunnerCuda runner("{so_path}");
-
-            std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
-                return runner.run(input_tensors);
-            }}
-
-            std::vector<std::string> get_call_spec() {{
-                return runner.get_call_spec();
-            }}
-        """
-    elif device == "cpu":
-        return f"""
-            #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
-
-            torch::inductor::AOTIModelContainerRunnerCpu runner("{so_path}");
-
-            std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
-                return runner.run(input_tensors);
-            }}
-
-            std::vector<std::string> get_call_spec() {{
-                return runner.get_call_spec();
-            }}
-        """
-    else:
-        raise RuntimeError(f"Unsupported device: {device}")

@@ -2,6 +2,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/Generator.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Tensor.h>
@@ -110,13 +111,21 @@ static void check_from_to_in_range(int64_t from, int64_t to_inc, caffe2::TypeMet
       WARN_OUT_OF_BOUNDS(from, "from", digits, dtype);
       WARN_OUT_OF_BOUNDS(to_inc, "to - 1", digits, dtype);
     });
+  } else if (scalar_type == kUInt64) {
+    // When you do a comparison between int64_t and uint64_t, the usual
+    // arithmetic conversions say that the int64_t value is promoted to
+    // unsigned. But this conversion wraps around: if I had -1 as my int64_t,
+    // then it will promote to 0xFFFFFFFFFFFFFFFF in uint64_t. This is never
+    // the right thing to do.
+    CHECK_OUT_OF_BOUNDS(from, "from", 0, INT64_MAX, dtype);
+    CHECK_OUT_OF_BOUNDS(to_inc, "to - 1", 0, INT64_MAX, dtype);
   } else if (isIntegralType(scalar_type, /*includeBool=*/true)) {
-    AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, scalar_type, "check_random_integral_bounds", [&]() {
+    AT_DISPATCH_V2(scalar_type, "check_random_integral_bounds", AT_WRAP([&]() {
       const auto min = static_cast<int64_t>(std::numeric_limits<scalar_t>::lowest());
       const auto max = static_cast<int64_t>(std::numeric_limits<scalar_t>::max());
       CHECK_OUT_OF_BOUNDS(from, "from", min, max, dtype);
       CHECK_OUT_OF_BOUNDS(to_inc, "to - 1", min, max, dtype);
-    });
+    }), AT_EXPAND(AT_INTEGRAL_TYPES), kUInt16, kUInt32, kBool);
   } else {
     TORCH_CHECK(false, "check_random_bounds handles only integral, floating-point and boolean types");
   }
@@ -152,13 +161,13 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
         TORCH_CHECK(from < to_inc, "random_ expects 'from' casted to dtype to be less than or equal to 'to_inc' casted to dtype, but got from=", from, " > to_inc=", to_inc);
       });
     } else if (isIntegralType(iter.dtype(), /*includeBool=*/true)) {
-      AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "random_from_to_range_calc", [&] {
+      AT_DISPATCH_V2(self.scalar_type(), "random_from_to_range_calc", AT_WRAP([&] {
         if constexpr (std::is_same_v<scalar_t, bool>) {
           to_inc = static_cast<int64_t>(true);
         } else {
           to_inc = static_cast<int64_t>(std::numeric_limits<scalar_t>::max());
         }
-      });
+      }), AT_EXPAND(AT_INTEGRAL_TYPES_V2), kBool);
     } else {
       TORCH_CHECK(false, "random_from_to_impl handles only integral, floating-point and boolean types");
     }

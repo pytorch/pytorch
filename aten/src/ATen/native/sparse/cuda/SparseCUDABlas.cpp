@@ -69,7 +69,7 @@ const char* cusparseGetErrorString(cusparseStatus_t status) {
 }
 #endif
 
-namespace at { namespace native { namespace sparse { namespace cuda {
+namespace at::native::sparse::cuda {
 
 void Xcoo2csr(const int *coorowind, int64_t nnz, int64_t m, int *csrrowptr) {
   TORCH_CHECK((m <= INT_MAX) && (nnz <= INT_MAX),
@@ -524,4 +524,4 @@ void XcoosortByRow(int64_t m, int64_t n, int64_t nnz, int *cooRows, int *cooCols
 }
 
 
-}}}} // namespace at::native::sparse::cuda
+} // namespace at::native::sparse::cuda

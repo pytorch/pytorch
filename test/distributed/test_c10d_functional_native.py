@@ -29,9 +29,7 @@ def load_test_module(name):
         ).load_module()
 
 
-AOTInductorModelRunner = load_test_module(
-    "inductor.test_aot_inductor"
-).AOTInductorModelRunner
+AOTIRunnerUtil = load_test_module("inductor.test_aot_inductor_utils").AOTIRunnerUtil
 
 import sys
 
@@ -277,7 +275,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         assert same(out, correct), f"{out} va {correct}"
 
         # Test aoti
-        out = AOTInductorModelRunner.run("cuda", func, (arg,))
+        out = AOTIRunnerUtil.run("cuda", func, (arg,))
         torch.cuda.synchronize()
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
@@ -332,8 +330,41 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         assert same(out, correct), f"{out} va {correct}"
 
         # Test aoti
-        out = AOTInductorModelRunner.run("cuda", func, (args,))
+        out = AOTIRunnerUtil.run("cuda", func, (args,))
         torch.cuda.synchronize()
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(debug=True)
+    @fresh_inductor_cache()
+    def test_inductor_inplace_op_on_view(self):
+        self._init_process_group()
+
+        def func(arg: torch.Tensor) -> torch.Tensor:
+            buf0 = (arg + 10)[:2]
+            ar0 = torch.ops._c10d_functional.all_reduce(buf0, "avg", "default")
+            ar0 = torch.ops._c10d_functional.wait_tensor(ar0)
+            return ar0
+
+        arg = torch.rand(4, 4, device=self.device)
+        compiled = torch.compile(func)
+
+        code = run_and_get_triton_code(compiled, arg)
+        (
+            FileCheck()
+            .check("buf0 = empty(")
+            # Ensure the all_reduce_ input is a view
+            .check(
+                "torch.ops._c10d_functional.all_reduce_.default(reinterpret_tensor(buf0"
+            )
+            .check(
+                "torch.ops._c10d_functional.wait_tensor.default(reinterpret_tensor(buf0"
+            )
+            .check("return (reinterpret_tensor(buf0")
+            .run(code)
+        )
+        out = compiled(arg)
+        correct = func(arg)
+        assert same(out, correct), f"{out} va {correct}"
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(debug=True)
@@ -406,7 +437,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         assert same(out, correct), f"{out} va {correct}"
 
         # Test aoti
-        out = AOTInductorModelRunner.run("cuda", func, (arg,))
+        out = AOTIRunnerUtil.run("cuda", func, (arg,))
         torch.cuda.synchronize()
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
@@ -425,7 +456,6 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         args = [torch.rand(4, 4, device=self.device) for _ in range(4)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
-        print(code)
         (
             FileCheck()
             .check(
@@ -449,7 +479,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         assert same(out, correct), f"{out} va {correct}"
 
         # Test aoti
-        out = AOTInductorModelRunner.run("cuda", func, (args,))
+        out = AOTIRunnerUtil.run("cuda", func, (args,))
         torch.cuda.synchronize()
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
@@ -483,7 +513,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         assert same(out, correct), f"{out} va {correct}"
 
         # Test aoti
-        out = AOTInductorModelRunner.run("cuda", func, (arg,))
+        out = AOTIRunnerUtil.run("cuda", func, (arg,))
         torch.cuda.synchronize()
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
@@ -525,7 +555,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         assert same(out, correct), f"{out} va {correct}"
 
         # Test aoti
-        out = AOTInductorModelRunner.run("cuda", func, (args,))
+        out = AOTIRunnerUtil.run("cuda", func, (args,))
         torch.cuda.synchronize()
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")

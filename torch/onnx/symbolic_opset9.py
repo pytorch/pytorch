@@ -4400,35 +4400,34 @@ def repeat(g: jit_utils.GraphContext, self, repeats):
 def repeat_interleave(
     g: jit_utils.GraphContext, self, repeats, dim=None, output_size=None
 ):
-    input = self
+    repeats_dim = symbolic_helper._get_tensor_rank(repeats)
+    repeats_sizes = symbolic_helper._get_tensor_sizes(repeats)
+    input_sizes = symbolic_helper._get_tensor_sizes(self)
+    if repeats_dim is None:
+        raise errors.SymbolicValueError(
+            "Unsupported: ONNX export of repeat_interleave for unknown repeats rank.",
+            self,
+        )
+    if repeats_sizes is None:
+        raise errors.SymbolicValueError(
+            "Unsupported: ONNX export of repeat_interleave for unknown repeats size.",
+            self,
+        )
+    if input_sizes is None:
+        raise errors.SymbolicValueError(
+            "Unsupported: ONNX export of repeat_interleave for unknown input size.",
+            self,
+        )
+
     # if dim is None flatten
     # By default, use the flattened input array, and return a flat output array
     if symbolic_helper._is_none(dim):
-        input = symbolic_helper._reshape_helper(
+        self = symbolic_helper._reshape_helper(
             g, self, g.op("Constant", value_t=torch.tensor([-1]))
         )
         dim = torch.tensor(0, dtype=torch.int64)
     else:
         dim = symbolic_helper._maybe_get_scalar(dim)
-
-    repeats_dim = symbolic_helper._get_tensor_rank(repeats)
-    repeats_sizes = symbolic_helper._get_tensor_sizes(repeats)
-    input_sizes = symbolic_helper._get_tensor_sizes(input)
-    if repeats_dim is None:
-        raise errors.SymbolicValueError(
-            "Unsupported: ONNX export of repeat_interleave for unknown repeats rank.",
-            input,
-        )
-    if repeats_sizes is None:
-        raise errors.SymbolicValueError(
-            "Unsupported: ONNX export of repeat_interleave for unknown repeats size.",
-            input,
-        )
-    if input_sizes is None:
-        raise errors.SymbolicValueError(
-            "Unsupported: ONNX export of repeat_interleave for unknown input size.",
-            input,
-        )
 
     # Handle cases where dim is negative
     if dim < 0:
@@ -4480,7 +4479,7 @@ def repeat_interleave(
 
     final_splits = list()
     r_splits = symbolic_helper._repeat_interleave_split_helper(g, repeats, reps, 0)
-    i_splits = symbolic_helper._repeat_interleave_split_helper(g, input, reps, dim)
+    i_splits = symbolic_helper._repeat_interleave_split_helper(g, self, reps, dim)
     input_sizes[dim], input_sizes_temp[dim] = -1, 1
     for idx, r_split in enumerate(r_splits):
         i_split = unsqueeze(g, i_splits[idx], dim + 1)
