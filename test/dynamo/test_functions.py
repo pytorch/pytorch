@@ -1747,7 +1747,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         opt_fn = torch.compile(fullgraph=True, dynamic=True)(fn)
 
-
         def test(x, y):
             self.assertEqual(opt_fn(x, y), fn(x, y))
 
@@ -1764,7 +1763,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         opt_fn = torch.compile(fullgraph=True, dynamic=False)(fn)
 
-
         def test(x, y):
             self.assertEqual(opt_fn(x, y), fn(x, y))
 
@@ -1775,7 +1773,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         test(torch.ones(1), 1)
         test(torch.zeros(1), 1)
         test(torch.ones(1), torch.ones(1))
-
 
     def test_unary_fold_op(self):
         for op in (operator.abs, abs, operator.neg, operator.pos, operator.truth):
