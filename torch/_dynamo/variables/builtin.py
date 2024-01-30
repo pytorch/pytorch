@@ -930,6 +930,9 @@ class BuiltinVariable(VariableTracker):
         ):
             return variables.ConstantVariable.create(True)
 
+        elif isinstance(arg, UserDefinedVariable):
+            return variables.ConstantVariable.create(callable(arg.value))
+
     def call_cast(self, _, *args, **kwargs):
         if len(args) == 2:
             return args[1]

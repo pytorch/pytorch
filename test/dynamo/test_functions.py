@@ -450,6 +450,25 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         else:
             return x - 1
 
+    def test_callable_class(self):
+        class CallableClass:
+            def __call__():
+                pass
+
+        class NotCallableClass:
+            pass
+
+        @torch.compile(backend="inductor", fullgraph=True)
+        def fn(x, args):
+            if callable(args[0]):
+                return x
+            return x + 1
+
+        input = torch.randn(4)
+
+        self.assertEqual(fn(input, [CallableClass()]), input)
+        self.assertEqual(fn(input, [NotCallableClass()]), input + 1)
+
     @make_test
     def test_len_constant_misc_iterables(x):
         a = len((1, 2, 3))
