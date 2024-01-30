@@ -1,3 +1,4 @@
+#include <ATen/Utils.h>
 #include <ATen/xpu/XPUGeneratorImpl.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/util/CallOnce.h>
