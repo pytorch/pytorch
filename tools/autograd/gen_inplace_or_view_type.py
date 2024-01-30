@@ -366,13 +366,13 @@ def get_view_info(f: NativeFunction) -> Optional[str]:
     return view_info
 
 
-def emit_view_lambda(
+def emit_view_func(
     f: NativeFunction, bindings: List[Binding], view_idx: Optional[str] = None
 ) -> str:
     """Generate an additional lambda function to recover views in backward when as_strided is not supported.
     See Note [View + Inplace update for base tensor] and [View + Inplace update for view tensor] for more details.
     """
-    # TODO: Clean all this up (it's mostly no longer needed if we're not dealing with lambdas)
+    # TODO: Clean this logic up if we get rid of reverse view funcs or reify them.
     input_base = "input_base"
     replay_view_func = ""
     updated_args: List[str] = []
@@ -421,8 +421,7 @@ def emit_view_lambda(
         else:
             updated_args.append(arg)
 
-    # skip input_base arg
-    view_func_args = list(updated_args[1:])
+    view_func_args = [b.name for b in bindings if b.name != "self"]
     if view_idx is not None:
         view_func_args.append(f"{view_idx}")
     replay_view_func += REPLAY_VIEW_FUNC.substitute(
@@ -478,7 +477,6 @@ def emit_view_body(
         )
     if len(differentiable_output_vars) == 0:
         # no output is differentiable (.indices() for SparseTensors for example)
-        # TODO: Remove this? how does this work
         rhs_value = (
             f"as_view({view_info}, {var}, "
             f"/* is_bw_differentiable */ false, /* is_fw_differentiable */ false)"
@@ -505,7 +503,7 @@ def emit_view_body(
         if is_tensor_list_type(return_info.type):
             creation_meta = get_creation_meta_in_mode("CreationMeta::MULTI_OUTPUT_NODE")
             view_idx = "view_idx"
-            view_lambda = emit_view_lambda(
+            view_func = emit_view_func(
                 f, extract_bindings(f), view_idx=view_idx
             ).strip()
             as_view_call = (
@@ -515,11 +513,11 @@ def emit_view_body(
                 f"/* creation_meta */ {creation_meta});"
             )
             call += MULTI_OUTPUT_VIEW_ITERATION.substitute(
-                var=var, view_idx=view_idx, body=f"{view_lambda}\n{as_view_call}"
+                var=var, view_idx=view_idx, body=f"{view_func}\n{as_view_call}"
             )
             rhs_value = f"std::move({var})"
         else:
-            call += emit_view_lambda(f, extract_bindings(f), view_idx=None)
+            call += emit_view_func(f, extract_bindings(f), view_idx=None)
             creation_meta = get_creation_meta_in_mode("CreationMeta::DEFAULT")
             rhs_value = (
                 f"as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, "

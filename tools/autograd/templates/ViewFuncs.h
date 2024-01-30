@@ -14,13 +14,22 @@ $ops_headers
 
 namespace torch { namespace autograd {
 
-// TODO: Document this
+/// Base class for view functions, providing reapplication of a view on a new base.
+/// Each view op should get a codegenerated subclass of this class containing
+/// any state needed to reconstruct the view. The class also provides convenience
+/// accessors for saved SymInts / tensor state. This is useful for e.g. fake-ification,
+/// where we want to use symbolic values or fake tensors instead.
 struct TORCH_API ViewFunc {
   virtual ~ViewFunc() {}
+  /// Returns any SymInts in the saved state.
   virtual std::vector<c10::SymInt> get_symints() = 0;
+  /// Sets any SymInts in the saved state.
   virtual void set_symints(const std::vector<c10::SymInt>&) = 0;
+  /// Returns any Tensors in the saved state.
   virtual std::vector<at::Tensor> get_tensors() = 0;
+  /// Sets any Tensors in the saved state.
   virtual void set_tensors(const std::vector<at::Tensor>&) = 0;
+  /// Reapplies the view on the given base using the saved state.
   virtual at::Tensor operator()(const at::Tensor&) = 0;
 };
 
