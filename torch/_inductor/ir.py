@@ -4173,7 +4173,7 @@ def mark_node_as_mutating(cur_buffer, *mutated_ops):
     indicates to the scheduler that these ops depend on cur_buffer.
     """
     for op in mutated_ops:
-        assert isinstance(op, TensorBox)
+        assert isinstance(op, (TensorBox, Buffer)), op
         V.graph.mark_buffer_mutated(op.get_name())
         MutationOutput(op.layout, op, cur_buffer)
 
@@ -4542,6 +4542,47 @@ class FallbackKernel(ExternKernelAlloc):
         self.kwargs = {} if kwargs is None else kwargs
         V.graph.warn_fallback(self.python_kernel_name)
 
+        # The names of the inputs that were mutated and not returned as
+        # outputs from the operator.
+        self.mutated_but_not_returned_inputs = []
+
+        if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
+            # We assume here that HOPs with FallbackKernel are functional.
+            # This may not always be true! HOPs must individually opt-in to
+            # FallbackKernel, so please check this if you opt-in.
+            return
+
+        schema = self.op_overload._schema
+        from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
+
+        # NOTE: [FallbackKernel supported operators]
+        # We only support three types of operators:
+        # - functional ops
+        # - view ops
+        # - mutating ops that are auto-functionalizable. That is,
+        # the operator may mutate any number of inputs, but its outputs
+        # may not alias any of the inputs.
+        #
+        # The unsupported cases usually do not show up here (because
+        # AOTAutograd functionalized them away); the only way for an in-place
+        # op to show up here is if a lowering or pass introduced it.
+        if schema.is_mutable and not can_auto_functionalize(kernel):
+            raise NotImplementedError(
+                f"NYI: Can't generate FallbackKernel for {kernel}"
+            )
+
+        schema_args = schema.arguments
+        args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
+        input_alias_sets = set()
+        for arg, info in zip(args, schema_args):
+            if info.alias_info is None or not info.alias_info.is_write:
+                continue
+            if arg is not None:
+                # NB: can_auto_functionalize check guarantees that the arg
+                # is not directly a return of the operator.
+                self.mutated_but_not_returned_inputs.append(arg.get_name())
+                mark_node_as_mutating(self, arg)
+
     def set_cpp_kernel(self, kernel):
         from .codegen.wrapper import get_cpp_op_schema
 
@@ -4691,19 +4732,23 @@ class FallbackKernel(ExternKernelAlloc):
         return None
 
     def has_side_effects(self):
-        # TODO - some fallbacks are still OpOverloadPackets
-        if not isinstance(self.op_overload, torch._ops.OpOverload):
+        if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
             return False
         return get_schema_info(self.op_overload).is_mutable()
 
     def get_alias_names(self):
-        # TODO - some fallbacks are still OpOverloadPackets
-        if not isinstance(self.op_overload, torch._ops.OpOverload):
+        if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
             return []
         if torch._inductor.utils.is_view(self.op_overload):
             # TODO - use op._schema.arguments alias_info to figure out
             # precise list
             return [inp.get_name() for inp in self.inputs]
+        # See NOTE [FallbackKernel supported operators]
+        return self.mutated_but_not_returned_inputs
+
+    def get_mutation_names(self):
+        # See NOTE [FallbackKernel supported operators]
+        # NB: this is inputs that are mutated AND returned as outputs
         return []
 
     def fill_non_provided_args(self, args, kwargs, convert_val_to_str=False):
@@ -4893,8 +4938,12 @@ class FallbackKernel(ExternKernelAlloc):
         device = cls.find_device(tensor_args, example_output)
         assert device, "Not sure where to find device info"
 
+        layout: Any = NoneLayout
+        if len(kernel._schema.returns) > 0:
+            layout = MultiOutputLayout
+
         packed = cls(
-            MultiOutputLayout(device),
+            layout(device),
             kernel,
             tensor_args,
             non_tensor_args,

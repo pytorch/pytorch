@@ -6114,6 +6114,144 @@ class CommonTemplate:
         self.assertTrue((d >= 0).all())
         self.assertTrue((d < 1).all())
 
+    @config.patch(implicit_fallbacks=True)
+    def test_fallback_mutable_op_basic(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+
+            def impl(a, b, c, d, e=2):
+                a.add_(b[0] * c * e),
+                if d is not None:
+                    d.add_(b[1])
+
+            m.define(
+                "inplace_(Tensor(a!) a, Tensor[] b, SymInt c, *, Tensor(b!)? d, SymInt e=2) -> ()"
+            )
+            m.impl("inplace_", impl, "CompositeExplicitAutograd")
+
+            # We do some clones and copy_ to test that Inductor doesn't reorder
+            # the copy_ w.r.t. inplace_.
+            def f(a, b1, b2, c, d):
+                a_ = a.clone()
+                d_ = d if d is None else d.clone()
+                torch.ops.mylib.inplace_(a_, (b1, b2), c, d=d_)
+                a.copy_(a_)
+                if d is not None:
+                    d.copy_(d_)
+                return ()
+
+            a = torch.tensor([0.0, 1.0, 2])
+            b = [torch.tensor([2.0, 3.0, 5.0]), torch.tensor([1.0, 4.0, 6.0])]
+            c = 4
+            d = torch.tensor([2.0, 1, 0])
+            args = (a, b[0], b[1], c, d)
+            cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+            mod = make_fx(f)(*cloned_args)
+            cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+            compiled_f = compile_fx_inner(mod, cloned_args)
+
+            cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+            compiled_f(list(cloned_args))
+            f(*args)
+            self.assertEqual(cloned_args, args)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_fallback_mutable_op_with_return(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+
+            def impl(a, b, c, d, e=2):
+                a.add_(b[0] * c * e),
+                if d is not None:
+                    d.add_(b[1])
+                return b[0] + b[1]
+
+            m.define(
+                "inplace_(Tensor(a!) a, Tensor[] b, SymInt c, *, Tensor(b!)? d, SymInt e=2) -> Tensor"
+            )
+            m.impl("inplace_", impl, "CompositeExplicitAutograd")
+
+            # We do some clones and copy_ to test that Inductor doesn't reorder
+            # the copy_ w.r.t. inplace_.
+            def f(a, b0, b1, c, d):
+                a_ = a.clone()
+                d_ = d if d is None else d.clone()
+                res = torch.ops.mylib.inplace_(a_, (b0, b1), c, d=d_)
+                a.copy_(a_)
+                if d is not None:
+                    d.copy_(d_)
+                return (res,)
+
+            a = torch.tensor([0.0, 1.0, 2])
+            b = [torch.tensor([2.0, 3.0, 5.0]), torch.tensor([1.0, 4.0, 6.0])]
+            c = 4
+            d = torch.tensor([2.0, 1, 0])
+            args = (a, b[0], b[1], c, d)
+
+            cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+            mod = make_fx(f)(*cloned_args)
+            cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+            compiled_f = compile_fx_inner(mod, cloned_args)
+
+            cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+            compiled_out = compiled_f(list(cloned_args))
+            out = f(*args)
+            self.assertEqual(cloned_args, args)
+            self.assertEqual(compiled_out, out)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_fallback_mutable_op_no_mutated_tensors(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+
+            def impl(a, b):
+                if b is not None:
+                    b.add_(1)
+
+            m.define("inplace_(Tensor a, Tensor(b!)? b) -> ()")
+            m.impl("inplace_", impl, "CompositeExplicitAutograd")
+
+            def f(a):
+                torch.ops.mylib.inplace_(a, None)
+                return ()
+
+            a = torch.tensor([0.0, 1.0, 2])
+            args = (a,)
+            cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+            mod = make_fx(f)(*cloned_args)
+            cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+            compiled_f = compile_fx_inner(mod, cloned_args)
+
+            cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+            compiled_f(list(cloned_args))
+            f(*args)
+            self.assertEqual(cloned_args, args)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_fallback_mutable_op_list(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+
+            def impl(a, b):
+                for bi in b:
+                    bi.add_(a)
+
+            m.define("inplace_(Tensor a, Tensor(a!)[] b) -> ()")
+            m.impl("inplace_", impl, "CompositeExplicitAutograd")
+
+            def f(a, b):
+                torch.ops.mylib.inplace_(a, b)
+                return ()
+
+            a = torch.tensor([0.0, 1.0, 2])
+            b = [torch.tensor([2.0, 3.0, 5.0]), torch.tensor([1.0, 4.0, 6.0])]
+            args = (a, b)
+            cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+            mod = make_fx(f)(*cloned_args)
+            cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+
+            with self.assertRaisesRegex(
+                torch._inductor.exc.LoweringException,
+                "NYI: Can't generate FallbackKernel",
+            ):
+                compiled_f = compile_fx_inner(mod, cloned_args)
+
     def test_functionalize_rng_wrappers(self):
         # Ideally, we would like to use torch.compile for these operators. But
         # currently the plan is to introduce these operators at the partitioner
