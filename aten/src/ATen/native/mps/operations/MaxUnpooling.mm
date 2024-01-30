@@ -14,8 +14,12 @@ struct CachedGraph : public MPSCachedGraph {
   MPSGraphTensor* outputTensor_ = nil;
 };
 
-static std::string getCacheKey(const ScalarType& dtype, const IntArrayRef output_size) {
-  return "max_unpooling2d_forward_mps:" + getMPSTypeString(dtype) + "[" + getArrayRefString(output_size) + "]";
+static std::string getCacheKey(const Tensor& input,
+                               const Tensor& indices,
+                               const ScalarType& dtype,
+                               const IntArrayRef output_size) {
+  return "max_unpooling2d_forward_mps:" + getTensorsStringKey({input, indices}) + "[" + getArrayRefString(output_size) +
+      "]";
 }
 
 static MPSGraphTensor* buildGraph(CachedGraph* cachedGraph, const IntArrayRef output_size) {
@@ -39,7 +43,7 @@ static MPSGraphTensor* buildGraph(CachedGraph* cachedGraph, const IntArrayRef ou
 
 static CachedGraph* getGraph(const Tensor& input, const Tensor& indices, const IntArrayRef output_size) {
   @autoreleasepool {
-    string key = getCacheKey(input.scalar_type(), output_size);
+    string key = getCacheKey(input, indices, input.scalar_type(), output_size);
     return LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, input);
       newCachedGraph->indicesTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, indices);
