@@ -1103,6 +1103,7 @@ class Graph:
                     module_name: str,
                     args: Optional[Tuple['Argument', ...]] = None,
                     kwargs: Optional[Dict[str, 'Argument']] = None,
+                    name: Optional[str] = None,
                     type_expr: Optional[Any] = None) -> Node:
         """
         Insert a ``call_module`` ``Node`` into the ``Graph``. A ``call_module`` node
@@ -1123,6 +1124,10 @@ class Graph:
             kwargs (Optional[Dict[str, Argument]]): The keyword arguments to be passed
                 to the called method
 
+            name (Optional[str]): an optional string name for the ``Node``.
+                This will influence the name of the value assigned to in the
+                Python generated code.
+
             type_expr (Optional[Any]): an optional type annotation representing the
                 Python type the output of this node will have.
 
@@ -1141,7 +1146,7 @@ class Graph:
                           "GraphModule! Call "
                           "GraphModule.add_submodule to add the "
                           "necessary submodule")
-        return self.create_node('call_module', module_name, args, kwargs, type_expr=type_expr)
+        return self.create_node('call_module', module_name, args, kwargs, name=name, type_expr=type_expr)
 
     @compatibility(is_backward_compatible=True)
     def call_method(self,
