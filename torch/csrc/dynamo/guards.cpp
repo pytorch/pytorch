@@ -784,7 +784,6 @@ class PythonLambdaGuard : public LeafGuard {
       : LeafGuard(guard_str) {
     if (py::isinstance<py::function>(guard_check_fn)) {
       _guard_check_fn = py::cast<py::function>(guard_check_fn);
-      _guard_check_fn_pyobj = _guard_check_fn.ptr();
     } else {
       throw py::type_error("PythonLambdaGuard expects (callable, str)");
     }
@@ -792,7 +791,7 @@ class PythonLambdaGuard : public LeafGuard {
 
   // Runs the lambda function with the current f_locals value.
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    PyObject* x = PyObject_CallOneArg(_guard_check_fn_pyobj, value); // new ref
+    PyObject* x = PyObject_CallOneArg(_guard_check_fn.ptr(), value); // new ref
     bool result = PyObject_IsTrue(x);
     Py_DECREF(x);
     return result;
@@ -805,7 +804,6 @@ class PythonLambdaGuard : public LeafGuard {
  private:
   // The user provided lambda function for check_fn.
   py::function _guard_check_fn;
-  PyObject* _guard_check_fn_pyobj;
 };
 
 class TYPE_MATCH : public LeafGuard {
@@ -849,10 +847,11 @@ class ID_MATCH : public LeafGuard {
 class EQUALS_MATCH : public LeafGuard {
  public:
   EQUALS_MATCH(py::object value, py::object guard_str)
-      : LeafGuard(guard_str), _value(value.ptr()) {}
+      : LeafGuard(guard_str), _value(value) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    return PyObject_RichCompareBool(value, _value, Py_EQ);
+    return Py_TYPE(value) == Py_TYPE(_value.ptr()) &&
+        PyObject_RichCompareBool(value, _value.ptr(), Py_EQ);
   }
 
   std::string repr_prefix() override {
@@ -861,7 +860,7 @@ class EQUALS_MATCH : public LeafGuard {
 
  private:
   // value to compare against.
-  PyObject* _value;
+  py::object _value;
 };
 
 class LENGTH_CHECK : public LeafGuard {
@@ -883,27 +882,6 @@ class LENGTH_CHECK : public LeafGuard {
  private:
   // Length of the guarded list
   Py_ssize_t _length;
-};
-
-class DICT_KEYS : public LeafGuard {
- public:
-  DICT_KEYS(py::object keys, py::object guard_str)
-      : LeafGuard(guard_str), _keys(PyDict_Keys(keys.ptr())) {}
-
-  bool check_nopybind(PyObject* value) override { // borrowed ref
-    PyObject* keys = PyDict_Keys(value); // new ref - of type PyListObject
-    bool result = PyObject_RichCompareBool(keys, _keys, Py_EQ);
-    Py_DECREF(keys);
-    return result;
-  }
-
-  std::string repr_prefix() override {
-    return "DICT_KEYS";
-  }
-
- private:
-  // keys to compare against.
-  PyObject* _keys;
 };
 
 class TUPLE_ITERATOR_LEN : public LeafGuard {
@@ -956,12 +934,10 @@ class DICT_VERSION : public LeafGuard {
 class DICT_CONTAINS : public LeafGuard {
  public:
   DICT_CONTAINS(py::object value, py::object guard_str, py::object invert)
-      : LeafGuard(guard_str),
-        _key(value.ptr()),
-        _invert(py::cast<bool>(invert)) {}
+      : LeafGuard(guard_str), _key(value), _invert(py::cast<bool>(invert)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    bool ret = PyDict_Contains(value, _key);
+    bool ret = PyDict_Contains(value, _key.ptr());
     if (_invert) {
       ret = !ret;
     }
@@ -974,7 +950,7 @@ class DICT_CONTAINS : public LeafGuard {
 
  private:
   // Saved key
-  PyObject* _key; // TODO(janimesh) - Check owenrship
+  py::object _key;
   bool _invert;
 };
 
@@ -1950,10 +1926,6 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "LENGTH_CHECK")
       .def(py::init<py::object, py::str>())
       .def("__call__", &LENGTH_CHECK::check);
-  py::class_<DICT_KEYS, LeafGuard, std::shared_ptr<DICT_KEYS>>(
-      py_m, "DICT_KEYS")
-      .def(py::init<py::object, py::str>())
-      .def("__call__", &DICT_KEYS::check);
   py::class_<
       TUPLE_ITERATOR_LEN,
       LeafGuard,
@@ -2080,13 +2052,6 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object guard_str) -> void {
             self.add_leaf_guard(
                 std::make_shared<LENGTH_CHECK>(value, guard_str));
-          })
-      .def(
-          "add_dict_keys_guard",
-          [](GuardManager& self,
-             py::object value,
-             py::object guard_str) -> void {
-            self.add_leaf_guard(std::make_shared<DICT_KEYS>(value, guard_str));
           })
       .def(
           "add_dict_version_guard",

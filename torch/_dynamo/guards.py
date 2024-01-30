@@ -66,7 +66,6 @@ from .source import (
     NNModuleSource,
     NotNNModuleSource,
     NumpyTensorSource,
-    ODictGetItemSource,
     ShapeEnvSource,
     TupleIteratorGetItemSource,
     TypeSource,
@@ -374,8 +373,6 @@ class GuardBuilder(GuardBuilderBase):
                 return build(source.base).lambda_manager(from_numpy)
             elif istype(source, TupleIteratorGetItemSource):
                 return build(source.base).tuple_iterator_getitem_manager(source.index)
-            elif istype(source, ODictGetItemSource):
-                pass
             else:
                 raise AssertionError(
                     f"missing guard manager builder {source} - {source.name()}"
@@ -1247,8 +1244,8 @@ class CheckFunctionManager:
             ):
                 continue
 
-            if config.enable_cpp_guard_manager:
-                builder.get_guard_manager(guard)
+            # if config.enable_cpp_guard_manager:
+            #     builder.get_guard_manager(guard)
             guard.create(builder)
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
         # Check that the check_fn is True for this frame
