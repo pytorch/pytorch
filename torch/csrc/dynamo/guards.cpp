@@ -847,10 +847,12 @@ class ID_MATCH : public LeafGuard {
 class EQUALS_MATCH : public LeafGuard {
  public:
   EQUALS_MATCH(py::object value, py::object guard_str)
-      : LeafGuard(guard_str), _value(value) {}
+      : LeafGuard(guard_str),
+        _value(value),
+        _value_type(Py_TYPE(value.ptr())) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    return Py_TYPE(value) == Py_TYPE(_value.ptr()) &&
+    return Py_TYPE(value) == _value_type &&
         PyObject_RichCompareBool(value, _value.ptr(), Py_EQ);
   }
 
@@ -861,6 +863,7 @@ class EQUALS_MATCH : public LeafGuard {
  private:
   // value to compare against.
   py::object _value;
+  PyTypeObject* _value_type;
 };
 
 class LENGTH_CHECK : public LeafGuard {
@@ -2103,7 +2106,7 @@ PyObject* torch_c_dynamo_guards_init() {
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
       .def(
-          "__getattr__",
+          "getattr_manager",
           &GuardManager::get_child_manager<GetAttrGuardAccessor>,
           py::return_value_policy::reference)
       // return by reference because GuardManager has the ownership of accessors
