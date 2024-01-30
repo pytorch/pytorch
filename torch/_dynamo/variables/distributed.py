@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import inspect
 from typing import Dict, List
 

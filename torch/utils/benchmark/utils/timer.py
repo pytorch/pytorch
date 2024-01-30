@@ -13,7 +13,7 @@ from torch.utils.benchmark.utils.valgrind_wrapper import timer_interface as valg
 __all__ = ["Timer", "timer", "Language"]
 
 
-if torch.backends.cuda.is_built() and torch.cuda.is_available():
+if torch.backends.cuda.is_built() and torch.cuda.is_available():  # type: ignore[no-untyped-call]
     def timer() -> float:
         torch.cuda.synchronize()
         return timeit.default_timer()
