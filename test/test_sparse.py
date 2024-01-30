@@ -4519,7 +4519,6 @@ class TestSparseAny(TestCase):
 
         for args, kwargs in self.generate_simple_inputs(
                 layout, device=device, dtype=torch.float64,
-                enable_batch=False,  # TODO: remove after gh-104868 is resolved
                 output_tensor=False):
             values_offset = 1 if layout is torch.sparse_coo else 2
 
