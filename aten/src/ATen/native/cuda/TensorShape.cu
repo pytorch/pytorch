@@ -198,7 +198,7 @@ static inline std::vector<int64_t> get_dst_addrs(at::TensorList out) {
   return addrs;
 }
 
-// Caculate the chunk size for each split in bytes.
+// Calculate the chunk size for each split in bytes.
 static inline std::vector<int64_t> get_split_chunk_sizes(
     const at::Tensor& tensor,
     at::IntArrayRef split_sizes,
@@ -213,7 +213,7 @@ static inline std::vector<int64_t> get_split_chunk_sizes(
   return split_chunk_sizes;
 }
 
-// Caculate the chunk stride in bytes. This is the same for all splits.
+// Calculate the chunk stride in bytes. This is the same for all splits.
 static inline int64_t get_chunk_stride(const at::Tensor& tensor, int64_t dim) {
   int64_t stride = 1;
   for (int64_t d = dim; d < tensor.dim(); ++d) {
