@@ -62,8 +62,8 @@ static PyObject* THXPEvent_get_device(THXPEvent* self, void* unused) {
 
 static PyObject* THXPEvent_record(PyObject* _self, PyObject* _stream) {
   HANDLE_TH_ERRORS
-  auto self = (THXPEvent*)_self;
-  auto stream = (THXPStream*)_stream;
+  auto* self = (THXPEvent*)_self;
+  auto* stream = (THXPStream*)_stream;
   self->xpu_event.record(stream->xpu_stream);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -71,8 +71,8 @@ static PyObject* THXPEvent_record(PyObject* _self, PyObject* _stream) {
 
 static PyObject* THXPEvent_wait(PyObject* _self, PyObject* _stream) {
   HANDLE_TH_ERRORS
-  auto self = (THXPEvent*)_self;
-  auto stream = (THXPStream*)_stream;
+  auto* self = (THXPEvent*)_self;
+  auto* stream = (THXPStream*)_stream;
   self->xpu_event.block(stream->xpu_stream);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -80,15 +80,15 @@ static PyObject* THXPEvent_wait(PyObject* _self, PyObject* _stream) {
 
 static PyObject* THXPEvent_query(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = (THXPEvent*)_self;
+  auto* self = (THXPEvent*)_self;
   return PyBool_FromLong(self->xpu_event.query());
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THXPEvent_elapsed_time(PyObject* _self, PyObject* _other) {
   HANDLE_TH_ERRORS
-  auto self = (THXPEvent*)_self;
-  auto other = (THXPEvent*)_other;
+  auto* self = (THXPEvent*)_self;
+  auto* other = (THXPEvent*)_other;
   return PyFloat_FromDouble(self->xpu_event.elapsed_time(other->xpu_event));
   END_HANDLE_TH_ERRORS
 }
@@ -96,7 +96,7 @@ static PyObject* THXPEvent_elapsed_time(PyObject* _self, PyObject* _other) {
 static PyObject* THXPEvent_synchronize(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil;
-    auto self = (THXPEvent*)_self;
+    auto* self = (THXPEvent*)_self;
     self->xpu_event.synchronize();
   }
   Py_RETURN_NONE;
