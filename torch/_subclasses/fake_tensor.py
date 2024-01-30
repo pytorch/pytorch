@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import contextlib
 import functools
 import itertools
@@ -1738,10 +1740,6 @@ class FakeTensorMode(TorchDispatchMode):
 
         if func == aten._unsafe_view.default:
             raise _BypassDispatchCache("unsafe view")
-
-        # TODO: Unnecessary after https://github.com/pytorch/pytorch/pull/115769
-        if func == aten.set_.source_Tensor:
-            raise _BypassDispatchCache("set source")
 
         if func in self.lift_fns:
             raise _BypassDispatchCache("lift")

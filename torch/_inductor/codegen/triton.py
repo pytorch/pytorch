@@ -52,13 +52,13 @@ from ..utils import (
     next_power_of_2,
     Placeholder,
     sympy_dot,
+    sympy_index_symbol,
     sympy_product,
     sympy_subs,
-    sympy_symbol,
     unique,
     yellow_text,
 )
-from ..virtualized import ops, V
+from ..virtualized import ops, OpsHandler, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
 from .common import (
     CSE,
@@ -197,10 +197,10 @@ class BlockPtrOptions:
         for i in range(len(self.shape)):
             if (
                 self.block_shape[i] != "1"
-                and not V.graph.sizevars.statically_known_equals(self.strides[i], 0)
+                and not V.graph.sizevars.statically_known_equals(self.strides[i], 0)  # type: ignore[arg-type]
                 and not V.graph.sizevars.statically_known_multiple_of(
                     self.shape[i],
-                    config.triton.max_block[self.block_shape[i][0]],
+                    config.triton.max_block[self.block_shape[i][0]],  # type: ignore[arg-type]
                 )
                 and not (V.kernel.no_x_dim and self.block_shape[i] == "XBLOCK")
             ):
@@ -836,6 +836,11 @@ class TritonOverrides(OpOverrides):
         return f"tl.math.ceil({x})"
 
 
+# Use mypy to check protocol implemented correctly
+def _typecheck_TritonOverrides(h: TritonOverrides) -> OpsHandler[str]:
+    return h
+
+
 class TritonKernelOverrides(TritonOverrides):
     """Map element-wise ops to Triton within a TritonKernel
 
@@ -885,6 +890,11 @@ class TritonKernelOverrides(TritonOverrides):
         )
 
 
+# Use mypy to check protocol implemented correctly
+def _typecheck_TritonKernelOverrides(h: TritonKernelOverrides) -> OpsHandler[str]:
+    return h
+
+
 @dataclasses.dataclass
 class IterationRanges:
     """
@@ -927,7 +937,7 @@ class IterationRanges:
         return self.prefix == "r" and not self.kernel.persistent_reduction
 
     def symbol(self):
-        return sympy_symbol(self.name)
+        return sympy_index_symbol(self.name)
 
 
 class IterationRangesRoot(IterationRanges):
@@ -969,9 +979,11 @@ class IterationRangesRoot(IterationRanges):
         Lookup a given RangeTreeEntry, creating it if needed
         """
         if V.graph.sizevars.statically_known_equals(divisor * length, self.numel):
-            expr = FloorDiv(sympy_symbol(f"{self.prefix}index"), divisor)
+            expr = FloorDiv(sympy_index_symbol(f"{self.prefix}index"), divisor)
         else:
-            expr = ModularIndexing(sympy_symbol(f"{self.prefix}index"), divisor, length)
+            expr = ModularIndexing(
+                sympy_index_symbol(f"{self.prefix}index"), divisor, length
+            )
 
         if expr not in self.nodes:
             node = IterationRangesEntry(
@@ -1268,7 +1280,7 @@ class TritonKernel(Kernel):
         if hint > threshold:
             return False
         # will need to recompile if we cross a larger power of 2 boundary
-        V.graph.sizevars.guard_leq(self.numels[-1], next_power_of_2(hint))
+        V.graph.sizevars.guard_leq(self.numels[-1], next_power_of_2(hint))  # type: ignore[arg-type]
         return True
 
     def set_last_usage(self, nodes):
@@ -1358,7 +1370,7 @@ class TritonKernel(Kernel):
         for length_group in lengths:
             return_getters = []
             for size in length_group:
-                if sv.statically_known_equals(size, 1):
+                if sv.statically_known_equals(size, 1):  # type: ignore[arg-type]
                     return_getters.append(lambda _: sympy.Integer(0))
                     continue
 
@@ -1449,7 +1461,7 @@ class TritonKernel(Kernel):
             if symbol not in self.range_tree_nodes:
                 # Non-iterated variables, e.g. strides
                 continue
-            entry = self.range_tree_nodes[symbol]
+            entry = self.range_tree_nodes[symbol]  # type: ignore[index]
             assert isinstance(entry.parent, IterationRangesRoot)
             index_numels[entry.parent.index] *= entry.length
 
@@ -1457,7 +1469,7 @@ class TritonKernel(Kernel):
         # numels, then it must be broadcasted.
         simplify = V.graph.sizevars.simplify
         return any(
-            simplify(idx_range) != simplify(iter_range)
+            simplify(idx_range) != simplify(iter_range)  # type: ignore[arg-type]
             for idx_range, iter_range in zip(index_numels, self.numels)
         )
 
@@ -1540,7 +1552,7 @@ class TritonKernel(Kernel):
                 # indirect indexing
                 cse_var = self.cse.varname_map[var.name]
                 mask_vars.update(cse_var.mask_vars)
-            elif var.name.startswith(("s", "ps", "i")):
+            elif var.name.startswith(("s", "ps", "i", "u")):
                 pass
             else:
                 # var is one of xN, yN or rN
@@ -1591,7 +1603,7 @@ class TritonKernel(Kernel):
                     [m[s] for s in strides],
                     m[offset],
                     range_trees,
-                    mask_vars,
+                    mask_vars,  # type: ignore[arg-type]
                 )
 
         expand_str = None
@@ -1618,7 +1630,7 @@ class TritonKernel(Kernel):
         self.filter_masks(mask_vars)
 
         mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
-        return IndexingOptions(index_str, mask_vars, mask_str, expand_str, has_rindex)
+        return IndexingOptions(index_str, mask_vars, mask_str, expand_str, has_rindex)  # type: ignore[arg-type]
 
     def active_range_trees(self, reorder=False):
         trees = [
@@ -1635,7 +1647,7 @@ class TritonKernel(Kernel):
     def filter_masks(self, mask_vars):
         for tree in self.range_trees:
             # Masks are superfluous if we only have one element
-            if V.graph.sizevars.statically_known_equals(tree.numel, 1):
+            if V.graph.sizevars.statically_known_equals(tree.numel, 1):  # type: ignore[arg-type]
                 mask_vars.discard(f"{tree.prefix}mask")
                 continue
             # Masks are superfluous if numel is a multiple of BLOCK
@@ -1647,7 +1659,7 @@ class TritonKernel(Kernel):
             # never need to do a masked load to handle stragglers at the end.
             # It's faster to avoid masking at all.  But it is sound to always
             # mask.
-            if V.graph.sizevars.statically_known_multiple_of(tree.numel, max_block):
+            if V.graph.sizevars.statically_known_multiple_of(tree.numel, max_block):  # type: ignore[arg-type]
                 mask_vars.discard(f"{tree.prefix}mask")
 
     def var_ranges(self):
@@ -1664,13 +1676,13 @@ class TritonKernel(Kernel):
                 # if indexing expression is complicated, we precompute it on the host side
                 # and send the result as a kernel argument
                 replacements = {}
-                for ps in self.range_tree_nodes[sym].precomputed_args():
+                for ps in self.range_tree_nodes[sym].precomputed_args():  # type: ignore[index]
                     replacements[ps] = V.graph.sizevars.lookup_precomputed_size(ps)
                 if len(replacements) > 0:
-                    self.range_tree_nodes[sym].expr = sympy_subs(
-                        self.range_tree_nodes[sym].expr, replacements
+                    self.range_tree_nodes[sym].expr = sympy_subs(  # type: ignore[index]
+                        self.range_tree_nodes[sym].expr, replacements  # type: ignore[index]
                     )
-                self.range_tree_nodes[sym].codegen()
+                self.range_tree_nodes[sym].codegen()  # type: ignore[index]
         return expr
 
     @contextlib.contextmanager
@@ -1723,10 +1735,10 @@ class TritonKernel(Kernel):
         {xindex: 512, rindex: 1024}
         """
         index_to_tile_indexes = {k: v.expr for k, v in self.range_tree_nodes.items()}
-        index_in_tile_vars = sympy_subs(index, index_to_tile_indexes)
+        index_in_tile_vars = sympy_subs(index, index_to_tile_indexes)  # type: ignore[arg-type]
         strides = {}
         for range_tree in self.range_trees:
-            s = sympy_symbol(range_tree.name)
+            s = sympy_index_symbol(range_tree.name)
             strides[s] = sympy_subs(index_in_tile_vars, {s: 1}) - sympy_subs(
                 index_in_tile_vars, {s: 0}
             )
@@ -1871,7 +1883,7 @@ class TritonKernel(Kernel):
 
         result_var = self.cse.generate(load_buffer, line)
         assert isinstance(result_var, TritonCSEVariable)
-        result_var.mask_vars = indexing.mask_vars
+        result_var.mask_vars = indexing.mask_vars  # type: ignore[assignment]
 
         if append_broadcast:
             line = f"tl.broadcast_to({result_var}, {append_broadcast})"
@@ -1885,7 +1897,9 @@ class TritonKernel(Kernel):
 
         return result_var
 
-    def store(self, name, index, value, mode=None):
+    def store(
+        self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
+    ) -> None:
         var = self.args.output(name)
         original_index = index
         indexing = self.indexing(index, dense_indexing=True, block_ptr=mode is None)
@@ -1930,7 +1944,7 @@ class TritonKernel(Kernel):
         offsets_size: sympy.Expr,
         indexing_dtype: torch.dtype,
         right: bool,
-    ):
+    ) -> CSEVariable:
         """
         See [Note: Inductor bucketize op]
         """
@@ -1976,7 +1990,13 @@ class TritonKernel(Kernel):
             return tuple(map(fn, value))
         return fn(value)
 
-    def reduction(self, dtype, src_dtype, reduction_type, value):
+    def reduction(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: ReductionType,
+        value: Union[CSEVariable, Tuple[CSEVariable, ...]],
+    ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
         assert self.inside_reduction
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)
@@ -2201,7 +2221,7 @@ class TritonKernel(Kernel):
 
         return result_var
 
-    def store_reduction(self, name, index, value):
+    def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable):
         assert self.inside_reduction
         self.inside_reduction = False
         indexing = self.indexing(index, block_ptr=True)
@@ -2257,7 +2277,13 @@ class TritonKernel(Kernel):
 
         return self.helper_functions.add(helper.getvalue())
 
-    def scan(self, dtype, combine_fn, value, init):
+    def scan(
+        self,
+        dtype: torch.dtype,
+        combine_fn: Callable[[CSEVariable, CSEVariable], CSEVariable],
+        value: CSEVariable,
+        init: int,
+    ) -> CSEVariable:
         assert self.inside_reduction
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)
@@ -2365,7 +2391,7 @@ class TritonKernel(Kernel):
         self.stores.clear()
         self.suffix.clear()
 
-    def codegen_kernel_benchmark(self):
+    def codegen_kernel_benchmark(self, grid=None):
         result = IndentedBuffer()
         argdefs, call_args, signature = self.args.python_argdefs()
 
@@ -2384,7 +2410,7 @@ class TritonKernel(Kernel):
                     # note that random seed is put in V.graph.constants
                     const_tensor = V.graph.constants[arg_name]
                     result.writeline(
-                        f"{var_name} = rand_strided({V.graph.sizevars.size_hints(const_tensor.size())}, {V.graph.sizevars.size_hints(const_tensor.stride())}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({V.graph.sizevars.size_hints(const_tensor.size())}, {V.graph.sizevars.size_hints(const_tensor.stride())}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
                     )
                 elif isinstance(arg_sig, SizeArg):
                     symval_hint = V.graph.sizevars.size_hint(arg_sig.expr)
@@ -2403,9 +2429,22 @@ class TritonKernel(Kernel):
             result.writeline(f"return {', '.join(var_names)},")
 
         result.writelines(["\n", "\n", "def call(args):"])
-        grid = []
-        extra_args = []
-        extra_args_str = None
+        if grid is None:
+            grid = []
+            extra_args = []
+            extra_args_str = None
+            for tree in self.active_range_trees():
+                expr = pexpr(V.graph.sizevars.size_hint(tree.numel))
+                extra_args.append(expr)
+                if tree.prefix != "r":
+                    grid.append(expr)
+            if self.need_numel_args():
+                extra_args_str = ", ".join(map(str, extra_args)) + ", "
+            else:
+                extra_args_str = ""
+            grid_arg = f"{extra_args_str}grid=grid({', '.join(grid)})"
+        else:
+            grid_arg = f"grid={grid}"
         index = V.graph.scheduler.current_device.index
         with result.indent():
             result.writeline(f"with {V.graph.device_ops.device_guard(index)}:")
@@ -2413,22 +2452,10 @@ class TritonKernel(Kernel):
                 result.writeline(
                     V.graph.device_ops.set_device(index)
                 )  # no-op to ensure context
-                for tree in self.active_range_trees():
-                    expr = pexpr(V.graph.sizevars.size_hint(tree.numel))
-                    extra_args.append(expr)
-                    if tree.prefix != "r":
-                        grid.append(expr)
-
                 stream_name = f"stream{index}"
                 result.writeline(f"{stream_name} = get_raw_stream({index})")
-
-                if self.need_numel_args():
-                    extra_args_str = ", ".join(map(str, extra_args)) + ", "
-                else:
-                    extra_args_str = ""
-
                 result.writeline(
-                    f"{str(Placeholder.KERNEL_NAME)}.run(*args, {extra_args_str}grid=grid({', '.join(grid)}), stream={stream_name})"
+                    f"{str(Placeholder.KERNEL_NAME)}.run(*args, {grid_arg}, stream={stream_name})"
                 )
 
         # benchmark all configs
@@ -2440,7 +2467,7 @@ class TritonKernel(Kernel):
                     V.graph.device_ops.set_device(index)
                 )  # no-op to ensure context
                 result.writeline(
-                    f"return {str(Placeholder.KERNEL_NAME)}.benchmark_all_configs(*args, {extra_args_str}grid=grid({', '.join(grid)}))"  # noqa: B950 line too long
+                    f"return {str(Placeholder.KERNEL_NAME)}.benchmark_all_configs(*args, {grid_arg})"
                 )
 
         ninplace_args = len(unique(self.args.inplace_buffers.values()))
@@ -3101,9 +3128,9 @@ class TritonScheduling(BaseScheduling):
 
         # Only install guards for 32-bit indexing as there is no correctness
         # issue with using 64-bit for everything
-        V.graph.sizevars.guard_leq(numel, int_max)
+        V.graph.sizevars.guard_leq(numel, int_max)  # type: ignore[arg-type]
         for size in buf_sizes:
-            V.graph.sizevars.guard_leq(size, int_max)
+            V.graph.sizevars.guard_leq(size, int_max)  # type: ignore[arg-type]
         return True
 
     @staticmethod
@@ -3369,7 +3396,14 @@ class TritonScheduling(BaseScheduling):
             node_schedule = [template_node, *epilogue_nodes]
 
             if config.benchmark_kernel:
-                src_code = f"{kernel.imports_for_benchmark_kernel()}\n{src_code}\n{kernel.codegen_kernel_benchmark().getvalue()}"
+                grid_args = V.graph.sizevars.size_hints(kernel.call_sizes)
+                assert kernel.meta is not None, "meta is None"
+                grid = kernel.grid_fn(*grid_args, kernel.meta)
+                src_code = (
+                    f"{kernel.imports_for_benchmark_kernel()}\n"
+                    f"{src_code}\n"
+                    f"{kernel.codegen_kernel_benchmark(grid).getvalue()}"
+                )
 
             kernel_name = self.define_kernel(src_code, node_schedule)
         self.codegen_comment(node_schedule)
