@@ -17,6 +17,7 @@ from torch.export.exported_program import (
     TensorArgument,
 )
 from torch.fx._symbolic_trace import is_fx_tracing
+from torch.utils._pytree import GetAttrKey, SequenceKey
 
 __all__ = ["InterpreterModule", "UnflattenedModule", "unflatten", "FlatArgsAdapter"]
 
@@ -126,7 +127,7 @@ class FlatArgsAdapter(abc.ABC):
         input_spec: pytree.TreeSpec,
         input_args: List[Any],
     ) -> List[Any]:
-        """NOTE: This adapter may mutate given ``flat_args``."""
+        """NOTE: This adapter may mutate given ``input_args_with_path``."""
         ...
 
 
@@ -214,9 +215,13 @@ class UnflattenedModule(torch.nn.Module):
 
     def forward(self, *args, **kwargs):
         signature = self.module_call_graph[0].signature
-        reordered_kwargs = reorder_kwargs(kwargs, signature.in_spec)
-        flat_args, in_spec = pytree.tree_flatten((args, reordered_kwargs))
 
+        reordered_kwargs = reorder_kwargs(kwargs, signature.in_spec)
+
+        flat_args_with_path, in_spec = pytree.tree_flatten_with_path(
+            (args, reordered_kwargs)
+        )
+        flat_args = [x[1] for x in flat_args_with_path]
         if is_fx_tracing():
             return_val = torch.fx.Interpreter(self, graph=self.graph).run(
                 *flat_args, enable_io_processing=False
@@ -259,8 +264,19 @@ class UnflattenedModule(torch.nn.Module):
             # TODO(suo): untangle this.
             from torch._export.utils import _check_input_constraints_for_graph
 
+            if self.adapted is True:
+                # TODO(suo): The FlatArgsAdapter returns a list of flat args,
+                # which we don't have keypaths for. For now, just create a dummy
+                # keypath to associate with the arg.
+                new_flat_args_with_path = [  # type: ignore[var-annotated]
+                    ((SequenceKey(idx=0), GetAttrKey(name="<unknown location>")), arg)
+                    for arg in flat_args
+                ]
+            else:
+                new_flat_args_with_path = flat_args_with_path  # type: ignore[assignment]
+
             _check_input_constraints_for_graph(
-                self.input_placeholders, flat_args, self.range_constraints
+                self.input_placeholders, new_flat_args_with_path, self.range_constraints
             )
         tree_out = torch.fx.Interpreter(self, graph=self.graph).run(
             *flat_args, enable_io_processing=False

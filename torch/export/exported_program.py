@@ -250,7 +250,9 @@ class ExportedProgram:
         if in_spec is not None:
             kwargs = reorder_kwargs(kwargs, in_spec)
 
-        flat_args, received_spec = pytree.tree_flatten((args, kwargs))
+        flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
+            (args, kwargs)
+        )
 
         if in_spec is not None and received_spec != in_spec:
             raise ValueError(
@@ -270,7 +272,8 @@ class ExportedProgram:
                 additional_inputs.append(self.constants[input_.target])
         additional_inputs = tuple(additional_inputs)
 
-        self._check_input_constraints(*flat_args)
+        self._check_input_constraints(flat_args_with_path)
+        flat_args = [x[1] for x in flat_args_with_path]
 
         # NOTE: calling convention is first params, then buffers, then args as user supplied them.
         # See: torch/_functorch/aot_autograd.py#L1034
@@ -566,7 +569,7 @@ class ExportedProgram:
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
         return transformed_ep
 
-    def _check_input_constraints(self, *args):
+    def _check_input_constraints(self, flat_args_with_path):
         from torch._export.utils import _check_input_constraints_for_graph
 
         placeholders = [p for p in self.graph.nodes if p.op == "placeholder"]
@@ -576,7 +579,7 @@ class ExportedProgram:
             if s.kind == InputKind.USER_INPUT
         ]
         _check_input_constraints_for_graph(
-            input_placeholders, args, self.range_constraints
+            input_placeholders, flat_args_with_path, self.range_constraints
         )
 
     def _validate(self):
