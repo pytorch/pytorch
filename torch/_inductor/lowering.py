@@ -249,7 +249,7 @@ def _register_foreach_lowering(aten_fn, decomp_fn):
 
     aten_fns = get_overloads(aten_fn)
     foreach_ops.update(aten_fns)
-    lowerings.update({fn: wrapped for fn in aten_fns})
+    lowerings.update(dict.fromkeys(aten_fns, wrapped))
     return wrapped
 
 
@@ -299,7 +299,7 @@ def _register_lowering(
 
     aten_fn = get_overloads(aten_fn)
 
-    lowerings.update({fn: wrapped for fn in aten_fn})
+    lowerings.update(dict.fromkeys(aten_fn, wrapped))
     return wrapped
 
 
