@@ -85,7 +85,7 @@ else:
                 if cur_rank in mesh_1d:
                     res_sub_mesh = sub_mesh
 
-            res_sub_mesh._dim_group_infos = [device_mesh._dim_group_infos[mesh_dim]]
+            res_sub_mesh._dim_group_infos = [device_mesh._dim_group_infos[mesh_dim]]  # type: ignore[possibly-undefined]
             # Assign the current DeviceMesh as the parent of the child DeviceMesh.
             self.child_to_parent_mapping[res_sub_mesh] = device_mesh
             return res_sub_mesh

@@ -155,7 +155,7 @@ def get_cpp_op_schema(kernel: torch._ops.OpOverload) -> str:
         cpp_return_value = f"std::tuple<{tuple_returns}>"
 
     cpp_arg_type = [f"{convert_arg_type(arg)} {arg.name}" for arg in args]
-    return f"{cpp_return_value}({', '.join(cpp_arg_type)})"
+    return f"{cpp_return_value}({', '.join(cpp_arg_type)})"  # type: ignore[possibly-undefined]
 
 
 # TODO: Move to a well known place

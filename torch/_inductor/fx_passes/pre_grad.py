@@ -99,7 +99,7 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
 
         gm_after_fx_passes = gm.__copy__()
         numeric_check_if_enabled(
-            gm_before_fx_passes,
+            gm_before_fx_passes,  # type: ignore[possibly-undefined]
             gm_after_fx_passes,
             example_inputs,
             config.fx_passes_numeric_check.get("num_iterations", 1),
