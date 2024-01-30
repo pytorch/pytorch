@@ -34,7 +34,11 @@ from torch._C._distributed_c10d import (
     Store,
     DebugLevel,
     get_debug_level,
-    Work
+    Work,
+    _register_process_group,
+    _resolve_process_group,
+    _unregister_all_process_groups,
+    _unregister_process_group,
 )
 from .constants import default_pg_timeout, default_pg_nccl_timeout
 from .c10d_logger import _exception_logger, _time_logger
@@ -620,7 +624,7 @@ def _check_valid_timeout(timeout: Any) -> None:
         )
 
 # Default process group state
-_default_pg_init_method = None
+_default_pg_init_method: Optional[str] = None
 
 STORE_BASED_BARRIER_PREFIX = "store_based_barrier_key"
 
@@ -837,6 +841,11 @@ def _get_group_size(group) -> int:
     if group is GroupMember.WORLD or group is None:
         default_pg = _get_default_group()
         return default_pg.size()
+    return group.size()
+
+
+def _get_group_size_by_name(group_name: str) -> int:
+    group = _resolve_process_group(group_name)
     return group.size()
 
 
@@ -1536,6 +1545,7 @@ def _new_process_group_helper(
     _world.pg_map[pg] = (backend, prefix_store)
     _world.pg_names[pg] = group_name
     pg._set_group_name(group_name)
+    _register_process_group(group_name, pg)
 
     _world.pg_backend_config[pg] = str(backend_config)
     # "" is the default tag for user PGs
@@ -1594,6 +1604,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         _world.tags_to_pg.clear()
         _world.pg_coalesce_state.clear()
         _world.pg_default_device.clear()
+        _unregister_all_process_groups()
 
         # when process group doesn't have an explicit name (only WORLD (default)
         # process group can have an explicit name), we use global _world.group_count
@@ -1627,6 +1638,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
                     _world.tags_to_pg[""].remove(pg)
             except Exception:
                 pass
+        _unregister_process_group(pg.group_name)
 
 
 def get_rank(group: Optional[ProcessGroup] = None) -> int:
@@ -2360,7 +2372,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
             should be correctly sized as the size of the group for this
             collective and will contain the output. Must be ``None`` on non-dst
             ranks. (default is ``None``)
-        dst (int, optional): Destination rank. (default is 0)
+        dst (int, optional): Destination rank on global process group (regardless of 'group' argument). (default is 0)
         group: (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used. Default is ``None``.
 
@@ -2982,7 +2994,7 @@ def gather(tensor, gather_list=None, dst=0, group=None, async_op=False):
         gather_list (list[Tensor], optional): List of appropriately-sized
             tensors to use for gathered data (default is None, must be specified
             on the destination rank)
-        dst (int, optional): Destination rank (default is 0)
+        dst (int, optional): Destination rank on global process group (regardless of 'group' argument). (default is 0)
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
