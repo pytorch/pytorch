@@ -16,14 +16,14 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
       - name: Clone CodeLlama
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
         with:
           repository: osalpekar/codellama
           ref: main
           path: codellama
 
       - name: Clone Target Determination Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
         with:
           repository: osalpekar/llm-target-determinator
           ref: main
