@@ -4173,7 +4173,7 @@ def mark_node_as_mutating(cur_buffer, *mutated_ops):
     indicates to the scheduler that these ops depend on cur_buffer.
     """
     for op in mutated_ops:
-        assert isinstance(op, (TensorBox, Buffer)), op
+        assert isinstance(op, (TensorBox, Buffer, BaseView)), op
         V.graph.mark_buffer_mutated(op.get_name())
         MutationOutput(op.layout, op, cur_buffer)
 
@@ -4740,7 +4740,7 @@ class FallbackKernel(ExternKernelAlloc):
         if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
             return []
         # See NOTE [FallbackKernel supported operators]
-        if self.op_overload._schema.is_mutable():
+        if self.op_overload._schema.is_mutable:
             return self.mutated_but_not_returned_inputs
         if torch._inductor.utils.is_view(self.op_overload):
             # TODO - use op._schema.arguments alias_info to figure out
