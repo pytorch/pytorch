@@ -32,13 +32,13 @@ Random Number Generator
 
     get_rng_state
     get_rng_state_all
-    set_rng_state
-    set_rng_state_all
+    initial_seed
     manual_seed
     manual_seed_all
     seed
     seed_all
-    initial_seed
+    set_rng_state
+    set_rng_state_all
 
 Streams and events
 ------------------
