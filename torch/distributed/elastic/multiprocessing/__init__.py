@@ -223,8 +223,8 @@ def start_processes(
         redirect_std = redirs[local_rank]
         redirs[local_rank] = redirect_std | tee_std
 
-    stdouts = {local_rank: "" for local_rank in range(nprocs)}
-    stderrs = {local_rank: "" for local_rank in range(nprocs)}
+    stdouts = dict.fromkeys(range(nprocs), "")
+    stderrs = dict.fromkeys(range(nprocs), "")
     tee_stdouts: Dict[int, str] = {}
     tee_stderrs: Dict[int, str] = {}
     error_files = {}

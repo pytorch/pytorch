@@ -147,7 +147,7 @@ def register_dataclass_as_pytree_node(
 
     def default_unflatten_fn(values: Iterable[Any], context: Context) -> Any:
         typ, flat_names, none_names = context
-        return typ(**dict(zip(flat_names, values)), **{k: None for k in none_names})
+        return typ(**dict(zip(flat_names, values)), **dict.fromkeys(none_names))
 
     def default_to_dumpable_context(context: Context) -> DumpableContext:
         return (serialized_type, context[1], context[2])

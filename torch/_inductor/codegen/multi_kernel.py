@@ -24,7 +24,7 @@ def get_all_kernel_argdefs(kernels):
         Any, None
     ] = {}  # use a dict rather than set to maintain insertion order
     for argdefs in argdefs_list:
-        all_argdefs.update({arg: None for arg in argdefs})
+        all_argdefs.update(dict.fromkeys(argdefs))
 
     return list(all_argdefs.keys())
 

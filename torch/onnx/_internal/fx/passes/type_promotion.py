@@ -216,8 +216,8 @@ class ElementwiseTypePromotionRule(TypePromotionRule):
         )
 
         return TypePromotionSnapshot(
-            {i: consolidated_input_dtype for i in candidate_args.keys()},
-            {name: consolidated_input_dtype for name in candidate_kwargs.keys()},
+            dict.fromkeys(candidate_args.keys(), consolidated_input_dtype),
+            dict.fromkeys(candidate_kwargs.keys(), consolidated_input_dtype),
             result_dtype,
         )
 

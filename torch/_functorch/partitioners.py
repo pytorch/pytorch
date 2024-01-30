@@ -291,8 +291,8 @@ def default_partition(
                 saved_sym_nodes.extend(backward_usages)
             else:
                 saved_values.append(node)
-    saved_values = list({k: None for k in saved_values}.keys())
-    saved_sym_nodes = list({k: None for k in saved_sym_nodes}.keys())
+    saved_values = list(dict.fromkeys(saved_values).keys())
+    saved_sym_nodes = list(dict.fromkeys(saved_sym_nodes).keys())
 
     return _extract_fwd_bwd_modules(joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
 
