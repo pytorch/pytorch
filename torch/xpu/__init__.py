@@ -19,6 +19,7 @@ _initialized = False
 _initialization_lock = threading.Lock()
 _is_in_bad_fork = getattr(torch._C, "_xpu_isInBadFork", lambda: False)
 _device_t = Union[_device, str, int, None]
+default_generators: Tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 
 
 def _is_compiled() -> bool:
@@ -342,6 +343,9 @@ def synchronize(device: _device_t = None) -> None:
     _lazy_init()
     device = _get_device_index(device)
     return torch._C._xpu_synchronize(device)
+
+
+from .random import *  # noqa: F403
 
 
 __all__ = [

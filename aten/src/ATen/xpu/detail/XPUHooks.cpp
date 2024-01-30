@@ -40,6 +40,10 @@ int XPUHooks::getNumGPUs() const {
   return at::xpu::device_count();
 }
 
+DeviceIndex XPUHooks::current_device() const {
+  return c10::xpu::current_device();
+}
+
 void XPUHooks::deviceSynchronize(DeviceIndex device_index) const {
   c10::xpu::syncStreamsOnDevice(device_index);
 }
