@@ -171,12 +171,30 @@ def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
 ################################################################################
 
 
+def is_valid_mm_plus_mm(match: Match):
+    *b1, m1, k1 = match.kwargs["mat1"].meta.get("tensor_meta").shape
+    *b2, k2, n1 = match.kwargs["mat2"].meta.get("tensor_meta").shape
+    if k1 != k2:
+        return False
+
+    *b1, m2, k3 = match.kwargs["mat3"].meta.get("tensor_meta").shape
+    *b2, k4, n2 = match.kwargs["mat4"].meta.get("tensor_meta").shape
+    if k3 != k4:
+        return False
+
+    if m1 != m2 or n1 != n2:
+        return False
+
+    return True
+
+
 @register_lowering_pattern(
     CallFunction(
         aten.add,
-        CallFunction(aten.mm, Arg(), Arg()),
-        CallFunction(aten.mm, Arg(), Arg()),
-    )
+        CallFunction(aten.mm, KeywordArg("mat1"), KeywordArg("mat2")),
+        CallFunction(aten.mm, KeywordArg("mat3"), KeywordArg("mat4")),
+    ),
+    extra_check=is_valid_mm_plus_mm,
 )
 def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
