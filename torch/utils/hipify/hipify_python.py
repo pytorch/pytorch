@@ -659,26 +659,36 @@ def is_caffe2_gpu_file(rel_filepath):
     _, ext = os.path.splitext(filename)
     return ('gpu' in filename or ext in ['.cu', '.cuh']) and ('cudnn' not in filename)
 
+class TrieNode:
+    """A Trie node whose children are represented as a directory of char: TrieNode.
+       A special char '' represents end of word
+    """
+
+    def __init__(self):
+        self.children={}
+
 class Trie:
     """Creates a Trie out of a list of words. The trie can be exported to a Regex pattern.
     The corresponding Regex should match much faster than a simple Regex union."""
 
     def __init__(self):
         """Initialize the trie with an empty root node."""
-        self.root = {}
+        self.root = TrieNode()
 
     def add(self, word):
         """Add a word to the Trie. """
         node = self.root
-        for char in word:
-            node = node.setdefault(char, {})
-        node[''] = True # Mark the end of the word
 
-    def _dump(self):
+        for char in word:
+            node.children.setdefault(char, TrieNode())
+            node = node.children[char]
+        node.children[''] = True # Mark the end of the word
+
+    def dump(self):
         """Return the root node of Trie. """
         return self.root
 
-    def _quote(self, char):
+    def quote(self, char):
         """ Escape a char for regex. """
         return re.escape(char)
 
@@ -687,30 +697,30 @@ class Trie:
         Returns True if yes, else return False"""
         node = self.root
         for char in word:
-            if char in node:
-                node = node[char]
+            if char in node.children:
+                node = node.children[char]
             else:
                 return False
 
-        return '' in node # make sure to check the end-of-word marker present
+        return '' in node.children # make sure to check the end-of-word marker present
 
     def _pattern(self, root):
-        """Convert a nested dictionary represented by a trie into a regular expression pattern"""
+        """Convert a Trie into a regular expression pattern"""
         node = root
 
-        if "" in node and len(node.keys()) == 1:
+        if "" in node.children and len(node.children.keys()) == 1:
             return None
 
         alt = [] # store alternative patterns
         cc = [] # to store char to char classes
         q = 0 # for node representing the end of word
-        for char in sorted(node.keys()):
-            if isinstance(node[char], dict):
+        for char in sorted(node.children.keys()):
+            if isinstance(node.children[char], TrieNode):
                 try:
-                    recurse = self._pattern(node[char])
-                    alt.append(self._quote(char) + recurse)
+                    recurse = self._pattern(node.children[char])
+                    alt.append(self.quote(char) + recurse)
                 except Exception:
-                    cc.append(self._quote(char))
+                    cc.append(self.quote(char))
             else:
                 q = 1
         cconly = not len(alt) > 0
@@ -733,10 +743,13 @@ class Trie:
                 result = f"(?:{result})?"
         return result
 
-    def export_to_regex(self):
+    def pattern(self):
         """Export the Trie to a regex pattern."""
         return self._pattern(self.root)
 
+    def export_to_regex(self):
+        """Export the Trie to a regex pattern."""
+        return self._pattern(self.root)
 
 CAFFE2_TRIE = Trie()
 CAFFE2_MAP = {}

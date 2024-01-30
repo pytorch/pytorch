@@ -724,7 +724,7 @@ class TestHipifyTrie(TestCase):
         orig_chars=["*", "[", ".", "+", "a", "z", "-"]
         quoted_strs=["\\*", "\\[", "\\.", "\\+", "a", "z", "\\-"]
         for i in range(len(orig_chars)):
-            self.assertEqual(self.trie._quote(orig_chars[i]), quoted_strs[i])
+            self.assertEqual(self.trie.quote(orig_chars[i]), quoted_strs[i])
     
     def test_export_trie_to_regex(self):
         words_to_add=["__CUDACC__", "CUDA_ERROR_CONTEXT_ALREADY_CURRENT", "CUDA_ERROR_ARRAY_IS_MAPPED","CUDA_ERROR_NOT_MAPPED", "CUDA_ERROR_INVALID_SOURCE"]
