@@ -1584,6 +1584,46 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), example_inputs)
 
+    @config.patch({"aot_inductor.abi_compatible": True})
+    def test_triton_kernel_reinterpret_view_mem_leak(self):
+        # Check for memory leak when using user-defined Triton Kernel + AOTI.
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                out = torch.zeros_like(x)
+                yy = y * y
+                # reshape creates a ReinterpretView
+                add_kernel[(4,)](x, yy.reshape_as(x), out, 4, 16)
+                return out
+
+        example_inputs = (
+            torch.randn(4, 4, device="cuda"),
+            torch.randn(1, 16, device="cuda"),
+        )
+
+        so_path: str = AOTIRunnerUtil.compile(
+            Model(),
+            example_inputs,
+        )
+        aot_inductor_module = AOTIRunnerUtil.load("cuda", so_path)
+
+        # Don't assign outputs to a variable b/c it will allocate GPU memory.
+        device: int = torch.cuda.current_device()
+        mem_before = torch.cuda.memory_allocated(device)
+        aot_inductor_module(*example_inputs)
+        aot_inductor_module(*example_inputs)
+        mem_after = torch.cuda.memory_allocated(device)
+        self.assertEqual(mem_before, mem_after)
+
+        actual = aot_inductor_module(*example_inputs)
+        expected = Model()(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
     @skipIfRocm
     def test_scaled_dot_product_efficient_attention(self):
         if self.device != "cuda":

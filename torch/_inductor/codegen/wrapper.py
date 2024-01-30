@@ -1013,7 +1013,7 @@ class WrapperCodeGen(CodeGen):
                 signature.append(
                     TensorArg(
                         key,
-                        arg.codegen_reference(),
+                        arg.get_name(),
                         arg.get_dtype(),
                         # For ReinterpretView, we do not want to check alignment
                         not isinstance(arg, ReinterpretView),
