@@ -8,7 +8,7 @@
 import sys
 
 # This test does not support PyThon 3.12
-if (sys.version_info >= (3, 12))
+if (sys.version_info >= (3, 12)):
     return
 
 from functorch.dim import Tensor, Dim, dims, dimlists, stack, DimensionBindError, DimList
