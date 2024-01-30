@@ -55,7 +55,10 @@ def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
     return functional_call
 
 
-def decompose_and_inline_function_with_makefx(tx, fn, args, kwargs):
+function_key_to_fx = {}
+
+
+def decompose_and_inline_function_with_makefx(tx, fn, args, kwargs, function_key=None):
     from functorch import make_fx
 
     from torch._dispatch.python import enable_python_dispatcher
@@ -65,39 +68,47 @@ def decompose_and_inline_function_with_makefx(tx, fn, args, kwargs):
     from .dicts import ConstDictVariable
     from .lists import BaseListVariable
 
-    # convert he arguments from VariableTracker to fake tensors + constants again
-    fake_value_args = []
-    for arg in args:
-        if type(arg.as_proxy()) is torch.fx.proxy.Proxy:
-            fake_value_args.append(get_fake_value(arg.as_proxy().node, tx))
-        else:
-            # mostly handle tuple and scalar
-            fake_value_args.append(arg.as_proxy())
+    if function_key is None or function_key not in function_key_to_fx:
+        # convert he arguments from VariableTracker to fake tensors + constants again
+        fake_value_args = []
+        for arg in args:
+            if type(arg.as_proxy()) is torch.fx.proxy.Proxy:
+                fake_value_args.append(get_fake_value(arg.as_proxy().node, tx))
+            else:
+                # mostly handle tuple and scalar
+                fake_value_args.append(arg.as_proxy())
 
-    fake_value_kwargs = {}
-    for key, value in kwargs.items():
-        if type(value.as_proxy()) is torch.fx.proxy.Proxy:
-            fake_value_kwargs[key] = get_fake_value(value.as_proxy().node, tx)
-        else:
-            # mostly handle tuple and scalar
-            fake_value_kwargs[key] = value.as_proxy()
+        fake_value_kwargs = {}
+        for key, value in kwargs.items():
+            if type(value.as_proxy()) is torch.fx.proxy.Proxy:
+                fake_value_kwargs[key] = get_fake_value(value.as_proxy().node, tx)
+            else:
+                # mostly handle tuple and scalar
+                fake_value_kwargs[key] = value.as_proxy()
 
-    # Wrap the function before calling make_fx to avoid make_fx modify the kwargs's key.
-    def wrapper_fn(fn):
-        def inner(arg, kwargs):
-            return fn(*arg, **kwargs)
+        # Wrap the function before calling make_fx to avoid make_fx modify the kwargs's key.
+        def wrapper_fn(fn):
+            def inner(arg, kwargs):
+                return fn(*arg, **kwargs)
 
-        return inner
+            return inner
 
-    wrapped_fn = wrapper_fn(fn)
+        wrapped_fn = wrapper_fn(fn)
 
-    with enable_python_dispatcher():
-        fx_g = make_fx(wrapped_fn, pre_dispatch=True)(
-            fake_value_args, fake_value_kwargs
-        )
+        with enable_python_dispatcher():
+            fx_g = make_fx(wrapped_fn, pre_dispatch=True)(
+                fake_value_args, fake_value_kwargs
+            )
 
-    # print("\nfx code")
-    # print(fx_g.code)
+        if function_key is not None:
+            function_key_to_fx[function_key] = fx_g
+    else:
+        breakpoint()
+        fx_g = function_key_to_fx[function_key]
+
+    print("\nfx code")
+    print(fx_g.code)
+    print(fx_g.forward.__func__.__code__.co_filename)
 
     # now inline this fx graph and return the output
     user_fn_variable_with_kwargs = SourcelessBuilder()(

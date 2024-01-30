@@ -427,7 +427,11 @@ class NNModuleVariable(VariableTracker):
                 # stich the args togther and pass it to decompose_and_inline_function_with_makefx
                 complete_tensor_variable_args = self_params_as_vt + args
                 res = decompose_and_inline_function_with_makefx(
-                    tx, functional_call, complete_tensor_variable_args, kwargs
+                    tx,
+                    functional_call,
+                    complete_tensor_variable_args,
+                    kwargs,
+                    function_key=str(self.module),
                 )
 
                 num_nodes_need_update_metadata = (
