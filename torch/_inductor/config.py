@@ -271,7 +271,7 @@ enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", ""
 max_fusion_size = 64
 
 # max number of inputs to generate cat as a pointwise op with masked laods
-max_pointwise_cat_inputs = 4
+max_pointwise_cat_inputs: Optional[int] = None
 
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
