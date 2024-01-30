@@ -92,11 +92,17 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float16();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float32();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float64();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_uint8();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_uint16();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_uint32();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_uint64();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int8();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int16();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int32();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int64();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_bool();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex32();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex64();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex128();
 
 // Functions for converting a single-element tensor to a scalar value
 AOTI_TORCH_EXPORT AOTITorchError
@@ -414,6 +420,12 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_index_put_out(
     const uint32_t num_indices,
     const AtenTensorHandle values,
     bool accumulate);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_view_dtype(
+    AtenTensorHandle self,
+    int32_t dtype,
+    AtenTensorHandle* ret // returns new reference
+);
 
 #ifdef USE_CUDA
 
