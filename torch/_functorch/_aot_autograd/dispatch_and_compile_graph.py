@@ -86,6 +86,13 @@ def aot_dispatch_base_graph(
         meta=fw_metadata,
         fw_only=flat_fn,
     )
+    if aot_config.enable_log:
+        aot_graphs_log.info(
+            "aot_config id: %s, fw_metadata=%s,subclass_metadata=%s",
+            str(aot_config.aot_id),
+            str(fw_metadata),
+            str(maybe_subclass_meta),
+        )
 
     fw_module = _create_graph(
         fn_to_trace,
@@ -165,6 +172,13 @@ def aot_dispatch_autograd_graph(
     joint_fn_to_trace = subclass_tracing_info.plain_tensor_trace_fn
     updated_joint_inputs = subclass_tracing_info.plain_tensor_args
     maybe_subclass_meta = subclass_tracing_info.maybe_subclass_meta
+    if aot_config.enable_log:
+        aot_graphs_log.info(
+            "aot_config id: %s, fw_metadata=%s,subclass_metadata=%s",
+            str(aot_config.aot_id),
+            str(fw_metadata),
+            str(maybe_subclass_meta),
+        )
 
     fx_g = _create_graph(joint_fn_to_trace, updated_joint_inputs, aot_config=aot_config)
 
