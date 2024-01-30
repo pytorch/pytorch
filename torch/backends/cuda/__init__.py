@@ -14,6 +14,7 @@ __all__ = [
     "preferred_linalg_library",
     "cufft_plan_cache",
     "matmul",
+    "SDPBackend",
     "SDPAParams",
     "enable_flash_sdp",
     "flash_sdp_enabled",
@@ -204,7 +205,7 @@ def preferred_linalg_library(
     return torch._C._get_linalg_preferred_backend()
 
 
-from torch._C import _SDPAParams as SDPAParams
+from torch._C import _SDPAParams as SDPAParams, _SDPBackend as SDPBackend
 
 # Set the __module__ attribute
 SDPAParams.__module__ = "torch.backends.cuda"
