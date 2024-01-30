@@ -98,17 +98,6 @@ def uninteresting_files():
 CLOSURE_VARS = {
     "___check_type_id": check_type_id,
     "___check_obj_id": check_obj_id,
-    "___current_backend": (
-        lambda: torch._dynamo.eval_frame.guarded_backend_cache.current_backend
-    ),
-    "___lookup_backend": (
-        lambda backend_obj_id: torch._dynamo.eval_frame.cached_backends.get(
-            backend_obj_id, None
-        )
-    ),
-    "___skip_backend_check": (
-        lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode
-    ),
     "___odict_getitem": collections.OrderedDict.__getitem__,
     "___key_to_id": key_to_id,
     "___dict_version": dict_version,
@@ -117,6 +106,7 @@ CLOSURE_VARS = {
     "___tuple_iterator_len": tuple_iterator_len,
     "___tuple_iterator_getitem": tuple_iterator_getitem,
     "__math_isnan": math.isnan,
+    "__numpy_isnan": np.isnan,
     "inf": float("inf"),
     "__load_module": importlib.import_module,
     "utils_device": torch.utils._device,
@@ -360,6 +350,15 @@ class GuardBuilder(GuardBuilderBase):
 
         self._produce_guard_code(guard, [code], provided_guarded_object=self.get(base))
 
+    def FUNCTORCH_CURRENT_LEVEL_MATCH(self, guard: Guard):
+        # Invalidate the graph if a call to vmap has been made prior to this
+        # This is super conservative as the interpreter stack may not contain
+        # vmap
+        code = [
+            "torch._C._functorch.maybe_current_level() is None",
+        ]
+        self._produce_guard_code(guard, code)
+
     def EQUALS_MATCH(self, guard: Guard):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
@@ -409,6 +408,13 @@ class GuardBuilder(GuardBuilderBase):
             code = list()
             code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
             code.append(f"__math_isnan({ref})")
+            self._produce_guard_code(guard, code)
+            return
+        # Python math library doesn't support complex nan, so we need to use numpy
+        elif istype(val, complex) and np.isnan(val):
+            code = list()
+            code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
+            code.append(f"__numpy_isnan({ref})")
             self._produce_guard_code(guard, code)
             return
 
@@ -591,9 +597,7 @@ class GuardBuilder(GuardBuilderBase):
         backend_id = (
             f"{id(torch._dynamo.eval_frame.guarded_backend_cache.current_backend)}"
         )
-        code = [
-            f"(___skip_backend_check() or ___current_backend() == ___lookup_backend({backend_id}))"
-        ]
+        code = [f"___check_current_backend({backend_id})"]
         self._produce_guard_code(guard, code)
 
     def SHAPE_ENV(self, guard: Guard):
@@ -653,7 +657,10 @@ class GuardBuilder(GuardBuilderBase):
             # Export keeps static.
             ignore_static=(not self.check_fn_manager.output_graph.export),
         )
-        output_graph.shape_env.freeze()
+        # When exporting, we may work with the shape constraints some more in
+        # postprocessing, so don't freeze yet
+        if not self.check_fn_manager.output_graph.export:
+            output_graph.shape_env.freeze()
         for shape_guard in guards:
             self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
@@ -1153,6 +1160,7 @@ class CheckFunctionManager:
             "___check_tensors": check_tensors_fn,
             "___check_tensors_verbose": check_tensors_verbose_fn,
             "___check_global_state": global_state.check,
+            "___check_current_backend": torch._dynamo.eval_frame.check_current_backend,
             "tensor_check_names": tensor_check_names,
             **SYMPY_INTERP,
             **CLOSURE_VARS,

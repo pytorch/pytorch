@@ -498,7 +498,7 @@ def forward(self, x_1):
         self.assertTrue(expect_true(i0 <= s0))
         self.assertExpectedInline(
             str([ra.expr for ra in shape_env.deferred_runtime_asserts[i0.node.expr]]),
-            """[i0 - s0 <= 0]"""
+            """[-s0 + u0 <= 0]"""
         )
         self.assertTrue(i0 <= s0)
         self.assertFalse(i0 > s0)
@@ -512,7 +512,7 @@ def forward(self, x_1):
         # Importantly, this is put in i1, not i0!
         self.assertExpectedInline(
             str([ra.expr for ra in shape_env.deferred_runtime_asserts[i1_sym]]),
-            """[Eq(i0 + i1, 10)]"""
+            """[Eq(u0 + u1, 10)]"""
         )
         self.assertTrue(i0 + i1 == 10)
         # NB: We currently don't support deriving that we can substitute
@@ -526,17 +526,17 @@ def forward(self, x_1):
         i0 = shape_env.create_unbacked_symint()
         i1 = shape_env.create_unbacked_symint()
         self.assertTrue(expect_true(i0 == i1 * 4))
-        self.assertExpectedInline(str(i0), """4*i1""")
+        self.assertExpectedInline(str(i0), """4*u1""")
 
         i2 = shape_env.create_unbacked_symint()
         i3 = shape_env.create_unbacked_symint()
         self.assertTrue(expect_true(i2 * 4 == i3))
-        self.assertExpectedInline(str(i3), """4*i2""")
+        self.assertExpectedInline(str(i3), """4*u2""")
 
     def test_expect_true_double_digits(self):
         shape_env = ShapeEnv()
         ia = [shape_env.create_unbacked_symint() for _ in range(11)]  # allocate 10
-        self.assertEqual(str(ia[-1]), "i10")
+        self.assertEqual(str(ia[-1]), "u10")
         self.assertTrue(expect_true(sum(ia) == 20))
         self.assertEqual(len(shape_env.deferred_runtime_asserts[ia[-1].node.expr]), 1)
 

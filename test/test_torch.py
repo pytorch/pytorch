@@ -54,7 +54,8 @@ from typing import Tuple
 import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import (
-    tf32_on_and_off, tf32_is_not_fp32, TEST_CUDNN)
+    tf32_on_and_off, tf32_is_not_fp32, TEST_CUDNN, TEST_MULTIGPU)
+from torch.testing._internal.common_mkldnn import bf32_on_and_off
 from torch.testing._internal.common_dtype import (
     floating_types_and, get_all_math_dtypes, all_types_and_complex_and, complex_types,
     all_types_and, floating_types, floating_and_complex_types, integral_types_and,
@@ -2457,6 +2458,7 @@ else:
                         self.assertEqual(y1.grad, y2.grad, rtol=0, atol=0.001)
 
     @tf32_on_and_off(0.005)
+    @bf32_on_and_off(0.005)
     def test_cdist_large(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(1000, 10, device=device)
@@ -2467,6 +2469,7 @@ else:
 
     @slowTest
     @tf32_on_and_off(0.01)
+    @bf32_on_and_off(0.01)
     def test_cdist_large_batch(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 1000, 10, device=device)
@@ -2476,6 +2479,7 @@ else:
             self.assertEqual(expected, actual)
 
     @tf32_on_and_off(0.005)
+    @bf32_on_and_off(0.005)
     def test_cdist_non_contiguous(self, device):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(5, 7, device=device).mT
@@ -2503,6 +2507,7 @@ else:
             self.assertEqual(expected, actual)
 
     @tf32_on_and_off(0.005)
+    @bf32_on_and_off(0.005)
     def test_cdist_non_contiguous_batch(self, device):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 2, 5, 7, device=device).mT
@@ -4985,7 +4990,6 @@ else:
             torch.channels_last_3d)
 
     # FIXME: make this a elementwise unary and elementwise binary OpInfo test
-    @skipIfTorchDynamo("Torchdynamo fails with unknown reason")
     def test_strides_propagation(self, device):
         def _test_helper(x, op, unary=False):
             def compare_strides(s1, s2, div):
@@ -5195,6 +5199,15 @@ else:
         self.assertTrue(torch._C._data_address(t) == t_new_data_addr)
         self.assertTrue(torch._C._data_address(view) == t_new_data_addr)
         self.assertTrue(torch._C._data_address(clone) == orig_data_ptr)
+
+    @skipXLA
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_lazy_clone_binary_op_no_materialize(self, device, dtype):
+        t = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)
+        clone = t._lazy_clone()
+        res = t + clone
+        self.assertTrue(torch._C._is_cow_tensor(t))
+        self.assertTrue(torch._C._is_cow_tensor(clone))
 
     # FIXME: move to test distributions
     @skipIfMps
@@ -5517,8 +5530,9 @@ else:
                 'cpu', get_generator(mf, shape), transformation_cuda_fn, mf, default_is_preserve=True)
 
     # FIXME: move to test_serialization
+    @onlyNativeDeviceTypes
     def test_pickle_gradscaler(self, device):
-        # This test is not in test_cuda.py because it should pass in 3 cases:
+        # This test should pass in 3 cases for cuda:
         #  1. cuda is not available.
         #  2. cuda is available but device is not cuda.
         #  3. cuda is available and device is cuda.
@@ -5527,14 +5541,18 @@ else:
         # to cuda Tensors, because I don't want to do cuda things if device is not cuda.
         # In case 3, a and b are enabled and we may also try lazy-initing _scale to a cuda tensor.
         device = torch.device(device)
-        try_lazy_inits = (True, False) if device.type == "cuda" else (False,)
+        try_lazy_inits = (True, False)
+        GradScaler = partial(torch.GradScaler, device=device.type)
         for lazy_init_scale in try_lazy_inits:
-            a = torch.cuda.amp.GradScaler(init_scale=3., growth_factor=4., backoff_factor=.5, growth_interval=2)
-            self.assertTrue(not a.is_enabled() if torch.cuda.amp.common.amp_definitely_not_available() else a.is_enabled())
+            a = GradScaler(init_scale=3., growth_factor=4., backoff_factor=.5, growth_interval=2)
+            if device.type == "cuda":
+                self.assertTrue(not a.is_enabled() if torch.cuda.amp.common.amp_definitely_not_available() else a.is_enabled())
+            else:
+                self.assertTrue(a.is_enabled())
             if lazy_init_scale:
                 # Dummy a.scale() call lazy-inits a._scale Tensor.
                 a.scale(torch.tensor([4.0], dtype=torch.float32, device=device))
-                self.assertTrue(isinstance(a._scale, torch.cuda.FloatTensor))
+                self.assertTrue(a._scale.device.type == device.type)
             # The following three lines should work whether or not cuda is available.
             serialized = pickle.dumps(a)
             b = pickle.loads(serialized)
@@ -5547,7 +5565,7 @@ else:
                 self.assertEqual(b._init_growth_tracker, 0)
                 # supplies a dummy key to test the defaultdict's default_factory
                 self.assertEqual(b._per_optimizer_states["fdsa"],
-                                 torch.cuda.amp.grad_scaler._refresh_per_optimizer_state())
+                                 torch.amp.grad_scaler._refresh_per_optimizer_state())
                 if lazy_init_scale:
                     self.assertEqual(b.scale(torch.tensor([4.0], dtype=torch.float32, device=device)), 12.0)
 
@@ -5568,14 +5586,16 @@ else:
         self._test_multinomial_empty(device, False, 1)
         self._test_multinomial_empty(device, False, 2)
 
-    @onlyCPU
+    @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     def test_grad_scaling_unscale(self, device, dtype):
-        inv_scale = torch.full((1,), 0.25, dtype=torch.float, device=device)
-        found_inf = torch.full((1,), 0.0, dtype=torch.float, device=device)
+        device = torch.device(device)
+        device0 = "cuda:0" if device.type == "cuda" else "cpu"
+        inv_scale = torch.full((1,), 0.25, dtype=torch.float, device=device0)
+        found_inf = torch.full((1,), 0.0, dtype=torch.float, device=device0)
 
         size = 20
-        g = torch.full((size, size), 4.0, dtype=dtype, device=device)
+        g = torch.full((size, size), 4.0, dtype=dtype, device=device0)
         ginf = g.clone()
         ginf[2, 2] = float('inf')
         gnan = g.clone()
@@ -5611,12 +5631,56 @@ else:
                     self.assertEqual(grad, torch.ones_like(grad), rtol=1e-5, atol=1e-7)
 
         # When passing lists with mismatched dtypes to a raw
-        # _amp_foreach_non_finite_check_and_unscale_ call,
+        # _amp_foreach_non_finite_check_and_unscale_ call on CUDA,
         # it's expected to fall back to single-tensor TensorIterator kernel.
         grads = [g.clone(), g.to(dtype=torch.float16)]
         torch._amp_foreach_non_finite_check_and_unscale_(grads, found_inf, inv_scale)
         for grad in grads:
             self.assertEqual(grad, torch.ones_like(grad), rtol=1e-5, atol=1e-7)
+
+        # Passing lists with mismatched devices to a raw
+        # _amp_foreach_non_finite_check_and_unscale_ call should raise errors.
+        if device.type == "cuda" and TEST_MULTIGPU:
+            with self.assertRaisesRegex(RuntimeError, r"Expected all tensors to be on the same device"):
+                torch._amp_foreach_non_finite_check_and_unscale_([g.clone(), g.to(device="cuda:1")],
+                                                                 found_inf,
+                                                                 inv_scale)
+
+        # Creates a list of grads with mismatched dtypes and devices, to ensure
+        # scaler._unscale_grads_ organizes grads by dtype and device before calling
+        # _amp_foreach_non_finite_check_and_unscale_ on each set.
+        # If inject_inf >= 0, writes an inf into one grad for _unscale_grads_ to find.
+        def perfect_storm_grads(inject_inf):
+            grads = [g.clone(), g.clone()[:, :5], g.to(dtype=torch.float16), g.to(dtype=torch.float16)]
+            if device.type == "cuda" and TEST_MULTIGPU:
+                grads += [g.to(device="cuda:1"),
+                          g.to(device="cuda:1")[:, :5],
+                          g.to(device="cuda:1", dtype=torch.float16),
+                          g.to(device="cuda:1", dtype=torch.float16)]
+            if inject_inf >= 0:
+                grads[inject_inf][2, 2] = float('inf')
+            return grads
+
+        GradScaler = partial(torch.GradScaler, device=device.type)
+        scaler = GradScaler()
+        dummy_params = [torch.empty_like(g) for g in perfect_storm_grads(-1)]
+        dummy_opt = torch.optim.SGD(dummy_params, lr=1.)
+
+        # Ensures the inf/nan checking can find an inf injected onto any grad in the perfect storm.
+        for inject_inf in range(-1, len(dummy_params)):
+            found_inf = torch.full((1,), 0.0, dtype=torch.float, device=device0)
+            grads = perfect_storm_grads(inject_inf)
+            for i, p in enumerate(dummy_params):
+                p.grad = grads[i]
+            found_inf_per_device = scaler._unscale_grads_(dummy_opt, inv_scale, found_inf, True)
+            if inject_inf < 0:
+                # No inf was injected, ensures unscaling worked normally.
+                self.assertTrue(sum(v.item() for v in found_inf_per_device.values()) == 0)
+                for grad in grads:
+                    self.assertEqual(grad, torch.ones_like(grad), rtol=1e-5, atol=1e-7)
+            else:
+                # inf was injected, ensures inf was found.
+                self.assertTrue(sum(v.item() for v in found_inf_per_device.values()) == 1)
 
     @skipMeta
     @onlyNativeDeviceTypes
@@ -9945,6 +10009,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(t1_moved, new_t2_moved)
         self.assertEqual(t2_moved, new_t1_moved)
 
+        # tests that PyObject slots on TensorImpl are correctly swapped by
+        # checking that when the function applied on a swapped tensor is
+        # returns doesn't change the TensorImpl, the returned value (which is
+        # given by returning the reference to the PyObject in the TensorImpl's
+        # PyObjectSlot) is still correct
+        self.assertEqual(id(t1.fill_(0.5)), id(t1))
+        self.assertEqual(id(t2.fill_(0.5)), id(t2))
+
     @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo adds weakrefs")
     def test_swap_basic(self):
         ts = [
@@ -9966,9 +10038,20 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self.assertIs(holder[0], t1)
             self.assertEqual(t1.foo, "bar")
 
+            if t1.is_floating_point():
+                t3 = t1.clone().detach().requires_grad_(True)
+                out = t3 * 2
+                with self.assertRaisesRegex(RuntimeError, "Expected single reference to a's"):
+                    torch.utils.swap_tensors(t3, t2)
+                del out
+                # Now succeeds
+                torch.utils.swap_tensors(t3, t2)
+                torch.utils.swap_tensors(t1, t2)
+
             wr = weakref.ref(t1)
             with self.assertRaisesRegex(RuntimeError, "has weakref"):
                 torch.utils.swap_tensors(t1, t2)
+
 
     @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo adds weakrefs")
     def test_swap_fail_slots(self):
@@ -10021,7 +10104,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 METHOD = 1
 INPLACE_METHOD = 2
 FUNCTIONAL = 4
-DIM_ARG = None
+DIM_ARG: None = None
 
 def make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim=0):
     def neg_dim_test(self):

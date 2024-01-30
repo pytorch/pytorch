@@ -2,7 +2,6 @@
 
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
-#include <c10/util/math_compat.h>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
