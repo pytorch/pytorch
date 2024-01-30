@@ -441,7 +441,12 @@ class ExportedProgram:
         }
 
         input_specs = [
-            InputSpec(spec.kind, update_arg(spec.arg, new_placeholders[i]), spec.target)
+            InputSpec(
+                spec.kind,
+                update_arg(spec.arg, new_placeholders[i]),
+                spec.target,
+                spec.persistent,
+            )
             for i, spec in enumerate(self.graph_signature.input_specs)
         ]
         output_specs = [
