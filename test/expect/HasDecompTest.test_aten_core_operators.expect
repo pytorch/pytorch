@@ -470,8 +470,6 @@ aten::special_zeta.out
 aten::special_zeta.self_scalar
 aten::special_zeta.self_scalar_out
 aten::split_with_sizes
-aten::split_with_sizes_copy
-aten::split_with_sizes_copy.out
 aten::sqrt
 aten::sqrt.out
 aten::sqrt_
