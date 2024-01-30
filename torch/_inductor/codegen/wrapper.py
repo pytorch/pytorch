@@ -30,7 +30,7 @@ from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
 
 from torch._inductor.codegen.multi_kernel import MultiKernelState
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
+from torch.fx.experimental.symbolic_shapes import SymTypes
 from torch.fx.node import _get_qualified_name
 from torch.utils._sympy.singleton_int import SingletonInt
 

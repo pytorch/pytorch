@@ -1780,8 +1780,12 @@ CPU_TEST_FAILURES = {
         is_skip=True
     ),
     "test_simple_dynamic": fail_with_and_without_stack_allocation(),
-    "test_zero_grid_with_unbacked_symbols": fail_with_and_without_stack_allocation(is_skip=True),
-    "test_zero_grid_with_backed_symbols": fail_with_and_without_stack_allocation(is_skip=True),
+    "test_zero_grid_with_unbacked_symbols": fail_with_and_without_stack_allocation(
+        is_skip=True
+    ),
+    "test_zero_grid_with_backed_symbols": fail_with_and_without_stack_allocation(
+        is_skip=True
+    ),
 }
 
 CUDA_TEST_FAILURES = {
