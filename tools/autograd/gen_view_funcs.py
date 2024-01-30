@@ -30,7 +30,6 @@ from .gen_inplace_or_view_type import (
     get_view_info,
     modifies_arguments,
     use_derived,
-    view_func_name,
 )
 
 FUNCTION_DECLARATION = CodeTemplate(
@@ -84,6 +83,25 @@ at::Tensor ${op}::operator()(const at::Tensor& ${call_input_name}) {
 )
 
 
+# e.g. as_strided -> AsStridedViewFunc for camel case or
+# as_strided_view_func otherwise
+def view_func_name(
+    f: NativeFunction, include_namespace: bool = False, camel_case: bool = True
+) -> str:
+    name = f.func.name.unambiguous_name()
+    view_func_name = f"{name.replace('.', '_')}_view_func"
+    if camel_case:
+        is_private = view_func_name.startswith("_")
+        view_func_name = "".join(
+            [p.title() for p in view_func_name.replace(".", "_").split("_")]
+        )
+        if is_private:
+            # put the leading underscore back in
+            view_func_name = f"_{view_func_name}"
+    namespace = "torch::autograd::generated::" if include_namespace else ""
+    return f"{namespace}{view_func_name}"
+
+
 def is_symint_or_tensor(arg: Argument) -> bool:
     return arg.type.is_tensor_like() or arg.type.is_symint_like()
 
@@ -110,7 +128,6 @@ def maybe_convert_ref_to_value_type(nctype: NamedCType) -> NamedCType:
     return NamedCType(name=arg_name, type=val_type)
 
 
-# TODO: This is dumb; merge this with the previous somehow
 def maybe_convert_ref_to_value_name(nctype: NamedCType, name: str) -> str:
     val_name = name
     arg_type = nctype.type
