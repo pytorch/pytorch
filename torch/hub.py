@@ -650,14 +650,14 @@ def download_url_to_file(url: str, dst: str, hash_prefix: Optional[str] = None,
                 buffer = u.read(READ_DATA_CHUNK)
                 if len(buffer) == 0:
                     break
-                f.write(buffer)  # type: ignore[possibly-undefined]
+                f.write(buffer)
                 if hash_prefix is not None:
-                    sha256.update(buffer)  # type: ignore[possibly-undefined]
+                    sha256.update(buffer)
                 pbar.update(len(buffer))
 
         f.close()
         if hash_prefix is not None:
-            digest = sha256.hexdigest()  # type: ignore[possibly-undefined]
+            digest = sha256.hexdigest()
             if digest[:len(hash_prefix)] != hash_prefix:
                 raise RuntimeError(f'invalid hash value (expected "{hash_prefix}", got "{digest}")')
         shutil.move(f.name, dst)
