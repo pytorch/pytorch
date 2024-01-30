@@ -1354,6 +1354,52 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         self.assertEqual(backend.comm_split_count(), 1)
         self.assertEqual(tensor, original_tensor)
 
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_non_blocking_init(self):
+        # Test creating a pg using nonblocking mode but not eagerly
+        os.environ["TORCH_NCCL_USE_COMM_NONBLOCKING"] = "1"
+        os.environ["TORCH_NCCL_NONBLOCKING_TIMEOUT"] = "100"
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = self.rank_to_GPU[self.rank][0]
+        pg = self._create_process_group_nccl(store, self.opts())
+        backend = pg._get_backend(torch.device(device))
+        self.assertEqual(backend.comm_split_count(), 0)
+        reduce_tensor = torch.rand(10, 10, device=device)
+        # Run an allreduce, which should trigger a comm init for pg
+        pg.allreduce(reduce_tensor).wait()
+        new_pg = c10d.new_group()
+        # even after pg's collective call, new pg's comm is not initialized until its own collectcive calls
+        self.assertEqual(backend.comm_split_count(), 0)
+        broadcast_tensor = torch.tensor([self.rank]).cuda(device)
+        new_pg.broadcast(broadcast_tensor, 0).wait()
+        self.assertEqual(backend.comm_split_count(), 1)
+
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_non_blocking_with_eager_init(self):
+        # Test creating a pg eagerly with nonblocking mode when
+        # we've passed a specific device_id to init_process_group.
+        os.environ["TORCH_NCCL_USE_COMM_NONBLOCKING"] = "1"
+        os.environ["TORCH_NCCL_NONBLOCKING_TIMEOUT"] = "100"
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f'cuda:{self.rank}')
+        # bound device to triger eager init mode
+        pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
+        backend = pg._get_backend(torch.device(device))
+        self.assertEqual(backend.comm_split_count(), 0)
+        reduce_tensor = torch.rand(10, 10, device=device)
+        # Run an allreduce, comm should have already started initilizaing,
+        # but allreduce is issued to CUDA STREAM only after the initialization is a success
+        pg.allreduce(reduce_tensor).wait()
+        new_pg = c10d.new_group()
+        # even after pg's collective call, new pg's comm is not initialized until its own collectcive calls
+        self.assertEqual(backend.comm_split_count(), 0)
+        broadcast_tensor = torch.tensor([self.rank]).cuda(device)
+        new_pg.broadcast(broadcast_tensor, 0).wait()
+        self.assertEqual(backend.comm_split_count(), 1)
+
 
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
@@ -3056,6 +3102,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
                 raise ValueError(f"Rank {self.rank} barrier timed out waiting for rank 0 with error: {str(e)}") from e
 
 
+
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @property
     def device(self):
@@ -3353,7 +3400,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_tensor_dtype_complex(self):
         self._test_tensor_dtype_complex(backend="nccl")
 
-
 class CompilerTest(test_c10d_common.CompilerTest):
 
     @property
@@ -3528,6 +3574,63 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
     @skip_if_lt_x_gpu(4)
     def test_new_group_local_sync_duplicated_pg(self):
         self._test_new_group_local_sync_duplicate_pg(backend="nccl")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_gather_subgroup(self):
+        world_size = 4
+        if self.rank >= world_size:
+            # just easier to write the test for exactly 4 gpus, even if this test class increased to 8gpu later
+            return
+
+        store = c10d.FileStore(self.file_name, world_size)
+        torch.distributed.init_process_group(backend="nccl", store=store, rank=self.rank, world_size=world_size)
+        process_group = c10d.distributed_c10d._get_default_group()
+        a_group = c10d.new_group([0, 1])
+        b_group = c10d.new_group([2, 3])
+        my_group = a_group if self.rank < 2 else b_group
+
+        device = torch.device("cuda:%d" % self.rank)
+        input = torch.ones((10,), device=device) * self.rank
+        if self.rank == 0 or self.rank == 2:
+            gather_list = [torch.empty_like(input) for _ in range(my_group.size())]
+            torch.distributed.gather(input, gather_list=gather_list, dst=self.rank, group=my_group, async_op=False)
+            for src in range(len(gather_list)):
+                expected = (torch.ones_like(input) * self.rank) + src
+                self.assertEqual(gather_list[src], expected)
+        else:
+            torch.distributed.gather(input, gather_list=None, dst=self.rank - 1, group=my_group, async_op=False)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_gather_object_subgroup(self):
+        world_size = 4
+        if self.rank >= world_size:
+            # just easier to write the test for exactly 4 gpus, even if this test class increased to 8gpu later
+            return
+
+        store = c10d.FileStore(self.file_name, world_size)
+        torch.distributed.init_process_group(backend="nccl", store=store, rank=self.rank, world_size=world_size)
+        process_group = c10d.distributed_c10d._get_default_group()
+        a_group = c10d.new_group([0, 1])
+        b_group = c10d.new_group([2, 3])
+        my_group = a_group if self.rank < 2 else b_group
+
+        # discrepancy #1
+        # have to set device or else gather_object gets wrong device from 'current_device = _get_pg_default_device(group)
+        torch.cuda.set_device(self.rank)
+
+        input = {"rank": self.rank}
+        if self.rank == 0 or self.rank == 2:
+            # discrepancy #2
+            # another weird thing- what's the point of making me specify some empty objects in my list?
+            # empty list should be valid imo.  (but it throws an error)
+            gather_list = [{}, {}]
+            torch.distributed.gather_object(input, object_gather_list=gather_list, dst=self.rank, group=my_group)
+            for src in range(len(gather_list)):
+                self.assertEqual(gather_list[src]["rank"], self.rank + src)
+        else:
+            torch.distributed.gather_object(input, object_gather_list=None, dst=self.rank - 1, group=my_group)
 
 
 class SparseCollective(MultiProcessTestCase):

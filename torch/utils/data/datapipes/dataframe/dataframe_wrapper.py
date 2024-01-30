@@ -1,5 +1,7 @@
-_pandas = None
-_WITH_PANDAS = None
+from typing import Any, Optional
+
+_pandas: Any = None
+_WITH_PANDAS: Optional[bool] = None
 
 
 def _try_import_pandas() -> bool:
