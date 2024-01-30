@@ -742,6 +742,9 @@ struct HelperInterpBase {
     }
   }
 
+  // This is a helper function for _compute_index_ranges_weights method that computes
+  // source two int64 scalars index min and size and a list weights (of size max_interp_size)
+  // for interpolation with antialiasing=true mode. It returns the maximal weights value
   template <typename scalar_t, typename aa_filter_fn_t>
   static inline scalar_t _compute_indices_min_size_weights_aa(
     const int64_t i, const int64_t input_size, const scalar_t scale, const scalar_t support,
@@ -781,6 +784,12 @@ struct HelperInterpBase {
     return wt_max;
   }
 
+  // This is a helper function for _compute_index_ranges_weights method that computes
+  // source two int64 scalars index min and size and a list weights (of size max_interp_size)
+  // for interpolation with antialiasing=false mode. It returns the maximal weights value.
+  // This function is templated with scalar_t for type of scale and weights but is only used for
+  // bilinear/bicubic modes on uint8 input and antialiasing=false (in this case scalar_t is double).
+  // For float input types we are using upsample_generic_Nd_kernel_impl and compute_indices_weights methods
   template <typename scalar_t, typename aa_filter_fn_t>
   static inline scalar_t _compute_indices_min_size_weights(
     const int64_t i, const int64_t input_size, const scalar_t scale,
@@ -809,6 +818,13 @@ struct HelperInterpBase {
     // We have to clip the value
     index_size = std::clamp(index_size, static_cast<int64_t>(0), max_interp_size);
 
+    // Below the weights are computed using filter_fn and accumulating values for indices being out of bounds
+    // For example, for bicubic mode for output index i = 0, we have input_index = -1,
+    // then we have unbound_index_min = -2 and unbound_index_max = 1 => unbounded input indices are [-2, -1, 0, 1] and
+    // valid input indices will be [0, 1]
+    // For unbounded input indices we compute four weight non-zero values [w0, w1, w2, w3] and as only two weights can
+    // be used with valid input indcies, we accumulate values in the following way: [w0 + w1 + w2, w3, 0.0, 0.0]
+    // A similar accumulation should done for unbounded indices larger than input size.
     auto w_index = 0;
     scalar_t wt_max = 0.0;
     for (const auto j : c10::irange(max_interp_size)) {
@@ -831,8 +847,8 @@ struct HelperInterpBase {
 
   // Note [ Support for antialias=False as a subcase of antilias=True ]
   // This function was originally written with the hard assumption that
-  // antialias=True (hence the aa in the name). It was later extended to support
-  // antialias=False. The only difference between aa and no-aa is in how the
+  // antialias=True and it was later extended to support antialias=False.
+  // The only difference between aa and no-aa is in how the
   // weights and indices are computed (and their number). In aa their number is
   // variable but with no-aa, they're fixed to interp_size. The same "filters"
   // can be used otherwise. HOWEVER, support for antialias=False here may not be
