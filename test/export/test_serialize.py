@@ -223,8 +223,8 @@ class TestDeserialize(TestCase):
         deserialized_ep = deserialize(serialized_artifact, expected_opset_version={"aten": 0})
         deserialized_ep.graph.eliminate_dead_code()
 
-        orig_outputs = ep(*inputs)
-        loaded_outputs = deserialized_ep(*inputs)
+        orig_outputs = ep.module()(*inputs)
+        loaded_outputs = deserialized_ep.module()(*inputs)
 
         flat_orig_outputs = pytree.tree_leaves(orig_outputs)
         flat_loaded_outputs = pytree.tree_leaves(loaded_outputs)
@@ -621,7 +621,7 @@ class TestSaveLoad(TestCase):
         buffer.seek(0)
         loaded_ep = load(buffer)
 
-        self.assertTrue(torch.allclose(ep(*inp), loaded_ep(*inp)))
+        self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
 
     def test_save_file(self):
         class Foo(torch.nn.Module):
@@ -638,7 +638,7 @@ class TestSaveLoad(TestCase):
             f.seek(0)
             loaded_ep = load(f)
 
-        self.assertTrue(torch.allclose(ep(*inp), loaded_ep(*inp)))
+        self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
 
     def test_save_path(self):
         class Foo(torch.nn.Module):
@@ -655,7 +655,7 @@ class TestSaveLoad(TestCase):
             save(ep, path)
             loaded_ep = load(path)
 
-        self.assertTrue(torch.allclose(ep(*inp), loaded_ep(*inp)))
+        self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
 
     def test_save_extra(self):
         inp = (torch.tensor([0.1, 0.1]),)
@@ -674,7 +674,7 @@ class TestSaveLoad(TestCase):
         extra_files = {"extra.txt": ""}
         loaded_ep = load(buffer, extra_files=extra_files)
 
-        self.assertTrue(torch.allclose(ep(*inp), loaded_ep(*inp)))
+        self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
         self.assertEqual(extra_files["extra.txt"], "moo")
 
     def test_version_error(self):
@@ -715,7 +715,7 @@ class TestSaveLoad(TestCase):
         loaded_ep = load(buffer)
 
         inp = (torch.tensor(1),)
-        self.assertTrue(torch.allclose(ep(*inp), loaded_ep(*inp)))
+        self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerializeCustomClass(TestCase):

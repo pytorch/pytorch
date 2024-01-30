@@ -160,7 +160,7 @@ def _unlift_graph(mod, gm, graph_signature):
     for name, buffer in mod.named_buffers(remove_duplicate=False):
         state_dict[name] = buffer
         _assign_attr(
-            param,
+            buffer,
             gm,
             name,
             attr_kind=_AttrKind.BUFFER,
