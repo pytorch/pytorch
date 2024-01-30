@@ -66,6 +66,7 @@ from .source import (
     NNModuleSource,
     NotNNModuleSource,
     NumpyTensorSource,
+    ODictGetItemSource,
     ShapeEnvSource,
     TupleIteratorGetItemSource,
     TypeSource,
@@ -358,17 +359,20 @@ class GuardBuilder(GuardBuilderBase):
             ):
                 return build(source.base)
             elif istype(source, AttrSource):
-                return getattr(build(source.base), source.member)
+                return build(source.base).getattr_manager(source.member)
             elif istype(source, GetItemSource) and not source.index_is_slice:
                 return build(source.base)[source.index]
-            # elif istype(source, ConstDictKeySource):
-            #     assert value is not None
-            #     return build(source.base).dict_get_item_manager(value)
+            elif istype(source, ODictGetItemSource):
+                return build(source.base).dict_get_item_manager(source.index)
             elif istype(source, DefaultsSource):
                 if not source.is_kw:
-                    return build(source.base).__defaults__[source.idx_key]
+                    return build(source.base).getattr_manager("__defaults__")[
+                        source.idx_key
+                    ]
                 else:
-                    return build(source.base).__kwdefaults__[str(source.idx_key)]
+                    return build(source.base).getattr_manager("__kwdefaults__")[
+                        str(source.idx_key)
+                    ]
             elif istype(source, NumpyTensorSource):
                 return build(source.base).lambda_manager(from_numpy)
             elif istype(source, TupleIteratorGetItemSource):
@@ -635,7 +639,9 @@ class GuardBuilder(GuardBuilderBase):
             self.code.append(
                 GuardCodeList([f"{ref}.training == {val.training}"], guard)
             )
-            self.get_guard_manager(guard).training.add_equals_match_guard(
+            self.get_guard_manager(guard).getattr_manager(
+                "training"
+            ).add_equals_match_guard(
                 val.training,
                 self.get_guard_str(guard, [f"{ref}.training == {val.training}"]),
             )
@@ -666,9 +672,9 @@ class GuardBuilder(GuardBuilderBase):
 
                 # TODO(janimesh) Check if the guard installation can be modified
                 # to move the getattr __code__ to the installation.
-                self.get_guard_manager(guard).__code__.add_id_match_guard(
-                    obj_id, self.get_guard_str(guard, code)
-                )
+                self.get_guard_manager(guard).getattr_manager(
+                    "__code__"
+                ).add_id_match_guard(obj_id, self.get_guard_str(guard, code))
             else:
                 self.FUNCTION_MATCH(guard)
 
@@ -741,9 +747,9 @@ class GuardBuilder(GuardBuilderBase):
             code.append(f"___key_to_id({ref}) == {const_keys_repr}")
         else:
             code.append(f"list({ref}.keys()) == {const_keys_repr}")
-            self.get_guard_manager(guard).add_dict_keys_guard(
-                value, self.get_guard_str(guard, code)
-            )
+            # self.get_guard_manager(guard).add_dict_keys_guard(
+            #     value, self.get_guard_str(guard, code)
+            # )
 
         self._produce_guard_code(guard, code)
 
