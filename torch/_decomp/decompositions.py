@@ -1264,7 +1264,11 @@ def split_with_sizes_copy(
 ) -> Optional[List[Tensor]]:
     splits = split_with_sizes(self, split_sizes, dim=dim)
     if out is None:
-        return [s.clone() for s in splits]
+        out = [s.new_zeros(s.shape) for s in splits]
+        for output, split in zip(out, splits):
+            output.copy_(split)
+            print(output.stride())
+        return out
     else:
         for output, split in zip(out, splits):
             _maybe_resize_out(output, split.shape)
