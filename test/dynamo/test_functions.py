@@ -466,7 +466,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         input = torch.randn(4)
 
-        self.assertEqual(fn(input, NotCallableClass()), input)
+        self.assertEqual(fn(input, NotCallableClass()), input + 1)
         self.assertEqual(fn(input, CallableClass()), input)
 
         # passing tensor and scalars
