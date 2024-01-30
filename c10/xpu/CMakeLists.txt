@@ -15,6 +15,7 @@ set(C10_XPU_HEADERS
     XPUDeviceProp.h
     XPUException.h
     XPUFunctions.h
+    XPUGuard.h
     XPUMacros.h
     XPUStream.h
     impl/XPUGuardImpl.h
