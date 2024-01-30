@@ -1238,7 +1238,12 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           errorMsg = c10::str(
               logPrefix(),
               "Received a global timeout from another rank and will ",
-              "start to dump the debug info.");
+              "start to dump the debug info. ",
+              "Last enqueued NCCL work: ",
+              lastEnqueuedSeq_,
+              ", last completed NCCL work: ",
+              lastCompletedSeq_,
+              ".");
           exitMsg = c10::str(
               "ProcessGroupNCCL's watchdog detected a collective timeout and notified current rank. ",
               "This is most likely caused by incorrect usages of collectives, e.g., wrong ",
@@ -1538,7 +1543,7 @@ void ProcessGroupNCCL::watchdogHandler() {
               work.seq_,
               ", last enqueued NCCL work: ",
               lastEnqueuedSeq_,
-              ", last completeted NCCL work: ",
+              ", last completed NCCL work: ",
               lastCompletedSeq_,
               ".");
           try {
@@ -1719,15 +1724,15 @@ std::exception_ptr ProcessGroupNCCL::checkForNCCLErrorsInternal(
               *commFailureReason)));
     }
     ncclResult_t ncclAsyncErr = ncclComm->checkForNcclError();
-    // When nonblocking mode is enabled by TORCH_NCCL_USE_COMM_NONBLOCKING,
-    // ncclInProgress could be returned when there are pending NCCL calls.
-    // In this case, no exception should be thrown
-    #ifdef NCCL_HAS_COMM_NONBLOCKING
+// When nonblocking mode is enabled by TORCH_NCCL_USE_COMM_NONBLOCKING,
+// ncclInProgress could be returned when there are pending NCCL calls.
+// In this case, no exception should be thrown
+#ifdef NCCL_HAS_COMM_NONBLOCKING
     // ncclInProgress is defined only if NCCL_HAS_COMM_NONBLOCKING is defined
     if (ncclAsyncErr != ncclSuccess && ncclAsyncErr != ncclInProgress) {
-    #else
+#else
     if (ncclAsyncErr != ncclSuccess) {
-    #endif
+#endif
       return std::make_exception_ptr(C10_BUILD_ERROR(
           DistBackendError,
           "NCCL error: " + ncclGetErrorWithVersion(ncclAsyncErr) + "\n" +
