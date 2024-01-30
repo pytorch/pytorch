@@ -179,6 +179,13 @@ PyObject* THXPModule_xpuSynchronize(PyObject* self, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THXPModule_emptyCache(PyObject* self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  c10::xpu::XPUCachingAllocator::emptyCache();
+  END_HANDLE_TH_ERRORS
+  Py_RETURN_NONE;
+}
+
 // XPU module initialization
 
 static void registerXpuDeviceProperties(PyObject* module) {
@@ -300,6 +307,7 @@ static struct PyMethodDef _THXPModule_methods[] = {
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_xpu_synchronize", THXPModule_xpuSynchronize, METH_O, nullptr},
+    {"_xpu_emptyCache", THXPModule_emptyCache, METH_NOARGS, nullptr},
     {nullptr}};
 
 PyMethodDef* THXPModule_methods() {
