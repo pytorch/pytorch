@@ -1741,21 +1741,29 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
                 x = torch.randn(10)
                 self.assertEqual(opt_fn(x), fn(x))
 
-    def test_pos(self):
-        def fn(x, y):
-            return operator.pos(x) * operator.pos(y)
+    def test_unary_functions(self):
+        for op in (operator.abs, abs, operator.neg, operator.pos, operator.truth,):
+            with self.subTest(op=op):
+                def fn(x, y):
+                    return op(x) * op(y)
 
-        opt_fn = torch.compile(fullgraph=True, dynamic=True)(fn)
+                opt_fn = torch.compile(fullgraph=True, backend="inductor", dynamic=False)(fn)
+                def test(x, y):
+                    self.assertEqual(opt_fn(x, y), fn(x, y))
 
-        def test(x, y):
-            self.assertEqual(opt_fn(x, y), fn(x, y))
+                # Test variable inputs.
+                test(1, 2)
+                test(0, 0)
+                test(1.1, 2.1)
+                test(True, False)
 
-        test(torch.ones(4), 1)
-        test(1, torch.ones(4))
-        test(-1, -1)
-        test(-1.1, 1.1)
-        test(True, False)
-        test(torch.ones(4, dtype=torch.float32), 1.1)
+                # Test tensor inputs.
+                test(torch.ones(1), 3)
+                test(torch.ones(1), torch.ones(1)*4)
+
+                if op is not operator.truth :
+                    test(torch.ones(4), torch.ones(4)*4)
+
 
     def test_unary_fold_op(self):
         for op in (operator.abs, abs, operator.neg, operator.pos, operator.truth):
