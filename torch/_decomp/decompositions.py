@@ -1264,7 +1264,7 @@ def split_with_sizes_copy(
 ) -> Optional[List[Tensor]]:
     splits = split_with_sizes(self, split_sizes, dim=dim)
     if out is None:
-        return [s.clone() if s.is_contiguous() else s.contiguous() for s in splits]
+        return [s.clone(memory_format=torch.contiguous_format) for s in splits]
     else:
         for output, split in zip(out, splits):
             _maybe_resize_out(output, split.shape)
