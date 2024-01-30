@@ -10,7 +10,6 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch.export.exported_program import ExportedProgram
 from torch.export.graph_signature import (
     CustomObjArgument,
-    ExportGraphSignature,
     InputKind,
     SymIntArgument,
     TensorArgument,
@@ -129,9 +128,6 @@ class Verifier(metaclass=_VerifierMeta):
 
     @final
     def check(self, ep: ExportedProgram) -> None:
-        if not isinstance(ep.graph_signature, ExportGraphSignature):
-            # TODO Enforce type checking in the constructor.
-            return
         self._check_graph_module(ep.graph_module)
         _verify_exported_program_signature(ep)
 
