@@ -165,7 +165,6 @@ def parse_ttir(ttir, kwargs):
     parser which further makes parsing much simpler.
     """
     # TODO(oulgen):
-    # - Support multiple functions
     # - Support parsing of conditionals
     # - Support parsing for/while loops
     # - Support ops with multiple return value (e.g. %4:2 = "tt.reduce")
@@ -275,6 +274,22 @@ def parse_ttir(ttir, kwargs):
     return functions
 
 
+class MemoizeWithCycleCheck:
+    def __init__(self, fn):
+        self.cache = {}
+        self.fn = fn
+
+    def __call__(self, functions, fn_name, num_args):
+        key = (fn_name, num_args)
+        if key not in self.cache:
+            self.cache[key] = None
+            self.cache[key] = self.fn(functions, fn_name, num_args)
+        if self.cache[key] is None:
+            raise Exception("Recursion is not supported")
+        return self.cache[key]
+
+
+@MemoizeWithCycleCheck
 def analyze_kernel_mutations(functions, fn_name, num_args):
     """
     Analyzes the graph to detect all sinks from a predefined list of sinks
@@ -301,9 +316,6 @@ def analyze_kernel_mutations(functions, fn_name, num_args):
 
         if op.name == "tt.call":
             assert op.fn_call_name in functions
-            if op.fn_call_name == fn_name:
-                # TODO(oulgen): This does not guard against multi level recursion
-                raise Exception("Recursion not allowed")
             mutations = analyze_kernel_mutations(
                 functions, op.fn_call_name, len(op.args)
             )

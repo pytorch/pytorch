@@ -2515,7 +2515,7 @@ coverage_ignore_classes = [
     "MatchAllNode",
     # torch.backends.cudnn.rnn
     "Unserializable",
-    # torch.cuda.amp.grad_scaler
+    # torch.amp.grad_scaler
     "GradScaler",
     "OptState",
     # torch.cuda.graphs

@@ -1094,13 +1094,13 @@ if HAS_CUDA and HAS_LARK:
         ],
     ]
     for kernel, inputs, outputs in tests:
-        test = make_mutation_test(lambda: (kernel, inputs, outputs))
+        fn = make_mutation_test(lambda: (kernel, inputs, outputs))
         name = f"test_mutations_{kernel.fn.__name__}"
         # Poor way to make test names be unique
         while name in MutationTests.__dict__:
             name += "1"
 
-        setattr(MutationTests, name, test)
+        setattr(MutationTests, name, fn)
 
 
 common_utils.instantiate_parametrized_tests(KernelTests)
