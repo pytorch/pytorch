@@ -282,14 +282,14 @@ def reduce_scatter_tensor(
             self,
             reduceOp,
             group_size,
-            group_name,
+            group_name,  # type: ignore[possibly-undefined]
         )
     else:
         tensor = torch.ops.c10d_functional.reduce_scatter_tensor(  # type: ignore[attr-defined]
             self,
             reduceOp,
             tag,
-            rankset,
+            rankset,  # type: ignore[possibly-undefined]
             group_size,
         )
     res = _maybe_wrap_tensor(tensor)
@@ -414,14 +414,14 @@ def reduce_scatter_tensor_coalesced(
             inputs,
             reduceOp,
             group_size,
-            group_name,
+            group_name,  # type: ignore[possibly-undefined]
         )
     else:
         tensor_list = torch.ops.c10d_functional.reduce_scatter_tensor_coalesced(  # type: ignore[attr-defined]
             inputs,
             reduceOp,
             tag,
-            rankset,
+            rankset,  # type: ignore[possibly-undefined]
             group_size,
         )
 
