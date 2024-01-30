@@ -5718,7 +5718,7 @@ for shape in [(1,), ()]:
         # The autograd engine creates worker threads only when GPU devices are present.
         # So make sure that we do shutdown threads when we're testing cuda and make sure
         # that there is no thread to shutdown when we're not using cuda.
-        if TEST_CUDA or torch.backends.mps.is_available():
+        if TEST_CUDA or torch.backends.mps.is_available() or torch.xpu.is_available():
             self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
         else:
             self.assertNotRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
