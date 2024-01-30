@@ -253,7 +253,7 @@ class ExportedProgram:
                     user_args, self.call_spec.in_spec, exact_structural_match=True
                 )  # type: ignore[assignment]
             except Exception:
-                _, received_spec = pytree.tree_flatten(user_args)
+                _, received_spec = pytree.tree_flatten(user_args)  # type: ignore[possibly-undefined]
                 raise TypeError(  # noqa: TRY200
                     "Trying to flatten user inputs with exported input tree spec: \n"
                     f"{self.call_spec.in_spec}\n"
@@ -626,6 +626,9 @@ def _get_updated_range_constraints(
         for k, v in shape_env.var_to_range.items()
         if k not in shape_env.replacements
     }
+    # Only when we have an unbacked symint, and it's used as constructor inputs,
+    # runtime_var_to_range will make a difference compated to var_to_range.
+    # e.g. [2, oo) -> [0, oo)
     for k, v in shape_env.runtime_var_to_range.items():
         if k not in shape_env.replacements:
             range_constraints[k] = v
