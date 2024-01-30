@@ -43,6 +43,9 @@ those with low accuracy.
 Default is 1, must be >= 1. Running tuning iterations in a loop might cache inputs and impact results. This setting
 controls how many duplicates of the operator inputs to cycle through during tuning to avoid cache effects.
 
+#### PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED
+Default is 1. Set to 0 to disable hipblaslt from being considered during tuning.
+
 ### Tuning Iterations
 By default, each possible solution for a given operator will be run for 100 iterations and its average execution will be
 calculated. The fastest solution is chosen. In addition, a set of warm up iterations can optionally be run prior to the

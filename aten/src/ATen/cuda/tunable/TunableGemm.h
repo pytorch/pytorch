@@ -167,25 +167,28 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
 #endif
 
 #if defined(USE_ROCM) && ROCM_VERSION >= 50700
-    // disallow tuning of hipblaslt with c10::complex
-    if constexpr (
-        !std::is_same_v<T, c10::complex<float>> &&
-        !std::is_same_v<T, c10::complex<double>>) {
-      for (auto&& [name, op] : GetHipBlasLtGemmTypeStringAndOps<T, ALayout, BLayout>()) {
-        this->RegisterOp(std::move(name), std::move(op));
+    static const char *env = std::getenv("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
+    if (env != nullptr && strcmp(env, "1") == 0) {
+      // disallow tuning of hipblaslt with c10::complex
+      if constexpr (
+          !std::is_same_v<T, c10::complex<float>> &&
+          !std::is_same_v<T, c10::complex<double>>) {
+        for (auto&& [name, op] : GetHipBlasLtGemmTypeStringAndOps<T, ALayout, BLayout>()) {
+          this->RegisterOp(std::move(name), std::move(op));
+        }
       }
-    }
 
-    if (validators.find("HIPBLASLT_VERSION") == validators.end()) {
-      std::string hipblaslt_version = c10::str(
-          XSTRINGIFY(HIPBLASLT_VERSION_MAJOR), ".",
-          XSTRINGIFY(HIPBLASLT_VERSION_MINOR), ".",
-          XSTRINGIFY(HIPBLASLT_VERSION_PATCH), "-",
-          XSTRINGIFY(HIPBLASLT_VERSION_TWEAK));
-      getTuningContext()->GetTuningResultsValidator().RegisterValidator(
-          "HIPBLASLT_VERSION",
-          [hipblaslt_version]() { return hipblaslt_version; },
-          [hipblaslt_version](auto&& k) { return hipblaslt_version == k ? OK : FAIL; });
+      if (validators.find("HIPBLASLT_VERSION") == validators.end()) {
+        std::string hipblaslt_version = c10::str(
+            XSTRINGIFY(HIPBLASLT_VERSION_MAJOR), ".",
+            XSTRINGIFY(HIPBLASLT_VERSION_MINOR), ".",
+            XSTRINGIFY(HIPBLASLT_VERSION_PATCH), "-",
+            XSTRINGIFY(HIPBLASLT_VERSION_TWEAK));
+        getTuningContext()->GetTuningResultsValidator().RegisterValidator(
+            "HIPBLASLT_VERSION",
+            [hipblaslt_version]() { return hipblaslt_version; },
+            [hipblaslt_version](auto&& k) { return hipblaslt_version == k ? OK : FAIL; });
+      }
     }
 #endif
   }
@@ -238,25 +241,28 @@ class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>
 #endif
 
 #if defined(USE_ROCM) && ROCM_VERSION >= 50700
-    // disallow tuning of hipblaslt with c10::complex
-    if constexpr (
-        !std::is_same_v<T, c10::complex<float>> &&
-        !std::is_same_v<T, c10::complex<double>>) {
-      for (auto&& [name, op] : GetHipBlasLtGemmStridedBatchedTypeStringAndOps<T, ALayout, BLayout>()) {
-        this->RegisterOp(std::move(name), std::move(op));
+    static const char *env = std::getenv("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
+    if (env != nullptr && strcmp(env, "1") == 0) {
+      // disallow tuning of hipblaslt with c10::complex
+      if constexpr (
+          !std::is_same_v<T, c10::complex<float>> &&
+          !std::is_same_v<T, c10::complex<double>>) {
+        for (auto&& [name, op] : GetHipBlasLtGemmStridedBatchedTypeStringAndOps<T, ALayout, BLayout>()) {
+          this->RegisterOp(std::move(name), std::move(op));
+        }
       }
-    }
 
-    if (validators.find("HIPBLASLT_VERSION") == validators.end()) {
-      std::string hipblaslt_version = c10::str(
-          XSTRINGIFY(HIPBLASLT_VERSION_MAJOR), ".",
-          XSTRINGIFY(HIPBLASLT_VERSION_MINOR), ".",
-          XSTRINGIFY(HIPBLASLT_VERSION_PATCH), "-",
-          XSTRINGIFY(HIPBLASLT_VERSION_TWEAK));
-      getTuningContext()->GetTuningResultsValidator().RegisterValidator(
-          "HIPBLASLT_VERSION",
-          [hipblaslt_version]() { return hipblaslt_version; },
-          [hipblaslt_version](auto&& k) { return hipblaslt_version == k ? OK : FAIL; });
+      if (validators.find("HIPBLASLT_VERSION") == validators.end()) {
+        std::string hipblaslt_version = c10::str(
+            XSTRINGIFY(HIPBLASLT_VERSION_MAJOR), ".",
+            XSTRINGIFY(HIPBLASLT_VERSION_MINOR), ".",
+            XSTRINGIFY(HIPBLASLT_VERSION_PATCH), "-",
+            XSTRINGIFY(HIPBLASLT_VERSION_TWEAK));
+        getTuningContext()->GetTuningResultsValidator().RegisterValidator(
+            "HIPBLASLT_VERSION",
+            [hipblaslt_version]() { return hipblaslt_version; },
+            [hipblaslt_version](auto&& k) { return hipblaslt_version == k ? OK : FAIL; });
+      }
     }
 #endif
   }
