@@ -59,6 +59,7 @@ inductor_decompositions = get_decompositions(
         aten.native_layer_norm,
         aten._softmax,
         aten.sin_,
+        aten.split_with_sizes_copy,
         aten.sqrt_,
         out_dtype,
         aten._to_copy,
