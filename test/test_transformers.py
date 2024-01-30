@@ -30,8 +30,10 @@ from torch.testing._internal.common_utils import (
     set_default_dtype,
     gradcheck,
     make_tensor,
-    NOTEST_CPU
+    NOTEST_CPU,
+    IS_WINDOWS
 )
+from torch._dynamo.testing import CompileCounterWithBackend
 
 
 from torch.testing._internal.common_methods_invocations import wrapper_set_seed
@@ -3206,11 +3208,19 @@ class TestSDPACudaOnly(NNTestCase):
         self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
                          atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
 
-class TestAttnMasks(NNTestCase):
+class TestAttnBias(NNTestCase):
 
-    def run_test(self, device, compile, make_q, make_kv, attn_bias=None,
-                 forw_tolerances: Optional[Tolerances] = None, grad_tolerances: Optional[Tolerances] = None):
-        if compile:
+    def run_test(
+        self,
+        device,
+        make_q,
+        make_kv,
+        attn_bias=None,
+        forw_tolerances: Optional[Tolerances] = None,
+        grad_tolerances: Optional[Tolerances] = None,
+        backend=None,
+    ):
+        if backend is not None:
             torch._dynamo.reset()
 
         query, key, value = make_q(), make_kv(), make_kv()
@@ -3222,8 +3232,8 @@ class TestAttnMasks(NNTestCase):
         )
 
         sdpa_op = (
-            torch.compile(scaled_dot_product_attention, fullgraph=True)
-            if compile
+            torch.compile(scaled_dot_product_attention, backend=backend)
+            if backend is not None
             else scaled_dot_product_attention
         )
         sdpa_output = sdpa_op(
@@ -3278,15 +3288,16 @@ class TestAttnMasks(NNTestCase):
         else:
             attn_bias = causal_lower_right(seq_len_q, seq_len_kv)
 
-        self.run_test(device, False, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol)
+        self.run_test(device, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol, backend=None)
 
-    @unittest.skip("This test fails on some parameters and on some CI machines")
     @parametrize("causal_variant", [CausalVariant.UPPER_LEFT, CausalVariant.LOWER_RIGHT])
     @parametrize(
         "shape",
         [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)],
     )
+    @unittest.skipIf(IS_WINDOWS, "torch.compile is not supported on windows")
     def test_causal_variants_compile(self, device, causal_variant: CausalVariant, shape: List[Tuple[int]]):
+        cnts = CompileCounterWithBackend("aot_eager")
         make_tensor = partial(
             torch.rand, device=device, dtype=torch.float16, requires_grad=True
         )
@@ -3306,7 +3317,8 @@ class TestAttnMasks(NNTestCase):
         else:
             attn_bias = causal_lower_right(seq_len_q, seq_len_kv)
 
-        self.run_test(device, True, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol)
+        self.run_test(device, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol, backend=cnts)
+        self.assertEqual(cnts.frame_count, 1, "Compiled graph should have 1 frame!")
 
     @parametrize("shape", [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)])
     def test_is_causal_equals_upper_left(self, device, shape: List[Tuple[int]]):
@@ -3354,7 +3366,7 @@ instantiate_device_type_tests(TestTransformers, globals(), only_for=device_types
 instantiate_device_type_tests(TestSDPAFailureModes, globals(), only_for=device_types)
 instantiate_device_type_tests(TestSDPA, globals(), only_for=device_types)
 instantiate_device_type_tests(TestSDPACudaOnly, globals(), only_for=("cuda"))
-instantiate_device_type_tests(TestAttnMasks, globals(), only_for=device_types)
+instantiate_device_type_tests(TestAttnBias, globals(), only_for=device_types)
 
 if __name__ == '__main__':
     run_tests()
