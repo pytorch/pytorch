@@ -8,6 +8,7 @@ from typing import Any, cast, Dict, List, Optional, Union
 import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
+from torch.export._tree_utils import reorder_kwargs
 from torch.export.exported_program import (
     ConstantArgument,
     ExportedProgram,
@@ -209,9 +210,13 @@ class UnflattenedModule(torch.nn.Module):
             node for node in self.graph.nodes if node.op == "placeholder"
         ]
         self.check_input_constraints = True
+        assert self.module_call_graph[0].fqn == ""
 
     def forward(self, *args, **kwargs):
-        flat_args, in_spec = pytree.tree_flatten((args, kwargs))
+        signature = self.module_call_graph[0].signature
+        reordered_kwargs = reorder_kwargs(kwargs, signature.in_spec)
+        flat_args, in_spec = pytree.tree_flatten((args, reordered_kwargs))
+
         if is_fx_tracing():
             return_val = torch.fx.Interpreter(self, graph=self.graph).run(
                 *flat_args, enable_io_processing=False
@@ -221,8 +226,6 @@ class UnflattenedModule(torch.nn.Module):
                 return return_val[0]
             return return_val
 
-        assert self.module_call_graph[0].fqn == ""
-        signature = self.module_call_graph[0].signature
         if in_spec != signature.in_spec:
             if not self.adapted:
                 print(

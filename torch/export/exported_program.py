@@ -25,8 +25,8 @@ if TYPE_CHECKING:
     from torch.utils._sympy.value_ranges import ValueRanges
 
 import torch
-import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
+from torch.export._tree_utils import reorder_kwargs
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
 
@@ -246,20 +246,19 @@ class ExportedProgram:
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         import torch._export.error as error
 
-        if self.call_spec.in_spec is not None:
-            try:
-                user_args = (args, kwargs or {})
-                args = fx_pytree.tree_flatten_spec(
-                    user_args, self.call_spec.in_spec, exact_structural_match=True
-                )  # type: ignore[assignment]
-            except Exception:
-                _, received_spec = pytree.tree_flatten(user_args)
-                raise TypeError(  # noqa: TRY200
-                    "Trying to flatten user inputs with exported input tree spec: \n"
-                    f"{self.call_spec.in_spec}\n"
-                    "but actually got inputs with tree spec of: \n"
-                    f"{received_spec}"
-                )
+        in_spec = self.call_spec.in_spec
+        if in_spec is not None:
+            kwargs = reorder_kwargs(kwargs, in_spec)
+
+        flat_args, received_spec = pytree.tree_flatten((args, kwargs))
+
+        if in_spec is not None and received_spec != in_spec:
+            raise ValueError(
+                "Trying to flatten user inputs with exported input tree spec: \n"
+                f"{in_spec}\n"
+                "but actually got inputs with tree spec of: \n"
+                f"{received_spec}"
+            )
 
         additional_inputs = []
         for input_ in self.graph_signature.input_specs:
@@ -271,13 +270,13 @@ class ExportedProgram:
                 additional_inputs.append(self.constants[input_.target])
         additional_inputs = tuple(additional_inputs)
 
-        self._check_input_constraints(*args)
+        self._check_input_constraints(*flat_args)
 
         # NOTE: calling convention is first params, then buffers, then args as user supplied them.
         # See: torch/_functorch/aot_autograd.py#L1034
         res = torch.fx.Interpreter(self.graph_module).run(
             *additional_inputs,
-            *args,
+            *flat_args,
             enable_io_processing=False,
         )
 
@@ -322,7 +321,7 @@ class ExportedProgram:
                             for i, spec in enumerate(user_inputs)
                             if spec.arg.name == output_spec.target
                         )
-                        args[index].copy_(value)
+                        flat_args[index].copy_(value)
                     else:
                         raise AssertionError(f"Unexpected kind: {output_spec.kind}")
 

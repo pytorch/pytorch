@@ -22,7 +22,6 @@ from typing import (
 )
 
 import torch
-import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch.fx._compatibility import compatibility
 

@@ -1946,7 +1946,7 @@ def forward(self, arg_0):
 
         exported_program = export(MyModule(), (torch.rand(2, 3),), {})
         with self.assertRaisesRegex(
-            TypeError, "Trying to flatten user inputs"
+            ValueError, "Trying to flatten user inputs"
         ):
             exported_program.module()(torch.rand(2, 3), torch.rand(2, 3))
 
