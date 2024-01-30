@@ -1138,10 +1138,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             else:
                 return torch.arange(0, y)
 
-        self.assertRaises(
-            torch._dynamo.exc.UserError,
-            lambda: f(torch.tensor([3]))
-        )
+        self.assertRaises(torch._dynamo.exc.UserError, lambda: f(torch.tensor([3])))
 
     def test_config_obj(self):
         class Cfg:
