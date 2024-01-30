@@ -1790,6 +1790,11 @@ class CppKernel(Kernel):
                     stack.enter_context(code.indent())
                     # generate inner loops or loop body
                     if loop.inner:
+                        if update_reduction_store and loop.parallel:
+                            for inner in loop.inner:
+                                inner.get_kernels()[
+                                    0
+                                ].update_stores_with_parallel_reduction()
                         gen_loops(loop.inner, loop.is_reduction)
                     else:
                         kernels = loop.get_kernels()
