@@ -907,7 +907,7 @@ class SummaryWriter:
             else:
                 # Handles cnn.CNNModelHelper, model_helper.ModelHelper
                 current_graph = model_to_graph_def(model)
-            event = event_pb2.Event(graph_def=current_graph.SerializeToString())
+            event = event_pb2.Event(graph_def=current_graph.SerializeToString())  # type: ignore[possibly-undefined]
             self._get_file_writer().add_event(event)
 
     @staticmethod
