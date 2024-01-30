@@ -146,13 +146,25 @@ def _warn_tf32_disabled():
 
 
 def _unlift_graph(mod, gm, graph_signature):
+    from torch.export.unflatten import _assign_attr, _AttrKind
+
     state_dict = {}
     for name, param in mod.named_parameters(remove_duplicate=False):
-        gm.register_parameter(name.replace(".", "_"), param)
         state_dict[name] = param
+        _assign_attr(
+            param,
+            gm,
+            name,
+            attr_kind=_AttrKind.PARAMETER,
+        )
     for name, buffer in mod.named_buffers(remove_duplicate=False):
-        gm.register_buffer(name.replace(".", "_"), buffer)
         state_dict[name] = buffer
+        _assign_attr(
+            buffer,
+            gm,
+            name,
+            attr_kind=_AttrKind.BUFFER,
+        )
 
     placeholder_nodes = [node for node in gm.graph.nodes if node.op == "placeholder"]
     lifted_inputs = []

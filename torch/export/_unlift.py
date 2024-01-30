@@ -1,9 +1,11 @@
 import copy
+from itertools import chain
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
 from torch._export.utils import _check_input_constraints_for_graph
+from torch.export.unflatten import _assign_attr, _AttrKind
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from .exported_program import (
@@ -52,12 +54,12 @@ def _unlift_inputs_as_getattr(
 
         else:
             with gm.graph.inserting_after(input_node):
-                getattr_node = gm.graph.get_attr(lifted_node.replace(".", "_"))
+                getattr_node = gm.graph.get_attr(lifted_node)
                 input_node.replace_all_uses_with(getattr_node)
                 metadata = input_node.meta
                 gm.graph.erase_node(input_node)
                 getattr_node.meta = metadata
-                unlifted_name_to_node[lifted_node.replace(".", "_")] = getattr_node
+                unlifted_name_to_node[lifted_node] = getattr_node
 
     return unlifted_name_to_node, input_name_to_node
 
@@ -87,7 +89,6 @@ def _insert_copy_for_mutations(
             user_output_nodes.append(return_node)
             continue
 
-        mutated_node_name = mutated_node_name.replace(".", "_")
         if mutated_node_name in unlifted_name_to_node:
             mutated_node = unlifted_name_to_node[mutated_node_name]
         elif mutated_node_name in input_name_to_node:
@@ -181,14 +182,33 @@ def _register_attrs_to_new_gm(
     state_dict: Dict[str, Any],
     constants: Dict[str, Any],
 ) -> None:
-    for name, value in state_dict.items():
-        if name in graph_signature.buffers:
-            new_gm.register_buffer(name.replace(".", "_"), value)
-        if name in graph_signature.parameters:
-            new_gm.register_parameter(name.replace(".", "_"), value)
+    for name in graph_signature.buffers:
+        value = state_dict[name]
+        _assign_attr(
+            value,
+            new_gm,
+            name,
+            attr_kind=_AttrKind.BUFFER,
+        )
+    for name in graph_signature.parameters:
+        value = state_dict[name]
+        _assign_attr(
+            value,
+            new_gm,
+            name,
+            attr_kind=_AttrKind.PARAMETER,
+        )
 
-    for name, value in constants.items():
-        setattr(new_gm, name.replace(".", "_"), value)
+    for name in chain(
+        graph_signature.lifted_custom_objs, graph_signature.lifted_tensor_constants
+    ):
+        value = constants[name]
+        _assign_attr(
+            value,
+            new_gm,
+            name,
+            attr_kind=_AttrKind.CONSTANT,
+        )
 
 
 class _StatefulGraphModuleFactory(type):

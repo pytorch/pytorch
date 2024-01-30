@@ -120,6 +120,18 @@ def is_magic_method(op):
     return op in magic_ops
 
 
+def getattr_recursive(obj, target):
+    target_atoms = target.split(".")
+    attr_itr = obj
+    for i, atom in enumerate(target_atoms):
+        if not hasattr(attr_itr, atom):
+            raise RuntimeError(
+                f"Node referenced nonexistent target {'.'.join(target_atoms[:i])}"
+            )
+        attr_itr = getattr(attr_itr, atom)
+    return attr_itr
+
+
 class GraphLowering(torch.fx.Interpreter):
     graph_outputs: List[ir.IRNode]
 
@@ -743,7 +755,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def get_attr(self, target, args, kwargs):
         # this is a constant
-        value = getattr(self.module, target)
+        value = getattr_recursive(self.module, target)
 
         if config.always_keep_tensor_constants or unsupported_output_tensor(value):
             return self.add_tensor_constant(value, target)

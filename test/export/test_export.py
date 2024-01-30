@@ -1178,12 +1178,12 @@ class TestExport(TestCase):
             """\
 def forward(self, arg_0):
     l_x_, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
-    conv_weight = self.conv_weight
-    conv_bias = self.conv_bias
-    bn_weight = self.bn_weight
-    bn_bias = self.bn_bias
-    bn_running_mean = self.bn_running_mean
-    bn_running_var = self.bn_running_var
+    conv_weight = self.conv.weight
+    conv_bias = self.conv.bias
+    bn_weight = self.bn.weight
+    bn_bias = self.bn.bias
+    bn_running_mean = self.bn.running_mean
+    bn_running_var = self.bn.running_var
     conv2d = torch.ops.aten.conv2d.default(l_x_, conv_weight, conv_bias);  l_x_ = conv_weight = conv_bias = None
     _native_batch_norm_legit_no_training = torch.ops.aten._native_batch_norm_legit_no_training.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
     getitem = _native_batch_norm_legit_no_training[0];  _native_batch_norm_legit_no_training = None
@@ -1197,13 +1197,13 @@ def forward(self, arg_0):
             """\
 def forward(self, arg_0):
     l_x_, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
-    conv_weight = self.conv_weight
-    conv_bias = self.conv_bias
-    bn_weight = self.bn_weight
-    bn_bias = self.bn_bias
-    bn_running_mean = self.bn_running_mean
-    bn_running_var = self.bn_running_var
-    bn_num_batches_tracked = self.bn_num_batches_tracked
+    conv_weight = self.conv.weight
+    conv_bias = self.conv.bias
+    bn_weight = self.bn.weight
+    bn_bias = self.bn.bias
+    bn_running_mean = self.bn.running_mean
+    bn_running_var = self.bn.running_var
+    bn_num_batches_tracked = self.bn.num_batches_tracked
     conv2d = torch.ops.aten.conv2d.default(l_x_, conv_weight, conv_bias);  l_x_ = conv_weight = conv_bias = None
     add = torch.ops.aten.add.Tensor(bn_num_batches_tracked, 1)
     _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, True, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = None
@@ -2599,7 +2599,6 @@ def forward(self, l_x_):
         ep.run_decompositions(decomp_table=torch._decomp.decomposition_table)
         self.assertEqual(ep.module()(t, dim, index, src), output)
 
-    @testing.expectedFailureRetraceability
     def test_fqn(self):
         class NestedChild(torch.nn.Module):
             def forward(self, x):

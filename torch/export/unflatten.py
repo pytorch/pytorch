@@ -2,6 +2,7 @@ import abc
 import copy
 import operator
 from copy import deepcopy
+from enum import Enum
 from itertools import chain
 from typing import Any, cast, Dict, List, Optional, Union
 
@@ -22,13 +23,20 @@ from torch.utils._pytree import GetAttrKey, SequenceKey
 __all__ = ["InterpreterModule", "UnflattenedModule", "unflatten", "FlatArgsAdapter"]
 
 
+class _AttrKind(Enum):
+    PARAMETER = "parameter"
+    BUFFER = "buffer"
+    CONSTANT = "constant"
+
+
 # Assign attribute 'from_obj' to the qualified name 'target' on 'to_module
 # This installs empty Modules where none exist yet if they are subpaths of target
 def _assign_attr(
-    from_obj: torch.Tensor,
+    from_obj: Union[torch.Tensor, torch.ScriptObject],
     to_module: torch.nn.Module,
     target: str,
-    is_parameter: bool,
+    attr_kind: _AttrKind,
+    persistent: bool = True,
 ):
     *prefix, field = target.split(".")
     for item in prefix:
@@ -39,19 +47,15 @@ def _assign_attr(
             setattr(to_module, item, t)
         to_module = t
 
-    if isinstance(from_obj, torch.ScriptObject):
+    if attr_kind == _AttrKind.PARAMETER:
+        assert isinstance(from_obj, torch.nn.Parameter)
+        to_module.register_parameter(field, from_obj)
+    elif attr_kind == _AttrKind.BUFFER:
+        assert isinstance(from_obj, torch.Tensor)
+        to_module.register_buffer(field, from_obj, persistent=persistent)
+    elif attr_kind == _AttrKind.CONSTANT:
+        assert isinstance(from_obj, (torch.Tensor, torch.ScriptObject))
         setattr(to_module, field, from_obj)
-        return
-
-    # If it is a tensor and not a parameter attribute of a module, it should be a named buffer.
-    # So, we register it as a named buffer in the target module.
-    if not isinstance(from_obj, torch.Tensor):
-        raise ValueError("Expected only parameters or buffers, got:", type(from_obj))
-
-    if is_parameter:
-        to_module.register_parameter(field, torch.nn.Parameter(from_obj))
-    else:
-        to_module.register_buffer(field, from_obj)
 
 
 class InterpreterModule(torch.nn.Module):
@@ -157,12 +161,12 @@ class UnflattenedModule(torch.nn.Module):
 
         state_dict = export_module.state_dict
         for name in self.graph_signature.parameters:
-            cloned = state_dict[name].clone()
+            cloned = torch.nn.Parameter(state_dict[name].clone())
             _assign_attr(
                 cloned,
                 self,
                 name,
-                is_parameter=True,
+                attr_kind=_AttrKind.PARAMETER,
             )
         for name in self.graph_signature.buffers:
             cloned = state_dict[name].clone()
@@ -170,7 +174,7 @@ class UnflattenedModule(torch.nn.Module):
                 cloned,
                 self,
                 name,
-                is_parameter=False,
+                attr_kind=_AttrKind.BUFFER,
             )
 
         for fqn in chain(
@@ -184,7 +188,7 @@ class UnflattenedModule(torch.nn.Module):
                 constant,
                 self,
                 fqn,
-                is_parameter=False,
+                attr_kind=_AttrKind.CONSTANT,
             )
 
         inputs_to_state: Dict[str, str] = {
