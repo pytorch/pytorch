@@ -26,6 +26,19 @@
 namespace torch {
 namespace autograd {
 
+// Returns a ViewFunc with a corresponding view that matches the shape,
+// stride, and storage offset of the given tensor. Requires the generated
+// AsStridedViewFunc to be available, which may not be the case (e.g. for
+// mobile).
+static std::shared_ptr<ViewFunc> create_view_func_matching(const Variable& t) {
+#ifdef AS_STRIDED_VIEW_FUNC_AVAILABLE
+  return std::make_shared<torch::autograd::generated::AsStridedViewFunc>(
+      t.sym_sizes(), t.sym_strides(), t.sym_storage_offset());
+#else
+  return std::make_shared<ErroringViewFunc>("as_strided() not available");
+#endif
+}
+
 DifferentiableViewMeta::DifferentiableViewMeta(
     at::TensorImpl* self_impl,
     c10::optional<ViewInfo> backward_info,
@@ -81,13 +94,9 @@ ViewInfo ViewInfo::chain(
     } else {
       // current_view has a view_func and but it's parent doesn't have one
       if (base.unsafeGetTensorImpl()->support_as_strided()) {
-        auto as_strided_view_func =
-            std::make_shared<torch::autograd::generated::AsStridedViewFunc>(
-                base.sym_sizes(),
-                base.sym_strides(),
-                base.sym_storage_offset());
+        auto match_base_view_func = create_view_func_matching(base);
         view_func =
-            std::make_shared<ChainedViewFunc>(as_strided_view_func, view_func);
+            std::make_shared<ChainedViewFunc>(match_base_view_func, view_func);
 
         // assume view_fn_ / rev_view_fn_ always exist together or neither are
         // set
@@ -116,13 +125,9 @@ ViewInfo ViewInfo::chain(
     }
   } else if (view_fn_) {
     // if current_view doesn't have a view_func but it's parent has one
-    auto as_strided_view_func =
-        std::make_shared<torch::autograd::generated::AsStridedViewFunc>(
-            tensor.sym_sizes(),
-            tensor.sym_strides(),
-            tensor.sym_storage_offset());
+    auto match_tensor_view_func = create_view_func_matching(tensor);
     view_func =
-        std::make_shared<ChainedViewFunc>(view_fn_, as_strided_view_func);
+        std::make_shared<ChainedViewFunc>(view_fn_, match_tensor_view_func);
 
     // assume view_fn_ / rev_view_fn_ always exist together or neither are set
     auto prev_rev_view_fn = rev_view_fn_;
