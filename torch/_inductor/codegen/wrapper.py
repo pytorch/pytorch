@@ -1508,7 +1508,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 #define alloc_from_pool torch::inductor::_alloc_from_pool
                 """
             )
-            if "cuda" in V.graph.device_types:
+            if V.graph.cuda:
                 self.header.splice(
                     """
                     #include <ATen/cuda/EmptyTensor.h>
