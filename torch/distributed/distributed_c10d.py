@@ -34,7 +34,11 @@ from torch._C._distributed_c10d import (
     Store,
     DebugLevel,
     get_debug_level,
-    Work
+    Work,
+    _register_process_group,
+    _resolve_process_group,
+    _unregister_all_process_groups,
+    _unregister_process_group,
 )
 from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
 from .constants import default_pg_timeout, default_pg_nccl_timeout
@@ -841,6 +845,11 @@ def _get_group_size(group) -> int:
     return group.size()
 
 
+def _get_group_size_by_name(group_name: str) -> int:
+    group = _resolve_process_group(group_name)
+    return group.size()
+
+
 def _check_single_tensor(param, param_name) -> None:
     """Check that the parameter ``param_name`` is a single tensor."""
     if not isinstance(param, torch.Tensor):
@@ -1539,6 +1548,7 @@ def _new_process_group_helper(
     _world.pg_map[pg] = (backend, prefix_store)
     _world.pg_names[pg] = group_name
     pg._set_group_name(group_name)
+    _register_process_group(group_name, pg)
 
     _world.pg_backend_config[pg] = str(backend_config)
     # "" is the default tag for user PGs
@@ -1597,6 +1607,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         _world.tags_to_pg.clear()
         _world.pg_coalesce_state.clear()
         _world.pg_default_device.clear()
+        _unregister_all_process_groups()
 
         # when process group doesn't have an explicit name (only WORLD (default)
         # process group can have an explicit name), we use global _world.group_count
@@ -1630,6 +1641,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
                     _world.tags_to_pg[""].remove(pg)
             except Exception:
                 pass
+        _unregister_process_group(pg.group_name)
 
 
 def get_rank(group: Optional[ProcessGroup] = None) -> int:
@@ -1933,9 +1945,9 @@ def _coalescing_manager(
         work = group._end_coalescing(device)
 
     if async_ops:
-        cm.append(work)
+        cm.append(work)  # type: ignore[possibly-undefined]
     else:
-        work.wait()
+        work.wait()  # type: ignore[possibly-undefined]
 
 
 def batch_isend_irecv(p2p_op_list):
@@ -2448,7 +2460,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     # All ranks call gather with equal-sized tensors.
     gather(
         input_tensor,
-        gather_list=output_tensors if my_rank == dst else None,
+        gather_list=output_tensors if my_rank == dst else None,  # type: ignore[possibly-undefined]
         dst=dst,
         group=group,
     )
@@ -2547,7 +2559,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
     # Note: torch.cat will do an extra memory copy to the current device, if the tensor_list
     # has only one element, we can skip the copy.
     if my_rank == src:
-        if len(tensor_list) == 1:
+        if len(tensor_list) == 1:  # type: ignore[possibly-undefined]
             object_tensor = tensor_list[0]
         else:
             object_tensor = torch.cat(tensor_list)
@@ -2650,8 +2662,8 @@ def scatter_object_list(
     # Src rank broadcasts the maximum tensor size. This is because all ranks are
     # expected to call into scatter() with equal-sized tensors.
     if my_rank == src:
-        max_tensor_size = max(tensor_sizes)
-        for tensor in tensor_list:
+        max_tensor_size = max(tensor_sizes)  # type: ignore[possibly-undefined]
+        for tensor in tensor_list:  # type: ignore[possibly-undefined]
             tensor.resize_(max_tensor_size)
     else:
         max_tensor_size = torch.tensor([0], dtype=torch.long, device=pg_device)
@@ -2661,7 +2673,7 @@ def scatter_object_list(
     output_tensor = torch.empty(max_tensor_size.item(), dtype=torch.uint8, device=pg_device)
     scatter(
         output_tensor,
-        scatter_list=None if my_rank != src else tensor_list,
+        scatter_list=None if my_rank != src else tensor_list,  # type: ignore[possibly-undefined]
         src=src,
         group=group,
     )
@@ -2670,7 +2682,7 @@ def scatter_object_list(
     obj_tensor_size = torch.tensor([0], dtype=torch.long, device=pg_device)
     scatter(
         obj_tensor_size,
-        scatter_list=None if my_rank != src else tensor_sizes,
+        scatter_list=None if my_rank != src else tensor_sizes,  # type: ignore[possibly-undefined]
         src=src,
         group=group,
     )
