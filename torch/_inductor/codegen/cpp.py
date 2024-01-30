@@ -1475,11 +1475,10 @@ class CppKernel(Kernel):
         dtype,
         is_vec=False,
     ):
-        if not hasattr(self.parallel_reduction_prefix, "max_threads"):
+        if config.cpp.dynamic_threads and not self.parallel_reduction_prefix:
             self.parallel_reduction_prefix.writeline(
                 "int max_threads = omp_get_max_threads();"
             )
-            setattr(self.parallel_reduction_prefix, "max_threads", True)  # noqa: B010
         reduction_combine_fn = reduction_combine_vec if is_vec else reduction_combine
         reduction_init_fn = reduction_init_vec if is_vec else reduction_init
         acc_local = f"{acc}_local"
@@ -1513,6 +1512,17 @@ class CppKernel(Kernel):
                 "}",
             ],
         )
+
+    def _reduction_var_name(self, var_name: str, line: str) -> str:
+        return var_name
+
+    def update_stores_with_parallel_reduction(self):
+        for i, line in enumerate(self.stores._lines):
+            if isinstance(line, str):
+                m = re.search("tmp_acc[0-9]+", line)
+                if m:
+                    var_name = self._reduction_var_name(m.group(0), line)
+                    self.stores._lines[i] = line.replace(var_name, f"{var_name}_local")
 
     @contextlib.contextmanager
     def masked(self, mask):
@@ -1711,21 +1721,6 @@ class CppKernel(Kernel):
                 if hasattr(kernel, "codegen_inner_loops"):
                     code.splice(kernel.poststores)
 
-            def replace_parallel_reduction_store(loops):
-                for loop in loops:
-                    if loop.parallel:
-                        for kernel in loop.get_kernels():
-                            for i, line in enumerate(kernel.stores._lines):
-                                if isinstance(line, str):
-                                    m = re.search("tmp_acc[0-9]+", line)
-                                    if m:
-                                        var_name = m.group(0)
-                                        if f"{var_name}_vec" in line:
-                                            var_name = f"{var_name}_vec"
-                                        kernel.stores._lines[i] = line.replace(
-                                            var_name, f"{var_name}_local"
-                                        )
-
             def get_reduction_code_buffer(loops, is_suffix=True):
                 for loop in loops:
                     for kernel in loop.get_kernels():
@@ -1759,7 +1754,6 @@ class CppKernel(Kernel):
                     if loops:
                         loop = loops[0]
                         if loop.is_reduction and not in_reduction:
-                            replace_parallel_reduction_store(loops)
                             (
                                 reduction_prefix,
                                 ws_init,
@@ -1776,7 +1770,7 @@ class CppKernel(Kernel):
                             worksharing.parallel(threads)
 
                     for loop in loops:
-                        gen_loop(loop, in_reduction)
+                        gen_loop(loop, loops[0].is_reduction and not in_reduction)
 
                     if loops:
                         loop = loops[0]
@@ -1787,7 +1781,7 @@ class CppKernel(Kernel):
                                 get_reduction_code_buffer(loops, is_suffix=True)[0]
                             )
 
-            def gen_loop(loop: LoopLevel, in_reduction=False):
+            def gen_loop(loop: LoopLevel, update_reduction_store=False):
                 with contextlib.ExitStack() as stack:
                     loop_lines = loop.lines()
                     if loop_lines is None:
@@ -1800,6 +1794,8 @@ class CppKernel(Kernel):
                     else:
                         kernels = loop.get_kernels()
                         assert len(kernels) == 1
+                        if update_reduction_store and loop.parallel:
+                            kernels[0].update_stores_with_parallel_reduction()
                         gen_kernel(kernels[0])
 
             stack.enter_context(code.indent())
@@ -1872,6 +1868,11 @@ class CppVecKernel(CppKernel):
         self.tiling_factor = tiling_factor
         self.tiling_idx = tiling_idx
         metrics.generated_cpp_vec_kernel_count += 1
+
+    def _reduction_var_name(self, var_name: str, line: str) -> str:
+        if f"{var_name}_vec" in line:
+            var_name = f"{var_name}_vec"
+        return var_name
 
     def _get_vec_load_line(
         self,
