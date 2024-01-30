@@ -14,6 +14,8 @@ struct XPUHooks : public at::XPUHooksInterface {
   bool hasXPU() const override;
   std::string showConfig() const override;
   int getGlobalIdxFromDevice(const at::Device& device) const override;
+  const Generator& getDefaultXPUGenerator(
+      DeviceIndex device_index = -1) const override;
   Device getDeviceFromPtr(void* data) const override;
   int getNumGPUs() const override;
   void deviceSynchronize(DeviceIndex device_index) const override;
