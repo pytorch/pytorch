@@ -261,9 +261,9 @@ aten_fallback_mixed_mm = ExternKernelChoice(fallback_mixed_mm, None)
 
 
 @functools.lru_cache(None)
-def _is_v100_gpu(index: Optional[int]) -> bool:
+def _is_sm7x_or_older_gpu(index: Optional[int]) -> bool:
     props = torch.cuda.get_device_properties(index or 0)
-    return props.major == 7
+    return props.major <= 7
 
 
 def tuned_mixed_mm(mat1, mat2, mat2_dtype):
@@ -271,7 +271,7 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     choices = [aten_fallback_mixed_mm.bind((mat1, mat2), layout)]
     if (
         mat1.layout.dtype != torch.float32 and not mat2.layout.is_contiguous()
-    ) or _is_v100_gpu(layout.device.index):
+    ) or _is_sm7x_or_older_gpu(layout.device.index):
         # can't use triton kernel unless one of these is true or if running on v100 (numerical issues)
         return autotune_select_algorithm("mixed_mm", choices, [mat1, mat2], layout)
     if inductor_config.force_mixed_mm:
