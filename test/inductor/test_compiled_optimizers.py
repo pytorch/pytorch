@@ -63,12 +63,12 @@ KERNEL_COUNT_OVERRIDES = {
 KERNEL_COUNTS = {
     Adam: KernelCounts(multitensor=2, singletensor=8),
     AdamW: KernelCounts(multitensor=2, singletensor=8),
-    NAdam: KernelCounts(multitensor=2, singletensor=12),
+    NAdam: KernelCounts(multitensor=2, singletensor=8),
     Rprop: KernelCounts(multitensor=1, singletensor=4),
     RMSprop: KernelCounts(multitensor=1, singletensor=4),
     Adadelta: KernelCounts(multitensor=1, singletensor=4),
     Adagrad: KernelCounts(multitensor=5, singletensor=8),
-    ASGD: KernelCounts(multitensor=2, singletensor=12),
+    ASGD: KernelCounts(multitensor=2, singletensor=8),
     SGD: KernelCounts(multitensor=2, singletensor=8),
     RAdam: KernelCounts(
         multitensor=2, singletensor=None
