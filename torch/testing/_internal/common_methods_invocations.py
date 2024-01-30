@@ -15409,8 +15409,6 @@ op_db: List[OpInfo] = [
     OpInfo('split_with_sizes_copy',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool, torch.chalf),
            sample_inputs_func=sample_inputs_split_with_sizes,
-           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
-           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            supports_out=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
