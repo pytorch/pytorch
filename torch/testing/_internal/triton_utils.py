@@ -14,7 +14,9 @@ def has_lark():
         return False
 
 
-requires_lark = unittest.skipUnless(has_lark(), "requires lark")
+HAS_LARK = has_lark()
+
+requires_lark = unittest.skipUnless(HAS_LARK, "requires lark")
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 if HAS_CUDA:
@@ -28,23 +30,6 @@ if HAS_CUDA:
         in_ptr1,
         out_ptr,
         n_elements,
-        BLOCK_SIZE: "tl.constexpr",
-    ):
-        pid = tl.program_id(axis=0)
-        block_start = pid * BLOCK_SIZE
-        offsets = block_start + tl.arange(0, BLOCK_SIZE)
-        mask = offsets < n_elements
-        x = tl.load(in_ptr0 + offsets, mask=mask)
-        y = tl.load(in_ptr1 + offsets, mask=mask)
-        output = x + y
-        tl.store(out_ptr + offsets, output, mask=mask)
-
-    @triton.jit
-    def add_kernel_out_of_order(
-        in_ptr0,
-        n_elements,
-        in_ptr1,
-        out_ptr,
         BLOCK_SIZE: "tl.constexpr",
     ):
         pid = tl.program_id(axis=0)
