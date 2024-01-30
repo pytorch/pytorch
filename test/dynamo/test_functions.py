@@ -458,7 +458,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         class NotCallableClass:
             pass
 
-        @torch.compile(backend="inductor", fullgraph=True)
+        @torch.compile(backend="eager", fullgraph=True)
         def fn(x, args):
             if callable(args[0]):
                 return x
