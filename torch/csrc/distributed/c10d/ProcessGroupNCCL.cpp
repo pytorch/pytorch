@@ -1060,6 +1060,8 @@ void ProcessGroupNCCL::abortCommsFromMap(
     auto& ncclComms = it.second;
 
     for (const auto& ncclComm : ncclComms) {
+      LOG(INFO) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
+                << ncclComm->ncclComm_ << " on CUDA device: " << devName;
       ncclComm->ncclCommAbort(abortReason);
     }
     // Note that we don't remove the aborted communicators from the
@@ -1080,8 +1082,9 @@ void ProcessGroupNCCL::abortCommsFromMap(
       }
     }
 
-    LOG(INFO) << logPrefix() << "] Destroyed " << ncclComms.size()
-              << "communicators on CUDA device: " << devName
+    LOG(INFO) << logPrefix() << "ProcessGroupNCCL destroyed "
+              << ncclComms.size()
+              << " communicators on CUDA device: " << devName
               << " with stream: " << streamId;
   }
 }
@@ -1274,7 +1277,10 @@ void ProcessGroupNCCL::heartbeatMonitor() {
             "you can either increase the timeout (TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC) to a larger value "
             "or disable the heartbeat monitor (TORCH_NCCL_ENABLE_MONITORING=0)."
             "If either of aforementioned helps, feel free to file an issue to PyTorch about the short timeout "
-            "or false positive abort; otherwise, please attempt to debug the hang.");
+            "or false positive abort; otherwise, please attempt to debug the hang. "
+            "workMetaList_.size() = ",
+            workMetaList_.size(),
+            "");
         break;
       }
     }
@@ -1340,17 +1346,21 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     // TODO(fduwjj): After having a hang debug wiki, we need to update the wiki
     // url here.
     const auto finalExitMsg = c10::str(logPrefix(), exitMsg);
-    terminateProcess(finalExitMsg);
+    if (monitorThreadEnabled_.load()) {
+      terminateProcess(finalExitMsg);
+    } else {
+      LOG(ERROR)
+          << "PGNCCL Monitor Thread is disabled, but would have killed this job:\n"
+          << finalExitMsg;
+    }
   }
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
   try {
     VLOG(2) << logPrefix() << "NCCL watchdog thread started!";
-    if (monitorThreadEnabled_.load()) {
-      ncclHeartbeatMonitorThread_ =
-          std::thread(&ProcessGroupNCCL::heartbeatMonitor, this);
-    }
+    ncclHeartbeatMonitorThread_ =
+        std::thread(&ProcessGroupNCCL::heartbeatMonitor, this);
     watchdogHandler();
     VLOG(2) << logPrefix() << "NCCL watchdog thread terminated normally";
   } catch (std::exception& e) {
@@ -1971,6 +1981,12 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     C10D_NCCL_CHECK_TIMEOUT_GROUPEND(ncclGroupEnd(), ncclComms, c10::nullopt);
   }
 #endif
+
+  for (const auto i : c10::irange(devices.size())) {
+    int deviceIndex = devices[i].index();
+    LOG(INFO) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
+              << ncclComms[i]->ncclComm_ << " on CUDA device: " << deviceIndex;
+  }
 
   // At this point NCCL should have been initialized, hence we can accurately
   // get the env value even if NCCL sets it by reading from nccl.conf file

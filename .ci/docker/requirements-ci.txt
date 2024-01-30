@@ -52,6 +52,11 @@ junitparser==2.1.1
 #Pinned versions: 2.1.1
 #test that import:
 
+lark==0.12.0
+#Description: parser
+#Pinned versions: 0.12.0
+#test that import:
+
 librosa>=0.6.2 ; python_version < "3.11"
 #Description: A python package for music and audio analysis
 #Pinned versions: >=0.6.2
@@ -80,10 +85,10 @@ librosa>=0.6.2 ; python_version < "3.11"
 #Pinned versions:
 #test that import:
 
-mypy==1.7.0
+mypy==1.8.0
 # Pin MyPy version because new errors are likely to appear with each release
 #Description: linter
-#Pinned versions: 1.7.0
+#Pinned versions: 1.8.0
 #test that import: test_typing.py, test_type_hints.py
 
 networkx==2.8.8
