@@ -754,7 +754,7 @@ def floor(x):
 
 @register_lowering(aten.round)
 def round(x, decimals=0):
-    if is_integer_type(x):
+    if is_integer_type(x) and decimals >= 0:
         return clone(x)
     if decimals == 0:
         fn = ops_wrapper("round")
