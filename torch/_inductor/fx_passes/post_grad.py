@@ -652,6 +652,9 @@ def decompose_auto_functionalized(graph):
             match.replace_by_example(auto_functionalized_dense, args, run_dce=False)
 
     graph_pass.apply(graph)
+    for node in graph.nodes:
+        if node.target is torch.ops.higher_order.auto_functionalized:
+            raise AssertionError("auto_functionalized was not removed")
 
 
 @register_lowering_pattern(
