@@ -29,11 +29,6 @@
 #include <torch/custom_class.h>
 
 namespace c10d {
-// Control whether we perform a NCCL health check or not
-// which ensures communicators are healthy at the beginning of init.
-static std::vector<std::string> TORCH_ENABLE_NCCL_HEALTH_CHECK = {
-    "TORCH_ENABLE_NCCL_HEALTH_CHECK",
-    "ENABLE_NCCL_HEALTH_CHECK"};
 
 // Control whether or not wait() is blocking or non-blocking.
 static std::vector<std::string> TORCH_NCCL_BLOCKING_WAIT = {
@@ -346,28 +341,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     friend class ProcessGroupNCCL;
   };
 
-  class CoalescedWorkNCCL
-      : public Work,
-        public std::enable_shared_from_this<CoalescedWorkNCCL> {
-   public:
-    // Constructor takes a list of WorkNCCL works
-    CoalescedWorkNCCL(
-        std::vector<ProcessGroupNCCL::WorkNCCL> works,
-        int rank,
-        OpType opType);
-
-    ~CoalescedWorkNCCL() override;
-
-    // Same as calling synchronize() for NCCL work.
-    bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
-
-   protected:
-    // The cached list of CUDA devices to operate on
-    std::vector<ProcessGroupNCCL::WorkNCCL> works_;
-
-    friend class ProcessGroupNCCL;
-  };
-
   struct Options : Backend::Options {
     // NOTE: timeout in ProcessGroupNCCL::Options denote the timeout for
     // operations. This is only used when blockingWait_ is enabled.
@@ -621,12 +594,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       const std::vector<at::Tensor>& inputs = {},
       const std::vector<at::Tensor>& outputs = {});
 
-  virtual c10::intrusive_ptr<ProcessGroupNCCL::CoalescedWorkNCCL>
-  initCoalescedWork(
-      const std::vector<c10::intrusive_ptr<Work>>& works,
-      int rank,
-      OpType opType);
-
  private:
   int globalRankStart;
   int globalRankStride;
@@ -702,16 +669,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // guarantee that this heuristic is the correct assignment of ranks
   // to GPUs that Python layers use, but in practice it tends to be.
   // Fortunately we don't rely on this for correctness of any tensor
-  // operations, just for ancillary uses like health checks and
-  // barriers.
+  // operations, just for ancillary uses like barriers.
   at::Device guessDeviceForRank() const;
-
-  // Performs a health check by initializing dummy NCCL communicators and then
-  // destroying them. This will help indicate and signal any NCCL-related issues
-  // prior to the first collective. The actual initialization and subsequent
-  // destruction is ran on a separate thread and the main thread is signalled
-  // about timeouts/errors to report to the application.
-  void runHealthCheck();
 
   // Destroys initialized NCCL communicators in devNCCLComMap_ given by input
   // key. Throws if there are no communicators to destroy. Also removes
