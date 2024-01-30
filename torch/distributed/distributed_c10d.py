@@ -40,6 +40,7 @@ from torch._C._distributed_c10d import (
     _unregister_all_process_groups,
     _unregister_process_group,
 )
+from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
 from .constants import default_pg_timeout, default_pg_nccl_timeout
 from .c10d_logger import _exception_logger, _time_logger
 from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
@@ -1191,6 +1192,8 @@ def init_process_group(
         "cpu:gloo,cuda:custom_backend".
 
     """
+    set_pytorch_distributed_envs_from_justknobs()
+
     global _world
 
     global _backend
