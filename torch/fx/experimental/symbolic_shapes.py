@@ -3726,18 +3726,13 @@ class ShapeEnv:
 
         concrete_val = None
 
-        if size_oblivious:
-            mb_static = self._maybe_evaluate_static(orig_expr,
-                                                    expect_rational=expect_rational,
-                                                    size_oblivious=True)
-            if mb_static is not None:
-                concrete_val = mb_static
-
-        if concrete_val is None:
-            if hint is None:
-                concrete_val = self.size_hint(orig_expr)
-            else:
-                concrete_val = sympy.sympify(hint)
+        def compute_concrete_val():
+            nonlocal concrete_val
+            if concrete_val is None:
+                if hint is None:
+                    concrete_val = self.size_hint(orig_expr)
+                else:
+                    concrete_val = sympy.sympify(hint)
 
         # Check if:
         #   1. 'translation_validation' is set
@@ -3752,7 +3747,9 @@ class ShapeEnv:
                 self._translation_validation_enabled
                 and fx_node is not None
                 and not self._suppress_guards_tls()
+                and not size_oblivious
         ):
+            compute_concrete_val()
             if concrete_val is sympy.true:
                 node, fresh = self.create_fx_call_function(torch._assert, (fx_node,))
             elif concrete_val is sympy.false:
@@ -3808,6 +3805,7 @@ class ShapeEnv:
                     raise self._make_data_dependent_error(expr.xreplace(self.var_to_val), expr)
                 expr = new_expr
 
+            compute_concrete_val()
             self._check_frozen(expr, concrete_val)
 
             if (
