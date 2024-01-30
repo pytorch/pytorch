@@ -6,6 +6,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from torch._custom_ops import impl_abstract
+from torch._subclasses.fake_tensor import is_fake
 from torch.distributed.device_mesh import DeviceMesh
 from torch.fx.experimental.proxy_tensor import get_innermost_proxy_mode
 
@@ -455,7 +456,11 @@ class AsyncCollectiveTensor(torch.Tensor):
         return AsyncCollectiveTensor(elem)
 
     def __repr__(self):
-        wait_tensor(self.elem)
+        if not is_fake(self.elem):
+            # If we have a real tensor, then we need to sync it before printing its data.
+            # but if we have a fake tensor, then we will likely be calling this method
+            # as tracing time while logging, so we don't want the logging to cause side effects.
+            wait_tensor(self.elem)
         return f"AsyncCollectiveTensor({self.elem})"
 
     def trigger_wait(self):
