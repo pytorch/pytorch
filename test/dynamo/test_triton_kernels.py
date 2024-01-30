@@ -896,6 +896,7 @@ def forward(self, x_1, output_1):
 class MutationTests(torch._dynamo.test_case.TestCase):
     @requires_cuda
     @requires_lark
+    @skipIfRocm
     def test_find_mutations(self):
         from torch._higher_order_ops.triton_kernel_wrap import identify_mutated_tensors
 
