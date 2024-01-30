@@ -230,6 +230,31 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = opt_kwargs_fn(x)
         self.assertEqual(res, ref)
 
+    def test_dtensor_different_gradient_placement(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x, y, z):
+            permute = x.permute(0, 2, 1)
+            breakpoint()
+            permute2 = permute.contiguous()
+            layer_norm = torch.nn.functional.layer_norm(permute2, (4,), y, z, 1e-05)
+            out = layer_norm.permute(0, 2, 1)
+            return out
+
+        x = torch.randn(4, 2, 4, requires_grad=True)
+        x_dt = DTensor.from_local(x, mesh, [Shard(1)], run_check=False)
+
+        y = torch.randn(4, requires_grad=True)
+        y_dt = DTensor.from_local(y, mesh, [Replicate()], run_check=False)
+
+        z = torch.randn(4, requires_grad=True)
+        z_dt = DTensor.from_local(z, mesh, [Replicate()], run_check=False)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        tmp_dt = opt_fn(x_dt, y_dt, z_dt)
+        out_dt = torch.matmul(tmp_dt, x_dt).permute(0, 2, 1)
+        out_dt.sum().backward()
+
     def test_dynamo_dtensor_from_local_redistribute(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
