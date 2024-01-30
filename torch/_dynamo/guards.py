@@ -58,11 +58,8 @@ from .source import DefaultsSource, LocalSource, TypeSource
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     common_constant_types,
-    dict_keys_repr,
     guard_failures,
     istype,
-    key_is_id,
-    key_to_id,
     orig_code_map,
     tensor_always_has_static_shape,
     tuple_iterator_getitem,
@@ -98,7 +95,6 @@ CLOSURE_VARS = {
     "___check_type_id": check_type_id,
     "___check_obj_id": check_obj_id,
     "___odict_getitem": collections.OrderedDict.__getitem__,
-    "___key_to_id": key_to_id,
     "___dict_version": dict_version,
     "___dict_contains": lambda a, b: a in b,
     "___tuple_iterator_len": tuple_iterator_len,
@@ -285,7 +281,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def BOOL_FALSE(self, guard: Guard):
         # Guard on the runtime value being 'False',
-        # can be faster than seemingly equivalent checks like DICT_KEYS for empty dict
+        # can be faster than seemingly equivalent checks like DICT_CONST_KEYS for empty dict
         #
         # WARNING: this guard is not safe to use generally.  It only works if the runtime
         # value is of a type that supports bool(), and some types e.g. Tensor do not.
@@ -294,7 +290,7 @@ class GuardBuilder(GuardBuilderBase):
         #
         # Why not simply check the runtime type inside this guard?  It's slow enough to defeat
         # the purpose of using this guard, which itself is supposed to be a faster alternative
-        # to DICT_KEYS.
+        # to DICT_CONST_KEYS.
         ref = self.arg_ref(guard)
         code = f"not {ref}"
         self._produce_guard_code(guard, [code])
@@ -521,26 +517,6 @@ class GuardBuilder(GuardBuilderBase):
         code = [f"{ref_b} is {ref_a}"]
         self._produce_guard_code(guard, code)
 
-    def DICT_KEYS(self, guard):
-        # Guard on the keys and their order
-        ref = self.arg_ref(guard)
-        value = self.get(guard.name)
-        t = type(value)
-
-        code = list()
-        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
-        any_key_is_id = any(key_is_id(k) for k in value.keys())
-        const_keys_repr = dict_keys_repr(
-            key_to_id(value),
-            local=is_from_local_source(guard.originating_source),
-        )
-        if any_key_is_id:
-            code.append(f"___key_to_id({ref}) == {const_keys_repr}")
-        else:
-            code.append(f"list({ref}.keys()) == {const_keys_repr}")
-
-        self._produce_guard_code(guard, code)
-
     def WEAKREF_ALIVE(self, guard):
         self._produce_guard_code(guard, [f"{self.arg_ref(guard)} is not None"])
 
@@ -556,15 +532,15 @@ class GuardBuilder(GuardBuilderBase):
 
         self._produce_guard_code(guard, code)
 
-    def ODICT_KEYS(self, guard):
-        """OrderedDict keys match"""
+    def DICT_CONST_KEYS(self, guard):
+        """Constant keys match"""
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
 
         code = list()
         code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
-        code.append(f"str({ref}.keys()) == {str(value.keys())!r}")
+        code.append(f"list({ref}.keys()) == {list(value.keys())!r}")
 
         self._produce_guard_code(guard, code)
 

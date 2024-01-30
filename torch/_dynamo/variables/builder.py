@@ -424,11 +424,20 @@ class VariableBuilder:
             else:
                 self.install_guards(GuardBuilder.LIST_LENGTH)
 
+            # Optimisation for the common case strings, ints, etc
+            all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
+            if all_const:
+                self.install_guards(GuardBuilder.DICT_CONST_KEYS)
+
             # We need all the keys to be hashable. We do this within the
             # _HashableTracker class in dicts.py
             def build_key_value(i, k, v):
-                source_key = ConstDictKeySource(self.get_source(), i)
-                key = LazyVariableTracker.create(k, source_key)
+                if all_const:
+                    key = ConstantVariable.create(k)
+                    source_key = k
+                else:
+                    source_key = ConstDictKeySource(self.get_source(), i)
+                    key = LazyVariableTracker.create(k, source_key)
 
                 source_value = GetItemSource(self.get_source(), source_key)
                 value = LazyVariableTracker.create(v, source_value)
@@ -489,7 +498,7 @@ class VariableBuilder:
 
             install_guard(
                 self.get_source().make_guard(GuardBuilder.TYPE_MATCH),
-                keywords_source.make_guard(GuardBuilder.DICT_KEYS),
+                keywords_source.make_guard(GuardBuilder.DICT_CONST_KEYS),
                 args_source.make_guard(GuardBuilder.LIST_LENGTH),
             )
             return FunctoolsPartialVariable(func_obj, args, keywords, original=value)
