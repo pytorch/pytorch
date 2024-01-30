@@ -1616,12 +1616,8 @@ class AOTInductorTestsTemplate:
     @config.patch({"aot_inductor.abi_compatible": True})
     def test_triton_kernel_reinterpret_view_mem_leak(self):
         # Check for memory leak when using user-defined Triton Kernel + AOTI.
-<<<<<<< HEAD
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
-=======
-        device = torch.cuda.current_device()
->>>>>>> c26135f9dc0 ([inductor] skip launching kernels with zero grid in AOTInductor when using backed symints)
 
         class Model(torch.nn.Module):
             def __init__(self):
