@@ -712,7 +712,6 @@ def mps_ops_modifier(ops):
         'nn.functional.hardshrink': None,
         'nn.functional.max_pool3d': None,
         'nn.functional.max_unpool1d': None,
-        'nn.functional.max_unpool2d': None,
         'nn.functional.max_unpool3d': None,
         'nn.functional.multi_margin_loss': None,
         'nn.functional.multilabel_margin_loss': None,
