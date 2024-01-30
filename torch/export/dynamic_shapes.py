@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Un
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.utils._pytree import SUPPORTED_NODES
 from .exported_program import ExportedProgram
 
 if TYPE_CHECKING:
@@ -371,17 +372,18 @@ def _process_dynamic_shapes(
                 )
             for k, shape in dynamic_shapes.items():
                 yield from tree_zip(combined_args[k], shape)
-        elif dataclasses.is_dataclass(combined_args):
-            if not type(dynamic_shapes) == type(combined_args):
+        elif type(combined_args) in SUPPORTED_NODES:
+            if not isinstance(dynamic_shapes, Sequence):
                 raise UserError(
                     UserErrorType.INVALID_INPUT,
-                    f"Expected dynamic_shapes of a {type(combined_args)} to be a {type(combined_args)}, "
-                    f"got {dynamic_shapes} instead",
+                    f"Expected dynamic_shapes of a user-registered class (e.g., "
+                    f"{type(combined_args)}) to be a Sequence that matches the "
+                    f"flattened structure, but got {dynamic_shapes} instead",
                 )
-            for f in dataclasses.fields(combined_args):
-                yield from tree_zip(
-                    getattr(combined_args, f.name), getattr(dynamic_shapes, f.name)
-                )
+            yield from tree_zip(
+                SUPPORTED_NODES[type(combined_args)].flatten_fn(combined_args)[0],
+                dynamic_shapes,
+            )
         elif isinstance(combined_args, torch.Tensor):
             yield (combined_args, dynamic_shapes)
         else:

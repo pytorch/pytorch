@@ -1,9 +1,13 @@
+# mypy: ignore-errors
+
 import functools
 
 import inspect
 import operator
 import types
 from typing import Dict, List
+
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 
 try:
@@ -171,6 +175,49 @@ class TensorVariable(VariableTracker):
         return props
 
     def dynamic_getattr(self, tx, name):
+        fake_val = self.proxy.node.meta["example_value"]
+        # For getattrs on tensors without sources,
+        # we can do better than the default (creating a GetAttrVariable)
+        # if:
+        # (1) the tensor is a traceable tensor subclass
+        # (2) We are getattr'ing an inner tensor from that subclass
+        if not self.source and is_traceable_wrapper_subclass(fake_val):
+            fake_val = self.proxy.node.meta["example_value"]
+            attrs, ctx = fake_val.__tensor_flatten__()
+            if name in attrs or name in ctx:
+                proxy = getattr(self.as_proxy(), name)
+                example_value = getattr(fake_val, name)
+                if name in attrs:
+                    # attrs returned from tensor_flatten are always tensors
+                    assert isinstance(example_value, torch.Tensor)
+                    from .builder import wrap_fx_proxy
+
+                    return wrap_fx_proxy(
+                        tx=tx, proxy=proxy, example_value=example_value
+                    )
+                else:
+                    # attributes in the ctx returned by tensor_flatten are assumed to be constants
+                    from . import ConstantVariable, ListVariable, TupleVariable
+
+                    # TODO: figure out a good way to dispatch on all possible variable trackers for constants here.
+                    from .distributed import DeviceMeshVariable, PlacementVariable
+
+                    def constant_or_distributed(x):
+                        if PlacementVariable.is_placement(x):
+                            return PlacementVariable(x)
+                        if DeviceMeshVariable.is_device_mesh(x):
+                            return DeviceMeshVariable(x)
+                        return ConstantVariable(x)
+
+                    if isinstance(example_value, list):
+                        return ListVariable(
+                            [constant_or_distributed(x) for x in example_value]
+                        )
+                    elif isinstance(example_value, tuple):
+                        return TupleVariable(
+                            [constant_or_distributed(x) for x in example_value]
+                        )
+                    return constant_or_distributed(example_value)
         if not self.source:
             raise NotImplementedError()
 
@@ -509,6 +556,8 @@ class TensorVariable(VariableTracker):
         elif name == "get_device" and isinstance(self.device, torch.device):
             index = self.device.index if self.device.type != "cpu" else -1
             constant_result = ConstantVariable.create(index)
+        elif name == "element_size":
+            constant_result = ConstantVariable.create(self.dtype.itemsize)
         else:
             constant_result = None
 
