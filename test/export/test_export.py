@@ -1674,6 +1674,36 @@ def forward(self, arg_0):
         ):
             torch.export.export(exported_v2.module(), (torch.randn(2, 2),))
 
+    def test_export_cond(self):
+        class A(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(6, 4))
+
+            def forward(self):
+                return self.buffer.cos()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = A()
+
+            def forward(self, x):
+                def true_fn(x):
+                    return x.cos() + self.a().sum()
+
+                def false_fn(x):
+                    return x.sin()
+
+                return cond(x.shape[0] > 4, true_fn, false_fn, [x])
+
+        inp = torch.ones(6, 4)
+        ep = export(
+            Foo(),
+            (inp,),
+        )
+        self.assertTrue(torch.allclose(ep.module()(torch.ones(6, 4)), Foo()(torch.ones(6, 4))))
+
     def test_cond_buffers(self):
         class M(torch.nn.Module):
             def __init__(self):
