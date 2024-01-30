@@ -2,8 +2,7 @@
 #include <ATen/native/MathBitsFallback.h>
 #include <ATen/native/MathBitFallThroughLists.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 struct NegFallback : MathOpFallback {
   NegFallback() : MathOpFallback(DispatchKey::Negative, "negation") {}
   bool is_bit_set(const Tensor& tensor) override {
@@ -48,5 +47,4 @@ TORCH_LIBRARY_IMPL(aten, Negative, m) {
   TORCH_VIEW_FNS_NATIVE_FN_REGISTRATION(m)
 }
 
-}
-} // namespace at
+} // namespace at::native

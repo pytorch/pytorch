@@ -487,7 +487,7 @@ def pointwise_strategy(
 
         pointwise_strategy.strategies.append(
             PlacementStrategy(
-                output_spec=DTensorSpec(
+                output_specs=DTensorSpec(
                     mesh=mesh,
                     placements=tuple(out_placements),
                 ),
@@ -527,6 +527,7 @@ for_each_ops = [
     aten._foreach_addcmul_.Scalar,
     aten._foreach_addcmul_.ScalarList,
     aten._foreach_addcmul_.Tensor,
+    aten._foreach_div_.List,
     aten._foreach_div_.ScalarList,
     aten._foreach_lerp_.Scalar,
     aten._foreach_maximum_.List,
@@ -545,7 +546,9 @@ for_each_ops = [
 ]
 
 for_each_linearity_ops = [
+    aten._foreach_add.Scalar,
     aten._foreach_add_.Scalar,
+    aten._foreach_add_.ScalarList,
     aten._foreach_add.List,
     aten._foreach_add_.List,
 ]
@@ -601,7 +604,7 @@ def foreach_list_strategy(
                 )
             strategies.append(
                 PlacementStrategy(
-                    output_spec=spec_to_follow, redistribute_cost=redistribute_costs
+                    output_specs=spec_to_follow, redistribute_cost=redistribute_costs
                 )
             )
 

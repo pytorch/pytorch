@@ -3,6 +3,7 @@ import logging
 import math
 import operator
 import sympy
+import builtins
 
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
@@ -215,6 +216,24 @@ try:
         def abs(self, number: z3.ArithRef) -> z3.ArithRef:
             return z3.Abs(number)
 
+        def round(self, number: z3.ArithRef, ndigits: Optional[z3.ArithRef] = None) -> z3.ArithRef:
+            if ndigits is not None:
+                raise ValueError("round(..., ndigits=) is currently not supported by shape validations.")
+
+            # Pythons builtin 'round' implements the 'round half to even' strategy
+            # See https://en.wikipedia.org/wiki/Rounding#Rounding_half_to_even
+            # z3 has an equivalent z3.fpRoundToIntegral(z3.RoundNearestTiesToEven(), ...), but this only applies to
+            # floating point numbers, which is different from real numbers that we are dealing with here.
+            # Instead, we implement 'round half to even' in terms of 'round half up' (floor(x + 0.5)) and
+            # 'round half down' (ceil(x - 0.5)).
+            # Assuming 'round half up' is the default case, we need to correct ..., -3.5, -1.5, 0.5, 2.5, 4.5, ...
+            # to round down, i.e. use the 'round half down' strategy
+            return z3.If(
+                self.mod(number, z3.IntVal(2)) == 0.5,
+                self.ceil(number - 0.5),
+                self.floor(number + 0.5),
+            )
+
     # Lifts a callable to be used in Z3.
     #
     # This function replaces the given 'op' by a function that:
@@ -224,8 +243,6 @@ try:
     #   2. Calls an operation that corresponds to 'op', but works with Z3
     #      inhabitants (left as is if it works as is)
     def z3op(op: Callable, validator: "TranslationValidator") -> Callable:
-        from torch.fx.experimental.sym_node import sym_sqrt
-
         # Operations that have booleans as their argument.
         # This is needed because the argument of some FX nodes were
         # literal integers, instead of booleans. So, whenever this flag
@@ -267,6 +284,7 @@ try:
             operator.truediv: lift(ops.div),
             operator.mod: lift(ops.mod),
             operator.abs: lift(ops.abs),
+            builtins.round: lift(ops.round),
 
             # Math module.
             math.ceil: lift(ops.ceil),
@@ -277,7 +295,7 @@ try:
             torch.sym_max: lift(ops.max),
             torch.sym_min: lift(ops.min),
             torch.sym_ite: lift(lambda b, t, f: t if b else f),
-            sym_sqrt: lift(ops.sqrt),
+            torch._sym_sqrt: lift(ops.sqrt),  # type: ignore[attr-defined]
             # Not lifted because we only use this function as a
             # marker for adding the expression as validator input.
             torch._assert: torch._assert,
@@ -355,6 +373,9 @@ try:
 
         def mod(self, p: z3.ArithRef, q: z3.ArithRef) -> z3.ArithRef:
             return self._ops.mod(p, q)
+
+        def round(self, number: z3.ArithRef, ndigits: Optional[z3.ArithRef] = None) -> z3.ArithRef:
+            return self._ops.round(number, ndigits)
 
         def __getattr__(self, name: str) -> Any:
             REPLACEMENT = {

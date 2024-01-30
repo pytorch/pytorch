@@ -1,9 +1,11 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+from copy import deepcopy
 import torch
 import torch.distributed as dist
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
+import torch.distributed._functional_collectives as funcol
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
     CheckpointImpl,
@@ -11,6 +13,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
+    PrepareModuleInput,
     RowwiseParallel,
 )
 from torch.distributed.tensor.parallel.input_reshard import input_reshard
@@ -22,7 +25,10 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
+    ModelArgs,
     NUM_DEVICES,
+    skip_unless_torch_gpu,
+    Transformer,
     with_comms,
 )
 
@@ -50,7 +56,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         torch.manual_seed(rng_seed)
         inp = torch.rand(*inp_size, device=self.device_type)
         model = MLPModule(self.device_type)
-        model_tp = MLPModule(self.device_type)
+        model_tp = deepcopy(model)
 
         # Ensure model are initialized the same way.
         self._check_module(model, model_tp)
@@ -117,7 +123,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         torch.manual_seed(0)
         inp = torch.rand(*inp_size, device=self.device_type)
         model = MLPModule(self.device_type)
-        model_tp = MLPModule(self.device_type)
+        model_tp = deepcopy(model)
 
         # Ensure model are initialized the same way.
         self._check_module(model, model_tp)
@@ -151,6 +157,194 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         )
         with torch.inference_mode():
             self._test_mlp_inference(device_mesh)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    @parametrize("is_seq_parallel", [True, False])
+    def test_transformer_training(self, is_seq_parallel=False):
+        # Step 1: Initialize single-gpu models and optimizers.
+
+        model_args = ModelArgs(
+            # Disable dropout in the test since we cannot reproduce the same random
+            # behaviors when comparing single-gpu models with multi-gpu models.
+            dropout_p=0.0,
+            # TODO: Weight_tying works fine under inputs and models of small size.
+            # Test error would surpass the allowed limit when tuning up model size.
+            # Need to investigate if this is normal, e.g. due to precision issues.
+            weight_tying=False,
+        )
+
+        # Reset random seeds to ensure two models have the same initialization.
+        torch.manual_seed(5)
+        model = Transformer(model_args).to(self.device_type)
+        model_tp = deepcopy(model)
+        self._check_module(model, model_tp)
+
+        # Step 2: Set up and execute the parallelize plan to shard the test model
+        # onto the device mesh.
+
+        device_mesh = DeviceMesh(self.device_type, torch.arange(0, NUM_DEVICES))
+
+        # Parallelize the embedding submodules.
+        parallelize_module(
+            model_tp.tok_embeddings,
+            device_mesh,
+            ColwiseParallel(
+                output_layouts=Shard(1)
+            ) if is_seq_parallel else ColwiseParallel(output_layouts=Replicate())
+        )
+        parallelize_module(
+            model_tp.pos_embeddings,
+            device_mesh,
+            ColwiseParallel(
+                output_layouts=Shard(0),
+            ) if is_seq_parallel else ColwiseParallel(output_layouts=Replicate())
+        )
+
+        # Parallelize the attention and feed forward submodules.
+        for layer in model_tp.layers:
+            layer_parallelize_plan = {}
+            if is_seq_parallel:
+                layer_parallelize_plan["attention"] = PrepareModuleInput(
+                    input_layouts=Shard(1),
+                    desired_input_layouts=Replicate(),
+                )
+            layer_parallelize_plan["attention.wq"] = ColwiseParallel()
+            layer_parallelize_plan["attention.wk"] = ColwiseParallel()
+            layer_parallelize_plan["attention.wv"] = ColwiseParallel()
+            layer_parallelize_plan["attention.wo"] = RowwiseParallel(
+                output_layouts=Shard(1)
+            ) if is_seq_parallel else RowwiseParallel()
+
+            layer_parallelize_plan["feed_forward.w1"] = ColwiseParallel(
+                input_layouts=Shard(1)
+            ) if is_seq_parallel else ColwiseParallel()
+            layer_parallelize_plan["feed_forward.w2"] = RowwiseParallel(
+                output_layouts=Shard(1)
+            ) if is_seq_parallel else RowwiseParallel()
+
+            parallelize_module(layer, device_mesh, layer_parallelize_plan)
+
+        # Parallelize the output submodule. If weight tying is enabled, we need to
+        # make sure output.weight is sharded consistently as tok_embeddings.weight,
+        # at the cost of the all_reduce operation using RowwiseParallel.
+        output_parallelize_plan = None
+        if not model_args.weight_tying:
+            output_parallelize_plan = ColwiseParallel(
+                input_layouts=Shard(1),
+                output_layouts=Replicate(),
+            ) if is_seq_parallel else ColwiseParallel(output_layouts=Replicate())
+        else:
+            output_parallelize_plan = RowwiseParallel(
+                input_layouts=Shard(1),
+                output_layouts=Replicate(),
+            ) if is_seq_parallel else RowwiseParallel(input_layouts=Replicate())
+        parallelize_module(model_tp.output, device_mesh, output_parallelize_plan)
+
+        # Step 2.5: Do manual setup on features that DTensor does not support yet.
+
+        # Manually adjust the number of heads after sharding the attention modules.
+        for layer in model_tp.layers:
+            layer.attention.n_heads = model_args.n_heads // self.world_size
+
+        # TODO: switch to a TP API once that feature is ready.
+        # Manually register all_reduce hooks for all norm layers as they only process sharded inputs.
+        if is_seq_parallel:
+            def all_reduce_fn(grad):
+                return funcol.all_reduce(grad, reduceOp="SUM", group=device_mesh)
+            for layer in model_tp.layers:
+                layer.attention_norm.weight.register_hook(all_reduce_fn)
+                layer.attention_norm.bias.register_hook(all_reduce_fn)
+                layer.ffn_norm.weight.register_hook(all_reduce_fn)
+                layer.ffn_norm.bias.register_hook(all_reduce_fn)
+            model_tp.norm.weight.register_hook(all_reduce_fn)
+            model_tp.norm.bias.register_hook(all_reduce_fn)
+
+        # Manually set output.weight so that parameters and gradients are shared.
+        if model_args.weight_tying:
+            model_tp.output.weight = model_tp.tok_embeddings.weight
+
+        # Step 3: Run test by comparing outputs from single-gpu and multi-gpu models.
+
+        LR = 0.25
+        optim = torch.optim.Adam(model.parameters(), lr=LR)
+        optim_tp = torch.optim.Adam(model_tp.parameters(), lr=LR)
+
+        # Initialize input and make sure all ranks have the same input.
+        inp_size = [4, 8]  # [batch_size, seq_len]
+        if is_seq_parallel:
+            assert inp_size[1] % self.world_size == 0
+        torch.manual_seed(0)
+        inp = torch.randint(model_args.vocab_size, inp_size, device=self.device_type)
+
+        # Compare outputs on the same input.
+        output = model(inp)
+        output_tp = model_tp(inp)
+        self.assertEqual(output, output_tp)
+
+        # Ensure gradients are equal.
+        output.sum().backward()
+        output_tp.sum().backward()
+        self._check_module(model, model_tp, check_grad=True)
+
+        # Ensure model weights are still the same after update.
+        optim.step()
+        optim_tp.step()
+        self._check_module(model, model_tp)
+
+        # Compare outputs on another input.
+        torch.manual_seed(11)
+        inp = torch.randint(model_args.vocab_size, inp_size, device=self.device_type)
+        output = model(inp)
+        output_tp = model_tp(inp)
+        self.assertEqual(output, output_tp)
+
+    @with_comms
+    def test_weight_tying(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Initialize different weights for embedding and fc.
+                torch.manual_seed(1)
+                self.embedding = torch.nn.Embedding(16, 8)
+                torch.manual_seed(2)
+                self.fc = torch.nn.Linear(8, 16)
+
+            def forward(self, x):
+                return self.fc(self.embedding(x))
+
+        model = TestModule().to(self.device_type)
+        parallelize_plan = {
+            "embedding": ColwiseParallel(),
+            "fc": RowwiseParallel(),
+        }
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        parallelize_module(model, device_mesh, parallelize_plan)
+
+        input_size = [5]
+        torch.manual_seed(0)
+        inp = torch.randint(16, input_size, device=self.device_type)
+
+        # Without weight tying.
+        self.assertNotEqual(
+            model.embedding.weight.to_local(), model.fc.weight.to_local()
+        )
+        output = model(inp)
+        output.sum().backward()
+        self.assertNotEqual(
+            model.embedding.weight.grad.to_local(), model.fc.weight.grad.to_local()
+        )
+        model.zero_grad()
+
+        # With weight tying.
+        model.fc.weight = model.embedding.weight
+
+        self.assertEqual(model.embedding.weight, model.fc.weight)
+        self.assertEqual(id(model.embedding.weight), id(model.fc.weight))
+        output = model(inp)
+        output.sum().backward()
+        self.assertEqual(model.embedding.weight.grad, model.fc.weight.grad)
+        self.assertEqual(id(model.embedding.weight.grad), id(model.fc.weight.grad))
 
 
 instantiate_parametrized_tests(DistTensorParallelExampleTest)

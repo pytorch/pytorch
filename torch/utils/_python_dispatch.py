@@ -5,7 +5,7 @@ import warnings
 from dataclasses import dataclass
 import torch
 import torchgen
-from torch._C import _len_torch_dispatch_stack, _get_dispatch_stack_at,\
+from torch._C import _len_torch_dispatch_stack, _get_dispatch_stack_at, \
     _pop_torch_dispatch_stack, _push_on_torch_dispatch_stack, DispatchKey
 
 
@@ -80,33 +80,46 @@ def _get_current_dispatch_mode():
     return None
 
 
+def _detect_functional_mode():
+    from torch._ops import _get_dispatch_mode_pre_dispatch
+    pre_dispatch_functional_mode = _get_dispatch_mode_pre_dispatch(torch._C._TorchDispatchModeKey.FUNCTIONAL)
+    post_dispatch_functional_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
+
+    assert (pre_dispatch_functional_mode is None) or (post_dispatch_functional_mode is None)
+
+    if pre_dispatch_functional_mode is None:
+        return post_dispatch_functional_mode
+
+    return pre_dispatch_functional_mode
+
+
 def _get_current_dispatch_mode_stack():
     stack_len = _len_torch_dispatch_stack()
     return [_get_dispatch_stack_at(i) for i in range(stack_len)]
 
 def _push_mode(mode, k: Optional[DispatchKey] = None):
-    if k is not None:
-        from torch._ops import push_mode_for_key, get_cached_ops
-        # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
-        # Clear the cache of every op that has been used so far, for this particular key.
-        ks = torch._C._functionality_to_backend_keys(k)
-        for op in get_cached_ops():
-            for key in ks:
-                op._uncache_dispatch(key)
-        push_mode_for_key(k, mode)
-    else:
+    assert k is None or k == torch._C.DispatchKey.PreDispatch
+    if k is None:
         _push_on_torch_dispatch_stack(mode)
+        return
+
+    from torch._ops import get_cached_ops, _set_mode_pre_dispatch
+    # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
+    # Clear the cache of every op that has been used so far, for this particular key.
+    ks = torch._C._functionality_to_backend_keys(k)
+    for op in get_cached_ops():
+        for key in ks:
+            op._uncache_dispatch(key)
+    _set_mode_pre_dispatch(mode)
 
 
 def _pop_mode(k: Optional[Union[DispatchKey, torch._C._TorchDispatchModeKey]] = None):
+    if k == torch._C.DispatchKey.PreDispatch:  # type: ignore[attr-defined]
+        from torch._ops import _pop_mode_from_pre_dispatch
+        return _pop_mode_from_pre_dispatch()
+
     if k is None or isinstance(k, torch._C._TorchDispatchModeKey):
         return _pop_torch_dispatch_stack(k)
-    from torch._ops import pop_mode_for_key
-    # per-dispatch-key-mode-stack do not currently handle "always running infra modes last".
-    # In practice this doesn't matter, since ProxyTorchDispatchMode is the only mode
-    # that we push onto these per-dispatch-key-mode-stacks.
-    return pop_mode_for_key(k)
-
 
 @contextlib.contextmanager
 def _pop_mode_temporarily(k: Optional[DispatchKey] = None):
@@ -252,12 +265,15 @@ and output of type {type(ret)}. But expected types to match."""
                 # Example: out = inp.expand(inp.shape[0], inp.shape[0])
                 #     This requires swapping the storage of out to be the same as inp,
                 #     but we do *not* want it to change the sizes/strides that were compute for out.
+
                 if isinstance(ret, list):
                     for r in ret:
                         torch.ops.aten.set_.source_Storage_storage_offset(r, arg.untyped_storage(), r.storage_offset(), r.shape)
                 else:
                     assert isinstance(ret, torch.Tensor), f"type: {type(ret)}"
-                    torch.ops.aten.set_.source_Storage_storage_offset(ret, arg.untyped_storage(), ret.storage_offset(), ret.shape)
+                    torch.ops.aten.set_.source_Storage_storage_offset(
+                        ret, arg.untyped_storage(), ret.storage_offset(), ret.shape
+                    )
             finally:
                 torch._C._set_meta_in_tls_dispatch_include(meta_in_tls)
 

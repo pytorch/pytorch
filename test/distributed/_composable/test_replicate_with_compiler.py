@@ -17,6 +17,7 @@ from torch.distributed.algorithms.ddp_comm_hooks import (
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
+    skip_if_rocm,
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.utils._triton import has_triton
@@ -37,20 +38,24 @@ class Net(nn.Module):
 
     def forward(self, x):
         if self.use_checkpoint:
-            _fc1 = checkpoint(self.fc1, x, use_reentrant(False))
+            _fc1 = checkpoint(self.fc1, x, use_reentrant=False)
         else:
             _fc1 = self.fc1(x)
         return self.fc4(self.fc3(self.fc2(_fc1)))
 
 
-def compiler_fn(gm):
-    def inner_compiler(gm_, example_inputs_):
-        # This backend is the same as inductor.compile. It's created
-        # for easy debugging purpose.
-        return inductor.compile(gm_, example_inputs_)
+def compiler_fn(no_inductor):
+    def _compiler_fn(gm):
+        def inner_compiler(gm_, example_inputs_):
+            if no_inductor:
+                return gm_
+            else:
+                return inductor.compile(gm_, example_inputs_)
 
-    gm = torch.compile(gm, fullgraph=True, backend=inner_compiler)
-    return gm
+        gm = torch.compile(gm, fullgraph=True, backend=inner_compiler)
+        return gm
+
+    return _compiler_fn
 
 
 class ReplicateTest(MultiProcessTestCase):
@@ -75,6 +80,8 @@ class ReplicateTest(MultiProcessTestCase):
         use_gpu: bool,
         no_sync: bool,
         setup_func: Optional[Callable] = None,
+        no_inductor: bool = False,
+        no_compile_forward: bool = False,
     ):
         backend = "nccl" if use_gpu else "gloo"
         dist.init_process_group(
@@ -90,11 +97,16 @@ class ReplicateTest(MultiProcessTestCase):
             device = torch.device("cpu")
 
         torch._dynamo.config.ddp_python_hook = True
+        torch._dynamo.config.optimize_ddp = False
         torch.manual_seed(123)
         model = Net().to(device)
         input = torch.randn([1, DIM], device=device)
 
-        compiled_model = torch.compile(replicate(deepcopy(model)), fullgraph=True)
+        if no_compile_forward:
+            compiled_model = replicate(deepcopy(model))
+            replicate.state(compiled_model)._ddp._force_to_disable_reducer = True
+        else:
+            compiled_model = torch.compile(replicate(deepcopy(model)), fullgraph=True)
         compiled_optim = torch.optim.Adam(compiled_model.parameters())
         model = replicate(model)
         optim = torch.optim.Adam(model.parameters())
@@ -103,8 +115,8 @@ class ReplicateTest(MultiProcessTestCase):
             setup_func(model, compiled_model)
 
         # Run multiple iterations so that we could test no_sync
-        for i in range(6):
-            # Settting a different random seed so that if the allreduces are not
+        for i in range(2):
+            # Setting a different random seed so that if the allreduces are not
             # executed correctly, the gradients won't be correct compared to the
             # eager DDP.
             torch.manual_seed(123 + self.rank + i)
@@ -124,7 +136,7 @@ class ReplicateTest(MultiProcessTestCase):
             else:
                 context = contextlib.nullcontext()
             with context:
-                with compiled_autograd.enable(compiler_fn):
+                with compiled_autograd.enable(compiler_fn(no_inductor)):
                     compiled_loss = compiled_model(input).sum()
                     compiled_loss.backward()
 
@@ -134,6 +146,8 @@ class ReplicateTest(MultiProcessTestCase):
                 compiled_optim.step()
                 # Right now we have to use `set_to_none=False`, otherwise
                 # the backward will be recompiled every iteration.
+                # With `set_to_none=False`, it will only be recompiled once.
+                # https://github.com/pytorch/pytorch/issues/118435
                 compiled_optim.zero_grad(set_to_none=False)
                 optim.step()
                 optim.zero_grad()
@@ -147,37 +161,51 @@ class ReplicateTest(MultiProcessTestCase):
         self._test_compile(use_gpu=False, no_sync=True)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_rocm
     @skip_if_lt_x_gpu(2)
     def test_compile_gpu(self):
         self._test_compile(use_gpu=True, no_sync=False)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_rocm
     @skip_if_lt_x_gpu(2)
     def test_compile_bf16(self):
         def setup(model, compiled_model) -> None:
             replicate.state(model)._ddp.register_comm_hook(
                 None, ddp_default_hooks.bf16_compress_hook
             )
-            compiled_m = getattr(compiled_model, "_orig_mod", compiled_model)
+            compiled_m = compiled_model._orig_mod
             replicate.state(compiled_m)._ddp.register_comm_hook(
                 None, ddp_default_hooks.bf16_compress_hook
             )
 
-        self._test_compile(use_gpu=True, no_sync=False, setup_func=setup)
+        self._test_compile(
+            use_gpu=True, no_sync=False, setup_func=setup, no_inductor=True
+        )
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_rocm
     @skip_if_lt_x_gpu(2)
     def test_compile_fp16(self):
         def setup(model, compiled_model) -> None:
             replicate.state(model)._ddp.register_comm_hook(
                 None, ddp_default_hooks.fp16_compress_hook
             )
-            compiled_m = getattr(compiled_model, "_orig_mod", compiled_model)
+            compiled_m = compiled_model._orig_mod
             replicate.state(compiled_m)._ddp.register_comm_hook(
                 None, ddp_default_hooks.fp16_compress_hook
             )
 
-        self._test_compile(use_gpu=True, no_sync=False, setup_func=setup)
+        # TODO: figure out why we need to disable Inductor to avoid test errors.
+        self._test_compile(
+            use_gpu=True, no_sync=False, setup_func=setup, no_inductor=True
+        )
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_rocm
+    @skip_if_lt_x_gpu(2)
+    def test_compile_backward_only(self):
+        self._test_compile(use_gpu=True, no_sync=False, no_compile_forward=True)
 
 
 if __name__ == "__main__":

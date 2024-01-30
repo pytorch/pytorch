@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import torch
 import torch.fx
 import traceback
@@ -26,7 +28,7 @@ class TensorMetadata(NamedTuple):
     is_quantized : bool
     qparams: Dict[str, Any]
 
-def _extract_tensor_metadata(result : torch.Tensor) -> TensorMetadata:
+def _extract_tensor_metadata(result : torch.Tensor, include_contiguity=True) -> TensorMetadata:
     """
     Extract a TensorMetadata NamedTuple describing `result`.
     """
@@ -35,18 +37,18 @@ def _extract_tensor_metadata(result : torch.Tensor) -> TensorMetadata:
     requires_grad = result.requires_grad
     stride = result.stride()
 
-    memory_formats = {
-        torch.contiguous_format,
-        torch.channels_last,
-        torch.channels_last_3d,
-    }
-
     memory_format = None
 
-    for query_format in memory_formats:
-        if result.is_contiguous(memory_format=query_format):
-            memory_format = query_format
-            break
+    if include_contiguity:
+        memory_formats = {
+            torch.contiguous_format,
+            torch.channels_last,
+            torch.channels_last_3d,
+        }
+        for query_format in memory_formats:
+            if result.is_contiguous(memory_format=query_format):
+                memory_format = query_format
+                break
 
     is_quantized = result.is_quantized
     qparams: Dict[str, Any] = {}

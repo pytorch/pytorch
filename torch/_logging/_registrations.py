@@ -2,15 +2,28 @@
 from ._internal import register_artifact, register_log
 
 DYNAMIC = ["torch.fx.experimental.symbolic_shapes", "torch.fx.experimental.sym_node"]
-DISTRIBUTED = ["torch.distributed", "torch._dynamo.backends.distributed"]
+DISTRIBUTED = [
+    "torch.distributed",
+    "torch._dynamo.backends.distributed",
+    "torch.nn.parallel.distributed",
+]
 
 register_log("dynamo", ["torch._dynamo", *DYNAMIC])
 register_log("aot", ["torch._functorch.aot_autograd", "torch._functorch._aot_autograd"])
+register_log("autograd", "torch.autograd")
 register_log("inductor", "torch._inductor")
 register_log("dynamic", DYNAMIC)
 register_log("torch", "torch")
 register_log("distributed", DISTRIBUTED)
+register_log(
+    "dist_c10d", ["torch.distributed.distributed_c10d", "torch.distributed.rendezvous"]
+)
+register_log(
+    "dist_ddp", ["torch.nn.parallel.distributed", "torch._dynamo.backends.distributed"]
+)
+register_log("dist_fsdp", ["torch.distributed.fsdp"])
 register_log("onnx", "torch.onnx")
+register_log("export", ["torch._dynamo", "torch.export", *DYNAMIC])
 
 register_artifact(
     "guards",

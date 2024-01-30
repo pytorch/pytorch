@@ -110,6 +110,11 @@ def get_static_dispatch_backend():
         return []
     return static_dispatch_backend.split(";")
 
+def get_glsl_image_format():
+    if read_config("pt", "vulkan_full_precision", "0") == "0":
+        return "rgba16f"
+    return "rgba32f"
+
 def get_glsl_paths():
     paths = [
         "//xplat/caffe2:aten_vulkan_glsl_src_path",

@@ -1,4 +1,4 @@
-"""Defines utilities for interacting with scaled_dot_product_attention"""
+"""Defines bias subclasses that work with scaled_dot_product_attention"""
 from enum import auto, IntEnum
 from typing import Optional
 from warnings import warn
@@ -241,6 +241,7 @@ class CausalBias(torch.Tensor):
                     cu_seqlens_q=None,
                     cu_seqlens_k=None,
                     max_seqlen_q=None,
+                    max_seqlen_k=None,
                     dropout_p=dropout_p,
                     custom_mask_type=int(attn_mask.variant),
                     compute_log_sumexp=compute_log_sumexp,

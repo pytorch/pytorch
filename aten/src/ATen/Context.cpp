@@ -93,6 +93,14 @@ void Context::alertNotDeterministic(c10::string_view const& caller) {
   }
 }
 
+bool Context::userEnabledNNPACK() const {
+  return enabled_nnpack;
+}
+
+void Context::setUserEnabledNNPACK(bool e) {
+  enabled_nnpack = e;
+}
+
 bool Context::allowTF32CuDNN() const {
   return allow_tf32_cudnn;
 }
