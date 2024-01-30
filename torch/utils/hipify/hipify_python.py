@@ -665,7 +665,7 @@ class TrieNode:
     """
 
     def __init__(self):
-        self.children={}
+        self.children = {}
 
 class Trie:
     """Creates a Trie out of a list of words. The trie can be exported to a Regex pattern.
@@ -682,7 +682,7 @@ class Trie:
         for char in word:
             node.children.setdefault(char, TrieNode())
             node = node.children[char]
-        node.children[''] = True # Mark the end of the word
+        node.children[''] = True    # Mark the end of the word
 
     def dump(self):
         """Return the root node of Trie. """
@@ -702,7 +702,8 @@ class Trie:
             else:
                 return False
 
-        return '' in node.children # make sure to check the end-of-word marker present
+        # make sure to check the end-of-word marker present
+        return '' in node.children
 
     def _pattern(self, root):
         """Convert a Trie into a regular expression pattern"""
@@ -711,9 +712,9 @@ class Trie:
         if "" in node.children and len(node.children.keys()) == 1:
             return None
 
-        alt = [] # store alternative patterns
-        cc = [] # to store char to char classes
-        q = 0 # for node representing the end of word
+        alt = []    # store alternative patterns
+        cc = []     # store char to char classes
+        q = 0       # for node representing the end of word
         for char in sorted(node.children.keys()):
             if isinstance(node.children[char], TrieNode):
                 try:
