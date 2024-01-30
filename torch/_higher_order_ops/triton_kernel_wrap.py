@@ -361,7 +361,7 @@ def identify_mutated_tensors(kernel, kwargs):
 
         kernel_name = next(iter(functions.keys()))
         # Triton codegen modifies the name
-        assert kernel.__name__ in kernel_name
+        assert kernel.fn.__name__ in kernel_name
         mutations = analyze_kernel_mutations(functions, kernel_name, len(kwargs))
 
         return [
