@@ -9,18 +9,6 @@
 
 namespace at {
 
-namespace {
-
-inline bool sym_lt(int64_t a, int64_t b) {
-  return a < b;
-}
-
-inline SymBool sym_lt(const SymInt& a, const SymInt& b) {
-  return a.sym_lt(b);
-}
-
-} // anonymous namespace
-
 std::ostream& operator<<(std::ostream & out, TensorGeometryArg t) {
   if (t.pos == 0) {
     // 0 is distinguished; it usually indicates 'self' or the return

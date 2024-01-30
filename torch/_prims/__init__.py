@@ -1345,7 +1345,9 @@ def _collapse_view_helper(
     length = shape[end]
     stride = strides[end]
     for idx in range(end - 1, start - 1, -1):
-        if guard_size_oblivious(shape[idx] == 0) or guard_size_oblivious(shape[idx + 1] == 0):
+        if guard_size_oblivious(shape[idx] == 0) or guard_size_oblivious(
+            shape[idx + 1] == 0
+        ):
             length = 0
             stride = 0
             break
@@ -1359,7 +1361,9 @@ def _collapse_view_helper(
         if (
             guard_size_oblivious(a.numel() > 0)
             and guard_size_oblivious(shape[idx + 1] != 1)
-            and not guard_size_oblivious(strides[idx] == strides[idx + 1] * shape[idx + 1])
+            and not guard_size_oblivious(
+                strides[idx] == strides[idx + 1] * shape[idx + 1]
+            )
         ):
             return None, None
 

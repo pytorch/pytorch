@@ -808,7 +808,7 @@ def _export(
 
     gm.meta["inline_constraints"] = {
         k: v
-        for k, v in dynamo_fake_mode.shape_env.runtime_var_to_range.items()
+        for k, v in dynamo_fake_mode.shape_env.var_to_range.items()
         if free_unbacked_symbols(k)
     }
 

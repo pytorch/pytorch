@@ -3382,9 +3382,9 @@ class ShapeEnv:
         for s in expr.free_symbols:
             stacktrace = ''.join(self.var_to_stack[s].format())
             self.log.debug("Data dependent variable '%s' allocated at:\n%s", s, stacktrace)
-        # cpp_stack = CapturedTraceback.extract(cpp=True)
+        cpp_stack = CapturedTraceback.extract(cpp=True)
         return GuardOnDataDependentSymNode(
-            # "C++ stack trace:\n" + ''.join(cpp_stack.format()) + "\n\n"
+            "C++ stack trace:\n" + ''.join(cpp_stack.format()) + "\n\n"
             "It appears that you're trying to get a value out of symbolic int/float "
             "whose value is data-dependent (and thus we do not know the true value.)  "
             f"The expression we were trying to evaluate is {expr} (unhinted: {unhinted_expr}).  "

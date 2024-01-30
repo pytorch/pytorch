@@ -381,4 +381,36 @@ inline SymBool sym_ne(const SymInt& a, const SymInt& b) {
   return a.sym_ne(b);
 }
 
+inline bool sym_lt(int64_t a, int64_t b) {
+  return a < b;
+}
+
+inline SymBool sym_lt(const SymInt& a, const SymInt& b) {
+  return a.sym_lt(b);
+}
+
+inline bool sym_le(int64_t a, int64_t b) {
+  return a <= b;
+}
+
+inline SymBool sym_le(const SymInt& a, const SymInt& b) {
+  return a.sym_le(b);
+}
+
+inline bool sym_gt(int64_t a, int64_t b) {
+  return a > b;
+}
+
+inline SymBool sym_gt(const SymInt& a, const SymInt& b) {
+  return a.sym_gt(b);
+}
+
+inline bool sym_ge(int64_t a, int64_t b) {
+  return a >= b;
+}
+
+inline SymBool sym_ge(const SymInt& a, const SymInt& b) {
+  return a.sym_ge(b);
+}
+
 } // namespace c10

@@ -222,13 +222,15 @@ def is_contiguous(a: TensorLikeType) -> bool:
     Tensors are contiguous when they have no elements,
     one element, or when they have "nested" strides.
     """
-    if a.numel() < 2:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+    if guard_size_oblivious(a.numel() < 2):
         return True
 
     expected_stride = 1
     for x, y in reversed(tuple(zip(a.shape, a.stride()))):
         # Skips checking strides when a dimension has length 1
-        if x == 1:
+        if guard_size_oblivious(x == 1):
             continue
 
         if y != expected_stride:
