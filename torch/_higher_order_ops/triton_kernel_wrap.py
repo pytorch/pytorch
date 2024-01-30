@@ -163,7 +163,7 @@ def parse_ttir(ttir, kwargs):
         return None
 
     try:
-        import lark
+        import lark  # type: ignore[import-not-found]
         from lark import Lark, Transformer, v_args
     except ModuleNotFoundError:
         warnings.warn(
