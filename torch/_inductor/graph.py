@@ -845,7 +845,7 @@ class GraphLowering(torch.fx.Interpreter):
             ):
                 debug("fallback_handler")
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
-                    *args, **kwargs
+                    *args, **kwargs  # type: ignore[possibly-undefined]
                 )
             elif n.op == "call_function" and n.target in layout_constraints:
                 debug("layout_constraints")
