@@ -152,6 +152,18 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertEqual(mesh_2d.get_group("tp"), tp_mesh.get_group())
 
     @with_comms
+    def test_submesh_get_group(self):
+        sub_mesh_list = [0, 2]
+        sub_mesh = DeviceMesh(self.device_type, sub_mesh_list)
+
+        if self.rank in sub_mesh_list:
+            self.assertEqual(
+                get_process_group_ranks(sub_mesh.get_group()), sub_mesh_list
+            )
+        else:
+            self.assertEqual(sub_mesh.get_group(), None)
+
+    @with_comms
     def test_get_local_rank_raises_exception(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(
