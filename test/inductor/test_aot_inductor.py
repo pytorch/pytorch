@@ -1558,6 +1558,9 @@ class AOTInductorTestsTemplate:
 
         class Model(torch.nn.Module):
             def forward(self, x, y):
+                # AOT export does not allow for input mutation
+                x = x.clone()
+                y = y.clone()
                 out = torch.zeros_like(x)
                 # torch.mm is ExternKernelOut
                 add_kernel[(4,)](x, torch.mm(x, y), out, 4, 16)
@@ -1577,6 +1580,9 @@ class AOTInductorTestsTemplate:
 
         class Model(torch.nn.Module):
             def forward(self, x, y):
+                # AOT export does not allow for input mutation
+                x = x.clone()
+                y = y.clone()
                 out = torch.zeros_like(x)
                 # torch.sort creates fallback kernel and hence MultiOutput
                 add_kernel[(4,)](x, torch.sort(y).values, out, 4, 16)
