@@ -525,16 +525,83 @@ static PyObject* THPVariable_fix_weakref(PyObject* self, PyObject* noargs) {
   Py_RETURN_NONE;
 }
 
+// Maps the given PyObject callable over a vector of items. The wrapper /
+// unwrapper args define how to convert between PyObject and item type.
+template <typename T, typename Wrapper, typename Unwrapper>
+static std::vector<T> map_py_func(
+    PyObject* func,
+    const std::vector<T>& items,
+    Wrapper wrapper,
+    Unwrapper unwrapper) {
+  std::vector<T> new_items;
+  new_items.resize(items.size());
+  std::transform(
+      items.begin(), items.end(), new_items.begin(), [&](const T& item) {
+        PyObject* res = PyObject_CallOneArg(func, wrapper(item));
+        return unwrapper(res);
+      });
+  return new_items;
+}
+
+// RAII guard for modifying and restoring saved SymInt / tensor state in a
+// ViewFunc.
+struct ViewFuncSavedStateGuard {
+  ViewFuncSavedStateGuard(
+      const std::shared_ptr<ViewFunc>& view_func,
+      const std::optional<std::vector<c10::SymInt>>& new_symints,
+      const std::optional<std::vector<at::Tensor>>& new_tensors)
+      : view_func(view_func) {
+    // save old state and set new state
+    old_symints = view_func->get_symints();
+    old_tensors = view_func->get_tensors();
+    if (new_symints.has_value()) {
+      view_func->set_symints(*new_symints);
+    }
+    if (new_tensors.has_value()) {
+      view_func->set_tensors(*new_tensors);
+    }
+  }
+
+  ~ViewFuncSavedStateGuard() {
+    // restore previous state
+    view_func->set_symints(old_symints);
+    view_func->set_tensors(old_tensors);
+  }
+
+  std::shared_ptr<ViewFunc> view_func;
+  std::vector<c10::SymInt> old_symints;
+  std::vector<at::Tensor> old_tensors;
+};
+
 static PyObject* view_func_impl(
     PyObject* self_,
-    PyObject* arg,
+    PyObject* args,
     bool check_has_same_meta) {
   HANDLE_TH_ERRORS
   const auto& self = THPVariable_Unpack(self_);
+
+  // NB: can't use PythonArgParser because we're expecting callables to be
+  // passed in.
+  // TODO: can this be done in a nice kw-driven way?
+  Py_ssize_t nargs = args ? PyTuple_GET_SIZE(args) : 0;
   TORCH_CHECK(
-      THPVariable_Check(arg),
-      "_view_func expect a single argument that is a Tensor");
-  const auto& new_base = THPVariable_Unpack(arg);
+      nargs >= 1 && nargs <= 3,
+      "expected usage: _view_func(new_root, [symint_visitor_fn], [tensor_visitor_fn])");
+
+  PyObject* new_base_obj = PyTuple_GET_ITEM(args, 0);
+  TORCH_CHECK(
+      THPVariable_Check(new_base_obj),
+      "_view_func expects the first argument to be a Tensor");
+  const auto& new_base = THPVariable_Unpack(new_base_obj);
+
+  PyObject* symint_visitor_fn = nullptr;
+  PyObject* tensor_visitor_fn = nullptr;
+  if (nargs >= 2) {
+    symint_visitor_fn = PyTuple_GET_ITEM(args, 1);
+  }
+  if (nargs == 3) {
+    tensor_visitor_fn = PyTuple_GET_ITEM(args, 2);
+  }
 
   // Ensure that self is indeed a backward differentiable view
   // If not, we return an undefined Tensor (None) and let the user handle it.
@@ -547,7 +614,40 @@ static PyObject* view_func_impl(
         torch::autograd::utils::has_same_meta(new_base, view_info.base_)) {
       // Do the actual view replay
       if (view_info.has_view_fn()) {
-        out = (*view_info.view_fn())(new_base);
+        auto view_func = view_info.view_fn();
+
+        // Mutate saved SymInt / tensor state as needed.
+        c10::optional<std::vector<c10::SymInt>> new_symints = c10::nullopt;
+        if (symint_visitor_fn) {
+          new_symints = map_py_func(
+              symint_visitor_fn,
+              view_func->get_symints(),
+              [](const c10::SymInt& s) { return torch::toPyObject(s); },
+              [](PyObject* p) {
+                TORCH_CHECK(
+                    torch::is_symint(py::handle(p)) || PyInt_Check(p),
+                    "Expected symint_visitor_fn to return int or SymInt");
+                return py::cast<c10::SymInt>(py::handle(p));
+              });
+        }
+
+        c10::optional<std::vector<at::Tensor>> new_tensors = c10::nullopt;
+        if (tensor_visitor_fn) {
+          new_tensors = map_py_func(
+              tensor_visitor_fn,
+              view_func->get_tensors(),
+              [](const at::Tensor& t) { return THPVariable_Wrap(t); },
+              [](PyObject* p) {
+                TORCH_CHECK(
+                    THPVariable_Check(p),
+                    "Expected tensor_visitor_fn to return Tensor");
+                return THPVariable_Unpack(p);
+              });
+        }
+
+        // call view func
+        ViewFuncSavedStateGuard guard(view_func, new_symints, new_tensors);
+        out = (*view_func)(new_base);
       } else {
         out = new_base.as_strided(
             self.sizes(), self.strides(), self.storage_offset());
@@ -558,12 +658,12 @@ static PyObject* view_func_impl(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPVariable_view_func(PyObject* self_, PyObject* arg) {
-  return view_func_impl(self_, arg, /*check_has_same_meta=*/true);
+static PyObject* THPVariable_view_func(PyObject* self_, PyObject* args) {
+  return view_func_impl(self_, args, /*check_has_same_meta=*/true);
 }
 
-static PyObject* THPVariable_view_func_unsafe(PyObject* self_, PyObject* arg) {
-  return view_func_impl(self_, arg, /*check_has_same_meta=*/false);
+static PyObject* THPVariable_view_func_unsafe(PyObject* self_, PyObject* args) {
+  return view_func_impl(self_, args, /*check_has_same_meta=*/false);
 }
 
 static PyObject* rev_view_func_impl(PyObject* self_, PyObject* arg) {
@@ -592,70 +692,6 @@ static PyObject* THPVariable_rev_view_func_unsafe(
     PyObject* self_,
     PyObject* arg) {
   return rev_view_func_impl(self_, arg);
-}
-
-// TODO: Change the name of this / merge it with view_func_unsafe()
-static PyObject* THPVariable_full_view_func_unsafe(
-    PyObject* self_,
-    PyObject* args) {
-  HANDLE_TH_ERRORS
-  auto& self = THPVariable_Unpack(self_);
-  Py_ssize_t nargs = args ? PyTuple_GET_SIZE(args) : 0;
-  TORCH_CHECK(
-      nargs == 3,
-      "expected usage: _full_view_func(new_root, symint_visitor_fn, tensor_visitor_fn)");
-  PyObject* new_root_obj = PyTuple_GET_ITEM(args, 0);
-  TORCH_CHECK(
-      THPVariable_Check(new_root_obj),
-      "_full_view_func expects the first argument to be a Tensor");
-  const auto& new_root = THPVariable_Unpack(new_root_obj);
-
-  PyObject* symint_visitor_fn = PyTuple_GET_ITEM(args, 1);
-  PyObject* tensor_visitor_fn = PyTuple_GET_ITEM(args, 2);
-
-  // Ensure that self is indeed a backward differentiable view
-  // If not, we return an undefined Tensor (None) and let the user handle it.
-  auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
-  at::Tensor out;
-  if (diff_view_meta && diff_view_meta->has_bw_view()) {
-    auto& view_info = diff_view_meta->get_backward_view();
-    // Do the actual view replay
-    TORCH_CHECK(view_info.has_view_fn(), "No view func found");
-    auto view_func = view_info.view_fn();
-
-    std::vector<c10::SymInt> symints;
-    const auto old_symints = view_func->get_symints();
-    symints.reserve(old_symints.size());
-    for (const c10::SymInt& s : old_symints) {
-      PyObject* res =
-          PyObject_CallOneArg(symint_visitor_fn, torch::toPyObject(s));
-      TORCH_CHECK(
-          torch::is_symint(py::handle(res)) || PyInt_Check(res),
-          "Expected symint_visitor_fn to return int or SymInt");
-      symints.push_back(py::cast<c10::SymInt>(py::handle(res)));
-    }
-
-    std::vector<at::Tensor> tensors;
-    const auto old_tensors = view_func->get_tensors();
-    tensors.reserve(old_tensors.size());
-    for (const at::Tensor& t : view_func->get_tensors()) {
-      PyObject* res =
-          PyObject_CallOneArg(tensor_visitor_fn, THPVariable_Wrap(t));
-      TORCH_CHECK(
-          THPVariable_Check(res),
-          "Expected tensor_visitor_fn to return Tensor");
-      tensors.push_back(THPVariable_Unpack(res));
-    }
-
-    // TODO: Use RAII properly to set old symints / tensors in case of error.
-    view_func->set_symints(symints);
-    view_func->set_tensors(tensors);
-    out = (*view_func)(new_root);
-    view_func->set_symints(old_symints);
-    view_func->set_tensors(old_tensors);
-  }
-  return THPVariable_Wrap(std::move(out));
-  END_HANDLE_TH_ERRORS
 }
 
 // Instantiates a subclass of self with the same data.
@@ -1732,15 +1768,11 @@ static PyMethodDef extra_methods[] = {
      METH_STATIC | METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_fix_weakref", THPVariable_fix_weakref, METH_NOARGS, nullptr},
-    {"_view_func", THPVariable_view_func, METH_O, nullptr},
-    {"_view_func_unsafe", THPVariable_view_func_unsafe, METH_O, nullptr},
+    {"_view_func", THPVariable_view_func, METH_VARARGS, nullptr},
+    {"_view_func_unsafe", THPVariable_view_func_unsafe, METH_VARARGS, nullptr},
     {"_rev_view_func_unsafe",
      THPVariable_rev_view_func_unsafe,
      METH_O,
-     nullptr},
-    {"_full_view_func_unsafe",
-     THPVariable_full_view_func_unsafe,
-     METH_VARARGS,
      nullptr},
     {nullptr}};
 

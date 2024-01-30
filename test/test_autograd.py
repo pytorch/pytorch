@@ -8866,6 +8866,23 @@ get_out().sum().backward()
             nt = nested_view_from_values_offsets(values, offsets).clone().detach()
             _test_fn(torch.ops.aten._nested_get_values.default, nt, use_unsafe_fwd=True)
 
+    def test_view_func_replay_with_modified_state(self):
+        with torch.autograd._force_original_view_tracking(True):
+            base = torch.randn(3, 4, 5)
+            view = base.select(1, 2)
+
+            def symint_visitor_fn(x):
+                # modify saved index
+                return x + 1
+
+            # ensure modifying state changes view replay
+            new_base = torch.randn_like(base)
+            new_view = view._view_func(new_base, symint_visitor_fn, lambda t: t)
+            self.assertEqual(new_view, new_base.select(1, 3))
+
+            # ensure saved state reverts back afterwards
+            self.assertEqual(view._view_func(new_base), new_base.select(1, 2))
+
     def test_setup_context_when_forward_has_default_args(self):
         class PowFunction(Function):
             @staticmethod
