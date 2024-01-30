@@ -1658,6 +1658,8 @@ static at::Tensor _quantized_convolution_onednn(
       auto upper_bound_value =
           unary_scalars[1].get().toOptional<at::Scalar>().value().to<float>();
       op_attr = ideep::attr_t::fuse_clamp(lower_bound_value, upper_bound_value);
+    } else if (has_unary_post_op && unary_attr.value()=="hardswish") {
+      op_attr = ideep::attr_t::fuse_hardswish();
     } else {
       op_attr = ideep::attr_t();
     }
@@ -1851,8 +1853,8 @@ class QConvoneDNN final {
     } else {
       // Conv2D post op check
       TORCH_CHECK(
-        attr == "none" || attr == "relu" || attr == "hardtanh",
-        "none post_op or post_op relu/hardtanh is supported for quantized pointwise conv2d. Got unary_post_op: ",
+        attr == "none" || attr == "relu" || attr == "hardtanh" || attr == "hardswish",
+        "none post_op or post_op relu/hardtanh/hardswish is supported for quantized pointwise conv2d. Got unary_post_op: ",
         attr,
         ".")
     }

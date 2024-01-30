@@ -184,8 +184,13 @@ def do_auto_functionalize(
         # NB: torch_dispatch kwargs are the args defined as kwarg-only in the schema
         if arg.name in kwargs:
             normalized_kwargs[arg.name] = kwargs[arg.name]
-        else:
+        elif idx < len(args):
+            # if its out of bounds we don't need to do anything
+            # as it means the the optional arg was passed with its default
+            # value
             normalized_kwargs[arg.name] = args[idx]
+        else:
+            normalized_kwargs[arg.name] = arg.default_value
 
     unwrapped_kwargs = ctx.unwrap_tensors(normalized_kwargs)  # type: ignore[arg-type]
     with ctx.redispatch_to_next():

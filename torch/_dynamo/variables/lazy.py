@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import functools
 from typing import Optional
 
@@ -72,6 +74,8 @@ class LazyVariableTracker(VariableTracker):
         return VariableTracker.clone(self.unwrap(), **kwargs)
 
     def __str__(self):
+        if self.is_realized():
+            return self.unwrap().__str__()
         return VariableTracker.__str__(self.unwrap())
 
     def __getattr__(self, item):

@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import copy
 import gc
 import inspect
@@ -1321,6 +1323,10 @@ def disableMkldnn(fn):
         return fn(self, *args, **kwargs)
 
     return disable_mkldnn
+
+
+def expectedFailureCPU(fn):
+    return expectedFailure('cpu')(fn)
 
 
 def expectedFailureCUDA(fn):
