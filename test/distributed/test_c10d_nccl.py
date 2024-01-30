@@ -3537,7 +3537,11 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
     def test_new_group_local_sync_duplicated_pg(self):
         self._test_new_group_local_sync_duplicate_pg(backend="nccl")
 
-    def _init_pg_subgroups(self, world_size: int):
+    def _init_two_pg2_subgroups(self, world_size: int = 4):
+        if world_size != 4:
+            raise NotImplementedError(
+                f"need world size of 4 to get 2 subgroup PGs, but got world size of {world_size}"
+            )
         store = c10d.FileStore(self.file_name, world_size)
         c10d.init_process_group(backend="nccl", store=store, rank=self.rank, world_size=world_size)
         # every rank creates the same sub groups
@@ -3554,17 +3558,17 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
             # just easier to write the test for exactly 4 gpus, even if this test class increased to 8gpu later
             return
 
-        my_group = self._init_pg_subgroup(world_size)
+        subgroup = self._init_two_pg2_subgroups(world_size)
         device = torch.device("cuda:%d" % self.rank)
         input = torch.ones((10,), device=device) * self.rank
         if self.rank == 0 or self.rank == 2:
-            gather_list = [torch.empty_like(input) for _ in range(my_group.size())]
-            torch.distributed.gather(input, gather_list=gather_list, dst=self.rank, group=my_group, async_op=False)
+            gather_list = [torch.empty_like(input) for _ in range(subgroup.size())]
+            torch.distributed.gather(input, gather_list=gather_list, dst=self.rank, group=subgroup, async_op=False)
             for src in range(len(gather_list)):
                 expected = (torch.ones_like(input) * self.rank) + src
                 self.assertEqual(gather_list[src], expected)
         else:
-            torch.distributed.gather(input, gather_list=None, dst=self.rank - 1, group=my_group, async_op=False)
+            torch.distributed.gather(input, gather_list=None, dst=self.rank - 1, group=subgroup, async_op=False)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
@@ -3574,7 +3578,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
             # just easier to write the test for exactly 4 gpus, even if this test class increased to 8gpu later
             return
 
-        my_group = self._init_pg_subgroup(world_size)
+        subgroup = self._init_two_pg2_subgroups(world_size)
 
         # discrepancy #1
         # have to set device or else gather_object gets wrong device from 'current_device = _get_pg_default_device(group)
@@ -3586,11 +3590,11 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
             # another weird thing- what's the point of making me specify some empty objects in my list?
             # empty list should be valid imo.  (but it throws an error)
             gather_list = [{}, {}]
-            torch.distributed.gather_object(input, object_gather_list=gather_list, dst=self.rank, group=my_group)
+            torch.distributed.gather_object(input, object_gather_list=gather_list, dst=self.rank, group=subgroup)
             for src in range(len(gather_list)):
                 self.assertEqual(gather_list[src]["rank"], self.rank + src)
         else:
-            torch.distributed.gather_object(input, object_gather_list=None, dst=self.rank - 1, group=my_group)
+            torch.distributed.gather_object(input, object_gather_list=None, dst=self.rank - 1, group=subgroup)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
@@ -3598,15 +3602,15 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         world_size = 4
         if self.rank >= world_size:
             return
-        group = self._init_pg_subgroups(world_size)
+        subgroup = self._init_two_pg2_subgroups(world_size)
         device = torch.device("cuda:%d" % self.rank)
         x = torch.ones((10,), device=device) * self.rank
         if self.rank == 0 or self.rank == 2:
             expected = x + torch.ones((10,), device=device) * (self.rank + 1)
-            c10d.reduce(x, dst=self.rank, group=group, async_op=False)
+            c10d.reduce(x, dst=self.rank, group=subgroup, async_op=False)
             self.assertEqual(x, expected)
         else:
-            c10d.reduce(x, dst=self.rank - 1, group=group, async_op=False)
+            c10d.reduce(x, dst=self.rank - 1, group=subgroup, async_op=False)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
@@ -3615,22 +3619,22 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         world_size = 4
         if self.rank >= world_size:
             return
-        group = self._init_pg_subgroups(world_size)
+        subgroup = self._init_two_pg2_subgroups(world_size)
         device = torch.device("cuda:%d" % self.rank)
         if self.rank == 0 or self.rank == 2:
             x = torch.empty((10,), device=device)
             if async_op:
-                c10d.irecv(x, src=self.rank + 1, group=group).wait()
+                c10d.irecv(x, src=self.rank + 1, group=subgroup).wait()
             else:
-                c10d.recv(x, src=self.rank + 1, group=group)
+                c10d.recv(x, src=self.rank + 1, group=subgroup)
             expected = torch.ones((10,), device=device) * (self.rank + 1)
             self.assertEqual(x, expected)
         else:
             x = torch.ones((10,), device=device) * self.rank
             if async_op:
-                c10d.isend(x, dst=self.rank - 1, group=group).wait()
+                c10d.isend(x, dst=self.rank - 1, group=subgroup).wait()
             else:
-                c10d.send(x, dst=self.rank - 1, group=group)
+                c10d.send(x, dst=self.rank - 1, group=subgroup)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
@@ -3638,16 +3642,16 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         world_size = 4
         if self.rank >= world_size:
             return
-        group = self._init_pg_subgroups(world_size)
+        subgroup = self._init_two_pg2_subgroups(world_size)
         device = torch.device("cuda:%d" % self.rank)
         if self.rank == 0 or self.rank == 2:
             x = torch.empty((10,), device=device)
-            c10d.broadcast(x, src=self.rank + 1, group=group)
+            c10d.broadcast(x, src=self.rank + 1, group=subgroup)
             expected = torch.ones((10,), device=device) * (self.rank + 1)
             self.assertEqual(x, expected)
         else:
             x = torch.ones((10,), device=device) * self.rank
-            c10d.broadcast(x, src=self.rank, group=group)
+            c10d.broadcast(x, src=self.rank, group=subgroup)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
@@ -3656,7 +3660,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         world_size = 4
         if self.rank >= world_size:
             return
-        group = self._init_pg_subgroups(world_size)
+        subgroup = self._init_two_pg2_subgroups(world_size)
         if set_device == SetDeviceMethod.TORCH_CUDA_SET:
             torch.cuda.set_device(self.rank)
             device = None
@@ -3664,12 +3668,12 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
             device = torch.device("cuda:%d" % self.rank)
         if self.rank == 0 or self.rank == 2:
             x = [{}]
-            c10d.broadcast_object_list(x, src=self.rank + 1, group=group, device=device)
+            c10d.broadcast_object_list(x, src=self.rank + 1, group=subgroup, device=device)
             expected = [{"rank": self.rank + 1}]
             self.assertEqual(x, expected)
         else:
             x = [{"rank": self.rank}]
-            c10d.broadcast_object_list(x, src=self.rank, group=group, device=device)
+            c10d.broadcast_object_list(x, src=self.rank, group=subgroup, device=device)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
@@ -3677,18 +3681,18 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         world_size = 4
         if self.rank >= world_size:
             return
-        group = self._init_pg_subgroups(world_size)
+        subgroup = self._init_two_pg2_subgroups(world_size)
         device = torch.device("cuda:%d" % self.rank)
         x = torch.empty((10,), device=device)
         expected = torch.ones((10,), device=device) * self.rank
         if self.rank == 0 or self.rank == 2:
-            c10d.scatter(x, scatter_list=None, src=self.rank + 1, group=group)
+            c10d.scatter(x, scatter_list=None, src=self.rank + 1, group=subgroup)
         else:
             scatter_list = [
                 torch.ones((10,), device=device) * (self.rank - 1),
                 torch.ones((10,), device=device) * self.rank,
             ]
-            c10d.scatter(x, scatter_list=scatter_list, src=self.rank, group=group)
+            c10d.scatter(x, scatter_list=scatter_list, src=self.rank, group=subgroup)
         self.assertEqual(x, expected)
 
 
@@ -3698,7 +3702,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         world_size = 4
         if self.rank >= world_size:
             return
-        group = self._init_pg_subgroups(world_size)
+        subgroup = self._init_two_pg2_subgroups(world_size)
         torch.cuda.set_device(self.rank)
         scatter_object_output_list = [None]
         expected = [{"rank": self.rank}]
@@ -3707,7 +3711,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
                 scatter_object_output_list=scatter_object_output_list,
                 scatter_object_input_list=None,
                 src=self.rank + 1,
-                group=group,
+                group=subgroup,
             )
 
         else:
@@ -3719,7 +3723,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
                 scatter_object_output_list=scatter_object_output_list,
                 scatter_object_input_list=scatter_object_input_list,
                 src=self.rank,
-                group=group,
+                group=subgroup,
             )
         self.assertEqual(scatter_object_output_list, expected)
 
