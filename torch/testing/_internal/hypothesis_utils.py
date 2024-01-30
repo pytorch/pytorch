@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 from collections import defaultdict
 from collections.abc import Iterable
 import numpy as np
@@ -159,10 +161,10 @@ Example:
 @st.composite
 def array_shapes(draw, min_dims=1, max_dims=None, min_side=1, max_side=None, max_numel=None):
     """Return a strategy for array shapes (tuples of int >= 1)."""
-    assert(min_dims < 32)
+    assert min_dims < 32
     if max_dims is None:
         max_dims = min(min_dims + 2, 32)
-    assert(max_dims < 32)
+    assert max_dims < 32
     if max_side is None:
         max_side = min_side + 5
     candidate = st.lists(st.integers(min_side, max_side), min_size=min_dims, max_size=max_dims)
@@ -334,7 +336,7 @@ def tensor_conv(
     # Resolve the tensors
     if qparams is not None:
         if isinstance(qparams, (list, tuple)):
-            assert(len(qparams) == 3), "Need 3 qparams for X, w, b"
+            assert len(qparams) == 3, "Need 3 qparams for X, w, b"
         else:
             qparams = [qparams] * 3
 

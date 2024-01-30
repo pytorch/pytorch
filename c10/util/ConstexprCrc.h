@@ -8,6 +8,7 @@
 namespace c10::util {
 
 namespace detail {
+// NOLINTNEXTLINE(*c-arrays*)
 constexpr uint64_t crc64_table[] = {
     0x0000000000000000, 0x7ad870c830358979, 0xf5b0e190606b12f2,
     0x8f689158505e9b8b, 0xc038e5739841b68f, 0xbae095bba8743ff6,

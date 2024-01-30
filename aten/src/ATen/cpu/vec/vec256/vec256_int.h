@@ -960,13 +960,37 @@ Vectorized<T> inline int_elementwise_binary_256(const Vectorized<T>& a, const Ve
 template <>
 Vectorized<int8_t> inline operator*(const Vectorized<int8_t>& a, const Vectorized<int8_t>& b) {
   // We don't have an instruction for multiplying int8_t
+#ifndef CPU_CAPABILITY_AVX2
   return int_elementwise_binary_256(a, b, std::multiplies<int8_t>());
+#else
+  __m256i mask00FF = _mm256_set1_epi16(0x00FF);
+  __m256i a_lo = _mm256_srai_epi16(_mm256_slli_epi16(a, 8), 8);
+  __m256i b_lo = _mm256_srai_epi16(_mm256_slli_epi16(b, 8), 8);
+  __m256i a_hi = _mm256_srai_epi16(a, 8);
+  __m256i b_hi = _mm256_srai_epi16(b, 8);
+  __m256i res_lo = _mm256_and_si256(_mm256_mullo_epi16(a_lo, b_lo), mask00FF);
+  __m256i res_hi = _mm256_slli_epi16(_mm256_mullo_epi16(a_hi, b_hi), 8);
+  __m256i res = _mm256_or_si256(res_hi, res_lo);
+  return res;
+#endif
 }
 
 template <>
 Vectorized<uint8_t> inline operator*(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b) {
   // We don't have an instruction for multiplying uint8_t
+#ifndef CPU_CAPABILITY_AVX2
   return int_elementwise_binary_256(a, b, std::multiplies<uint8_t>());
+#else
+  __m256i mask00FF = _mm256_set1_epi16(0x00FF);
+  __m256i a_lo = _mm256_and_si256 (a, mask00FF);
+  __m256i b_lo = _mm256_and_si256 (b, mask00FF);
+  __m256i a_hi = _mm256_srli_epi16(a, 8);
+  __m256i b_hi = _mm256_srli_epi16(b, 8);
+  __m256i res_lo = _mm256_and_si256(_mm256_mullo_epi16(a_lo, b_lo), mask00FF);
+  __m256i res_hi = _mm256_slli_epi16(_mm256_mullo_epi16(a_hi, b_hi), 8);
+  __m256i res = _mm256_or_si256(res_hi, res_lo);
+  return res;
+#endif
 }
 
 template <>
