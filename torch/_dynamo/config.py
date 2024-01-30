@@ -223,8 +223,8 @@ enforce_cond_guards_match = True
 # Automatically split model graph into pieces to match DDP bucket sizes
 # to allow DDP comm/compute overlap.  Disable to allow DDP models to
 # run without graph-breaks, but also without comm/compute overlap.
-# set torch._dynamo.config.log_level to INFO or DEBUG for more info
-# about optimize_ddp behavior.
+# set TORCH_LOGS env to include any of 'dynamo', 'distributed', or
+# 'dist_ddp' for more info about optimize_ddp behavior.
 optimize_ddp = True
 
 # If True, delays DDPOptimizer submodule compilation to 1st run of the model,
@@ -325,6 +325,9 @@ capture_autograd_function = True
 
 # enable/disable dynamo tracing for `torch.func` transforms
 capture_func_transforms = False
+
+# enable/disable user-defined triton kernel optimizations
+optimize_user_defined_triton_kernels = True
 
 # If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
 log_compilation_metrics = True
