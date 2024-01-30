@@ -47,8 +47,8 @@ Streams and events
     :toctree: generated
     :nosignatures:
 
-    Stream
     Event
+    Stream
 
 
 .. This module needs to be documented. Adding here in the meantime
