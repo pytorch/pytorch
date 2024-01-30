@@ -411,7 +411,9 @@ class VariableBuilder:
             return ConstDictVariable(result, type(value))
         elif value is sys.modules:
             return PythonSysModulesVariable(source=self.source)
-        elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
+        elif isinstance(value, dict):
+            # We handle DefaultDicts, OreredDicts and subclasses of these
+
             if not value and self.get_source().is_nn_module():
                 # It is faster to guard on 'false' property than to guard
                 # on actual dict keys, but we can't do this fast guard in general because
@@ -448,7 +450,7 @@ class VariableBuilder:
                 build_key_value(i, k, v) for i, (k, v) in enumerate(value.items())
             )
 
-            if istype(value, collections.defaultdict):
+            if isinstance(value, collections.defaultdict):
                 result = DefaultDictVariable(
                     result,
                     type(value),
@@ -592,7 +594,7 @@ class VariableBuilder:
                 value.device,
                 source=self.source,
             )
-        elif isinstance(value, torch._C._SDPAParams):
+        elif isinstance(value, (torch._C._SDPAParams)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return SDPAParamsVariable.create(self.tx, value, self.source)
         elif isinstance(value, _EventBase):
@@ -1535,6 +1537,12 @@ def wrap_fx_proxy_cls(
 
         proxy.node.meta["example_value"] = example_value
         return SDPAParamsVariable(proxy, **options)
+    elif isinstance(example_value, bool) and proxy.node.target in [
+        torch.backends.cuda.can_use_flash_attention,
+        torch.backends.cuda.can_use_efficient_attention,
+    ]:
+        proxy.node.meta["example_value"] = example_value
+        return ConstantVariable.create(example_value, **options)
     else:
         unimplemented(
             "torch.* op returned non-Tensor "
