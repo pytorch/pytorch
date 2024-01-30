@@ -3543,6 +3543,11 @@ def forward(self, x):
             ep.module()(*test_inp, **test_kwargs), foo(*test_inp, **test_kwargs)
         )
 
+        test_inp = (torch.randn(4, 4), torch.randn(7, 4))
+        test_kwargs = {"kw1": torch.zeros(9, 4), "kw2": torch.ones(4, 4)}
+        # This should work even if the kwarg order are flipped.
+        self.assertEqual(ep(*test_inp, **test_kwargs), foo(*test_inp, **test_kwargs))
+
     def test_non_arg_name_dynamic_shapes_api_with_container_type(self):
         class Foo(torch.nn.Module):
             def forward(self, a, b):

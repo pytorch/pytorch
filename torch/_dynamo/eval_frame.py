@@ -1154,7 +1154,7 @@ def rewrite_signature(
                 assert unprovided_arg in kwargs, f"Missing argument {unprovided_arg}"
 
         # 4. Keyword arguments provided in `kwargs`.
-        input_strs += list(kwargs.keys())
+        input_strs += sorted(kwargs.keys())
 
         # 5. Keyword-only arguments with default values if not provided are not exported
         # as part of the function signature.
