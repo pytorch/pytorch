@@ -944,6 +944,37 @@ class MutationTests(torch._dynamo.test_case.TestCase):
             ["out_ptr"],
         )
 
+    @make_mutation_test
+    def test_out_of_order_kernel_call():
+        @triton.jit
+        def add_kernel_out_of_order_fn1(
+            in_ptr0,
+            n_elements,
+            in_ptr1,
+            out_ptr,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            add_kernel_out_of_order_fn2(
+                in_ptr0, in_ptr1, n_elements, out_ptr, BLOCK_SIZE=BLOCK_SIZE
+            )
+
+        t = torch.randn(4)
+        return (
+            add_kernel_out_of_order_fn1,
+            {
+                "in_ptr0": t,
+                "n_elements": 4,
+                "in_ptr1": t,
+                "out_ptr": t,
+                "BLOCK_SIZE": 4,
+            },
+            ["out_ptr"],
+        )
+
 
 if HAS_CUDA and HAS_LARK:
     t = torch.randn(4)
