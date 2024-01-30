@@ -295,7 +295,7 @@ static struct PyMethodDef _THXPModule_methods[] = {
      METH_O,
      nullptr},
     {"_xpu_setStream",
-     castPyCFunctionWithKeywords(XPUModule_setStream_wrap),
+     castPyCFunctionWithKeywords(THXPModule_setStream_wrap),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_xpu_synchronize", THXPModule_xpuSynchronize, METH_O, nullptr},
