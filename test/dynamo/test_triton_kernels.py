@@ -894,13 +894,13 @@ def forward(self, x_1, output_1):
 
 
 def make_mutation_test(fn):
-    kernel, inputs, outputs = fn()
-
+    @requires_cuda
     @requires_lark
     @skipIfRocm
     def test_fn(self):
         from torch._higher_order_ops.triton_kernel_wrap import identify_mutated_tensors
 
+        kernel, inputs, outputs = fn()
         self.assertListEqual(
             identify_mutated_tensors(kernel, inputs),
             outputs,
@@ -912,7 +912,6 @@ def make_mutation_test(fn):
 class MutationTests(torch._dynamo.test_case.TestCase):
     # Tests injected below
 
-    @requires_cuda
     @make_mutation_test
     def test_out_of_order_kernel():
         @triton.jit
@@ -1064,12 +1063,13 @@ if HAS_CUDA and HAS_LARK:
         ],
     ]
     for kernel, inputs, outputs in tests:
+        test = make_mutation_test(lambda: (kernel, inputs, outputs))
+        name = f"test_mutations_{kernel.fn.__name__}"
+        # Poor way to make test names be unique
+        while name in MutationTests.__dict__:
+            name += "1"
 
-        def test():
-            return kernel, inputs, outputs
-
-        test = make_mutation_test(test)
-        setattr(MutationTests, f"test_mutations_{kernel.fn.__name__}", test)
+        setattr(MutationTests, name, test)
 
 
 common_utils.instantiate_parametrized_tests(KernelTests)
