@@ -255,12 +255,12 @@ class TestUnflatten(TestCase):
                 strict=strict
             )
             unflattened = unflatten(export_module)
-            self.compare_outputs(export_module, unflattened, inps)
+            self.compare_outputs(export_module.module(), unflattened, inps)
             unflattened.foo.nested = NestedChild()
-            self.compare_outputs(export_module, unflattened, inps)
+            self.compare_outputs(export_module.module(), unflattened, inps)
 
             # Test tree spec mismatched input
-            orig_outs = export_module(*inps)
+            orig_outs = export_module.module()(*inps)
             new_inps = *inps, torch.rand(2, 3)
             with self.assertRaisesRegex(
                 TypeError,
@@ -305,7 +305,7 @@ class TestUnflatten(TestCase):
         export_module = torch.export.export(Mod(), (torch.randn((2, 3)),))
         unflattened = unflatten(export_module)
 
-        self.compare_outputs(export_module, unflattened, (torch.randn((2, 3)),))
+        self.compare_outputs(export_module.module(), unflattened, (torch.randn((2, 3)),))
 
     def test_unflatten_wrong_input(self):
         class Mod(torch.nn.Module):
@@ -328,7 +328,7 @@ class TestUnflatten(TestCase):
 
         export_module = torch.export.export(Mod(), (torch.randn((2, 3)),))
         with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[0] to be equal to 2, but got 6")):
-            export_module(torch.randn(6, 6))
+            export_module.module()(torch.randn(6, 6))
 
         unflattened = unflatten(export_module)
         with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[0] to be equal to 2, but got 6")):
@@ -468,7 +468,7 @@ class TestUnflatten(TestCase):
 
         gm_unflat_non_strict = unflatten(ep_non_strict)
         ep = torch.export.export(gm_unflat_non_strict, inp, strict=False)
-        self.assertTrue(torch.allclose(ep(*inp), mod(*inp)))
+        self.assertTrue(torch.allclose(ep.module()(*inp), mod(*inp)))
 
     def test_unflattened_module_nodes_has_meta_val(self):
         class SubMod(torch.nn.Module):

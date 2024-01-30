@@ -40,14 +40,14 @@ class ExampleTests(TestCase):
         exported_program.graph_module.print_readable()
 
         self.assertEqual(
-            exported_program(*inputs_export.args, **inputs_export.kwargs),
+            exported_program.module()(*inputs_export.args, **inputs_export.kwargs),
             model(*inputs_model.args, **inputs_model.kwargs),
         )
 
         if case.extra_inputs is not None:
             inputs = normalize_inputs(case.extra_inputs)
             self.assertEqual(
-                exported_program(*inputs.args, **inputs.kwargs),
+                exported_program.module()(*inputs.args, **inputs.kwargs),
                 model(*inputs.args, **inputs.kwargs),
             )
 
