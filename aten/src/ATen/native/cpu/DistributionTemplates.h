@@ -10,6 +10,11 @@
 #include <limits>
 #include <mutex>
 
+#ifdef CPU_CAPABILITY_AVX2
+#include <ATen/native/cpu/avx_mathfun.h>
+#include <c10/util/irange.h>
+#endif
+
 namespace at {
 namespace native {
 namespace templates {
@@ -79,6 +84,57 @@ struct RandomKernel {
 };
 
 // ==================================================== Normal ========================================================
+
+#ifdef CPU_CAPABILITY_AVX2
+static void normal_fill_16_AVX2(float *data,
+                         const __m256* two_pi,
+                         const __m256* one,
+                         const __m256* minus_two,
+                         const __m256* mean,
+                         const __m256* std_v) {
+  const __m256 u1 = _mm256_sub_ps(*one, _mm256_loadu_ps(data));
+  const __m256 u2 = _mm256_loadu_ps(data + 8);
+  // sincos256_ps and log256_ps are from avx_mathfun.h
+  const __m256 radius = _mm256_sqrt_ps(_mm256_mul_ps(*minus_two, log256_ps(u1)));
+  const __m256 theta = _mm256_mul_ps(*two_pi, u2);
+  __m256 sintheta, costheta;
+  sincos256_ps(theta, &sintheta, &costheta);
+  const __m256 n1 = _mm256_mul_ps(radius, costheta);
+  const __m256 n2 = _mm256_mul_ps(radius, sintheta);
+  _mm256_storeu_ps(data, _mm256_fmadd_ps(n1, *std_v, *mean));
+  _mm256_storeu_ps(data + 8, _mm256_fmadd_ps(n2, *std_v, *mean));
+}
+
+template<typename RNG>
+void normal_fill_AVX2(const TensorBase &self, const float mean, const float std, RNG generator) {
+  float *data = self.data_ptr<float>();
+  auto size = self.numel();
+  std::lock_guard<std::mutex> lock(generator->mutex_);
+  for (const auto i : c10::irange(size)) {
+    at::uniform_real_distribution<float> uniform(0, 1);
+    data[i] = uniform(generator);
+  }
+  const __m256 two_pi = _mm256_set1_ps(2.0f * c10::pi<double>);
+  const __m256 one = _mm256_set1_ps(1.0f);
+  const __m256 minus_two = _mm256_set1_ps(-2.0f);
+  const __m256 mean_v = _mm256_set1_ps(mean);
+  const __m256 std_v = _mm256_set1_ps(std);
+
+  for (int64_t i = 0; i < size - 15; i += 16) {
+    normal_fill_16_AVX2(data + i, &two_pi, &one, &minus_two, &mean_v, &std_v);
+  }
+
+  if (size % 16 != 0) {
+    // Recompute the last 16 values.
+    data = data + size - 16;
+    for (const auto i : c10::irange(16)) {
+      at::uniform_real_distribution<float> uniform(0, 1);
+      data[i] = uniform(generator);
+    }
+    normal_fill_16_AVX2(data, &two_pi, &one, &minus_two, &mean_v, &std_v);
+  }
+}
+#endif
 
 template <typename scalar_t>
 static void normal_fill_16(scalar_t *data, const scalar_t mean, const scalar_t std) {
@@ -174,7 +230,11 @@ template<typename RNG>
 void normal_kernel(const TensorBase &self, double mean, double std, RNG generator) {
   auto size = self.numel();
   if (self.scalar_type() == ScalarType::Float && size >= 16 && self.is_contiguous()) {
+#ifdef CPU_CAPABILITY_AVX2
+    normal_fill_AVX2(self, static_cast<float>(mean), static_cast<float>(std), generator);
+#else
     normal_fill_vectorize(self, static_cast<float>(mean), static_cast<float>(std), generator);
+#endif 
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "normal_kernel_cpu", [&] {
       if (size >= 16 && self.is_contiguous()) {
