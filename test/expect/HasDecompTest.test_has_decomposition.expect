@@ -1126,8 +1126,6 @@ aten::round.out
 aten::row_indices
 aten::row_indices_copy
 aten::row_indices_copy.out
-aten::rsub.Scalar_out
-aten::rsub.Tensor_out
 aten::scalar_tensor
 aten::scalar_tensor.out
 aten::scatter.reduce
