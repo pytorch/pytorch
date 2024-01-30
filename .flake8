@@ -7,9 +7,7 @@ max-line-length = 120
 # C408 ignored because we like the dict keyword argument syntax
 # E501 is not flexible enough, we're using B950 instead
 ignore =
-    E203,E305,E402,E501,E721,E741,F405,F821,F841,F999,W503,W504,C408,E302,W291,E303,
-    # fix these lints in the future
-    E275,
+    E203,E305,E402,E501,E721,E741,F405,F841,F999,W503,W504,C408,E302,W291,E303,
     # shebang has extra meaning in fbcode lints, so I think it's not worth trying
     # to line this up with executable bit
     EXE001,
@@ -31,9 +29,13 @@ ignore =
     TOR102,
 per-file-ignores =
     __init__.py: F401
+    test/**: F821
+    test/**/__init__.py: F401,F821
     torch/utils/cpp_extension.py: B950
     torchgen/api/types/__init__.py: F401,F403
     torchgen/executorch/api/types/__init__.py: F401,F403
+    test/dynamo/test_higher_order_ops.py: B950
+    torch/testing/_internal/dynamo_test_failures.py: B950
 optional-ascii-coding = True
 exclude =
     ./.git,

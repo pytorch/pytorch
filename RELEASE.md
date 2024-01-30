@@ -12,6 +12,7 @@
     - [`pytorch/builder` / PyTorch domain libraries](#pytorchbuilder--pytorch-domain-libraries)
     - [Making release branch specific changes for PyTorch](#making-release-branch-specific-changes-for-pytorch)
     - [Making release branch specific changes for domain libraries](#making-release-branch-specific-changes-for-domain-libraries)
+  - [Running Launch Execution team Core XFN sync](#running-launch-execution-team-core-xfn-sync)
   - [Drafting RCs (Release Candidates) for PyTorch and domain libraries](#drafting-rcs-release-candidates-for-pytorch-and-domain-libraries)
     - [Release Candidate Storage](#release-candidate-storage)
     - [Release Candidate health validation](#release-candidate-health-validation)
@@ -152,6 +153,22 @@ After the branch cut is performed, the Pytorch Dev Infra member should be inform
 Follow these examples of PR that updates the version and sets RC Candidate upload channel:
 * torchvision : https://github.com/pytorch/vision/pull/5400
 * torchaudio: https://github.com/pytorch/audio/pull/2210
+
+## Running Launch Execution team Core XFN sync
+
+The series of meetings for Core XFN sync should be organized. The goal of these meetings are the following:
+1. Establish release POC's from each of the workstreams
+2. Cover the tactical phase of releasing minor releases to the market
+3. Discuss possible release blockers
+
+Following POC's should be assigned from each of the workstreams:
+* Core/Marketing
+* Release Eng
+* Doc Eng
+* Release notes
+* Partner
+
+**NOTE**: The meetings should start after the release branch is created and should continue until the week of the release.
 
 ## Drafting RCs (Release Candidates) for PyTorch and domain libraries
 

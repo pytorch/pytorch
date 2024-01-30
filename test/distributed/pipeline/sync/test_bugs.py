@@ -13,6 +13,7 @@ import torch.nn.functional as F
 
 from torch.distributed.pipeline.sync import Pipe
 from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 
 
 def test_python_autograd_function(setup_rpc):
@@ -71,7 +72,7 @@ def test_exception_no_hang(setup_rpc):
         model(torch.rand(3))
 
 
-@pytest.mark.skipif(torch.cuda.device_count() < 2, reason="2 cuda devices required")
+@pytest.mark.skipif(not TEST_MULTIGPU, reason="2 cuda devices required")
 def test_tuple_wait(cuda_sleep, setup_rpc):
     # In v0.0.3, Wait is applied to only the first tensor on a micro-batch.
     # Under this behavior, if checkpointing was disabled, there's a possibility

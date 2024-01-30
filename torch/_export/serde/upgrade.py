@@ -4,7 +4,7 @@ from typing import Tuple, Dict, Optional, List
 
 import torch
 from torch._export import export
-from torch._export.pass_base import _ExportPassBase
+from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.pass_infra.node_metadata import NodeMetadata
 from torch._export.pass_infra.proxy_value import ProxyValue
 from torch._subclasses import FakeTensor
@@ -74,7 +74,7 @@ class GraphModuleOpUpgrader:
     original TorchScript upgrader).
     """
 
-    class UpgraderPass(_ExportPassBase):
+    class UpgraderPass(_ExportPassBaseDeprecatedDoNotUse):
         def __init__(self, old_target: Target, new_target: Target):
             super().__init__()
             self.old_target = old_target
@@ -194,7 +194,7 @@ class GraphModuleOpUpgrader:
         assert kwargs == {}
 
         for _pass in self.upgrader_passes:
-            upgraded_program = exported_program._transform(_pass)
+            upgraded_program = exported_program._transform_do_not_use(_pass)
             # NB: we have to retrace the graph_module instead of ep because of some failure.
             exported_program = export(upgraded_program.module(), args, kwargs)
 

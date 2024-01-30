@@ -55,6 +55,7 @@ readability-container-size-empty,
 readability-delete-null-pointer,
 readability-duplicate-include
 readability-misplaced-array-index,
+readability-redundant-function-ptr-dereference,
 readability-redundant-smartptr-get,
 readability-simplify-subscript-expr,
 readability-string-compare,
