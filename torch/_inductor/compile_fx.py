@@ -147,6 +147,7 @@ def _warn_tf32_disabled():
 
 def _unlift_graph(mod, gm, graph_signature):
     from torch.export.unflatten import _assign_attr, _AttrKind
+
     state_dict = {}
     for name, param in mod.named_parameters(remove_duplicate=False):
         state_dict[name] = param
@@ -159,7 +160,7 @@ def _unlift_graph(mod, gm, graph_signature):
     for name, buffer in mod.named_buffers(remove_duplicate=False):
         state_dict[name] = buffer
         _assign_attr(
-            param,
+            buffer,
             gm,
             name,
             attr_kind=_AttrKind.BUFFER,

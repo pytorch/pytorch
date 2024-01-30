@@ -7,8 +7,9 @@ from itertools import chain
 from typing import Any, cast, Dict, List, Optional, Union
 
 import torch
+import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
-from torch.export._tree_utils import is_equivalent, reorder_kwargs
+from torch.export._tree_utils import reorder_kwargs
 from torch.export.exported_program import (
     ConstantArgument,
     ExportedProgram,
@@ -17,8 +18,7 @@ from torch.export.exported_program import (
     TensorArgument,
 )
 from torch.fx._symbolic_trace import is_fx_tracing
-from torch.fx.immutable_collections import immutable_dict, immutable_list
-from torch.utils._pytree import Context, GetAttrKey, SequenceKey
+from torch.utils._pytree import GetAttrKey, SequenceKey
 
 __all__ = ["InterpreterModule", "UnflattenedModule", "unflatten", "FlatArgsAdapter"]
 
@@ -421,48 +421,10 @@ def _add_spec(gm: torch.nn.Module, spec) -> str:
     return name
 
 
-def _fx_collection_equivalence_fn(
-    spec1_type: Optional[type],
-    spec1_context: Context,
-    spec2_type: Optional[type],
-    spec2_context: Context,
-) -> bool:
-    """Treat containers and their immutable variants as the same type. Otherwise
-    compare as normal.
-    """
-    if spec1_type is None or spec2_type is None:
-        return spec1_type is spec2_type and spec1_context == spec2_context
-
-    if issubclass(spec1_type, (dict, immutable_dict)) and issubclass(
-        spec2_type, (dict, immutable_dict)
-    ):
-        return spec1_context == spec2_context
-
-    if issubclass(spec1_type, (list, immutable_list)) and issubclass(
-        spec2_type, (list, immutable_list)
-    ):
-        return spec1_context == spec2_context
-
-    return spec1_type is spec2_type and spec1_context == spec2_context
-
-
-def tree_flatten_check(args_kwargs, spec):
-    flat, new_spec = pytree.tree_flatten(args_kwargs)
-    if not is_equivalent(new_spec, spec, _fx_collection_equivalence_fn):
-        raise AssertionError(
-            "Unexpected structure for unflattened module input. Got:\n"
-            f"{new_spec}\n"
-            "expected:\n"
-            f"{spec}"
-        )
-
-    return flat
-
-
 def _generate_flatten(gm: torch.nn.Module, node, spec) -> torch.fx.Node:
     name = _add_spec(gm, spec)
     spec_node = gm.graph.get_attr(name)
-    return gm.graph.call_function(tree_flatten_check, (node, spec_node))
+    return gm.graph.call_function(fx_pytree.tree_flatten_spec, (node, spec_node))
 
 
 def _generate_unflatten(gm: torch.nn.Module, nodes, spec) -> torch.fx.Node:
