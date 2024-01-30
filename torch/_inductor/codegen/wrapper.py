@@ -3111,12 +3111,12 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         ), f"expected grid to be a list or tuple but got: {grid=}"
 
         grid = [V.graph.sizevars.simplify(item) for item in grid]
-        grid_has_unbacked_symbols = any(free_unbacked_symbols(item) for item in grid)
+        grid_uses_symbolic_shapes = any(item.free_symbols for item in grid)
         grid_args = [self.grid_expr_printer(item) for item in grid]
         grid_args_str = ", ".join(grid_args)
         self.writeline(f"Grid {grid_name} = Grid({grid_args_str});")
 
-        if grid_has_unbacked_symbols:
+        if grid_uses_symbolic_shapes:
             self.writeline(f"if ({grid_name}.is_non_zero()) {{")
         kernel_var_name = f"kernels.{name}" if V.graph.aot_mode else name
         self.writeline(
@@ -3131,5 +3131,5 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 stream,
             )
         )
-        if grid_has_unbacked_symbols:
+        if grid_uses_symbolic_shapes:
             self.writeline("}")

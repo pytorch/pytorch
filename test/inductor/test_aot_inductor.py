@@ -712,13 +712,42 @@ class AOTInductorTestsTemplate:
                 d = (b + c) @ y
                 return d.sum()
 
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires CUDA")
+        # if self.device != "cuda":
+        #     raise unittest.SkipTest("requires CUDA")
         example_inputs = (
             torch.tensor([1, 1, 1], device=self.device),
             torch.randn((1, 32), dtype=torch.float16, device=self.device),
         )
         self.check_model(Repro(), example_inputs)
+
+    def test_zero_grid_with_backed_symbols(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, b):
+                return x + b
+
+        example_inputs = (
+            x := torch.randn((3, 2), device=self.device),
+            torch.randn((1, 2), device=self.device),
+        )
+        torch._dynamo.mark_dynamic(x, index=0)
+
+        so_path: str = AOTIRunnerUtil.compile(
+            Repro(),
+            example_inputs,
+        )
+        aot_inductor_module = AOTIRunnerUtil.load("cuda", so_path)
+        aot_inductor_module(*example_inputs)
+
+        example_inputs = (
+            torch.randn((0, 2), device=self.device),
+            torch.randn((1, 2), device=self.device),
+        )
+        actual = aot_inductor_module(*example_inputs)
+        expected = Repro()(*example_inputs)
+        torch.testing.assert_close(actual, expected)
 
     def test_repeat_interleave(self):
         class Repro(torch.nn.Module):
@@ -1587,8 +1616,12 @@ class AOTInductorTestsTemplate:
     @config.patch({"aot_inductor.abi_compatible": True})
     def test_triton_kernel_reinterpret_view_mem_leak(self):
         # Check for memory leak when using user-defined Triton Kernel + AOTI.
+<<<<<<< HEAD
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
+=======
+        device = torch.cuda.current_device()
+>>>>>>> c26135f9dc0 ([inductor] skip launching kernels with zero grid in AOTInductor when using backed symints)
 
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1751,6 +1784,8 @@ CPU_TEST_FAILURES = {
         is_skip=True
     ),
     "test_simple_dynamic": fail_with_and_without_stack_allocation(),
+    "test_zero_grid_with_unbacked_symbols": fail_with_and_without_stack_allocation(is_skip=True),
+    "test_zero_grid_with_backed_symbols": fail_with_and_without_stack_allocation(is_skip=True),
 }
 
 CUDA_TEST_FAILURES = {
@@ -1780,6 +1815,7 @@ if TEST_WITH_ROCM:
             "test_foreach_multiple_dynamic": fail_cuda(is_skip=True),
             "test_reuse_kernel": fail_cuda(is_skip=True),
             "test_zero_grid_with_unbacked_symbols": fail_cuda(is_skip=True),
+            "test_zero_grid_with_backed_symbols": fail_cuda(is_skip=True),
         }
     )
 
