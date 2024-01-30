@@ -866,15 +866,6 @@ def optim_error_inputs_func_sparseadam(device, dtype):
                 error_type=ValueError,
                 error_regex="SparseAdam requires dense parameter tensors",
             ),
-            ErrorOptimizerInput(
-                OptimizerInput(
-                    params=[torch.rand(2, 3, device=device, dtype=torch.complex64)],
-                    kwargs=dict(),
-                    desc="complex not supported",
-                ),
-                error_type=ValueError,
-                error_regex="SparseAdam does not support complex parameters",
-            ),
         ]
     return error_inputs
 
@@ -1895,11 +1886,6 @@ optim_db: List[OptimizerInfo] = [
                 skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
-            ),
-            DecorateInfo(
-                unittest.skip("Missing complex support, see #118153"),
-                "TestOptimRenewed",
-                "test_complex",
             ),
         ),
     ),

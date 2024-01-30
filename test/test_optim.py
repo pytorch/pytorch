@@ -177,7 +177,12 @@ class TestOptimRenewed(TestCase):
                     p.grad = torch.randn_like(p)
                     grads_losses.append(p.grad.clone())
                     real_steps.append(p.clone())
+                    if optim_info.only_supports_sparse_grads:
+                        # SparseAdam, for example, requires sparse gradients. We convert the Tensor layout,
+                        # which we know does NOT represent the expected use case!
+                        p.grad = p.grad.to_sparse()
                 grads_losses.append(torch.randn(1))
+
                 return grads_losses[-1].clone()
 
             def complex_closure():
@@ -188,6 +193,10 @@ class TestOptimRenewed(TestCase):
                     else:
                         p.grad = grads_losses.pop(0)
                         complex_steps.append(p.clone())
+                    if optim_info.only_supports_sparse_grads:
+                        # SparseAdam, for example, requires sparse gradients. We convert the Tensor layout,
+                        # which we know does NOT represent the expected use case!
+                        p.grad = p.grad.to_sparse()
                 return grads_losses.pop(0)
 
             for _ in range(3):
