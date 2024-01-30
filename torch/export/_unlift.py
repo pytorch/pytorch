@@ -19,7 +19,7 @@ def _check_input_constraints_pre_hook(self, *args, **kwargs):
     args, received_spec = pytree.tree_flatten(args)
 
     if received_spec != self._in_spec:
-        raise TypeError(  # noqa: TRY200
+        raise ValueError(  # noqa: TRY200
             "Trying to flatten user inputs with exported input tree spec: \n"
             f"{self._in_spec}\n"
             "but actually got inputs with tree spec of: \n"
