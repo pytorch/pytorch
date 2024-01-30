@@ -1632,6 +1632,12 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_dynamo_does_not_support("pytree flatten error"),
     ),
     xfail(
+        "split_with_sizes_copy",
+        matcher=lambda sample: isinstance(sample.args[0], torch.Size),
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        reason=onnx_test_common.reason_dynamo_does_not_support("pytree flatten error"),
+    ),
+    xfail(
         "t",
         matcher=lambda sample: isinstance(sample.input, torch.Tensor)
         and len(sample.input.shape) < 2,
