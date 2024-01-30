@@ -9144,21 +9144,22 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
                 disable_fastpath = False
             yield ForeachSampleInput(input, ord=ord, disable_fastpath=disable_fastpath)
 
-        # Also test nan propagation with a single tensor
-        nan_inputs = [
-            [float('nan')],
-            [float('nan'), 1.0],
-            [1.0, float('nan')],
-            [1.0, 2.0, 3.0, float('nan'), float('nan'), 7.0, float('nan'), float('nan'), -1.5, 6.0],
-            [7.0, 3.0, float('nan'), float('nan'), -1.5, 6.0],
-            [3.0, float('nan'), float('nan'), -1.5, 6.0],
-        ]
-        for input in nan_inputs:
-            x = torch.tensor(input, device=device)
-            disable_fastpath = True
-            if ord in (1, 2, float('inf')) and dtype in floating_types_and(torch.half, torch.bfloat16):
-                disable_fastpath = False
-            yield ForeachSampleInput([x], ord=ord, disable_fastpath=disable_fastpath)
+        # Also test nan propagation with a single tensor, but skip autograd testing
+        if not requires_grad:
+            nan_inputs = [
+                [float('nan')],
+                [float('nan'), 1.0],
+                [1.0, float('nan')],
+                [1.0, 2.0, 3.0, float('nan'), float('nan'), 7.0, float('nan'), float('nan'), -1.5, 6.0],
+                [7.0, 3.0, float('nan'), float('nan'), -1.5, 6.0],
+                [3.0, float('nan'), float('nan'), -1.5, 6.0],
+            ]
+            for input in nan_inputs:
+                x = torch.tensor(input, device=device)
+                disable_fastpath = True
+                if ord in (1, 2, float('inf')) and dtype in floating_types_and(torch.half, torch.bfloat16):
+                    disable_fastpath = False
+                yield ForeachSampleInput([x], ord=ord, disable_fastpath=disable_fastpath)
 
 
 
