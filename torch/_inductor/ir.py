@@ -4739,12 +4739,14 @@ class FallbackKernel(ExternKernelAlloc):
     def get_alias_names(self):
         if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
             return []
+        # See NOTE [FallbackKernel supported operators]
+        if self.op_overload._schema.is_mutable():
+            return self.mutated_but_not_returned_inputs
         if torch._inductor.utils.is_view(self.op_overload):
             # TODO - use op._schema.arguments alias_info to figure out
             # precise list
             return [inp.get_name() for inp in self.inputs]
-        # See NOTE [FallbackKernel supported operators]
-        return self.mutated_but_not_returned_inputs
+        return []
 
     def get_mutation_names(self):
         # See NOTE [FallbackKernel supported operators]
@@ -4938,12 +4940,8 @@ class FallbackKernel(ExternKernelAlloc):
         device = cls.find_device(tensor_args, example_output)
         assert device, "Not sure where to find device info"
 
-        layout: Any = NoneLayout
-        if len(kernel._schema.returns) > 0:
-            layout = MultiOutputLayout
-
         packed = cls(
-            layout(device),
+            MultiOutputLayout(device),
             kernel,
             tensor_args,
             non_tensor_args,
