@@ -86,6 +86,10 @@ class FailChoiceCaller(ChoiceCaller):
 
 @instantiate_parametrized_tests
 class TestMaxAutotune(TestCase):
+    def setUp(self):
+        super().setUp()
+        torch.random.manual_seed(1234)
+
     def _create_buffer(self, name, shape):
         return Buffer(name, FixedLayout(torch.device("cuda:0"), torch.float32, shape))
 
@@ -1247,6 +1251,8 @@ class TestMaxAutotune(TestCase):
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": 2,
                 "cuda.cutlass_prefer_evt_capable_ops": cutlass_prefer_evt_capable_ops,
+                "cuda.cutlass_op_whitelist_regex": "warpspecialized_cooperative_epi_tma",
+                "cuda.cutlass_op_blacklist_regex": "pingpong",  # Pingpong Kernels can lead to numerical issues
             }
         ):
             # No broadcast
@@ -1255,9 +1261,7 @@ class TestMaxAutotune(TestCase):
             compare_results(4096, 25728, 2048, 2.0, 0.4, [2048])
             # Broadcast last dim.
             if not SM90OrLater and max_autotune_gemm_backends == "CUTLASS":
-                with self.assertRaisesRegex(RuntimeError, "No choices to select"):
-                    # CUTLASS2 doesn't support Bias last-dim broadcast.
-                    compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
+                compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
             else:
                 compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
 
