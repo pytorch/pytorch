@@ -1115,7 +1115,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             tos = self.pop()
         _ = self.pop()
         if preserve_tos:
-            self.push(tos)
+            self.push(tos)  # type: ignore[possibly-undefined]
 
     def FOR_ITER(self, inst):
         it = self.pop().realize()
