@@ -339,6 +339,9 @@ class NCCLComm {
     // Set true failure reason if provided by ProcessGroupNCCL (e.g. work
     // timeout)
     commFailureReason_ = commFailureReason;
+    LOG(INFO) << "Aborting ncclComm_ " << ncclComm_ << " with reason: "
+              << (commFailureReason ? *commFailureReason
+                                    : "No abort reason provided.");
 #ifndef NCCL_HAS_COMM_NONBLOCKING
     C10D_NCCL_CHECK(::ncclCommAbort(ncclComm_), commFailureReason_);
 #else
@@ -429,6 +432,8 @@ class NCCLComm {
         c10::str(
             "Failed to deregister segment handle ",
             handle,
+            ", with ptr ",
+            ptr,
             " on ncclComm_ ",
             ncclComm_));
     registeredSegmentHandles_.erase(ptr);
@@ -437,6 +442,8 @@ class NCCLComm {
     return ncclInvalidUsage;
 #endif
   }
+
+  friend class ProcessGroupNCCL;
 
  protected:
   ncclComm_t ncclComm_;
