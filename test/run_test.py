@@ -1366,6 +1366,11 @@ def handle_log_file(
             if re.search("Running .* items in this shard:", line):
                 print_to_stderr(line.rstrip())
         print_to_stderr("")
+
+        # Temporary dumping the log file into stderr for QA reference
+        print_to_stderr(f"\n START of temporary dumping of {test} execution log file from ({file_path})")
+        print_to_stderr(full_text)
+        print_to_stderr(f"END of temporary dumping of {test} execution log file form ({file_path})\n")
         return
 
     # otherwise: print entire file
