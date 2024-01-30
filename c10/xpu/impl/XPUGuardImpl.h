@@ -75,7 +75,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
         stream.device_index(),
         ".");
 
-    auto xpu_event = reinterpret_cast<sycl::event*>(*event);
+    auto* xpu_event = reinterpret_cast<sycl::event*>(*event);
     XPUStream xpu_stream{stream};
     *xpu_event = xpu_stream.queue().ext_oneapi_submit_barrier();
   }
@@ -83,7 +83,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   void block(void* event, const Stream& stream) const override {
     if (!event)
       return;
-    auto xpu_event = reinterpret_cast<sycl::event*>(event);
+    auto* xpu_event = reinterpret_cast<sycl::event*>(event);
     std::vector<sycl::event> event_list{*xpu_event};
     XPUStream xpu_stream(stream);
     xpu_stream.queue().ext_oneapi_submit_barrier(event_list);
@@ -93,7 +93,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     using namespace sycl::info;
     if (!event)
       return true;
-    auto xpu_event = reinterpret_cast<sycl::event*>(event);
+    auto* xpu_event = reinterpret_cast<sycl::event*>(event);
     return xpu_event->get_info<event::command_execution_status>() ==
         event_command_status::complete;
   }
