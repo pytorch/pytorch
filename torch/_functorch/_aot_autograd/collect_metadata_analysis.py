@@ -49,6 +49,18 @@ zip = strict_zip
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 
+# Note [Tangents must be contiguous]
+# We force tangents to be contiguous today.
+# The idea is that we are technically making a guess about the strides of our tangents,
+# while we trace out the joint.
+# Today, we force this guess to be correct by additioanlly calling contiguous()
+# on all tangents at runtime.
+# In the future, you could imagine lifting this restriction, since these contiguous()
+# calls can have noticeable perf overhead depending on the model.
+def coerce_tangent(x):
+    return x.detach().contiguous() if isinstance(x, Tensor) else x
+
+
 # This is a version of functionalization that is specifically designed
 # for the AOTAutograd use case.
 #
@@ -569,6 +581,11 @@ from a multi-output view call"
         traced_tangents = pytree.tree_map(from_fun, f_tangents)
         traced_tangents = pytree.tree_map(
             view_avoid_dupes_with_primals, traced_tangents
+        )
+        # See Note [Tangents must be contiguous]
+        traced_tangents = pytree.tree_map(
+            coerce_tangent,
+            traced_tangents,
         )
         user_outs = pytree.tree_map(from_fun, f_output_tangents)
 

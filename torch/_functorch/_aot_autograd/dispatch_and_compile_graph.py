@@ -6,7 +6,6 @@ pathways, taking into account the AOTConfig and the collected ViewAndMutationMet
 from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
-import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
 from torch._dispatch.python import enable_python_dispatcher
@@ -133,12 +132,7 @@ def aot_dispatch_autograd_graph(
     # traced_tangents corresponds to the set of outputs in the traced forward that should get grad_outputs in the traced backward.
     # It includes outputs of the original forward, *and* any updated inputs due to input mutations.
     # However, it does *not* include any outputs that are aliases of inputs or intermediates, or any metadata-only input mutations.
-    traced_tangents = pytree.tree_map(
-        lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
-        fw_metadata.traced_tangents,
-    )
-
-    joint_inputs = (flat_args, traced_tangents)
+    joint_inputs = (flat_args, fw_metadata.traced_tangents)
 
     fn_prepared_for_autograd = fn_prepped_for_autograd(
         flat_fn,
