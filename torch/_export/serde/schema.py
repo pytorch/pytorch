@@ -1,14 +1,14 @@
 # NOTE: This is a placeholder for iterating on export serialization schema design.
 #       Anything is subject to change and no guarantee is provided at this point.
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Dict, List, Optional, Tuple
 
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = (3, 1)
 TREESPEC_VERSION = 1
 
 
@@ -142,6 +142,7 @@ class GraphArgument:
 @dataclass
 class CustomObjArgument:
     name: str
+    class_fqn: str
 
 
 # This is actually a union type
@@ -199,6 +200,7 @@ class Graph:
     # tensor, rather than following export schema and returning a singleton
     # list.
     is_single_tensor_return: bool = False
+    custom_obj_values: Dict[str, CustomObjArgument] = field(default_factory=dict)
 
 
 @dataclass
@@ -225,12 +227,19 @@ class InputToTensorConstantSpec:
     tensor_constant_name: str
 
 
+@dataclass
+class InputToCustomObjSpec:
+    arg: CustomObjArgument
+    custom_obj_name: str
+
+
 @dataclass(repr=False)
 class InputSpec(_Union):
     user_input: UserInputSpec
     parameter: InputToParameterSpec
     buffer: InputToBufferSpec
     tensor_constant: InputToTensorConstantSpec
+    custom_obj: InputToCustomObjSpec
 
 
 @dataclass
@@ -309,11 +318,19 @@ class GraphModule:
     module_call_graph: List[ModuleCallEntry]
 
 
+# Invariant: Every time a change is made to the schema, one of the versions
+#            should be upadted.
+@dataclass
+class SchemaVersion:
+    major: int  # Major version number is bumped every time a breaking change is made.
+    minor: int  # Minor version number is bumped when a compatible change is made.
+
+
 @dataclass
 class ExportedProgram:
     graph_module: GraphModule
     # Key is the opset namespace (ex. aten), and value is the version number
     opset_version: Dict[str, int]
     range_constraints: Dict[str, RangeConstraint]
-    schema_version: int
+    schema_version: SchemaVersion
     dialect: str

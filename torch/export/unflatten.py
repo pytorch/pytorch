@@ -2,6 +2,7 @@ import abc
 import copy
 import operator
 from copy import deepcopy
+from itertools import chain
 from typing import Any, cast, Dict, List, Optional, Union
 
 import torch
@@ -35,6 +36,10 @@ def _assign_attr(
             t = torch.nn.Module()
             setattr(to_module, item, t)
         to_module = t
+
+    if isinstance(from_obj, torch.ScriptObject):
+        setattr(to_module, field, from_obj)
+        return
 
     # If it is a tensor and not a parameter attribute of a module, it should be a named buffer.
     # So, we register it as a named buffer in the target module.
@@ -112,7 +117,7 @@ class InterpreterModule(torch.nn.Module):
 
 class FlatArgsAdapter(abc.ABC):
     """
-    Adapts input arguments with `input_spec` to align `target_spec`.
+    Adapts input arguments with ``input_spec`` to align ``target_spec``.
     """
 
     @abc.abstractmethod
@@ -122,7 +127,7 @@ class FlatArgsAdapter(abc.ABC):
         input_spec: pytree.TreeSpec,
         input_args: List[Any],
     ) -> List[Any]:
-        """NOTE: This adapter may mutate given `flat_args`."""
+        """NOTE: This adapter may mutate given ``flat_args``."""
         ...
 
 
@@ -148,7 +153,7 @@ class UnflattenedModule(torch.nn.Module):
         _outline_submodules(export_graph, self)
 
         self.range_constraints = export_module.range_constraints
-        self.equality_constraints = export_module.equality_constraints
+        self.equality_constraints: List = []
 
         state_dict = export_module.state_dict
         for name in self.graph_signature.parameters:
@@ -168,9 +173,25 @@ class UnflattenedModule(torch.nn.Module):
                 is_parameter=False,
             )
 
+        for fqn in chain(
+            self.graph_signature.lifted_tensor_constants,
+            self.graph_signature.lifted_custom_objs,
+        ):
+            constant = export_module.constants[fqn]
+            if isinstance(constant, torch.Tensor):
+                constant = constant.clone()
+            _assign_attr(
+                constant,
+                self,
+                fqn,
+                is_parameter=False,
+            )
+
         inputs_to_state: Dict[str, str] = {
             **self.graph_signature.inputs_to_parameters,
             **self.graph_signature.inputs_to_buffers,
+            **self.graph_signature.inputs_to_lifted_tensor_constants,
+            **self.graph_signature.inputs_to_lifted_custom_objs,
         }
 
         _sink_params(self, inputs_to_state, [])
@@ -192,11 +213,15 @@ class UnflattenedModule(torch.nn.Module):
         self.check_input_constraints = True
 
     def forward(self, *args, **kwargs):
-        if is_fx_tracing():
-            return torch.fx.Interpreter(self, graph=self.graph).run(
-                *args, enable_io_processing=False
-            )
         flat_args, in_spec = pytree.tree_flatten((args, kwargs))
+        if is_fx_tracing():
+            return_val = torch.fx.Interpreter(self, graph=self.graph).run(
+                *flat_args, enable_io_processing=False
+            )
+            # For scalar return value, fx.Graph wraps in a tuple
+            if isinstance(return_val, tuple) and len(return_val) == 1:
+                return return_val[0]
+            return return_val
 
         assert self.module_call_graph[0].fqn == ""
         signature = self.module_call_graph[0].signature
@@ -251,10 +276,10 @@ def unflatten(
     hierachy instead of the flat graph that :mod:`torch.export` usually produces.
 
     .. note:: The args/kwargs of unflattened modules will not necessarily match
-    the eager module, so doing a module swap (e.g. :code:`self.submod =
-    new_mod`) will not necessarily work. If you need to swap a module out, you
-    need to set the :code:`preserve_module_call_signature` parameter of
-    :func:`torch.export.export`.
+        the eager module, so doing a module swap (e.g. :code:`self.submod =
+        new_mod`) will not necessarily work. If you need to swap a module out, you
+        need to set the :code:`preserve_module_call_signature` parameter of
+        :func:`torch.export.export`.
 
     Args:
         module (ExportedProgram): The ExportedProgram to unflatten.
@@ -601,12 +626,19 @@ class _ModuleFrame:
         if parent_out is None:
             return
 
+        parent_out.meta["val"] = (
+            graph_outputs.meta.get("val")
+            if isinstance(graph_outputs, torch.fx.Node)
+            else [o.meta.get("val") for o in graph_outputs]
+        )
+
         if len(orig_outputs) == 1 and signature is None:
             self.parent.node_map[orig_outputs[0]] = parent_out
         else:
             for i, orig_output in enumerate(orig_outputs):
                 # Use Proxy to record getitem access.
                 proxy_out = torch.fx.Proxy(parent_out)[i].node  # type: ignore[index]
+                proxy_out.meta["val"] = orig_output.meta.get("val")
                 self.parent.node_map[orig_output] = proxy_out
 
         if self.cached_graph_module is not None:
@@ -733,7 +765,7 @@ def _sink_params(
     inputs_to_state: Dict[str, str],
     scope: List[str],
 ):
-    """Sink params and buffers from graph inputs into get_attr nodes.
+    """Sink params, buffers, and constants from graph inputs into get_attr nodes.
 
     Exported modules are purely functional, so they pass their parameters and
     buffers in as inputs to the graph.
@@ -756,7 +788,8 @@ def _sink_params(
         return
 
     graph = module.graph
-    inputs = filter(lambda n: n.op == "placeholder", graph.nodes)
+    inputs = list(filter(lambda n: n.op == "placeholder", graph.nodes))
+    the_last_input = inputs[-1]
 
     # Also remove from call_module nodes
     call_module_nodes = filter(lambda n: n.op == "call_module", graph.nodes)
@@ -780,9 +813,10 @@ def _sink_params(
                 continue
             attr_path = state_name[len(scope) :]
             state_attr = _recursive_getattr(module, attr_path)
-            assert isinstance(state_attr, torch.Tensor)
+            assert isinstance(state_attr, (torch.Tensor, torch.ScriptObject))
 
-            with graph.inserting_after(node):
+            # Make sure the newly created get_attr node is placed after the last placeholder node
+            with graph.inserting_after(the_last_input):
                 new_node = graph.create_node("get_attr", ".".join(attr_path))
 
             node.replace_all_uses_with(new_node, propagate_meta=True)

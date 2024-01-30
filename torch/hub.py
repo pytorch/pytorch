@@ -82,7 +82,7 @@ ENV_XDG_CACHE_HOME = 'XDG_CACHE_HOME'
 DEFAULT_CACHE_DIR = '~/.cache'
 VAR_DEPENDENCY = 'dependencies'
 MODULE_HUBCONF = 'hubconf.py'
-READ_DATA_CHUNK = 8192
+READ_DATA_CHUNK = 128 * 1024
 _hub_dir = None
 
 
@@ -647,7 +647,7 @@ def download_url_to_file(url: str, dst: str, hash_prefix: Optional[str] = None,
         with tqdm(total=file_size, disable=not progress,
                   unit='B', unit_scale=True, unit_divisor=1024) as pbar:
             while True:
-                buffer = u.read(8192)
+                buffer = u.read(READ_DATA_CHUNK)
                 if len(buffer) == 0:
                     break
                 f.write(buffer)

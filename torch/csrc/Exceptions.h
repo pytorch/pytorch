@@ -279,15 +279,6 @@ struct PyTorchError : public std::exception {
 #define TORCH_FORMAT_FUNC(FORMAT_INDEX, VA_ARGS_INDEX)
 #endif
 
-// Translates to Python IndexError
-struct IndexError : public PyTorchError {
-  using PyTorchError::PyTorchError;
-  IndexError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
-  PyObject* python_type() override {
-    return PyExc_IndexError;
-  }
-};
-
 // Translates to Python TypeError
 struct TypeError : public PyTorchError {
   using PyTorchError::PyTorchError;
@@ -297,37 +288,11 @@ struct TypeError : public PyTorchError {
   }
 };
 
-// Translates to Python ValueError
-struct ValueError : public PyTorchError {
-  using PyTorchError::PyTorchError;
-  TORCH_PYTHON_API ValueError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
-  PyObject* python_type() override {
-    return PyExc_ValueError;
-  }
-};
-
-// Translates to Python NotImplementedError
-struct NotImplementedError : public PyTorchError {
-  NotImplementedError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
-  NotImplementedError() = default;
-  PyObject* python_type() override {
-    return PyExc_NotImplementedError;
-  }
-};
-
 // Translates to Python AttributeError
 struct AttributeError : public PyTorchError {
   AttributeError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
   PyObject* python_type() override {
     return PyExc_AttributeError;
-  }
-};
-
-// Translates to Python LinAlgError
-struct LinAlgError : public PyTorchError {
-  LinAlgError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
-  PyObject* python_type() override {
-    return THPException_LinAlgError;
   }
 };
 
@@ -375,20 +340,16 @@ auto wrap_pybind_function_impl_(
     Func&& f,
     std::index_sequence<Is...>,
     bool release_gil) {
-  using result_type = typename invoke_traits<Func>::result_type;
   namespace py = pybind11;
 
   // f=f is needed to handle function references on older compilers
-  return [f = std::forward<Func>(f),
-          release_gil](Arg<Func, Is>... args) -> result_type {
+  return [f = std::forward<Func>(f), release_gil](Arg<Func, Is>... args) {
     HANDLE_TH_ERRORS
     if (release_gil) {
       py::gil_scoped_release no_gil;
-      return c10::guts::invoke(
-          std::move(f), std::forward<Arg<Func, Is>>(args)...);
+      return c10::guts::invoke(f, std::forward<Arg<Func, Is>>(args)...);
     } else {
-      return c10::guts::invoke(
-          std::move(f), std::forward<Arg<Func, Is>>(args)...);
+      return c10::guts::invoke(f, std::forward<Arg<Func, Is>>(args)...);
     }
     END_HANDLE_TH_ERRORS_PYBIND
   };

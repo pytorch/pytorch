@@ -5398,8 +5398,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def forward(self, x):
                 return x.repeat_interleave(2)
 
-        x = torch.tensor([1, 2, 3])
-        self.run_test(FlattenModel(), (x,))
+        for shape in ([3], [3, 4], [2, 3, 4]):
+            x = torch.randn(shape)
+            self.run_test(FlattenModel(), (x,))
 
         class DimsModel(torch.nn.Module):
             def forward(self, x):

@@ -25,8 +25,8 @@ Tensor flip(const at::Tensor& self, const IntArrayRef dim_list) {
   // Create the output texture
   vTensor v_output{
       context,
-      self.sizes().vec(),
-      self.scalar_type(),
+      v_input.sizes(),
+      convert_dtype(self.scalar_type()),
   };
 
   // Required to determine how to insert memory barriers in the command buffer
