@@ -278,14 +278,14 @@ def reduce_scatter_tensor(
         self = torch.cat(tensor_list)
 
     if USE_NATIVE_C10D_FUNCTIONAL:
-        tensor = torch.ops._c10d_functional.reduce_scatter_tensor(
+        tensor = torch.ops._c10d_functional.reduce_scatter_tensor(  # type: ignore[possibly-undefined]
             self,
             reduceOp,
             group_size,
             group_name,
         )
     else:
-        tensor = torch.ops.c10d_functional.reduce_scatter_tensor(  # type: ignore[attr-defined]
+        tensor = torch.ops.c10d_functional.reduce_scatter_tensor(  # type: ignore[attr-defined, possibly-undefined]
             self,
             reduceOp,
             tag,
@@ -410,14 +410,14 @@ def reduce_scatter_tensor_coalesced(
             inputs[idx] = torch.cat(tensor_list)
 
     if USE_NATIVE_C10D_FUNCTIONAL:
-        tensor_list = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(  # type: ignore[attr-defined]
+        tensor_list = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(  # type: ignore[attr-defined, possibly-undefined]
             inputs,
             reduceOp,
             group_size,
             group_name,
         )
     else:
-        tensor_list = torch.ops.c10d_functional.reduce_scatter_tensor_coalesced(  # type: ignore[attr-defined]
+        tensor_list = torch.ops.c10d_functional.reduce_scatter_tensor_coalesced(  # type: ignore[attr-defined, possibly-undefined]
             inputs,
             reduceOp,
             tag,
