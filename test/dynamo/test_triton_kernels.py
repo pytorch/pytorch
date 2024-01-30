@@ -914,6 +914,10 @@ def make_mutation_test(fn):
 if HAS_CUDA:
 
     @triton.jit
+    def helper_id(p):
+        return p
+
+    @triton.jit
     def helper_add_and_out(x, y, out_ptr):
         return x + y, out_ptr
 
@@ -1011,7 +1015,41 @@ class MutationTests(torch._dynamo.test_case.TestCase):
         )
 
     @make_mutation_test
-    def test_fn_call():
+    def test_fn_call_one_return():
+        @triton.jit
+        def add_kernel_with_fn_call(
+            in_ptr0,
+            in_ptr1,
+            n_elements,
+            out_ptr,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            out = helper_id(out_ptr)
+            tl.store(out + offsets, output, mask=mask)
+
+        t = torch.randn(4)
+        return (
+            add_kernel_with_fn_call,
+            {
+                "in_ptr0": t,
+                "in_ptr1": t,
+                "n_elements": 4,
+                "out_ptr": t,
+                "BLOCK_SIZE": 4,
+            },
+            # TODO(oulgen): helper return values not implemented yet
+            ["in_ptr0", "in_ptr1", "out_ptr"],
+        )
+
+    @make_mutation_test
+    def test_fn_call_multi_return():
         @triton.jit
         def add_kernel_with_fn_call(
             in_ptr0,
