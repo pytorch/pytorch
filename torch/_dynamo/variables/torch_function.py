@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import inspect
 from typing import Dict, List
 
@@ -52,7 +54,7 @@ def _get_subclass_type(var):
 def _get_subclass_type_var(tx, var):
     assert isinstance(var, (TensorWithTFOverrideVariable, UserDefinedObjectVariable))
     if isinstance(var, TensorWithTFOverrideVariable):
-        return var.class_type_var()
+        return var.class_type_var(tx)
     elif isinstance(var, UserDefinedObjectVariable):
         from .builder import SourcelessBuilder, VariableBuilder
 
@@ -163,19 +165,29 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # stash the subclass type to rewrap an output tensor if needed
         # this is needed because the actual type needs to be available
         # each time the compiled artifact is run and outputs a wrapped tensor.
-        if self.global_mangled_class_name() not in tx.output.global_scope:
-            tx.output.install_global(self.global_mangled_class_name(), self.class_type)
+        if self.global_mangled_class_name(tx) not in tx.output.global_scope:
+            # Safe because global_mangled_class_name figures it out
+            tx.output.install_global_unsafe(
+                self.global_mangled_class_name(tx), self.class_type
+            )
 
     def python_type(self):
         return self.class_type
 
-    def class_type_var(self):
+    def class_type_var(self, tx):
         return TensorSubclassVariable(
-            self.class_type, source=GlobalSource(self.global_mangled_class_name())
+            self.class_type, source=GlobalSource(self.global_mangled_class_name(tx))
         )
 
-    def global_mangled_class_name(self):
-        return f"__subclass_{self.class_type.__name__}_{id(self.class_type)}"
+    def global_mangled_class_name(self, tx):
+        # The global_mangled_class_name should be different for different
+        # invocations of torch.compile. Otherwise, we can run into a situation
+        # where multiple torch.compile invocations re-use the same global name,
+        # but the global's lifetime is tied to the first invocation (and
+        # may be deleted when the first torch.compile invocation is deleted)
+        # We mangle it based off of the output_graph's id.
+        compile_id = tx.output.compile_id
+        return f"__subclass_{self.class_type.__name__}_{id(self.class_type)}_c{id}"
 
     def var_getattr(self, tx, name):
         # [Note: __torch_function__] We currently only support attributes that are defined on
@@ -206,7 +218,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
             return self.call_torch_function(
                 tx,
                 get_fn,
-                TupleVariable([self.class_type_var()]),
+                TupleVariable([self.class_type_var(tx)]),
                 [self],
                 {},
             )
@@ -216,7 +228,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
     def call_torch_function(self, tx, fn, types, args, kwargs):
         return call_torch_function(
             tx,
-            self.class_type_var(),
+            self.class_type_var(tx),
             self.torch_function_fn,
             fn,
             types,
