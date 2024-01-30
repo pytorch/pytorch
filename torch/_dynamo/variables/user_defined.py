@@ -502,51 +502,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if method is object.__init__:
                 return ConstantVariable.create(None)
 
-            # [NOTE] OrderedDict, dict subtypes must always have source
-            # We cannot instantiate such subtypes in-graph due to builtin __new__
-            if method is collections.OrderedDict.keys:
-                # subclass of OrderedDict
-                assert not (args or kwargs)
-                assert self.source  # OrderedDict, dict subtypes must always have source
-                keys = list(self.value.keys())
-                assert all(map(ConstantVariable.is_literal, keys))
-                install_guard(self.source.make_guard(GuardBuilder.DICT_CONST_KEYS))
-                return TupleVariable([ConstantVariable.create(k) for k in keys])
-
-            if (
-                method in (collections.OrderedDict.__contains__, dict.__contains__)
-                and len(args) == 1
-                and isinstance(args[0], (ConstantVariable, BuiltinVariable))
-                and inspect.getattr_static(type(self.value), "keys")
-                in (collections.OrderedDict.keys, dict.keys)
-            ):
-                assert not kwargs
-                assert self.source  # OrderedDict, dict subtypes must always have source
-                install_guard(self.source.make_guard(GuardBuilder.DICT_CONST_KEYS))
-                return ConstantVariable.create(
-                    args[0].as_python_constant() in self.value
-                )
-
-            if method is collections.OrderedDict.items and isinstance(
-                self.value, collections.OrderedDict
-            ):
-                assert self.source  # OrderedDict, dict subtypes must always have source
-                assert not (args or kwargs)
-                items = []
-                keys = self.call_method(tx, "keys", [], {})
-                for key in keys.unpack_var_sequence(tx):
-                    items.append(
-                        TupleVariable(
-                            [key, self.odict_getitem(tx, key)],
-                        )
-                    )
-                return TupleVariable(items)
-
-            if method is collections.OrderedDict.__getitem__ and len(args) == 1:
-                assert not kwargs
-                assert self.source  # OrderedDict, dict subtypes must always have source
-                return self.odict_getitem(tx, args[0])
-
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
                 source = (
