@@ -278,18 +278,18 @@ def reduce_scatter_tensor(
         self = torch.cat(tensor_list)
 
     if USE_NATIVE_C10D_FUNCTIONAL:
-        tensor = torch.ops._c10d_functional.reduce_scatter_tensor(  # type: ignore[possibly-undefined]
+        tensor = torch.ops._c10d_functional.reduce_scatter_tensor(
             self,
             reduceOp,
             group_size,
-            group_name,
+            group_name,  # type: ignore[possibly-undefined]
         )
     else:
-        tensor = torch.ops.c10d_functional.reduce_scatter_tensor(  # type: ignore[attr-defined, possibly-undefined]
+        tensor = torch.ops.c10d_functional.reduce_scatter_tensor(  # type: ignore[attr-defined]
             self,
             reduceOp,
             tag,
-            rankset,
+            rankset,  # type: ignore[possibly-undefined]
             group_size,
         )
     res = _maybe_wrap_tensor(tensor)
@@ -410,18 +410,18 @@ def reduce_scatter_tensor_coalesced(
             inputs[idx] = torch.cat(tensor_list)
 
     if USE_NATIVE_C10D_FUNCTIONAL:
-        tensor_list = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(  # type: ignore[attr-defined, possibly-undefined]
+        tensor_list = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(  # type: ignore[attr-defined]
             inputs,
             reduceOp,
             group_size,
-            group_name,
+            group_name,  # type: ignore[possibly-undefined]
         )
     else:
-        tensor_list = torch.ops.c10d_functional.reduce_scatter_tensor_coalesced(  # type: ignore[attr-defined, possibly-undefined]
+        tensor_list = torch.ops.c10d_functional.reduce_scatter_tensor_coalesced(  # type: ignore[attr-defined]
             inputs,
             reduceOp,
             tag,
-            rankset,
+            rankset,  # type: ignore[possibly-undefined]
             group_size,
         )
 
