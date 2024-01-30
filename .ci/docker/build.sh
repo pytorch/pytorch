@@ -277,6 +277,7 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     DOCS=yes
+    UNINSTALL_DILL=yes
     ;;
   pytorch-linux-jammy-py3-clang12-executorch)
     ANACONDA_PYTHON_VERSION=3.10
@@ -349,7 +350,7 @@ if [[ "$image" == *cuda*  && ${OS} == "ubuntu" ]]; then
 fi
 
 # Build image
-docker build \
+DOCKER_BUILDKIT=1 docker build \
        --no-cache \
        --progress=plain \
        --build-arg "BUILD_ENVIRONMENT=${image}" \

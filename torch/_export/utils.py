@@ -13,22 +13,11 @@ from torch.utils._pytree import (
     FlattenFunc,
     FromDumpableContextFn,
     ToDumpableContextFn,
-    tree_flatten,
     UnflattenFunc,
 )
 
 
 SERIALIZED_DATACLASS_TO_PYTHON_DATACLASS: Dict[str, Type[Any]] = {}
-
-
-@torch._dynamo.disable
-def _check_input_constraints_pre_hook(self, *args, **kwargs):
-    flat_args, _ = tree_flatten(args)
-    return _check_input_constraints_for_graph(
-        [node for node in self.graph.nodes if node.op == "placeholder"],
-        flat_args,
-        self.range_constraints,
-    )
 
 
 def _check_input_constraints_for_graph(
