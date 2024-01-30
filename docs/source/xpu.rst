@@ -24,6 +24,22 @@ torch.xpu
     stream
     synchronize
 
+Random Number Generator
+-------------------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    get_rng_state
+    get_rng_state_all
+    set_rng_state
+    set_rng_state_all
+    manual_seed
+    manual_seed_all
+    seed
+    seed_all
+    initial_seed
+
 Streams and events
 ------------------
 .. autosummary::
