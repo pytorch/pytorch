@@ -12,7 +12,7 @@ from .. import variables
 from ..bytecode_transformation import create_call_function, create_rot_n
 from ..exc import unimplemented, Unsupported
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
-from ..utils import get_first_attr, identity, make_cell
+from ..utils import get_first_attr, identity, istype, make_cell
 from .base import typestr, VariableTracker
 
 if TYPE_CHECKING:
@@ -131,6 +131,12 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         if inspect.getattr_static(fn, "__script_if_tracing_wrapper", False):
             fn = inspect.getattr_static(fn, "__original_fn", fn)
         self.fn: types.FunctionType = fn
+
+    def as_python_constant(self):
+        if istype(self, UserFunctionVariable):
+            return self.fn
+        # subclasses (such as methods) usually aren't a constant
+        return super().as_python_constant()
 
     def self_args(self):
         return []
@@ -625,6 +631,20 @@ class FunctoolsPartialVariable(VariableTracker):
         assert isinstance(keywords, dict)
         self.keywords = keywords
 
+    def reconstruct(self, codegen):
+        codegen.load_import_from("functools", "partial")
+        codegen(self.func)
+        if self.args:
+            codegen.foreach(self.args)
+        if not self.keywords:
+            return create_call_function(len(self.args) + 1, True)
+
+        codegen.foreach(self.keywords.values())
+        keys = tuple(self.keywords.keys())
+        return codegen.create_call_function_kw(
+            len(keys) + len(self.args) + 1, keys, True
+        )
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -645,18 +665,12 @@ class FunctoolsPartialVariable(VariableTracker):
             **{k: v.as_python_constant() for k, v in self.keywords.items()},
         )
 
-    def reconstruct(self, codegen):
-        codegen.load_import_from("functools", "partial")
-        codegen(self.func)
-        if self.args:
-            codegen.foreach(self.args)
-        if not self.keywords:
-            return create_call_function(len(self.args) + 1, True)
-
-        codegen.foreach(self.keywords.values())
-        keys = tuple(self.keywords.keys())
-        return codegen.create_call_function_kw(
-            len(keys) + len(self.args) + 1, keys, True
+    def guard_as_python_constant(self):
+        """Similar to as_python_constant(), but add ID_MATCH guards to try to force things to become constants"""
+        return functools.partial(
+            self.func.guard_as_python_constant(),
+            *[v.guard_as_python_constant() for v in self.args],
+            **{k: v.guard_as_python_constant() for k, v in self.keywords.items()},
         )
 
 
