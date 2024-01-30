@@ -626,6 +626,9 @@ def _get_updated_range_constraints(
         for k, v in shape_env.var_to_range.items()
         if k not in shape_env.replacements
     }
+    # Only when we have an unbacked symint, and it's used as constructor inputs,
+    # runtime_var_to_range will make a difference compated to var_to_range.
+    # e.g. [2, oo) -> [0, oo)
     for k, v in shape_env.runtime_var_to_range.items():
         if k not in shape_env.replacements:
             range_constraints[k] = v
