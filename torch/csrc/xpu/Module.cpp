@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/xpu/XPUContext.h>
 #include <c10/util/CallOnce.h>
+#include <c10/xpu/XPUCachingAllocator.h>
 #include <c10/xpu/XPUFunctions.h>
 #include <torch/csrc/Module.h>
 #include <torch/csrc/THP.h>
