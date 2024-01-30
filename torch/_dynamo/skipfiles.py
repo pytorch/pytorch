@@ -158,6 +158,7 @@ FUNC_INLINELIST = {
     "torch._constrain_as_size",
     "torch._constrain_as_value",
     "torch._tensor._convert",
+    "torch.jit._unwrap_optional",
 }
 
 
@@ -221,6 +222,7 @@ MOD_INLINELIST = {
     "torch.utils._pytree",
     "torch._tensor",
     "torch._higher_order_ops.strict_mode",
+    "torch._higher_order_ops.while_loop",
 }
 
 
