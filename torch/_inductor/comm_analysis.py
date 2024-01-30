@@ -209,7 +209,7 @@ def estimate_nccl_collective_runtime(snode: "BaseSchedulerNode") -> float:
         nsteps = nRanks - 1
 
     # Convert bus BW to algorithm BW (tensor bytes / algoBW = actual execution time)
-    ratio = (1.0 * nRanks) / nsteps
+    ratio = (1.0 * nRanks) / nsteps  # type: ignore[possibly-undefined]
     bandwidth = busBw * ratio
     # Convert GB/s to GB/ns
     bandwidth_GB_per_ns = bandwidth / 1e9
@@ -236,7 +236,7 @@ def estimate_nccl_collective_runtime(snode: "BaseSchedulerNode") -> float:
     if nNodes > 1:
         netOverhead = 1.0  # getNetOverhead(comm);
     intraLat = max(intraLat, netOverhead)
-    latency += (nsteps - nInterSteps) * intraLat + nInterSteps * interLat
+    latency += (nsteps - nInterSteps) * intraLat + nInterSteps * interLat  # type: ignore[possibly-undefined]
     # Convert us to ns
     latency_ns = latency * 1e3
 

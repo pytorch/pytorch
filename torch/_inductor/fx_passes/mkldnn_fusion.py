@@ -283,7 +283,7 @@ if torch._C._has_mkldnn:
                     L[aten.mul](out, negative_slope),
                 )
                 if lowp_dtype:
-                    out = L[prims.convert_element_type.default](out, dtype=dtype2)
+                    out = L[prims.convert_element_type.default](out, dtype=dtype2)  # type: ignore[possibly-undefined]
                 return out
 
         return fn
@@ -324,7 +324,7 @@ if torch._C._has_mkldnn:
                     out = L[prims.convert_element_type.default](out, dtype=torch.float)
                 out = L[aten.clamp_max](L[aten.clamp_min](out, min_value), max_value)
                 if lowp_dtype:
-                    out = L[prims.convert_element_type.default](out, dtype=dtype2)
+                    out = L[prims.convert_element_type.default](out, dtype=dtype2)  # type: ignore[possibly-undefined]
                 return out
 
         return fn

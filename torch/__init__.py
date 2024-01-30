@@ -515,7 +515,7 @@ for name in ("sqrt", "cos", "cosh", "sin", "sinh", "tan", "tanh", "asin", "acos"
 sym_sqrt = current_module._sym_sqrt
 __all__.append("sym_sqrt")
 
-del fn, name, sym_name, current_module
+del fn, name, sym_name, current_module  # type: ignore[possibly-undefined]
 
 
 def sym_ite(b, t, f):

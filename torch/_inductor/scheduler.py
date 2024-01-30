@@ -1038,7 +1038,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 else:
                     fused_nodes.append(node)
 
-        return cls(producer.scheduler, fused_nodes, prev_node_1, prev_node_2)
+        return cls(producer.scheduler, fused_nodes, prev_node_1, prev_node_2)  # type: ignore[possibly-undefined]
 
     def __init__(
         self,
@@ -2256,13 +2256,13 @@ class Scheduler:
 
             if node.is_template():
                 node, *epilogue = node.get_nodes()
-                self.get_backend(device).codegen_template(node, epilogue)
+                self.get_backend(device).codegen_template(node, epilogue)  # type: ignore[possibly-undefined]
             elif node.is_extern():
                 self.codegen_extern_call(node)
             elif node.is_foreach():
-                self.get_backend(device).codegen_foreach(node)
+                self.get_backend(device).codegen_foreach(node)  # type: ignore[possibly-undefined]
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
-                self.get_backend(device).codegen_nodes(node.get_nodes())
+                self.get_backend(device).codegen_nodes(node.get_nodes())  # type: ignore[possibly-undefined]
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
@@ -2271,7 +2271,7 @@ class Scheduler:
                 V.graph.wrapper_code.generate_inf_and_nan_checker(node)
 
             if config.triton.debug_sync_kernel:
-                self.get_backend(device).codegen_sync()
+                self.get_backend(device).codegen_sync()  # type: ignore[possibly-undefined]
 
             self.available_buffer_names.update(node.get_names())
 

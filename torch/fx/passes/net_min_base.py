@@ -371,11 +371,11 @@ class _MinimizerBase:
         # Compare results
         names: Names = output_names
         if output_names is None:
-            names = [str(v) for v in result_key]
+            names = [str(v) for v in result_key]  # type: ignore[possibly-undefined]
 
         numeric_result, bool_result = self.compare_fn(a_result, b_result, names)
 
-        self.results[result_key] = numeric_result
+        self.results[result_key] = numeric_result  # type: ignore[possibly-undefined]
         report.append(f"Numerical accuracy = {numeric_result}")
         if not bool_result:
             report.append(f"Result mismatch for {result_key}")

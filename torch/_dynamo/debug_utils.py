@@ -46,7 +46,7 @@ if use_buck:
         "//deeplearning/fbgemm/fbgemm_gpu:sparse_ops_cpu",
         "//deeplearning/fbgemm/fbgemm_gpu:sparse_ops",
     ]
-    cur_target = libfb.py.build_info.BuildInfo.get_build_rule().replace("fbcode:", "//")
+    cur_target = libfb.py.build_info.BuildInfo.get_build_rule().replace("fbcode:", "//")  # type: ignore[possibly-undefined]
     extra_imports = "\n".join([f'torch.ops.load_library("{x}")' for x in extra_deps])
 
 

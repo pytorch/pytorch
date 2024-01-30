@@ -305,7 +305,7 @@ def _replace_pattern(
                     first_user_node = n
                     break
 
-        with original_graph.inserting_before(first_user_node):
+        with original_graph.inserting_before(first_user_node):  # type: ignore[possibly-undefined]
             copied_returning_nodes = original_graph.graph_copy(replacement_graph, val_map)
 
         if isinstance(copied_returning_nodes, Node):

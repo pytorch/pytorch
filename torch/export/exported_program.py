@@ -252,7 +252,7 @@ class ExportedProgram:
 
         flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
             (args, kwargs)
-        )
+        )  # type: ignore[possibly-undefined]
 
         if in_spec is not None and received_spec != in_spec:
             raise ValueError(
