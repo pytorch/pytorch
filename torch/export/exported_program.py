@@ -253,7 +253,7 @@ class ExportedProgram:
                     user_args, self.call_spec.in_spec, exact_structural_match=True
                 )  # type: ignore[assignment]
             except Exception:
-                _, received_spec = pytree.tree_flatten(user_args)
+                _, received_spec = pytree.tree_flatten(user_args)  # type: ignore[possibly-undefined]
                 raise TypeError(  # noqa: TRY200
                     "Trying to flatten user inputs with exported input tree spec: \n"
                     f"{self.call_spec.in_spec}\n"
@@ -516,7 +516,9 @@ class ExportedProgram:
                 old_input_spec = old_signature.input_specs[i]
                 arg = (
                     old_input_spec.arg
-                    if isinstance(old_input_spec.arg, ConstantArgument)
+                    if isinstance(
+                        old_input_spec.arg, (ConstantArgument, CustomObjArgument)
+                    )
                     else type(old_input_spec.arg)(node.name)
                 )
                 new_input_specs.append(
@@ -534,7 +536,9 @@ class ExportedProgram:
                 old_output_spec = old_signature.output_specs[i]
                 arg = (
                     old_output_spec.arg
-                    if isinstance(old_output_spec.arg, ConstantArgument)
+                    if isinstance(
+                        old_output_spec.arg, (ConstantArgument, CustomObjArgument)
+                    )
                     else type(old_output_spec.arg)(node.name)
                 )
                 new_output_specs.append(
@@ -579,6 +583,22 @@ class ExportedProgram:
     def _validate(self):
         self.verifier().check(self)
 
+    # TODO(zhxchen17) Formalize this.
+    def _update(
+        self, graph_module, graph_signature, state_dict=None
+    ) -> "ExportedProgram":
+        return ExportedProgram(
+            root=graph_module,
+            graph=graph_module.graph,
+            graph_signature=graph_signature,
+            state_dict=state_dict or self.state_dict,
+            range_constraints=copy.deepcopy(self.range_constraints),
+            module_call_graph=copy.deepcopy(self._module_call_graph),
+            example_inputs=self.example_inputs,
+            verifier=self.verifier,
+            tensor_constants=self.tensor_constants,
+        )
+
 
 def _get_updated_range_constraints(
     gm: torch.fx.GraphModule,
@@ -606,6 +626,9 @@ def _get_updated_range_constraints(
         for k, v in shape_env.var_to_range.items()
         if k not in shape_env.replacements
     }
+    # Only when we have an unbacked symint, and it's used as constructor inputs,
+    # runtime_var_to_range will make a difference compated to var_to_range.
+    # e.g. [2, oo) -> [0, oo)
     for k, v in shape_env.runtime_var_to_range.items():
         if k not in shape_env.replacements:
             range_constraints[k] = v

@@ -7,11 +7,9 @@ from typing import Any, Dict, final, List, Optional, Tuple, Type
 import torch
 from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.export.custom_obj import ScriptObjectMeta
 from torch.export.exported_program import ExportedProgram
 from torch.export.graph_signature import (
     CustomObjArgument,
-    ExportGraphSignature,
     InputKind,
     SymIntArgument,
     TensorArgument,
@@ -45,7 +43,7 @@ def _check_val(node: torch.fx.Node) -> None:
             return True
         elif isinstance(val, (SymInt, SymFloat, SymBool)):
             return True
-        elif isinstance(val, ScriptObjectMeta):
+        elif isinstance(val, CustomObjArgument):
             return True
         elif isinstance(val, Iterable):
             return all(_check_correct_val(x) for x in val)
@@ -130,9 +128,6 @@ class Verifier(metaclass=_VerifierMeta):
 
     @final
     def check(self, ep: ExportedProgram) -> None:
-        if not isinstance(ep.graph_signature, ExportGraphSignature):
-            # TODO Enforce type checking in the constructor.
-            return
         self._check_graph_module(ep.graph_module)
         _verify_exported_program_signature(ep)
 
@@ -344,7 +339,10 @@ def _verify_exported_program_signature(exported_program) -> None:
     # Check outputs
     output_node = list(exported_program.graph.nodes)[-1]
     assert output_node.op == "output"
-    output_nodes = [arg.name for arg in output_node.args[0]]
+    output_nodes = [
+        arg.name if isinstance(arg, torch.fx.Node) else arg
+        for arg in output_node.args[0]
+    ]
 
     if len(output_nodes) != len(gs.output_specs):
         raise SpecViolationError(
