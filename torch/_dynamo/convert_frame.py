@@ -9,6 +9,10 @@ import typing
 import weakref
 from typing import Any, Callable, Dict, List, Optional, Set
 
+from torch.fx._lazy_graph_module import (  # type: ignore[attr-defined]
+    _use_lazy_graph_module,
+)
+
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -17,7 +21,7 @@ except ModuleNotFoundError:
 import torch
 import torch._logging
 from torch._guards import compile_context, CompileContext, CompileId, tracing
-from torch._utils_internal import log_compilation_event, signpost_event
+from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
@@ -26,7 +30,6 @@ from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 from torch.utils._traceback import format_traceback_short
 
 from . import config, exc
-from .allowed_functions import is_allowed, is_numpy
 from .backends.registry import CompilerFn
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
@@ -62,6 +65,7 @@ from .hooks import Hooks
 from .output_graph import OutputGraph
 from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator, SpeculationLog
+from .trace_rules import is_numpy
 from .types import BytecodeHook
 from .utils import (
     CleanupManager,
@@ -77,6 +81,7 @@ from .utils import (
     istype,
     LazyString,
     orig_code_map,
+    record_compilation_metrics,
     reset_graph_break_dup_checker,
     setup_compile_debug,
     troubleshooting_url,
@@ -111,7 +116,7 @@ class Tracker:
 input_codes = Tracker()
 output_codes = Tracker()
 
-initial_global_state = None
+initial_global_state: Optional[GlobalStateGuard] = None
 
 
 @functools.wraps(original_forward_from_src)
@@ -179,7 +184,9 @@ def has_tensor_in_frame(frame):
     for co_name in frame.f_code.co_names:
         if co_name in frame.f_globals:
             obj = frame.f_globals[co_name]
-            if is_allowed(obj):
+            if isinstance(obj, types.ModuleType) and (
+                obj.__name__.startswith("torch.") or obj is torch
+            ):
                 return True
             # ... or a global import of numpy.*
             if np and config.trace_numpy and (obj is np or is_numpy(obj)):
@@ -219,7 +226,7 @@ def has_tensor_in_frame(frame):
         elif istype(obj, (str, int, float, type(None), bool)):
             seen_ids[obj_id] = False
             return seen_ids[obj_id]
-        elif is_namedtuple(obj):
+        elif is_namedtuple(obj) and hasattr(obj, "_fields"):
             seen_ids[obj_id] = any(has_tensor(getattr(obj, v)) for v in obj._fields)
             return seen_ids[obj_id]
         else:
@@ -327,7 +334,8 @@ def convert_frame_assert(
 
         if is_generator(code):
             unimplemented("generator")
-        if exceeds_cache_size_limit(cache_size):
+        exceeded, limit_type = exceeds_cache_size_limit(cache_size)
+        if exceeded:
 
             def format_func_info(code):
                 return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
@@ -337,17 +345,18 @@ def convert_frame_assert(
                 return recompile_reasons[-1]
 
             log.warning(
-                "torch._dynamo hit config.cache_size_limit (%s)\n"
+                "torch._dynamo hit config.%s (%s)\n"
                 "   function: %s\n"
                 "   last reason: %s\n"
                 'To log all recompilation reasons, use TORCH_LOGS="recompiles".\n'
                 "To diagnose recompilation issues, see %s.",
-                config.cache_size_limit,
+                limit_type,
+                getattr(config, limit_type),
                 format_func_info(code),
                 format_guard_failures(),
                 troubleshooting_url,
             )
-            unimplemented("cache_size_limit reached")
+            unimplemented(f"{limit_type} reached")
 
         if not has_tensor_in_frame(frame):
             return None
@@ -427,6 +436,7 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
     return handle
 
 
+@_use_lazy_graph_module(config.use_lazy_graph_module)
 @maybe_cprofile
 def _compile(
     code: types.CodeType,
@@ -451,14 +461,19 @@ def _compile(
     )
 
     output: Optional[OutputGraph] = None
+    tracer: Optional[InstructionTranslator] = None
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
+    fail_type: Optional[str] = None
     fail_reason: Optional[str] = None
+    fail_user_frame_filename: Optional[str] = None
+    fail_user_frame_lineno: Optional[int] = None
     speculation_log = SpeculationLog()
 
     @preserve_global_state
     def transform(instructions, code_options):
         nonlocal output
+        nonlocal tracer
         speculation_log.restart()
         tracer = InstructionTranslator(
             instructions,
@@ -566,6 +581,41 @@ def _compile(
 
         assert output is not None
 
+        # Tests for new code objects.
+        # The rationale for these tests can be found in torch/csrc/dynamo/eval_frame.c
+        # Only test once the code object is created.
+        # They are not tested during runtime.
+
+        def count_args(code):
+            import inspect
+
+            return (
+                code.co_argcount
+                + code.co_kwonlyargcount
+                + bool(code.co_flags & inspect.CO_VARARGS)
+                + bool(code.co_flags & inspect.CO_VARKEYWORDS)
+            )
+
+        total_argcount_old = count_args(code)
+        total_argcount_new = count_args(out_code)
+        msg = "arg mismatch: "
+        msg += f"old code object has args {code.co_varnames[:total_argcount_old]}, "
+        msg += f"new code object has args {out_code.co_varnames[:total_argcount_new]}"
+        assert (
+            code.co_varnames[:total_argcount_old]
+            == out_code.co_varnames[:total_argcount_new]
+        ), msg
+
+        msg = "free var mismatch: "
+        msg += f"old code object has free var {code.co_freevars}, "
+        msg += f"new code object has free var {out_code.co_freevars}"
+        assert code.co_freevars == out_code.co_freevars, msg
+
+        msg = "cell var mismatch: "
+        msg += f"old code object has cell var {code.co_cellvars}, "
+        msg += f"new code object has cell var {out_code.co_cellvars}"
+        assert code.co_cellvars == out_code.co_cellvars, msg
+
         # Skipping Dynamo on a frame without any extracted graph.
         # This does not affect eager functionality. But this is necessary
         # for export for cases where Dynamo-reconstructed bytecode can create
@@ -610,16 +660,27 @@ def _compile(
             UncapturedHigherOrderOpError,
             BisectValidationException,
         ) as e:
+            fail_type = str(type(e))
             fail_reason = str(e)
             exception_handler(e, code, frame, export=export)
+            if e.innermost_user_frame_summary is not None:  # type: ignore[union-attr]
+                fail_user_frame_filename = e.innermost_user_frame_summary.filename  # type: ignore[union-attr]
+                fail_user_frame_lineno = e.innermost_user_frame_summary.lineno  # type: ignore[union-attr]
             raise
         except Exception as e:
+            fail_type = str(type(e))
             fail_reason = str(e)
             exception_handler(e, code, frame, export=export)
+            if e.innermost_user_frame_summary is not None:  # type: ignore[attr-defined]
+                fail_user_frame_filename = e.innermost_user_frame_summary.filename  # type: ignore[attr-defined]
+                fail_user_frame_lineno = e.innermost_user_frame_summary.lineno  # type: ignore[attr-defined]
             raise InternalTorchDynamoError(str(e)).with_traceback(
                 e.__traceback__
             ) from None
         finally:
+            if tracer:
+                tracer.output.local_scope = {}
+
             from .utils import curr_frame
 
             frame_key = str(curr_frame)
@@ -629,6 +690,7 @@ def _compile(
                 and frame_key in frame_phase_timing
             ):
                 guard_count = len(output.guards)
+                shape_env_guard_count = len(output.shape_env.guards)
                 graph_op_count = output.count_calls()
                 graph_node_count = len(output.graph.nodes)
                 graph_input_count = len(output.placeholders)
@@ -644,6 +706,7 @@ def _compile(
                 }
             else:
                 guard_count = None
+                shape_env_guard_count = None
                 graph_op_count = None
                 graph_node_count = None
                 graph_input_count = None
@@ -659,16 +722,20 @@ def _compile(
                 cache_size.num_cache_entries_with_same_id_matched_objs,
                 cache_size.num_cache_entries,
                 guard_count,
+                shape_env_guard_count,
                 graph_op_count,
                 graph_node_count,
                 graph_input_count,
                 entire_frame_compile_time,
                 backend_compile_time,
+                fail_type,
                 fail_reason,
+                fail_user_frame_filename,
+                fail_user_frame_lineno,
                 non_compliant_ops,
                 compliant_custom_ops,
             )
-            log_compilation_event(metrics)
+            record_compilation_metrics(metrics)
 
 
 def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
@@ -745,8 +812,7 @@ def replay(filename):
             hooks=Hooks(),
             cache_size=CacheSizeRelevantForFrame(0, 0),
             frame=None,
+            frame_state={},
         )
-    except Exception:
-        pass
     finally:
         config.replay_record_enabled = original_replay_val

@@ -18,6 +18,10 @@ BUILD_DIR="build"
 BUILD_RENAMED_DIR="build_renamed"
 BUILD_BIN_DIR="$BUILD_DIR"/bin
 
+#Set Default values for these variables in case they are not set
+SHARD_NUMBER="${SHARD_NUMBER:=1}"
+NUM_TEST_SHARDS="${NUM_TEST_SHARDS:=1}"
+
 export VALGRIND=ON
 # export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
@@ -124,6 +128,10 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # mainly used so that we're not spending extra cycles testing cpu
   # devices on expensive gpu machines
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
+elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
+  export PYTORCH_TESTING_DEVICE_ONLY_FOR="xpu"
+  # setting PYTHON_TEST_EXTRA_OPTION
+  export PYTHON_TEST_EXTRA_OPTION="--xpu"
 fi
 
 if [[ "$TEST_CONFIG" == *crossref* ]]; then
@@ -134,6 +142,15 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
   rocminfo
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
+  # Source Intel oneAPI envrioment script to enable xpu runtime related libraries
+  # refer to https://www.intel.com/content/www/us/en/docs/oneapi/programming-guide/2024-0/use-the-setvars-and-oneapi-vars-scripts-with-linux.html
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/compiler/latest/env/vars.sh
+  # Check XPU status before testing
+  xpu-smi discovery
 fi
 
 if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
@@ -235,14 +252,14 @@ test_python_shard() {
 
   # Bare --include flag is not supported and quoting for lint ends up with flag not being interpreted correctly
   # shellcheck disable=SC2086
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION
 
   assert_git_not_dirty
 }
 
 test_python() {
   # shellcheck disable=SC2086
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --verbose
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --verbose $PYTHON_TEST_EXTRA_OPTION
   assert_git_not_dirty
 }
 
@@ -253,33 +270,13 @@ test_dynamo_shard() {
     exit 1
   fi
   python tools/dynamo/verify_dynamo.py
-  # Temporarily disable test_fx for dynamo pending the investigation on TTS
-  # regression in https://github.com/pytorch/torchdynamo/issues/784
+  # PLEASE DO NOT ADD ADDITIONAL EXCLUDES HERE.
+  # Instead, use @skipIfTorchDynamo on your tests.
   time python test/run_test.py --dynamo \
+    --exclude-inductor-tests \
     --exclude-jit-executor \
     --exclude-distributed-tests \
-    --exclude \
-      test_autograd \
-      test_jit \
-      test_proxy_tensor \
-      test_quantization \
-      test_public_bindings \
-      test_dataloader \
-      test_reductions \
-      test_namedtensor \
-      test_namedtuple_return_api \
-      profiler/test_profiler \
-      profiler/test_profiler_tree \
-      test_overrides \
-      test_python_dispatch \
-      test_fx \
-      test_package \
-      test_legacy_vmap \
-      test_custom_ops \
-      test_content_store \
-      export/test_db \
-      functorch/test_dims \
-      functorch/test_aotdispatch \
+    --exclude-torch-export-tests \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   assert_git_not_dirty
@@ -308,8 +305,10 @@ test_inductor() {
 
   # docker build uses bdist_wheel which does not work with test_aot_inductor
   # TODO: need a faster way to build
-  BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
-  CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aot_inductor
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+      BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
+      CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aot_inductor
+  fi
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
@@ -389,8 +388,8 @@ test_perf_for_dashboard() {
             --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]] && [[ "$mode" == "inference" ]]; then
-        python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --cpp-wrapper "$@" \
+        TORCHINDUCTOR_CPP_WRAPPER=1 python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_cuda_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *freezing_cudagraphs-true* ]] && [[ "$mode" == "inference" ]]; then
@@ -490,6 +489,13 @@ test_dynamo_benchmark() {
 test_inductor_torchbench_smoketest_perf() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
+
+  # smoke test the cpp_wrapper mode
+  TORCHINDUCTOR_CPP_WRAPPER=1 python benchmarks/dynamo/torchbench.py --device cuda --accuracy --bfloat16 \
+    --inference --inductor --only hf_T5 --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_smoketest.csv"
+  python benchmarks/dynamo/check_accuracy.py \
+      --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_smoketest.csv" \
+      --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_torchbench_inference.csv"
 
   python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --float16 --training \
     --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" --only hf_Bert \
@@ -662,6 +668,19 @@ test_libtorch_api() {
     export CPP_TESTS_DIR="${BUILD_BIN_DIR}"
     python test/run_test.py --cpp --verbose -i cpp/static_runtime_test
   fi
+}
+
+test_xpu_bin(){
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+
+  for xpu_case in "${BUILD_BIN_DIR}"/*{xpu,sycl}*; do
+    if [[ "$xpu_case" != *"*"* && "$xpu_case" != *.so && "$xpu_case" != *.a ]]; then
+      case_name=$(basename "$xpu_case")
+      echo "Testing ${case_name} ..."
+      "$xpu_case" --gtest_output=xml:"$TEST_REPORTS_DIR"/"$case_name".xml
+    fi
+  done
 }
 
 test_aot_compilation() {
@@ -999,14 +1018,17 @@ test_docs_test() {
 }
 
 test_executorch() {
+  echo "Install torchvision and torchaudio"
+  install_torchvision
+  install_torchaudio
+
   pushd /executorch
 
-  echo "Install torchvision and torchaudio"
-  # TODO(huydhn): Switch this to the pinned commits on ExecuTorch once they are
-  # there.  These libraries need to be built here, and not part of the Docker
-  # image because they require the target version of torch to be installed first
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/audio.git"
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/vision.git"
+  # NB: We need to build ExecuTorch runner here and not inside the Docker image
+  # because it depends on PyTorch
+  # shellcheck disable=SC1091
+  source .ci/scripts/utils.sh
+  build_executorch_runner "cmake"
 
   echo "Run ExecuTorch regression tests for some models"
   # NB: This is a sample model, more can be added here
@@ -1089,19 +1111,21 @@ elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
   test_inductor
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  test_without_numpy
   install_torchvision
   test_dynamo_shard 1
   test_aten
-elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
+elif [[ "${TEST_CONFIG}" == *dynamo* && $SHARD_NUMBER -gt 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  test_dynamo_shard 2
+  test_dynamo_shard "${SHARD_NUMBER}"
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
   test_python_shard 1
   test_aten
   test_libtorch 1
+  if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
+    test_xpu_bin
+  fi
 elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   test_python_shard 2
@@ -1126,6 +1150,11 @@ elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
   install_torchvision
   test_python
   test_aten
+elif [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
+  install_torchvision
+  test_python
+  test_aten
+  test_xpu_bin
 else
   install_torchvision
   install_monkeytype

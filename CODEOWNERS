@@ -50,6 +50,9 @@ nn/qat/ @jerryzh168
 /torch/onnx/ @bowenbao @abock @thiagocrepaldi @wschin
 /test/onnx/ @bowenbao @abock @thiagocrepaldi @wschin
 
+# CI
+/.ci  @pytorch/pytorch-dev-infra
+
 # Docker
 /.ci/docker/ @jeffdaily
 /.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @bertmaher @jeffdaily @jataylo @jithunnair-amd @pruthvistony

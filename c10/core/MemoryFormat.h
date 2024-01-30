@@ -1,10 +1,11 @@
 #pragma once
 
-#include <c10/core/Backend.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 
+#include <cstdint>
 #include <ostream>
+#include <vector>
 
 // Memory format is not the property of a Tensor. It is the way to tell an
 // operator how the result should be organized in memory and nothing more. That

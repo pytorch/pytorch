@@ -379,6 +379,37 @@ def all_to_all_single(
     return _maybe_wrap_tensor(tensor)
 
 
+def permute_tensor(
+    self: torch.Tensor,
+    src_dst: List[int],
+    group: RANK_TYPES,
+    tag: str = "",
+) -> torch.Tensor:
+    """
+    Permutes the elements of the tensor according to the given source/destination pairs. `src_dst` should
+    be defined such that src_dst[m] == n means m sends to n.
+
+    Group can be one of:
+        List[int]: ranks participating in the collective.
+        List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
+        ProcessGroup: Will perform a collective using the ranks and tag of the PG.
+        DeviceMesh: Do a SPMD collective over all ranks of the mesh
+        (DeviceMesh, int): Do a MPMD collective over one
+    """
+    t, rankset, group_size = _expand_group(group, tag)
+    local_pg = c10d._find_or_create_pg_by_ranks_and_tag(t, rankset, group_size)
+
+    output_split_sizes = [0] * group_size
+    input_split_sizes = [0] * group_size
+    for src, dst in enumerate(src_dst):
+        if src == dist.get_rank(local_pg):
+            input_split_sizes[dst] = self.numel()
+        if dst == dist.get_rank(local_pg):
+            output_split_sizes[src] = self.numel()
+
+    return all_to_all_single(self, output_split_sizes, input_split_sizes, group, tag)
+
+
 class AsyncCollectiveTensor(torch.Tensor):
     r"""
     A Tensor wrapper subclass that is used to trigger a call to wait
@@ -648,7 +679,7 @@ def _reduce_scatter_tensor_coalesced_meta(inputs, reduceOp, tag, rankset, group_
 # but then you pass those sizes explicitly, and the all to all itself
 # isn't dynamic, it just follows the specified output splits
 def _all_to_all_single_meta(
-    input, output_split_sizes, input_split_sizes, tag, rankset, group_size
+    input, output_split_sizes, input_split_sizes, *args, **kwargs
 ):
     if output_split_sizes is None:
         return input.new_empty(input.size())
@@ -741,6 +772,7 @@ if not torch._running_with_deploy():
         _reduce_scatter_tensor_coalesced_native_meta,
         "Meta",
     )
+    _c10_lib_impl.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
 else:
     warnings.warn(
         "PyTorch Distributed functional collectives do not work with torch::deploy."
@@ -759,8 +791,8 @@ These schemas intentionally match torch.distributed.distributed_c10d.* ops that 
 
 
 def all_gather_tensor_inplace(
-    output: torch.Tensor,
-    input: torch.Tensor,
+    output_tensor: torch.Tensor,
+    input_tensor: torch.Tensor,
     group,  # TODO add a type,
     async_op: bool = False,
     tag: str = "",
@@ -769,7 +801,7 @@ def all_gather_tensor_inplace(
     assert (
         not async_op
     ), "Can't remap async version of inplace op to functional collective"
-    return output.copy_(all_gather_tensor(input, gather_dim, group, tag))
+    return output_tensor.copy_(all_gather_tensor(input_tensor, gather_dim, group, tag))
 
 
 def reduce_scatter_tensor_inplace(
@@ -787,8 +819,23 @@ def reduce_scatter_tensor_inplace(
     return output.copy_(reduce_scatter_tensor(input, op, scatter_dim, group, tag))
 
 
+def all_reduce_inplace(
+    tensor: torch.Tensor,
+    op: str = "sum",
+    group=None,
+    async_op: bool = False,
+    tag: str = "",
+):
+    assert (
+        not async_op
+    ), "Can't remap async version of inplace op to functional collective"
+
+    return tensor.copy_(all_reduce(tensor, op, group, tag))
+
+
 from torch.distributed.distributed_c10d import (
     all_gather_into_tensor as legacy_allgather,
+    all_reduce as legacy_allreduce,
     reduce_scatter_tensor as legacy_reducescatter,
 )
 
@@ -797,4 +844,5 @@ from torch.distributed.distributed_c10d import (
 traceable_collective_remaps = {
     legacy_allgather: all_gather_tensor_inplace,
     legacy_reducescatter: reduce_scatter_tensor_inplace,
+    legacy_allreduce: all_reduce_inplace,
 }

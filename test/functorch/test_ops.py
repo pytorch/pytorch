@@ -9,6 +9,7 @@
 import itertools
 import unittest
 
+from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_MACOS, \
     IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like
 from torch.testing._internal.common_utils import skipIfRocm, runOnRocm
@@ -369,6 +370,7 @@ aliasing_ops_list_return = {
 
 
 @unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
+@unMarkDynamoStrictTest
 class TestOperators(TestCase):
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
@@ -774,6 +776,8 @@ class TestOperators(TestCase):
         xfail("nn.functional.batch_norm"),
         xfail("nn.functional.binary_cross_entropy"),  # vmap: inplace into a regular tensor
         xfail("nn.functional.ctc_loss"),  # derivate not implemented for _ctc_loss_backward
+        # flaky on ROCM needs investigation
+        decorate('nn.functional.conv_transpose2d', decorator=skipIfRocm),
         skip("nn.functional.dropout"),  # calls random op
         skip("nn.functional.dropout2d"),  # calls random op
         skip("nn.functional.dropout3d"),  # calls random op

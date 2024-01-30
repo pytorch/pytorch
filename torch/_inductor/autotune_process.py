@@ -513,6 +513,15 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         )
 
         run_method = getattr(mod, self.kernel_name).run
+        extra_args = list(self.extra_args)
+
+        # Newer version of triton add warmup argument to JITFunction.run.
+        # This code handles backward-compatibility.
+        warmup_arg = {}
+        import inspect
+
+        if "warmup" in inspect.signature(run_method).parameters:
+            warmup_arg["warmup"] = False
 
         return functools.partial(
             run_method,
@@ -520,9 +529,9 @@ class TritonBenchmarkRequest(BenchmarkRequest):
             output_tensor,
             *self.extra_args,
             grid=self.grid,
+            **warmup_arg,
             num_stages=self.num_stages,
             num_warps=self.num_warps,
-            stream=torch.cuda.current_stream().cuda_stream,
         )
 
     def __str__(self) -> str:

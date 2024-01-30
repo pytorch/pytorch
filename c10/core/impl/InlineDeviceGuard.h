@@ -4,13 +4,15 @@
 // InlineOptionalDeviceGuard.
 
 #include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/impl/VirtualGuardImpl.h>
-#include <c10/util/C++17.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+#include <type_traits>
+#include <utility>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 /**
  * A DeviceGuard is an RAII class that sets a device to some value
@@ -423,5 +425,4 @@ class InlineOptionalDeviceGuard {
   optional<InlineDeviceGuard<T>> guard_;
 };
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

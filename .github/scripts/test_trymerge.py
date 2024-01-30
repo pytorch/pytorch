@@ -32,7 +32,6 @@ from trymerge import (
     main as trymerge_main,
     MandatoryChecksMissingError,
     MergeRule,
-    PostCommentError,
     RE_GHSTACK_DESC,
     read_merge_rules,
     remove_job_name_suffix,
@@ -141,11 +140,14 @@ def mock_parse_args(revert: bool = False, force: bool = False) -> Any:
             self.comment_id = 0
             self.reason = "this is for testing"
             self.ignore_current = False
+            self.check_mergeability = False
 
     return Object()
 
 
-def mock_remove_label(org: str, repo: str, pr_num: str, label: str) -> None:
+def mock_remove_label(
+    org: str, repo: str, pr_num: str, label: str, dry_run: bool
+) -> None:
     pass
 
 
@@ -222,6 +224,31 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
     ]
 
 
+def mocked_read_merge_rules_approvers(
+    repo: Any, org: str, project: str
+) -> List[MergeRule]:
+    return [
+        MergeRule(
+            name="Core Reviewers",
+            patterns=["*"],
+            approved_by=["1", "2", "3", "4", "5", "6"],
+            mandatory_checks_name=[
+                "Lint",
+                "pull",
+            ],
+        ),
+        MergeRule(
+            name="Core Maintainers",
+            patterns=["*"],
+            approved_by=["1", "2", "malfet"],
+            mandatory_checks_name=[
+                "Lint",
+                "pull",
+            ],
+        ),
+    ]
+
+
 def mocked_read_merge_rules_raise(repo: Any, org: str, project: str) -> List[MergeRule]:
     raise RuntimeError("testing")
 
@@ -286,6 +313,27 @@ class TestTryMerge(TestCase):
         self.assertRaisesRegex(
             RuntimeError, "testing", lambda: find_matching_merge_rule(pr, repo)
         )
+
+    @mock.patch(
+        "trymerge.read_merge_rules", side_effect=mocked_read_merge_rules_approvers
+    )
+    def test_match_rules_approvers(self, *args: Any) -> None:
+        "Tests that PR has the necessary approvers"
+        repo = DummyGitRepo()
+
+        pr = GitHubPR("pytorch", "pytorch", 115329)
+        # Test that all potential approvers across all rules are listed if the
+        # PR doesn't have one of them
+        for mock_rule in ["Core Reviewers", "Core Maintainers"]:
+            self.assertRaisesRegex(
+                RuntimeError,
+                mock_rule,
+                lambda: find_matching_merge_rule(pr, repo),
+            )
+
+        pr = GitHubPR("pytorch", "pytorch", 115495)
+        # Test that PR with the correct approvers doesn't raise any exception
+        self.assertTrue(find_matching_merge_rule(pr, repo) is not None)
 
     @mock.patch("trymerge.read_merge_rules", side_effect=mocked_read_merge_rules)
     def test_lint_fails(self, *args: Any) -> None:
@@ -386,6 +434,13 @@ class TestTryMerge(TestCase):
         assert pr._reviews is not None  # to pacify mypy
         self.assertGreater(len(pr._reviews), 100)
 
+    def get_co_authors(self, *args: Any) -> None:
+        """Tests that co-authors are recognized"""
+        pr = GitHubPR("pytorch", "pytorch", 118347)
+        authors = pr.get_authors()
+        self.assertIn("kit1980", authors)
+        self.assertIn("Co-authored-by:", pr.gen_commit_message())
+
     def test_get_checkruns_many_runs(self, *args: Any) -> None:
         """Tests that all checkruns can be fetched"""
         pr = GitHubPR("pytorch", "pytorch", 105260)
@@ -469,20 +524,6 @@ class TestTryMerge(TestCase):
             self.fail(f"get_changed_files throws an exception: {error}")
 
         self.assertEqual(len(changed_files), pr.get_changed_files_count())
-
-    def test_revert_codev_fails(self, *args: Any) -> None:
-        pr = GitHubPR("pytorch", "pytorch", 91340)
-
-        class GitRepoCoDev(DummyGitRepo):
-            def commit_message(self, ref: str) -> str:
-                return pr.get_body()
-
-        repo = GitRepoCoDev()
-        self.assertRaisesRegex(
-            PostCommentError,
-            "landed via phabricator",
-            lambda: validate_revert(repo, pr, comment_id=1372496233),
-        )
 
     def test_revert_codev_abandoned_diff_succeeds(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 100652)

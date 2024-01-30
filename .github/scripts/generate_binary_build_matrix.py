@@ -16,13 +16,20 @@ from typing import Dict, List, Optional, Tuple
 CUDA_ARCHES = ["11.8", "12.1"]
 
 
-ROCM_ARCHES = ["5.6", "5.7"]
+CUDA_ARCHES_FULL_VERSION = {"11.8": "11.8.0", "12.1": "12.1.1"}
+
+
+CUDA_ARCHES_CUDNN_VERSION = {"11.8": "8", "12.1": "8"}
+
+
+ROCM_ARCHES = ["5.7", "6.0"]
 
 
 CPU_CXX11_ABI_ARCH = ["cpu-cxx11-abi"]
 
 
 CPU_AARCH64_ARCH = ["cpu-aarch64"]
+
 
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "11.8": (
