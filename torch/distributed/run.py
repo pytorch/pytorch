@@ -549,13 +549,14 @@ def get_args_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
-        "--filter-ranks",
-        "--filter_ranks",
+        "--filter-local-ranks",
+        "--filter_local_ranks",
         action=env,
         type=str,
         default="",
-        help="Only show logs from specified ranks in console (e.g. [--filter-ranks 0 1 2] will "
-        "only show logs from rank 0, 1 and 2). When used with --tee, logs will still be saved to files",
+        help="Only show logs from specified ranks in console (e.g. [--filter-local-ranks 0 1 2] will "
+        "only show logs from rank 0, 1 and 2). This will only apply to stdout and stderr, not to"
+        "log files saved via --redirect or --tee",
     )
 
     #
@@ -735,13 +736,13 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
     rdzv_endpoint = get_rdzv_endpoint(args)
 
     ranks: Optional[Set[int]] = None
-    if args.filter_ranks:
+    if args.filter_local_ranks:
         try:
-            ranks = set(map(int, args.filter_ranks.split(",")))
+            ranks = set(map(int, args.filter_local_ranks.split(",")))
             assert ranks
         except Exception as e:
             raise Exception(
-                "--filter_ranks must be a comma-separated list of integers e.g. --filter_ranks=0,1,2"
+                "--filter_local_ranks must be a comma-separated list of integers e.g. --filter_local_ranks=0,1,2"
             ) from e
 
     config = LaunchConfig(
@@ -761,7 +762,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
         log_dir=args.log_dir,
         log_line_prefix_template=log_line_prefix_template,
         local_addr=args.local_addr,
-        filter_ranks=ranks,
+        filter_local_ranks=ranks,
     )
 
     with_python = not args.no_python
