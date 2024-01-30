@@ -940,13 +940,21 @@ static void cum_max_min_helper_mps(const Tensor& input,
                                    Tensor& indices,
                                    int64_t dim,
                                    MPSReductionType reduction_type) {
-  TORCH_CHECK(reduction_type == MPSReductionType::MAX || reduction_type == MPSReductionType::MIN, "Unexpected reduction type");
+  TORCH_CHECK(reduction_type == MPSReductionType::MAX || reduction_type == MPSReductionType::MIN,
+              "Unexpected reduction type");
+
+  if (!values.sizes().equals(input.sizes()))
+    values.resize_(input.sizes());
+
+  if (!indices.sizes().equals(input.sizes()))
+    indices.resize_(input.sizes());
+
   if (!is_macos_13_or_newer()) {
     TORCH_WARN_ONCE("MPS: cum_max_min ops are supported natively starting from macOS 13.0. ",
                     "Falling back on CPU. This may have performance implications.");
 
-    auto values_cpu = at::empty_like(input, TensorOptions(kCPU)));
-    auto indices_cpu = at::empty(input, TensorOptions(kCPU).dtype(kLong));
+    auto values_cpu = at::empty_like(input, TensorOptions(kCPU));
+    auto indices_cpu = at::empty_like(input, TensorOptions(kCPU).dtype(kLong));
     auto input_cpu = input.to("cpu");
 
     if (reduction_type == MPSReductionType::MAX)
