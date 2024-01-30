@@ -90,15 +90,18 @@ Tensor& max_unpooling2d_forward_out_mps(const Tensor& input,
               indices.sizes());
 
   for (const auto i : c10::irange(1, input.ndimension())) {
-    TORCH_CHECK(input.size(i) > 0, "max_unpooling2d_forward_out_mps(): ",
+    TORCH_CHECK(input.size(i) > 0,
+                "max_unpooling2d_forward_out_mps(): ",
                 "Expected input to have non-zero size for non-batch dimensions, but got ",
-                input.sizes(), " with dimension ", i, " being empty.");
+                input.sizes(),
+                " with dimension ",
+                i,
+                " being empty.");
   }
 
   if (!is_macos_13_or_newer()) {
     TORCH_WARN_ONCE("MPS: max_unpooling2d_forward op is supported natively starting from macOS 13.0. ",
                     "Falling back on CPU. This may have performance implications.");
-
 
     Tensor output_cpu = at::max_unpool2d(input.to("cpu"), indices.to("cpu"), output_size);
     output.resize_as_(output_cpu);
