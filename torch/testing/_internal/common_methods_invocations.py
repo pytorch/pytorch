@@ -8531,6 +8531,26 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
         )
     )
 
+    # jagged (with query/keys offsets)
+    samples.append(
+        SampleInput(
+            make((4, 2, 64)).view(-1, 8, 8).unsqueeze(0),
+            make((6, 64)).view(-1, 8, 8).unsqueeze(0),
+            make((6, 64)).view(-1, 8, 8).unsqueeze(0),
+            bias=None,
+            cu_seqlens_q=torch.tensor((0, 2, 4, 6, 8), dtype=torch.int32, device=device),
+            cu_seqlens_k=torch.tensor((0, 1, 3, 5, 6), dtype=torch.int32, device=device),
+            max_seqlen_q=2,
+            max_seqlen_k=2,
+            dropout_p=0.0,
+            custom_mask_type=0,  # No Mask
+            compute_log_sumexp=requires_grad,
+            scale=None,
+            causal_diagonal=None,
+            seqlen_k=None,
+        )
+    )
+
     yield from samples
 
 def sample_inputs_flash_attention_forward(op_info, device, dtype, requires_grad, **kwargs):
