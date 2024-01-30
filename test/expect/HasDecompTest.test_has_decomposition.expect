@@ -1119,10 +1119,6 @@ aten::resize_as_
 aten::resize_as_sparse
 aten::resize_as_sparse.out
 aten::resize_as_sparse_
-aten::round
-aten::round.decimals
-aten::round.decimals_out
-aten::round.out
 aten::row_indices
 aten::row_indices_copy
 aten::row_indices_copy.out

@@ -870,13 +870,18 @@ def reciprocal(a):
     return prims.reciprocal(a)
 
 
-# TODO: round takes additional kwargs
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    aten_op=None,  # TODO: this does need a decomp, but kwarg handling is needed
 )
-def round(a):
-    return prims.round(a)
+def round(a: TensorLikeType, decimals: int = 0) -> TensorLikeType:
+    if decimals == 0:
+        return prims.round(a)
+    elif decimals > 0:
+        ten_pow = 10**decimals
+        return prims.div(prims.round(prims.mul(a, ten_pow)), ten_pow)
+    else:
+        ten_pow = 10**(-decimals)
+        return prims.mul(prims.round(prims.div(a, ten_pow)), ten_pow)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
