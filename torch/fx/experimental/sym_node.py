@@ -218,6 +218,9 @@ class SymNode:
     def abs(self) -> "SymNode":
         return self._abs()  # type: ignore[attr-defined]
 
+    def pos(self) -> "SymNode":
+        return self._pos()  # type: ignore[attr-defined]
+
     def round(self, ndigits=None) -> "SymNode":
         return self._round(ndigits)  # type: ignore[attr-defined]
 
@@ -392,6 +395,28 @@ class SymNode:
             _advise_is_size(SymInt(self))
         return r
 
+    def guard_size_oblivious(self, file, line):
+        """
+        Like guard_bool, but if we encounter unbacked symbols, if those symbols
+        are size-like, we will treat them as >= 2 for the purposes of the analysis.
+
+        This CHANGES the runtime semantics, but all size-oblivious sites have been
+        audited to ensure that the runtime semantics don't change in a material way.
+        Acceptable runtime semantic changes are, e.g., squeeze() no longer dropping
+        an unbacked one size, or a tensor reporting as non-contiguous even if it's
+        contiguous when it is one size.
+        """
+        # TODO: use the file/line for some useful diagnostic on why a
+        # guard occurred
+        r = self.shape_env.evaluate_expr(
+            self.expr, self.hint, fx_node=self.fx_node, size_oblivious=True
+        )
+        try:
+            return bool(r)
+        except Exception:
+            log.warning("Failed to convert to bool: %s", r)
+            raise
+
     def bool_(self):
         return self.guard_bool("", 0)
 
@@ -407,6 +432,7 @@ class SymNode:
 
 # TODO: this probably needs the sizes-strides eval functions
 METHOD_TO_OPERATOR = {
+    "pos": operator.pos,
     "abs": operator.abs,
     "add": operator.add,
     "and": operator.and_,
@@ -444,6 +470,7 @@ unary_magic_methods = {
     "floor",
     "neg",
     "sym_not",
+    "pos",
 }
 
 
@@ -724,6 +751,7 @@ def _sympy_is_integer(a):
 magic_methods = {
     **reflectable_magic_methods,
     "sym_not": operator.invert,
+    "pos": operator.pos,
     "eq": _sympy_eq,
     "ne": _sympy_ne,
     "gt": _sympy_gt,

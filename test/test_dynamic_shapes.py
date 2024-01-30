@@ -545,7 +545,7 @@ def forward(self, x_1):
         i1 = shape_env.create_unbacked_symint()
         _constrain_range_for_size(i1)
         self.assertTrue(expect_true(i0 == 10 - i1))
-        self.assertExpectedInline(str(i0), """i0""")
+        self.assertExpectedInline(str(i0), """u0""")
 
     def test_expect_true_double_digits(self):
         shape_env = ShapeEnv()
