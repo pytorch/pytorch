@@ -57,7 +57,7 @@ __all__ = [
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
     'SymBool', 'sym_not', 'unravel_index',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'sym_ite', 'compile', 'vmap',
-    'export', 'autocast', 'cond',
+    'export', 'autocast', 'cond', 'GradScaler',
 ]
 
 ################################################################################
@@ -515,7 +515,7 @@ for name in ("sqrt", "cos", "cosh", "sin", "sinh", "tan", "tanh", "asin", "acos"
 sym_sqrt = current_module._sym_sqrt
 __all__.append("sym_sqrt")
 
-del fn, name, sym_name, current_module
+del fn, name, sym_name, current_module  # type: ignore[possibly-undefined]
 
 
 def sym_ite(b, t, f):
@@ -1462,7 +1462,7 @@ def manager_path():
         raise RuntimeError("Unable to find torch_shm_manager at " + path)
     return path.encode('utf-8')
 
-from torch.amp import autocast
+from torch.amp import autocast, GradScaler
 
 # Initializing the extension shadows the built-in python float / int classes;
 # store them for later use by SymInt / SymFloat.
