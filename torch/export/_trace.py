@@ -49,6 +49,7 @@ from .graph_signature import (
     _sig_to_specs,
     ArgumentSpec,
     ConstantArgument,
+    CustomObjArgument,
     ExportGraphSignature,
     SymIntArgument,
     TensorArgument,
@@ -435,7 +436,13 @@ def _export_non_strict(
             return TensorArgument(name=node.name)
         elif isinstance(val, torch.SymInt):
             return SymIntArgument(name=node.name)
+        elif isinstance(val, torch.ScriptObject):
+            return CustomObjArgument(
+                name=node.name, class_fqn=val._type().qualified_name()  # type: ignore[attr-defined]
+            )
         else:
+            # TODO: this branch is likely wrong, all permissible ConstantArgument type
+            # should have been handled already
             return ConstantArgument(value=val)
 
     input_specs, output_specs = _sig_to_specs(
