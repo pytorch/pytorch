@@ -19,7 +19,7 @@ from torch.testing._internal.common_utils import markDynamoStrictTest, parametri
 FP16_REDUCED_PRECISION = {'atol': 1e-5, 'rtol': 1e-4}
 
 
-def _forceCapturableFalseForUnsupportedSingleTensor(optim_info, kwargs):
+def _force_capturable_False_for_unsupported_single_tensor(optim_info, kwargs):
     if optim_info.only_supports_capturable_on_foreach and not kwargs.get("foreach", False) and kwargs.get("capturable", False):
         kwargs["capturable"] = False
 
@@ -70,7 +70,7 @@ class TestOptimRenewed(TestCase):
             if "foreach" in optim_info.supported_impls:
                 optim_input.kwargs["foreach"] = False  # force forloop
 
-            _forceCapturableFalseForUnsupportedSingleTensor(optim_info, optim_input.kwargs)
+            _force_capturable_False_for_unsupported_single_tensor(optim_info, optim_input.kwargs)
 
             if contiguous:
                 weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
@@ -197,7 +197,7 @@ class TestOptimRenewed(TestCase):
             for flag_value in (False, True):
                 kwargs[flag] = flag_value
 
-                _forceCapturableFalseForUnsupportedSingleTensor(optim_info, kwargs)
+                _force_capturable_False_for_unsupported_single_tensor(optim_info, kwargs)
 
                 input = torch.tensor(
                     [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=dtype, device=device
@@ -301,7 +301,7 @@ class TestOptimRenewed(TestCase):
             updated_params, state = [], []
             kwargs = deepcopy(optim_input.kwargs)
 
-            _forceCapturableFalseForUnsupportedSingleTensor(optim_info, kwargs)
+            _force_capturable_False_for_unsupported_single_tensor(optim_info, kwargs)
 
             if kwargs.get("capturable", False) and str(device) == "cpu" :
                 # capturable is not supported on CPU
@@ -390,7 +390,7 @@ class TestOptimRenewed(TestCase):
             for flag_value in (False, True):
                 kwargs["foreach"] = flag_value
 
-                _forceCapturableFalseForUnsupportedSingleTensor(optim_info, kwargs)
+                _force_capturable_False_for_unsupported_single_tensor(optim_info, kwargs)
 
                 # The 128 is critical here! Our CUDACachingAllocator allocates in blocks of 512,
                 # meaning any tensor that occupies <512 bytes of memory will allocate a whole

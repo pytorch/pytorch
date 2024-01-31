@@ -711,6 +711,18 @@ def optim_inputs_func_radam(device=None):
 
 def optim_error_inputs_func_radam(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
+    if "cuda" in str(device):
+        error_inputs += [
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(foreach=False, capturable=True),
+                    desc="single tensor capturable not supported",
+                ),
+                error_type=ValueError,
+                error_regex="Capturable not supported with single tensor RAdam",
+            ),
+        ]
     if str(device) == "cpu":
         error_inputs += [
             ErrorOptimizerInput(

@@ -230,8 +230,6 @@ def adamax(
     if foreach and not torch.jit.is_scripting():
         func = _multi_tensor_adamax
     else:
-        if capturable and not torch._utils.is_compiling():
-            raise RuntimeError("Capturable not supported with single tensor ASGD")
         func = _single_tensor_adamax
 
     func(
@@ -269,6 +267,8 @@ def _single_tensor_adamax(
     capturable: bool,
     has_complex: bool,
 ):
+    if capturable:
+        raise RuntimeError("capturable is not supported for single tensor Adamax (when foreach=False)")
 
     for i, param in enumerate(params):
         grad = grads[i]
