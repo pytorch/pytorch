@@ -2300,7 +2300,7 @@ class TritonKernel(Kernel):
             self.compute, f"tl.broadcast_to({value}, {self.dense_size_str()})"
         )
 
-        default = init
+        default = triton_constant(init)
         default_tensor = self.cse.generate(
             self.body,
             f"tl.full({[1] * self.triton_tensor_ndim()}, {default}, {triton_compute_type(dtype)})",
