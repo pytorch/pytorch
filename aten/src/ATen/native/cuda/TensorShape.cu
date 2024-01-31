@@ -396,7 +396,7 @@ void split_with_sizes_copy_out_cuda(
         ", got size ",
         out.size());
 
-    auto out_shape = out[0].sizes().vec();
+    auto out_shape = self.sizes().vec();
     for (const auto i : c10::irange(split_sizes.size())) {
       out_shape[dim] = split_sizes[i];
       if (resize_output_check(out[i], out_shape)) {
