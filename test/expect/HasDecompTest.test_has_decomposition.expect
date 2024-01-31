@@ -394,8 +394,6 @@ aten::_linalg_solve_ex.result
 aten::_linalg_svd
 aten::_linalg_svd.U
 aten::_local_scalar_dense
-aten::_logcumsumexp
-aten::_logcumsumexp.out
 aten::_lstm_mps
 aten::_lstm_mps.out
 aten::_make_dep_token

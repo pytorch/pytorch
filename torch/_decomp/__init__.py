@@ -334,6 +334,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.linspace,
             aten.logaddexp,
             aten.logaddexp2,
+            aten.logcumsumexp,
             aten.logit,
             aten.logit_,
             aten.logit_backward,
