@@ -231,7 +231,7 @@ def fold_bn_weights_into_conv_node(
     _assign_attr(fused_weight, m, weight_attr_name, _AttrKind.PARAMETER)
     if conv_bias_node is not None:
         bias_attr_name = conv_bias_node.target
-        _assign_attr(fused_bias, m, bias_attr_name, _AttrKind.PARAMETER)
+        _assign_attr(fused_bias, m, str(bias_attr_name), _AttrKind.PARAMETER)
     else:
         bias_attr_name = weight_attr_name + "_bias"
         _assign_attr(fused_bias, m, bias_attr_name, _AttrKind.PARAMETER)
