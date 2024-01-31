@@ -201,7 +201,7 @@ The entries are as follows:
 * ``data.pkl`` is the result of pickling the object passed to ``torch.save``
   except  ``torch.Storage``s
 * ``byteorder`` records the ``sys.byteorder`` when saving (“little” or “big”)
-* ``data/`` contains all the saved storages, where each storage is a separate file
+* ``data/`` contains all the storages in the object, where each storage is a separate file
 * ``version`` contains a version number for internal use
 
 The local file header of each file is padded to a multiple of 64 bytes, ensuring
