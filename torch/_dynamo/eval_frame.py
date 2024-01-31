@@ -1525,21 +1525,14 @@ class TorchPatcher:
             # disable any currently set hooks
             # Note: we only want to disable the profiling hook
             # which is the *last* hook applied, we want to keep the no_grad hook
-            # Note: Use already_unwrapped to test if an opt has already had a layer removed since
-            # we only want to unwrap once. Unwrapping twice will accidentally get rid of the
-            # no_grad hook too. This is relevant for AdamW and Adam, who both call Adam.step,
-            # and we don't want Adam.step to be doubly unwrapped.
             hooked = getattr(opt.step, "hooked", False)
-            if hooked and not getattr(opt, "torch_patcher_already_unwrapped", False):
+            if hooked:
                 unwrapped_step = getattr(opt.step, "__wrapped__", None)
                 if unwrapped_step:
                     opt.step = unwrapped_step
-                    opt.torch_patcher_already_unwrapped = True
 
             # disable future hooking
             opt.step.hooked = True  # type: ignore[attr-defined]
-            if hasattr(opt, "torch_patcher_already_unwrapped"):
-                delattr(opt, "torch_patcher_already_unwrapped")
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):
