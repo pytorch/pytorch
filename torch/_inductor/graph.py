@@ -85,7 +85,9 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
         torch.uint8,
         torch.bool,
         torch.bfloat16,
+        torch.complex32,
         torch.complex64,
+        torch.complex128,
         torch.float16,
     }
     if cuda:
