@@ -92,6 +92,31 @@ Welford<T> welford_combine(const Welford<T> &acc, T data) {
   return result;
 }
 
+// Refer to https://github.com/pytorch/pytorch/blob/b5b36cf0c4e1958f1ff25120f5d4beeef3288187/
+// aten/src/ATen/native/SharedReduceOps.h#L419-L445
+template <typename scalar_t>
+inline bool greater_or_nan(scalar_t a, scalar_t b, int64_t idx_a, int64_t idx_b) {
+  // If (a == b), then choose the one with lower idx, else max(a, b)
+  if (at::_isnan(a)) {
+    if (at::_isnan(b)) {
+      return idx_a < idx_b;
+    }
+    return true;
+  }
+  return (a == b) ? idx_a < idx_b : (a > b);
+}
+
+template <typename scalar_t>
+inline bool less_or_nan(scalar_t a, scalar_t b, int64_t idx_a, int64_t idx_b) {
+  // If (a == b), then choose the one with lower idx, else min(a, b)
+  if (at::_isnan(a)) {
+    if (at::_isnan(b)) {
+      return idx_a < idx_b;
+    }
+    return true;
+  }
+  return (a == b) ? idx_a < idx_b : (a < b);
+}
 
 #if INDUCTOR_USE_VECTOR_TYPES()
 template <typename scalar_t>
