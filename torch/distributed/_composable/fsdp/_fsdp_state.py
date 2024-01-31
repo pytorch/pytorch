@@ -40,7 +40,7 @@ class FSDPState(_State):
     def __init__(self):
         super().__init__()
         self._fsdp_param_group: Optional[FSDPParamGroup] = None
-        self._is_root: Optional[bool] = None  # root responsible for lazy init
+        self._is_root: Optional[bool] = None  # root set during lazy init
         self._state_ctx = FSDPStateContext()
         self._comm_ctx = FSDPCommContext()
         self._training_state: TrainingState = TrainingState.IDLE
