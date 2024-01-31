@@ -8,7 +8,7 @@ import operator
 import math
 import logging
 import torch
-from typing import Union, Dict, Optional, SupportsFloat, TypeVar, Generic, cast
+from typing import Dict, Optional, SupportsFloat, TypeVar, Generic, cast, Union
 from typing_extensions import TypeGuard
 
 from torch._prims_common import dtype_to_type
@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 
 __all__ = ["ValueRanges", "ValueRangeAnalysis", "bound_sympy"]
 
-T = TypeVar('T', sympy.Expr, SympyBoolean)
+_T = TypeVar('_T', sympy.Expr, SympyBoolean)
 
 class ValueRangeError(RuntimeError):
     pass
@@ -62,24 +62,24 @@ def sympy_generic_le(lower, upper):
         return not (lower and not upper)
 
 
-def vr_is_bool(vr: ValueRanges[T]) -> TypeGuard[ValueRanges[SympyBoolean]]:
+def vr_is_bool(vr: ValueRanges[_T]) -> TypeGuard[ValueRanges[SympyBoolean]]:
     return vr.is_bool
 
 
-def vr_is_expr(vr: ValueRanges[T]) -> TypeGuard[ValueRanges[sympy.Expr]]:
+def vr_is_expr(vr: ValueRanges[_T]) -> TypeGuard[ValueRanges[sympy.Expr]]:
     return not vr.is_bool
 
 
 @dataclasses.dataclass(frozen=True)
-class ValueRanges(Generic[T]):
+class ValueRanges(Generic[_T]):
     # Although the type signature here suggests you can pass any
     # sympy expression, in practice the analysis here only works
     # with constant sympy expressions
-    lower: T
-    upper: T
+    lower: _T
+    upper: _T
     is_bool: bool
 
-    def __init__(self, lower: T, upper: T) -> None:
+    def __init__(self, lower: Union[_T, bool, int, float], upper: Union[_T, bool, int, float]) -> None:
         lower = simple_sympify(lower)
         upper = simple_sympify(upper)
         # TODO: when the bounds have free variables, this may be
@@ -104,33 +104,33 @@ class ValueRanges(Generic[T]):
         x = simple_sympify(x)
         return sympy_generic_le(self.lower, x) and sympy_generic_le(x, self.upper)
 
-    def tighten(self, other) -> "ValueRanges":
+    def tighten(self, other) -> ValueRanges:
         """Given two ValueRanges, returns their intersection"""
         return self & other
 
     # Intersection
-    def __and__(self: ValueRanges[T], other: ValueRanges[T]) -> ValueRanges[T]:
+    def __and__(self: ValueRanges[_T], other: ValueRanges[_T]) -> ValueRanges[_T]:
         if other == ValueRanges.unknown():
             return self
         if self == ValueRanges.unknown():
             return other
         assert self.is_bool == other.is_bool, (self, other)
         if vr_is_bool(self):
-            return cast(ValueRanges[T], ValueRanges(sympy.Or(self.lower, other.lower), sympy.And(self.upper, other.upper)))
+            return cast(ValueRanges[_T], ValueRanges(sympy.Or(self.lower, other.lower), sympy.And(self.upper, other.upper)))
         elif vr_is_expr(self):
-            return cast(ValueRanges[T], ValueRanges(sympy.Max(self.lower, other.lower), sympy.Min(self.upper, other.upper)))
+            return cast(ValueRanges[_T], ValueRanges(sympy.Max(self.lower, other.lower), sympy.Min(self.upper, other.upper)))
         else:
             raise AssertionError("impossible")
 
     # Union
-    def __or__(self, other) -> "ValueRanges":
+    def __or__(self, other) -> ValueRanges:
         if ValueRanges.unknown() in (self, other):
             return ValueRanges.unknown()
         assert self.is_bool == other.is_bool, (self, other)
         if vr_is_bool(self):
-            return cast(ValueRanges[T], ValueRanges(sympy.And(self.lower, other.lower), sympy.Or(self.upper, other.upper)))
+            return cast(ValueRanges[_T], ValueRanges(sympy.And(self.lower, other.lower), sympy.Or(self.upper, other.upper)))
         elif vr_is_expr(self):
-            return cast(ValueRanges[T], ValueRanges(sympy.Min(self.lower, other.lower), sympy.Max(self.upper, other.upper)))
+            return cast(ValueRanges[_T], ValueRanges(sympy.Min(self.lower, other.lower), sympy.Max(self.upper, other.upper)))
         else:
             raise AssertionError("impossible")
 
