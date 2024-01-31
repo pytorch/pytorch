@@ -14,7 +14,6 @@ from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_collectives import (
     AllGatherResult,
     AllGatherState,
-    AllGatherStateHolder,
     foreach_all_gather,
     foreach_all_gather_copy_out,
     foreach_reduce_scatter,
@@ -33,28 +32,24 @@ _ModuleToHandleDict = Dict[nn.Module, RemovableHandle]  # for state dict
 class FSDPCommContext:
     """This has the communication state shared across FSDP states/parameter groups."""
 
-    default_stream: torch.cuda.Stream
-    # All-gather state and copy-in stream allow overlapping the next copy-in
-    # with the current all-gather in forward; copy-in overlaps with reduce-
-    # scatter in backward without the separate copy-in stream
-    all_gather_state: AllGatherStateHolder
-    all_gather_copy_in_stream: torch.cuda.Stream
-    # All-gather stream allows overlapping next all-gather with current compute
-    all_gather_stream: torch.cuda.Stream
-    # Reduce-scatter stream gives separate execution "thread" for post-backward
-    # logic like pre/post-gradient division and reduce-scatter
-    reduce_scatter_stream: torch.cuda.Stream
-
     def init(self):
         # Setting the all-gather/reduce-scatter streams to be higher priority
         # can help avoid some issues where their copies in/out are delayed and
         # block computation
         high_priority = -1
         self.default_stream = torch.cuda.current_stream()
+        # All-gather state and copy-in stream allow overlapping the next
+        # copy-in with the current all-gather in forward; copy-in overlaps with
+        # reduce-scatter in backward without the separate copy-in stream
         self.all_gather_copy_in_stream = torch.cuda.Stream(priority=high_priority)
+        self.all_gather_state: Optional[AllGatherState] = None
+        # All-gather stream allows overlapping next all-gather with current
+        # forward compute
         self.all_gather_stream = torch.cuda.Stream(priority=high_priority)
+        # Reduce-scatter stream gives separate execution "thread" for post-
+        # backward logic like pre/post-gradient division and reduce-scatter
         self.reduce_scatter_stream = torch.cuda.Stream(priority=high_priority)
-        self.all_gather_state = AllGatherStateHolder()
+        # Post-forward order for explicit backward prefetching
         self.post_forward_order: List[FSDPParamGroup] = []
 
 
@@ -199,9 +194,9 @@ class FSDPParamGroup:
         if not self._all_gather_result:
             return  # no preceding unshard
         if self._training_state == TrainingState.FORWARD:  # implicit prefetch
-            if prev_all_gather_state := self.comm_ctx.all_gather_state.pop():
+            if prev_all_gather_state := self.comm_ctx.all_gather_state:
                 self._wait_all_gather_streams_on_event(prev_all_gather_state.event)
-                del prev_all_gather_state  # free
+                self.comm_ctx.all_gather_state = None  # free the all-gather result
         foreach_all_gather_copy_out(
             self._all_gather_result, self.fsdp_params, self._all_gather_process_group
         )
@@ -211,8 +206,8 @@ class FSDPParamGroup:
         all_gather_copy_out_event = torch.cuda.Event()
         all_gather_copy_out_event.record()
         if self._training_state == TrainingState.FORWARD:
-            self.comm_ctx.all_gather_state.put(
-                AllGatherState(self._all_gather_result, all_gather_copy_out_event)
+            self.comm_ctx.all_gather_state = AllGatherState(
+                self._all_gather_result, all_gather_copy_out_event
             )
         else:
             self._wait_all_gather_streams_on_event(all_gather_copy_out_event)

@@ -17,7 +17,6 @@ from torch.distributed.utils import _to_kwargs
 from torch.utils._pytree import tree_flatten, tree_map
 from torch.utils.hooks import RemovableHandle
 from ._fsdp_api import MixedPrecisionPolicy
-from ._fsdp_collectives import AllGatherStateHolder
 from ._fsdp_common import _cast_fp_tensor, TrainingState
 from ._fsdp_param import FSDPParam
 from ._fsdp_param_group import FSDPCommContext, FSDPParamGroup
@@ -35,16 +34,6 @@ class FSDPStateContext:
 
 
 class FSDPState(_State):
-    _modules: Tuple[nn.Module, ...]  # permit ref cycle since lifetimes are 1:1
-    _device: torch.device
-    _mp_policy: MixedPrecisionPolicy
-    _default_stream: torch.cuda.Stream
-    _all_gather_copy_in_stream: torch.cuda.Stream
-    _all_gather_stream: torch.cuda.Stream
-    _reduce_scatter_stream: torch.cuda.Stream
-    # For overlapping current copy-out and next all-gather in forward
-    _all_gather_state: AllGatherStateHolder
-
     def __init__(self):
         super().__init__()
         self._fsdp_param_group: Optional[FSDPParamGroup] = None
@@ -63,7 +52,7 @@ class FSDPState(_State):
         self, module: nn.Module, device: torch.device, mp_policy: MixedPrecisionPolicy
     ) -> None:
         _insert_module_state(module, self)
-        self._modules = (module,)
+        self._modules: Tuple[nn.Module, ...] = (module,)
         self._device = device
         self._mp_policy = mp_policy
         self._pre_forward_hook_handle = module.register_forward_pre_hook(
@@ -178,12 +167,12 @@ class FSDPState(_State):
         output = self._register_pre_backward_hook(output)
         self._training_state = TrainingState.IDLE
         if self._state_ctx.iter_forward_root is self:
-            if (all_gather_state := self._comm_ctx.all_gather_state.pop()) is not None:
+            if all_gather_state := self._comm_ctx.all_gather_state:
                 self._comm_ctx.all_gather_copy_in_stream.wait_event(
                     all_gather_state.event
                 )
                 self._comm_ctx.all_gather_stream.wait_event(all_gather_state.event)
-                del all_gather_state  # free
+                self._comm_ctx.all_gather_state = None  # free the all-gather result
             self._state_ctx.iter_forward_root = None
         if self._mp_policy.output_dtype is not None:
             with torch.profiler.record_function("FSDP::cast_forward_outputs"):
@@ -272,7 +261,8 @@ class FSDPState(_State):
         for fsdp_state in fsdp_states:
             modules.extend(list(fsdp_state._modules))
         new_state = fsdp_states[0]
-        new_state._fsdp_param_group = new_fsdp_param_group
+        if new_fsdp_param_group:
+            new_state._fsdp_param_group = new_fsdp_param_group
         for module in modules[1:]:
             _replace_module_state(module, new_state)
         new_state._modules = tuple(modules)
