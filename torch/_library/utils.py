@@ -103,8 +103,7 @@ def is_inplace_aten_op(op: torch._ops.OpOverload):
 
     TODO: torchgen/model.py's FunctionSchema.parse is the source of truth for this,
     but not all PyTorch builds have torchgen (due to the yaml dependency being weird).
-    Change this to call that when we fix the yaml dep (or figure out how to tag ops
-    as inplace).
+    Figure this out.
 
     Example: add_(Tensor(a!) x, Tensor y) -> Tensor(a)
     """
@@ -123,6 +122,8 @@ def is_inplace_aten_op(op: torch._ops.OpOverload):
         return False
     first_arg = schema.arguments[0]
     if first_arg.alias_info is None:
+        return False
+    if not first_arg.alias_info.is_write:
         return False
     alias_set = first_arg.alias_info.after_set
     if len(alias_set) != 1:
