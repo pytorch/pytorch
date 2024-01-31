@@ -299,38 +299,52 @@ def _export_to_torch_ir(
     return gm_torch_level
 
 
+# User inputs are either registered as buffer (if it's a tensor) or setattr of gm_torch_level (if it's a torch.ScriptObject)
 def _unlift_user_inputs_to_buffers(
     gm_torch_level: torch.fx.GraphModule, aot_export_args
-) -> List[str]:
+) -> Dict[Any, str]:
     flat_args = pytree.tree_leaves(aot_export_args)
-    user_input_names = []
+    user_input_names = {}
     with gm_torch_level.graph.inserting_before():
         for i, (arg, node) in enumerate(zip(flat_args, gm_torch_level.graph.nodes)):
             assert node.op == "placeholder"
-            user_input_names.append(node.name)
             if isinstance(arg, torch.Tensor):
+                user_input_names[node.name] = node.name
                 assert not hasattr(gm_torch_level, node.name)
                 gm_torch_level.register_buffer(node.name, arg)
                 get_attr = gm_torch_level.graph.get_attr(node.name)
                 node.replace_all_uses_with(get_attr)
                 get_attr.meta = copy.copy(node.meta)
+            elif isinstance(arg, torch.ScriptObject):
+                user_input_names[arg] = node.name
+                assert not hasattr(gm_torch_level, node.name)
+                setattr(gm_torch_level, node.name, arg)
+                get_attr = gm_torch_level.graph.get_attr(node.name)
+                node.replace_all_uses_with(get_attr)
+                get_attr.meta = copy.copy(node.meta)
+            else:
+                user_input_names[node.name] = node.name
 
-    for node in list(gm_torch_level.graph.nodes):
-        if node.op == "placeholder":
-            assert len(node.users) == 0
-            gm_torch_level.graph.erase_node(node)
+    phs = [node for node in gm_torch_level.graph.nodes if node.op == "placeholder"]
+    assert len(phs) == len(flat_args)
+    for arg, node in zip(flat_args, phs):
+        assert len(node.users) == 0
+        gm_torch_level.graph.erase_node(node)
+
     gm_torch_level.recompile()
     return user_input_names
 
 
+# We replace the placeholders that correspond to user_input_names to original name
+# and turn getattrs into placeholders if they're torch.ScriptObject.
 def _lift_buffers_to_user_inputs(
     gm: torch.fx.GraphModule,
     graph_signature: GraphSignature,
-    user_input_names: List[str],
+    user_input_names: Dict[Any, str],
 ) -> Dict[str, str]:
     assert len(graph_signature.user_inputs) == 0
     assert graph_signature.backward_signature is None
-    names = set(user_input_names)
+    names = set(user_input_names.keys())
 
     placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
     # user inputs are always added in the end
@@ -345,9 +359,16 @@ def _lift_buffers_to_user_inputs(
             continue
         old_nodes[buffer_name] = node
     replaces = {}
+
+    get_attr_nodes = [node for node in gm.graph.nodes if node.op == "get_attr"]
+    for node in get_attr_nodes:
+        attr_val = getattr(gm, node.name)
+        if attr_val in user_input_names:
+            old_nodes[user_input_names[attr_val]] = node
+
     new_node_names: Dict[str, str] = {}
     with gm.graph.inserting_after(last_placeholder_node):
-        for name in reversed(user_input_names):
+        for _, name in reversed(user_input_names.items()):
             new_node = gm.graph.placeholder(name)
             new_node.target = new_node.name
             new_node_names[name] = new_node.name
@@ -356,6 +377,7 @@ def _lift_buffers_to_user_inputs(
                 new_node.meta = copy.copy(old_node.meta)
                 old_node.replace_all_uses_with(new_node)
                 replaces[old_node.name] = new_node.name
+
     new_node_names = dict(reversed(new_node_names.items()))
     for old_node in old_nodes.values():
         gm.graph.erase_node(old_node)
@@ -691,8 +713,8 @@ def _export(
     for node in gm_torch_level.graph.nodes:
         if node.op == "get_attr" and "val" not in node.meta:
             attr = getattr(gm_torch_level, node.target)
-            # Checks if it is not a HigherOrderOp branch or a module
-            if not isinstance(attr, torch.nn.Module):
+            # Checks if it is not a HigherOrderOp branch or a module or a torch.ScriptObject
+            if not isinstance(attr, (torch.nn.Module, torch.ScriptObject)):
                 assert (
                     dynamo_fake_mode is not None
                 ), "Cannot find dynamo_fake_mode. This could be due to the exported graph module have no placeholders."

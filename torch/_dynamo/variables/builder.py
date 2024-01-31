@@ -53,6 +53,7 @@ from ..source import (
     GetItemSource,
     is_constant_source,
     LocalSource,
+    NNModuleSource,
     NumpyTensorSource,
     RandomValueSource,
     Source,
@@ -792,6 +793,31 @@ class VariableBuilder:
                     user_cls_source=AttrSource(self.source, "__class__"),
                 ),
             )
+        elif isinstance(value, torch.ScriptObject):
+            from .misc import TorchScriptObjectVariable
+
+            self.install_guards(GuardBuilder.ID_MATCH)
+            if not isinstance(self.source, (LocalSource, NNModuleSource)):
+                unimplemented(
+                    f"Expect torch.ScriptObject to be passed either as input or as an attribute"
+                    f"of an nn.module but got it from {self.source.name()}"
+                )
+            if isinstance(self.source, LocalSource):
+                proxy = self.tx.output.root_tracer.create_graph_input(
+                    re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                    type(value),
+                    source=self.source,
+                )
+                proxy.node.meta["grapharg"] = GraphArg(
+                    self.source, value, False, None, False, value
+                )
+                return TorchScriptObjectVariable.create(
+                    proxy, value, source=self.source
+                )
+            elif isinstance(self.source, NNModuleSource):
+                return self.tx.output.register_attr_or_module(
+                    value, self.source.name(), source=self.source
+                )
         else:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = UserDefinedObjectVariable(value, source=self.source)

@@ -519,6 +519,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return TraceWrappedHigherOrderOperatorVariable(value, source, **kwargs)
         elif value.__name__ == "strict_mode":
             return StrictModeHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "call_torchbind":
+            return TorchBindHigherOrderVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -526,6 +528,48 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
         unimplemented(f"HigherOrderOperator {self.value.__name__}")
+
+
+class TorchBindHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    def call_function(
+        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+    ) -> VariableTracker:
+        from . import ConstantVariable
+
+        from .builder import wrap_fx_proxy
+        from .misc import TorchScriptObjectVariable
+
+        assert isinstance(
+            args[0], TorchScriptObjectVariable
+        ), f"expect args[0] to be TorchScriptObjectVariable but got {args[0]}."
+        assert isinstance(
+            args[1], ConstantVariable
+        ), f"expect args[1] to be a ConstantVariable of string in dynamo but got {args[1]}."
+
+        real_script_obj = args[0].value
+        method_name = args[1].as_python_constant()
+
+        args_proxy = [arg.as_proxy() for arg in args[2:]]
+        real_args = pytree.tree_map_only(
+            torch.fx.Proxy, lambda a: get_real_value(a.node, tx.output), args_proxy
+        )
+        kwargs_proxy = {k: arg.as_proxy() for k, arg in kwargs.items()}
+        real_kwargs = pytree.tree_map_only(
+            torch.fx.Proxy, lambda a: get_real_value(a.node, tx.output), kwargs_proxy
+        )
+
+        real_value = getattr(real_script_obj, method_name)(*real_args, **real_kwargs)
+
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                self.value,
+                args=tuple([args[0].as_proxy(), method_name] + args_proxy),
+                kwargs=kwargs_proxy,
+            ),
+            example_value=deepcopy_to_fake_tensor(real_value, tx.fake_mode),
+        )
 
 
 class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):

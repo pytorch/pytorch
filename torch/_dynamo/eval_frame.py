@@ -1228,6 +1228,11 @@ def export(
         graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
         fake_mode = None
 
+        def _fakify(fake_mode, x):
+            if isinstance(x, torch.ScriptObject):
+                return x
+            return fake_mode.from_tensor(x, static_shapes=True)
+
         def guard_export_print(guards: _guards.GuardsSet):
             nonlocal out_guards
             assert (
@@ -1284,7 +1289,7 @@ def export(
                         )
 
                     fake_graph_inputs = pytree.tree_map(
-                        ambient_fake_mode.from_tensor, graph_inputs
+                        lambda inp: _fakify(ambient_fake_mode, inp), graph_inputs
                     )
                     graph_captured_result = torch.func.functional_call(
                         graph, fake_params_buffers, fake_graph_inputs
@@ -1379,7 +1384,9 @@ def export(
             check_signature_rewritable(graph)
 
         # NB: This is mostly hitting the cache; Dynamo already converted these
-        example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
+        example_fake_inputs = pytree.tree_map(
+            lambda t: _fakify(fake_mode, t), example_inputs
+        )
 
         if aten_graph:
             # Running graph with interpreter is needed for propagating the stack_trace

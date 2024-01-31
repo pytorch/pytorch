@@ -925,3 +925,43 @@ class StringFormatVariable(VariableTracker):
         codegen.extend_output(variables.ConstDictVariable(kwargs).reconstruct(codegen))
         codegen.append_output(create_instruction("CALL_FUNCTION_EX", arg=1))
         return []
+
+
+class TorchScriptObjectVariable(VariableTracker):
+    """
+    Represents a torch.jit.Script object.
+    """
+
+    @classmethod
+    def create(cls, proxy, value, **options):
+        if "example_value" in proxy.node.meta:
+            assert proxy.node.meta["example_value"] is value
+        proxy.node.meta["example_value"] = value
+        return TorchScriptObjectVariable(proxy, value, **options)
+
+    def __init__(self, proxy, value, **kwargs):
+        super().__init__(**kwargs)
+        self.proxy = proxy
+        self.value = value
+
+    def as_proxy(self):
+        if self.proxy is None:
+            unimplemented("proxy not set")
+        return self.proxy
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        from torch._higher_order_ops.torchbind import call_torchbind
+        from .higher_order_ops import TorchHigherOrderOperatorVariable
+
+        torchbind_hop = TorchHigherOrderOperatorVariable.make(
+            call_torchbind, source=AttrSource(self.source, name)
+        )
+        return torchbind_hop.call_function(
+            tx, [self, variables.ConstantVariable.create(name)] + list(args), kwargs
+        )

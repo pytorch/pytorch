@@ -88,6 +88,7 @@ from .utils import (
 )
 from .variables.base import VariableTracker
 from .variables.builder import GraphArg, TrackedFake, VariableBuilder, wrap_fx_proxy
+from .variables.misc import TorchScriptObjectVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -759,6 +760,20 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 )
 
             # HACKY CODE REGION END
+        elif isinstance(target, torch.ScriptObject):
+            # Registering torch.ScriptObject in the same way as torch.Tensor and symints
+            if not self.is_root_tracer():
+                unimplemented(
+                    "Accessing torch.ScriptObject in higher order op is not supported yet."
+                )
+
+            def wrap_name(module_key):
+                return TorchScriptObjectVariable.create(
+                    self.create_proxy("get_attr", module_key, tuple(), {}),
+                    target,
+                    **options,
+                )
+
         else:
 
             def wrap_name(module_key):
@@ -1220,6 +1235,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             else:
                 if not node.users:
                     remove_unused(node)
+                elif isinstance(node.meta["grapharg"].example, torch.ScriptObject):
+                    # nothing left to do for torch.ScriptObject input
+                    continue
                 else:
                     # Register the free symbols as uses
                     arg = node.meta["grapharg"]

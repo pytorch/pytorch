@@ -268,6 +268,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
+        from .misc import TorchScriptObjectVariable
+
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
 
@@ -551,6 +553,37 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ):
             raise unimplemented(
                 "torch.nn.functional.one_hot with data-dependent output shape"
+            )
+        elif isinstance(self.value, torch._ops.OpOverloadPacket) and any(
+            isinstance(arg, TorchScriptObjectVariable)
+            or (
+                isinstance(arg, ConstantVariable)
+                and isinstance(arg.value, torch.ScriptObject)
+            )
+            for arg in args + list(kwargs.values())
+        ):
+            from torch._dynamo.utils import get_fake_value
+            from torch.fx.proxy import Proxy
+
+            from torch.utils import _pytree as pytree
+
+            p_args = pytree.tree_map(lambda arg: arg.as_proxy(), args)
+            real_args = pytree.tree_map_only(
+                Proxy, lambda arg: get_fake_value(arg.node, tx), p_args
+            )
+
+            p_kwargs = pytree.tree_map(lambda arg: arg.as_proxy(), kwargs)
+            real_kwargs = pytree.tree_map_only(
+                Proxy, lambda arg: get_fake_value(arg.node, tx), p_kwargs
+            )
+
+            example_output = self.value(*real_args, **real_kwargs)
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function", self.value, args=tuple(p_args), kwargs=p_kwargs
+                ),
+                example_value=example_output,
             )
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
