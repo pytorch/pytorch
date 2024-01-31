@@ -1,9 +1,11 @@
 import copy
+from itertools import chain
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
-from torch._export.utils import _check_input_constraints_pre_hook
+from torch._export.utils import _check_input_constraints_for_graph
+from torch.export.unflatten import _assign_attr, _AttrKind
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from .exported_program import (
@@ -12,6 +14,25 @@ from .exported_program import (
     InputKind,
     OutputKind,
 )
+
+
+@torch._dynamo.disable
+def _check_input_constraints_pre_hook(self, *args, **kwargs):
+    flat_args_with_path, received_spec = pytree.tree_flatten_with_path(args)
+
+    if received_spec != self._in_spec:
+        raise ValueError(  # noqa: TRY200
+            "Trying to flatten user inputs with exported input tree spec: \n"
+            f"{self._in_spec}\n"
+            "but actually got inputs with tree spec of: \n"
+            f"{received_spec}"
+        )
+
+    return _check_input_constraints_for_graph(
+        [node for node in self.graph.nodes if node.op == "placeholder"],
+        flat_args_with_path,
+        self.range_constraints,
+    )
 
 
 def _unlift_inputs_as_getattr(
@@ -33,12 +54,12 @@ def _unlift_inputs_as_getattr(
 
         else:
             with gm.graph.inserting_after(input_node):
-                getattr_node = gm.graph.get_attr(lifted_node.replace(".", "_"))
+                getattr_node = gm.graph.get_attr(lifted_node)
                 input_node.replace_all_uses_with(getattr_node)
                 metadata = input_node.meta
                 gm.graph.erase_node(input_node)
                 getattr_node.meta = metadata
-                unlifted_name_to_node[lifted_node.replace(".", "_")] = getattr_node
+                unlifted_name_to_node[lifted_node] = getattr_node
 
     return unlifted_name_to_node, input_name_to_node
 
@@ -68,7 +89,6 @@ def _insert_copy_for_mutations(
             user_output_nodes.append(return_node)
             continue
 
-        mutated_node_name = mutated_node_name.replace(".", "_")
         if mutated_node_name in unlifted_name_to_node:
             mutated_node = unlifted_name_to_node[mutated_node_name]
         elif mutated_node_name in input_name_to_node:
@@ -119,37 +139,6 @@ def _get_codegen(
     )
 
 
-def _unlift_submod_inputs(
-    submod: torch.fx.GraphModule,
-    inputs: List[torch.fx.Node],
-    toplevel_gm: torch.fx.GraphModule,
-    toplevel_unlifted_nodes: List[torch.fx.Node],
-) -> Tuple[List[Optional[str]], List[torch.fx.Node]]:
-    """
-    Given a list of nodes being passed to the the submodule, if any of them
-    belong to an input that should be unlifted (ex. parameter/buffer), we should
-    remove it from the argument list and register the actual parameter/bffer
-    value to the submodule. A later recursive call to _unlift() on the submodule
-    parent module will fix the graph inside of the submodule to use unlifted
-    inputs.
-    """
-    submod_lifted_inputs: List[Optional[str]] = []
-    real_inputs = []
-    for inp in inputs:
-        if inp in toplevel_unlifted_nodes:
-            assert isinstance(inp.target, str)
-            submod_lifted_inputs.append(inp.target)
-            if inp.target not in toplevel_gm.state_dict():
-                raise RuntimeError("Unable to find value for ", inp.target)
-
-            submod.register_buffer(inp.target, toplevel_gm.state_dict()[inp.target])
-        else:
-            submod_lifted_inputs.append(None)
-            real_inputs.append(inp)
-
-    return submod_lifted_inputs, real_inputs
-
-
 def _unlift(
     gm: torch.fx.GraphModule,
     lifted_inputs: List[Optional[str]],
@@ -180,123 +169,7 @@ def _unlift(
     _insert_copy_for_mutations(
         gm, mutated_outputs, unlifted_name_to_node, input_name_to_node
     )
-    unlifted_nodes = list(unlifted_name_to_node.values())
-
-    gm.graph.lint()
-
     gm.graph._codegen = _get_codegen(in_spec, out_spec)
-    gm.recompile()
-
-    # Step 4: Find state references in HigherOrderOps and recursively
-    # fix them.
-    for node in gm.graph.nodes:
-        if node.op == "call_function" and node.target.__name__ == "cond":
-            pred, true_graph, false_graph, operands = node.args
-            true_gm = getattr(gm, true_graph.name)
-            false_gm = getattr(gm, false_graph.name)
-
-            submod_lifted_inputs1, real_operands1 = _unlift_submod_inputs(
-                true_gm, operands, gm, unlifted_nodes
-            )
-            submod_lifted_inputs2, real_operands2 = _unlift_submod_inputs(
-                false_gm, operands, gm, unlifted_nodes
-            )
-            assert submod_lifted_inputs1 == submod_lifted_inputs2
-            assert real_operands1 == real_operands2
-
-            node.args = (pred, true_graph, false_graph, real_operands1)
-
-            _, in_spec = pytree.tree_flatten(real_operands1)
-
-            # Currently HOO submodules do not allow mutations, so we
-            # will not need to handle this.
-            output_node = None
-            for node in gm.graph.nodes:
-                if node.op == "output":
-                    output_node = node
-                    break
-            assert output_node is not None
-            outputs = pytree.tree_flatten(output_node.args)[0]
-            mutated_outputs = [None for _ in range(len(outputs))]
-
-            _unlift(
-                true_gm,
-                submod_lifted_inputs1,
-                mutated_outputs,
-                in_spec,
-                None,
-                state_dict,
-                constants,
-            )
-            _unlift(
-                false_gm,
-                submod_lifted_inputs1,
-                mutated_outputs,
-                in_spec,
-                None,
-                state_dict,
-                constants,
-            )
-
-        elif node.op == "call_function" and node.target.__name__ == "map_impl":
-            body_graph, mapped_args, operands = node.args
-            body_gm = getattr(gm, body_graph.name)
-
-            def _find_real_operands(operands):
-                submod_lifted_inputs = []
-                real_operands = []
-                for ix, operand in enumerate(operands):
-                    if operand.target in lifted_inputs:
-                        submod_lifted_inputs.append(operand.target)
-                        if operand.target in state_dict:
-                            value = state_dict[operand.target]
-                        elif operand.target in constants:
-                            value = constants[operand.target]
-                        else:
-                            raise RuntimeError(
-                                "Unable to find value for ", operand.target
-                            )
-
-                        body_gm.register_buffer(operand.target, value)
-                    else:
-                        submod_lifted_inputs.append(None)
-                        real_operands.append(operand)
-
-                return submod_lifted_inputs, real_operands
-
-            lifted_args, real_mapped_args = _unlift_submod_inputs(
-                body_gm, mapped_args, gm, unlifted_nodes
-            )
-            lifted_operands, real_mapped_operands = _unlift_submod_inputs(
-                body_gm, operands, gm, unlifted_nodes
-            )
-
-            node.args = (body_graph, real_mapped_args, real_mapped_operands)
-            submod_lifted_inputs = lifted_args + lifted_operands
-
-            _, in_spec = pytree.tree_flatten(real_mapped_args + real_mapped_operands)
-
-            # Currently HOO submodules do not allow mutations, so we
-            # will not need to handle this.
-            output_node = None
-            for node in gm.graph.nodes:
-                if node.op == "output":
-                    output_node = node
-                    break
-            assert output_node is not None
-            outputs = pytree.tree_flatten(output_node.args)[0]
-            mutated_outputs = [None for _ in range(len(outputs))]
-
-            _unlift(
-                body_gm,
-                submod_lifted_inputs,
-                mutated_outputs,
-                in_spec,
-                None,
-                state_dict,
-                constants,
-            )
-
     gm.graph.lint()
     gm.graph.eliminate_dead_code()
     gm.recompile()
@@ -309,14 +182,33 @@ def _register_attrs_to_new_gm(
     state_dict: Dict[str, Any],
     constants: Dict[str, Any],
 ) -> None:
-    for name, value in state_dict.items():
-        if name in graph_signature.buffers:
-            new_gm.register_buffer(name.replace(".", "_"), value)
-        if name in graph_signature.parameters:
-            new_gm.register_parameter(name.replace(".", "_"), value)
+    for name in graph_signature.buffers:
+        value = state_dict[name]
+        _assign_attr(
+            value,
+            new_gm,
+            name,
+            attr_kind=_AttrKind.BUFFER,
+        )
+    for name in graph_signature.parameters:
+        value = state_dict[name]
+        _assign_attr(
+            value,
+            new_gm,
+            name,
+            attr_kind=_AttrKind.PARAMETER,
+        )
 
-    for name, value in constants.items():
-        setattr(new_gm, name.replace(".", "_"), value)
+    for name in chain(
+        graph_signature.lifted_custom_objs, graph_signature.lifted_tensor_constants
+    ):
+        value = constants[name]
+        _assign_attr(
+            value,
+            new_gm,
+            name,
+            attr_kind=_AttrKind.CONSTANT,
+        )
 
 
 class _StatefulGraphModuleFactory(type):

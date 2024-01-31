@@ -117,16 +117,16 @@ def call_func_at_runtime_with_args(f, args, steal_args=False, disable_amp=False)
 class PytreeThunk:
     spec: Optional[pytree.TreeSpec] = None
     # These are some kinda dumb microoptimizations that save about 3-4 us of overhead.
-    is_simple = (
-        None  # if the output spec is a tuple/list, we won't bother unflattening it.
-    )
-    is_really_simple = None  # if the output spec is a LeafSpec
+    is_simple: Optional[
+        bool
+    ] = None  # if the output spec is a tuple/list, we won't bother unflattening it.
+    is_really_simple: Optional[bool] = None  # if the output spec is a LeafSpec
 
     def set(self, spec: pytree.TreeSpec) -> None:
         assert self.spec is None or self.spec == spec
         assert spec is not None
         self.spec: pytree.TreeSpec = spec
-        if type(self.spec) in {tuple, list} and all(
+        if self.spec.type in {tuple, list} and all(
             child.is_leaf() for child in spec.children()
         ):
             self.is_simple = True
