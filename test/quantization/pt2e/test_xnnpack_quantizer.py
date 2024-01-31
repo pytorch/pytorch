@@ -606,8 +606,9 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
         )
         qconfig_mapping = QConfigMapping().set_global(qconfig)
 
-        import torch.ao.quantization.backend_config as bc
         import torch.ao.nn.quantized.reference as nnqr
+        import torch.ao.quantization.backend_config as bc
+
         backend_config = bc.get_executorch_backend_config()
         observation_type = bc.ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
         dtype_configs = [
@@ -617,11 +618,13 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
                 weight_dtype=torch.qint8,
             )
         ]
-        int4_weight_only_linear = bc.BackendPatternConfig(torch.nn.Linear) \
-            .set_observation_type(observation_type)  \
-            .set_dtype_configs(dtype_configs)  \
-            .set_root_module(torch.nn.Linear)  \
-            .set_reference_quantized_module(nnqr.Linear)   # noqa: E131
+        int4_weight_only_linear = (
+            bc.BackendPatternConfig(torch.nn.Linear)
+            .set_observation_type(observation_type)
+            .set_dtype_configs(dtype_configs)
+            .set_root_module(torch.nn.Linear)
+            .set_reference_quantized_module(nnqr.Linear)
+        )  # noqa: E131
 
         backend_config.set_backend_pattern_configs([int4_weight_only_linear])
         # Test with 2d inputs
@@ -636,7 +639,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
                 [],
                 check_against_fx_quant=True,
                 fx_qconfig_mapping=qconfig_mapping,
-                fx_backend_config=backend_config
+                fx_backend_config=backend_config,
             )
 
     def test_qat_dynamic_linear(self):

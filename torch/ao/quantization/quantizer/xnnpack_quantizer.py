@@ -100,6 +100,7 @@ def _get_supported_symmetric_config_and_operators() -> List[OperatorConfig]:
             )
     return copy.deepcopy(supported_config_and_operators)
 
+
 @functools.lru_cache
 def get_symmetric_quantization_config(
     is_per_channel: bool = False,

@@ -89,7 +89,7 @@ def serialize_functions() -> None:
     for (
         key,
         kwargs,
-    ) in _get_sfdp_patterns():
+    ) in _get_sfdp_patterns():  # type: ignore[no-untyped-call]
         pattern_name = kwargs["search_fn"].__name__
         gen_kwargs = {
             key: kwargs[key]
@@ -134,5 +134,5 @@ def serialize_functions() -> None:
 
 
 if __name__ == "__main__":
-    with torch._subclasses.FakeTensorMode():
+    with torch._subclasses.FakeTensorMode():  # type: ignore[no-untyped-call]
         serialize_functions()
