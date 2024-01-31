@@ -879,12 +879,10 @@ def reciprocal(a):
 def round(a: TensorLikeType, *, decimals: int = 0) -> TensorLikeType:
     if decimals == 0:
         return prims.round(a)
-    elif decimals > 0:
-        ten_pow = 10**decimals
-        return prims.div(prims.round(prims.mul(a, ten_pow)), ten_pow)
     else:
-        ten_pow = 10 ** (-decimals)
-        return prims.mul(prims.round(prims.div(a, ten_pow)), ten_pow)
+        ten_pow = 10**decimals
+        ten_neg_pow = 10 ** (-decimals)
+        return prims.mul(prims.round(prims.mul(a, ten_pow)), ten_neg_pow)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
