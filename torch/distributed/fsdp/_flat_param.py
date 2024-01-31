@@ -1767,8 +1767,8 @@ class FlatParamHandle:
             )
         flat_param.data = flat_param._local_shard  # type: ignore[attr-defined]
         if self._use_orig_params:
-            if skip_use_sharded_views:
-                self._unsharded_flat_param_for_skipped_views = unsharded_flat_param
+            if skip_use_sharded_views:  # type: ignore[possibly-undefined]
+                self._unsharded_flat_param_for_skipped_views = unsharded_flat_param  # type: ignore[possibly-undefined]
             else:
                 self._use_sharded_views()
             # For the post-forward reshard, we may try to use sharded gradient
@@ -1776,7 +1776,7 @@ class FlatParamHandle:
             # in `no_sync()`), but for the post-backward reshard, we delay the
             # call to after the reduce-scatter.
             if (
-                in_forward
+                in_forward  # type: ignore[possibly-undefined]
                 # Skip using gradient views if skipped using sharded views
                 # since exposing unsharded parameters with sharded gradients
                 # may be confusing to the user
