@@ -474,6 +474,10 @@ def get_reenabled_issues(pr_body: str = "") -> List[str]:
     return parse_reenabled_issues(pr_body) + parse_reenabled_issues(commit_messages)
 
 
+def check_for_setting(labels: Set[str], body: str, setting: str) -> bool:
+    return setting in labels or f"[{setting}]" in body
+
+
 def perform_misc_tasks(
     labels: Set[str], test_matrix: Dict[str, List[Any]], job_name: str, pr_body: str
 ) -> None:
@@ -481,7 +485,14 @@ def perform_misc_tasks(
     In addition to apply the filter logic, the script also does the following
     misc tasks to set keep-going and is-unstable variables
     """
-    set_output("keep-going", "keep-going" in labels)
+    set_output("keep-going", check_for_setting(labels, pr_body, "keep-going"))
+    set_output(
+        "ci-verbose-test-logs",
+        check_for_setting(labels, pr_body, "ci-verbose-test-logs"),
+    )
+    set_output(
+        "ci-no-test-timeout", check_for_setting(labels, pr_body, "ci-no-test-timeout")
+    )
 
     # Obviously, if the job name includes unstable, then this is an unstable job
     is_unstable = job_name and IssueType.UNSTABLE.value in job_name

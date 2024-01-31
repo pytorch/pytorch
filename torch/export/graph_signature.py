@@ -31,6 +31,7 @@ class SymIntArgument:
 @dataclasses.dataclass
 class CustomObjArgument:
     name: str
+    class_fqn: str
 
 
 @dataclasses.dataclass
