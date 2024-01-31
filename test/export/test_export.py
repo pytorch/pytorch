@@ -3026,6 +3026,15 @@ def forward(self, l_q_, l_k_, l_v_):
         self.assertEqual(res[0], torch.tensor(20))
         self.assertEqual(res[1], 4)
 
+    def test_int_list_output(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return [((1, 3), [x + x, x * x])]
+
+        ep = torch.export.export(M(), (torch.ones(2, 3),))
+        res = ep(torch.ones(2, 3))
+        self.assertEqual(res[0][0], (1, 3))
+
     def test_none_input_output(self):
         class Z(torch.nn.Module):
             def forward(self, x, y):
