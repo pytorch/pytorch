@@ -1356,7 +1356,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                         )
 
                     vr = self.shape_env.var_to_range[i0]
-                    if not self.shape_env._default_unspecified_value_range().issubset(vr):
+                    if not self.shape_env._default_unspecified_value_range().issubset(
+                        vr
+                    ):
                         # The runtime range is constrained, so add a runtime
                         # assert and also explicitly refine the range
                         # (refinement should not be necessary once runtime

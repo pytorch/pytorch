@@ -3414,6 +3414,7 @@ class ShapeEnv:
         # bigint compute in range analysis), but right now it doesn't
         # so we need to get rid of some unnecessary precision.
         int_range = ValueRanges(-sys.maxsize - 1, sys.maxsize - 1)
+
         def issubset(x, y):
             return (x & int_range).issubset(y & int_range)
 
