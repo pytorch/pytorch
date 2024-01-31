@@ -253,7 +253,7 @@ realize_opcount_threshold = 30
 realize_acc_reads_threshold = 8
 
 # fallback to eager for random/dropout, this is slow but useful for debugging
-fallback_random = False
+fallback_random = True
 
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
@@ -271,7 +271,7 @@ enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", ""
 max_fusion_size = 64
 
 # max number of inputs to generate cat as a pointwise op with masked laods
-max_pointwise_cat_inputs: Optional[int] = None
+max_pointwise_cat_inputs = 128
 
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
