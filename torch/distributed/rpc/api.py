@@ -1,5 +1,5 @@
 __all__ = ["shutdown", "get_worker_info", "remote", "rpc_sync",
-           "rpc_async", "RRef", "AllGatherStates", "method_factory", "new_method"]
+           "rpc_async", "RRef", "AllGatherStates"]
 
 import collections
 import contextlib
@@ -490,7 +490,7 @@ else:
 # under `.. autoclass:: RRef` does not work.
 # we have to do the following process to replace `rpc.PyRRef` with `rpc.RRef`.
 #
-def method_factory(method_name, docstring):
+def _method_factory(method_name, docstring):
     def method(self, *args, **kwargs):
         return getattr(super(RRef, self), method_name)(*args, **kwargs)
 
@@ -521,7 +521,7 @@ def _update_PyRRef_docstrings():
         docstring = docstring.replace("torch.distributed.rpc.PyRRef", "torch.distributed.rpc.RRef")
 
         # Attach user-facing RRef method with modified docstring.
-        new_method = method_factory(method_name, docstring)
+        new_method = _method_factory(method_name, docstring)
         setattr(RRef, method_name, new_method)
 
 

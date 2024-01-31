@@ -650,8 +650,6 @@ coverage_ignore_functions = [
     "rendezvous",
     # torch.distributed.rpc.api
     "get_worker_info",
-    "method_factory",
-    "new_method",
     "remote",
     "rpc_async",
     "rpc_sync",
