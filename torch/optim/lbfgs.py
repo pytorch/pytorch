@@ -357,22 +357,29 @@ class LBFGS(Optimizer):
                 # do lbfgs update (update memory)
                 y = flat_grad.sub(prev_flat_grad)
                 s = d.mul(t)
+
+                if len(old_dirs) == history_size:
+                    # shift history by one (limited-memory)
+                    old_dirs.pop(0)
+                    old_stps.pop(0)
+                    ro.pop(0)
+
+                # store new direction/step
+                old_dirs.append(y)
+                old_stps.append(s)
+
                 ys = y.dot(s)  # y*s
+                # Computes the inverse of rho_k, if rho_k is large then just
+                # assume the inverse is large.
+                # Similarly implementation to scipy: 
+                # https://github.com/scipy/scipy/blob/da64f8ca0ef2353b59994e7e37ecee4e67a9b1d3/scipy/optimize/_optimize.py#L1360-L1367
                 if ys > 1e-10:
-                    # updating memory
-                    if len(old_dirs) == history_size:
-                        # shift history by one (limited-memory)
-                        old_dirs.pop(0)
-                        old_stps.pop(0)
-                        ro.pop(0)
-
-                    # store new direction/step
-                    old_dirs.append(y)
-                    old_stps.append(s)
                     ro.append(1. / ys)
+                else:
+                    ro.append(1000)
 
-                    # update scale of initial Hessian approximation
-                    H_diag = ys / y.dot(y)  # (y*y)
+                # update scale of initial Hessian approximation
+                H_diag = ys / y.dot(y)  # (y*y)
 
                 # compute the approximate (L-BFGS) inverse Hessian
                 # multiplied by the gradient
