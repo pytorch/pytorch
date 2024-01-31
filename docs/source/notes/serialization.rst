@@ -187,6 +187,7 @@ archive unless the user sets ``_use_new_zipfile_serialization=False``.
 In this archive, the files are ordered as such
 
 .. code-block:: text
+
     checkpoint.pth
     ├── data.pkl
     ├── byteorder  # added in PyTorch 2.1.0
