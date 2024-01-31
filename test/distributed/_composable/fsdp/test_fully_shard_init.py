@@ -436,6 +436,22 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
             model0_out_proj_param_fqns, {"0.out_proj.weight", "0.out_proj.bias"}
         )
 
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_fully_shard_double_lazy_init(self):
+        model = nn.Sequential(MLP(8), MLP(8))
+        fully_shard(model[0].in_proj)
+        fully_shard(model[0].out_proj)
+        fully_shard(model)
+        root_state = fully_shard.state(model)
+        model0_in_proj_state = fully_shard.state(model[0].in_proj)
+        model0_in_proj_state._lazy_init()
+        regex = (
+            "FSDP state has already been lazily initialized for 0.in_proj\n"
+            "FSDP requires running forward through the root module first"
+        )
+        with self.assertRaisesRegex(RuntimeError, regex):
+            root_state._lazy_init()
+
 
 if __name__ == "__main__":
     run_tests()
