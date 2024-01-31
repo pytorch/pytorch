@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import abc
 import collections
 import contextlib
@@ -63,7 +65,7 @@ from ..utils import (
     common_constant_types,
     get_fake_value,
     get_static_address_type,
-    is_function,
+    is_function_or_wrapper,
     is_namedtuple,
     is_typing,
     is_utils_checkpoint,
@@ -74,6 +76,7 @@ from ..utils import (
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
+    unwrap_if_wrapper,
     wrap_fake_exception,
 )
 
@@ -587,7 +590,7 @@ class VariableBuilder:
                 value.device,
                 source=self.source,
             )
-        elif isinstance(value, torch._C._SDPAParams):
+        elif isinstance(value, (torch._C._SDPAParams)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return SDPAParamsVariable.create(self.tx, value, self.source)
         elif isinstance(value, _EventBase):
@@ -700,7 +703,9 @@ class VariableBuilder:
         elif TorchCtxManagerClassVariable.is_matching_cls(value):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return TorchCtxManagerClassVariable(value, source=self.source)
-        elif trace_rules.lookup(value) is not None:
+        elif (is_function_or_wrapper(value) or callable(value)) and trace_rules.lookup(
+            value
+        ) is not None:
             if is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup(value).create_with_source(
@@ -716,11 +721,12 @@ class VariableBuilder:
                 source=self.source,
             )
         elif (
-            is_function(value)
+            is_function_or_wrapper(value)
             and skipfiles.check(value, is_inlined_call=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
             and not inspect.getattr_static(value, "__script_if_tracing_wrapper", False)
         ):
+            value = unwrap_if_wrapper(value)
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return SkipFilesVariable(
                 value,
@@ -1527,6 +1533,12 @@ def wrap_fx_proxy_cls(
 
         proxy.node.meta["example_value"] = example_value
         return SDPAParamsVariable(proxy, **options)
+    elif isinstance(example_value, bool) and proxy.node.target in [
+        torch.backends.cuda.can_use_flash_attention,
+        torch.backends.cuda.can_use_efficient_attention,
+    ]:
+        proxy.node.meta["example_value"] = example_value
+        return ConstantVariable.create(example_value, **options)
     else:
         unimplemented(
             "torch.* op returned non-Tensor "
@@ -1853,7 +1865,10 @@ class SourcelessBuilder:
             return SourcelessBuilder.wrap_constant_literal(value)
         elif is_builtin_callable(value):
             return BuiltinVariable(value)
-        elif trace_rules.lookup(value) is not None:
+        elif (is_function_or_wrapper(value) or callable(value)) and trace_rules.lookup(
+            value
+        ) is not None:
+            value = unwrap_if_wrapper(value)
             if is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup(value)(value)
