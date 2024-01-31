@@ -34,7 +34,7 @@ def fully_shard(
             (i.e. FSDP). If this is a 2D mesh, then this shards across the 0th
             dimension and replicates across the 1st dimension (i.e. HSDP).
             FSDP/HSDP uses the device given by the mesh's device type. For CUDA
-            or CUDA-like devices, FSDP expects uses the current device.
+            or CUDA-like devices, FSDP uses the current device.
     """
     if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
         raise ValueError(
@@ -54,7 +54,7 @@ def fully_shard(
 
     managed_modules = _get_managed_modules(module)
     params, buffers = _get_managed_states(managed_modules)
-    _move_states_to_device(params, buffers, device, mesh_info)
+    _move_states_to_device(params, buffers, device, mesh_info)  # type: ignore[possibly-undefined]
     if params:
         state._fsdp_param_group = FSDPParamGroup(params, module, mesh_info, device)
 
