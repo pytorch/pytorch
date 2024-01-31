@@ -21,8 +21,8 @@ Default is 0. Set to 1 to enable.
 This is the big on/off switch for all TunableOp implementations.
 
 #### PYTORCH_TUNABLEOP_TUNING
-Default is 0. Set to 1 to enable.
-If a tuned entry isn't found, run the tuning step and record the entry.
+Default is 1. Set to 0 to disable.
+When enabled, if a tuned entry isn't found, run the tuning step and record the entry.
 
 #### PYTORCH_TUNABLEOP_VERBOSE
 Default is 0. Set to 1 to enable.
@@ -30,31 +30,28 @@ This will produce a lot of diagnostic messages but may be useful to see if Tunab
 Otherwise, TunableOp is completely silent unless there is a warning or error during its use.
 
 #### PYTORCH_TUNABLEOP_FILENAME
-If you provide a filename, the TuningContext will attempt to read it the first time the context is used.  If tuning is
-enabled and new tunings are discovered, it will also write out to this same filename with all tunings, both the ones it
-read in at startup as well as the new ones found at runtime.  This can be used, for example, to build up a tunings file
-across many workloads by reusing the same file.
+Default is 'tunableop_results.csv'.  If you provide a filename, the TuningContext will attempt to read it the first time
+the context is used.  If tuning is enabled and new tunings are discovered, it will also write out to this same filename
+with all tunings, both the ones it read in at startup as well as the new ones found at runtime.  This can be used, for
+example, to build up a tunings file across many workloads by reusing the same file.  Unsetting this variable is not
+recommended but can be done, in which case the tuning results will not be saved.
 
 #### PYTORCH_TUNABLEOP_NUMERICAL_CHECK
 Default is 1. Set to 0 to disable. Compare the results of each possible solution against the default solution and reject
 those with low accuracy.
 
-#### PYTORCH_TUNABLEOP_BUFFER_ROTATION_COUNT
-Default is 1, must be >= 1. Running tuning iterations in a loop might cache inputs and impact results. This setting
-controls how many duplicates of the operator inputs to cycle through during tuning to avoid cache effects.
-
 #### PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED
-Default is 1. Set to 0 to disable hipblaslt from being considered during tuning.
+Default is 0. Set to 1 to enable hipblaslt being considered during tuning.
 
 ### Tuning Iterations
-By default, each possible solution for a given operator will be run for 100 iterations and its average execution will be
-calculated. The fastest solution is chosen. In addition, a set of warm up iterations can optionally be run prior to the
-timed iterations. The following environment variables can be used to set either the maximum number of iterations to
-attempt or the maximum amount of time allowed in milliseconds, or both, in which case the smaller of the two values
-used.
+By default, each possible solution for a given operator will be run for either 100 iterations or as many iterations can
+be run within 30ms, whichever is smaller. Its average execution will be calculated. The fastest solution is chosen. In
+addition, a set of warm up iterations can optionally be run prior to the timed iterations. The following environment
+variables can be used to set either the maximum number of iterations to attempt or the maximum amount of time allowed in
+milliseconds, or both, in which case the smaller of the two values used.
 
 #### PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS
-Default is 0, meaning it is not used.
+Default is 30.
 
 #### PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS
 Default is 100.

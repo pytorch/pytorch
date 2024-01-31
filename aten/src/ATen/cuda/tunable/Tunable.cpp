@@ -292,14 +292,14 @@ TuningStatus TuningResultsValidator::ValidatePyTorchVersion(const std::string& v
 
 TuningContext::TuningContext() :
     enable_{false},
-    tuning_enable_{false},
+    tuning_enable_{true},
     manager_initialized_{false},
-    max_tuning_duration_ms_{0},
-    max_tuning_iterations_{0},
+    max_tuning_duration_ms_{30},
+    max_tuning_iterations_{100},
     max_warmup_duration_ms_{0},
     max_warmup_iterations_{0},
     buffer_rotation_count_{1},
-    filename_{},
+    filename_{"tunableop_results.csv"},
     results_count_from_input_file_{0}
 {
 }
@@ -356,9 +356,9 @@ void TuningContext::DisableTuning() {
 
 bool TuningContext::IsTuningEnabled() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_TUNING");
-  if (env != nullptr && strcmp(env, "1") == 0) {
+  if (env != nullptr && strcmp(env, "0") == 0) {
     //TUNABLE_LOG("PYTORCH_TUNABLEOP_TUNING=1");
-    return true;
+    return false;
   }
   return tuning_enable_;
 }
