@@ -712,8 +712,6 @@ class AOTInductorTestsTemplate:
                 d = (b + c) @ y
                 return d.sum()
 
-        # if self.device != "cuda":
-        #     raise unittest.SkipTest("requires CUDA")
         example_inputs = (
             torch.tensor([1, 1, 1], device=self.device),
             torch.randn((1, 32), dtype=torch.float16, device=self.device),
@@ -732,8 +730,9 @@ class AOTInductorTestsTemplate:
             x := torch.randn((3, 2), device=self.device),
             torch.randn((1, 2), device=self.device),
         )
-        torch._dynamo.mark_dynamic(x, index=0)
+        torch._dynamo.mark_dynamic(x, index=0) # Create dynamic symbol
 
+        # Compile & run model where dynamic dim size > 0.
         so_path: str = AOTIRunnerUtil.compile(
             Repro(),
             example_inputs,
@@ -741,6 +740,7 @@ class AOTInductorTestsTemplate:
         aot_inductor_module = AOTIRunnerUtil.load("cuda", so_path)
         aot_inductor_module(*example_inputs)
 
+        # Re-run where dynamic dim size is 0.
         example_inputs = (
             torch.randn((0, 2), device=self.device),
             torch.randn((1, 2), device=self.device),
