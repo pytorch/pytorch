@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import functools
 import itertools
 import unittest
@@ -112,6 +114,8 @@ class OptimizerInfo:
         supports_param_groups: bool = True,
         # whether the optimizer supports parameters on multiple devices
         supports_multiple_devices: bool = True,
+        # whether the optimizer ONLY supports capturable on foreach vs. both foreach and forloop
+        only_supports_capturable_on_foreach: bool = False,
         skips=(),  # Indicates which tests to skip
         decorators=None,  # Additional decorators to apply to generated tests
         optim_error_inputs_func=None,  # Function to generate optim inputs that error
@@ -124,6 +128,7 @@ class OptimizerInfo:
         self.step_requires_closure = step_requires_closure
         self.supports_param_groups = supports_param_groups
         self.supports_multiple_devices = supports_multiple_devices
+        self.only_supports_capturable_on_foreach = only_supports_capturable_on_foreach
         self.decorators = (
             *(decorators if decorators else []),
             *(skips if skips else []),
@@ -500,6 +505,24 @@ def optim_error_inputs_func_adamw(device, dtype):
 
 
 def optim_inputs_func_asgd(device):
+    cuda_supported_configs = [
+        OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
+        OptimizerInput(
+            params=None,
+            kwargs={"maximize": True, "capturable": True},
+            desc="maximize, capturable",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.1, "capturable": True},
+            desc="weight_decay, capturable",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.1, "maximize": True, "capturable": True},
+            desc="maximize, weight_decay, capturable",
+        ),
+    ]
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 0.02}, desc="non-default lr"),
@@ -511,9 +534,9 @@ def optim_inputs_func_asgd(device):
         OptimizerInput(
             params=None,
             kwargs={"weight_decay": 0.1, "maximize": True},
-            desc="maximize",
+            desc="maximize, nonzero weight_decay",
         ),
-    ]
+    ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
 
 def optim_error_inputs_func_asgd(device, dtype):
@@ -650,7 +673,27 @@ def optim_error_inputs_func_nadam(device, dtype):
 
 
 # Weird story bro, NAdam and RAdam do not have maximize.
-def optim_inputs_func_radam(device):
+def optim_inputs_func_radam(device=None):
+    cuda_supported_configs = [
+        OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "capturable": True,
+                "weight_decay": 0.1,
+            },
+            desc="capturable, weight_decay",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "capturable": True,
+                "weight_decay": 0.1,
+                "decoupled_weight_decay": True,
+            },
+            desc="capturable, weight_decay, decoupled_weight_decay",
+        ),
+    ]
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 2e-3}, desc="non-default lr"),
@@ -663,7 +706,7 @@ def optim_inputs_func_radam(device):
             kwargs={"weight_decay": 0.1, "decoupled_weight_decay": True},
             desc="decoupled_weight_decay",
         ),
-    ]
+    ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
 
 def optim_error_inputs_func_radam(device, dtype):
@@ -1160,6 +1203,7 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adamax,
         optim_error_inputs_func=optim_error_inputs_func_adamax,
         supported_impls=("foreach", "differentiable"),
+        only_supports_capturable_on_foreach=True,  # Remove this line when #117836 is done!
         skips=(
             DecorateInfo(
                 skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
@@ -1296,6 +1340,7 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_asgd,
         optim_error_inputs_func=optim_error_inputs_func_asgd,
         supported_impls=("foreach", "differentiable"),
+        only_supports_capturable_on_foreach=True,  # Remove this line when #116052 is done!
         skips=(
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1489,6 +1534,7 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_radam,
         optim_error_inputs_func=optim_error_inputs_func_radam,
         supported_impls=("foreach", "differentiable"),
+        only_supports_capturable_on_foreach=True,  # Remove this line when #118230 is done!
         skips=(
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1524,6 +1570,104 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115607"
+                ),
+                "TestOptimRenewed",
+                "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        # previously atol=1e-7, rtol=1e-7
+                        torch.float64: tol(atol=1.5e-7, rtol=1.1e-7)
+                    }
+                ),
+                "TestOptimRenewed",
+                "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_deterministic",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/115607"
+                ),
+                "TestOptimRenewed",
+                "test_can_load_older_state_dict",
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                toleranceOverride(
+                    {  # previously atol=5-05, rtol=0.001, https://github.com/pytorch/pytorch/issues/116202
+                        torch.float32: tol(atol=5e-04, rtol=0.01),
+                    }
+                ),
+                "TestOptimRenewed",
+                "test_mixed_device_dtype",
+                active_if=TEST_WITH_TORCHDYNAMO,
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_complex",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_step_is_noop_when_params_have_no_grad",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_load_nontensor_step",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_param_groups_weight_decay",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_param_groups_lr",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_step_is_noop_for_zero_grads",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_with_cuda_params",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_mixed_device_dtype",
             ),
         ),
     ),

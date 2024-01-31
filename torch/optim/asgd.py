@@ -201,8 +201,6 @@ def asgd(
     if foreach and not torch.jit.is_scripting():
         func = _multi_tensor_asgd
     else:
-        if capturable and not is_compiling():
-            raise RuntimeError("Capturable not supported with single tensor ASGD")
         func = _single_tensor_asgd
 
     func(
@@ -242,6 +240,9 @@ def _single_tensor_asgd(
     capturable: bool,
     has_complex: bool,
 ):
+    if capturable:
+        raise RuntimeError("capturable is not supported for single tensor ASGD (when foreach=False)")
+
     for i, param in enumerate(params):
         grad = grads[i]
         grad = grad if not maximize else -grad
@@ -299,7 +300,6 @@ def _multi_tensor_asgd(
     capturable: bool,
     has_complex: bool,
 ):
-
     if len(params) == 0:
         return
 
