@@ -44,6 +44,7 @@ struct GemmParams : OpParams {
     *copy = *this;
     int device;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
+#if 0
     size_t a_size = m * k * sizeof(T);
     size_t b_size = n * k * sizeof(T);
     size_t c_size = m * n * sizeof(T);
@@ -56,13 +57,21 @@ struct GemmParams : OpParams {
         const_cast<T*>(copy->b), device, b, device, b_size, getCurrentCUDAStream(device), true));
     AT_CUDA_CHECK(c10::cuda::CUDACachingAllocator::memcpyAsync(
         copy->c, device, c, device, c_size, getCurrentCUDAStream(device), true));
+#else
+    size_t c_size = m * n * sizeof(T);
+    copy->c = static_cast<T*>(c10::cuda::CUDACachingAllocator::raw_alloc(c_size));
+    AT_CUDA_CHECK(c10::cuda::CUDACachingAllocator::memcpyAsync(
+        copy->c, device, c, device, c_size, getCurrentCUDAStream(device), true));
+#endif
     return copy;
   }
 
   // only call on object returned by DeepCopy
   void Delete() {
+#if 0
     c10::cuda::CUDACachingAllocator::raw_delete(const_cast<T*>(a));
     c10::cuda::CUDACachingAllocator::raw_delete(const_cast<T*>(b));
+#endif
     c10::cuda::CUDACachingAllocator::raw_delete(c);
   }
 
@@ -121,6 +130,7 @@ struct GemmStridedBatchedParams : OpParams {
     *copy = *this;
     int device;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
+#if 0
     size_t a_size = batch * stride_a * sizeof(T);
     size_t b_size = batch * stride_b * sizeof(T);
     size_t c_size = batch * stride_c * sizeof(T);
@@ -133,13 +143,21 @@ struct GemmStridedBatchedParams : OpParams {
         const_cast<T*>(copy->b), device, b, device, b_size, getCurrentCUDAStream(device), true));
     AT_CUDA_CHECK(c10::cuda::CUDACachingAllocator::memcpyAsync(
         copy->c, device, c, device, c_size, getCurrentCUDAStream(device), true));
+#else
+    size_t c_size = batch * stride_c * sizeof(T);
+    copy->c = static_cast<T*>(c10::cuda::CUDACachingAllocator::raw_alloc(c_size));
+    AT_CUDA_CHECK(c10::cuda::CUDACachingAllocator::memcpyAsync(
+        copy->c, device, c, device, c_size, getCurrentCUDAStream(device), true));
+#endif
     return copy;
   }
 
   // only call on object returned by DeepCopy
   void Delete() {
+#if 0
     c10::cuda::CUDACachingAllocator::raw_delete(const_cast<T*>(a));
     c10::cuda::CUDACachingAllocator::raw_delete(const_cast<T*>(b));
+#endif
     c10::cuda::CUDACachingAllocator::raw_delete(c);
   }
 
