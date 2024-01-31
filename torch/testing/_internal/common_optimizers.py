@@ -490,6 +490,20 @@ def optim_error_inputs_func_adamw(device, dtype):
 
 
 def optim_inputs_func_asgd(device=None):
+    cuda_supported_configs = [
+        OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.1, "amsgrad": True, "capturable": True},
+            desc="capturable, amsgrad",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"lr": torch.tensor(0.001), "amsgrad": True, "capturable": True},
+            desc="Tensor lr with capturable and amsgrad",
+        ),
+    ]
+
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 0.02}, desc="non-default lr"),
@@ -502,7 +516,7 @@ def optim_inputs_func_asgd(device=None):
             kwargs={"weight_decay": 0.9, "maximize": True},
             desc="maximize",
         ),
-    ]
+    ] + (cuda_supported_configs if str(device) == "cuda" else [])
 
 
 def optim_error_inputs_func_asgd(device, dtype):
