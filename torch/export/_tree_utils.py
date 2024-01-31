@@ -17,14 +17,14 @@ def reorder_kwargs(user_kwargs: Dict[str, Any], spec: TreeSpec) -> Dict[str, Any
     kwargs_spec = spec.children_specs[1]
     assert kwargs_spec.type is dict
 
-    if set(user_kwargs) != set(kwargs_spec.context):
+    if set(user_kwargs) != set(kwargs_spec.entries()):
         raise ValueError(
             f"kwarg key mismatch: "
-            f"Got {list(user_kwargs)} but expected {kwargs_spec.context}"
+            f"Got {list(user_kwargs)} but expected {kwargs_spec.entries()}"
         )
 
     reordered_kwargs = {}
-    for kw in kwargs_spec.context:
+    for kw in kwargs_spec.entries():
         reordered_kwargs[kw] = user_kwargs[kw]
 
     return reordered_kwargs
@@ -54,10 +54,10 @@ def is_equivalent(
         return False
 
     # Recurse on children
-    if len(spec1.children_specs) != len(spec2.children_specs):
+    if spec1.num_children != spec2.num_children:
         return False
 
-    for child_spec1, child_spec2 in zip(spec1.children_specs, spec2.children_specs):
+    for child_spec1, child_spec2 in zip(spec1.children(), spec2.children()):
         if not is_equivalent(child_spec1, child_spec2, equivalence_fn):
             return False
 
