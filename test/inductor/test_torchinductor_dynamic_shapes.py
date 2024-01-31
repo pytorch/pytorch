@@ -23,7 +23,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TestCase,
+    TestCaseBase as TestCase,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
@@ -187,7 +187,6 @@ class TestInductorDynamic(TestCase):
         opt_r = opt_f(x, y)
         self.assertEqual(r, opt_r)
 
-    @unittest.expectedFailure
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unwrap_storage_didnt_work_repro(self, device):
         def f():
