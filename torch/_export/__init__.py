@@ -139,7 +139,7 @@ def capture_pre_autograd_graph(
         An nn.Module containing the traced method.
 
     """
-    from torch.export._trace import _convert_input_to_fake, DEFAULT_EXPORT_DYNAMO_CONFIG
+    from torch.export._trace import _export
     from torch.export.dynamic_shapes import _process_dynamic_shapes
 
     if kwargs is None:
@@ -156,45 +156,14 @@ def capture_pre_autograd_graph(
     else:
         constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
 
-    decomp_table = {op: op.decompose for op in FunctionalTensor.maybe_aliasing_or_mutating_ops}
-    with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
-        m = torch._dynamo.export(
-            f,
-            constraints=constraints,
-            assume_static_by_default=True,
-            tracing_mode="symbolic",
-            decomposition_table=decomp_table,
-            pre_dispatch=True,
-            aten_graph=True,
-        )(
-            *args,
-            **kwargs,
-        )[0]
-
-        _, _, _, fake_mode = _convert_input_to_fake(m, args, kwargs)
-
-        m.meta["inline_constraints"] = {
-            k: v
-            for k, v in fake_mode.shape_env.runtime_var_to_range.items()
-            if re.match(r"^[if]\d+$", str(k))
-        }
-
-        if isinstance(f, torch.nn.Module):
-            from torch.export._trace import _restore_state_dict
-            _restore_state_dict(f, m)
-
-        flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
-        range_constraints = _process_constraints(m, 0, flat_args)
-        module = _create_stateful_graph_module(
-            m,
-            range_constraints=range_constraints,
-        )
 
     def _train(self, mode: bool = True):
         raise NotImplementedError("Calling train() is not supported yet.")
 
     def _eval(self, mode: bool = True):
         raise NotImplementedError("Calling eval() is not supported yet.")
+
+    module = _export(f, args, kwargs, constraints, pre_dispatch=True).module()
 
     module.train = types.MethodType(_train, module)  # type: ignore[method-assign]
     module.eval = types.MethodType(_eval, module)  # type: ignore[method-assign]

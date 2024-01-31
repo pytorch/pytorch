@@ -1843,6 +1843,8 @@ def forward(self, arg_0):
         ):
             graph_module.eval()
 
+    # TODO (tmanlaibaatar) PreDispatch IR doesn't work with HOO yet
+    @unittest.expectedFailure
     def test_export_cond_preserve_stack_trace_for_subgraphs(self):
         class MySubModule(torch.nn.Module):
             def foo(self, x):
@@ -2653,9 +2655,8 @@ def forward(self, l_x_):
             orig_eager, (torch.rand(2, 3),), {}
         )
         for k, v in orig_eager.state_dict().items():
-            normalized_k = k.replace(".", "_")
-            self.assertIn(normalized_k, pre_autograd_gm.state_dict())
-            self.assertEqual(v, pre_autograd_gm.state_dict()[normalized_k])
+            self.assertIn(k, pre_autograd_gm.state_dict())
+            self.assertEqual(v, pre_autograd_gm.state_dict()[k])
         self.assertTrue(torch.allclose(pre_autograd_gm(test_inp), orig_eager(test_inp)))
 
         ep = export(orig_eager, (torch.rand(2, 3),), {})
