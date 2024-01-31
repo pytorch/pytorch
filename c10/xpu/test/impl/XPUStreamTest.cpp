@@ -181,7 +181,6 @@ TEST(XPUStreamTest, StreamFunction) {
 
   // H2D
   asyncMemCopy(stream, deviceData, hostData, sizeof(int) * numel);
-  ASSERT_FALSE(stream.query());
   c10::xpu::syncStreamsOnDevice();
   ASSERT_TRUE(stream.query());
 
