@@ -972,6 +972,10 @@ class CppOverrides(OpOverrides):
         V.kernel.compute.splice(code)
         return result
 
+    @staticmethod
+    def bessel_j0(x):
+        return f"bessel_j0_forward({x})"
+
 
 class CppVecOverrides(CppOverrides):
     """Map element-wise ops to aten vectorization C++"""
@@ -2033,7 +2037,10 @@ class CppVecKernel(CppKernel):
         }
         assert dtype == torch.float
         assert src_dtype == torch.float
-        assert isinstance(value, CppCSEVariable) and value.is_vec, value
+        assert isinstance(value, CppCSEVariable), value
+
+        if not value.is_vec:
+            value = self.broadcast(value)
 
         vec_ns = "at::vec"
         vec = f"{vec_ns}::Vectorized<{DTYPE_TO_CPP[dtype]}>"
