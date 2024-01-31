@@ -53,8 +53,8 @@ class DDPMeshInfo(DataParallelMeshInfo):
 @dataclass
 class HSDPMeshInfo(FSDPMeshInfo, DDPMeshInfo):
     def __post_init__(self):
-        super(FSDPMeshInfo, self).__post_init__()
-        super(DDPMeshInfo, self).__post_init__()
+        # Calls `FSDPMeshInfo` -> `DDPMeshInfo` -> `DataParallelMeshInfo`
+        super().__post_init__()
 
 
 class TrainingState(Enum):

@@ -1153,16 +1153,6 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
     return result
 
 
-@register_decomposition(aten.rsub.Tensor)
-def rsub_Tensor(self: Tensor, other: Tensor, alpha: float = 1) -> Tensor:
-    return torch.sub(other, self, alpha=alpha)
-
-
-@register_decomposition(aten.rsub.Scalar)
-def rsub_Scalar(self: Tensor, other: float, alpha: float = 1) -> Tensor:
-    return torch.sub(other, self, alpha=alpha)
-
-
 @register_decomposition(aten.embedding)
 @out_wrapper()
 def embedding(
@@ -2832,7 +2822,7 @@ def _rnn_helper(
             final_hiddens.append(bwd_hidden)
 
         if bidirectional:
-            input = torch.cat([fwd_inp, bwd_inp], fwd_inp.dim() - 1)
+            input = torch.cat([fwd_inp, bwd_inp], fwd_inp.dim() - 1)  # type: ignore[possibly-undefined]
         else:
             input = fwd_inp
 
@@ -3821,18 +3811,11 @@ def mv(self, vec):
 def binary_cross_entropy_with_logits(
     self, target, weight=None, pos_weight=None, reduction=Reduction.MEAN.value
 ):
-    max_val = (-self).clamp_min(0)
     if pos_weight is not None:
         log_weight = (pos_weight - 1) * target + 1
-        loss = (1 - target) * self + log_weight * (
-            ((-max_val).exp() + (-self - max_val).exp()).log() + max_val
-        )
+        loss = (1 - target) * self - (log_weight * F.logsigmoid(self))
     else:
-        loss = (
-            (1 - target) * self
-            + max_val
-            + ((-max_val).exp() + (-self - max_val).exp()).log()
-        )
+        loss = (1 - target) * self - F.logsigmoid(self)
 
     if weight is not None:
         loss = loss * weight
