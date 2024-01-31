@@ -43,6 +43,28 @@ def _contains_multi_kernel_code(wrapper_code: str):
     )
 
 
+def make_cpp_wrapper_test(orig_test, **extra_args):
+    """
+    Wrap an existing test into a new test with cpp-wrapper enabled.
+
+    Make this as a free function rather than staticmethod in MultiKernelTest.
+    Otherwise we get 'TypeError: 'staticmethod' object is not callable'
+    error in py3.8. (py3.10 works)
+    """
+
+    @config.patch("cpp_wrapper", True)
+    def fn(self):
+        # The same kernel may have been compiled by previous tests with
+        # cpp_wrapper disabled. Clear the cache so we go ahead to re-compile
+        # the kernel with cpp_wrapper enabled.
+        from torch._inductor import codecache
+
+        codecache.PyCodeCache.clear()
+        return orig_test(self, **extra_args)
+
+    return fn
+
+
 @config.patch(
     {
         "triton.multi_kernel": int(os.environ.get("TORCHINDUCTOR_MULTI_KERNEL", "1")),
@@ -102,20 +124,6 @@ class MultiKernelTest(TestCase):
     @config.patch("warn_mix_layout", True)
     def test_softmax_warn_mixed_layout(self):
         self.test_softmax()
-
-    @staticmethod
-    def make_cpp_wrapper_test(orig_test, **extra_args):
-        @config.patch("cpp_wrapper", True)
-        def fn(self):
-            # The same kernel may have been compiled by previous tests with
-            # cpp_wrapper disabled. Clear the cache so we go ahead to re-compile
-            # the kernel with cpp_wrapper enabled.
-            from torch._inductor import codecache
-
-            codecache.PyCodeCache.clear()
-            return orig_test(self, **extra_args)
-
-        return fn
 
     test_softmax_cpp_wrapper = make_cpp_wrapper_test(
         test_softmax, expect_multi_kernel=False
