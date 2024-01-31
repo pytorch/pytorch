@@ -17,6 +17,7 @@
 #else
 
 #include <ATen/ops/_addmm_activation.h>
+#include <ATen/ops/_embedding_bag.h>
 #include <ATen/ops/_scaled_dot_product_efficient_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
 #include <ATen/ops/_scaled_mm.h>
@@ -336,6 +337,41 @@ AOTITorchError aoti_torch_create_tensor_from_blob(
   });
 }
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__embedding_bag(
+    AtenTensorHandle weight,
+    AtenTensorHandle indices,
+    AtenTensorHandle offsets,
+    int32_t scale_grad_by_freq,
+    int32_t mode,
+    int32_t sparse,
+    AtenTensorHandle per_sample_weights, // optional argument
+    int32_t include_last_offset,
+    int32_t padding_idx,
+    AtenTensorHandle* ret0, // returns new reference
+    AtenTensorHandle* ret1, // returns new reference
+    AtenTensorHandle* ret2, // returns new reference
+    AtenTensorHandle* ret3 // returns new reference
+) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto [r0, r1, r2, r3] = at::_embedding_bag(
+        *tensor_handle_to_tensor_pointer(weight),
+        *tensor_handle_to_tensor_pointer(indices),
+        *tensor_handle_to_tensor_pointer(offsets),
+        scale_grad_by_freq,
+        mode,
+        sparse,
+        pointer_to_optional(
+            tensor_handle_to_tensor_pointer(per_sample_weights)),
+        include_last_offset,
+        padding_idx);
+
+    *ret0 = new_tensor_handle(std::move(r0));
+    *ret1 = new_tensor_handle(std::move(r1));
+    *ret2 = new_tensor_handle(std::move(r2));
+    *ret3 = new_tensor_handle(std::move(r3));
+  });
+}
+
 AOTITorchError aoti_torch__scaled_dot_product_flash_attention_v2(
     AtenTensorHandle query,
     AtenTensorHandle key,
@@ -343,7 +379,7 @@ AOTITorchError aoti_torch__scaled_dot_product_flash_attention_v2(
     double dropout_p,
     int is_causal,
     int return_debug_mask,
-    double* scale,
+    double* scale, // optional argument
     AtenTensorHandle* ret0, // returns new reference
     AtenTensorHandle* ret1, // returns new reference
     AtenTensorHandle* ret2, // returns new reference
