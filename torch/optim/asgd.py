@@ -34,7 +34,7 @@ class ASGD(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
-        if foreach is False and capturable:
+        if foreach is False and capturable and not is_compiling():
             raise ValueError("Capturable not supported with single tensor ASGD")
 
         defaults = dict(
@@ -240,7 +240,7 @@ def _single_tensor_asgd(
     capturable: bool,
     has_complex: bool,
 ):
-    if capturable:
+    if capturable and not is_compiling():
         raise RuntimeError("capturable is not supported for single tensor ASGD (when foreach=False)")
 
     for i, param in enumerate(params):
