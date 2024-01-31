@@ -37,11 +37,10 @@ def _get_post_forward_mesh_info(
             reshard_after_forward = False
         elif reshard_after_forward == shard_mesh_size:
             reshard_after_forward = True
+    post_forward_mesh_info = None
     if reshard_after_forward is True:
         post_forward_mesh_info = mesh_info
-    elif reshard_after_forward is False:
-        post_forward_mesh_info = None
-    else:
+    elif reshard_after_forward is not False:  # int case
         post_forward_shard_mesh_size = reshard_after_forward
         num_post_forward_meshes = (
             mesh_info.shard_mesh_size // post_forward_shard_mesh_size
