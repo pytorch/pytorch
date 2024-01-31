@@ -35,7 +35,7 @@ print_specializations = False
 inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY = False
 
 # [@compile_ignored: debug] Validate that ShapeEnv's version key is updated correctly
-validate_shape_env_verison_key = False
+validate_shape_env_version_key = False
 
 from torch.utils._config_module import install_config_module
 

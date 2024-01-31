@@ -1034,7 +1034,7 @@ def _lru_cache(fn, maxsize=None):
     fn_cache = lru_cache(maxsize)(fn)
     prior_version = 0
 
-    if config.validate_shape_env_verison_key:
+    if config.validate_shape_env_version_key:
         prior_key = None
 
         @functools.wraps(fn)
