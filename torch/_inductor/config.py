@@ -1,6 +1,6 @@
 import os  # noqa: C101
 import sys
-from typing import Any, Dict, TYPE_CHECKING
+from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
 import torch
 
@@ -81,13 +81,13 @@ pattern_matcher = True
 #
 # torch._inductor.config.post_grad_custom_pre_pass = my_custom_pre_pass
 # torch._inductor.config.post_grad_custom_post_pass = my_custom_post_pass
-post_grad_custom_pre_pass = None
-post_grad_custom_post_pass = None
+post_grad_custom_pre_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
+post_grad_custom_post_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
 
 # Registers a custom pregrad pass. Note that the pre-grad IR is 1.
 # non-functional, 2. non-normalized, and 3. prone to change. Ideally we should
 # use post-grad passes.
-pre_grad_custom_pass = None
+pre_grad_custom_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
 
 # Optimize away split cat patterns (Experimental)
 split_cat_fx_passes = True
@@ -247,7 +247,7 @@ warn_mix_layout = os.environ.get("TORCHINDUCTOR_WARN_MIX_LAYOUT") == "1"
 # For fanouts, rematerialization can lead to exponential blowup. So, have
 # smaller threshold
 realize_reads_threshold = 4
-realize_bytes_threshold = 2000
+realize_opcount_threshold = 30
 
 # Threshold to prevent excessive accumulation of ops in one buffer during lowering
 realize_acc_reads_threshold = 8
@@ -430,7 +430,7 @@ class cpp:
     # performance degradation.
     dynamic_threads = False
 
-    simdlen = None
+    simdlen: Optional[int] = None
     min_chunk_size = 4096
     cxx = (
         None,  # download gcc12 from conda-forge if conda is installed
@@ -450,12 +450,12 @@ class cpp:
     # Inject a bug into our relu implementation; useful for testing our repro
     # extraction and minification functionality.
     # Valid values: "compile_error", "runtime_error", "accuracy"
-    inject_relu_bug_TESTING_ONLY = None
-    inject_log1p_bug_TESTING_ONLY = None
+    inject_relu_bug_TESTING_ONLY: Optional[str] = None
+    inject_log1p_bug_TESTING_ONLY: Optional[str] = None
 
     # If None, autodetect whether or not AVX512/AVX2 can be used.  Otherwise,
     # force usage as specified, without testing.
-    vec_isa_ok = None
+    vec_isa_ok: Optional[bool] = None
 
     # similar to config.triton.descriptive_names
     descriptive_names = "original_aten"
@@ -578,7 +578,7 @@ class triton:
     # Inject a bug into our relu implementation; useful for testing our repro
     # extraction and minification functionality.
     # Valid values: "compile_error", "runtime_error", "accuracy"
-    inject_relu_bug_TESTING_ONLY = None
+    inject_relu_bug_TESTING_ONLY: Optional[str] = None
 
 
 class aot_inductor:
@@ -606,12 +606,12 @@ class cuda:
     # CUDA arch to use for CUDA template kernel compilation.
     # e.g. "70", "75", "80", "90", etc.
     # When arch is None, Inductor uses torch.cuda.get_device_capability(0).
-    arch = None
+    arch: Optional[str] = None
 
     # CUDA version to use for CUDA template kernel compilation.
     # e.g. "11.4", "12.1", etc.
     # When version is None, Inductor uses torch.version.cuda.
-    version = None
+    version: Optional[str] = None
 
     # Optimization level for the host compiler.
     compile_opt_level = "-O1"
@@ -640,7 +640,7 @@ class cuda:
     # Configures the maximum number of CUTLASS configs to profile in max_autotune.
     # By default it's None, so that all CUTLASS configs are tuned.
     # This is mainly used to reduce test time in CI.
-    cutlass_max_profiling_configs = None
+    cutlass_max_profiling_configs: Optional[int] = None
 
     # Path to CUDA NVCC.
     # NVCC search order:
@@ -648,7 +648,7 @@ class cuda:
     # 2）CUDACXX environment variable
     # 3）CUDA_HOME environment variable
     # 4) default system search PATH.
-    cuda_cxx = None
+    cuda_cxx: Optional[str] = None
 
     # If set to True, it will ensure that only GEMM ops capable of
     # epilogue fusion via CUTLASS Epilogue Visitor Trees ( EVT )
@@ -663,7 +663,7 @@ class trace:
 
     # Save debug information to a temporary directory
     # If not specified, a temp directory will be created by system
-    debug_dir = None
+    debug_dir: Optional[str] = None
 
     # Save python logger call >=logging.DEBUG
     debug_log = False
@@ -707,7 +707,7 @@ class trace:
 
     # Upload the .tar.gz file
     # Needs to be overriden based on specific environment needs
-    upload_tar = None
+    upload_tar: Optional[Callable[[str], None]] = None
 
 
 _save_config_ignore = {

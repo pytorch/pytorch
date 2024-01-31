@@ -710,7 +710,6 @@ def gen_pyi(
                             "dtype: _dtype",
                             "count: int = -1",
                             "offset: int = 0",
-                            "device: Optional[DeviceLikeType] = None",
                             "requires_grad: _bool = False",
                         ]
                     )
@@ -1106,9 +1105,13 @@ def gen_pyi(
                             "self",
                             "device: Optional[Union[_device, _int, str]] = None",
                             "non_blocking: _bool = False",
+                            "memory_format: torch.memory_format = torch.preserve_format",
                         ]
                     )
                 )
+            ],
+            "cpu": [
+                "def cpu(self, memory_format: torch.memory_format = torch.preserve_format) -> Tensor: ..."
             ],
             "numpy": ["def numpy(self, *, force: _bool = False) -> Any: ..."],
             "apply_": ["def apply_(self, callable: Callable) -> Tensor: ..."],
@@ -1204,7 +1207,6 @@ def gen_pyi(
     simple_conversions = [
         "byte",
         "char",
-        "cpu",
         "double",
         "float",
         "half",

@@ -242,6 +242,13 @@ class GraphLowering(torch.fx.Interpreter):
         self.creation_time = time.time()
         self.name = "GraphLowering"
         self.cpp_wrapper = cpp_wrapper
+
+        # record multi_kernel choice for cpp_wrapper so the second pass knows
+        # which sub-kernel is picked. Copy cpp_wrapper to another variable
+        # since cpp_wrapper flag is set to false for the first pass of codegen.
+        self.record_multi_kernel_choice = cpp_wrapper
+        self.multi_kernel_to_choice: Dict[str, int] = {}
+
         self.aot_mode = aot_mode
         self.graph_id = graph_id
         self.scheduler: "torch._inductor.scheduler.Scheduler" = None  # type: ignore[assignment]
@@ -258,8 +265,10 @@ class GraphLowering(torch.fx.Interpreter):
             []
         )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported
-        self.disable_cudagraphs = False
-        self.disable_cudagraphs_reason = ""
+        self.disable_cudagraphs_reason: Optional[str] = None
+
+        # only keeping one node per device for stack trace purposes
+        self.device_node_mapping: Dict[torch.device, torch.fx.Node] = {}
         self.orig_gm: torch.fx.GraphModule = gm.__copy__()
         self.dynamo_flat_name_to_original_fqn = self.module.meta.get(
             "dynamo_flat_name_to_original_fqn", {}
@@ -488,6 +497,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.device_types.add(device.type)
         if device.index is not None:
             self.device_idxs.add(device.index)
+        if V.graph.current_node and device not in self.device_node_mapping:
+            self.device_node_mapping[device] = V.graph.current_node
 
     @property
     def fake_mode(self):
@@ -845,7 +856,7 @@ class GraphLowering(torch.fx.Interpreter):
                 )
             elif n.op == "call_function" and n.target in layout_constraints:
                 debug("layout_constraints")
-                args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
+                args, kwargs = layout_constraints[n.target](n, *args, **kwargs)  # type: ignore[index]
                 result = self.call_function(n.target, args, kwargs)
             elif is_magic_method(n.target):
                 # TODO: this is sus, it probably should be handled in the
@@ -964,7 +975,7 @@ class GraphLowering(torch.fx.Interpreter):
                 curr = result.data.data
                 if isinstance(curr, Pointwise):
                     # Use inner fn as a rough proxy. Good enough.
-                    if curr.inner_fn_str_len() > config.realize_bytes_threshold:
+                    if curr.has_large_inner_fn():
                         result.realize()
 
         # This is not complete, but it doesn't have to be: origin_node

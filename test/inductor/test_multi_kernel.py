@@ -56,11 +56,16 @@ class MultiKernelTest(TestCase):
         ref = torch.softmax(x, -1)
         compiled_fn = torch.compile(torch.softmax)
         act, wrapper_code = run_and_get_code(compiled_fn, x, -1)
+
+        # wrapper_code will contains 2 entries if cpp_wrapper=True.
+        # One for the first pass and one for the second pass.
+        # We mainly care about the wrapper for the final pass here.
+        wrapper_code = wrapper_code[-1]
         self.assertTrue(torch.allclose(ref, act))
         if expect_multi_kernel:
-            self.assertTrue(_contains_multi_kernel_code(wrapper_code[0]))
+            self.assertTrue(_contains_multi_kernel_code(wrapper_code))
         else:
-            self.assertFalse(_contains_multi_kernel_code(wrapper_code[0]))
+            self.assertFalse(_contains_multi_kernel_code(wrapper_code))
 
     @parametrize("force_kernel", (0, 1))
     @unittest.mock.patch.dict(
@@ -98,20 +103,23 @@ class MultiKernelTest(TestCase):
     def test_softmax_warn_mixed_layout(self):
         self.test_softmax()
 
-    @config.patch("cpp_wrapper", True)
-    def test_softmax_cpp_wrapper(self):
-        """
-        Multi-kernel does not work when cpp_wrapper is enabled right now. So we disable
-        multi-kernel in that case.
-        """
+    @staticmethod
+    def make_cpp_wrapper_test(orig_test, **extra_args):
+        @config.patch("cpp_wrapper", True)
+        def fn(self):
+            # The same kernel may have been compiled by previous tests with
+            # cpp_wrapper disabled. Clear the cache so we go ahead to re-compile
+            # the kernel with cpp_wrapper enabled.
+            from torch._inductor import codecache
 
-        # The same kernel may have been compiled by previous tests with
-        # cpp_wrapper disabled. Clear the cache so we go ahead to re-compile
-        # the kernel with cpp_wrapper enabled.
-        from torch._inductor import codecache
+            codecache.PyCodeCache.clear()
+            return orig_test(self, **extra_args)
 
-        codecache.PyCodeCache.clear()
-        self.test_softmax(False)
+        return fn
+
+    test_softmax_cpp_wrapper = make_cpp_wrapper_test(
+        test_softmax, expect_multi_kernel=False
+    )
 
     def test_layernorm(self):
         ln = nn.LayerNorm(1024).cuda()
@@ -214,7 +222,7 @@ class MultiKernelTest(TestCase):
         act = torch.compile(f)(x, y)
         self.assertTrue(torch.allclose(y_ref, y))
 
-    def test_reduction_scratch_buffer(self):
+    def test_reduction_scratch_buffer(self, force_multi_kernel=1):
         """
         The explicited realized buffer in the test function will be passed in
         as a scratch buffer for the non-persistent reduction kernel but
@@ -222,6 +230,9 @@ class MultiKernelTest(TestCase):
 
         This causes different argument lists for non-persistent reduction kernel and
         persistent reduction kernel.
+
+        Check documentation around torch._inductor.config.triton.multi_kernel about
+        how to interpret the force_multi_kernel argument.
         """
 
         def f(x):
@@ -232,8 +243,24 @@ class MultiKernelTest(TestCase):
 
         x = torch.rand(16, 16, device="cuda")
         ref = f(x)
-        act = torch.compile(f)(x)
+        with config.patch("triton.multi_kernel", force_multi_kernel):
+            act = torch.compile(f)(x)
         self.assertTrue(torch.allclose(ref, act))
+
+    # Use benchmarking to pick the faster kernel
+    test_reduction_scratch_buffer_cpp_wrapper = make_cpp_wrapper_test(
+        test_reduction_scratch_buffer, force_multi_kernel=1
+    )
+    # force pick persistent reduction. This can be a good test since this persistent
+    # reduction uses less call arguments than the corresponding non-persistent
+    # reduction.
+    test_reduction_scratch_buffer_cpp_wrapper_persistent_reduction = (
+        make_cpp_wrapper_test(test_reduction_scratch_buffer, force_multi_kernel=2)
+    )
+    # force pick non-persistent reduction
+    test_reduction_scratch_buffer_cpp_wrapper_non_persistent_reduction = (
+        make_cpp_wrapper_test(test_reduction_scratch_buffer, force_multi_kernel=3)
+    )
 
 
 if __name__ == "__main__":
