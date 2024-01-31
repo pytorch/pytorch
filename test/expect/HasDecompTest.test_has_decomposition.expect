@@ -1004,10 +1004,6 @@ aten::ormqr
 aten::ormqr.out
 aten::permute_copy
 aten::permute_copy.out
-aten::pixel_shuffle
-aten::pixel_shuffle.out
-aten::pixel_unshuffle
-aten::pixel_unshuffle.out
 aten::poisson
 aten::poisson.out
 aten::polygamma
