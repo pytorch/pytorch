@@ -25,7 +25,7 @@ class FSDPStateContext:
     """This has state shared across FSDP states."""
 
     def __init__(self):
-        # All FSDP states in one module tree
+        # All FSDP states in the root state's module tree
         self.all_states: List[FSDPState] = []
         # Iteration's forward root runs the once-per-forward logic; this root
         # may not be the overall root set by lazy initialization in cases where
