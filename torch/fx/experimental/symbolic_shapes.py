@@ -165,6 +165,14 @@ def is_concrete_int(a: Union[int, SymInt]):
     return False
 
 def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
+    """
+    Perform a guard on a symbolic boolean expression in a size oblivious way.
+    This is typically used when a non-oblivious test would result in a guard
+    on a data dependent value of which we don't know the value of at compile time.
+    When a guard is tested this way, we may diverge in behavior from how regular
+    PyTorch semantics would treat it.  For more information, see
+    https://github.com/pytorch/pytorch/pull/118579
+    """
     if isinstance(expr, torch.SymBool):
         return expr.node.guard_size_oblivious("", 0)
     else:
@@ -3396,7 +3404,7 @@ class ShapeEnv:
             # problem
         )
 
-    def _set_replacement(self, a: "sympy.Symbol", tgt: "sympy.Expr", msg: str) -> None:
+    def _set_replacement(self, a: "sympy.Symbol", tgt: "sympy.Expr", msg: str, *, force_size_like: bool = False) -> None:
         """
         Adds or updates a replacement for a symbol.
         Use this instead of `self.replacements[a] = tgt`.
@@ -3490,7 +3498,13 @@ class ShapeEnv:
             if not issubset(tgt_bound, src_bound):
                 self.log.debug("skipped set_replacement %s = %s (%s) [%s not subset of %s]", a, tgt, msg, tgt_bound, src_bound)
                 return
-            elif self.is_unbacked_symint(a) and a in self.size_like and free_unbacked_symbols(tgt) and tgt not in self.size_like:
+            elif (
+                self.is_unbacked_symint(a) and
+                a in self.size_like and
+                free_unbacked_symbols(tgt) and
+                tgt not in self.size_like and
+                not force_size_like
+            ):
                 self.log.debug("skipped set_replacement %s = %s (%s) [rhs not size-like]", a, tgt, msg)
                 return
 
@@ -3619,7 +3633,7 @@ class ShapeEnv:
                             self.var_to_range[i1] = SymPyValueRangeAnalysis.truediv(
                                 self.var_to_range[i0], ValueRanges.wrap(d)
                             )
-                            self._set_replacement(i0, d * i1, "divisibility")
+                            self._set_replacement(i0, d * i1, "divisibility", force_size_like=True)
 
             except NotImplementedError:
                 pass
