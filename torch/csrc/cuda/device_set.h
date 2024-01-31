@@ -1,8 +1,8 @@
 #pragma once
 
+#include <c10/cuda/CUDAMacros.h>
 #include <bitset>
 #include <cstddef>
-#include <c10/cuda/CUDAMacros.h>
 
 namespace torch {
 
