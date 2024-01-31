@@ -37,9 +37,10 @@ class TestExportTorchbind(TestCase):
         with enable_torchbind_tracing():
             exported_program = export(f, args, kwargs, strict=strict)
         reversed_kwargs = {key: kwargs[key] for key in reversed(kwargs)}
-        self.assertEqual(exported_program(*args, **kwargs), f(*args, **kwargs))
+        self.assertEqual(exported_program.module()(*args, **kwargs), f(*args, **kwargs))
         self.assertEqual(
-            exported_program(*args, **reversed_kwargs), f(*args, **reversed_kwargs)
+            exported_program.module()(*args, **reversed_kwargs),
+            f(*args, **reversed_kwargs),
         )
 
     def test_none(self):
@@ -102,6 +103,23 @@ class TestExportTorchbind(TestCase):
         self._test_export_same_as_eager(
             MyModule(), (torch.ones(2, 3), cc), strict=False
         )
+
+    def test_unlift_custom_obj(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
+
+            def forward(self, x):
+                return x + torch.ops._TorchScriptTesting.takes_foo(self.attr, x)
+
+        m = MyModule()
+        input = torch.ones(2, 3)
+        with enable_torchbind_tracing():
+            ep = torch.export.export(m, (input,), strict=False)
+
+        unlifted = ep.module()
+        self.assertEqual(m(input), unlifted(input))
 
 
 if __name__ == "__main__":
