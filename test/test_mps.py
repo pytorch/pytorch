@@ -6869,6 +6869,22 @@ class TestMPS(TestCaseMPS):
         gc.collect()
         torch.mps.empty_cache()
 
+    def test_mm_large(self):
+        """ Test that MM works for matrices with index larger than 32K """
+        x = torch.rand(10, 1, device="mps")
+        y = torch.rand(1, 32769, device="mps")
+        # This used to crash with:
+        # error: subRange.start (24576) is not less than length of dimension[0] (16384)
+        # See https://github.com/pytorch/pytorch/issues/116769#issuecomment-1888302095
+        self.assertNotEqual(torch.mm(x, y[:, 16384:32768]).abs().max().item(), 0.0)
+        # And below used to produce incorrect results
+        m, n, k = 1024, 1, 32769
+        x = torch.rand(m, n, device="mps")
+        y = torch.rand(n, k, device="mps")
+        z = torch.mm(x, y).to("cpu")
+        z_cpu = torch.mm(x.to("cpu"), y.to("cpu"))
+        self.assertEqual(z, z_cpu)
+
     # Test flip
     def test_flip(self):
         def helper(shape, dims):
@@ -11215,6 +11231,9 @@ class TestConsistency(TestCaseMPS):
         'nextafter',
         'native_layer_norm',
         'nn.functional.layer_norm',
+        'nn.functional.interpolate',
+        'nn.functional.upsample_bilinear',
+        'nn.functional.upsample_nearest',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',

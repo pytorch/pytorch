@@ -1153,16 +1153,6 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
     return result
 
 
-@register_decomposition(aten.rsub.Tensor)
-def rsub_Tensor(self: Tensor, other: Tensor, alpha: float = 1) -> Tensor:
-    return torch.sub(other, self, alpha=alpha)
-
-
-@register_decomposition(aten.rsub.Scalar)
-def rsub_Scalar(self: Tensor, other: float, alpha: float = 1) -> Tensor:
-    return torch.sub(other, self, alpha=alpha)
-
-
 @register_decomposition(aten.embedding)
 @out_wrapper()
 def embedding(
@@ -1289,7 +1279,7 @@ def tensor_split_tensor_indices_or_sections_py_impl(
     self: Tensor,
     tensor_indices_or_sections: Tensor,
     dim: int = 0,
-) -> List[Tensor]:
+) -> Tuple[Tensor, ...]:
     assert tensor_indices_or_sections.device.type == "cpu"
     assert tensor_indices_or_sections.dtype == torch.int64
     split_dim = tensor_indices_or_sections.dim()
@@ -2832,7 +2822,7 @@ def _rnn_helper(
             final_hiddens.append(bwd_hidden)
 
         if bidirectional:
-            input = torch.cat([fwd_inp, bwd_inp], fwd_inp.dim() - 1)
+            input = torch.cat([fwd_inp, bwd_inp], fwd_inp.dim() - 1)  # type: ignore[possibly-undefined]
         else:
             input = fwd_inp
 
@@ -3282,6 +3272,18 @@ def upsample_bilinear2d_aa_vec(input, output_size, align_corners, scale_factors)
     scale_h = get_scale_value(scale_factors, 0)
     scale_w = get_scale_value(scale_factors, 1)
     return torch.ops.aten._upsample_bilinear2d_aa(
+        input, osize, align_corners, scale_h, scale_w
+    )
+
+
+@register_decomposition(aten._upsample_bicubic2d_aa.vec)
+@aten._upsample_bicubic2d_aa.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten._upsample_bicubic2d_aa.vec.py_impl(DispatchKey.Autograd)
+def upsample_bicubic2d_aa_vec(input, output_size, align_corners, scale_factors):
+    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
+    scale_h = get_scale_value(scale_factors, 0)
+    scale_w = get_scale_value(scale_factors, 1)
+    return torch.ops.aten._upsample_bicubic2d_aa(
         input, osize, align_corners, scale_h, scale_w
     )
 
@@ -3809,18 +3811,11 @@ def mv(self, vec):
 def binary_cross_entropy_with_logits(
     self, target, weight=None, pos_weight=None, reduction=Reduction.MEAN.value
 ):
-    max_val = (-self).clamp_min(0)
     if pos_weight is not None:
         log_weight = (pos_weight - 1) * target + 1
-        loss = (1 - target) * self + log_weight * (
-            ((-max_val).exp() + (-self - max_val).exp()).log() + max_val
-        )
+        loss = (1 - target) * self - (log_weight * F.logsigmoid(self))
     else:
-        loss = (
-            (1 - target) * self
-            + max_val
-            + ((-max_val).exp() + (-self - max_val).exp()).log()
-        )
+        loss = (1 - target) * self - F.logsigmoid(self)
 
     if weight is not None:
         loss = loss * weight
@@ -4321,7 +4316,14 @@ def scaled_dot_product_flash_attention_for_cpu(
     )
 
     output, attn = aten._scaled_dot_product_attention_math.default(
-        query, key, value, None, dropout_p, is_causal, None, scale=scale
+        query,
+        key,
+        value,
+        attn_mask=attn_mask,
+        dropout_p=dropout_p,
+        is_causal=is_causal,
+        dropout_mask=None,
+        scale=scale,
     )
     # Why this change?
     # In pre-dispatch export scaled_dot_product_attention is executed via
