@@ -2,10 +2,10 @@
 
 #include <bitset>
 #include <cstddef>
+#include <c10/cuda/CUDAMacros.h>
 
 namespace torch {
 
-static constexpr size_t MAX_CUDA_DEVICES = 64;
-using device_set = std::bitset<MAX_CUDA_DEVICES>;
+using device_set = std::bitset<C10_COMPILE_TIME_MAX_GPUS>;
 
 } // namespace torch
