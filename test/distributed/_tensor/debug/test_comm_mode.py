@@ -52,6 +52,26 @@ class TestCommMode(TestCase):
         self.assertEqual(comm_counts[c10d_functional.all_gather_into_tensor], 1)
         self.assertEqual(comm_counts[c10d_functional.reduce_scatter_tensor], 1)
 
+    def test_comm_mode_with_dtensor(self):
+        world_pg = self.world_pg
+
+        def f(x, y):
+            return torch.mm(x, y)
+        comm_mode = CommDebugMode()
+        x = torch.randn(4, 8, requires_grad=True)
+        y = torch.randn(4, 32, requires_grad=True)
+        x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
+        y_dtensor = DTensor.from_local(y, mesh, [Shard(0)], run_check=False)
+
+        with comm_mode:
+            f(x_dtensor, y_dtensor)
+
+        comm_counts = comm_mode.get_comm_counts()
+        self.assertEqual(comm_mode.get_total_counts(), 1)
+        self.assertEqual(comm_counts[c10d_functional.all_reduce], 0)
+        self.assertEqual(comm_counts[c10d_functional.all_gather_into_tensor], 1)
+        self.assertEqual(comm_counts[c10d_functional.reduce_scatter_tensor], 0)
+
 
 if __name__ == "__main__":
     run_tests()
