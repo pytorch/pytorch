@@ -13349,6 +13349,20 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(Module(False), x, rtol=1e-3, atol=1e-6)
         self.run_test(Module(True), x, rtol=1e-3, atol=1e-6)
 
+    class GridSampleModule(torch.nn.Module):
+        def __init__(self, mode, padding_mode, align_corners) -> None:
+            super().__init__()
+            self.mode, self.padding_mode, self.align_corners = (
+                mode,
+                padding_mode,
+                align_corners,
+            )
+
+        def forward(self, input, grid):
+            return torch.nn.functional.grid_sample(
+                input, grid, self.mode, self.padding_mode, self.align_corners
+            )
+
     @skipIfUnsupportedMinOpsetVersion(16)
     @common_utils.parametrize(
         "mode",
@@ -13364,21 +13378,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         name_fn=lambda align_corners: str(align_corners),
     )
     def test_grid_sample(self, mode, padding_mode, align_corners):
-        n, c, h_in, w_in, h_out, w_out = 1, 1, 3, 2, 2, 4
-
-        class GridSampleModule(torch.nn.Module):
-            def __init__(self, mode, padding_mode, align_corners) -> None:
-                super().__init__()
-                self.mode, self.padding_mode, self.align_corners = (
-                    mode,
-                    padding_mode,
-                    align_corners,
-                )
-
-            def forward(self, input, grid):
-                return torch.nn.functional.grid_sample(
-                    input, grid, self.mode, self.padding_mode, self.align_corners
-                )
+        n, c, d_in, h_in, w_in, d_out, h_out, w_out = 1, 1, 2, 3, 2, 3, 2, 4
 
         atol_rtol = {}
         if (mode, padding_mode) == ("bicubic", "border"):
@@ -13388,14 +13388,12 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 atol_rtol.update({"atol": 0.02, "rtol": 0.02})
         input, grid = torch.randn(n, c, h_in, w_in), torch.randn(n, h_out, w_out, 2)
         self.run_test(
-            GridSampleModule(mode, padding_mode, align_corners),
+            TestONNXRuntime.GridSampleModule(mode, padding_mode, align_corners),
             (input, grid),
             **atol_rtol,
         )
 
         # ONNX Opset 16 GridSample with 5D volumetric input is not supported.
-        d_in = 2
-        d_out = 3
         volumetric_input_tensor = torch.randn(n, c, d_in, h_in, w_in)
         volumetric_grid_tensor = torch.randn(n, d_out, h_out, w_out, 3)
         for mode, padding_mode, align_corners in itertools.product(
@@ -13417,7 +13415,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 torch.onnx.errors.OnnxExporterError,
             ):
                 self.run_test(
-                    GridSampleModule(mode, padding_mode, align_corners),
+                    TestONNXRuntime.GridSampleModule(mode, padding_mode, align_corners),
                     (volumetric_input_tensor, volumetric_grid_tensor),
                     **atol_rtol,
                 )

@@ -480,42 +480,99 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
         x = torch.randn(20, 16, 50)
         check_onnx_opsets_operator(MyDynamicModel(), x, ops, opset_versions=[9, 10])
 
-    def test_grid_sample(self):
-        n, c, h_in, w_in, h_out, w_out = 1, 1, 3, 2, 2, 4
-        ops = {16: [{"op_name": "GridSample"}]}
-
+    def test_affine_grid(self):
         class MyModule(Module):
-            def forward(self, x, grid, mode, padding_mode, align_corers):
-                return torch.nn.functional.grid_sample(
-                    x, grid, mode, padding_mode, align_corners
+            def forward(self, theta, size, align_corners):
+                return torch.nn.functional.affine_grid(
+                    theta, size, align_corners
                 )
 
-        for mode, padding_mode, align_corners in itertools.product(
-            ("bilinear", "nearest", "bicubic"),
-            ("zeros", "border", "reflection"),
+        opset_version = 20
+        ops = {opset_version: [{"op_name": "AffineGrid"}]}
+        # 2D affine
+        theta_2d = torch.empty(1, 2, 3, dtype=torch.double)
+        size_2d = torch.Size([1, 1, 2, 2])
+        # 3D affine
+        theta_3d = torch.empty(1, 3, 4, dtype=torch.double)
+        size_3d = torch.Size([1, 1, 2, 2, 2])
+
+        for inputs, align_corners in itertools.product(
+            ((theta_2d, size_2d), (theta_3d, size_3d)),
             (True, False),
         ):
-            args = (
-                torch.randn(n, c, h_in, w_in),  # x
-                torch.randn(n, h_out, w_out, 2),  # grid,
-                mode,
-                padding_mode,
-                align_corners,
-            )
+            theta, size = inputs
+            args = (theta, size, align_corners,)
             check_onnx_opsets_operator(
                 MyModule(),
                 args,
                 ops,
-                opset_versions=[16],
+                opset_versions=[opset_version],
                 training=torch.onnx.TrainingMode.TRAINING,
             )
             check_onnx_opsets_operator(
                 MyModule(),
                 args,
                 ops,
-                opset_versions=[16],
+                opset_versions=[opset_version],
                 training=torch.onnx.TrainingMode.EVAL,
             )
+
+    def test_grid_sample(self):
+        class MyModule(Module):
+            def forward(self, x, grid, mode, padding_mode, align_corers):
+                return torch.nn.functional.grid_sample(
+                    x, grid, mode, padding_mode, align_corners
+                )
+
+        from torch.onnx.symbolic_opset20 import convert_grid_sample_mode
+        for mode, padding_mode, align_corners, opset_version in itertools.product(
+            ("bilinear", "nearest", "bicubic"),
+            ("zeros", "border", "reflection"),
+            (True, False), (16, 20)
+        ):
+            def test_eval_and_training(ops, opset_version, mode, padding_mode, align_corners, x_shape, grid):
+                args = (
+                    torch.randn(*x_shape),  # x
+                    torch.randn(grid),  # grid,
+                    mode,
+                    padding_mode,
+                    align_corners,
+                )
+                check_onnx_opsets_operator(
+                    MyModule(),
+                    args,
+                    ops,
+                    opset_versions=[opset_version],
+                    training=torch.onnx.TrainingMode.TRAINING,
+                )
+                check_onnx_opsets_operator(
+                    MyModule(),
+                    args,
+                    ops,
+                    opset_versions=[opset_version],
+                    training=torch.onnx.TrainingMode.EVAL,
+                )
+
+        ops = {opset_version: [{"op_name": "GridSample"}]}
+        # mode = convert_grid_sample_mode(mode) if opset_version == 20 else mode
+        n, c, d_in, h_in, w_in, d_out, h_out, w_out = 1, 1, 2, 3, 2, 3, 2, 4
+        test_eval_and_training(
+            ops,
+            opset_version,
+            mode,
+            padding_mode,
+            align_corners,
+            (n, c, h_in, w_in),
+            (n, h_out, w_out, 2))
+        if opset_version == 20 and mode != "bicubic":
+            test_eval_and_training(
+                ops,
+                opset_version,
+                mode,
+                padding_mode,
+                align_corners,
+                (n, c, d_in, h_in, w_in),
+                (n, d_out, h_out, w_out, 3))
 
     def test_flatten(self):
         class MyModule(Module):

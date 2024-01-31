@@ -1,0 +1,66 @@
+"""This file exports ONNX ops for opset 18.
+
+Note [ONNX Operators that are added/updated in opset 20]
+
+"""
+
+import functools
+
+from torch.nn.functional import (
+    GRID_SAMPLE_INTERPOLATION_MODES,
+    GRID_SAMPLE_PADDING_MODES,
+)
+from torch.onnx import symbolic_helper
+from torch.onnx._internal import _beartype, jit_utils, registration
+
+# EDITING THIS FILE? READ THIS FIRST!
+# see Note [Edit Symbolic Files] in symbolic_helper.py
+
+__all__ = ["grid_sampler"]
+
+# string_conversion.py
+
+def convert_grid_sample_mode(mode_s):
+    return "linear" if mode_s == "bilinear" else "cubic" if mode_s == "bicubic" else mode_s
+
+_onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=20)
+
+@_onnx_symbolic("aten::grid_sampler")
+@symbolic_helper.parse_args("v", "v", "i", "i", "b")
+@_beartype.beartype
+def grid_sampler(
+    g: jit_utils.GraphContext,
+    input,
+    grid,
+    mode_enum,
+    padding_mode_enum,
+    align_corners,
+):
+    mode_s = {v: k for k, v in GRID_SAMPLE_INTERPOLATION_MODES.items()}[mode_enum]  # type: ignore[call-arg]
+    # mode string changes at https://onnx.ai/onnx/operators/text_diff_GridSample_16_20.html
+    mode_s = convert_grid_sample_mode(mode_s)
+    padding_mode_s = {v: k for k, v in GRID_SAMPLE_PADDING_MODES.items()}[padding_mode_enum]  # type: ignore[call-arg]
+    return g.op(
+        "GridSample",
+        input,
+        grid,
+        align_corners_i=int(align_corners),
+        mode_s=mode_s,
+        padding_mode_s=padding_mode_s,
+    )
+
+@_onnx_symbolic("aten::affine_grid_generator")
+@symbolic_helper.parse_args("v", "is", "b")
+@_beartype.beartype
+def affine_grid(
+    g: jit_utils.GraphContext,
+    theta,
+    size,
+    align_corners,
+):
+    return g.op(
+        "AffineGrid",
+        theta,
+        size,
+        align_corners_i=int(align_corners),
+    )
