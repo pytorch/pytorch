@@ -1194,7 +1194,7 @@ def _make_user_magic(method, user_type):
     # so that our internal logic can assume everything is nodes
 
     if method in magic_methods_on_operator_with_trailing_underscore:
-        method_attr = f"{method}_"
+        method_attr = f"sym_{method}"
     else:
         method_attr = method
 

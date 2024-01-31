@@ -1245,7 +1245,7 @@ def _broadcast_in_dim_meta(
         if idx in broadcast_dimensions:
             # Assigns a stride of zero to dimensions
             # which were actually broadcast
-            if a.shape[original_idx] != shape[idx]:
+            if guard_size_oblivious(a.shape[original_idx] != shape[idx]):
                 new_strides.append(0)
             else:
                 new_strides.append(a.stride()[original_idx])

@@ -32,6 +32,7 @@ from torch._dynamo.utils import counters
 from torch._prims_common import is_integer_dtype
 from torch.fx import Node
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
+from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
 from .._functorch import config as functorch_config
@@ -924,7 +925,7 @@ def register_replacement(
                 [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]
             )
         )
-        sym_args = []
+        sym_args: List[torch.SymInt] = []
         with torch._dynamo.utils.detect_fake_mode(args):
             for i, grad in enumerate(requires_grad):
                 if isinstance(args[i], torch.Tensor):
@@ -939,7 +940,9 @@ def register_replacement(
                         requires_grad=grad,
                     )
                     for v in itertools.chain(args[i].shape, args[i].stride()):
-                        if isinstance(v, torch.SymInt) and v not in sym_args:
+                        if isinstance(v, torch.SymInt) and all(
+                            guard_size_oblivious(v != a) for a in sym_args
+                        ):
                             sym_args.append(v)
 
             if sym_args:

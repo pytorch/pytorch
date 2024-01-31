@@ -2858,6 +2858,8 @@ def dstack(tensors: TensorSequenceType) -> TensorLikeType:
 
 @register_decomposition(aten.expand)
 def expand(a: Tensor, *shape) -> Tensor:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     # NOTE: cannot use utils.extract_shape_from_varargs here
     # because that also validates the shape, but the shape
     # given to expand may be "invalid"
@@ -2875,7 +2877,9 @@ def expand(a: Tensor, *shape) -> Tensor:
         offset_idx = idx + offset
         requested_length = shape[offset_idx]
         torch._check(
-            requested_length == x or x == 1 or requested_length == -1,
+            guard_size_oblivious(requested_length == x)
+            or guard_size_oblivious(x == 1)
+            or requested_length == -1,
             lambda: f"expand: attempting to expand a dimension of length {x}!",
         )
 
