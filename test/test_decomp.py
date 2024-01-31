@@ -915,6 +915,14 @@ class DecompOneOffTests(TestCase):
         self.assertTrue(torch.allclose(ref[0], res[0]))
         self.assertTrue(torch.allclose(ref[1], res[1]))
 
+        inp = torch.rand([30, 10], device=device)
+        inp2 = torch.rand([30, 1], device=device)
+
+        self.assertEqual(
+            torch.ops.aten._weight_norm_interface(inp, inp2),
+            torch._decomp.decompositions._weight_norm_interface(inp, inp2)
+        )
+
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCPU
     @skipIfCrossRef
