@@ -117,9 +117,10 @@ class TorchExport(exporter.FXGraphExtractor):
             diagnostic_context, fx_module, options.onnxfunction_dispatcher
         ).analyze(infra.levels.ERROR)
 
-        # TODO: Disabled this pass until "Segmentation fault (core dumped)" is fixed
         # This operation should be invoked as the last pre export pass.
         # See [NOTE: Modularize pass ordering]
-        # fx_module = passes.Modularize(diagnostic_context, fx_module).run()
-
+        # sink placeholders and stuff attributes back into the graph
+        fx_module = passes.Modularize(
+            diagnostic_context, fx_module, model_state_dict=original_model.state_dict  # type: ignore[union-attr]
+        ).run()
         return fx_module
