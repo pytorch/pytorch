@@ -55,7 +55,7 @@ def repro(testcase):
     return f"PYTORCH_TEST_WITH_DYNAMO=1 pytest {testcase.attrib['file']} -v -k {testcase.attrib['name']}"
 
 
-# e.g. "17c5f69852/dynamo"
+# e.g. "17c5f69852/eager", "17c5f69852/dynamo"
 def failures_histogram(eager_dir, dynamo_dir):
     fail_keys = compute_pass_rate(eager_dir, dynamo_dir)
     xmls = open_test_results(dynamo_dir)
