@@ -108,19 +108,6 @@ def _fx_collection_equivalence_fn(
     return spec1_type is spec2_type and spec1_context == spec2_context
 
 
-def tree_flatten_check(args_kwargs, spec):
-    flat, new_spec = pytree.tree_flatten(args_kwargs)
-    if not is_equivalent(new_spec, spec, _fx_collection_equivalence_fn):
-        raise AssertionError(
-            "Unexpected structure for unflattened module input. Got:\n"
-            f"{new_spec}\n"
-            "expected:\n"
-            f"{spec}"
-        )
-
-    return flat
-
-
 class ExportedProgram:
     """
     Package of a program from :func:`export`. It contains
