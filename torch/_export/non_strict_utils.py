@@ -1,9 +1,10 @@
 import inspect
 from collections import defaultdict
-from typing import Dict, Tuple
+from typing import Any, Dict, Tuple
 
 import torch
 from torch._dynamo.source import (
+    AttrSource,
     GetItemSource,
     LocalSource,
     TensorProperty,
@@ -22,19 +23,45 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
     StatelessSymbolicContext,
 )
+from torch.utils._pytree import (
+    GetAttrKey,
+    KeyPath,
+    MappingKey,
+    SequenceKey,
+    tree_map_with_path,
+)
 
 
-def fakify(mode, t, t_constraints, source, sources):
+def key_path_to_source(kp: KeyPath) -> Source:
     """
-    Make a fake tensor, given a fake mode, a tensor, constraints indexed
-    by tensor ids, the source for the tensor, and an accumulator mapping
-    tensor dimensions to their sources.
+    Given a key path, return the source for the key path.
     """
+    source: Source = LocalSource("args")
+    for k in kp:
+        if isinstance(k, SequenceKey):
+            source = GetItemSource(source, k.idx)
+        elif isinstance(k, MappingKey):
+            source = GetItemSource(source, k.key)
+        elif isinstance(k, GetAttrKey):
+            source = AttrSource(source, k.name)
+        else:
+            raise ValueError(f"Unknown KeyEntry {k}")
+
+    return source
+
+
+def fakify(
+    mode: FakeTensorMode,
+    kp: KeyPath,
+    t: Any,
+    t_constraints: Dict[int, Dict[int, Constraint]],
+    sources: Dict[Tuple[int, int], Source],
+):
+    source = key_path_to_source(kp)
     if t is None or isinstance(t, torch.ScriptObject):
         return t
     if not isinstance(t, torch.Tensor):
         raise ValueError("Only tensors allowed as input")
-
     n_dims = len(t.shape)
     symbolic_context = StatelessSymbolicContext(
         dynamic_sizes=[DimDynamic.STATIC] * n_dims,
@@ -51,26 +78,6 @@ def fakify(mode, t, t_constraints, source, sources):
     fake = mode.from_tensor(t, source=source, symbolic_context=symbolic_context)
     mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))
     return fake
-
-
-def fake_tree(mode, arg, t_constraints, source, sources):
-    """
-    Call fakify while recursively mapping on lists and dictionaries. Using pytree map
-    would be ideal here, but we are also building sources as we recurse.
-    """
-    if isinstance(arg, (tuple, list)):
-        return [
-            fake_tree(mode, arg, t_constraints, GetItemSource(source, i), sources)
-            for i, arg in enumerate(arg)
-        ]
-    elif isinstance(arg, dict):
-        return {
-            k: fake_tree(mode, arg, t_constraints, GetItemSource(source, k), sources)
-            for k, arg in arg.items()
-        }
-    # TODO(avik): data classes
-    else:
-        return fakify(mode, arg, t_constraints, source, sources)
 
 
 def make_fake_inputs(nn_module, args, constraints):
@@ -96,11 +103,10 @@ def make_fake_inputs(nn_module, args, constraints):
         shape_env=ShapeEnv(tracked_fakes=[], co_fields=co_fields)
     ) as fake_mode:
         original_signature = inspect.signature(nn_module.forward)
-        params = original_signature.parameters
         sources: Dict[Tuple[int, int], Source] = {}
-        fake_args = tuple(
-            fake_tree(fake_mode, arg, t_constraints, LocalSource(x), sources)
-            for x, arg in zip(params, args)
+        fake_args = tree_map_with_path(
+            lambda kp, val: fakify(fake_mode, kp, val, t_constraints, sources),
+            args,
         )
         src_equalities = []
         for constraint in constraints:
