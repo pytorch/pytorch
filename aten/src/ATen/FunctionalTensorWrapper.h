@@ -212,6 +212,11 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
       bool allow_tensor_metadata_change) const;
 
   void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override;
+  void copy_tensor_metadata_and_refresh(
+      const FunctionalTensorWrapper* src_impl,
+      FunctionalTensorWrapper* dest_impl,
+      const c10::VariableVersion& version_counter,
+      bool allow_tensor_metadata_change) const;
 
   // Note that value is not taken by reference: internally, the wrapper will
   // change the value tensor that it points to over time.
@@ -233,31 +238,12 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   size_t generation_ = 0;
   std::vector<at::functionalization::ViewMeta> view_metas_;
 
-protected:
-    static void copy_tensor_metadata(
+ protected:
+  static void copy_tensor_metadata(
       const FunctionalTensorWrapper* src_impl,
       FunctionalTensorWrapper* dest_impl,
       const c10::VariableVersion& version_counter,
-      bool allow_tensor_metadata_change) {
-    TensorImpl::copy_tensor_metadata(
-        src_impl,
-        dest_impl,
-        version_counter,
-        allow_tensor_metadata_change);
-
-    // FunctionalTensorWrapper-specific fields.
-    dest_impl->value_.set_data(src_impl->value_);
-    dest_impl->level_ = src_impl->level_;
-    dest_impl->mutation_counter_ = src_impl->mutation_counter_;
-    dest_impl->mutation_hidden_from_autograd_counter_ = src_impl->mutation_hidden_from_autograd_counter_;
-    dest_impl->mutation_during_no_grad_or_inference_mode_ = src_impl->mutation_during_no_grad_or_inference_mode_;
-    dest_impl->has_metadata_mutation_ = src_impl->has_metadata_mutation_;
-    dest_impl->is_multi_output_view_ = src_impl->is_multi_output_view_;
-    dest_impl->was_storage_changed_ = src_impl->was_storage_changed_;
-    dest_impl->generation_ = src_impl->generation_;
-    dest_impl->view_metas_ = src_impl->view_metas_;
-  }
-
+      bool allow_tensor_metadata_change);
 };
 
 // Utility functions for the functionalization pass.

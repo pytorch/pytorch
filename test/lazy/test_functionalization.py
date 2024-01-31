@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: jit"]
 
 import re
+
 import torch
 import torch._lazy.metrics as metrics
 import torch._lazy.ts_backend
@@ -67,11 +68,14 @@ class LazyFuncionalizationTest(TestCase):
         origin = torch.rand(3, dtype=torch.float32)
         tensor = origin.to("lazy")
 
-        self.assertExpectedInline(text(tensor), """\
+        self.assertExpectedInline(
+            text(tensor),
+            """\
 IR {
   %0 = [Float[3]] lazy_tensors::device_data(), device=CPU0, ROOT=0
 }
-""")
+""",
+        )
 
         # Modify the data-type of tensor, and assign it to 'data'.
         # This should update the inner tensor of FunctionalTensorWrapper,
@@ -79,12 +83,15 @@ IR {
         modified_tensor = tensor.to(torch.bfloat16)
         tensor.data = modified_tensor
 
-        self.assertExpectedInline(text(tensor), """\
+        self.assertExpectedInline(
+            text(tensor),
+            """\
 IR {
   %0 = [Float[3]] lazy_tensors::device_data(), device=CPU0
   %1 = [BFloat16[3]] aten::_to_copy(%0), dtype=BFloat16, layout=null, device=null, pin_memory=null, non_blocking=0, memory_format=null, ROOT=0
 }
-""")
+""",  # noqa: B950
+        )
 
 
 if __name__ == "__main__":
