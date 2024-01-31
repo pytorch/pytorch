@@ -394,6 +394,19 @@ c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach(
       std::move(version_counter), allow_tensor_metadata_change);
 }
 
+void FunctionalTensorWrapper::shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) {
+    AT_ASSERT(has_compatible_shallow_copy_type(impl->key_set()));
+    auto functional_impl =
+        static_cast<FunctionalTensorWrapper*>(impl.get());
+    copy_tensor_metadata(
+        /*src_impl=*/functional_impl,
+        /*dest_impl=*/this,
+        /*version_counter=*/version_counter(),
+        /*allow_tensor_metadata_change=*/allow_tensor_metadata_change());
+    refresh_numel();
+}
+
+
 c10::Device FunctionalTensorWrapper::device_custom() const {
   return value_.unsafeGetTensorImpl()->device();
 }
