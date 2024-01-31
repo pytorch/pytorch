@@ -68,7 +68,7 @@ Some of the most commonly used backends include:
    * - Backend
      - Description
    * - ``torch.compile(m, backend="tensorrt")``
-     - Uses ONNX Runtime to run TensorRT for inference optimizations. `Read more <https://github.com/onnx/onnx-tensorrt>`__
+     - Uses Torch-TensorRT for inference optimizations. Requires ``import torch_tensorrt`` in the calling script to register backend. `Read more <https://github.com/pytorch/TensorRT>`__
    * - ``torch.compile(m, backend="ipex")``
      - Uses IPEX for inference on CPU. `Read more <https://github.com/intel/intel-extension-for-pytorch>`__
    * - ``torch.compile(m, backend="tvm")``

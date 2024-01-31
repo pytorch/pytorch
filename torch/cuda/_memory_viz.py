@@ -82,7 +82,7 @@ def format_flamegraph(flamegraph_lines, flamegraph_script=None):
         print(f"Downloading flamegraph.pl to: {flamegraph_script}")
         urllib.request.urlretrieve(
             'https://raw.githubusercontent.com/brendangregg/FlameGraph/master/flamegraph.pl', flamegraph_script)
-        subprocess.run(['chmod', '+x', flamegraph_script])
+        subprocess.check_call(['chmod', '+x', flamegraph_script])
     args = [flamegraph_script, '--countname', 'bytes']
     p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, encoding='utf-8')
     assert p.stdin is not None

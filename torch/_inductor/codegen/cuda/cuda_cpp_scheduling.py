@@ -78,7 +78,7 @@ class CUDACPPScheduling(BaseScheduling):
         # We can fuse a Pointwise op that depends on the last fused epilogue node
         # if any. If there is no epilogue node yet, it needs to depend on the template
         # node
-        node_name = additional_node.get_computed_buffer_name()  # type: ignore[attr-defined]
+        node_name = additional_node.get_computed_buffer_name()
         if node_name is None:
             return False
 

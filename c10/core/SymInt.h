@@ -2,11 +2,15 @@
 
 #include <c10/core/SymBool.h>
 #include <c10/core/SymNodeImpl.h>
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
+#include <cstdint>
+#include <iterator>
 #include <numeric>
+#include <ostream>
 #include <type_traits>
 
 namespace c10 {
@@ -88,6 +92,7 @@ class C10_API SymInt {
     // https://stackoverflow.com/questions/42534749/signed-extension-from-24-bit-to-32-bit-in-c
     uint64_t extended_bits = (unextended_bits ^ sign_bit_mask) - sign_bit_mask;
     return static_cast<SymNodeImpl*>(
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
         reinterpret_cast<void*>(static_cast<uintptr_t>(extended_bits)));
   }
 
@@ -287,9 +292,9 @@ class C10_API SymInt {
 /// Sum of a list of SymInt; accumulates into the c10::SymInt expression
 template <
     typename C,
-    typename std::enable_if<
-        std::is_same<typename C::value_type, c10::SymInt>::value,
-        int>::type = 0>
+    typename std::enable_if_t<
+        std::is_same_v<typename C::value_type, c10::SymInt>,
+        int> = 0>
 inline c10::SymInt multiply_integers(const C& container) {
   return std::accumulate(
       container.begin(),
@@ -300,9 +305,9 @@ inline c10::SymInt multiply_integers(const C& container) {
 
 template <
     typename Iter,
-    typename = std::enable_if_t<std::is_same<
+    typename = std::enable_if_t<std::is_same_v<
         typename std::iterator_traits<Iter>::value_type,
-        c10::SymInt>::value>>
+        c10::SymInt>>>
 inline c10::SymInt multiply_integers(Iter begin, Iter end) {
   return std::accumulate(
       begin,

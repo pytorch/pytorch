@@ -7,8 +7,8 @@ import torch
 import torch.distributed as dist
 
 from torch import Tensor
-from torch.distributed._tensor.device_mesh import _get_device_handle, DeviceMesh
 from torch.distributed._tensor.placement_types import DTensorSpec, Shard
+from torch.distributed.device_mesh import _get_device_handle, DeviceMesh
 
 
 _rng_tracker: Optional["RNGStateTracker"] = None

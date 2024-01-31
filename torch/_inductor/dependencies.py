@@ -5,6 +5,7 @@ import logging
 import re
 import typing
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from unittest.mock import patch
 
 import sympy
 
@@ -12,8 +13,15 @@ import torch
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
 from .codegen.common import index_prevent_reordering
-from .utils import get_dtype_size, sympy_str, sympy_subs, sympy_symbol, VarRanges
-from .virtualized import V
+from .utils import (
+    get_dtype_size,
+    reduction_num_outputs,
+    sympy_index_symbol,
+    sympy_str,
+    sympy_subs,
+    VarRanges,
+)
+from .virtualized import OpsHandler, ReductionType, V
 
 log = logging.getLogger(__name__)
 is_indirect = re.compile(r"indirect|tmp").search
@@ -69,7 +77,7 @@ class MemoryDep(typing.NamedTuple):
         return isinstance(self.index, (int, sympy.Integer))
 
     def is_indirect(self) -> bool:
-        return any(is_indirect(v.name) for v in self.index.free_symbols)
+        return any(is_indirect(v.name) for v in self.index.free_symbols)  # type: ignore[attr-defined]
 
 
 class StarDep(typing.NamedTuple):
@@ -212,7 +220,7 @@ class ReadWrites:
 class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
     def __init__(self, var_ranges: VarRanges, normalize: bool):
         super().__init__()
-        self._reads: Set[MemoryDep] = set()
+        self._reads: Set[Dep] = set()
         self._writes: Set[MemoryDep] = set()
         self._index_exprs: Set[IndexExprDep] = set()
         self._var_ranges: VarRanges = var_ranges
@@ -220,7 +228,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
 
     def canonicalize(
         self, index: sympy.Expr
-    ) -> Tuple[sympy.Expr, Tuple[sympy.Expr, ...]]:
+    ) -> Tuple[sympy.Expr, Tuple[sympy.Symbol, ...], Tuple[sympy.Expr, ...]]:
         if not self._normalize:
             sizes = [V.graph.sizevars.simplify(x) for x in self._var_ranges.values()]
             var_names = tuple(
@@ -240,7 +248,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
             # if k in free_symbols
         }
         index_vars = [*var_ranges.keys()]
-        sizes = [*var_ranges.values()]  # type: ignore[assignment]
+        sizes = tuple(var_ranges.values())
         new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
             index_vars,
             sizes,
@@ -261,10 +269,10 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
             # downstream users won't.  Normalize this away.
             new_vars.pop()
             new_sizes.pop()
-        return index, tuple(new_vars), tuple(new_sizes)  # type: ignore[return-value]
+        return index, tuple(new_vars), tuple(new_sizes)  # type: ignore[arg-type]
 
     def load(self, name: str, index: sympy.Expr) -> str:
-        self._reads.add(MemoryDep(name, *self.canonicalize(index)))  # type: ignore[call-arg]
+        self._reads.add(MemoryDep(name, *self.canonicalize(index)))
         return f"load({name}, {sympy_str(index)})"
 
     def load_seed(self, name: str, index: int):
@@ -272,14 +280,14 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         return self.load(name, sympy.Integer(index))
 
     def store(self, name: str, index: sympy.Expr, value: str, mode=None) -> str:
-        self._writes.add(MemoryDep(name, *self.canonicalize(index)))  # type: ignore[call-arg]
+        self._writes.add(MemoryDep(name, *self.canonicalize(index)))
         return f"store({name}, {sympy_str(index)}, {value}, {mode})"
 
     def store_reduction(self, name: str, index, value) -> str:
         return self.store(name, index, f"store_reduction({value})")
 
     def index_expr(self, index: sympy.Expr, dtype) -> str:
-        self._index_exprs.add(IndexExprDep(*self.canonicalize(index)))  # type: ignore[call-arg]
+        self._index_exprs.add(IndexExprDep(*self.canonicalize(index)))
         return f"index_expr({sympy_str(index)}, {dtype})"
 
     def bucketize(
@@ -290,7 +298,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         indexing_dtype: torch.dtype,
         right: bool,
     ):
-        self._reads.add(StarDep(offsets_name))  # type: ignore[arg-type]
+        self._reads.add(StarDep(offsets_name))
         return f"bucketize({values}, {offsets_name}, {sympy_str(offsets_size)}, {indexing_dtype}, {right})"
 
 
@@ -321,7 +329,7 @@ def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Sy
     var_ranges: VarRanges = dict()
 
     def add_var(length: sympy.Expr) -> sympy.Symbol:
-        v = sympy_symbol(f"{prefix}{next(cnt)}")
+        v = sympy_index_symbol(f"{prefix}{next(cnt)}")
         var_ranges[v] = length
         return v
 
@@ -357,13 +365,13 @@ def extract_read_writes(
 ):
     args, var_ranges = index_vars_squeeze(*argsizes, prefix=prefix)
     rw = RecordLoadStore(var_ranges, normalize=normalize)
-    with V.set_ops_handler(rw):  # type: ignore[call-arg]
+    with V.set_ops_handler(rw):
         fn(*args)
 
     if normalize:
         range_vars = []  # Number of vars could differ due to normalization
     else:
-        range_vars = [*itertools.chain(*args)]
+        range_vars = list(itertools.chain.from_iterable(args))
 
     inner = rw.parent_handler.parent_handler
     return ReadWrites(
@@ -376,8 +384,8 @@ def extract_read_writes(
     )
 
 
-def extract_input_node_reduction_ranges(  # noqa: F722
-    input_node: ".ir.TensorBox",  # type: ignore[valid-type] # noqa: F722
+def extract_input_node_reduction_ranges(
+    input_node: "torch._inductor.ir.TensorBox",
 ) -> Tuple[Optional[List[sympy.Expr]], Optional[List[sympy.Expr]]]:
     """
     Returns the size and reduction size of all inputs, if the sizes and reduction_sizes (if exist) are all the same.
@@ -397,7 +405,7 @@ def extract_input_node_reduction_ranges(  # noqa: F722
         else:
             return (None, None)
 
-    if not isinstance(input_node.data.data, Loops):
+    if not isinstance(input_node.data.data, Loops):  # type: ignore[attr-defined]
         # Other IRNodes do not have reduction_ranges.
         return (None, None)
 
@@ -407,23 +415,89 @@ def extract_input_node_reduction_ranges(  # noqa: F722
     reads = input_node.get_reads()
     reduction_size = None
     size = None
-    for read in reads:
-        if not isinstance(read, MemoryDep):
-            continue
-        buffer = V.graph.get_buffer(read.name)
-        if buffer is None:
-            continue
-        if isinstance(buffer, ComputedBuffer) and len(buffer.get_reduction_size()) > 0:
-            if reduction_size is None:
-                reduction_size = buffer.get_reduction_size()
-                size = buffer.get_size()
-            elif (
-                reduction_size != buffer.get_reduction_size()
-                or size != buffer.get_size()
+    while reduction_size is None and len(reads) > 0:
+        seen = set()
+        new_reads = []
+        for read in reads:
+            if not isinstance(read, MemoryDep):
+                continue
+            if read.name in seen:
+                continue
+            seen.add(read.name)
+            buffer = V.graph.get_buffer(read.name)
+            if buffer is None:
+                continue
+            if (
+                isinstance(buffer, ComputedBuffer)
+                and len(buffer.get_reduction_size()) > 0
             ):
-                return (None, None)
+                if reduction_size is None:
+                    reduction_size = buffer.get_reduction_size()
+                    size = buffer.get_size()
+                elif (
+                    reduction_size != buffer.get_reduction_size()
+                    or size != buffer.get_size()
+                ):
+                    return (None, None)
+            else:
+                new_reads.extend(buffer.get_reads())
+        if reads == new_reads:
+            return (size, reduction_size)
+        else:
+            reads = new_reads
     return (size, reduction_size)
 
 
 def canonicalization_prefix():
     return "c"
+
+
+# ops handler which computes all the free unbacked symbols for an IR
+class FreeUnbackedSymbolsOpsHandler:
+    symbols: Set[sympy.Symbol]
+
+    def __init__(self):
+        self.symbols = set()
+
+    def __getattr__(self, name: str) -> Callable[..., Any]:
+        def inner(*args, **kwargs):
+            for a in itertools.chain(args, kwargs.values()):
+                if isinstance(a, (sympy.Expr, sympy.logic.boolalg.Boolean)):
+                    self.symbols |= free_unbacked_symbols(a)
+
+        return inner
+
+    def indirect_indexing(self, index_var, size, check=True) -> sympy.Symbol:
+        assert not isinstance(index_var, (sympy.Expr, sympy.logic.boolalg.Boolean))
+        self.symbols |= free_unbacked_symbols(size)
+        return sympy_index_symbol(f"({str(index_var)})")
+
+    def reduction(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: ReductionType,
+        value: Union[None, Tuple[None, ...]],
+    ) -> Union[None, Tuple[None, ...]]:
+        num_values = reduction_num_outputs(reduction_type)
+        return (None,) * num_values if num_values > 1 else None
+
+
+def _typecheck_FreeUnbackedSymbolsOpsHandler(
+    h: FreeUnbackedSymbolsOpsHandler,
+) -> OpsHandler[None]:
+    return h
+
+
+def extract_free_unbacked_symbols(fn: Callable[..., Any], index, rindex=None):
+    from .ir import FlexibleLayout
+
+    args = [index, rindex] if rindex is not None else [index]
+    handler = FreeUnbackedSymbolsOpsHandler()
+    # NB: I cargo culted the allow_indexing patch here, I don't understand why
+    # people do this all over
+    with V.set_ops_handler(handler), patch.object(
+        FlexibleLayout, "allow_indexing", True
+    ):
+        fn(*args)
+    return handler.symbols

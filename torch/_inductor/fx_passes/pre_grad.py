@@ -5,6 +5,7 @@ from typing import List, Optional
 import torch
 import torch.nn as nn
 from torch._dynamo.utils import detect_fake_mode
+from torch._utils_internal import print_graph
 from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
@@ -12,7 +13,6 @@ from torch.fx.experimental.optimization import (
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
-
 from .. import config
 
 from ..fx_utils import matches_module_function_pattern
@@ -21,8 +21,9 @@ from ..pattern_matcher import (
     PatternMatcherPass,
     stable_topological_sort,
 )
-from ..utils import is_cpu_device
-from .group_batch_fusion import group_batch_fusion_pre_grad_passes
+from ..utils import is_cpu_device, pass_execution_and_save
+from .group_batch_fusion import group_batch_fusion_passes
+from .misc_patterns import numpy_compat_normalization
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +33,13 @@ split_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 unbind_stack_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 efficient_conv_bn_eval_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 merge_getitem_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+predispatch_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+# based on predispatch aten IR
+normalization_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
+merge_splits_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
+split_cat_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
+unbind_stack_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
+merge_getitem_cat_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
 
 pattern_matcher_passes: List[PatternMatcherPass] = [
     normalization_pass,
@@ -41,6 +49,13 @@ pattern_matcher_passes: List[PatternMatcherPass] = [
     unbind_stack_pass,
     efficient_conv_bn_eval_pass,
 ]
+pattern_matcher_passes_aten: List[PatternMatcherPass] = [
+    normalization_pass_aten,
+    merge_getitem_cat_pass_aten,
+    merge_splits_pass_aten,
+    split_cat_pass_aten,
+    unbind_stack_pass_aten,
+]
 
 
 @init_once_fakemode
@@ -48,7 +63,7 @@ def lazy_init():
     from . import efficient_conv_bn_eval, split_cat  # noqa: F401  # noqa: F401
 
     if config.is_fbcode():
-        from .fb import split_cat as split_cat_fb  # type: ignore[import]  # noqa: F401
+        from . import fb  # type: ignore[attr-defined]  # noqa: F401
 
 
 def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
@@ -63,25 +78,72 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
     Consider adding a new pass to post_grad.py or joint_graph.py which
     are after functionalization and normalization.
     """
-
     if config.pattern_matcher:
         lazy_init()
-        gm = fuse_fx(gm, example_inputs)
-        group_batch_fusion_pre_grad_passes(gm.graph)
-        for pattern_matcher_pass in pattern_matcher_passes:
-            pattern_matcher_pass.apply(gm.graph)
+        if hasattr(
+            config, "fx_passes_numeric_check"
+        ) and config.fx_passes_numeric_check.get("pre_grad", False):
+            gm_before_fx_passes = gm.__copy__()
+        # explicitly run with predispatch atenIR based passes
+        if config.is_predispatch:
+            pass_execution_and_save(
+                group_batch_fusion_passes,
+                gm,
+                "[Pre grad(predispatch IR)] Apply group_batch_fusion",
+            )
+            pass_execution_and_save(
+                predispatch_pass.apply,
+                gm,
+                "[Pre grad(predispatch IR)] Apply predispatch_pass",
+            )
+            log.debug(
+                "[Pre grad(predispatch IR)]Before split cat in pre grad pass. graph: %s",
+                gm.graph,
+            )
+            for ind, pattern_matcher_pass_aten in enumerate(
+                pattern_matcher_passes_aten
+            ):
+                pass_execution_and_save(
+                    pattern_matcher_pass_aten.apply,
+                    gm,
+                    f"[Pre grad(predispatch IR)]Apply split_cat, index: {ind}",
+                )
+        else:
+            gm = fuse_fx(gm, example_inputs)
+            numpy_compat_normalization(gm.graph)
+            print_graph(gm.graph, "Before group batch fusion in pre grad pass.")
+            group_batch_fusion_passes(gm.graph, pre_grad=True)
+            print_graph(gm.graph, "Before split cat in pre grad pass.")
+            for pattern_matcher_pass in pattern_matcher_passes:
+                pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
+                print_graph(
+                    gm.graph,
+                    "Apply split cat pattern matcher PatternMatcherPass in pre grad.",
+                )
 
+    if config.pre_grad_custom_pass is not None:
+        config.pre_grad_custom_pass(gm.graph)
     stable_topological_sort(gm.graph)
     gm.graph.lint()
     gm.recompile()
 
-    if config.is_fbcode():
-        from torch._inductor.fb.utils import get_everpaste_url  # type: ignore[import]
+    if (
+        config.pattern_matcher
+        and hasattr(config, "fx_passes_numeric_check")
+        and config.fx_passes_numeric_check.get("pre_grad", False)
+    ):
+        from .numeric_utils import numeric_check_if_enabled
 
-        log.info(
-            "Print graph after recompile in pre grad passes: %s",
-            get_everpaste_url(str(gm.graph)),
+        gm_after_fx_passes = gm.__copy__()
+        numeric_check_if_enabled(
+            gm_before_fx_passes,  # type: ignore[possibly-undefined]
+            gm_after_fx_passes,
+            example_inputs,
+            config.fx_passes_numeric_check.get("num_iterations", 1),
+            config.fx_passes_numeric_check.get("precision", 1e-4),
         )
+
+    print_graph(gm.graph, "After recompile in pre grad pass.")
 
     return gm
 
@@ -220,21 +282,21 @@ class NormalizedLinearNode:
 
     def get_input(self) -> torch.fx.Node:
         if len(self.node.args) > 0:
-            return self.node.args[0]
+            return self.node.args[0]  # type: ignore[return-value]
         else:
-            return self.node.kwargs["input"]
+            return self.node.kwargs["input"]  # type: ignore[return-value]
 
     def get_weight(self) -> torch.fx.Node:
         if len(self.node.args) > 1:
-            return self.node.args[1]
+            return self.node.args[1]  # type: ignore[return-value]
         else:
-            return self.node.kwargs["weight"]
+            return self.node.kwargs["weight"]  # type: ignore[return-value]
 
     def get_bias(self) -> torch.fx.Node:
         if len(self.node.args) > 2:
-            return self.node.args[2]
+            return self.node.args[2]  # type: ignore[return-value]
         else:
-            return self.node.kwargs["bias"] if "bias" in self.node.kwargs else None
+            return self.node.kwargs["bias"] if "bias" in self.node.kwargs else None  # type: ignore[return-value]
 
 
 class NormalizedMatmulNode:
@@ -245,27 +307,27 @@ class NormalizedMatmulNode:
 
     def get_input(self) -> torch.fx.Node:
         if len(self.node.args) > 0:
-            return self.node.args[0]
+            return self.node.args[0]  # type: ignore[return-value]
         else:
-            return self.node.kwargs["input"]
+            return self.node.kwargs["input"]  # type: ignore[return-value]
 
     def get_other(self) -> torch.fx.Node:
         if len(self.node.args) > 1:
-            return self.node.args[1]
+            return self.node.args[1]  # type: ignore[return-value]
         else:
-            return self.node.kwargs["other"]
+            return self.node.kwargs["other"]  # type: ignore[return-value]
 
 
 def check_permute(node: torch.fx.Node) -> bool:
     ranks = len(node.meta["tensor_meta"].shape)
     if len(node.args) > 3:
-        permutation = [node.args[i] % ranks for i in range(1, ranks + 1)]
+        permutation = [node.args[i] % ranks for i in range(1, ranks + 1)]  # type: ignore[operator]
     elif (
         "permutation" in node.kwargs
         and node.kwargs["permutation"] is not None
-        and len(node.kwargs["permutation"]) > 2
+        and len(node.kwargs["permutation"]) > 2  # type: ignore[arg-type]
     ):
-        permutation = [i % ranks for i in node.kwargs["permutation"]]
+        permutation = [i % ranks for i in node.kwargs["permutation"]]  # type: ignore[union-attr]
     else:
         return False
     allowed_permutation = list(range(ranks))
@@ -418,9 +480,9 @@ def permute_matmul_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
             ):
                 Atrans = True
                 if len(input_A_node.args) > 0:
-                    input_A = input_A_node.args[0]
+                    input_A = input_A_node.args[0]  # type: ignore[assignment]
                 else:
-                    input_A = input_A_node.kwargs["input"]
+                    input_A = input_A_node.kwargs["input"]  # type: ignore[assignment]
 
             if (
                 input_B_node.op == "call_method"
@@ -429,9 +491,9 @@ def permute_matmul_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
             ):
                 Btrans = True
                 if len(input_B_node.args) > 0:
-                    input_B = input_B_node.args[0]
+                    input_B = input_B_node.args[0]  # type: ignore[assignment]
                 else:
-                    input_B = input_B_node.kwargs["input"]
+                    input_B = input_B_node.kwargs["input"]  # type: ignore[assignment]
 
             if Atrans or Btrans:
                 with module.graph.inserting_before(node):

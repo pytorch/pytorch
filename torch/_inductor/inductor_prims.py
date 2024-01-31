@@ -71,7 +71,7 @@ randint = make_prim(
 )
 force_stride_order = make_prim(
     "inductor_force_stride_order(Tensor input, SymInt[] stride) -> Tensor",
-    lambda input_tensor, stride: eager_force_stride(input_tensor, stride),
+    eager_force_stride,
     doc="Force the stride order for input tensor. No-op if the input tensor already has the stride. Do a copy otherwise",
 )
 masked_scatter_with_index = make_prim(

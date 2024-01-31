@@ -7,8 +7,7 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-Library that launches and manages ``n`` copies of worker subprocesses
-either specified by a function or a binary.
+Library that launches and manages ``n`` copies of worker subprocesses either specified by a function or a binary.
 
 For functions, it uses ``torch.multiprocessing`` (and therefore python
 ``multiprocessing``) to spawn/fork worker processes. For binaries it uses python
@@ -64,7 +63,7 @@ implementations of the parent :class:`api.PContext` class.
 """
 
 import os
-from typing import Callable, Dict, Optional, Tuple, Union
+from typing import Callable, Dict, Optional, Tuple, Union, Set
 
 from torch.distributed.elastic.multiprocessing.api import (  # noqa: F401
     _validate_full_rank,
@@ -104,9 +103,11 @@ def start_processes(
     start_method: str = "spawn",
     redirects: Union[Std, Dict[int, Std]] = Std.NONE,
     tee: Union[Std, Dict[int, Std]] = Std.NONE,
+    filter_local_ranks: Optional[Set[int]] = None,
 ) -> PContext:
     """
-    Starts ``n`` copies of ``entrypoint`` processes with the provided options.
+    Start ``n`` copies of ``entrypoint`` processes with the provided options.
+
     ``entrypoint`` is either a ``Callable`` (function) or a ``str`` (binary).
     The number of copies is determined by the number of entries for ``args`` and
     ``envs`` arguments, which need to have the same key set.
@@ -142,7 +143,6 @@ def start_processes(
     .. note:: It is expected that the ``log_dir`` exists, is empty, and is a directory.
 
     Example:
-
     ::
 
      log_dir = "/tmp/test"
@@ -195,9 +195,9 @@ def start_processes(
                       ignored for binaries
         redirects: which std streams to redirect to a log file
         tee: which std streams to redirect + print to console
+        filter_local_ranks: which ranks' logs to print to console
 
     """
-
     # listdir raises FileNotFound or NotADirectoryError so no need to check manually
     if log_dir != os.devnull and os.listdir(log_dir):
         raise RuntimeError(
@@ -225,8 +225,9 @@ def start_processes(
         redirect_std = redirs[local_rank]
         redirs[local_rank] = redirect_std | tee_std
 
-    stdouts = {local_rank: "" for local_rank in range(nprocs)}
-    stderrs = {local_rank: "" for local_rank in range(nprocs)}
+    SYS_STREAM = ""  # special case to indicate to output to console
+    stdouts = dict.fromkeys(range(nprocs), SYS_STREAM)
+    stderrs = dict.fromkeys(range(nprocs), SYS_STREAM)
     tee_stdouts: Dict[int, str] = {}
     tee_stderrs: Dict[int, str] = {}
     error_files = {}
@@ -252,6 +253,19 @@ def start_processes(
                 tee_stdouts[local_rank] = stdouts[local_rank]
             if t & Std.ERR == Std.ERR:
                 tee_stderrs[local_rank] = stderrs[local_rank]
+
+            if filter_local_ranks and local_rank not in filter_local_ranks:
+                # If stream is tee'd, only write to file, but don't tail
+                if local_rank in tee_stdouts:
+                    tee_stdouts.pop(local_rank, None)
+                if local_rank in tee_stderrs:
+                    tee_stderrs.pop(local_rank, None)
+
+                # If stream is not redirected, don't print
+                if stdouts[local_rank] == SYS_STREAM:
+                    stdouts[local_rank] = os.devnull
+                if stderrs[local_rank] == SYS_STREAM:
+                    stderrs[local_rank] = os.devnull
 
             error_file = os.path.join(clogdir, "error.json")
             error_files[local_rank] = error_file

@@ -1151,6 +1151,9 @@ class TestDistributions(DistributionsTestCase):
             self._gradcheck_log_prob(lambda p: Binomial(total_count, None, p.log()), [p])
         self.assertRaises(NotImplementedError, Binomial(10, p).rsample)
 
+    test_binomial_half = set_default_dtype(torch.float16)(test_binomial)
+    test_binomial_bfloat16 = set_default_dtype(torch.bfloat16)(test_binomial)
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_binomial_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]

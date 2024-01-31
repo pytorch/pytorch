@@ -12,10 +12,7 @@
 #include <ATen/ATen.h>
 #include <torch/csrc/autograd/generated/Functions.h>
 
-namespace torch {
-namespace autograd {
-namespace generated {
-namespace details {
+namespace torch::autograd::generated::details {
 
 extern const char* kCudnnDoubleBackwardMsg;
 
@@ -739,7 +736,8 @@ std::tuple<Tensor, Tensor> cholesky_solve_backward(
     const Tensor& self,
     const Tensor& input2,
     const Tensor& result,
-    const bool upper);
+    const bool upper,
+    std::array<bool, 2> output_mask);
 Tensor cholesky_solve_jvp(
     const Tensor& X,
     const Tensor& U,
@@ -1098,7 +1096,6 @@ mkldnn_rnn_layer_differentiable_backward(
     bool batch_first,
     const at::Tensor& workspace);
 
-} // namespace details
-} // namespace generated
-} // namespace autograd
-} // namespace torch
+Tensor values_backward(const Tensor& grad, const Tensor& self);
+
+} // namespace torch::autograd::generated::details

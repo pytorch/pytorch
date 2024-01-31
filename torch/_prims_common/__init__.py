@@ -21,6 +21,8 @@ from typing import (
     Union,
 )
 
+from typing_extensions import TypeAlias
+
 
 if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
@@ -33,16 +35,16 @@ import torch
 from torch import sym_float, sym_int, sym_max
 
 
-ShapeType = Union[torch.Size, List[int], Tuple[int, ...]]
-StrideType = Union[List[int], Tuple[int, ...]]
-DimsType = Union[int, List[int], Tuple[int, ...]]
-DimsSequenceType = Union[List[int], Tuple[int, ...]]
+ShapeType: TypeAlias = Union[torch.Size, List[int], Tuple[int, ...]]
+StrideType: TypeAlias = Union[List[int], Tuple[int, ...]]
+DimsType: TypeAlias = Union[int, List[int], Tuple[int, ...]]
+DimsSequenceType: TypeAlias = Union[List[int], Tuple[int, ...]]
 # TODO: Type[torch.SymInt], Type[torch.SymFloat]
-NumberTypeType = Union[Type[bool], Type[int], Type[float], Type[complex]]
+NumberTypeType: TypeAlias = Union[Type[bool], Type[int], Type[float], Type[complex]]
 # TODO: This needs a lot more type annotations
 # NumberType = Union[bool, int, float, complex, torch.SymInt, torch.SymFloat]
-NumberType = Union[bool, int, float, complex]
-RealNumberType = Union[bool, int, float]
+NumberType: TypeAlias = Union[bool, int, float, complex]
+RealNumberType: TypeAlias = Union[bool, int, float]
 
 Number = (bool, int, float, complex, torch.SymInt, torch.SymFloat)
 # I don't call it Integral because numbers.Integral includes bool, but IntLike
@@ -52,12 +54,19 @@ IntLike = (int, torch.SymInt)
 FloatLike = (float, torch.SymFloat)
 IntWithoutSymInt = int
 FloatWithoutSymFloat = float
-DeviceLikeType = Union[str, torch.device]
+DeviceLikeType: TypeAlias = Union[str, torch.device, int]
 Tensor = torch.Tensor
 
 
 torch_function_passthrough = {
     torch.device,
+    torch.sym_not,
+    torch.sym_float,
+    torch.sym_int,
+    torch.sym_max,
+    torch.sym_min,
+    torch._sym_sqrt,  # type: ignore[attr-defined]
+    torch.sym_ite,
     torch.Tensor.dim,
     torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
     torch.Tensor.numel,
@@ -80,8 +89,8 @@ torch_function_passthrough = {
 
 TensorLikeType = torch.Tensor
 TensorLike = torch.Tensor
-TensorSequenceType = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
-TensorOrNumberLikeType = Union[TensorLikeType, NumberType]
+TensorSequenceType: TypeAlias = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
+TensorOrNumberLikeType: TypeAlias = Union[TensorLikeType, NumberType]
 
 CustomOutParamAnnotation = "__custom_out_param__"
 
@@ -121,6 +130,7 @@ def compare_tensor_meta(
     check_strides=False,
     *,
     allow_rhs_unbacked=False,
+    check_conj=True,
 ):
     """
     Checks that two tensor likes have the same shape,
@@ -162,10 +172,11 @@ def compare_tensor_meta(
             msg = f"Storage offset mismatch! Storage offsets are {a.storage_offset()} and {b.storage_offset()}!"
             raise RuntimeError(msg)
 
-    if a.is_conj() != b.is_conj():
-        raise RuntimeError(
-            f"Conj mismatch! is_conj is set to {a.is_conj()} and {b.is_conj()}"
-        )
+    if check_conj:
+        if a.is_conj() != b.is_conj():
+            raise RuntimeError(
+                f"Conj mismatch! is_conj is set to {a.is_conj()} and {b.is_conj()}"
+            )
 
     if a.is_neg() != b.is_neg():
         raise RuntimeError(
@@ -879,7 +890,16 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
     return tuple(shape)
 
 
-_integer_dtypes = (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+_integer_dtypes = (
+    torch.uint8,
+    torch.uint16,
+    torch.uint32,
+    torch.uint64,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+)
 _low_precision_dtypes = (torch.float16, torch.bfloat16, torch.complex32)
 _complex_dtypes = (torch.complex32, torch.complex64, torch.complex128)
 
@@ -1296,7 +1316,7 @@ def number_type(x: Union[NumberType, torch.SymInt, torch.SymFloat]) -> Type:
         return type(x)
 
 
-def symbol_type(x: sympy.Symbol) -> Type:
+def expr_type(x: sympy.Expr) -> Type:
     if x.is_integer:  # type: ignore[attr-defined]
         return int
     else:
@@ -1404,14 +1424,14 @@ def elementwise_dtypes(
     import sympy
 
     for x in args:
-        if not isinstance(x, (Number, TensorLike, sympy.Symbol)):
+        if not isinstance(x, (Number, TensorLike, sympy.Expr)):
             msg = f"Unexpected type {str(type(x))} when computing elementwise type promotion!"
             raise ValueError(msg)
 
         if isinstance(x, Number):
             highest_type = get_higher_type(highest_type, number_type(x))
-        elif isinstance(x, sympy.Symbol):
-            highest_type = get_higher_type(highest_type, symbol_type(x))
+        elif isinstance(x, sympy.Expr):
+            highest_type = get_higher_type(highest_type, expr_type(x))
         else:
             # x is a TensorLike
             highest_type = get_higher_type(highest_type, dtype_to_type(x.dtype))
@@ -1530,27 +1550,13 @@ def make_contiguous_strides_for(
     if not shape:
         return ()
 
-    # TODO: Move this somewhere central?
-    def _is_singleton(s):
-        # check for SingletonSymNode
-        if not isinstance(s, torch.SymInt):
-            return False
-        if s.node.singleton_int() is not None:
-            return True
-
-        # check for SymInt wrapping a SingletonSymNode (fake-ifying causes this)
-        return (
-            s.node.is_symbolic()
-            and s.node.hint is not None
-            and isinstance(s.node.hint, torch.SymInt)
-            and s.node.hint.node.singleton_int() is not None
-        )
+    from torch.fx.experimental.symbolic_shapes import is_singleton
 
     multiplier = 1
     strides = []
     for l in reversed(shape):
         strides.append(multiplier)
-        multiplier *= l if _is_singleton(l) else sym_max(l, 1)
+        multiplier *= l if is_singleton(l) else sym_max(l, 1)
 
     result = tuple(reversed(strides))
 
@@ -1857,7 +1863,7 @@ def dtype_or_default(dtype: Optional[torch.dtype]) -> torch.dtype:
     return dtype if dtype is not None else torch.get_default_dtype()
 
 
-def device_or_default(device: Optional[torch.device]) -> torch.device:
+def device_or_default(device: Optional[DeviceLikeType]) -> DeviceLikeType:
     return device if device is not None else torch.device("cpu")
 
 

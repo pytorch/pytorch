@@ -13,6 +13,7 @@ _FUNCTIONAL_OPTIM_STEP_METHOD_NAME = "step_param"
 class _OptimizerHookState:
     """
     Holds state for running optimizer in-line after DDP communication hook.
+
     Currently contains only optimizer class which must have a method `step_param`.
     """
 
@@ -45,6 +46,8 @@ def _apply_optim_in_backward_hook(
     gradient_is_bucket_view: bool
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
     r"""
+    Register hook to apply the optimizer in backward.
+
     If torch.distributed.optim._apply_optimizer_in_backward is used to overlap
     optimizer with backward pass, DDP will run the below hook to run optimizer
     step for parameters after gradient communication has taken place.
@@ -123,9 +126,7 @@ def _hook_then_optimizer(
     hook: Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]],
     optimizer_state: _OptimizerHookState,
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
-    r"""
-    Runs optimizer in a functional fashion after DDP communication hook.
-    """
+    r"""Run optimizer in a functional fashion after DDP communication hook."""
     has_set_params = (
         hasattr(optimizer_state, 'params_to_optimize')
         and optimizer_state.params_to_optimize is not None

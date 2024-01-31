@@ -158,7 +158,6 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
             OperatingSystem.LINUX,
             arches=["11.8", "12.1"],
             python_versions=["3.8"],
-            gen_special_an_non_special_wheel=False,
         ),
         branches="main",
     ),
@@ -343,7 +342,8 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.MACOS_ARM64,
         package_type="conda",
-        cross_compile_arm64=True,
+        cross_compile_arm64=False,
+        macos_runner="macos-13-xlarge",
         build_configs=generate_binary_build_matrix.generate_conda_matrix(
             OperatingSystem.MACOS_ARM64
         ),

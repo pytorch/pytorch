@@ -5,7 +5,10 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same
 
-utils = torch._dynamo.testing.load_test_module(__file__, "dynamo.utils")
+try:
+    from . import utils
+except ImportError:
+    import utils
 
 
 class Pair:  # noqa: B903

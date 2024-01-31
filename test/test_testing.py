@@ -12,7 +12,7 @@ import re
 import subprocess
 import sys
 import unittest.mock
-from typing import Any, Callable, Iterator, List, Tuple, Generator
+from typing import Any, Callable, Iterator, List, Tuple
 
 import torch
 
@@ -29,6 +29,7 @@ from torch.testing._internal import opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and, floating_types
 from torch.testing._internal.common_modules import modules, module_db, ModuleInfo
 from torch.testing._internal.opinfo.core import SampleInput, DecorateInfo, OpInfo
+import operator
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -1427,7 +1428,7 @@ class TestMakeTensor(TestCase):
     @parametrize("noncontiguous", [False, True])
     @parametrize("shape", [tuple(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)])
     def test_noncontiguous(self, dtype, device, noncontiguous, shape):
-        numel = functools.reduce(lambda a, b: a * b, shape, 1)
+        numel = functools.reduce(operator.mul, shape, 1)
 
         t = torch.testing.make_tensor(shape, dtype=dtype, device=device, noncontiguous=noncontiguous)
         self.assertEqual(t.is_contiguous(), not noncontiguous or numel < 2)
@@ -1484,15 +1485,7 @@ class TestMakeTensor(TestCase):
         low_inclusive, high_exclusive = {
             torch.bool: (0, 2),
             torch.uint8: (0, 10),
-            **{
-                signed_integral_dtype: (-9, 10)
-                for signed_integral_dtype in [
-                    torch.int8,
-                    torch.int16,
-                    torch.int32,
-                    torch.int64,
-                ]
-            },
+            **dict.fromkeys([torch.int8, torch.int16, torch.int32, torch.int64], (-9, 10)),
         }.get(dtype, (-9, 9))
 
         t = torch.testing.make_tensor(10_000, dtype=dtype, device=device, low=low_inclusive, high=high_exclusive)
@@ -1867,6 +1860,33 @@ class TestTestParametrizationDeviceType(TestCase):
             '{}.test_two_things_default_names_x_2_y_3_{}',
             '{}.test_two_things_default_names_x_3_y_4_{}')
         ]
+        test_names = _get_test_names_for_test_class(device_cls)
+        self.assertEqual(expected_test_names, test_names)
+
+    def test_default_name_non_primitive(self, device):
+        device = self.device_type
+
+        class TestParametrized(TestCase):
+            @parametrize("x", [1, .5, "foo", object()])
+            def test_default_names(self, device, x):
+                pass
+
+            @parametrize("x,y", [(1, object()), (object(), .5), (object(), object())])
+            def test_two_things_default_names(self, device, x, y):
+                pass
+
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+        device_cls = locals()[f'TestParametrized{device.upper()}']
+        expected_test_names = sorted(name.format(device_cls.__name__, device) for name in (
+            '{}.test_default_names_x_1_{}',
+            '{}.test_default_names_x_0_5_{}',
+            '{}.test_default_names_x_foo_{}',
+            '{}.test_default_names_x3_{}',
+            '{}.test_two_things_default_names_x_1_y0_{}',
+            '{}.test_two_things_default_names_x1_y_0_5_{}',
+            '{}.test_two_things_default_names_x2_y2_{}')
+        )
         test_names = _get_test_names_for_test_class(device_cls)
         self.assertEqual(expected_test_names, test_names)
 
@@ -2361,19 +2381,19 @@ class TestOpInfoSampleFunctions(TestCase):
     def test_opinfo_sample_generators(self, device, dtype, op):
         # Test op.sample_inputs doesn't generate multiple samples when called
         samples = op.sample_inputs(device, dtype)
-        self.assertIsInstance(samples, Generator)
+        self.assertIsInstance(samples, Iterator)
 
     @ops([op for op in op_db if op.reference_inputs_func is not None], dtypes=OpDTypes.any_one)
     def test_opinfo_reference_generators(self, device, dtype, op):
         # Test op.reference_inputs doesn't generate multiple samples when called
         samples = op.reference_inputs(device, dtype)
-        self.assertIsInstance(samples, Generator)
+        self.assertIsInstance(samples, Iterator)
 
     @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_opinfo_error_generators(self, device, op):
         # Test op.error_inputs doesn't generate multiple inputs when called
         samples = op.error_inputs(device)
-        self.assertIsInstance(samples, Generator)
+        self.assertIsInstance(samples, Iterator)
 
 
 instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())

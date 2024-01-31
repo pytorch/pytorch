@@ -409,7 +409,6 @@ class CustomOp:
         """
 
         def inner(f):
-            frame = inspect.stack()[1]
             self._check_doesnt_have_library_meta_impl()
             self._register_impl("abstract", f, stacklevel=_stacklevel)
             location = self._get_impl("abstract").location
@@ -959,14 +958,14 @@ def get_abstract_impl(qualname):
     return custom_op._get_impl("abstract").func
 
 
-def _custom_op_with_schema(qualname, schema):
+def _custom_op_with_schema(qualname, schema, needs_fixed_stride_order=True):
     ns, name = qualname.split("::")
     schema_str = f"{name}{schema}"
     function_schema = FunctionSchema.parse(schema_str)
     validate_schema(function_schema)
-
+    tags = [torch._C.Tag.needs_fixed_stride_order] if needs_fixed_stride_order else []
     lib = library.Library(ns, "FRAGMENT")
-    lib.define(schema_str)
+    lib.define(schema_str, tags=tags)
     ophandle = find_ophandle_or_throw(ns, function_schema.name)
     result = CustomOp(lib, ns, function_schema, name, ophandle, _private_access=True)
     result._register_autograd_kernel_indirection()

@@ -8,11 +8,9 @@
 #endif
 
 #include <c10/core/CPUAllocator.h>
-#include <c10/util/Unicode.h>
 
-/* stuff for mapped files */
 #ifdef _WIN32
-#include <c10/util/win32-headers.h>
+#include <c10/util/Unicode.h>
 #endif
 
 #if defined(HAVE_MMAP)
@@ -326,6 +324,11 @@ MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags,
       base_ptr_ = nullptr; /* let's be sure it is NULL */
       TORCH_CHECK(false, "unable to mmap ", size_, " bytes from file <", filename_, ">: ", strerror(errno), " (", errno, ")");
     }
+
+#if !defined(__APPLE__) && !defined(__ANDROID__)
+    /* attempt to use larger block size on Linux, which is important for getting better CUDA upload speed */
+    posix_fadvise(fd, 0, size, POSIX_FADV_SEQUENTIAL);
+#endif
 
     if (flags_ & ALLOCATOR_MAPPED_KEEPFD) {
       fd_ = fd;

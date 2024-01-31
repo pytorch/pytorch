@@ -16,11 +16,12 @@ from torch.testing._internal.common_utils import (
 from torch.utils._sympy.functions import FloorDiv
 from torch.utils._sympy.solve import INEQUALITY_TYPES, mirror_rel_op, try_solve
 from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
-from torch.utils._sympy.reference import ReferenceAnalysis
+from torch.utils._sympy.reference import ReferenceAnalysis, PythonReferenceAnalysis
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.singleton_int import SingletonInt
 from sympy.core.relational import is_ge, is_le, is_gt, is_lt
 import functools
+import torch.fx as fx
 
 
 
@@ -280,6 +281,60 @@ class TestSympyInterp(TestCase):
                 # point is to test sympy_interp
                 r = sympy_interp(ReferenceAnalysis, dict(zip(symbols, sargs)), sympy_expr)
                 self.assertEqual(ref_r, r)
+
+    @parametrize("fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS)
+    def test_python_interp_fx(self, fn):
+        # These never show up from symbolic_shapes
+        if fn in ("log", "exp"):
+            return
+
+        vals = CONSTANTS
+        if fn in {*UNARY_BOOL_OPS, *BINARY_BOOL_OPS}:
+            vals = [True, False]
+
+        arity = 1
+        if fn in {*BINARY_OPS, *BINARY_BOOL_OPS, *COMPARE_OPS}:
+            arity = 2
+
+        from sympy.abc import x, y
+
+        symbols = [x]
+        if arity == 2:
+            symbols = [x, y]
+
+        # Workaround mpf from symbol error
+        if fn == "minimum":
+            sympy_expr = sympy.Min(x, y)
+        elif fn == "maximum":
+            sympy_expr = sympy.Max(x, y)
+        else:
+            sympy_expr = getattr(ReferenceAnalysis, fn)(*symbols)
+
+        if arity == 1:
+            def trace_f(px):
+                return sympy_interp(PythonReferenceAnalysis, {x: px}, sympy_expr)
+        else:
+            def trace_f(px, py):
+                return sympy_interp(PythonReferenceAnalysis, {x: px, y: py}, sympy_expr)
+
+        gm = fx.symbolic_trace(trace_f)
+
+        for args in itertools.product(vals, repeat=arity):
+            if arity == 1 and not valid_unary(fn, *args):
+                continue
+            elif arity == 2 and not valid_binary(fn, *args):
+                continue
+            if fn == "truncdiv" and args[1] == 0:
+                continue
+            elif fn == "pow" and (args[0] == 0 and args[1] <= 0):
+                continue
+            elif fn == "floordiv" and args[1] == 0:
+                continue
+            with self.subTest(args=args):
+                self.assertEqual(
+                    sympy_interp(PythonReferenceAnalysis, dict(zip(symbols, args)), sympy_expr),
+                    gm(*args)
+                )
 
 
 def type_name_fn(type: Type) -> str:

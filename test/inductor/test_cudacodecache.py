@@ -7,6 +7,7 @@ import torch
 
 from torch._inductor import config
 from torch._inductor.codecache import AsyncCompile, CUDACodeCache
+from torch._inductor.codegen.cuda.cuda_env import nvcc_exist
 from torch._inductor.exc import CUDACompileError
 from torch.testing._internal.common_utils import TestCase as TorchTestCase
 
@@ -85,6 +86,7 @@ class TestCUDACodeCache(TorchTestCase):
 
 
 if __name__ == "__main__":
-    from torch.testing._internal.inductor_utils import run_inductor_tests
+    from torch._dynamo.test_case import run_tests
 
-    run_inductor_tests(nvcc=True, triton=True)
+    if nvcc_exist():
+        run_tests("cuda")

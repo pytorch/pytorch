@@ -1268,15 +1268,20 @@ class CyclicLR(LRScheduler):
 
         self.cycle_momentum = cycle_momentum
         if cycle_momentum:
-            if 'momentum' not in optimizer.defaults:
-                raise ValueError('optimizer must support momentum with `cycle_momentum` option enabled')
+            if 'momentum' not in optimizer.defaults and 'betas' not in optimizer.defaults:
+                raise ValueError('optimizer must support momentum or beta1 with `cycle_momentum` option enabled')
 
-            base_momentums = self._format_param('base_momentum', optimizer, base_momentum)
-            if last_epoch == -1:
-                for momentum, group in zip(base_momentums, optimizer.param_groups):
-                    group['momentum'] = momentum
-            self.base_momentums = [group['momentum'] for group in optimizer.param_groups]
+            self.use_beta1 = 'betas' in self.optimizer.defaults
+            self.base_momentums = self._format_param('base_momentum', optimizer, base_momentum)
             self.max_momentums = self._format_param('max_momentum', optimizer, max_momentum)
+            if last_epoch == -1:
+                for m_momentum, b_momentum, group in zip(self.max_momentums, self.base_momentums, optimizer.param_groups):
+                    if self.use_beta1:
+                        group['betas'] = (m_momentum, *group['betas'][1:])
+                    else:
+                        group['momentum'] = m_momentum
+                    group['max_momentum'] = m_momentum
+                    group['base_momentum'] = b_momentum
 
         super().__init__(optimizer, last_epoch, verbose)
         self.base_lrs = base_lrs
@@ -1359,20 +1364,33 @@ class CyclicLR(LRScheduler):
                     momentum = max_momentum - base_height * self.scale_fn(self.last_epoch)
                 momentums.append(momentum)
             for param_group, momentum in zip(self.optimizer.param_groups, momentums):
-                param_group['momentum'] = momentum
+                if self.use_beta1:
+                    param_group['betas'] = (momentum, *param_group['betas'][1:])
+                else:
+                    param_group['momentum'] = momentum
 
         return lrs
 
     def state_dict(self):
         state = super().state_dict()
-        # We are dropping the `_scale_fn_ref` attribute because it is a `weakref.WeakMethod` and can't be pickled
-        state.pop("_scale_fn_ref")
+        # We are dropping the `_scale_fn_ref` attribute because it is a
+        # `weakref.WeakMethod` and can't be pickled.
+        state.pop('_scale_fn_ref')
+        fn = state.pop('_scale_fn_custom')
+        state['_scale_fn_custom'] = None
+        if fn is not None and not isinstance(fn, types.FunctionType):
+            # The _scale_fn_custom will only be saved if it is a callable object
+            # and not if it is a function or lambda.
+            state['_scale_fn_custom'] = fn.__dict__.copy()
+
         return state
 
     def load_state_dict(self, state_dict):
+        fn = state_dict.pop('_scale_fn_custom')
         super().load_state_dict(state_dict)
+        if fn is not None:
+            self._scale_fn_custom.__dict__.update(fn)
         self._init_scale_fn()
-
 
 
 class CosineAnnealingWarmRestarts(LRScheduler):
@@ -1711,7 +1729,7 @@ class OneCycleLR(LRScheduler):
         self.cycle_momentum = cycle_momentum
         if self.cycle_momentum:
             if 'momentum' not in self.optimizer.defaults and 'betas' not in self.optimizer.defaults:
-                raise ValueError('optimizer must support momentum with `cycle_momentum` option enabled')
+                raise ValueError('optimizer must support momentum or beta1 with `cycle_momentum` option enabled')
             self.use_beta1 = 'betas' in self.optimizer.defaults
             max_momentums = self._format_param('max_momentum', optimizer, max_momentum)
             base_momentums = self._format_param('base_momentum', optimizer, base_momentum)

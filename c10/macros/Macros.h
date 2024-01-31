@@ -152,13 +152,10 @@
 
 // Simply define the namespace, in case a dependent library want to refer to
 // the c10 namespace but not any nontrivial files.
-namespace c10 {} // namespace c10
-namespace c10 {
-namespace cuda {}
-} // namespace c10
-namespace c10 {
-namespace hip {}
-} // namespace c10
+namespace c10 {}
+namespace c10::cuda {}
+namespace c10::hip {}
+namespace c10::xpu {}
 
 // Since C10 is the core library for caffe2 (and aten), we will simply reroute
 // all abstractions defined in c10 to be available in caffe2 as well.
@@ -170,11 +167,9 @@ using namespace c10;
 namespace at {
 using namespace c10;
 }
-namespace at {
-namespace cuda {
+namespace at::cuda {
 using namespace c10::cuda;
-}
-} // namespace at
+} // namespace at::cuda
 
 // WARNING!!! THIS IS A GIANT HACK!!!
 // This line means you cannot simultaneously include c10/hip
@@ -184,11 +179,13 @@ using namespace c10::cuda;
 // from at::cuda.  This namespace makes that happen.  When
 // HIPIFY is no longer out-of-place, we can switch the cuda
 // here to hip and everyone is happy.
-namespace at {
-namespace cuda {
+namespace at::cuda {
 using namespace c10::hip;
-}
-} // namespace at
+} // namespace at::cuda
+
+namespace at::xpu {
+using namespace c10::xpu;
+} // namespace at::xpu
 
 // C10_LIKELY/C10_UNLIKELY
 //
@@ -356,13 +353,21 @@ __host__ __device__
 #endif // __SYCL_DEVICE_ONLY__
 }
 #endif // NDEBUG
-#define CUDA_KERNEL_ASSERT(cond)                                                                 \
-  if (C10_UNLIKELY(!(cond))) {                                                                   \
-    (void)(_wassert(_CRT_WIDE(#cond), _CRT_WIDE(__FILE__), static_cast<unsigned>(__LINE__)), 0); \
+#define CUDA_KERNEL_ASSERT(cond)                 \
+  if (C10_UNLIKELY(!(cond))) {                   \
+    (void)(_wassert(                             \
+               _CRT_WIDE(#cond),                 \
+               _CRT_WIDE(__FILE__),              \
+               static_cast<unsigned>(__LINE__)), \
+           0);                                   \
   }
-#define SYCL_KERNEL_ASSERT(cond)                                                                 \
-  if (C10_UNLIKELY(!(cond))) {                                                                   \
-    (void)(_wassert(_CRT_WIDE(#cond), _CRT_WIDE(__FILE__), static_cast<unsigned>(__LINE__)), 0); \
+#define SYCL_KERNEL_ASSERT(cond)                 \
+  if (C10_UNLIKELY(!(cond))) {                   \
+    (void)(_wassert(                             \
+               _CRT_WIDE(#cond),                 \
+               _CRT_WIDE(__FILE__),              \
+               static_cast<unsigned>(__LINE__)), \
+           0);                                   \
   }
 #else // __APPLE__, _MSC_VER
 #if defined(NDEBUG)
@@ -374,9 +379,7 @@ extern SYCL_EXTERNAL void __assert_fail(
     unsigned int line,
     const char* func);
 #else // __SYCL_DEVICE_ONLY__
-#if (                                                                       \
-    defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)) && \
-    !defined(TORCH_DISABLE_GPU_ASSERTS))
+#if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)))
 // CUDA supports __assert_fail function which are common for both device
 // and host side code.
 __host__ __device__
@@ -393,18 +396,14 @@ __host__ __device__
         unsigned int line,
         const char* function) noexcept __attribute__((__noreturn__));
 
-#if (defined(__HIP_ARCH__) || defined(__HIP__)) && \
-    !defined(TORCH_DISABLE_GPU_ASSERTS)
-// ROCm supports __assert_fail only as a device side function.
-__device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
-    const char* assertion,
-    const char* file,
-    unsigned int line,
-    const char* function);
-#endif // defined(__HIP_ARCH__) || defined(__HIP__)
 #endif // __SYCL_DEVICE_ONLY__
 }
 #endif // NDEBUG
+// ROCm disable kernel assert by default
+#if !defined(C10_USE_ROCM_KERNEL_ASSERT) and defined(USE_ROCM)
+#define CUDA_KERNEL_ASSERT(cond)
+#define SYCL_KERNEL_ASSERT(cond)
+#else
 #define CUDA_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
     __assert_fail(                                                       \
@@ -415,6 +414,7 @@ __device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
     __assert_fail(                                                       \
         #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
   }
+#endif //  C10_USE_ROCM_KERNEL_ASSERT and USE_ROCM
 #endif // __APPLE__
 
 #ifdef __APPLE__

@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import unittest
 from functools import partial
 from itertools import product
@@ -177,7 +179,7 @@ op_db: List[OpInfo] = [
         variant_test_name="special_polygamma_n_0",
         ref=reference_polygamma if TEST_SCIPY else None,
         dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
-        dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+        dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_polygamma,

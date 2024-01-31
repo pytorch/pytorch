@@ -68,7 +68,7 @@ std::vector<IValue> ivalue_symbolize(
     for (const auto& e : t) {
       l.push_back(all_frames.at(e));
     }
-    py_unique_frames.push_back(std::move(l));
+    py_unique_frames.emplace_back(std::move(l));
   }
 
   std::vector<IValue> result;
@@ -132,7 +132,7 @@ static void checkOptionIn(
 void _record_memory_history(
     c10::optional<std::string> enabled,
     c10::optional<std::string> context,
-    std::string stacks,
+    const std::string& stacks,
     size_t max_entries) {
   if (enabled) {
     checkOptionIn(
@@ -195,6 +195,7 @@ std::string _memory_snapshot_pickled() {
   IValue frames_s = "frames";
   IValue blocks_s = "blocks";
   IValue is_expandable_s = "is_expandable";
+  IValue time_us_s = "time_us";
 
   auto empty_frames = new_list();
 
@@ -310,6 +311,7 @@ std::string _memory_snapshot_pickled() {
         frame_tracebacks.push_back(sc);
         frame_dict.push_back(trace_entry);
       }
+      trace_entry.insert(time_us_s, te.time_.t_);
       trace.push_back(trace_entry);
     }
     traces.push_back(trace);

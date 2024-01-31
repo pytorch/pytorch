@@ -2,7 +2,7 @@
 
 import torch._C
 from torch._C import _add_docstr as add_docstr
-from ._torch_docs import parse_kwargs, reproducibility_notes
+from torch._torch_docs import parse_kwargs, reproducibility_notes
 
 
 def add_docstr_all(method, docstr):
@@ -1086,6 +1086,9 @@ Fills the tensor with numbers drawn from the Cauchy distribution:
 .. math::
 
     f(x) = \dfrac{1}{\pi} \dfrac{\sigma}{(x - \text{median})^2 + \sigma^2}
+
+.. note::
+  Sigma (:math:`\sigma`) is used to denote the scale parameter in Cauchy distribution.
 """,
 )
 
@@ -1906,11 +1909,19 @@ add_docstr_all(
     r"""
 exponential_(lambd=1, *, generator=None) -> Tensor
 
-Fills :attr:`self` tensor with elements drawn from the exponential distribution:
+Fills :attr:`self` tensor with elements drawn from the PDF (probability density function):
 
 .. math::
 
-    f(x) = \lambda e^{-\lambda x}
+    f(x) = \lambda e^{-\lambda x}, x > 0
+
+.. note::
+  In probability theory, exponential distribution is supported on interval [0, :math:`\inf`) (i.e., :math:`x >= 0`)
+  implying that zero can be sampled from the exponential distribution.
+  However, :func:`torch.Tensor.exponential_` does not sample zero,
+  which means that its actual support is the interval (0, :math:`\inf`).
+
+  Note that :func:`torch.distributions.exponential.Exponential` is supported on the interval [0, :math:`\inf`) and can sample zero.
 """,
 )
 
@@ -2103,8 +2114,12 @@ Fills :attr:`self` tensor with elements drawn from the geometric distribution:
 
 .. math::
 
-    f(X=k) = (1 - p)^{k - 1} p
+    P(X=k) = (1 - p)^{k - 1} p, k = 1, 2, ...
 
+.. note::
+  :func:`torch.Tensor.geometric_` `k`-th trial is the first success hence draws samples in :math:`\{1, 2, \ldots\}`, whereas
+  :func:`torch.distributions.geometric.Geometric` :math:`(k+1)`-th trial is the first success
+  hence draws samples in :math:`\{0, 1, \ldots\}`.
 """,
 )
 
@@ -6034,7 +6049,7 @@ Fills :attr:`self` tensor with numbers sampled from the continuous uniform
 distribution:
 
 .. math::
-    P(x) = \dfrac{1}{\text{to} - \text{from}}
+    f(x) = \dfrac{1}{\text{to} - \text{from}}
 """,
 )
 

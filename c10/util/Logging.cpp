@@ -7,9 +7,7 @@
 
 #include <algorithm>
 #include <cstdlib>
-#include <cstring>
 #include <iostream>
-#include <numeric>
 
 // Common code that we use regardless of whether we use glog or not.
 
@@ -422,8 +420,7 @@ MessageLogger::~MessageLogger() {
 
 #endif // !C10_USE_GLOG
 
-namespace c10 {
-namespace detail {
+namespace c10::detail {
 namespace {
 
 void setLogLevelFlagFromEnv() {
@@ -469,5 +466,4 @@ void setLogLevelFlagFromEnv() {
 }
 
 } // namespace
-} // namespace detail
-} // namespace c10
+} // namespace c10::detail

@@ -136,7 +136,8 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& view_value, const
       view_value.device()
     ),
     value_(view_value),
-    is_multi_output_view_(base->is_multi_output_view_ || meta.is_multi_output)
+    is_multi_output_view_(base->is_multi_output_view_ || meta.is_multi_output),
+    was_storage_changed_(base->was_storage_changed_)
 {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(value_));
   TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
@@ -148,6 +149,7 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& view_value, const
   view_metas_.push_back(meta);
   storage_ = base->storage_; // alias this tensor's storage with the base tensor's
 }
+
 
 functionalization::FunctionalStorageImpl* FunctionalTensorWrapper::functional_storage_impl() const {
   return static_cast<functionalization::FunctionalStorageImpl*>(storage_.unsafeGetStorageImpl());
@@ -230,6 +232,10 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
     TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
   }
   mutation_counter_++;
+  if (!at::GradMode::is_enabled() || InferenceMode::is_enabled()) {
+    // This mutation happened under no_grad or inference_mode
+    mark_mutation_during_no_grad_or_inference_mode();
+  }
 }
 
 bool FunctionalTensorWrapper::has_data_mutation() {
@@ -305,6 +311,14 @@ void FunctionalTensorWrapper::maybe_replace_storage(const Tensor& other) {
   has_metadata_mutation_ = true;
 }
 
+void FunctionalTensorWrapper::_unsafe_reset_storage() {
+  // Reset the storage with the current value_ tensor as the base
+  storage_ = c10::Storage(c10::make_intrusive<functionalization::FunctionalStorageImpl>(value_));
+  // Reset the generation so that it matches the new storage
+  generation_ = 0;
+  // Clear any pre-existing view metas so that base and value_ are semantically the same
+  view_metas_.clear();
+}
 
 void FunctionalTensorWrapper::sync_() {
   if (is_up_to_date()) {
@@ -564,6 +578,11 @@ void commit_update(ITensorListRef functional_tensor) {
   }
 }
 
+void unsafe_reset_storage(const Tensor& functional_tensor) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isFunctionalTensor(functional_tensor));
+  unsafeGetFunctionalWrapper(functional_tensor)->_unsafe_reset_storage();
+}
+
 void mark_mutation_hidden_from_autograd(const Tensor& functional_tensor) {
   TORCH_CHECK(isFunctionalTensor(functional_tensor));
   unsafeGetFunctionalWrapper(functional_tensor)->mark_mutation_hidden_from_autograd();
@@ -572,6 +591,11 @@ void mark_mutation_hidden_from_autograd(const Tensor& functional_tensor) {
 bool are_all_mutations_hidden_from_autograd(const Tensor& functional_tensor) {
   TORCH_CHECK(isFunctionalTensor(functional_tensor));
   return unsafeGetFunctionalWrapper(functional_tensor)->are_all_mutations_hidden_from_autograd();
+}
+
+bool are_all_mutations_under_no_grad_or_inference_mode(const Tensor& functional_tensor) {
+  TORCH_CHECK(isFunctionalTensor(functional_tensor));
+  return unsafeGetFunctionalWrapper(functional_tensor)->are_all_mutations_under_no_grad_or_inference_mode();
 }
 
 bool isFunctionalTensor(const at::Tensor& tensor) {

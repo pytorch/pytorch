@@ -21,7 +21,7 @@ else:
     DimOrDims = Optional[Tuple[int]]
 
 
-__all__ = []
+__all__: List[str] = []
 
 # All masked reduction/normalization operations have the same
 # signatures. Here we introduce docstring templates that are applied
@@ -463,7 +463,7 @@ def _canonical_dim(dim: DimOrDims, ndim: int) -> Tuple[int, ...]:
     if dim is None:
         return tuple(range(ndim))
     ndim = max(ndim, 1)
-    dim_ = (dim,) if isinstance(dim, int) else dim
+    dim_ = (dim,) if isinstance(dim, (int, torch.SymInt)) else dim
     for d in dim_:
         if d in dims:
             raise RuntimeError(f"dim={d} appears multiple times in the list of dims")
@@ -1627,7 +1627,7 @@ def _std_var(
             total = sum(x * x.conj(), dim, keepdim=keepdim, dtype=compute_dtype)
         else:
             total = sum(
-                x * x.conj(), dim, keepdim=keepdim, dtype=compute_dtype, mask=inmask
+                x * x.conj(), dim, keepdim=keepdim, dtype=compute_dtype, mask=inmask  # type: ignore[possibly-undefined]
             )
         if not keepdim:
             count = count.reshape(total.shape)
