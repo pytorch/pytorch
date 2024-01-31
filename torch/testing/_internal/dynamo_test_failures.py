@@ -59,12 +59,10 @@ dynamo_expected_failures = {
     "TestLinalgCPU.test_addmm_sizes_cpu_float64",
     "TestLinalgCPU.test_norm_dtype_cpu_float64",
     "TestLinalgCPU.test_addr_integral_cpu_int8",
-    "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_complex64",
     "TestLinalgCPU.test_pinv_cpu_float32",
     "TestLinalgCPU.test_addr_integral_cpu_uint8",
     "TestLinalgCPU.test_slogdet_errors_and_warnings_cpu_complex128",
     "TestLinalgCPU.test_addr_integral_cpu_int32",
-    "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_int64",
     "TestLinalgCPU.test_solve_cpu_complex64",
     "TestLinalgCPU.test_solve_cpu_float64",
     "TestLinalgCPU.test_addmm_sizes_cpu_float32",
@@ -73,7 +71,6 @@ dynamo_expected_failures = {
     "TestLinalgCPU.test_inverse_cpu_float64",
     "TestLinalgCPU.test_slogdet_errors_and_warnings_cpu_complex64",
     "TestLinalgCPU.test_pinv_cpu_complex64",
-    "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_float32",
     "TestLinalgCPU.test_geqrf_cpu_complex128",
     "TestLinalgCPU.test_geqrf_cpu_complex64",
     "TestLinalgCPU.test_slogdet_errors_and_warnings_cpu_float64",
@@ -2483,6 +2480,9 @@ dynamo_skips = {
     "TestMethods.test_choose",
     "TestMethods.test_conjugate_out",
     "TestMethods.test_compress",
+    "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_complex64",  # known py311 fail
+    "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_int64",  # known py311 fail
+    "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_float32",  # known py311 fail
     "TestCustomOpTestingCPU.test_incorrect_schema_mutation_cpu",  # test_custom_ops
     "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmax_np_method0",
     "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmin_np_method1",
