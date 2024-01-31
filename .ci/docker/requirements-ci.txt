@@ -25,6 +25,11 @@ coremltools==5.0b5
 #Pinned versions:
 #test that import:
 
+dill==0.3.7
+#Description: dill extends pickle with serializing and de-serializing for most built-ins
+#Pinned versions: 0.3.7
+#test that import: dynamo/test_replay_record.py test_dataloader.py test_datapipe.py test_serialization.py
+
 expecttest==0.1.6
 #Description: method for writing tests where test framework auto populates
 # the expected output based on previous runs
@@ -45,6 +50,11 @@ hypothesis==5.35.1
 junitparser==2.1.1
 #Description: unitparser handles JUnit/xUnit Result XML files
 #Pinned versions: 2.1.1
+#test that import:
+
+lark==0.12.0
+#Description: parser
+#Pinned versions: 0.12.0
 #test that import:
 
 librosa>=0.6.2 ; python_version < "3.11"
@@ -75,10 +85,10 @@ librosa>=0.6.2 ; python_version < "3.11"
 #Pinned versions:
 #test that import:
 
-mypy==1.7.0
+mypy==1.8.0
 # Pin MyPy version because new errors are likely to appear with each release
 #Description: linter
-#Pinned versions: 1.7.0
+#Pinned versions: 1.8.0
 #test that import: test_typing.py, test_type_hints.py
 
 networkx==2.8.8
@@ -159,11 +169,6 @@ pytest==7.3.2
 
 pytest-xdist==3.3.1
 #Description: plugin for running pytest in parallel
-#Pinned versions:
-#test that import:
-
-pytest-shard==0.1.2
-#Description: plugin spliting up tests in pytest
 #Pinned versions:
 #test that import:
 

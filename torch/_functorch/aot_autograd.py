@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import itertools
 from contextlib import nullcontext
 from functools import partial, wraps
@@ -1136,13 +1138,13 @@ def aot_export_joint_simple(
     if len([x for x in metadata.output_info if x.output_type != OutputType.non_alias]) != 0:
         raise RuntimeError(f"aot_export_joint_simple does not support outputs that alias inputs. {str(metadata)}")
     # No pytrees
-    if type(in_spec) == pytree.LeafSpec:
+    if in_spec.is_leaf():
         raise RuntimeError(f"aot_export_joint_simple requires inputs to be a single list/tuple. in_spec={str(in_spec)}")
-    if len([x for x in in_spec.children_specs if type(x) != pytree.LeafSpec]) != 0:
+    if not all(child.is_leaf() for child in in_spec.children_specs):
         raise RuntimeError(f"aot_export_joint_simple requires individual inputs not to be pytrees. in_spec={str(in_spec)}")
-    if type(out_spec) == pytree.LeafSpec:
+    if out_spec.is_leaf():
         raise RuntimeError(f"aot_export_joint_simple requires outputs to be a single list/tuple. out_spec={str(out_spec)}")
-    if len([x for x in out_spec.children_specs if type(x) != pytree.LeafSpec]) != 0:
+    if not all(child.is_leaf() for child in out_spec.children_specs):
         raise RuntimeError(f"aot_export_joint_simple requires individual outputs not to be pytrees. out_spec={str(out_spec)}")
     # TODO: we might have to temporarily patch config.functionalize_rng
     # so that it doesn't run when we're exporting a higher order op.

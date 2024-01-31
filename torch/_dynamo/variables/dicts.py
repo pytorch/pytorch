@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import collections
 import dataclasses
 import enum
@@ -127,8 +129,14 @@ class ConstDictVariable(VariableTracker):
 
         def __eq__(self, other: "ConstDictVariable._HashableTracker") -> bool:
             Hashable = ConstDictVariable._HashableTracker
-            assert isinstance(other, Hashable), type(other)
-            return Hashable._eq_impl(self.underlying_value, other.underlying_value)
+            assert isinstance(other, Hashable) or ConstantVariable.is_literal(
+                other
+            ), type(other)
+            if isinstance(other, Hashable):
+                return Hashable._eq_impl(self.underlying_value, other.underlying_value)
+
+            # constant
+            return Hashable._eq_impl(self.underlying_value, other)
 
     def __init__(
         self, items: Dict[VariableTracker, VariableTracker], user_cls=dict, **kwargs
@@ -205,6 +213,8 @@ class ConstDictVariable(VariableTracker):
 
     def getitem_const(self, arg: VariableTracker):
         key = ConstDictVariable._HashableTracker(arg)
+        if key not in self.items:
+            raise KeyError(arg.value)
         return self.items[key]
 
     def call_method(

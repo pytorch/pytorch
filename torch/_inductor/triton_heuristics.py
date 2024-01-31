@@ -162,7 +162,11 @@ class CachingAutotuner(KernelInterface):
         self.gpu_device = get_interface_for_device(self.device_type)
 
         if log.isEnabledFor(logging.DEBUG):
-            log.debug("CachingAutotuner gets %d configs", len(self.configs))
+            log.debug(
+                "CachingAutotuner gets %d configs for %s",
+                len(self.configs),
+                self.fn.__name__,
+            )
             for c in self.configs:
                 log.debug(c)
 
@@ -370,7 +374,19 @@ class CachingAutotuner(KernelInterface):
         scope["cta_args"] = (
             (binary.num_ctas, *get_first_attr(binary, "cluster_dims", "clusterDims"))
             if hasattr(binary, "num_ctas")
-            else ()
+            else (
+                (binary.metadata.num_ctas, *binary.metadata.cluster_dims)
+                if hasattr(binary, "metadata")
+                else ()
+            )
+        )
+        scope["num_warps"] = (
+            binary.num_warps
+            if hasattr(binary, "num_warps")
+            else binary.metadata.num_warps
+        )
+        scope["shared"] = (
+            binary.shared if hasattr(binary, "shared") else binary.metadata.shared
         )
 
         exec(
@@ -381,8 +397,8 @@ class CachingAutotuner(KernelInterface):
                 else:
                     grid_0, grid_1, grid_2 = grid
 
-                runner(grid_0, grid_1, grid_2, bin.num_warps,
-                            *cta_args, bin.shared,
+                runner(grid_0, grid_1, grid_2, num_warps,
+                            *cta_args, shared,
                             stream, function, None, None, None,
                             {', '.join(call_args)})
                 return bin
@@ -468,7 +484,7 @@ class CachingAutotuner(KernelInterface):
             self.coordesc_tuner.cache_benchmark_result(k.config, v)
 
         if log.isEnabledFor(logging.DEBUG):
-            log.debug("Benchmark all input configs get:")
+            log.debug("Benchmark all input configs for %s, get:", self.fn.__name__)
             for k, v in timings.items():
                 log.debug(
                     "%s: %f, nreg %d, nspill %d, #shared-mem %d",
@@ -497,15 +513,21 @@ class CachingAutotuner(KernelInterface):
         key = self.inductor_meta.get("kernel_name", None)  # unique kernel name
         assert key is not None, "kernel_name can not be None"
         params = {
-            "mangled_name": launcher.bin.metadata["name"],
+            "mangled_name": launcher.bin.metadata.name
+            if hasattr(launcher.bin.metadata, "name")
+            else launcher.bin.metadata["name"],
             "grid_x": grid_x,
             "grid_y": grid_y,
             "grid_z": grid_z,
             "x_block": launcher.config.kwargs.get("XBLOCK", 1),
             "y_block": launcher.config.kwargs.get("YBLOCK", None),
             "z_block": launcher.config.kwargs.get("ZBLOCK", None),
-            "num_warps": launcher.bin.num_warps,
-            "shared_mem": launcher.bin.shared,
+            "num_warps": launcher.bin.num_warps
+            if hasattr(launcher.bin, "num_warps")
+            else launcher.bin.metadata.num_warps,
+            "shared_mem": launcher.bin.shared
+            if hasattr(launcher.bin, "shared")
+            else launcher.bin.metadata.shared,
             "stream": stream,
             # User defined triton kernels will have arbitrary kwarg names
             "meta": launcher.config.kwargs,

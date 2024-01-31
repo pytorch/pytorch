@@ -22,7 +22,6 @@ from typing import (
 )
 
 import torch
-import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch.fx._compatibility import compatibility
 
@@ -258,6 +257,11 @@ def save(
 
     """
     from torch._export import save
+
+    if not isinstance(ep, ExportedProgram):
+        raise TypeError(
+            f"The 'ep' parameter must be an instance of 'ExportedProgram', got '{type(ep).__name__}' instead."
+        )
 
     save(ep, f, extra_files=extra_files, opset_version=opset_version)
 

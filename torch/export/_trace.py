@@ -28,6 +28,7 @@ from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
+    free_unbacked_symbols,
     GuardOnDataDependentSymNode,
     ShapeEnv,
 )
@@ -422,7 +423,13 @@ def _export_non_strict(
     is_joint = graph_signature.backward_signature is not None
 
     def make_argument_spec(node) -> ArgumentSpec:
-        assert "val" in node.meta, f"{node} has no 'val' metadata field"
+        if isinstance(node, (int, bool, float, type(None))):
+            # For const outputs we just directly return this
+            return ConstantArgument(value=node)
+
+        assert (
+            "val" in node.meta
+        ), f"{node} is not a constant or a node with a 'val' metadata field"
         val = node.meta["val"]
         if isinstance(val, FakeTensor):
             return TensorArgument(name=node.name)
@@ -544,9 +551,14 @@ def _export(
 
                     def forward(self, *args, **kwargs):
                         nonlocal out_spec
-                        flat_outs, out_spec = pytree.tree_flatten(
-                            self._export_root(*args, **kwargs)
-                        )
+                        if isinstance(self._export_root, torch.fx.GraphModule):
+                            with torch.fx.traceback.preserve_node_meta():
+                                tree_out = torch.fx.Interpreter(self._export_root).run(
+                                    *args, **kwargs
+                                )
+                        else:
+                            tree_out = self._export_root(*args, **kwargs)
+                        flat_outs, out_spec = pytree.tree_flatten(tree_out)
                         return tuple(flat_outs)
 
                 wrapped_mod = Wrapper(mod)
@@ -574,8 +586,6 @@ def _export(
                 for node in gm.graph.nodes:
                     if "nn_module_stack" in node.meta:
                         nn_module_stack = node.meta["nn_module_stack"]
-                        # Delete the wrapper module reference
-                        del nn_module_stack[""]
                         node.meta["nn_module_stack"] = {
                             fixup_key(key): val
                             for key, val in pytree.tree_map(
@@ -802,7 +812,7 @@ def _export(
     gm.meta["inline_constraints"] = {
         k: v
         for k, v in dynamo_fake_mode.shape_env.runtime_var_to_range.items()
-        if re.match(r"^[if]\d+$", str(k))
+        if free_unbacked_symbols(k)
     }
 
     num_lifted = next(
