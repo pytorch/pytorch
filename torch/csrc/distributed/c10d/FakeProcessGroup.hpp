@@ -4,14 +4,14 @@
 
 namespace c10d {
 
-class TORCH_API FakeWork : public Work {
+class FakeWork : public Work {
  public:
   bool wait(std::chrono::milliseconds timeout) override {
     return true;
   }
 };
 
-class TORCH_API FakeProcessGroup : public Backend {
+class FakeProcessGroup : public Backend {
  public:
   FakeProcessGroup(int rank, int size) : Backend(rank, size) {}
 
