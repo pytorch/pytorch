@@ -246,6 +246,20 @@ std::ostream& operator<<(std::ostream& stream, const XPUStream& s) {
   return stream << s.unwrap();
 }
 
+/*
+ * Note [Synchronize Streams on Device]
+ *
+ * There are two stream pools per device to manage our reserved SYCL queues.
+ * When syncStreamsOnDevice is called, all reserved SYCL queues in the pools of
+ * the specified device will be blocked, and wait for their synchronizations. We
+ * realize the semantics via a loop through the stream pools of the specified
+ * device and make each command queue synchronization sequentially.
+ *
+ * There is a semantic gap with device synchronization because only the SYCL
+ * queues we have reserved (in our pools) will be synchronized, rather than
+ * synchronizing all SYCL queues on the specified device.
+ */
+
 // Note: The stream pools will be initialized if needed, at the first invocation
 // to this function.
 void syncStreamsOnDevice(DeviceIndex device) {
