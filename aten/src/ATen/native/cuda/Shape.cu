@@ -345,9 +345,14 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
       catMetaData.dimSize[batchCounter] = dimSize;
       catMetaData.nElements[batchCounter] = inputs[i+batchCounter].get().numel();
 
+#ifdef USE_ROCM
+      // On ROCm, CatArrayBatchedCopy_contig is faster
+      isAligned = false;
+#else
       // If at least one of the inputs is not aligned, we can't call the
       // CatArrayBatchedCopy_aligned16_contig
       isAligned &= is_aligned_vec4(catMetaData.input[batchCounter]);
+#endif
 
       if (stride_size > 1) {
         auto strides = inputs[i+batchCounter].get().strides();
