@@ -1515,8 +1515,8 @@ class CppKernel(Kernel):
             ],
         )
 
-    def _reduction_var_name(self, var_name: str, line: str) -> str:
-        return var_name
+    def _reduction_var_name(self, name_prefix: str, line: str) -> str:
+        return name_prefix
 
     def update_stores_with_parallel_reduction(self):
         for i, line in enumerate(self.stores._lines):
@@ -1641,7 +1641,7 @@ class CppKernel(Kernel):
                 [
                     f"for (int tid = 0; tid < {num_threads}; tid++)",
                     "{",
-                    f"    if ({acc}.value {compare_op} {acc_local_in_array}.value) {{",
+                    f"    if(!({compare_op}({acc}.value, {acc_local_in_array}.value, {acc}.index, {acc_local_in_array}.index))) {{",
                     f"        {acc}.index = {acc_local_in_array}.index; {acc}.value = {acc_local_in_array}.value;",
                     "    }",
                     "}",
@@ -1880,10 +1880,10 @@ class CppVecKernel(CppKernel):
         self.tiling_idx = tiling_idx
         metrics.generated_cpp_vec_kernel_count += 1
 
-    def _reduction_var_name(self, var_name: str, line: str) -> str:
-        if f"{var_name}_vec" in line:
-            var_name = f"{var_name}_vec"
-        return var_name
+    def _reduction_var_name(self, name_prefix: str, line: str) -> str:
+        if f"{name_prefix}_vec" in line:
+            name_prefix = f"{name_prefix}_vec"
+        return name_prefix
 
     def _get_vec_load_line(
         self,
