@@ -1,11 +1,18 @@
 # Owner(s): ["module: inductor"]
-import sys
 import unittest
 
 import torch._inductor.config as inductor_config
 from torch._dynamo.test_minifier_common import MinifierTestBase
-from torch.testing._internal.common_utils import IS_JETSON, skipIfRocm
-from torch.testing._internal.inductor_utils import requires_cuda
+from torch.testing._internal.common_utils import (
+    IS_JETSON,
+    IS_MACOS,
+    skipIfRocm,
+    TEST_WITH_ASAN,
+)
+from torch.utils._triton import has_triton
+
+_HAS_TRITON = has_triton()
+requires_cuda = unittest.skipUnless(_HAS_TRITON, "requires cuda")
 
 
 # These minifier tests are slow, because they must be run in separate
@@ -30,17 +37,19 @@ inner(torch.randn(2, 2).to("{device}"))
         self._test_after_aot_runtime_error("cpu", "")
 
     @skipIfRocm
-    @requires_cuda()
+    @requires_cuda
     @inductor_config.patch("triton.inject_relu_bug_TESTING_ONLY", "runtime_error")
     def test_after_aot_cuda_runtime_error(self):
         self._test_after_aot_runtime_error("cuda", "device-side assert")
 
 
 if __name__ == "__main__":
-    from torch.testing._internal.inductor_utils import run_inductor_tests
+    import sys
+
+    from torch._dynamo.test_case import run_tests
 
     # Skip CI tests on mac since CPU inductor does not seem to work due to C++ compile errors,
     # also skip on ASAN due to https://github.com/pytorch/pytorch/issues/98262
     # also skip on Py 3.11+ since unhandled exceptions can cause segfaults
-    if sys.version_info < (3, 11):
-        run_inductor_tests(skip_mac=True, skip_asan=True)
+    if not IS_MACOS and not TEST_WITH_ASAN and sys.version_info < (3, 11):
+        run_tests()

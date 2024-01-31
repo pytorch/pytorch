@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import enum
 import dis
 import copy
@@ -107,7 +109,7 @@ class TracerBase:
     scope : Scope
 
     # Records the module call stack
-    module_stack: OrderedDict[str, str]
+    module_stack: OrderedDict[str, Tuple[str, Any]]
 
     # Mapping of node name to module scope
     node_name_to_scope: Dict[str, Tuple[str, type]]
@@ -156,8 +158,8 @@ class TracerBase:
             # nodes as is the case with in-place foreach ops. During the
             # BWD pass we retrieve the sequence_nr stored on the current
             # executing autograd Node. See NOTE [ Sequence Number ].
-            if current_meta.get("in_grad_fn", False):
-                new_seq_nr = current_meta["grad_fn_seq_nr"]
+            if current_meta.get("in_grad_fn", 0) > 0:
+                new_seq_nr = current_meta["grad_fn_seq_nr"][-1]
             node.meta["seq_nr"] = new_seq_nr
 
         elif self.module_stack:
@@ -409,6 +411,9 @@ class Proxy:
 
         return self.tracer.iter(self)
 
+    def __abs__(self):
+        return self.tracer.create_proxy('call_function', operator.abs, (self,), {})
+
     def __bool__(self) -> bool:
         if self.tracer.trace_asserts:
             # check if this boolean is used in an assertion, bytecode pattern for assertions
@@ -507,7 +512,7 @@ class ParameterProxy(Proxy):
     """
     def __init__(self, tracer: TracerBase, node: Node, name, param):
         super().__init__(node, tracer)
-        assert(isinstance(param, torch.nn.Parameter))
+        assert isinstance(param, torch.nn.Parameter)
         self.param = param
         self.name = name
 

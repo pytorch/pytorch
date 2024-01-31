@@ -5,7 +5,7 @@ import warnings
 from collections import OrderedDict
 from copy import deepcopy
 from numbers import Number
-from typing import Any, Dict, Optional, Set, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
 import torch._C as _C
@@ -79,9 +79,6 @@ def _rebuild_from_type_v2(func, new_type, args, state):
 # torch/_C/__init__.pyi.in to add a type annotation for your method;
 # otherwise, it will not show up in autocomplete.
 class Tensor(torch._C.TensorBase):
-    _dynamo_static_input_type: str  # Set in `mark_static_address`
-    _dynamo_dynamic_indices: Set[int]  # Set in `mark_dynamic`
-
     def __deepcopy__(self, memo):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__deepcopy__, (self,), self, memo)
@@ -397,14 +394,31 @@ class Tensor(torch._C.TensorBase):
             )
             return (torch._utils._rebuild_wrapper_subclass, arg_wrapper_subclass)
         else:
-            # TODO: Once we decide to break serialization FC, no longer
-            # need to wrap with TypedStorage
-            args = (
-                torch.storage.TypedStorage(
+            v3_dtypes = [
+                torch.float8_e5m2,
+                torch.float8_e4m3fn,
+                torch.float8_e5m2fnuz,
+                torch.float8_e4m3fnuz,
+                torch.bits8,
+                torch.bits16,
+                torch.bits1x8,
+                torch.bits2x4,
+                torch.bits4x2,
+            ]
+            if self.dtype in v3_dtypes:
+                rebuild_func = torch._utils._rebuild_tensor_v3
+                storage = self.untyped_storage()
+            else:
+                # TODO: Once we decide to break serialization FC, no longer
+                # need to wrap with TypedStorage
+                rebuild_func = torch._utils._rebuild_tensor_v2  # type: ignore[assignment]
+                storage = torch.storage.TypedStorage(
                     wrap_storage=self._typed_storage()._untyped_storage,
                     dtype=self.dtype,
                     _internal=True,
-                ),
+                )  # type: ignore[assignment]
+            args = (
+                storage,
                 self.storage_offset(),
                 tuple(self.size()),
                 self.stride(),
@@ -412,10 +426,14 @@ class Tensor(torch._C.TensorBase):
                 backward_hooks,
             )  # previously was self._backward_hooks
 
+            if isinstance(storage, torch.storage.UntypedStorage):
+                args = args + (self.dtype,)  # type: ignore[assignment]
+
             metadata = torch._utils.get_tensor_metadata(self)
             if metadata:
                 args = args + (metadata,)  # type: ignore[assignment]
-            return (torch._utils._rebuild_tensor_v2, args)
+
+            return (rebuild_func, args)
 
     def __setstate__(self, state):
         if has_torch_function_unary(self):
@@ -656,14 +674,6 @@ class Tensor(torch._C.TensorBase):
       Returned Tensor shares the same storage with the original one.
       In-place modifications on either of them will be seen, and may trigger
       errors in correctness checks.
-      IMPORTANT NOTE: Previously, in-place size / stride / storage changes
-      (such as `resize_` / `resize_as_` / `set_` / `transpose_`) to the returned tensor
-      also update the original tensor. Now, these in-place changes will not update the
-      original tensor anymore, and will instead trigger an error.
-      For sparse tensors:
-      In-place indices / values changes (such as `zero_` / `copy_` / `add_`) to the
-      returned tensor will not update the original tensor anymore, and will instead
-      trigger an error.
     """,
     )
 

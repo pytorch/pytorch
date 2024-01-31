@@ -15,9 +15,6 @@
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 
-#include <stdexcept>
-#include <utility>
-
 namespace py = pybind11;
 
 // This makes intrusive_ptr to be available as a custom pybind11 holder type,
@@ -28,8 +25,7 @@ PYBIND11_DECLARE_HOLDER_TYPE(T, c10::intrusive_ptr<T>, true);
 PYBIND11_DECLARE_HOLDER_TYPE(T, c10::SingletonOrSharedTypePtr<T>);
 PYBIND11_DECLARE_HOLDER_TYPE(T, c10::SingletonTypePtr<T>, true);
 
-namespace pybind11 {
-namespace detail {
+namespace pybind11::detail {
 
 // torch.Tensor <-> at::Tensor conversions (without unwrapping)
 template <>
@@ -324,16 +320,9 @@ struct type_caster<c10::complex<T>> {
   }
 };
 
-// Pybind11 bindings for our optional.
-// http://pybind11.readthedocs.io/en/stable/advanced/cast/stl.html#c-17-library-containers
-template <typename T>
-struct type_caster<c10::optional<T>> : optional_caster<c10::optional<T>> {};
+} // namespace pybind11::detail
 
-} // namespace detail
-} // namespace pybind11
-
-namespace torch {
-namespace impl {
+namespace torch::impl {
 
 // Use this function if you have a C++ object that is used from both C++
 // and Python contexts, and you need its GIL to be released when you
@@ -389,5 +378,4 @@ inline void destroy_without_gil(T* ptr) {
   }
 }
 
-} // namespace impl
-} // namespace torch
+} // namespace torch::impl

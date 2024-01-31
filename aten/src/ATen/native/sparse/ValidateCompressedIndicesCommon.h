@@ -24,8 +24,7 @@
 
 #define INVARIANT_CHECK_FUNC_API static INLINE FUNCAPI void
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -126,8 +125,8 @@ INVARIANT_CHECK_FUNC_API _check_idx_sorted_distinct_vals_slices_with_cidx(
   // Note that ptr_idx_batch = &idx[batch_idx] and is contiguous.
   const auto* RESTRICT slice_begin = ptr_idx_batch + cidx;
   const auto* RESTRICT slice_end = ptr_idx_batch + cidx_next;
-  for (auto* RESTRICT curr = slice_begin + 1; curr < slice_end; ++curr) {
-    const auto invariant = *(curr - 1) < *curr;
+  for (auto* RESTRICT curr = slice_begin; (slice_begin < slice_end) && (curr + 1 < slice_end); ++curr) {
+    const auto invariant = *curr < *(curr + 1);
     if (cdim_name == CDimName::CRow) {
       _assert(
           invariant,
@@ -335,10 +334,16 @@ void _validate_compressed_sparse_indices_kernel(
                 // NOTE: the implementation below is sync-less, but,
                 // unfortunately, work is not guaranteed to be well-balanced
                 // between different threads.
+                // Note: 5.6 should not be tested when
+                // nnz==0. Fortunately, the code below is no-op when
+                // nnz==0.
                 int64_t idx_offset = 0;
                 // assuming idx contiguity per batch:
-                int64_t tmp = batch_idx * idx_sizes[idx_ndims - 1];
-                for (int i = idx_ndims - 1; i >= 0; i--) {
+                int64_t tmp = batch_idx * nnz;
+                // `nnz == idx_sizes[idx_ndims - 1]` is checked above as `nnz == idx.size(-1)`
+                for (int i = idx_ndims - 1;
+                     i >= 0 && nnz > 0;  // break early when nnz==0
+                     i--) {
                   int64_t div = tmp / idx_sizes[i];
                   idx_offset += (tmp - div * idx_sizes[i]) * idx_strides[i];
                   tmp = div;
@@ -406,5 +411,4 @@ void validate_compressed_sparse_indices_kernel(
 
 } // namespace
 
-} // namespace native
-} // namespace at
+} // namespace at::native

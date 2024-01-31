@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import torch
 import unittest
 from copy import deepcopy
@@ -16,9 +18,14 @@ from torch.testing._internal.common_device_type import (
     _TestParametrizer, _update_param_kwargs, toleranceOverride, tol,
     skipCUDAIfCudnnVersionLessThan, skipCUDAIfRocm, precisionOverride, skipMeta, skipMPS, skipCUDAVersionIn)
 from torch.testing._internal.common_methods_invocations import DecorateInfo
-from torch.testing._internal.common_nn import nllloss_reference, get_reduction
+from torch.testing._internal.common_nn import (
+    cosineembeddingloss_reference, cross_entropy_loss_reference, ctcloss_reference,
+    hingeembeddingloss_reference, huberloss_reference, kldivloss_reference,
+    marginrankingloss_reference, multimarginloss_reference, multilabelmarginloss_reference,
+    nllloss_reference, nlllossNd_reference, smoothl1loss_reference, softmarginloss_reference, get_reduction)
 from torch.testing._internal.common_utils import (
-    freeze_rng_state, set_single_threaded_if_parallel_tbb, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS)
+    freeze_rng_state, set_single_threaded_if_parallel_tbb, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS,
+    skipIfTorchDynamo)
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
 
@@ -66,10 +73,12 @@ TrainEvalMode = Enum('TrainEvalMode', ('train_only', 'eval_only', 'train_and_eva
 class modules(_TestParametrizer):
     """ PROTOTYPE: Decorator for specifying a list of modules over which to run a test. """
 
-    def __init__(self, module_info_iterable, allowed_dtypes=None, train_eval_mode=TrainEvalMode.train_and_eval):
+    def __init__(self, module_info_iterable, allowed_dtypes=None,
+                 train_eval_mode=TrainEvalMode.train_and_eval, skip_if_dynamo=True):
         self.module_info_list = list(module_info_iterable)
         self.allowed_dtypes = set(allowed_dtypes) if allowed_dtypes is not None else None
         self.train_eval_mode = train_eval_mode
+        self.skip_if_dynamo = skip_if_dynamo
 
     def _get_training_flags(self, module_info):
         training_flags = []
@@ -116,6 +125,9 @@ class modules(_TestParametrizer):
                     @wraps(test)
                     def test_wrapper(*args, **kwargs):
                         return test(*args, **kwargs)
+
+                    if self.skip_if_dynamo:
+                        test_wrapper = skipIfTorchDynamo("Policy: we don't run ModuleInfo tests w/ Dynamo")(test_wrapper)
 
                     decorator_fn = partial(module_info.get_decorators, generic_cls.__name__,
                                            test.__name__, device_cls.device_type, dtype)
@@ -273,7 +285,7 @@ def module_inputs_torch_nn_Bilinear(module_info, device, dtype, requires_grad, t
     module_inputs = [
         ModuleInput(constructor_input=FunctionInput(2, 3, 4),
                     forward_input=FunctionInput(make_input((8, 2)), make_input((8, 3))),
-                    reference_fn=lambda m, p, x1, x2: bilinear_reference_fn(m, p, x1, x2)),
+                    reference_fn=bilinear_reference_fn),
         ModuleInput(constructor_input=FunctionInput(2, 3, 4, bias=False),
                     forward_input=FunctionInput(make_input((8, 2)), make_input((8, 3))),
                     desc='no_bias',
@@ -283,6 +295,43 @@ def module_inputs_torch_nn_Bilinear(module_info, device, dtype, requires_grad, t
                     desc='no_batch_dim',
                     reference_fn=lambda m, p, x1, x2: bilinear_reference_fn(m, p, x1.view(1, -1), x2.view(1, -1))),
     ]
+
+    return module_inputs
+
+
+def module_inputs_torch_nn_KLDivLoss(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    cases: List[Tuple[str, dict]] = [
+        ('', {}),
+        ('reduction_sum', {'reduction': 'sum'}),
+        ('reduction_batchmean', {'reduction': 'batchmean'}),
+        ('reduction_none', {'reduction': 'none'}),
+        ('log_target', {'log_target': True})
+    ]
+
+    module_inputs = []
+    for desc, constructor_kwargs in cases:
+        def reference_fn(m, p, i, t, constructor_kwargs=constructor_kwargs):
+            return kldivloss_reference(i, t, **constructor_kwargs)
+
+        input = make_input((10, 10)).log()
+        target = make_input((10, 10)) if kwargs.get('log_target', False) else make_input((10, 10)).log()
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
+                        forward_input=FunctionInput(input, target),
+                        desc=desc,
+                        reference_fn=reference_fn)
+        )
+
+        scalar_input = make_input(()).log()
+        scalar_target = make_input(()) if kwargs.get('log_target', False) else make_input(()).log()
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
+                        forward_input=FunctionInput(scalar_input, scalar_input),
+                        desc='scalar_' + desc,
+                        reference_fn=reference_fn)
+        )
 
     return module_inputs
 
@@ -298,9 +347,9 @@ def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, tr
         ('reduction_sum', {'reduction': 'sum'}),
         ('reduction_none', {'reduction': 'none'}),
         ('ignore_index', {'ignore_index': 2}),
-        ('weights', {'weight': make_weight(10).abs()}),
-        ('weights_ignore_index', {'weight': make_weight(10).abs(), 'ignore_index': 2}),
-        ('weights_ignore_index_neg', {'weight': make_weight(10).abs(), 'ignore_index': -1})
+        ('weights', {'weight': make_weight(4).abs()}),
+        ('weights_ignore_index', {'weight': make_weight(4).abs(), 'ignore_index': 2}),
+        ('weights_ignore_index_neg', {'weight': make_weight(4).abs(), 'ignore_index': -1})
     ]
 
     # TODO: Uncomment when negative weights is supported.
@@ -315,10 +364,40 @@ def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, tr
 
         module_inputs.append(
             ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
-                        forward_input=FunctionInput(make_input((15, 10)),
-                                                    torch.empty(15, device=device).uniform_().mul(10).floor().long()),
+                        forward_input=FunctionInput(make_input((15, 4)),
+                                                    torch.empty(15, device=device).uniform_().mul(4).floor().long()),
                         desc=desc,
                         reference_fn=reference_fn)
+        )
+
+        def nd_reference_fn(m, p, i, t, constructor_kwargs=constructor_kwargs):
+            return nlllossNd_reference(i, t, **constructor_kwargs)
+
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
+                        forward_input=FunctionInput(
+                            make_input((2, 4, 5, 5)),
+                            torch.empty(2, 5, 5, device=device).uniform_().mul(4).floor().long()),
+                        desc=f"nd_{desc}",
+                        reference_fn=nd_reference_fn)
+        )
+
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
+                        forward_input=FunctionInput(
+                            make_input((2, 4, 5, 5, 2, 2)),
+                            torch.empty(2, 5, 5, 2, 2, device=device).uniform_().mul(4).floor().long()),
+                        desc=f"higher_dim_{desc}",
+                        reference_fn=nd_reference_fn)
+        )
+
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
+                        forward_input=FunctionInput(
+                            make_input((2, 4, 5)),
+                            torch.empty(2, 5, device=device).uniform_().mul(4).floor().long()),
+                        desc=f"3d_{desc}",
+                        reference_fn=nd_reference_fn)
         )
 
     return module_inputs
@@ -344,6 +423,93 @@ def module_inputs_torch_nn_GaussianNLLLoss(module_info, device, dtype, requires_
                                                     make_input(1).abs()),
                         desc=desc,
                         reference_fn=no_batch_dim_reference_fn)
+        )
+
+    return module_inputs
+
+
+def module_inputs_torch_nn_PoissonNLLLoss(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_target = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+
+    cases: List[Tuple[str, dict]] = [
+        ('', {}),
+        ('reduction_sum', {'reduction': 'sum'}),
+        ('reduction_mean', {'reduction': 'mean'}),
+        ('reduction_none', {'reduction': 'none'}),
+        ('full', {'full': True}),
+        ('no_log_input', {'log_input': False}),
+        ('full_no_log_input', {'full': True, 'log_input': False}),
+    ]
+
+    def poissonnllloss_reference_fn(i, t, log_input=True, full=False, reduction='mean', eps=1e-8):
+        if log_input:
+            result = i.exp() - t.mul(i)
+        else:
+            result = i - t.mul((i + eps).log())
+
+        if full:
+            result += (t.mul(t.log()) - t + 0.5 * (2. * math.pi * t).log()).masked_fill(t <= 1, 0)
+
+        if reduction == 'none':
+            return result
+        elif reduction == 'mean':
+            return result.sum() / i.numel()
+        else:
+            return result.sum()
+
+    module_inputs = []
+    for desc, constructor_kwargs in cases:
+        def reference_fn(m, p, i, t, constructor_kwargs=constructor_kwargs):
+            return poissonnllloss_reference_fn(i, t, **constructor_kwargs)
+
+        log_input = constructor_kwargs.get('log_input', True)
+        input = make_input((2, 3, 4, 5)) if log_input else make_input((2, 3, 4, 5)).abs().add(0.001)
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
+                        forward_input=FunctionInput(input,
+                                                    make_target((2, 3, 4, 5)).floor_().abs_()),
+                        desc=desc,
+                        reference_fn=reference_fn)
+        )
+
+    return module_inputs
+
+
+def module_inputs_torch_nn_MSELoss(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_target = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+
+    cases: List[Tuple[str, dict]] = [
+        ('', {}),
+        ('reduction_sum', {'reduction': 'sum'}),
+        ('reduction_mean', {'reduction': 'mean'}),
+        ('reduction_none', {'reduction': 'none'}),
+    ]
+
+    def mse_loss_reference_fn(m, p, i, t, reduction='mean'):
+        if reduction == 'none':
+            return (i - t).pow(2)
+        elif reduction == 'mean':
+            return (i - t).pow(2).sum() / i.numel()
+        else:
+            return (i - t).pow(2).sum()
+
+    module_inputs = []
+    for desc, constructor_kwargs in cases:
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
+                        forward_input=FunctionInput(make_input((2, 3, 4, 5)),
+                                                    make_target((2, 3, 4, 5))),
+                        desc=desc,
+                        reference_fn=partial(mse_loss_reference_fn, **constructor_kwargs))
+        )
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
+                        forward_input=FunctionInput(make_input(()),
+                                                    make_target(())),
+                        desc=f'{desc}_scalar',
+                        reference_fn=partial(mse_loss_reference_fn, **constructor_kwargs))
         )
 
     return module_inputs
@@ -792,6 +958,34 @@ def module_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, tra
     ]
 
 
+def module_inputs_torch_nn_CosineEmbeddingLoss(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_target = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+
+    cases: List[Tuple[str, dict]] = [
+        ('', {}),
+        ('reduction_sum', {'reduction': 'sum'}),
+        ('reduction_mean', {'reduction': 'mean'}),
+        ('reduction_none', {'reduction': 'none'}),
+        ('margin', {'margin': 0.7})
+    ]
+
+    module_inputs = []
+    for desc, constructor_kwargs in cases:
+        def reference_fn(m, p, i1, i2, t, constructor_kwargs=constructor_kwargs):
+            return cosineembeddingloss_reference(i1, i2, t, **constructor_kwargs)
+
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
+                        forward_input=FunctionInput(make_input((15, 10)), make_input((15, 10)),
+                                                    make_target((15,)).sign()),
+                        desc=desc,
+                        reference_fn=reference_fn)
+        )
+
+    return module_inputs
+
+
 def module_inputs_torch_nn_ELU(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -1203,38 +1397,282 @@ def module_inputs_torch_nn_L1Loss(module_info, device, dtype, requires_grad, tra
                     desc='scalar')] + generate_regression_criterion_inputs(make_input)
 
 
+def module_inputs_torch_nn_SmoothL1Loss(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+
+    cases: List[Tuple[str, dict]] = [
+        ('', {}),
+        ('reduction_sum', {'reduction': 'sum'}),
+        ('reduction_mean', {'reduction': 'mean'}),
+        ('reduction_none', {'reduction': 'none'}),
+    ]
+
+    module_inputs = []
+    for desc, constructor_kwargs in cases:
+        def reference_fn(m, p, i, t, constructor_kwargs=constructor_kwargs):
+            return smoothl1loss_reference(i, t, **constructor_kwargs)
+
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
+                        forward_input=FunctionInput(make_input((5, 10)),
+                                                    make_input((5, 10))),
+                        desc=desc,
+                        reference_fn=reference_fn)
+        )
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
+                        forward_input=FunctionInput(make_input(()),
+                                                    make_input(())),
+                        desc=f'scalar_{desc}',
+                        reference_fn=reference_fn)
+        )
+
+    return module_inputs
+
+
+
+def module_inputs_torch_nn_BCELoss(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_target = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+    make_weight = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+
+    cases: List[Tuple[str, dict]] = [
+        ('', {}),
+        ('reduction_sum', {'reduction': 'sum'}),
+        ('reduction_mean', {'reduction': 'mean'}),
+        ('reduction_none', {'reduction': 'none'}),
+        ('weights', {'weight': make_weight((10,))}),
+    ]
+
+    def bce_loss_reference_fn(m, p, i, t, reduction='mean', weight=None):
+        result = -(t * i.log() + (1 - t) * (1 - i).log())
+
+        if weight is not None:
+            result = result * weight
+
+        if reduction == 'none':
+            return result
+        elif reduction == 'mean':
+            return result.sum() / i.numel()
+        else:
+            return result.sum()
+
+    module_inputs = []
+    for desc, constructor_kwargs in cases:
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
+                        forward_input=FunctionInput(make_input((15, 10), low=1e-2, high=1 - 1e-2),
+                                                    make_target((15, 10)).gt(0).to(dtype)),
+                        desc=desc,
+                        reference_fn=partial(bce_loss_reference_fn, **constructor_kwargs))
+        )
+
+    scalar_weight = make_weight(())
+    module_inputs.append(
+        ModuleInput(constructor_input=FunctionInput(weight=scalar_weight),
+                    forward_input=FunctionInput(make_input((), low=1e-2, high=1 - 1e-2),
+                                                make_target(()).gt(0).to(dtype)),
+                    desc='scalar_weight',
+                    reference_fn=partial(bce_loss_reference_fn, weight=scalar_weight))
+    )
+
+    return module_inputs
+
+
+def module_inputs_torch_nn_BCEWithLogitsLoss(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_target = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+    make_weight = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+
+    cases: List[Tuple[str, dict]] = [
+        ('', {}),
+        ('reduction_sum', {'reduction': 'sum'}),
+        ('reduction_mean', {'reduction': 'mean'}),
+        ('reduction_none', {'reduction': 'none'}),
+        ('weights', {'weight': make_weight((10,))}),
+        ('scalar_weights', {'weight': make_weight(())})
+    ]
+
+    def bce_withlogitsloss_reference_fn(m, p, i, t, reduction='mean', weight=None):
+        # TODO: add pos_weight to the definition here and corresponding SampleInputs
+        max_val = (-i).clamp(min=0)
+        result = (1 - t).mul_(i).add_(max_val).add_((-max_val).exp_().add_((-i - max_val).exp_()).log_())
+
+        if weight is not None:
+            result = result * weight
+
+        if reduction == 'none':
+            return result
+        elif reduction == 'mean':
+            return result.sum() / i.numel()
+        else:
+            return result.sum()
+
+    module_inputs = []
+    for desc, constructor_kwargs in cases:
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
+                        forward_input=FunctionInput(make_input((15, 10), low=1e-2, high=1 - 1e-2),
+                                                    make_target((15, 10)).gt(0).to(dtype)),
+                        desc=desc,
+                        reference_fn=partial(bce_withlogitsloss_reference_fn, **constructor_kwargs))
+        )
+
+    return module_inputs
+
+
 def module_inputs_torch_nn_CrossEntropyLoss(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_target = partial(make_tensor, device=device, dtype=torch.long, requires_grad=False)
     make_weight = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
-    reductions = ['sum', 'mean', 'none']
-    samples = []
-    # Samples below are for validating the no-batch-dim support.
-    for reduction in reductions:
-        samples.append(
-            ModuleInput(constructor_input=FunctionInput(reduction=reduction),
-                        forward_input=FunctionInput(make_input((9,)), make_target((), low=0, high=9)),
-                        reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True))
+    reductions: List[str] = ['mean', 'sum', 'none']
+    cases: List[Tuple[str, dict]] = [
+        ('', {}),
+        ('weights', {'weight': make_weight((3,))}),
+        ('ignore_index', {'ignore_index': 1}),
+        ('label_smoothing', {'label_smoothing': 0.15}),
+        ('ignore_index_label_smoothing', {'ignore_index': 1, 'label_smoothing': 0.15})
+    ]
+
+    module_inputs = []
+    for reduction, (desc, constructor_kwargs) in product(reductions, cases):
+        def reference_fn(m, p, i, t, reduction=reduction, constructor_kwargs=constructor_kwargs):
+            return cross_entropy_loss_reference(i, t, reduction=reduction, **constructor_kwargs)
+
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(reduction=reduction, **constructor_kwargs),
+                        forward_input=FunctionInput(make_input((2, 3, 5, 5)),
+                                                    make_target((2, 5, 5), low=0, high=3)),
+                        desc=f"4d_{desc}_{reduction}",
+                        reference_fn=reference_fn)
         )
-        samples.append(
-            ModuleInput(constructor_input=FunctionInput(reduction=reduction, weight=make_weight((9,))),
-                        forward_input=FunctionInput(make_input((9,)), make_target((), low=0, high=9)),
-                        reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True))
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(reduction=reduction, **constructor_kwargs),
+                        forward_input=FunctionInput(make_input((2, 3, 5)),
+                                                    make_target((2, 5), low=0, high=3)),
+                        desc=f"3d_{desc}_{reduction}",
+                        reference_fn=reference_fn)
         )
-        samples.append(
-            ModuleInput(constructor_input=FunctionInput(reduction=reduction, label_smoothing=0.5),
-                        forward_input=FunctionInput(make_input((9,)), make_target((), low=0, high=9)),
-                        reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True))
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(reduction=reduction, **constructor_kwargs),
+                        forward_input=FunctionInput(make_input((2, 3)),
+                                                    make_target((2), low=0, high=3)),
+                        desc=f"2d_{desc}_{reduction}",
+                        reference_fn=reference_fn)
         )
-        samples.append(
-            ModuleInput(constructor_input=FunctionInput(reduction=reduction, label_smoothing=0.5,
-                                                        weight=make_weight((9,))),
-                        forward_input=FunctionInput(make_input((9,)), make_target((), low=0, high=9)),
-                        reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True))
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(reduction=reduction, **constructor_kwargs),
+                        forward_input=FunctionInput(make_input((2, 3, 5, 5, 2, 2)),
+                                                    make_target((2, 5, 5, 2, 2), low=0, high=3)),
+                        desc=f"higher_dim_{desc}_{reduction}",
+                        reference_fn=reference_fn)
         )
 
-    return samples
+        if constructor_kwargs.get('ignore_index', None) is None:
+            module_inputs.append(
+                ModuleInput(constructor_input=FunctionInput(reduction=reduction, **constructor_kwargs),
+                            forward_input=FunctionInput(make_input((5, 3, 4, 2)),
+                                                        make_input((5, 3, 4, 2)).softmax(dim=1)),
+                            desc=f"4d_prob_target_{desc}_{reduction}",
+                            reference_fn=reference_fn)
+            )
+            module_inputs.append(
+                ModuleInput(constructor_input=FunctionInput(reduction=reduction, **constructor_kwargs),
+                            forward_input=FunctionInput(make_input((5, 3, 4)),
+                                                        make_input((5, 3, 4)).softmax(dim=1)),
+                            desc=f"3d_prob_target_{desc}_{reduction}",
+                            reference_fn=reference_fn)
+            )
+            module_inputs.append(
+                ModuleInput(constructor_input=FunctionInput(reduction=reduction, **constructor_kwargs),
+                            forward_input=FunctionInput(make_input((5, 3)),
+                                                        make_input((5, 3)).softmax(dim=1)),
+                            desc=f"2d_prob_target_{desc}_{reduction}",
+                            reference_fn=reference_fn)
+            )
+            module_inputs.append(
+                ModuleInput(constructor_input=FunctionInput(reduction=reduction, **constructor_kwargs),
+                            forward_input=FunctionInput(make_input((2, 3, 5, 5, 2, 2)),
+                                                        make_input((2, 3, 5, 5, 2, 2)).softmax(dim=1)),
+                            desc=f"higher_dim_prob_target_{desc}_{reduction}",
+                            reference_fn=reference_fn)
+            )
+            module_inputs.append(
+                ModuleInput(constructor_input=FunctionInput(reduction=reduction, **constructor_kwargs),
+                            forward_input=FunctionInput(make_input((3,)),
+                                                        make_target((), low=0, high=3)),
+                            desc=f"no_batch_dim_{desc}_{reduction}",
+                            reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True))
+            )
+
+    return module_inputs
+
+
+
+def module_inputs_torch_nn_CTCLoss(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_target = partial(make_tensor, device=device, requires_grad=False)
+
+    cases: List[Tuple[str, dict]] = [
+        ('', {}),
+        ('reduction_sum', {'reduction': 'sum'}),
+        ('reduction_mean', {'reduction': 'mean'}),
+        ('reduction_none', {'reduction': 'none'}),
+        ('blank', {'blank': 14})
+    ]
+    target_dtypes = [torch.int, torch.long]
+
+    module_inputs = []
+    for target_dtype, (desc, constructor_kwargs) in product(target_dtypes, cases):
+        def reference_fn(m, p, i, t, il, tl, constructor_kwargs=constructor_kwargs):
+            return ctcloss_reference(i, t, il, tl, **constructor_kwargs)
+
+        blank = constructor_kwargs.get('blank', 0)
+        low = 0 if blank == 14 else 1
+        high = 14 if blank == 14 else 15
+
+        module_inputs.append(
+            ModuleInput(
+                constructor_input=FunctionInput(**constructor_kwargs),
+                forward_input=FunctionInput(make_input((50, 3, 15)).log_softmax(2),
+                                            make_target((3, 30), dtype=target_dtype, low=low, high=high),
+                                            (50, 50, 50), (30, 25, 20)),
+                desc=f'{desc}_lengths_intlists',
+                reference_fn=reference_fn)
+        )
+        module_inputs.append(
+            ModuleInput(
+                constructor_input=FunctionInput(**constructor_kwargs),
+                forward_input=FunctionInput(make_input((50, 3, 15)).log_softmax(2),
+                                            make_target((3, 30), dtype=target_dtype, low=low, high=high),
+                                            torch.tensor((50, 50, 50), device=device),
+                                            torch.tensor((30, 25, 20), device=device)),
+                desc=f'{desc}_lengths_tensors',
+                reference_fn=reference_fn)
+        )
+        module_inputs.append(
+            ModuleInput(
+                constructor_input=FunctionInput(**constructor_kwargs),
+                forward_input=FunctionInput(make_input((50, 3, 15)).log_softmax(2),
+                                            make_target((30 + 25 + 20,), dtype=target_dtype, low=low, high=high),
+                                            (50, 50, 50), (30, 25, 20)),
+                desc=f'{desc}_1d_target_lengths_intlists',
+                reference_fn=reference_fn)
+        )
+        module_inputs.append(
+            ModuleInput(
+                constructor_input=FunctionInput(**constructor_kwargs),
+                forward_input=FunctionInput(make_input((50, 3, 15)).log_softmax(2),
+                                            make_target((30 + 25 + 20,), dtype=target_dtype, low=low, high=high),
+                                            torch.tensor((50, 50, 50), device=device),
+                                            torch.tensor((30, 25, 20), device=device)),
+                desc=f'{desc}_1d_target_lengths_tensors',
+                reference_fn=reference_fn)
+        )
+
+    return module_inputs
 
 
 def module_inputs_torch_nn_GroupNorm(module_info, device, dtype, requires_grad, training, **kwargs):
@@ -1345,6 +1783,67 @@ def module_inputs_torch_nn_Hardtanh(module_info, device, dtype, requires_grad, t
             desc='no_batch_dim',
         )
     ]
+
+
+def module_inputs_torch_nn_HingeEmbeddingLoss(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_target = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+
+    cases: List[Tuple[str, dict]] = [
+        ('', {}),
+        ('reduction_sum', {'reduction': 'sum'}),
+        ('reduction_mean', {'reduction': 'mean'}),
+        ('reduction_none', {'reduction': 'none'}),
+        ('margin', {'margin': 0.5})
+    ]
+
+    module_inputs = []
+    for desc, constructor_kwargs in cases:
+        def reference_fn(m, p, i, t, constructor_kwargs=constructor_kwargs):
+            return hingeembeddingloss_reference(i, t, **constructor_kwargs)
+
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
+                        forward_input=FunctionInput(make_input((10,)),
+                                                    make_target((10,)).gt(0).to(dtype).mul_(2).sub_(1)),
+                        desc=desc,
+                        reference_fn=reference_fn)
+        )
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
+                        forward_input=FunctionInput(make_input(()),
+                                                    make_target(()).gt(0).to(dtype).mul_(2).sub_(1)),
+                        desc=f'scalar_{desc}',
+                        reference_fn=reference_fn)
+        )
+
+    return module_inputs
+
+
+def module_inputs_torch_nn_HuberLoss(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    cases: List[Tuple[str, dict]] = [
+        ('', {}),
+        ('reduction_sum', {'reduction': 'sum'}),
+        ('reduction_mean', {'reduction': 'mean'}),
+        ('reduction_none', {'reduction': 'none'}),
+    ]
+
+    module_inputs = []
+    for desc, constructor_kwargs in cases:
+        def reference_fn(m, p, i, t, constructor_kwargs=constructor_kwargs):
+            return huberloss_reference(i, t, **constructor_kwargs)
+
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
+                        forward_input=FunctionInput(make_input((5, 10)),
+                                                    make_input((5, 10))),
+                        desc=desc,
+                        reference_fn=reference_fn)
+        )
+
+    return module_inputs
 
 
 def module_inputs_torch_nn_InstanceNormNd(module_info, device, dtype, requires_grad, training, **kwargs):
@@ -1468,8 +1967,32 @@ def module_inputs_torch_nn_LPPool2d(module_info, device, dtype, requires_grad, t
             constructor_input=FunctionInput(2, 2, 2),
             forward_input=FunctionInput(make_input((1, 3, 7, 7)))),
         ModuleInput(
+            constructor_input=FunctionInput(2, 2, 2),
+            forward_input=FunctionInput(make_input((3, 7, 7))),
+            reference_fn=no_batch_dim_reference_fn,
+            desc='no_batch_dim'),
+        ModuleInput(
             constructor_input=FunctionInput(1.5, 2),
             forward_input=FunctionInput(make_input((1, 3, 7, 7))),
+            desc='norm'),
+    ]
+
+
+def module_inputs_torch_nn_LPPool3d(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(2, 2, 2),
+            forward_input=FunctionInput(make_input((1, 3, 7, 7, 7)))),
+        ModuleInput(
+            constructor_input=FunctionInput(2, 2, 2),
+            forward_input=FunctionInput(make_input((3, 7, 7, 7))),
+            reference_fn=no_batch_dim_reference_fn,
+            desc='no_batch_dim'),
+        ModuleInput(
+            constructor_input=FunctionInput(1.5, 2),
+            forward_input=FunctionInput(make_input((1, 3, 7, 7, 7))),
             desc='norm'),
     ]
 
@@ -1657,6 +2180,166 @@ def module_inputs_torch_nn_LogSigmoid(module_info, device, dtype, requires_grad,
     ]
 
 
+def module_inputs_torch_nn_MarginRankingLoss(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_target = partial(make_tensor, device=device, dtype=torch.long, requires_grad=False)
+
+    cases: List[Tuple[str, dict]] = [
+        ('', {}),
+        ('reduction_sum', {'reduction': 'sum'}),
+        ('reduction_mean', {'reduction': 'mean'}),
+        ('reduction_none', {'reduction': 'none'}),
+        ('margin', {'margin': 0.5})
+    ]
+
+    module_inputs = []
+    for desc, constructor_kwargs in cases:
+        def reference_fn(m, p, i1, i2, t, constructor_kwargs=constructor_kwargs):
+            return marginrankingloss_reference(i1, i2, t, **constructor_kwargs)
+
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
+                        forward_input=FunctionInput(make_input((50,)), make_input((50,)),
+                                                    make_target((50,)).sign()),
+                        desc=desc,
+                        reference_fn=reference_fn)
+        )
+
+    return module_inputs
+
+
+def module_inputs_torch_nn_MultiLabelMarginLoss(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_target = partial(make_tensor, device=device, dtype=torch.long, requires_grad=False)
+
+    cases: List[Tuple[str, dict]] = [
+        ('', {}),
+        ('reduction_sum', {'reduction': 'sum'}),
+        ('reduction_mean', {'reduction': 'mean'}),
+        ('reduction_none', {'reduction': 'none'}),
+    ]
+
+    module_inputs = []
+    for desc, constructor_kwargs in cases:
+        def reference_fn(m, p, i, t, constructor_kwargs=constructor_kwargs):
+            return multilabelmarginloss_reference(i, t, **constructor_kwargs)
+
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
+                        forward_input=FunctionInput(make_input((10,)),
+                                                    make_target((10), low=0, high=10)),
+                        desc=f'1d_{desc}',
+                        reference_fn=reference_fn)
+        )
+
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
+                        forward_input=FunctionInput(make_input((5, 10)),
+                                                    make_target((5, 10), low=0, high=10)),
+                        desc=desc,
+                        reference_fn=reference_fn)
+        )
+
+    return module_inputs
+
+
+def module_inputs_torch_nn_MultiMarginLoss(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_target = partial(make_tensor, device=device, dtype=torch.long, requires_grad=False)
+    make_weight = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+
+    cases: List[Tuple[str, dict]] = [
+        ('', {}),
+        ('reduction_sum', {'reduction': 'sum'}),
+        ('reduction_mean', {'reduction': 'mean'}),
+        ('reduction_none', {'reduction': 'none'}),
+        ('p', {'p': 2}),
+        ('margin', {'margin': 0.5}),
+        ('weights', {'weight': make_weight(10)})
+    ]
+
+    module_inputs = []
+    for desc, constructor_kwargs in cases:
+        def reference_fn(m, p, i, t, constructor_kwargs=constructor_kwargs):
+            return multimarginloss_reference(i, t, **constructor_kwargs)
+
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
+                        forward_input=FunctionInput(make_input((5, 10)),
+                                                    make_target((5), low=0, high=10)),
+                        desc=desc,
+                        reference_fn=reference_fn)
+        )
+
+    return module_inputs
+
+
+def module_inputs_torch_nn_MultiLabelSoftMarginLoss(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_target = partial(make_tensor, device=device, dtype=torch.long, requires_grad=False)
+    make_weight = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+
+    cases: List[Tuple[str, dict]] = [
+        ('', {}),
+        ('reduction_sum', {'reduction': 'sum'}),
+        ('reduction_mean', {'reduction': 'mean'}),
+        ('reduction_none', {'reduction': 'none'}),
+        ('weight', {'weight': make_weight(10)}),
+    ]
+
+    def multilabelsoftmargin_loss_reference_fn(m, p, i, t, reduction='mean', weight=None):
+        result = t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()
+        if weight is not None:
+            result *= weight
+        result = (-result).sum(i.dim() - 1) / i.size(-1)
+
+        if reduction == 'none':
+            return result
+        elif reduction == 'mean':
+            return result.mean()
+        else:
+            return result.sum()
+
+    module_inputs = []
+    for desc, constructor_kwargs in cases:
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
+                        forward_input=FunctionInput(make_input((5, 10)),
+                                                    make_target((5, 10), low=0, high=2)),
+                        desc=desc,
+                        reference_fn=partial(multilabelsoftmargin_loss_reference_fn, **constructor_kwargs))
+        )
+
+    return module_inputs
+
+
+def module_inputs_torch_nn_SoftMarginLoss(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_target = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+
+    cases: List[Tuple[str, dict]] = [
+        ('', {}),
+        ('reduction_sum', {'reduction': 'sum'}),
+        ('reduction_mean', {'reduction': 'mean'}),
+        ('reduction_none', {'reduction': 'none'}),
+    ]
+
+    module_inputs = []
+    for desc, constructor_kwargs in cases:
+        def reference_fn(m, p, i, t, constructor_kwargs=constructor_kwargs):
+            return softmarginloss_reference(i, t, **constructor_kwargs)
+
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
+                        forward_input=FunctionInput(make_input((5, 5)),
+                                                    make_target((5, 5)).sign()),
+                        desc=desc,
+                        reference_fn=reference_fn)
+        )
+
+    return module_inputs
+
+
 def module_inputs_torch_nn_TransformerEncoder(module_info, device, dtype, requires_grad, training, **kwargs):
     # Reuse the TransformerEncoderLayer samples since the forward args are nearly the same.
     samples = []
@@ -1699,52 +2382,57 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
                 make_input((2, 3, 4))
             ),
             desc='gelu_activation'
-        ), ]
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput(4, 2, 8, 0.0, bias=False),
+            forward_input=FunctionInput(
+                make_input((2, 3, 4))
+            ),
+            desc='no_bias'
+        ),]
 
     # Samples below are for validating the no-batch-dim support.
     key_padding_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool))
     attn_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool).expand((3, 3)))
-    for src_mask, src_key_padding_mask, norm_first in itertools.product(attn_masks, key_padding_masks, (True, False)):
+    for src_mask, src_key_padding_mask, norm_first, batch_first, bias in \
+            itertools.product(attn_masks, key_padding_masks, (True, False), (True, False), (True, False)):
         samples.append(
             ModuleInput(
                 constructor_input=FunctionInput(d_model=4, nhead=2, dim_feedforward=8,
-                                                dropout=0.0, batch_first=True, norm_first=norm_first),
+                                                dropout=0.0, batch_first=batch_first,
+                                                norm_first=norm_first, bias=bias),
                 forward_input=FunctionInput(
                     make_input((3, 4)), src_mask=src_mask, src_key_padding_mask=src_key_padding_mask
                 ),
                 reference_fn=partial(no_batch_dim_reference_fn,
-                                     batch_first=True, kwargs_to_batchify={'src_key_padding_mask': 0}),
-                desc='no_batch_dim_batch_first'
+                                     batch_first=batch_first, kwargs_to_batchify={'src_key_padding_mask': 0}),
+                desc=f'no_batch_dim_batch_first_{batch_first}'
             ))
 
-        samples.append(
-            ModuleInput(
-                constructor_input=FunctionInput(4, 2, 8, dropout=0.0, batch_first=False, norm_first=norm_first),
-                forward_input=FunctionInput(
-                    make_input((3, 4)), src_mask=src_mask, src_key_padding_mask=src_key_padding_mask
-                ),
-                reference_fn=partial(no_batch_dim_reference_fn,
-                                     batch_first=False, kwargs_to_batchify={'src_key_padding_mask': 0}),
-                desc='no_batch_dim'
-            ))
-
+    # Samples below where we pass reference_fn are for validating the fast path,
+    # since the fast path requires no_grad mode, we run the fast path in .eval()
+    # and no_grad() in the reference_fn and verify that against the results in train mode.
     def fast_path_reference_fn(module, parameters, *args, **kwargs):
-        assert not module.training
-        module = module.train(True)
-        output = module(*args, **kwargs)
-        module = module.train(False)
+        assert module.training
+        module.train(False)
+        with torch.no_grad():
+            output = module(*args, **kwargs)
+        module.train(True)
         return output
 
-    if not training:
-        for norm_first in (True, False):
+    if training:
+        for norm_first, bias in itertools.product((True, False), (True, False)):
             samples.append(
                 ModuleInput(
-                    constructor_input=FunctionInput(4, 2, 8, dropout=0.0, batch_first=True, norm_first=norm_first),
+                    constructor_input=FunctionInput(
+                        4, 2, 8, dropout=0.0, batch_first=True, norm_first=norm_first, bias=bias
+                    ),
                     forward_input=FunctionInput(
                         make_input((2, 3, 4)),
                     ),
-                    reference_fn=fast_path_reference_fn,
-                    desc="fast_path_norm_first" if norm_first else "fast_path"
+                    # fastpath doesn't run when bias=False
+                    reference_fn=fast_path_reference_fn if bias else None,
+                    desc=f'fastpath_{bias}_norm_first_{norm_first}'
                 )
             )
 
@@ -1768,40 +2456,51 @@ def module_inputs_torch_nn_TransformerDecoderLayer(module_info, device, dtype, r
                 make_input((2, 3, 4)), make_input((2, 3, 4))
             ),
             desc='gelu_activation'
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput(4, 2, 8, 0.0, bias=False),
+            forward_input=FunctionInput(
+                make_input((2, 3, 4)), make_input((2, 3, 4))
+            ),
+            desc='no_bias'
         ), ]
 
-    # Samples below are for validating the no-batch-dim support.
     key_padding_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool))
     attn_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool).expand((3, 3)))
-    for tgt_mask, tgt_key_padding_mask, norm_first in itertools.product(attn_masks, key_padding_masks, (True, False)):
+    for tgt_mask, tgt_key_padding_mask, norm_first, bias, batch_first in \
+            itertools.product(attn_masks, key_padding_masks, (True, False), (True, False), (True, False)):
         # Using same mask for tgt and memory
         memory_mask = tgt_mask
         memory_key_padding_mask = tgt_key_padding_mask
         samples.append(
             ModuleInput(
                 constructor_input=FunctionInput(d_model=4, nhead=2, dim_feedforward=8,
-                                                dropout=0.0, batch_first=True, norm_first=norm_first),
+                                                dropout=0.0, batch_first=batch_first,
+                                                norm_first=norm_first, bias=bias),
                 forward_input=FunctionInput(
                     make_input((3, 4)), make_input((3, 4)), tgt_mask=tgt_mask, memory_mask=memory_mask,
                     tgt_key_padding_mask=tgt_key_padding_mask, memory_key_padding_mask=memory_key_padding_mask
                 ),
                 reference_fn=partial(no_batch_dim_reference_fn,
-                                     batch_first=True,
+                                     batch_first=batch_first,
                                      kwargs_to_batchify={'tgt_key_padding_mask': 0, 'memory_key_padding_mask': 0}),
-                desc='no_batch_dim_batch_first'
+                desc=f'no_batch_dim_batch_first_{batch_first}'
             ))
-
+        src, tgt = make_input((2, 3, 4)), make_input((2, 3, 4))
+        if not batch_first:
+            src, tgt = src.transpose(0, 1), tgt.transpose(0, 1)
+        if tgt_key_padding_mask is not None:
+            memory_key_padding_mask, tgt_key_padding_mask = (tgt_key_padding_mask.expand(2, 3),) * 2
         samples.append(
             ModuleInput(
-                constructor_input=FunctionInput(4, 2, 8, dropout=0.0, batch_first=False, norm_first=norm_first),
+                constructor_input=FunctionInput(d_model=4, nhead=2, dim_feedforward=8,
+                                                dropout=0.0, batch_first=batch_first,
+                                                norm_first=norm_first, bias=bias),
                 forward_input=FunctionInput(
-                    make_input((3, 4)), make_input((3, 4)), tgt_mask=tgt_mask, memory_mask=memory_mask,
+                    src, tgt, tgt_mask=tgt_mask, memory_mask=memory_mask,
                     tgt_key_padding_mask=tgt_key_padding_mask, memory_key_padding_mask=memory_key_padding_mask
                 ),
-                reference_fn=partial(no_batch_dim_reference_fn,
-                                     batch_first=False,
-                                     kwargs_to_batchify={'tgt_key_padding_mask': 0, 'memory_key_padding_mask': 0}),
-                desc='no_batch_dim'
+                desc=f'norm_first_{norm_first}_batch_first_{batch_first}_bias_{bias}'
             ))
 
     return samples
@@ -1813,8 +2512,8 @@ def module_inputs_torch_nn_Transformer(module_info, device, dtype, requires_grad
     # Samples below are for validating the no-batch-dim support.
     key_padding_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool))
     attn_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool).expand((3, 3)))
-    for mask, key_padding_mask, norm_first, bias in \
-            itertools.product(attn_masks, key_padding_masks, (True, False), (True, False)):
+    for mask, key_padding_mask, norm_first, bias, batch_first in \
+            itertools.product(attn_masks, key_padding_masks, (True, False), (True, False), (True, False)):
         # Using same mask for tgt and memory
         src_mask , tgt_mask = (mask,) * 2
         src_key_padding_mask, tgt_key_padding_mask = (key_padding_mask,) * 2
@@ -1822,32 +2521,34 @@ def module_inputs_torch_nn_Transformer(module_info, device, dtype, requires_grad
             ModuleInput(
                 constructor_input=FunctionInput(d_model=4, nhead=2, dim_feedforward=8,
                                                 num_encoder_layers=1, num_decoder_layers=1,
-                                                dropout=0.0, batch_first=True, norm_first=norm_first, bias=bias),
+                                                dropout=0.0, batch_first=batch_first, norm_first=norm_first, bias=bias),
                 forward_input=FunctionInput(
                     make_input((3, 4)), make_input((3, 4)), tgt_mask=tgt_mask, src_mask=src_mask,
                     tgt_key_padding_mask=tgt_key_padding_mask, src_key_padding_mask=src_key_padding_mask
                 ),
                 reference_fn=partial(no_batch_dim_reference_fn,
-                                     batch_first=True,
+                                     batch_first=batch_first,
                                      kwargs_to_batchify={'tgt_key_padding_mask': 0, 'src_key_padding_mask': 0}),
-                desc='no_batch_dim_batch_first'
+                desc=f'no_batch_dim_batch_first_{batch_first}'
             ))
+
+        src, tgt = make_input((2, 3, 4)), make_input((2, 3, 4))
+        if not batch_first:
+            src = src.transpose(0, 1)
+            tgt = tgt.transpose(0, 1)
+        if key_padding_mask is not None:
+            src_key_padding_mask, tgt_key_padding_mask = (key_padding_mask.expand(2, 3),) * 2
 
         samples.append(
             ModuleInput(
                 constructor_input=FunctionInput(d_model=4, nhead=2, dim_feedforward=8,
                                                 num_encoder_layers=1, num_decoder_layers=1,
-                                                dropout=0.0, batch_first=False, norm_first=norm_first),
+                                                dropout=0.0, batch_first=batch_first, norm_first=norm_first, bias=bias),
                 forward_input=FunctionInput(
-                    make_input((3, 4)), make_input((3, 4)), tgt_mask=tgt_mask, src_mask=src_mask,
+                    src, tgt, tgt_mask=tgt_mask, src_mask=src_mask,
                     tgt_key_padding_mask=tgt_key_padding_mask, src_key_padding_mask=src_key_padding_mask
                 ),
-                reference_fn=partial(no_batch_dim_reference_fn,
-                                     batch_first=False,
-                                     kwargs_to_batchify={'tgt_key_padding_mask': 0, 'src_key_padding_mask': 0}),
-                desc='no_batch_dim'
             ))
-
     return samples
 
 
@@ -2877,6 +3578,13 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(precisionOverride({torch.complex64: 1e-04}), 'TestModule', 'test_cpu_gpu_parity'),
                    DecorateInfo(precisionOverride({torch.chalf: 5e-03}), 'TestModule', 'test_memory_format'),
                )),
+    ModuleInfo(torch.nn.CosineEmbeddingLoss,
+               module_inputs_func=module_inputs_torch_nn_CosineEmbeddingLoss,
+               skips=(
+                   # No channels_last support for loss functions.
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
     ModuleInfo(torch.nn.ELU,
                module_inputs_func=module_inputs_torch_nn_ELU,
                skips=(
@@ -2900,6 +3608,13 @@ module_db: List[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.L1Loss,
                module_inputs_func=module_inputs_torch_nn_L1Loss,
+               skips=(
+                   # No channels_last support for loss functions.
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.SmoothL1Loss,
+               module_inputs_func=module_inputs_torch_nn_SmoothL1Loss,
                skips=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
@@ -3073,6 +3788,14 @@ module_db: List[ModuleInfo] = [
                        device_type='mps',
                    ),)
                ),
+    ModuleInfo(torch.nn.LPPool3d,
+               module_inputs_func=module_inputs_torch_nn_LPPool3d,
+               skips=(
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps),)
+               ),
     ModuleInfo(torch.nn.MaxPool1d,
                module_inputs_func=module_inputs_torch_nn_MaxPool1d,
                skips=(
@@ -3090,6 +3813,65 @@ module_db: List[ModuleInfo] = [
                    # not supported on MPS backend
                    DecorateInfo(skipMPS),)
                ),
+    ModuleInfo(torch.nn.KLDivLoss,
+               module_inputs_func=module_inputs_torch_nn_KLDivLoss,
+               skips=(
+                   # No channels_last support for loss functions.
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # https://github.com/pytorch/pytorch/issues/115588
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_cpu_gpu_parity'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),)
+               ),
+    ModuleInfo(torch.nn.MSELoss,
+               module_inputs_func=module_inputs_torch_nn_MSELoss,
+               skips=(
+                   # No channels_last support for loss functions.
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.MarginRankingLoss,
+               module_inputs_func=module_inputs_torch_nn_MarginRankingLoss,
+               skips=(
+                   # No channels_last support for loss functions.
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.MultiLabelMarginLoss,
+               module_inputs_func=module_inputs_torch_nn_MultiLabelMarginLoss,
+               skips=(
+                   # No channels_last support for loss functions.
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   # 'aten::multilabel_margin_loss_forward' is not currently implemented for the MPS device.
+                   DecorateInfo(skipIfMps, 'TestModule'),
+                   # derivative for aten::multilabel_margin_loss_backward is not implemented
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),)
+               ),
+    ModuleInfo(torch.nn.MultiMarginLoss,
+               module_inputs_func=module_inputs_torch_nn_MultiMarginLoss,
+               skips=(
+                   # No channels_last support for loss functions.
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   # 'aten::multi_margin_loss' is not currently implemented for the MPS device.
+                   DecorateInfo(skipIfMps, 'TestModule'),
+                   # RuntimeError: derivative for aten::multi_margin_loss_backward is not implemented
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),)
+               ),
+    ModuleInfo(torch.nn.SoftMarginLoss,
+               module_inputs_func=module_inputs_torch_nn_SoftMarginLoss,
+               skips=(
+                   # No channels_last support for loss functions.
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.MultiLabelSoftMarginLoss,
+               module_inputs_func=module_inputs_torch_nn_MultiLabelSoftMarginLoss,
+               skips=(
+                   # No channels_last support for loss functions.
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
     ModuleInfo(torch.nn.NLLLoss,
                module_inputs_func=module_inputs_torch_nn_NLLLoss,
                skips=(
@@ -3103,10 +3885,72 @@ module_db: List[ModuleInfo] = [
                    # No channels_last support for loss functions.
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)),
+    ModuleInfo(torch.nn.PoissonNLLLoss,
+               module_inputs_func=module_inputs_torch_nn_PoissonNLLLoss,
+               skips=(
+                   # No channels_last support for loss functions.
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)),
+    ModuleInfo(torch.nn.HingeEmbeddingLoss,
+               module_inputs_func=module_inputs_torch_nn_HingeEmbeddingLoss,
+               skips=(
+                   # No channels_last support for loss functions.
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.HuberLoss,
+               module_inputs_func=module_inputs_torch_nn_HuberLoss,
+               skips=(
+                   # No channels_last support for loss functions.
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.BCELoss,
+               module_inputs_func=module_inputs_torch_nn_BCELoss,
+               skips=(
+                   # No channels_last support for loss functions.
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.BCEWithLogitsLoss,
+               module_inputs_func=module_inputs_torch_nn_BCEWithLogitsLoss,
+               skips=(
+                   # No channels_last support for loss functions.
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
     ModuleInfo(torch.nn.CrossEntropyLoss,
                module_inputs_func=module_inputs_torch_nn_CrossEntropyLoss,
+               dtypes=get_all_fp_dtypes(include_half=True, include_bfloat16=False),
+               decorators=(
+                   # No channels_last support for loss functions.
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format'),
+                   # Expect failures for tests that rely on torch.half implementation on CPU
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_forward", dtypes=[torch.float16], device_type='cpu'),
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_if_train_and_eval_modes_differ",
+                                dtypes=[torch.float16], device_type='cpu'),
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_pickle", dtypes=[torch.float16], device_type='cpu'),
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors", dtypes=[torch.float16],
+                                device_type='cpu'),
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_multiple_device_transfer", dtypes=[torch.float16],
+                                device_type='cuda'),
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity", dtypes=[torch.float16],
+                                device_type='cuda'),
+                   # MPS does not support double, so expect failures on MPS for torch.double
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', dtypes=[torch.float64], device_type='mps'),),
+               ),
+    ModuleInfo(torch.nn.CTCLoss,
+               module_inputs_func=module_inputs_torch_nn_CTCLoss,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   # No channels_last support for loss functions.
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   # The operator aten::_ctc_loss is not currently implemented for the MPS device.
+                   DecorateInfo(skipIfMps, 'TestModule'),
+                   # derivative for aten::_ctc_loss_backward is not implemented
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),
+                   # https://github.com/pytorch/pytorch/issues/115585
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_non_contiguous_tensors'),)
                ),
     ModuleInfo(torch.nn.GELU,
                module_inputs_func=module_inputs_torch_nn_GELU,

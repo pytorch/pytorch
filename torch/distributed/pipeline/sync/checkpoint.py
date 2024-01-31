@@ -68,7 +68,7 @@ class Function(Protocol):
 
 
 def checkpoint(function: Function, input):
-    """Makes a checkpoint with a simple interface like
+    """Make a checkpoint with a simple interface like
     :func:`torch.utils.checkpoint.checkpoint`. It's only used to test or debug
     :class:`Checkpoint` and :class:`Recompute` without boilerplate.
     """
@@ -94,7 +94,7 @@ class Checkpointing:
         self.rng_states: Deque[RNGStates] = deque(maxlen=1)
 
     def checkpoint(self) -> Batch:
-        """Returns a batch applied by :class:`Checkpoint`."""
+        """Return a batch applied by :class:`Checkpoint`."""
         input_atomic = self.batch.atomic
         inputs = tuple(self.batch)
 
@@ -112,7 +112,7 @@ class Checkpointing:
         return Batch(output)
 
     def recompute(self, batch: Batch) -> None:
-        """Applies :class:`Recompute` to the batch in place."""
+        """Apply :class:`Recompute` to the batch in place."""
         input_atomic = self.batch.atomic
         inputs = tuple(self.batch)
 
@@ -136,7 +136,7 @@ thread_local = ThreadLocal()
 
 @contextmanager
 def enable_checkpointing() -> Generator[None, None, None]:
-    """Makes :func:`is_checkpointing` return :data:`True` within a context."""
+    """Make :func:`is_checkpointing` return :data:`True` within a context."""
     orig = thread_local.is_checkpointing
     thread_local.is_checkpointing = True
     try:
@@ -167,8 +167,9 @@ def is_checkpointing() -> bool:
 
 
 def is_recomputing() -> bool:
-    """Whether the current forward propagation is under checkpoint
-    recomputation. Use this to prevent duplicated side-effects at forward
+    """Whether the current forward propagation is under checkpoint recomputation.
+
+    Use this to prevent duplicated side-effects at forward
     propagation::
 
         class Counter(nn.Module):
@@ -191,9 +192,7 @@ def is_recomputing() -> bool:
 
 
 class Context:
-    """The common interface between the :class:`Checkpoint` and
-    :class:`Recompute` context.
-    """
+    """The common interface between the :class:`Checkpoint` and :class:`Recompute` context."""
 
     recomputed: Deque[Recomputed]
     rng_states: Deque[RNGStates]
@@ -208,7 +207,10 @@ class Context:
 
 
 def save_rng_states(device: torch.device, rng_states: Deque[RNGStates],) -> None:
-    """:meth:`Checkpoint.forward` captures the current PyTorch's random number
+    """:
+    Capture the current random number generator states.
+
+    meth:`Checkpoint.forward` captures the current PyTorch's random number
     generator states at CPU and GPU to reuse in :meth:`Recompute.backward`.
 
     .. seealso:: :ref:`Referential Transparency`
@@ -227,7 +229,10 @@ def save_rng_states(device: torch.device, rng_states: Deque[RNGStates],) -> None
 
 @contextmanager
 def restore_rng_states(device: torch.device, rng_states: Deque[RNGStates],) -> Generator[None, None, None]:
-    """:meth:`Recompute.backward` restores the random number generator states
+    """:
+    Restore the random number generator state.
+
+    meth:`Recompute.backward` restores the random number generator states
     captured by :func:`save_rng_states` within its context.
 
     .. seealso:: :ref:`Referential Transparency`

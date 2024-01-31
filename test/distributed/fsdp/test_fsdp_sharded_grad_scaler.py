@@ -1,17 +1,24 @@
 # Owner(s): ["oncall: distributed"]
 
+import copy
 import functools
 import itertools
 import sys
 import unittest
-from typing import Optional
+from typing import List, Optional
 
 import torch
 from torch import distributed as dist
 from torch.cuda.amp.common import amp_definitely_not_available
 from torch.distributed.fsdp import CPUOffload, MixedPrecision
-from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
+    FullyShardedDataParallel as FSDP,
+    ShardingStrategy,
+)
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
+from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     CUDAInitMode,
@@ -21,6 +28,7 @@ from torch.testing._internal.common_fsdp import (
     NestedWrappedModule,
     NonUniformReqGradNWM,
     subtest_name,
+    TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -194,6 +202,143 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
                 enable_sharded_grad_scaler=True,
                 use_orig_params=use_orig,
                 sharded_grad_scaler_kwargs=sharded_grad_scaler_kwargs,
+            )
+
+    def _build_model_and_optim(
+        self,
+        cpu_offload: CPUOffload = CPUOffload(offload_params=False),
+        use_orig_params: bool = False,
+    ):
+        model = TransformerWithSharedParams.init(
+            self.process_group,
+            FSDPInitMode.NO_FSDP,
+            CUDAInitMode.CUDA_BEFORE,
+            deterministic=True,
+        )
+        ref_model = DDP(
+            copy.deepcopy(model),
+            device_ids=[self.rank],
+        )
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        fsdp_kwargs = {
+            "use_orig_params": use_orig_params,
+            "cpu_offload": cpu_offload,
+            "auto_wrap_policy": ModuleWrapPolicy(
+                {
+                    TransformerEncoderLayer,
+                    TransformerDecoderLayer,
+                }
+            ),
+        }
+        model = FSDP(model, **fsdp_kwargs)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        return model, optim, ref_model, ref_optim
+
+    @skip_if_lt_x_gpu(2)
+    def test_sharded_grad_scaler_found_inf(self):
+        self.run_subtests(
+            {
+                "use_orig_params": [False, True],
+                "cpu_offload": [
+                    CPUOffload(offload_params=True),
+                    CPUOffload(offload_params=False),
+                ],
+            },
+            self._test_sharded_grad_scaler_found_inf,
+        )
+
+    def _test_sharded_grad_scaler_found_inf(
+        self,
+        use_orig_params: bool,
+        cpu_offload: CPUOffload,
+    ):
+        model, optim, ref_model, ref_optim = self._build_model_and_optim(
+            cpu_offload=cpu_offload,
+            use_orig_params=use_orig_params,
+        )
+        grad_scaler = ShardedGradScaler(init_scale=2.0)
+        ref_grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
+        scaled_losses: List[torch.Tensor] = []
+        device = torch.device("cuda")
+        torch.manual_seed(42 + self.rank + 1)
+
+        for iter in range(10):
+            for _model, _optim, _grad_scaler in (
+                (ref_model, ref_optim, ref_grad_scaler),
+                (model, optim, grad_scaler),
+            ):
+                module = _model.module
+                inp = module.get_input(device)
+                _optim.zero_grad()
+                output = _model(*inp)
+                loss = module.get_loss(inp, output)
+                scaled_loss = _grad_scaler.scale(loss)
+                scaled_losses.append(scaled_loss)
+                scaled_loss.backward()
+                orig_params = [
+                    param.detach().clone()
+                    for param in _model.parameters()
+                    if param.grad is not None
+                ]
+                should_find_inf = iter % 2 == 0
+                if should_find_inf and (
+                    _model is ref_model or (_model is model and self.rank == 0)
+                ):
+                    # other ranks should find infs from rank 0
+                    # after collectives
+                    for param in _model.parameters():
+                        if param.grad is None:
+                            continue
+                        param.grad.fill_(float("inf"))
+                        break
+                _grad_scaler.step(_optim)
+                orig_scale = _grad_scaler.get_scale()
+                _grad_scaler.update()
+                if should_find_inf:
+                    self.assertEqual(
+                        _grad_scaler.get_scale(),
+                        orig_scale * _grad_scaler.get_backoff_factor(),
+                        (
+                            f"rank: {self.rank} iter: {iter} expect origin scale {orig_scale} "
+                            f"to be backed off by {_grad_scaler.get_backoff_factor()} "
+                            f"but got {_grad_scaler.get_scale()}"
+                        ),
+                    )
+                else:
+                    self.assertEqual(
+                        _grad_scaler.get_scale(),
+                        orig_scale,
+                        (
+                            f"rank: {self.rank} iter: {iter} expect same scale {orig_scale} "
+                            f"but got {_grad_scaler.get_scale()}"
+                        ),
+                    )
+                for param, orig_param in zip(
+                    [param for param in _model.parameters() if param.grad is not None],
+                    orig_params,
+                ):
+                    if should_find_inf:
+                        self.assertEqual(
+                            param,
+                            orig_param,
+                            (
+                                f"rank: {self.rank} iter: {iter} expect the same params before "
+                                f"and after optim.step but got {param} vs {orig_param}"
+                            ),
+                        )
+                    else:
+                        self.assertNotEqual(
+                            param,
+                            orig_param,
+                            (
+                                f"rank: {self.rank} iter: {iter} expect the updated params after "
+                                f"optim.step but got {param} vs {orig_param}"
+                            ),
+                        )
+            self.assertEqual(
+                scaled_losses[0],
+                scaled_losses[1],
+                f"iter: {iter} {scaled_losses[0]} vs {scaled_losses[1]}",
             )
 
 

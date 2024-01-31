@@ -234,9 +234,18 @@ class Vectorized<float> {
     return ret._nor();
   }
 
-  Vectorized<float> _isinf() const {
-    auto x = *this;
-    return (x == v_inf) | (x == v_minus_inf);
+  bool has_inf_nan() const {
+    for (const auto i : c10::irange(size()/2)) {
+      if(_isnan(_vec0[i]) || _isinf(_vec0[i])) {
+        return true;
+      }
+    }
+    for (const auto i : c10::irange(size()/2)) {
+      if(_isnan(_vec1[i]) || _isinf(_vec1[i])) {
+        return true;
+      }
+    }
+    return false;
   }
 
   int zero_mask() const {
@@ -311,6 +320,9 @@ class Vectorized<float> {
   }
   Vectorized<float> expm1() const {
     return {Sleef_expm1f4_u10(_vec0), Sleef_expm1f4_u10(_vec1)};
+  }
+  Vectorized<float> C10_ALWAYS_INLINE exp_u20() const {
+    return exp();
   }
 
   Vectorized<float> C10_ALWAYS_INLINE log() const {

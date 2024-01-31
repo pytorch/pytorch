@@ -12,7 +12,17 @@ from concurrent.futures import ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p
 from multiprocessing.process import BaseProcess
 from multiprocessing.queues import Queue
-from typing import Any, Callable, Dict, List, Optional, Sequence, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    TYPE_CHECKING,
+    Union,
+)
 
 import torch
 from torch import multiprocessing
@@ -243,9 +253,9 @@ class TuningProcessPool:
             EXIT_HANDLER_REGISTERED = True
             import atexit
 
-            atexit.register(lambda: self.terminate())
+            atexit.register(self.terminate)
 
-    def get_device_list(self) -> List[Optional[int]]:
+    def get_device_list(self) -> Sequence[Optional[int]]:
         """
         Gather the list of devices to be used in the pool.
         """
@@ -259,7 +269,7 @@ class TuningProcessPool:
         if CUDA_VISIBLE_DEVICES in os.environ:
             devices = [int(d) for d in os.environ[CUDA_VISIBLE_DEVICES].split(",")]
             assert len(devices) <= count
-            return devices  # type: ignore[return-value]
+            return devices
 
         return list(range(count))
 
@@ -331,8 +341,8 @@ LayoutOrBuffer = Union[ir.Layout, ir.Buffer]
 class TensorMeta:
     device: torch.device
     dtype: torch.dtype
-    sizes: List[int]
-    strides: List[int]
+    sizes: torch._prims_common.ShapeType
+    strides: torch._prims_common.StrideType
     offset: int
 
     @classmethod
@@ -390,7 +400,7 @@ class BenchmarkRequest:
         kernel_name: str,
         input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
-        extra_args: Dict[str, Any],
+        extra_args: Iterable[Any],
     ):
         # the kernel name defined in the module
         self.kernel_name = kernel_name
@@ -430,25 +440,25 @@ class BenchmarkRequest:
             output_tensor = self.output_tensor_meta.to_tensor()
 
         if debug:
-            create_tensor_elapse = time.time() - start_ts
+            create_tensor_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             start_ts = time.time()
 
         fn = self.make_run_fn(*input_tensors, output_tensor=output_tensor)
 
         if debug:
-            load_elapse = time.time() - start_ts
+            load_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             start_ts = time.time()
 
         out = do_bench(fn)
         torch.cuda.synchronize()  # shake out any CUDA errors
 
         if debug:
-            bench_elapse = time.time() - start_ts
+            bench_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             log.debug(
                 "InChildProcess %s: load %f, create tensor %f, bench %f",
                 str(self),
-                load_elapse,
-                create_tensor_elapse,
+                load_elapse,  # type: ignore[possibly-undefined]
+                create_tensor_elapse,  # type: ignore[possibly-undefined]
                 bench_elapse,
             )
         self.cleanup_run_fn()
@@ -478,7 +488,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         kernel_name: str,
         input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
-        extra_args: Dict[str, Any],
+        extra_args: Iterable[Any],
         module_path: str,  # the path of the module defining the triton kernel
         module_cache_key: str,
         grid: List[int],
@@ -503,6 +513,15 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         )
 
         run_method = getattr(mod, self.kernel_name).run
+        extra_args = list(self.extra_args)
+
+        # Newer version of triton add warmup argument to JITFunction.run.
+        # This code handles backward-compatibility.
+        warmup_arg = {}
+        import inspect
+
+        if "warmup" in inspect.signature(run_method).parameters:
+            warmup_arg["warmup"] = False
 
         return functools.partial(
             run_method,
@@ -510,9 +529,9 @@ class TritonBenchmarkRequest(BenchmarkRequest):
             output_tensor,
             *self.extra_args,
             grid=self.grid,
+            **warmup_arg,
             num_stages=self.num_stages,
             num_warps=self.num_warps,
-            stream=torch.cuda.current_stream().cuda_stream,
         )
 
     def __str__(self) -> str:
@@ -525,7 +544,7 @@ class CUDABenchmarkRequest(BenchmarkRequest):
         kernel_name: str,
         input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
-        extra_args: Dict[str, Any],
+        extra_args: Iterable[Any],
         source_code: str,
     ):
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)

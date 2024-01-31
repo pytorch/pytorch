@@ -240,6 +240,7 @@ TEST(IOptTensorListRefTest, Boxed_Iterate) {
   for (const auto t : list) {
     EXPECT_EQ(boxed[i].has_value(), t.has_value());
     if (t.has_value()) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       EXPECT_TRUE((*boxed[i]).is_same(*t));
     }
     i++;

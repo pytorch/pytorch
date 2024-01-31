@@ -1,8 +1,10 @@
 from operator import itemgetter
+from typing import List
 
 from functorch.compile import make_boxed_func
 
 import torch
+import torch.fx
 import torch.nn as nn
 from torch._functorch.compilers import aot_module
 from torch._inductor.decomposition import select_decomp_table
@@ -11,7 +13,7 @@ from torch.distributed._tensor import DTensor
 
 inductor_decomps = select_decomp_table()
 
-graphs = []
+graphs: List[torch.fx.GraphModule] = []
 
 
 def fwd_bwd_compiler(fx_g, _):
@@ -81,7 +83,7 @@ def print_op_coverage_summary(model: nn.Module, args, kwargs, *, output_csv=Fals
     op_infos = []
 
     for op, count in op_counts.items():
-        supported = op in DTensor._propagator.op_to_rules
+        supported = op in DTensor._op_dispatcher.sharding_propagator.op_to_rules
         op_infos.append([op, str(op._schema), count, supported])
 
     # sort the op info base on the total count index

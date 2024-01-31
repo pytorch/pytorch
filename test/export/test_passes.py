@@ -3,29 +3,30 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_functionalization_with_native_python_assertion)
 """
 
-# Owner(s): ["module: dynamo"]
+# Owner(s): ["oncall: export"]
+import math
+import operator
 import unittest
 from typing import List, Set
-import operator
+from re import escape
 
 import torch
-from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.testing import FileCheck
+from functorch.experimental.control_flow import cond
 from torch._dynamo.eval_frame import is_dynamo_supported
-from torch._export import export
-from torch._export.passes import (
-    ReplaceViewOpsWithViewCopyOpsPass,
-)
-from torch._export.passes.replace_view_ops_with_view_copy_ops_pass import (
-    is_view_op,
-    get_view_copy_of_view_op,
-)
+from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.passes.functionalize_side_effectful_ops_pass import (
     _FunctionalizeSideEffectfulOpsPass,
 )
-from functorch.experimental.control_flow import cond
-from torch.fx.passes.operator_support import OperatorSupport
+from torch._export.passes.replace_view_ops_with_view_copy_ops_pass import (
+    get_view_copy_of_view_op,
+    is_view_op,
+    ReplaceViewOpsWithViewCopyOpsPass,
+)
+from torch.export import export, WrapperModule
 from torch.fx.passes.infra.partitioner import Partition
+from torch.fx.passes.operator_support import OperatorSupport
+from torch.testing import FileCheck
+from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo
 from torch.utils import _pytree as pytree
 
 
@@ -61,6 +62,7 @@ def _get_output_names(gm: torch.fx.GraphModule) -> List[str]:
     return [str(arg) for arg in args]
 
 
+@skipIfTorchDynamo("recursively running dynamo on export is unlikely")
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
 class TestPasses(TestCase):
     def test_runtime_assert_one_dim(self) -> None:
@@ -76,10 +78,10 @@ class TestPasses(TestCase):
         dim1_x = torch.export.Dim("dim1_x", min=2, max=6)
         ep = torch.export.export(M(), (x,), dynamic_shapes={"x": {1: dim1_x}})
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
-            ep(torch.zeros(2, 7, 3))
+        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[1] to be <= 6, but got 7")):
+            ep.module()(torch.zeros(2, 7, 3))
 
-        self.assertEqual(ep(torch.ones(2, 4, 3)), M().forward(torch.ones(2, 4, 3)))
+        self.assertEqual(ep.module()(torch.ones(2, 4, 3)), M().forward(torch.ones(2, 4, 3)))
 
     def test_runtime_assert_multiple_dims(self) -> None:
         class M(torch.nn.Module):
@@ -99,11 +101,11 @@ class TestPasses(TestCase):
             M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": {0: dim0_y}}
         )
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
-            ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
+        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[1] to be <= 6, but got 7")):
+            ep.module()(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg1_1"):
-            ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
+        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[1].shape[0] to be >= 3, but got 2")):
+            ep.module()(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
     def test_runtime_assert_some_dims_not_specified(self) -> None:
         class M(torch.nn.Module):
@@ -123,17 +125,17 @@ class TestPasses(TestCase):
             M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": None}
         )
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
-            ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
+        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[1] to be <= 6, but got 7")):
+            ep.module()(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
         with self.assertRaisesRegex(
-            RuntimeError, r"Input arg1_1.shape\[0\] is specialized at 5"
+            RuntimeError, escape("Expected input at *args[1].shape[0] to be equal to 5, but got 2")
         ):
-            ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
+            ep.module()(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
         # Since we didn't insert the constraint for x[1] >= 2, it should work for case where x[1] == 1
-        gm_result_for_1_size = ep(torch.ones(3, 1, 3), torch.ones(5, 5, 5))
+        gm_result_for_1_size = ep.module()(torch.ones(3, 1, 3), torch.ones(5, 5, 5))
         eager_result_for_1_size = M().forward(torch.ones(3, 1, 3), torch.ones(5, 5, 5))
 
         self.assertEqual(gm_result_for_1_size, eager_result_for_1_size)
@@ -152,17 +154,17 @@ class TestPasses(TestCase):
         dim1_y = torch.export.Dim("dim1_y", min=3, max=6)
         ep = torch.export.export(M(), (x, y), dynamic_shapes={"x": None, "y": {1: dim1_y}})
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
-            ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
+        with self.assertRaisesRegex(RuntimeError, escape("shape[1] to be equal to 2")):
+            ep.module()(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
         with self.assertRaisesRegex(
-            RuntimeError, r"Input arg1_1.shape\[0\] is specialized at 5"
+            RuntimeError, escape("Expected input at *args[1].shape[0] to be equal to 5, but got 2")
         ):
-            ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
+            ep.module()(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
         # Since we didn't insert the constraint for x[1] >= 2, it should work for case where x[1] == 1
-        gm_result_for_1_size = ep(torch.zeros(4, 2, 3), torch.ones(5, 5, 5))
+        gm_result_for_1_size = ep.module()(torch.zeros(4, 2, 3), torch.ones(5, 5, 5))
         eager_result_for_1_size = M().forward(torch.zeros(4, 2, 3), torch.ones(5, 5, 5))
 
         self.assertEqual(gm_result_for_1_size, eager_result_for_1_size)
@@ -181,7 +183,7 @@ class TestPasses(TestCase):
         ep = export(M(), (x,))
         self.assertEqual(count_call_function(ep.graph, torch.ops.aten.view.default), 1)
 
-        ep = ep._transform(ReplaceViewOpsWithViewCopyOpsPass())
+        ep = ep._transform_do_not_use(ReplaceViewOpsWithViewCopyOpsPass())
         self.assertEqual(count_call_function(ep.graph, torch.ops.aten.view.default), 0)
 
     def test_functionalization_with_view_copy(self) -> None:
@@ -193,7 +195,7 @@ class TestPasses(TestCase):
 
         x = torch.zeros(4, 2, 3)
 
-        ep = export(foo, (x,))._transform(ReplaceViewOpsWithViewCopyOpsPass())
+        ep = export(WrapperModule(foo), (x,))._transform_do_not_use(ReplaceViewOpsWithViewCopyOpsPass())
         # After this pass, there shouldn't be any view nodes in the graph
         self.assertTrue(count_call_function(ep.graph, torch.ops.aten.view.default) == 0)
         self.assertTrue(count_call_function(ep.graph, torch.ops.aten.view_copy.default) > 0)
@@ -232,10 +234,10 @@ class TestPasses(TestCase):
         ep = export(mod, (x,))
 
         with self.assertRaisesRegex(RuntimeError, r"_local_scalar_dense is outside of inline constraint \[2, 5\]."):
-            ep(torch.tensor([6]))
+            ep.module()(torch.tensor([6]))
 
         new_inp = torch.tensor([5])
-        self.assertEqual(mod(new_inp), ep(new_inp))
+        self.assertEqual(mod(new_inp), ep.module()(new_inp))
 
     def test_runtime_assert_inline_constraints_for_nonzero(self) -> None:
         class M(torch.nn.Module):
@@ -264,15 +266,15 @@ class TestPasses(TestCase):
         with self.assertRaisesRegex(
             RuntimeError, r"nonzero.shape\[0\] is outside of inline constraint \[3, 5\]."
         ):
-            ep(torch.tensor([1, 1, 0, 0, 0]))
+            ep.module()(torch.tensor([1, 1, 0, 0, 0]))
 
         with self.assertRaisesRegex(
             RuntimeError, r"nonzero.shape\[0\] is outside of inline constraint \[3, 5\]."
         ):
-            ep(torch.ones(6))
+            ep.module()(torch.ones(6))
 
         new_inp = torch.tensor([1, 1, 1, 1])
-        self.assertEqual(mod(new_inp), ep(new_inp))
+        self.assertEqual(mod(new_inp), ep.module()(new_inp))
 
     def test_runtime_assert_inline_constraints_for_cond(self) -> None:
         class M(torch.nn.Module):
@@ -300,37 +302,9 @@ class TestPasses(TestCase):
 
 
         with self.assertRaisesRegex(RuntimeError, "is outside of inline constraint \\[2, 5\\]."):
-            ep(torch.tensor(False), torch.tensor([6]), torch.tensor([6]))
+            ep.module()(torch.tensor(False), torch.tensor([6]), torch.tensor([6]))
 
-    def test_runtime_assert_equality_constraint(self):
-        class Adder(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-                return x + y
-
-        m = Adder()
-        x = torch.rand(3, 4)
-        y = torch.rand(3, 4)
-        dim1 = torch.export.Dim("dim1")
-        exported = torch.export.export(
-            m, (x, y), dynamic_shapes={"x": {1: dim1}, "y": {1: dim1}}
-        )
-
-        x = torch.rand(3, 5)
-        y = torch.rand(3, 6)
-        with self.assertRaisesRegex(
-            RuntimeError, r"Input arg0_1.shape\[1\] is not equal to input arg1_1.shape\[1\]"
-        ):
-            exported(x, y)
-
-        y = torch.rand(3, 5)
-        dynamo_result = exported(x, y)
-        real_result = m(x, y)
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
-
-    def test_functionalize_inline_contraints(self) -> None:
+    def test_functionalize_inline_constraints(self) -> None:
         def f(x):
             a = x.item()
             torch._constrain_as_value(a, 4, 7)
@@ -344,9 +318,6 @@ class TestPasses(TestCase):
             exactly=True,
         ).run(gm.code)
 
-        # TODO(ycao): ExportedProgram._transform() forbids changes to number
-        # of inputs/outputs for now. When it supports that better, change this
-        # back to using ExportedProgram._transform()
         gm = _FunctionalizeSideEffectfulOpsPass()(ep.graph_module).graph_module
 
         with self.assertRaisesRegex(
@@ -366,6 +337,17 @@ class TestPasses(TestCase):
         FileCheck().check_count(
             "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
         ).run(gm.code)
+
+    def test_math_ops(self):
+        def func(x):
+            return (
+                torch.tensor([math.ceil(x.item())]),
+                torch.tensor([math.floor(x.item())]),
+            )
+
+        x = torch.randn(1, dtype=torch.float32)
+        ep = torch.export.export(WrapperModule(func), args=(x,))
+        _ExportPassBaseDeprecatedDoNotUse()(ep.graph_module)
 
 
 if __name__ == '__main__':

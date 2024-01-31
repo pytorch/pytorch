@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 
+#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
@@ -34,7 +35,11 @@
 #include <llvm/Passes/PassBuilder.h>
 #pragma GCC diagnostic pop
 
+#if LLVM_VERSION_MAJOR >= 18
+#include <llvm/TargetParser/Host.h>
+#else
 #include <llvm/Support/Host.h>
+#endif
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Transforms/IPO/AlwaysInliner.h>
 #include <llvm/Transforms/Scalar/DCE.h>
@@ -2749,7 +2754,11 @@ void LLVMCodeGenImpl::optimize(llvm::Module& M) {
   // options.
   llvm::PassBuilder PB(&TM);
 
+#if LLVM_VERSION_MAJOR >= 18
+  TM.registerPassBuilderCallbacks(PB, false /* PopulateClassToPassNames */);
+#else
   TM.registerPassBuilderCallbacks(PB);
+#endif
 
   // Register all the basic analyses with the managers.
   PB.registerModuleAnalyses(MAM);

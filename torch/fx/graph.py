@@ -1,4 +1,3 @@
-import collections
 from collections import defaultdict
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
 import torch.utils._pytree as pytree
@@ -209,6 +208,8 @@ dtype_abbrs = {
     torch.float16: 'f16',
     torch.float8_e4m3fn: 'f8e4m3fn',
     torch.float8_e5m2: 'f8e5m2',
+    torch.float8_e4m3fnuz: 'f8e4m3fnuz',
+    torch.float8_e5m2fnuz: 'f8e5m2fnuz',
     torch.complex32: 'c32',
     torch.complex64: 'c64',
     torch.complex128: 'c128',
@@ -284,11 +285,20 @@ class _PyTreeInfo(NamedTuple):
     in_spec: pytree.TreeSpec
     out_spec: Optional[pytree.TreeSpec]
 
+@dataclass(frozen=True)
+class _ParsedStackTrace:
+    """
+    Represents the top-most frame of a parsed stack trace
+    """
+    file: str
+    lineno: str
+    name: str
+    code: str
+
 # get File:lineno code from stack_trace
 def _parse_stack_trace(stack_trace: str):
     if stack_trace is None:
         return None
-    ParsedStackTrace = collections.namedtuple("ParsedStackTrace", ["file", "lineno", "code"])
     pattern = re.compile(r"^File \"(.+)\", line (\d+), in (.+)$")
     lines = stack_trace.strip().split('\n')
     # stacktrace should have innermost frame last, so we
@@ -301,11 +311,11 @@ def _parse_stack_trace(stack_trace: str):
         if matches:
             file = matches.group(1)
             lineno = matches.group(2)
+            name = matches.group(3)
             # next line should be the code
             code = lines[idx + 1].strip()
-            return ParsedStackTrace(file, lineno, code)
+            return _ParsedStackTrace(file, lineno, name, code)
     return None
-
 
 @compatibility(is_backward_compatible=False)
 class CodeGen:
@@ -502,7 +512,8 @@ class CodeGen:
                         if parsed_stack_trace is not None:
                             lineno = parsed_stack_trace.lineno
                             code = parsed_stack_trace.code
-                            summary_str = f'File: {parsed_stack_trace.file}:{lineno}, code: {code}'
+                            name = parsed_stack_trace.name
+                            summary_str = f'File: {parsed_stack_trace.file}:{lineno} in {name}, code: {code}'
 
                         body.append(f'\n# {summary_str}\n')
                 elif prev_stacktrace != "":
@@ -670,7 +681,7 @@ class _PyTreeCodeGen(CodeGen):
             return out
         if not isinstance(out, (list, tuple)):
             out = [out]
-        assert(self.pytree_info.out_spec is not None)
+        assert self.pytree_info.out_spec is not None
         return pytree.tree_unflatten(out, self.pytree_info.out_spec)
 
     def gen_fn_def(self, free_vars, maybe_return_annotation):
@@ -701,13 +712,13 @@ class _PyTreeCodeGen(CodeGen):
         if len(free_vars) > 0:  # pytree has placeholders in it
             # when kwargs is present, in_spec is tuple(args, kwargs)
             has_args_kwargs_tuple = self.pytree_info.in_spec.type == tuple and \
-                len(self.pytree_info.in_spec.children_specs) == 2 and \
+                self.pytree_info.in_spec.num_children == 2 and \
                 self.pytree_info.in_spec.children_specs[0].type == tuple and \
                 self.pytree_info.in_spec.children_specs[1].type == dict
             fn_kwargs = '{}'
             fn_signature = f"[{', '.join(fn_args)}], self._in_spec"
             if has_args_kwargs_tuple:
-                count_args = len(self.pytree_info.in_spec.children_specs[0].children_specs)
+                count_args = self.pytree_info.in_spec.children_specs[0].num_children
                 fn_args = self.pytree_info.orig_args[:count_args]
                 fn_kwargs = '{' + ', '.join(f"'{k}':{v}" for k, v in zip(
                                   self.pytree_info.in_spec.children_specs[1].context,

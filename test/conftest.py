@@ -19,6 +19,7 @@ import copy
 import json
 import re
 from collections import defaultdict
+from pytest_shard_custom import PytestShardPlugin, pytest_addoptions as shard_addoptions
 
 # a lot of this file is copied from _pytest.junitxml and modified to get rerun info
 
@@ -84,6 +85,7 @@ def pytest_addoption(parser: Parser) -> None:
         "Emit XML for schema: one of legacy|xunit1|xunit2",
         default="xunit2",
     )
+    shard_addoptions(parser)
 
 
 def pytest_configure(config: Config) -> None:
@@ -105,6 +107,8 @@ def pytest_configure(config: Config) -> None:
         config.option.stepcurrent = config.getoption("stepcurrent_skip")
     if config.getoption("stepcurrent"):
         config.pluginmanager.register(StepcurrentPlugin(config), "stepcurrentplugin")
+    if config.getoption("num_shards"):
+        config.pluginmanager.register(PytestShardPlugin(config), "pytestshardplugin")
 
 
 def pytest_unconfigure(config: Config) -> None:
@@ -125,6 +129,24 @@ class _NodeReporterReruns(_NodeReporter):
         tag.text = bin_xml_escape(content)
         self.append(tag)
 
+    def append_skipped(self, report: TestReport) -> None:
+        # Referenced from the below
+        # https://github.com/pytest-dev/pytest/blob/2178ee86d7c1ee93748cfb46540a6e40b4761f2d/src/_pytest/junitxml.py#L236C6-L236C6
+        # Modified to escape characters not supported by xml in the skip reason.  Everything else should be the same.
+        if hasattr(report, "wasxfail"):
+            # Super here instead of the actual code so we can reduce possible divergence
+            super().append_skipped(report)
+        else:
+            assert isinstance(report.longrepr, tuple)
+            filename, lineno, skipreason = report.longrepr
+            if skipreason.startswith("Skipped: "):
+                skipreason = skipreason[9:]
+            details = f"{filename}:{lineno}: {skipreason}"
+
+            skipped = ET.Element("skipped", type="pytest.skip", message=bin_xml_escape(skipreason))
+            skipped.text = bin_xml_escape(details)
+            self.append(skipped)
+            self.write_captured_output(report)
 
 class LogXMLReruns(LogXML):
     def __init__(self, *args, **kwargs):
@@ -276,6 +298,7 @@ class StepcurrentPlugin:
         self.cache: pytest.Cache = config.cache
         self.directory = f"{STEPCURRENT_CACHE_DIR}/{config.getoption('stepcurrent')}"
         self.lastrun: Optional[str] = self.cache.get(self.directory, None)
+        self.initial_val = self.lastrun
         self.skip: bool = config.getoption("stepcurrent_skip")
 
     def pytest_collection_modifyitems(self, config: Config, items: List[Any]) -> None:
@@ -310,3 +333,7 @@ class StepcurrentPlugin:
     def pytest_runtest_protocol(self, item, nextitem) -> None:
         self.lastrun = item.nodeid
         self.cache.set(self.directory, self.lastrun)
+
+    def pytest_sessionfinish(self, session, exitstatus):
+        if exitstatus == 0:
+            self.cache.set(self.directory, self.initial_val)

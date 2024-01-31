@@ -20,7 +20,7 @@ def install_config_module(module):
     """
     Converts a module-level config into a `ConfigModule()`.
 
-    See config_typing.pyi for instructions on how to get the converted module to typecheck.
+    See _config_typing.pyi for instructions on how to get the converted module to typecheck.
     """
 
     class ConfigModuleInstance(ConfigModule):
@@ -78,10 +78,10 @@ def get_assignments_with_compile_ignored_comments(module):
     tokens = tokenize.tokenize(io.BytesIO(source_code.encode("utf-8")).readline)
     current_comment = "", -1
     prev_name = ""
-    prev_assigned = "", -1
 
     for token in tokens:
         if token.type == tokenize.COMMENT:
+            prev_name = ""
             maybe_current = token.string.strip()
             if COMPILE_IGNORED_MARKER in maybe_current:
                 assert current_comment == (
@@ -89,15 +89,12 @@ def get_assignments_with_compile_ignored_comments(module):
                     -1,
                 ), f"unconsumed {COMPILE_IGNORED_MARKER}"
                 current_comment = maybe_current, token.start[0]
-                if token.start[0] == prev_assigned[1]:
-                    # Check if the current assignment is followed with
-                    # a same-line comment with COMPILE_IGNORED_MARKER
-                    assignments.add(prev_assigned[0])
-                    current_comment = "", -1  # reset
         elif token.type == tokenize.NAME:
-            prev_name = token.string
+            # Only accept the first name token, to handle if you have
+            # something like foo: Bar = ...
+            if not prev_name:
+                prev_name = token.string
         elif token.type == tokenize.OP and token.string == "=":
-            prev_assigned = prev_name, token.start[0]
             # Check if the current assignment follows a comment
             # with COMPILE_IGNORED_MARKER
             if (
@@ -106,12 +103,13 @@ def get_assignments_with_compile_ignored_comments(module):
             ):
                 assignments.add(prev_name)
                 current_comment = "", -1  # reset
+            prev_name = ""
     assert current_comment == ("", -1), f"unconsumed {COMPILE_IGNORED_MARKER}"
     return assignments
 
 
 class ConfigModule(ModuleType):
-    # NOTE: This should be kept in sync with config_typing.pyi.
+    # NOTE: This should be kept in sync with _config_typing.pyi.
 
     # The default values of the configuration settings.  This can be used to
     # determine if the config has been changed or not.
@@ -267,6 +265,37 @@ class ConfigModule(ModuleType):
                 prior.clear()
 
         return ConfigPatch()
+
+    def _make_closure_patcher(self, **changes):
+        """
+        A lower-overhead version of patch() for things on the critical path.
+
+        Usage:
+
+            # do this off the critical path
+            change_fn = config.make_closure_patcher(foo=True)
+
+            ...
+
+            revert = change_fn()
+            try:
+              ...
+            finally:
+                revert()
+
+        """
+        config = self._config
+
+        def change():
+            prior = {k: config[k] for k in changes}
+            config.update(changes)
+
+            def revert():
+                config.update(prior)
+
+            return revert
+
+        return change
 
 
 class ContextDecorator(contextlib.ContextDecorator):

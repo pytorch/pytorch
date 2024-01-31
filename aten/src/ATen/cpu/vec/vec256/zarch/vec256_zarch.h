@@ -875,6 +875,20 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
     return ret._not();
   }
 
+  bool has_inf_nan() const {
+    for (const auto i : c10::irange(size()/2)) {
+      if(_isnan(_vec0[i]) || _isinf(_vec0[i])) {
+        return true;
+      }
+    }
+    for (const auto i : c10::irange(size()/2)) {
+      if(_isnan(_vec1[i]) || _isinf(_vec1[i])) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   template <
       typename U = T,
       std::enable_if_t<std::is_floating_point<U>::value, int> = 0>
@@ -1071,6 +1085,9 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
   }
   Vectorized<T> expm1() const {
     return mapSleef(Sleef_expm1f4_u10, Sleef_expm1d2_u10);
+  }
+  Vectorized<T> exp_u20() const {
+    return exp();
   }
 
   Vectorized<T> log() const {
@@ -1733,6 +1750,16 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
   template <
       typename U = T,
       std::enable_if_t<Vectorized<U>::float_num_vecs() == 1, int> = 0>
+  float_vec_return_type dequantize(
+      Vectorized<float> scale,
+      Vectorized<float> zero_point) const {
+    auto float_val = convert_to_float(_vec);
+    return {(float_val - zero_point) * scale};
+  }
+
+  template <
+      typename U = T,
+      std::enable_if_t<Vectorized<U>::float_num_vecs() == 1, int> = 0>
   static Vectorized<T> quantize(
       const float_vec_return_type& rhs,
       float scale,
@@ -1802,6 +1829,30 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
         fmadd(scale, vecf_1, scale_zp_premul),
         fmadd(scale, vecf_2, scale_zp_premul),
         fmadd(scale, vecf_3, scale_zp_premul)};
+  }
+
+  template <
+      typename U = T,
+      std::enable_if_t<Vectorized<U>::float_num_vecs() == 4, int> = 0>
+  float_vec_return_type dequantize(
+      Vectorized<float> scale,
+      Vectorized<float> zero_point) const {
+    // unpacking unsigned as signed
+    auto ret16 = unpack(_vec);
+    auto ret32_0 = unpack(ret16.first);
+    auto ret32_1 = unpack(ret16.second);
+
+    auto vecf_0 = convert_to_float(ret32_0.first);
+    auto vecf_1 = convert_to_float(ret32_0.second);
+
+    auto vecf_2 = convert_to_float(ret32_1.first);
+    auto vecf_3 = convert_to_float(ret32_1.second);
+
+    return {
+        (vecf_0 - zero_point) * scale,
+        (vecf_1 - zero_point) * scale,
+        (vecf_2 - zero_point) * scale,
+        (vecf_3 - zero_point) * scale };
   }
 
   template <

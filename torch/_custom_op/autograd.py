@@ -108,7 +108,7 @@ def construct_autograd_kernel(
 
             # We use the info about args to give better error messages in backward
             args_info = namedtuple_args(
-                schema, pytree.tree_map(lambda arg: type(arg), args))
+                schema, pytree.tree_map(type, args))
 
             save_for_backward_fn_inputs = namedtuple_args(schema, args)
             to_save = save_for_backward_fn(save_for_backward_fn_inputs, output)

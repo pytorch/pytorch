@@ -8,8 +8,7 @@ __all__ = ["noop_hook"]
 
 def noop_hook(_: Any, bucket: GradBucket) -> torch.futures.Future[torch.Tensor]:
     """
-    This DDP communication hook returns a future that wraps the input,
-    so it is a noop that does not incur any communication overheads.
+    Return a future that wraps the input, so it is a no-op that does not incur any communication overheads.
 
     This hook should **only** be used for headroom analysis of allreduce optimization,
     instead of the normal gradient synchronization.

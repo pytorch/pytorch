@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import contextlib
 import copy
 import functools
@@ -90,6 +92,7 @@ from ._optim_utils import (
     _get_param_to_param_key,
     _optim_state_dict,
     _rekey_sharded_optim_state_dict,
+    _set_optim_use_dtensor,
 )
 from ._state_dict_utils import _register_all_state_dict_hooks
 from ._unshard_param_utils import (
@@ -126,6 +129,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
     .. _`Xu et al.`: https://arxiv.org/abs/2004.13336
     .. _DeepSpeed: https://www.deepspeed.ai/
+
+    For advanced notes please refer to :ref:`fsdp_notes`.
 
     Example::
 
@@ -443,7 +448,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # over which sharding occurs, if sharding_strategy is {HYBRID_SHARD, _HYBRID_SHARD_ZERO2}.
         # Note that this is done before auto_wrapping, so that child FSDP modules simply pick up
         # the same process group state as the root FSDP module.
-        self.device_mesh = device_mesh
+        self._device_mesh = device_mesh
         _init_process_group_state(
             self,
             process_group,
@@ -465,6 +470,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 "limit_all_gathers": limit_all_gathers,
                 "use_orig_params": use_orig_params,
                 "ignored_states": self._ignored_params,
+                "device_mesh": device_mesh,
             }
             if sharding_strategy in HYBRID_SHARDING_STRATEGIES:
                 # Share root process groups with children to maintain
@@ -763,6 +769,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                     state_dict_config=submodule._state_dict_config,
                     optim_state_dict_config=submodule._optim_state_dict_config,
                 )
+                _set_optim_use_dtensor(submodule, state_dict_settings)
             else:
                 submodule_settings = StateDictSettings(
                     submodule._state_dict_type,
@@ -773,15 +780,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                     "All FSDP modules must have the same state dict settings."
                     f"Got {submodule_settings} and {state_dict_settings}."
                 )
-
-            # If device_mesh is passed in when initalizing FSDP, we automatically turn the
-            # _use_dtensor flag to be true for ShardedOptimStateDictConfig().
-            if (
-                getattr(module, "device_mesh", None)
-                and state_dict_settings.state_dict_type
-                == StateDictType.SHARDED_STATE_DICT
-            ):
-                state_dict_settings.optim_state_dict_config._use_dtensor = True
+                _set_optim_use_dtensor(submodule, submodule_settings)
         return state_dict_settings
 
     @staticmethod
@@ -1185,7 +1184,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             )  # warn since this is generally unexpected
             return total_norm
         total_norm_dtype = functools.reduce(
-            lambda dtype1, dtype2: torch.promote_types(dtype1, dtype2),
+            torch.promote_types,
             [grad.dtype for grad in grads],
         )
         return total_norm.to(total_norm_dtype)
@@ -1809,7 +1808,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             >>> )
             >>> model.load_state_dict(state_dict)
             >>> optim_state_dict = FSDP.optim_state_dict_to_load(
-            >>>     optim_state_dict, model, optim
+            >>>     model, optim, optim_state_dict
             >>> )
             >>> optim.load_state_dict(optim_state_dict)
 

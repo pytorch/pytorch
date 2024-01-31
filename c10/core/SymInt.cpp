@@ -3,6 +3,7 @@
 #include <c10/core/SymInt.h>
 #include <c10/core/SymNodeImpl.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/safe_numerics.h>
 #include <functional>
 
 namespace c10 {
@@ -134,7 +135,21 @@ bool SymInt::expect_size(const char* file, int64_t line) const {
 
 SymInt operator-(const SymInt& s) {
   if (auto ma = s.maybe_as_int()) {
-    return SymInt(-*ma);
+    const auto val = *ma;
+    // Note: Result of `-std::numeric_limits<decltype(val)>::min()` is undefined
+    // But on many platforms it equals to self + setting Carry/Overflow flags
+    // Which in opimized code affects results of `check_range` condition
+    // Workaround by using ternary that avoids alterning the flags
+#if C10_HAS_BUILTIN_OVERFLOW()
+    std::decay_t<decltype(val)> out = 0;
+    if (C10_UNLIKELY(__builtin_sub_overflow(out, val, &out))) {
+      return SymInt(val);
+    }
+    return SymInt(out);
+#else
+    constexpr auto val_min = std::numeric_limits<decltype(val)>::min();
+    return SymInt(val != val_min ? -val : val_min);
+#endif
   } else {
     return SymInt(s.toSymNodeImplUnowned()->neg());
   }
