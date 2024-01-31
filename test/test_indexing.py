@@ -739,7 +739,7 @@ class TestIndexing(TestCase):
             self.assertEqual(y, torch.ones(size=(10, 10), device=device))
             self.assertEqual(len(w), 2)
 
-    @skipIfTorchDynamo("This test causes SIGKILL when running with dynamo, https://github.com/pytorch/pytorch/issues/88472")
+    # @skipIfTorchDynamo("This test causes SIGKILL when running with dynamo, https://github.com/pytorch/pytorch/issues/88472")
     def test_index_put_accumulate_large_tensor(self, device):
         # This test is for tensors with number of elements >= INT_MAX (2^31 - 1).
         N = (1 << 31) + 5
