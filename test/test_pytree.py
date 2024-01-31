@@ -1066,7 +1066,7 @@ TreeSpec(tuple, None, [*,
         all_zeros = py_pytree.tree_map_with_path(
             lambda kp, val: val - kp[1].key + kp[0].idx, tree
         )
-        self.assertEqual(all_zeros, [{i: 0 for i in range(10)}])
+        self.assertEqual(all_zeros, [dict.fromkeys(range(10), 0)])
 
     def test_tree_map_with_path_multiple_trees(self):
         @dataclass

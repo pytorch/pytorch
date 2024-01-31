@@ -518,8 +518,16 @@ def is_numpy_float_type(value):
     )
 
 
+def is_function_or_wrapper(value):
+    return (
+        is_function(value)
+        or isinstance(value, functools._lru_cache_wrapper)
+        and is_function(inspect.getattr_static(value, "__wrapped__"))
+    )
+
+
 def is_function(value):
-    return istype(
+    return isinstance(
         value,
         (
             types.FunctionType,
@@ -528,6 +536,12 @@ def is_function(value):
             types.WrapperDescriptorType,
         ),
     )
+
+
+def unwrap_if_wrapper(value):
+    if isinstance(value, functools._lru_cache_wrapper):
+        value = inspect.getattr_static(value, "__wrapped__")
+    return value
 
 
 def is_numpy_ndarray(value):
@@ -759,7 +773,7 @@ def preserve_rng_state():
         with torch.utils._python_dispatch._disable_current_modes():
             torch.random.set_rng_state(rng_state)
             if torch.cuda.is_available():
-                torch.cuda.set_rng_state(cuda_rng_state)
+                torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
 
 
 def is_jit_model(model0):
@@ -878,7 +892,7 @@ def timed(model, example_inputs, times=1):
         result = model(*example_inputs)
         synchronize()
     t1 = time.perf_counter()
-    return result, t1 - t0
+    return result, t1 - t0  # type: ignore[possibly-undefined]
 
 
 def check_is_cuda(gm, example_inputs):
