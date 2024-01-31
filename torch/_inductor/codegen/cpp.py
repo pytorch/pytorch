@@ -972,6 +972,15 @@ class CppOverrides(OpOverrides):
         V.kernel.compute.splice(code)
         return result
 
+    @staticmethod
+    def store_to_fp32_cache(var, name):
+        V.kernel.cse.store_cache[name] = var
+        return var
+
+    @staticmethod
+    def load_from_fp32_cache(name):
+        return V.kernel.cse.store_cache[name]
+
 
 class CppVecOverrides(CppOverrides):
     """Map element-wise ops to aten vectorization C++"""
@@ -3038,6 +3047,125 @@ class CppKernelProxy(CppKernel):
             for sub_block in sub_blocks:
                 add_to_dtype(sub_block.graph)
 
+        def create_fp32_store_cache(nodes):
+            def belong_to_same_fused_schedular_nodes(nodes):
+                if len(nodes) >= 2:
+                    name = nodes[0].node.name
+                    fused_schedular_node = nodes[0].scheduler.name_to_fused_node[name]
+                    assert all(
+                        n.scheduler.name_to_fused_node[n.node.name]
+                        is fused_schedular_node
+                        for n in nodes
+                    )
+                    return True
+                return False
+
+            def match_to_store(graphs):
+                r"""
+                find the buffer stored after a "to_dtype(lowp)" node
+                -----------  -----------  ---------  --------------------------------------------  -------
+                    call_method  to_dtype_3   to_dtype   (ops, mul, torch.float16)                     {}
+                    call_method  store        store      (ops, 'buf5', get_index_3, to_dtype_3, None)  {}
+                """
+                result: Dict[str, torch.fx.Node] = {}
+                for g in graphs:
+                    for _node in g.nodes:
+                        if _node.target == "store":
+                            node_to_be_stored = _node.args[3]
+                            if (
+                                node_to_be_stored.target == "to_dtype"
+                                and node_to_be_stored.args[2] in DTYPE_LOWP_FP
+                            ):
+                                buf = _node.args[1]
+                                # only stored once for one buf
+                                assert buf not in result
+                                result[buf] = _node
+                return result
+
+            def match_load_to(graphs):
+                r"""
+                find the buffer loaded and only used by a "to_dtype(float32)" node
+                -----------  -----------  ---------  --------------------------------------------  -------
+                    call_method  load         load       (ops, 'buf5', get_index)                        {}
+                    call_method  to_dtype     to_dtype   (ops, load, torch.float32)                      {}
+                """
+                result: Dict[str, List[torch.fx.Node]] = {}
+
+                def _only_used_by_to_float(node: torch.fx.Node):
+                    return all(
+                        usr.target == "to_dtype" and usr.args[2] == torch.float32
+                        for usr in node.users
+                    )
+
+                for g in graphs:
+                    for _node in g.nodes:
+                        if _node.target == "load" and _only_used_by_to_float(_node):
+                            buf = _node.args[1]
+                            if buf in result:
+                                result[buf].append(_node)
+                            else:
+                                result[buf] = [_node]
+                return result
+
+            def store_float_buf_to_cache(buf, _node):
+                r"""
+                insert a store_to_fp32_cache node before to_dtype
+                -----------  -----------  ---------  --------------------------------------------  -------
+                call_method  mul                  mul             (ops, to_dtype, maximum)                      {}
+                call_method  store_to_fp32_cache  store_to_fp32_cache  (ops, mul, 'fp32_buf5')                  {} --> new node
+                call_method  to_dtype_3           to_dtype        (ops, mul, torch.float16)                     {}
+                call_method  store                store           (ops, 'buf5', get_index_3, to_dtype_3, None)  {}
+                """
+                graph = _node.graph
+                to_dtype_node = _node.args[3]
+                fp32_node = to_dtype_node.args[1]
+                with graph.inserting_after(fp32_node):
+                    store_to_fp32_cache = graph.call_method(
+                        "store_to_fp32_cache",
+                        args=(_node.args[0], fp32_node, f"fp32_{buf}"),
+                    )
+
+            def load_float_buf_from_cache(buf, _node):
+                r"""
+                replace to_dtype node with load_from_fp32_cache node
+                -----------  -----------  ---------  --------------------------------------------  -------
+                call_method  load         load       (ops, 'buf5', get_index)                      {}
+                call_method  to_dtype     to_dtype   (ops, load, torch.float32)                    {}
+                call_method  tan          tan        (ops, to_dtype)                               {}
+                -->
+                -----------  -----------  ---------  --------------------------------------------  -------
+                call_method  load                  load             (ops, 'buf5', get_index)                           {}
+                call_method  load_from_fp32_cache  load_from_fp32_cache  (ops, 'fp32_buf5')                            {}
+                call_method  tan                   tan              (ops, load_from_fp32_cache)                        {}
+                """
+                graph = _node.graph
+                assert len(_node.users) == 1
+                with graph.inserting_after(_node):
+                    load_from_fp32_cache = graph.call_method(
+                        "load_from_fp32_cache", args=(_node.args[0], f"fp32_{buf}")
+                    )
+                    to_dtype_node = next(iter(_node.users.keys()))
+                    to_dtype_node.replace_all_uses_with(load_from_fp32_cache)
+                    graph.erase_node(to_dtype_node)
+                    metrics.cpp_to_dtype_count -= 1
+
+            if not belong_to_same_fused_schedular_nodes(nodes):
+                return
+
+            graphs = []
+            for _node in nodes:
+                body: ir.LoopBody = _node._body
+                blocks = [body.root_block] + list(body.subblocks.values())
+                graphs += [block.graph for block in blocks]
+
+            stores = match_to_store(graphs)
+            loads = match_load_to(graphs)
+            for buf, store_graph in stores.items():
+                if buf in loads:
+                    store_float_buf_to_cache(buf, store_graph)
+                    for load_graph in loads[buf]:
+                        load_float_buf_from_cache(buf, load_graph)
+
         if all(
             isinstance(_node, SchedulerNode) and self.is_lowp_fp_scheduler(_node)
             for _node in nodes
@@ -3075,6 +3203,8 @@ class CppKernelProxy(CppKernel):
             if should_legalize:
                 body: ir.LoopBody = node._body
                 _legalize_lowp_fp(body)
+
+        create_fp32_store_cache(nodes)
 
     def codegen_nodes(self, nodes):
         # Legalize BF16 node by adding to_dtype explicitly
