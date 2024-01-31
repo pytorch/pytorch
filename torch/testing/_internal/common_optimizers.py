@@ -540,19 +540,6 @@ def optim_inputs_func_lbfgs(device=None):
 
 def optim_error_inputs_func_lbfgs(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
-    if str(device) == "cpu":
-        complex_param = torch.rand(2, 3, device=device, dtype=torch.complex64)
-        error_inputs += [
-            ErrorOptimizerInput(
-                OptimizerInput(
-                    params=[complex_param],
-                    kwargs=dict(),
-                    desc="complex not supported",
-                ),
-                error_type=ValueError,
-                error_regex="LBFGS doesn't support complex parameters",
-            ),
-        ]
     return error_inputs
 
 
@@ -1382,11 +1369,6 @@ optim_db: List[OptimizerInfo] = [
                 unittest.skip("LBFGS doesn't support multidevice"),
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction_multigpu",
-            ),
-            DecorateInfo(
-                unittest.skip("Missing complex support, see #118148"),
-                "TestOptimRenewed",
-                "test_complex",
             ),
         ),
     ),
