@@ -168,7 +168,7 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
 
 #if defined(USE_ROCM) && ROCM_VERSION >= 50700
     static const char *env = std::getenv("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
-    if (env != nullptr && strcmp(env, "1") == 0) {
+    if (env == nullptr || strcmp(env, "1") == 0) {
       // disallow tuning of hipblaslt with c10::complex
       if constexpr (
           !std::is_same_v<T, c10::complex<float>> &&
@@ -242,7 +242,7 @@ class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>
 
 #if defined(USE_ROCM) && ROCM_VERSION >= 50700
     static const char *env = std::getenv("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
-    if (env != nullptr && strcmp(env, "1") == 0) {
+    if (env == nullptr || strcmp(env, "1") == 0) {
       // disallow tuning of hipblaslt with c10::complex
       if constexpr (
           !std::is_same_v<T, c10::complex<float>> &&

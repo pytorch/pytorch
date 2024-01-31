@@ -41,7 +41,7 @@ Default is 1. Set to 0 to disable. Compare the results of each possible solution
 those with low accuracy.
 
 #### PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED
-Default is 0. Set to 1 to enable hipblaslt being considered during tuning.
+Default is 1. Set to 0 to disable hipblaslt being considered during tuning.
 
 ### Tuning Iterations
 By default, each possible solution for a given operator will be run for either 100 iterations or as many iterations can
