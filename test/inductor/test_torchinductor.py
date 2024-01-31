@@ -1628,8 +1628,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8),))
 
-    # TODO(voz): Re-enable this test ASAP https://github.com/pytorch/pytorch/issues/82763
-    @unittest.skip("Skipping due to op bugs")
     def test_nan_to_num(self):
         def fn(a):
             return (
