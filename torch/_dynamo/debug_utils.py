@@ -88,6 +88,7 @@ python_binary(
 {extra_cpp_deps}
     ],
     main_module = "{self.path}",
+    par_style = "xar",
 )
 """
         )
