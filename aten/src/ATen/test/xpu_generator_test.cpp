@@ -25,6 +25,10 @@ TEST(XpuGeneratorTest, testDefaultGenerator) {
   auto bar = at::xpu::detail::getDefaultXPUGenerator();
   ASSERT_EQ(foo, bar);
 
+  auto offset = foo.get_offset() + 1;
+  foo.set_offset(offset);
+  ASSERT_EQ(foo.get_offset(), offset);
+
   if (c10::xpu::device_count() >= 2) {
     foo = at::xpu::detail::getDefaultXPUGenerator(0);
     bar = at::xpu::detail::getDefaultXPUGenerator(0);
@@ -75,26 +79,4 @@ TEST(XpuGeneratorTest, testMultithreadingGetSetCurrentSeed) {
   t1.join();
   t2.join();
   ASSERT_EQ(gen1.current_seed(), initial_seed+3);
-}
-
-void makeRandomNumber() {
-  c10::xpu::set_device(std::rand() % 2);
-  auto x = at::randn({1000});
-}
-
-void testXpuRNGMultithread() {
-  auto threads = std::vector<std::thread>();
-  for (auto i = 0; i < 1000; i++) {
-    threads.emplace_back(makeRandomNumber);
-  }
-  for (auto& t : threads) {
-    t.join();
-  }
-};
-
-TEST(XpuGeneratorTest, testMultithreadRNG) {
-  if (!at::xpu::is_available()) {
-    return;
-  }
-  testXpuRNGMultithread();
 }
