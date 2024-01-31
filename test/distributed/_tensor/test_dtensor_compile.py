@@ -285,6 +285,23 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = opt_kwargs_fn(x)
         self.assertEqual(res, ref)
 
+    def test_inductor_wait_followed_by_view(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # pass in tensor as inputs/outputs, create DTensor and run redistribute
+        # (allgather collective) inside the fn
+        def fn(x_dt):
+            out = x_dt.redistribute(mesh, [Replicate()])
+            return out.view(-1)
+
+        x = torch.ones(4, 4)
+        x_dt = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
+        ref = fn(x_dt)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        res = opt_fn(x_dt)
+        self.assertEqual(ref, res)
+
     def test_dtensor_partial_placement_graph_output(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -371,8 +388,8 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         FileCheck() \
             .check("buf1_work = dist.all_gather_into_tensor(buf1[0]") \
             .check("buf2 = buf1[0]") \
-            .check("buf2 = _wait_tensor(buf2)") \
-            .check("extern_kernels.mm(buf2,") \
+            .check("buf3 = _wait_tensor(buf2)") \
+            .check("extern_kernels.mm(buf3,") \
             .run(code)
 
 
