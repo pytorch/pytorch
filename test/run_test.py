@@ -1139,6 +1139,12 @@ def parse_args():
         default=IS_CI and not strtobool(os.environ.get("NO_TEST_TIMEOUT", "False")),
     )
     parser.add_argument(
+        "--enable-td",
+        action="store_true",
+        help="Set a timeout based on the test times json file.  Only works if there are test times available",
+        default=IS_CI and not strtobool(os.environ.get("NO_TD", "False")),
+    )
+    parser.add_argument(
         "additional_unittest_args",
         nargs="*",
         help="additional arguments passed through to unittest, e.g., "
