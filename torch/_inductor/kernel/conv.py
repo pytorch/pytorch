@@ -243,14 +243,14 @@ def conv_layout(
             ir.ir_node_to_tensor(weight, guard_shape=True),
             ir.ir_node_to_tensor(bias, guard_shape=True),
             stride,
-            tuple(V.graph.sizevars.size_hint(p) for p in padding),
+            tuple(V.graph.sizevars.size_hint(p) for p in padding),  # type: ignore[arg-type]
             dilation,
             transposed,
-            tuple(V.graph.sizevars.size_hint(p) for p in output_padding),
+            tuple(V.graph.sizevars.size_hint(p) for p in output_padding),  # type: ignore[arg-type]
             groups,
         )
         sizes = ir.convert_shape_to_inductor(output.size())
-        stride = ir.convert_shape_to_inductor(output.stride())
+        stride = ir.convert_shape_to_inductor(output.stride())  # type: ignore[assignment]
 
     return ir.FixedLayout(
         x.get_device(),
@@ -419,7 +419,7 @@ def convolution(
         and not transposed
         and is_zeros(output_padding)
         # there are some odd models where this check fails (e.g. shufflenet_v2_x1_0)
-        and V.graph.sizevars.statically_known_equals(in_chan, x.get_size()[1])
+        and V.graph.sizevars.statically_known_equals(in_chan, x.get_size()[1])  # type: ignore[arg-type]
     ):
         if (
             is_ones(kernel_shape)
