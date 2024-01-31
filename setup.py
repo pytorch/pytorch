@@ -1286,6 +1286,7 @@ def main():
         "include/sleef.h",
         "_inductor/codegen/*.h",
         "_inductor/codegen/aoti_runtime/*.cpp",
+        "_export/serde/*.yaml",
         "share/cmake/ATen/*.cmake",
         "share/cmake/Caffe2/*.cmake",
         "share/cmake/Caffe2/public/*.cmake",
