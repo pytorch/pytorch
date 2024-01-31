@@ -938,8 +938,6 @@ class BuiltinVariable(VariableTracker):
             return variables.ConstantVariable.create(callable(arg.value))
         elif isinstance(arg, (ConstantVariable, SymNodeVariable, TensorVariable)):
             return variables.ConstantVariable.create(False)
-        else:
-            raise UnsupportedError(f"unsupported callable type: {arg}")
 
     def call_cast(self, _, *args, **kwargs):
         if len(args) == 2:
