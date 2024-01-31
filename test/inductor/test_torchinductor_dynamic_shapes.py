@@ -23,9 +23,9 @@ from torch.testing._internal.common_utils import (
     parametrize,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TestCase,
+    TestCaseBase as TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -40,7 +40,7 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from inductor.test_torchinductor import (
     check_model,
-    check_model_cuda,
+    check_model_gpu,
     CommonTemplate,
     copy_tests,
     TestFailure,
@@ -91,14 +91,14 @@ if HAS_CPU:
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
 
 
-if HAS_CUDA and not TEST_WITH_ASAN:
+if HAS_GPU and not TEST_WITH_ASAN:
 
-    class DynamicShapesCudaTests(TestCase):
-        common = check_model_cuda
-        device = "cuda"
+    class DynamicShapesGPUTests(TestCase):
+        common = check_model_gpu
+        device = GPU_TYPE
 
     copy_tests(
-        DynamicShapesCommonTemplate, DynamicShapesCudaTests, "cuda", test_failures
+        DynamicShapesCommonTemplate, DynamicShapesGPUTests, GPU_TYPE, test_failures
     )
 
 
@@ -108,7 +108,7 @@ class TestInductorDynamic(TestCase):
     def setUp(self):
         # HAS_CUDA also checks compute capability to skip tests
         # on older devices
-        if self.device_type == "cuda" and not HAS_CUDA:
+        if not HAS_GPU:
             self.skipTest("Triton not available")
         torch._dynamo.reset()
         super(TestCase, self).setUp()
@@ -185,6 +185,19 @@ class TestInductorDynamic(TestCase):
         opt_f = self.compile_fn(fn)
         r = fn(x, y)
         opt_r = opt_f(x, y)
+        self.assertEqual(r, opt_r)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unwrap_storage_didnt_work_repro(self, device):
+        def f():
+            full = torch.full((), 11)
+            i0 = full.item()
+            torch._check_is_size(i0)
+            return torch.full((i0,), 0)
+
+        opt_f = torch.compile(f, fullgraph=True)
+        r = f()
+        opt_r = opt_f()
         self.assertEqual(r, opt_r)
 
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
@@ -298,6 +311,19 @@ class TestInductorDynamic(TestCase):
         f(torch.tensor([3.0], device=device))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_index_select(self, device):
+        # Tests if unbacked symbols captured by inner_fn are properly tracked
+        def f(x):
+            y = x.item()
+            return torch.index_select(
+                torch.ones(y, device=device), 0, torch.tensor([0, 2, 1], device=device)
+            )
+
+        cf = torch.compile(fullgraph=True)(f)
+        arg = torch.tensor(5, device=device)
+        self.assertEqual(f(arg), cf(arg))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unbacked_matmul(self, device):
         def f(x):
             y = x.item()
@@ -382,6 +408,7 @@ class TestInductorDynamic(TestCase):
         res1 = opt(x1)
         self.assertEqual(ref1, res1)
 
+    # Need to comment: is xpu need this? if yes we may need to add onlyGPU
     @onlyCUDA
     def test_pad_dynamic(self, device):
         def get_same_padding(x: int, k: int, s: int, d: int):
@@ -571,5 +598,5 @@ if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
     # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ASAN:
+    if (HAS_CPU or HAS_GPU) and not TEST_WITH_ASAN:
         run_tests(needs="filelock")

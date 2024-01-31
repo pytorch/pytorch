@@ -53,7 +53,7 @@ from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, g
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, tf32_off, tf32_on
 from torch.types import _TensorOrTensors
-
+from torch.testing._internal.common_mkldnn import bf32_on_and_off
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
 
@@ -2113,25 +2113,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 expected = F.threshold(x, threshold, 0).to(dtype=dtype).float()
                 res_bf16 = F.threshold(x.to(dtype=dtype), threshold, 0).float()
                 self.assertEqual(res_bf16, expected)
-
-    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                         'Linear_FP16_weight requires FBGEMM. FBGEMM is only optimized for CPUs'
-                         ' with instruction set support avx2 or newer.')
-    def test_fb_fc_packed(self):
-        X = np.random.rand(16, 16).astype(np.float32) - 0.5
-        W = np.random.rand(16, 16).astype(np.float32) - 0.5
-        b = np.random.rand(16).astype(np.float32) - 0.5
-
-        def fc_op(X, W, b):
-            return np.dot(X, W.T) + b
-
-        x_tensor = torch.tensor(X)
-        w_tensor = torch.tensor(W)
-        b_tensor = torch.tensor(b)
-        packed_w_tensor = torch.fbgemm_pack_gemm_matrix_fp16(w_tensor)
-        actual_output = torch.fbgemm_linear_fp16_weight(x_tensor, packed_w_tensor, b_tensor)
-        expected_output = fc_op(X, W, b)
-        torch.testing.assert_close(torch.from_numpy(expected_output), actual_output.cpu(), atol=1e-3, rtol=1e-3)
 
     def test_pad_scalar_error(self):
         inputs = torch.tensor(0., requires_grad=True)
@@ -8165,6 +8146,7 @@ class TestNNDeviceType(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @tf32_on_and_off()
+    @bf32_on_and_off()
     def test_affine_2d_rotate0(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -8204,6 +8186,7 @@ class TestNNDeviceType(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @tf32_on_and_off(0.001)
+    @bf32_on_and_off(0.001)
     def test_affine_2d_rotate90(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -8252,6 +8235,7 @@ class TestNNDeviceType(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @tf32_on_and_off(0.005)
+    @bf32_on_and_off(0.005)
     def test_affine_2d_rotate45(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -8307,6 +8291,7 @@ class TestNNDeviceType(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @tf32_on_and_off(0.005)
+    @bf32_on_and_off(0.005)
     def test_affine_2d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -8358,6 +8343,7 @@ class TestNNDeviceType(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @tf32_on_and_off(0.005)
+    @bf32_on_and_off(0.005)
     def test_affine_3d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -10188,6 +10174,29 @@ class TestNNDeviceType(NNTestCase):
                     native_res.masked_fill(mask_out, 0),
                     exact_dtype=True
                 )
+
+    @dtypes(torch.bfloat16, torch.half)
+    @precisionOverride({torch.bfloat16: 2e-2, torch.half: 3e-3})
+    def test_masked_softmax_lowp(self, dtype):
+        sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
+        for (B, num_heads, L) in sizes:
+            for dim in [0, 3]:
+                input_lowp = torch.randn((B, num_heads, L, L), dtype=dtype).requires_grad_()
+                input_ref = input_lowp.float().detach().requires_grad_()
+                mask = torch.randint(0, 2, (B, L))
+                mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L).bool()
+
+                for mask_type in [1, 2]:
+                    res_ref = torch._masked_softmax(input_ref, mask, dim, mask_type)
+                    res = torch._masked_softmax(input_lowp, mask, dim, mask_type)
+                    self.assertEqual(res_ref.to(dtype), res)
+
+                    grad_lowp = torch.randn_like(res_ref).to(dtype=dtype)
+                    grad_ref = grad_lowp.float()
+
+                    res_ref.backward(grad_ref)
+                    res.backward(grad_lowp)
+                    self.assertEqual(input_ref.grad.to(dtype), input_lowp.grad)
 
     def _test_masked_softmax_helper(self, input, dim, mask, mask_type):
         input_ref = input.detach().clone().requires_grad_()
@@ -12719,7 +12728,6 @@ class TestNNDeviceType(NNTestCase):
             with cm:
                 _test(activation=activation, batch_first=batch_first, training=training)
 
-    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @parametrize_test('foreach', (False, True))
     def test_clip_grad_value(self, foreach, device):
         if torch.device(device).type == 'xla' and foreach:
@@ -12747,7 +12755,6 @@ class TestNNDeviceType(NNTestCase):
         clip_grad_value_([p2], clip_value, foreach=foreach)
         self.assertEqual(p1.grad, p2.grad)
 
-    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @parametrize_test('foreach', (False, True))
     @parametrize_test('norm_type', (0.5, 1.5, 2, 4, 'inf'))
     def test_clip_grad_norm(self, norm_type, foreach, device):

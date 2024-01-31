@@ -570,6 +570,9 @@ API Reference
 .. autoclass:: ExportGraphSignature
 
     .. automethod:: replace_all_uses
+    .. automethod:: get_replace_hook
+
+.. autoclass:: torch.export.graph_signature.CustomObjArgument
 
 .. py:module:: torch.export.dynamic_shapes
 
@@ -578,3 +581,5 @@ API Reference
 
 .. automodule:: torch.export.wrapper
     :members:
+
+.. automodule:: torch.export.custom_obj

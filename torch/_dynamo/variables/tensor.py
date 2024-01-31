@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import functools
 
 import inspect
@@ -109,7 +111,6 @@ class TensorVariable(VariableTracker):
         size=None,
         stride=None,
         is_contiguous=None,
-        specialized_value=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -125,7 +126,6 @@ class TensorVariable(VariableTracker):
         self.is_contiguous = is_contiguous
         self.is_sparse = is_sparse
         self.class_type = class_type
-        self.specialized_value = specialized_value
 
     def as_proxy(self):
         return self.proxy
@@ -511,6 +511,8 @@ class TensorVariable(VariableTracker):
         elif name == "get_device" and isinstance(self.device, torch.device):
             index = self.device.index if self.device.type != "cpu" else -1
             constant_result = ConstantVariable.create(index)
+        elif name == "element_size":
+            constant_result = ConstantVariable.create(self.dtype.itemsize)
         else:
             constant_result = None
 
