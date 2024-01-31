@@ -1908,7 +1908,7 @@ Tensor& vdot_out(const Tensor& self, const Tensor& other, Tensor& result) {
   return result.fill_(self.vdot(other));
 }
 
-static bool should_fold(const Tensor& tensor1, const Tensor& tensor2) {
+static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_out) {
   // We check that we can fold the larger tensor into a matrix and dispatch to mm or mv rather than
   // to bmm. We want to make sure we can do so without incurring in any extra copy
   const auto tensor1_larger = tensor1.dim() >= tensor2.dim();
@@ -1937,7 +1937,10 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2) {
   // of shape [b, n, k] unnacessarily, which may cause a large memory footprint, and in the
   // worst case, an OOM
   bool t2_requires_grad = tensor1_larger ? tensor2.requires_grad() : tensor1.requires_grad();
-  if (t2_requires_grad && at::GradMode::is_enabled()) {
+  if (t2_requires_grad && !has_out) {
+    // We should be checking !at::GradMode::is_enabled(), but apparently
+    // this regresses performance in some cases:
+    // https://github.com/pytorch/pytorch/issues/118548#issuecomment-1916022394
     return true;
   }
 
@@ -2014,7 +2017,7 @@ static Tensor _matmul_impl(
                    : tensor1.unsqueeze(0).mm(tensor2).squeeze_(0);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
     return has_out ? at::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
-  } else if (should_fold(tensor1, tensor2)) {
+  } else if (should_fold(tensor1, tensor2, has_out)) {
     // dim_tensor1 >=3 && (dim_tensor2 == 1 || dim_tensor2 == 2) ||
     // dim_tensor2 >=3 && (dim_tensor1 == 1 || dim_tensor1 == 2)
     // and at least one of the following two conditions hold
