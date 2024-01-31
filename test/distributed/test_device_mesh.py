@@ -28,7 +28,6 @@ from torch.distributed.distributed_c10d import (
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
-    NativeFunColMixin,
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -739,9 +738,7 @@ class DeviceMeshTestWithNativeFunCol(DeviceMeshTest):
             funcol.disable_native_funcol()
 
 
-class DeviceMeshCollectiveTestWithNativeFunCol(
-    DeviceMeshCollectiveTest, NativeFunColMixin
-):
+class DeviceMeshCollectiveTestWithNativeFunCol(DeviceMeshCollectiveTest):
     def setUp(self) -> None:
         self._prev_native_funcol_enabled = funcol.native_funcol_enabled()
         funcol.enable_native_funcol()
