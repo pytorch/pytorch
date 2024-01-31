@@ -286,22 +286,6 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
         f"struct {struct_name} {{size_t index; {DTYPE_TO_CPP[src_dtype]} value;}};",
         f"{struct_name} {tmpvar}{{0, {reduction_init(reduction_type, src_dtype)}}};",
     ]
-<<<<<<< HEAD
-
-    if reduction_type in ["argmax", "argmin"]:
-        compare_op = "greater_or_nan" if reduction_type == "argmax" else "less_or_nan"
-        prefix.extend(
-            [
-                "#if !defined(__clang_major__) || __clang_major__ > 9",
-                f"#pragma omp declare reduction({reduction_type} : {struct_name} :\\",
-                f"    omp_out = {compare_op}(omp_in.value, omp_out.value, omp_in.index, omp_out.index) ? omp_in : omp_out)\\",
-                f"\tinitializer(omp_priv = {{0, {reduction_init(reduction_type, src_dtype)}}})",
-                "#endif",
-            ]
-        )
-
-    return prefix
-=======
     local_init = [
         f"{struct_name} {tmpvar}_local{{0, {reduction_init(reduction_type, src_dtype)}}};",
     ]
@@ -310,7 +294,6 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
         f"{struct_name} {tmpvar_per_thd};",
     ]
     return prefix, parallel_prefix, local_init
->>>>>>> e72e33f7963 (use two pass reduction for deterministic reduction order)
 
 
 @functools.lru_cache
