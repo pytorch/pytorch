@@ -1,4 +1,4 @@
-from typing import List, NamedTuple, Optional, Tuple
+from typing import List, NamedTuple, Optional
 
 import torch
 import torch.distributed as dist
@@ -198,32 +198,14 @@ def foreach_reduce_scatter_copy_in(
     reduce_scatter_input: torch.Tensor,
     world_size: int,
 ) -> None:
-    # Use `torch.split` to reduce CPU overhead since it pushes for loops of
-    # slices into C++ only
-    copy_dests: List[torch.Tensor] = []  # 1D
-    copy_srcs: List[torch.Tensor] = []  # 1D
-    split_sizes: List[int] = []
-    is_padding_mask: List[bool] = []
-    for rank in range(world_size):
-        for fsdp_param in fsdp_params:
-            split_sizes.extend(fsdp_param.padded_unsharded_chunk_numels[rank])
-            is_padding_mask.extend(fsdp_param.is_padding_mask[rank])
-    splits = torch.split(reduce_scatter_input, split_sizes, dim=0)
-    all_flat_grad_splits: List[Tuple[torch.Tensor, ...]] = []
-    for fsdp_param, grad in zip(fsdp_params, unsharded_grads):
-        # Flatten once per gradient to reduce number of `view` calls
-        flat_grad_splits = torch.split(grad.view(-1), fsdp_param.unsharded_chunk_numels)
-        all_flat_grad_splits.append(flat_grad_splits)
-    for rank in range(world_size):
-        for fsdp_param_idx in range(len(fsdp_params)):
-            if (split := all_flat_grad_splits[fsdp_param_idx][rank]).numel() > 0:
-                copy_srcs.append(split)
-            # Else pure padding
-    for is_padding, split in zip(is_padding_mask, splits):
-        if is_padding:
-            continue
-        copy_dests.append(split)
-    torch._foreach_copy_(copy_dests, copy_srcs)
+    grad_views: List[torch.Tensor] = []
+    for grad in unsharded_grads:
+        grad_size = grad.size()
+        dim0_padded_size = _get_dim0_padded_size(grad_size, world_size)
+        if dim0_padded_size != grad_size:
+            grad.resize_(dim0_padded_size)
+        grad_views.append(grad.view(world_size, -1))
+    torch.cat(grad_views, dim=-1, out=reduce_scatter_input.view(world_size, -1))
 
 
 def _div_if_needed(tensor: torch.Tensor, div_factor: float) -> None:
