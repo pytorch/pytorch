@@ -1041,6 +1041,7 @@ def make_fast_binary_impl(slow_ref):
         # compute_fast_setup_type
         is_contiguous = True
         is_channels_last = True
+        is_channels_last_3d = True
         # TODO: is_non-overlapping_and_dense (not bound from Python
         # no inplace, no out, everything defined
 
@@ -1053,6 +1054,9 @@ def make_fast_binary_impl(slow_ref):
                 )
                 is_channels_last = is_channels_last and op.is_contiguous(
                     memory_format=torch.channels_last
+                )
+                is_channels_last_3d = is_channels_last and op.is_contiguous(
+                    memory_format=torch.channels_last_3d
                 )
         if is_contiguous:
             # do contiguous
@@ -1077,6 +1081,19 @@ def make_fast_binary_impl(slow_ref):
                     dtype=common_dtype,
                     device="meta",
                     memory_format=torch.channels_last,
+                ),
+                device=common_device,
+            )
+        if is_channels_last_3d:
+            count_label("fast channels_last_3d")
+            # do channels last
+            return FakeTensor(
+                mode,
+                torch.empty(
+                    final_shape,
+                    dtype=common_dtype,
+                    device="meta",
+                    memory_format=torch.channels_last_3d,
                 ),
                 device=common_device,
             )

@@ -47,12 +47,12 @@ aten = torch.ops.aten
 torch._dynamo.config.fake_tensor_cache_enabled = True
 torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 
+
 class FakeTensorTest(TestCase):
     def checkType(self, t, device_str, size):
         self.assertTrue(isinstance(t, FakeTensor))
         self.assertEqual(t.device.type, device_str)
         self.assertEqual(list(t.size()), size)
-
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cuda_initialized(self):
@@ -310,8 +310,6 @@ class FakeTensorTest(TestCase):
                 torch.ops.aten.index_put(x, torch.tensor([1, 1], device="cuda"), torch.tensor(5.))
                 torch.ops.aten.index_put_(x, torch.tensor([1, 1], device="cuda"), torch.tensor(5.))
 
-
-
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_like_constructor(self):
         with FakeTensorMode():
@@ -401,7 +399,6 @@ class FakeTensorTest(TestCase):
 
             with self.assertRaisesRegex(Exception, "found two different devices"):
                 x.add_(y)
-
 
     @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile")
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
@@ -778,6 +775,13 @@ class FakeTensorTest(TestCase):
             grad_in = torch.ops.aten._adaptive_avg_pool2d_backward(grad_out, inp)
             self.assertTrue(torch._prims_common.suggest_memory_format(grad_in) == torch.channels_last)
 
+    def test__adaptive_avg_pool3d_backward(self):
+        with FakeTensorMode():
+            grad_out = torch.rand(2, 3, 4, 4, 4)
+            inp = torch.rand(2, 3, 4, 4, 4).to(memory_format=torch.channels_last_3d)
+            grad_in = torch.ops.aten._adaptive_avg_pool3d_backward(grad_out, inp)
+            self.assertTrue(torch._prims_common.suggest_memory_format(grad_in) == torch.channels_last_3d)
+
 
 class FakeTensorConstHandling(TestCase):
     def assertConst(self, *args):
@@ -869,6 +873,7 @@ class FakeTensorConstHandling(TestCase):
             y = torch.div(4, 4, rounding_mode='trunc')
             self.assertConst(y)
 
+
 def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
     return maybe_contained_type.isSubtypeOf(type) or any(
         contains_type(e, maybe_contained_type) for e in type.containedTypes()
@@ -895,7 +900,8 @@ class FakeTensorConverterTest(TestCase):
         x = torch.rand(2, 2).to(device="meta")
         mode = FakeTensorMode()
         converter = mode.fake_tensor_converter
-        self.assertTrue(converter.from_meta_and_device(mode, x, "cpu") is converter.from_meta_and_device(mode, x, "cpu"))
+        self.assertTrue(converter.from_meta_and_device(mode, x, "cpu")
+                        is converter.from_meta_and_device(mode, x, "cpu"))
 
     def test_separate_tensor_storages_view(self):
         x = torch.rand(2, 2, 2)
@@ -925,7 +931,6 @@ class FakeTensorConverterTest(TestCase):
         self.assertEqual(len(converter.tensor_memo), 0)
         converter.meta_converter.check_for_expired_weak_storages()
         self.assertEqual(len(converter.meta_converter.storage_memo), 0)
-
 
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_dead_weak_ref(self):
@@ -1133,7 +1138,8 @@ class FakeTensorOperatorInvariants(TestCase):
                 # We expect the cross ref to succed for the first output to fail
                 # for the rng state, see Note [Seed and Offset]
                 self.assertTrue("output[0]" not in str(e))
-                self.assertTrue("found mismatched tensor metadata for output[6]: Devices cpu and cuda:0 are not equal!" in str(e))
+                self.assertTrue(
+                    "found mismatched tensor metadata for output[6]: Devices cpu and cuda:0 are not equal!" in str(e))
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
@@ -1242,7 +1248,6 @@ class FakeTensorPropTest(TestCase):
                     failed = True
                 self.assertTrue(failed)
 
-
     def test_fake_tensor_prop_on_nn_module_with_optional_args(self):
         class OptionalArgumentInBetween(torch.nn.Module):
             def __init__(self):
@@ -1331,11 +1336,18 @@ class FakeTensorDispatchCache(TestCase):
             z = x.to(device="cuda")
             self._test_cache_key(fm, x, y, z)
 
-    def test_cache_key_memory_format(self):
+    def test_cache_key_memory_format_2d(self):
         with FakeTensorMode() as fm:
             x = torch.randn(1, 2, 3, 4)
             y = torch.randn(1, 2, 3, 4)
             z = x.to(memory_format=torch.channels_last)
+            self._test_cache_key(fm, x, y, z)
+
+    def test_cache_key_memory_format_3d(self):
+        with FakeTensorMode() as fm:
+            x = torch.randn(1, 2, 3, 4, 5)
+            y = torch.randn(1, 2, 3, 4, 5)
+            z = x.to(memory_format=torch.channels_last_3d)
             self._test_cache_key(fm, x, y, z)
 
     def test_cache_key_storage_offset(self):
