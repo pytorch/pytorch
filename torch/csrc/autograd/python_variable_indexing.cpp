@@ -28,6 +28,8 @@
 #include <c10/util/irange.h>
 
 #include <c10/core/Layout.h>
+#include <tuple>
+#include <vector>
 
 using namespace at;
 using namespace torch::autograd::utils;
@@ -127,12 +129,10 @@ inline Variable valueToTensor(
   } else if (torch::is_symbool(value)) {
     scalar = Scalar(py::cast<c10::SymBool>(py::handle(value)));
   } else {
-    TORCH_CHECK_TYPE(
-        false,
-        "can't assign a ",
+    throw TypeError(
+        "can't assign a %s to a %s",
         Py_TYPE(value)->tp_name,
-        " to a ",
-        torch::utils::options_to_string(options));
+        torch::utils::options_to_string(options).c_str());
   }
   // lift_fresh is supposed to be used in situations where you are guaranteed to
   // get a plain Tensor which is not true for cpu device but not for non cpu
@@ -437,7 +437,9 @@ void dispatch_set_item(
 // indexing is needed, it calls C++ `at::indexing::dispatch_index_put_`.
 int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK_TYPE(py_value, "Tensor does not support deleting items");
+  if (py_value == nullptr) {
+    throw TypeError("Tensor does not support deleting items");
+  }
   if ((!THPVariable_CheckExact(self) && check_has_torch_function(self)) ||
       (!THPVariable_CheckExact(py_value) &&
        check_has_torch_function(py_value))) {
@@ -447,11 +449,11 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   }
 
   const auto& self_ = THPVariable_Unpack(self);
-  TORCH_CHECK_TYPE(
-      self_.layout() != kSparse && self_.layout() != kSparseCsr &&
-          self_.layout() != kSparseCsc && self_.layout() != kSparseBsr &&
-          self_.layout() != kSparseBsc,
-      "Cannot assign to a sparse tensor");
+  if (self_.layout() == kSparse || self_.layout() == kSparseCsr ||
+      self_.layout() == kSparseCsc || self_.layout() == kSparseBsr ||
+      self_.layout() == kSparseBsc) {
+    throw TypeError("Cannot assign to a sparse tensor");
+  }
   OptionalDeviceGuard device_guard(device_of(self_));
   at::Device self_device = self_.device();
   Variable value;
