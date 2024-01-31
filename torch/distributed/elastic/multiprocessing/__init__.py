@@ -226,8 +226,8 @@ def start_processes(
         redirs[local_rank] = redirect_std | tee_std
 
     SYS_STREAM = ""  # special case to indicate to output to console
-    stdouts = {local_rank: SYS_STREAM for local_rank in range(nprocs)}
-    stderrs = {local_rank: SYS_STREAM for local_rank in range(nprocs)}
+    stdouts = dict.fromkeys(range(nprocs), SYS_STREAM)
+    stderrs = dict.fromkeys(range(nprocs), SYS_STREAM)
     tee_stdouts: Dict[int, str] = {}
     tee_stderrs: Dict[int, str] = {}
     error_files = {}

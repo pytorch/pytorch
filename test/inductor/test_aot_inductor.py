@@ -3,6 +3,7 @@ import copy
 import os
 import sys
 import tempfile
+import types
 import unittest
 from typing import Dict, Tuple
 
@@ -20,6 +21,7 @@ from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_quantization import skip_if_no_torchvision
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     IS_CI,
     IS_FBCODE,
     IS_WINDOWS,
@@ -77,7 +79,8 @@ def check_model(
         }
     ):
         torch.manual_seed(0)
-        model = model.to(self.device)
+        if not isinstance(model, types.FunctionType):
+            model = model.to(self.device)
         ref_model = copy.deepcopy(model)
         ref_inputs = copy.deepcopy(example_inputs)
         expected = ref_model(*ref_inputs)
@@ -187,7 +190,7 @@ class AOTInductorTestsTemplate:
         )
         self.assertTrue(actual_path == expected_path)
 
-    @requires_cuda()
+    @requires_cuda
     def test_multi_device(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -1165,6 +1168,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_y}}
         self.check_model(Model(), (x, y), dynamic_shapes=dynamic_shapes)
 
+    @skipIfRocm
     def test_triton_kernel_dynamic_shape_with_div(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -1191,6 +1195,7 @@ class AOTInductorTestsTemplate:
         dynamic_shapes = {"x": {0: dim0_x}}
         self.check_model(Model(), (x,), dynamic_shapes=dynamic_shapes)
 
+    @skipIfRocm
     def test_triton_kernel_reinterpret_view(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -1212,6 +1217,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(4, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    @skipIfRocm
     def test_triton_kernel_with_none_input(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -1324,25 +1330,30 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), inputs)
 
     def test_index_put_fallback(self):
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
+        # index_put falls back in the deterministic mode
+        with DeterministicGuard(True):
 
-            def forward(
-                self,
-                self_tensor: torch.Tensor,
-                indices: Tuple[torch.Tensor],
-                values: torch.Tensor,
-            ):
-                return torch.index_put(self_tensor, indices, values, accumulate=True)
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
 
-        inputs = (
-            torch.ones(4, device=self.device, dtype=torch.int64),
-            (torch.tensor([1, 1, 2, 2], device=self.device, dtype=torch.bool),),
-            torch.ones(4, device=self.device, dtype=torch.int64),
-        )
+                def forward(
+                    self,
+                    self_tensor: torch.Tensor,
+                    indices: Tuple[torch.Tensor],
+                    values: torch.Tensor,
+                ):
+                    return torch.index_put(
+                        self_tensor, indices, values, accumulate=True
+                    )
 
-        self.check_model(Model(), inputs)
+            inputs = (
+                torch.ones(4, device=self.device, dtype=torch.int64),
+                (torch.tensor([1, 1, 2, 2], device=self.device, dtype=torch.bool),),
+                torch.ones(4, device=self.device, dtype=torch.int64),
+            )
+
+            self.check_model(Model(), inputs)
 
     def test_convolution(self):
         class Model(torch.nn.Module):
@@ -1542,12 +1553,16 @@ class AOTInductorTestsTemplate:
         model.weight += 1
         self.check_model(model, example_inputs)
 
+    @skipIfRocm
     def test_triton_kernel_extern_kernel_arg(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
 
         class Model(torch.nn.Module):
             def forward(self, x, y):
+                # AOT export does not allow for input mutation
+                x = x.clone()
+                y = y.clone()
                 out = torch.zeros_like(x)
                 # torch.mm is ExternKernelOut
                 add_kernel[(4,)](x, torch.mm(x, y), out, 4, 16)
@@ -1560,12 +1575,16 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), example_inputs)
 
+    @skipIfRocm
     def test_triton_kernel_multi_output_arg(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
 
         class Model(torch.nn.Module):
             def forward(self, x, y):
+                # AOT export does not allow for input mutation
+                x = x.clone()
+                y = y.clone()
                 out = torch.zeros_like(x)
                 # torch.sort creates fallback kernel and hence MultiOutput
                 add_kernel[(4,)](x, torch.sort(y).values, out, 4, 16)
@@ -1577,6 +1596,85 @@ class AOTInductorTestsTemplate:
         )
 
         self.check_model(Model(), example_inputs)
+
+    @skipIfRocm
+    @config.patch({"aot_inductor.abi_compatible": True})
+    def test_triton_kernel_reinterpret_view_mem_leak(self):
+        # Check for memory leak when using user-defined Triton Kernel + AOTI.
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                out = torch.zeros_like(x)
+                yy = y * y
+                # reshape creates a ReinterpretView
+                add_kernel[(4,)](x, yy.reshape_as(x), out, 4, 16)
+                return out
+
+        example_inputs = (
+            torch.randn(4, 4, device="cuda"),
+            torch.randn(1, 16, device="cuda"),
+        )
+
+        so_path: str = AOTIRunnerUtil.compile(
+            Model(),
+            example_inputs,
+        )
+        aot_inductor_module = AOTIRunnerUtil.load("cuda", so_path)
+
+        # Don't assign outputs to a variable b/c it will allocate GPU memory.
+        device: int = torch.cuda.current_device()
+        mem_before = torch.cuda.memory_allocated(device)
+        aot_inductor_module(*example_inputs)
+        aot_inductor_module(*example_inputs)
+        mem_after = torch.cuda.memory_allocated(device)
+        self.assertEqual(mem_before, mem_after)
+
+        actual = aot_inductor_module(*example_inputs)
+        expected = Model()(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipIfRocm
+    def test_scaled_dot_product_efficient_attention(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def forward(self, q, k, v, attn_bias):
+                return torch.ops.aten._scaled_dot_product_efficient_attention(
+                    q, k, v, attn_bias, False
+                )[0]
+
+        example_inputs = (
+            torch.randn(4, 4, 36, 36, device="cuda"),
+            torch.randn(4, 4, 36, 36, device="cuda"),
+            torch.randn(4, 4, 36, 36, device="cuda"),
+            torch.randn(4, 4, 36, 36, device="cuda"),
+        )
+        self.check_model(Model(), example_inputs)
+
+    @skipIfRocm
+    def test_index_put_with_none_index(self):
+        # index_put falls back in the deterministic mode
+        with DeterministicGuard(True):
+
+            class Model(torch.nn.Module):
+                def forward(self, x, i1, i2, y):
+                    return torch.ops.aten.index_put(
+                        x, (None, None, i1, i2), y, accumulate=True
+                    )
+
+            example_inputs = (
+                torch.rand(8, 192, 30, 30, device=self.device),
+                torch.zeros(3, 14, 1, 1, dtype=torch.int64, device=self.device),
+                torch.ones(3, 14, dtype=torch.int64, device=self.device),
+                torch.randn(8, 192, 3, 14, 3, 14, device=self.device),
+            )
+            self.check_model(Model(), example_inputs)
 
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
@@ -1639,7 +1737,7 @@ CPU_TEST_FAILURES = {
     "test_bmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
     "test_dup_unbacked_sym_decl": fail_with_and_without_stack_allocation(),
     "test_dynamic_cat": fail_with_and_without_stack_allocation(),
-    "test_dynamic_scalar": fail_with_and_without_stack_allocation(),
+    "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
     "test_dynamic_smem_above_default_limit": fail_with_and_without_stack_allocation(),
     "test_foreach_multiple_dynamic": fail_with_and_without_stack_allocation(),
     # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
@@ -1658,6 +1756,7 @@ CPU_TEST_FAILURES = {
     "test_scatter_fallback": fail_stack_allocation(is_skip=True),
     "test_scatter_reduce_fallback": fail_stack_allocation(is_skip=True),
     "test_index_put_fallback": fail_stack_allocation(is_skip=True),
+    "test_index_put_with_none_index": fail_stack_allocation(is_skip=True),
     # C++ compile error, need for aoti_torch___scaled_dot_product_flash_attention_for_cpu
     "test_sdpa": fail_with_and_without_stack_allocation(is_skip=True),
     "test_sdpa_2": fail_with_and_without_stack_allocation(is_skip=True),
@@ -1671,8 +1770,6 @@ CPU_TEST_FAILURES = {
 CUDA_TEST_FAILURES = {
     # test_failures, xfail by default, set is_skip=True to skip
     "test_dup_unbacked_sym_decl": fail_abi_compatible_cuda(),
-    # will add .item support later
-    "test_dynamic_scalar": fail_abi_compatible_cuda(),
     "test_normal_functional": fail_abi_compatible_cuda(),
     # There is a double-free issue which will be fixed in another PR
     "test_repeat_output": fail_abi_compatible_cuda(is_skip=True),
@@ -1782,6 +1879,7 @@ copy_tests(
 )
 
 
+@unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
 class AOTInductorTestABICompatibleCuda(TestCase):
     device = "cuda"
     abi_compatible = True
@@ -1799,7 +1897,10 @@ copy_tests(
 )
 
 
-@unittest.skipIf(IS_FBCODE, "NonABI mode should not be used in fbcode")
+@unittest.skipIf(
+    IS_FBCODE or sys.platform == "darwin",
+    "NonABI mode should not be used in fbcode nor on MacOS",
+)
 class AOTInductorTestNonABICompatibleCpu(TestCase):
     device = "cpu"
     abi_compatible = False
@@ -1827,7 +1928,10 @@ copy_tests(
 )
 
 
-@unittest.skipIf(IS_FBCODE, "NonABI mode should not be used in fbcode")
+@unittest.skipIf(
+    IS_FBCODE or sys.platform == "darwin",
+    "NonABI mode should not be used in fbcode nor on MacOS",
+)
 class AOTInductorTestNonABICompatibleCuda(TestCase):
     device = "cuda"
     abi_compatible = False
@@ -1849,5 +1953,5 @@ if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
     # cpp_extension N/A in fbcode
-    if HAS_CUDA:
+    if HAS_CUDA or sys.platform == "darwin":
         run_tests(needs="filelock")
