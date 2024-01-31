@@ -146,9 +146,8 @@ C10_XPU_API void setCurrentXPUStream(XPUStream stream);
 C10_XPU_API std::ostream& operator<<(std::ostream& stream, const XPUStream& s);
 
 /**
- * Block all SYCL queues on the device, and wait their synchronizations. We
- * realize the semantics via a loop through the queue pools of the specified
- * device and make each command queue synchronization sequentially.
+ * Block all reserved SYCL queues in the stream pools on the device, and wait
+ * for their synchronizations.
  */
 C10_XPU_API void syncStreamsOnDevice(DeviceIndex device = -1);
 
