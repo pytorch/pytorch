@@ -20,9 +20,9 @@ namespace detail {
 // splits.
 // - Each dst split is the concatenation of the chunks in its corresponding src
 // splits.
-// - The sizes chunks vary across splits.
-// - The alignment varies across chunks. A (src, dst) chunk pair is not
-// guaranteed to have the same alignment.
+// - The sizes of chunks vary across splits.
+// - A (src, dst) chunk pair is not guaranteed to have the
+// same alignment.
 //
 // The following strategies are employed to optimize for this workload:
 // - The entire workload is fused into a single kernel to maximize I/O

@@ -85,7 +85,9 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
         torch.uint8,
         torch.bool,
         torch.bfloat16,
+        torch.complex32,
         torch.complex64,
+        torch.complex128,
         torch.float16,
     }
     if cuda:
@@ -857,7 +859,7 @@ class GraphLowering(torch.fx.Interpreter):
             ):
                 debug("fallback_handler")
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
-                    *args, **kwargs
+                    *args, **kwargs  # type: ignore[possibly-undefined]
                 )
             elif n.op == "call_function" and n.target in layout_constraints:
                 debug("layout_constraints")
