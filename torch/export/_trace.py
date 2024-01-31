@@ -49,6 +49,7 @@ from .graph_signature import (
     _sig_to_specs,
     ArgumentSpec,
     ConstantArgument,
+    CustomObjArgument,
     ExportGraphSignature,
     SymIntArgument,
     TensorArgument,
@@ -435,7 +436,13 @@ def _export_non_strict(
             return TensorArgument(name=node.name)
         elif isinstance(val, torch.SymInt):
             return SymIntArgument(name=node.name)
+        elif isinstance(val, torch.ScriptObject):
+            return CustomObjArgument(
+                name=node.name, class_fqn=val._type().qualified_name()  # type: ignore[attr-defined]
+            )
         else:
+            # TODO: this branch is likely wrong, all permissible ConstantArgument type
+            # should have been handled already
             return ConstantArgument(value=val)
 
     input_specs, output_specs = _sig_to_specs(
@@ -551,9 +558,14 @@ def _export(
 
                     def forward(self, *args, **kwargs):
                         nonlocal out_spec
-                        flat_outs, out_spec = pytree.tree_flatten(
-                            self._export_root(*args, **kwargs)
-                        )
+                        if isinstance(self._export_root, torch.fx.GraphModule):
+                            with torch.fx.traceback.preserve_node_meta():
+                                tree_out = torch.fx.Interpreter(self._export_root).run(
+                                    *args, **kwargs
+                                )
+                        else:
+                            tree_out = self._export_root(*args, **kwargs)
+                        flat_outs, out_spec = pytree.tree_flatten(tree_out)
                         return tuple(flat_outs)
 
                 wrapped_mod = Wrapper(mod)
@@ -581,8 +593,6 @@ def _export(
                 for node in gm.graph.nodes:
                     if "nn_module_stack" in node.meta:
                         nn_module_stack = node.meta["nn_module_stack"]
-                        # Delete the wrapper module reference
-                        del nn_module_stack[""]
                         node.meta["nn_module_stack"] = {
                             fixup_key(key): val
                             for key, val in pytree.tree_map(
