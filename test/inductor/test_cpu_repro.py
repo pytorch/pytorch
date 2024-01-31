@@ -2944,6 +2944,7 @@ class CPUReproTests(TestCase):
         assert metrics.generated_cpp_vec_kernel_count == 1
 
     def test_no_rebundant_to_dtypes_between_fused_scheduler_node(self):
+        # https://github.com/pytorch/pytorch/issues/115260
         p0 = torch.tensor([1.0879], dtype=torch.float16)
 
         class Model1(torch.nn.Module):
