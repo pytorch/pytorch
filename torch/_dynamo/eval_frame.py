@@ -275,6 +275,10 @@ def nothing():
     pass
 
 
+def always_false():
+    return False
+
+
 def innermost_fn(fn):
     """
     In case of nesting of _TorchDynamoContext calls, find the innermost
@@ -415,11 +419,16 @@ class _TorchDynamoContext:
 
         callback = self.callback
 
+        if isinstance(self, DisableContext):
+            is_jit_tracing = always_false
+            is_fx_tracing = always_false
+        else:
+            is_jit_tracing = torch._C._is_tracing
+            is_fx_tracing = torch.fx._symbolic_trace.is_fx_tracing
+
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
-            if torch.fx._symbolic_trace.is_fx_tracing() and not isinstance(
-                self, DisableContext
-            ):
+            if is_fx_tracing():
                 if config.error_on_nested_fx_trace:
                     raise RuntimeError(
                         "Detected that you are using FX to symbolically trace "
@@ -428,7 +437,7 @@ class _TorchDynamoContext:
                 else:
                     return fn(*args, **kwargs)
 
-            if torch.jit.is_tracing():
+            if is_jit_tracing():
                 if config.error_on_nested_jit_trace:
                     raise RuntimeError(
                         "Detected that you are using FX to torch.jit.trace "
@@ -1421,7 +1430,7 @@ def export(
                 example_fake_inputs,
                 graph_captured_input,
                 graph_captured_result,
-                result_traced,
+                result_traced,  # type: ignore[possibly-undefined]
                 flat_args_dynamic_dims,
             )
         # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check
