@@ -11,8 +11,7 @@
 #include <mutex>
 #include <vector>
 
-namespace c10 {
-namespace cuda {
+namespace c10::cuda {
 
 namespace {
 
@@ -339,5 +338,4 @@ std::ostream& operator<<(std::ostream& stream, const CUDAStream& s) {
   return stream << s.unwrap();
 }
 
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda

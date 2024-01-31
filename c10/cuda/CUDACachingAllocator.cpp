@@ -40,8 +40,7 @@ namespace c10 {
 
 C10_DEFINE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
 
-namespace cuda {
-namespace CUDACachingAllocator {
+namespace cuda::CUDACachingAllocator {
 
 // Included here as this is externally used in CUDAAllocatorConfig
 const size_t kLargeBuffer =
@@ -3347,6 +3346,6 @@ struct BackendStaticInitializer {
 std::atomic<CUDAAllocator*> allocator;
 BackendStaticInitializer backend_static_initializer;
 
-} // namespace CUDACachingAllocator
-} // namespace cuda
+} // namespace cuda::CUDACachingAllocator
+
 } // namespace c10

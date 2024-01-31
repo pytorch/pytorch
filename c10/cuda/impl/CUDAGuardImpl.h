@@ -18,9 +18,7 @@
 #include <cuda_runtime_api.h>
 #include <cstdint>
 
-namespace c10 {
-namespace cuda {
-namespace impl {
+namespace c10::cuda::impl {
 
 struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = DeviceType::CUDA;
@@ -211,6 +209,4 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
 };
 
-} // namespace impl
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda::impl

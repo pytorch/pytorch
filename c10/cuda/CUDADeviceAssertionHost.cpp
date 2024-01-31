@@ -26,8 +26,7 @@
         false);                                                     \
   } while (0)
 
-namespace c10 {
-namespace cuda {
+namespace c10::cuda {
 
 namespace {
 
@@ -343,5 +342,4 @@ bool CUDAKernelLaunchRegistry::has_failed() const {
   return false;
 }
 
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda

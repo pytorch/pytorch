@@ -9,10 +9,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace c10 {
-namespace cuda {
-namespace CUDACachingAllocator {
-namespace CudaMallocAsync {
+namespace c10::cuda::CUDACachingAllocator::CudaMallocAsync {
 
 #if CUDA_VERSION >= 11040
 // CUDA device allocator that uses cudaMallocAsync to implement
@@ -898,7 +895,4 @@ CUDAAllocator* allocator() {
 
 #endif
 
-} // namespace CudaMallocAsync
-} // namespace CUDACachingAllocator
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda::CUDACachingAllocator::CudaMallocAsync
