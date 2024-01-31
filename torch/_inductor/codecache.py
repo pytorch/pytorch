@@ -1511,6 +1511,10 @@ class CudaKernelParamCache:
     def get(cls, key: str) -> Optional[Dict[str, str]]:
         return cls.cache.get(key, None)
 
+    @classmethod
+    def get_keys(cls):
+        return cls.cache.keys()
+
 
 class AotCodeCompiler:
     @classmethod
@@ -1692,7 +1696,9 @@ class AotCodeCompiler:
                 return bytes(raw_array.contents)
 
             aot_constants = b"".join(
-                _to_bytes(tensor) for tensor in graph.constants.values()
+                _to_bytes(tensor)
+                for name, tensor in graph.constants.items()
+                if name not in graph.folded_constants
             )
             consts_o = {
                 "linux": _compile_consts_linux,

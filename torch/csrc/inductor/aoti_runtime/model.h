@@ -318,8 +318,13 @@ class AOTInductorModelBase {
     for (size_t i = 0; i < num_constants; i++) {
       std::string name = this->constant_name(i);
       size_t data_size = this->constant_data_size(i);
+      bool from_folded = this->constant_from_folded(i);
       uint8_t* internal_ptr = (data_size != 0)
-          ? constant_ptr(constants_internal_offset[i], bytes_read, data_size)
+          ? constant_ptr(
+                constants_internal_offset[i],
+                bytes_read,
+                data_size,
+                from_folded)
           : nullptr;
       bytes_read += data_size;
 
@@ -361,20 +366,24 @@ class AOTInductorModelBase {
   uint8_t* constant_ptr(
       size_t constant_offset,
       size_t bytes_read,
-      size_t data_size) {
+      size_t data_size,
+      bool skip_copy) {
 #ifdef USE_CUDA
     auto* constants_ptr = static_cast<uint8_t*>(constant_blob_.get());
     uint8_t* internal_ptr = constants_ptr + constant_offset;
     // Copy data to GPU memory
     // TODO: Handle shared storage case.
-    AOTI_RUNTIME_DEVICE_CHECK(cudaMemcpy(
-        internal_ptr,
-        _binary_constants_bin_start + bytes_read,
-        data_size,
-        cudaMemcpyHostToDevice));
+    if (!skip_copy) {
+      AOTI_RUNTIME_DEVICE_CHECK(cudaMemcpy(
+          internal_ptr,
+          _binary_constants_bin_start + bytes_read,
+          data_size,
+          cudaMemcpyHostToDevice));
+    }
     return internal_ptr;
 #else // !USE_CUDA
     // get pointer to constant which is packed in model during compile time.
+    AOTI_RUNTIME_CHECK(!skip_copy, "pure cpu mode doesn't support skip copy");
     return const_cast<uint8_t*>(_binary_constants_bin_start) + bytes_read;
 #endif // USE_CUDA
   }
@@ -448,6 +457,10 @@ class AOTInductorModelBase {
 
   const char* constant_original_fqn(int64_t idx) const {
     return constants_info_.at(idx).original_fqn;
+  }
+
+  bool constant_from_folded(int64_t idx) const {
+    return constants_info_.at(idx).from_folded;
   }
 
   const char* get_in_spec() const {
@@ -541,6 +554,7 @@ class AOTInductorModelBase {
     int64_t offset;
     size_t data_size;
     const char* original_fqn = nullptr;
+    bool from_folded;
   };
 
   std::vector<ParamInfo> inputs_info_;
@@ -586,6 +600,16 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
       std::shared_ptr<std::vector<ConstantHandle>> constants_array,
       const std::string& device_str,
       std::optional<std::string> cubin_dir);
+
+  std::unordered_map<std::string, AtenTensorHandle> const_run_impl(
+      DeviceStreamType stream,
+      AOTIProxyExecutorHandle proxy_executor,
+      bool initialization = false);
+
+  void _const_run_impl(
+      std::vector<AtenTensorHandle>& output_handles,
+      DeviceStreamType stream,
+      AOTIProxyExecutorHandle proxy_executor);
 
   void run_impl(
       AtenTensorHandle*
