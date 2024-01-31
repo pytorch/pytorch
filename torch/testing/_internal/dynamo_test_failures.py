@@ -2746,6 +2746,68 @@ dynamo_expected_failures = {
     "TestScript.test_repeated_script_on_function",  # test_jit
     "TestScript.test_gather_dynamic_index",  # test_jit
     "TestScript.test_alias_covariant_type_containers",  # test_jit
+    "TestTensorExprFuser.test_min_max_reduction2",  # test_tensorexpr
+    "TestTensorExprFuser.test_constant",  # test_tensorexpr
+    "TestTensorExprFuser.test_round_2",  # test_tensorexpr
+    "TestTensorExprFuser.test_int64_promotion",  # test_tensorexpr
+    "TestTensorExprFuser.test_chunk",  # test_tensorexpr
+    "TestTensorExprFuser.test_sin_pow",  # test_tensorexpr
+    "TestTensorExprFuser.test_le",  # test_tensorexpr
+    "TestTensorExprFuser.test_cat_negative_dim",  # test_tensorexpr
+    "TestTensorExprFuser.test_add_const_rhs",  # test_tensorexpr
+    "TestTensorExprFuser.test_all_combos",  # test_tensorexpr
+    "TestTensorExprFuser.test_min_max_reduction_dim1_2",  # test_tensorexpr
+    "TestTensorExprFuser.test_relu",  # test_tensorexpr
+    "TestTensorExprFuser.test_ge",  # test_tensorexpr
+    "TestTensorExprFuser.test_nans",  # test_tensorexpr
+    "TestTensorExprFuser.test_rank_two",  # test_tensorexpr
+    "TestTensorExprFuser.test_add_sub",  # test_tensorexpr
+    "TestTensorExprFuser.test_simple_add",  # test_tensorexpr
+    "TestTensorExprFuser.test_int_output",  # test_tensorexpr
+    "TestTensorExprFuser.test_double",  # test_tensorexpr
+    "TestTensorExprFuser.test_sliced_stride",  # test_tensorexpr
+    "TestTensorExprFuser.test_bitwise_ops",  # test_tensorexpr
+    "TestTensorExprFuser.test_min_max",  # test_tensorexpr
+    "TestTensorExprFuser.test_loop",  # test_tensorexpr
+    "TestTensorExprFuser.test_multioutput",  # test_tensorexpr
+    "TestTensorExprFuser.test_easy",  # test_tensorexpr
+    "TestTensorExprFuser.test_unsqueeze",  # test_tensorexpr
+    "TestTensorExprFuser.test_binary_ops",  # test_tensorexpr
+    "TestTensorExprFuser.test_mask",  # test_tensorexpr
+    "TestTensorExprFuser.test_where",  # test_tensorexpr
+    "TestTensorExprFuser.test_broadcast",  # test_tensorexpr
+    "TestTensorExprFuser.test_strided_output_preserved",  # test_tensorexpr
+    "TestTensorExprFuser.test_char",  # test_tensorexpr
+    "TestTensorExprFuser.test_cat_empty_tensors",  # test_tensorexpr
+    "TestTensorExprFuser.test_broadcast_big2",  # test_tensorexpr
+    "TestTensorExprFuser.test_slice",  # test_tensorexpr
+    "TestTensorExprFuser.test_remainder",  # test_tensorexpr
+    "TestTensorExprFuser.test_cat",  # test_tensorexpr
+    "TestTensorExprFuser.test_reps",  # test_tensorexpr
+    "TestTensorExprFuser.test_transpose",  # test_tensorexpr
+    "TestTensorExprFuser.test_exp_pow",  # test_tensorexpr
+    "TestTensorExprFuser.test_lt",  # test_tensorexpr
+    "TestTensorExprFuser.test_cat_promote_inputs",  # test_tensorexpr
+    "TestTensorExprFuser.test_gt",  # test_tensorexpr
+    "TestTensorExprFuser.test_double_intrinsics",  # test_tensorexpr
+    "TestTensorExprFuser.test_alpha",  # test_tensorexpr
+    "TestTensorExprFuser.test_ne",  # test_tensorexpr
+    "TestTensorExprFuser.test_scalar",  # test_tensorexpr
+    "TestTensorExprFuser.test_short",  # test_tensorexpr
+    "TestTensorExprFuser.test_promotion",  # test_tensorexpr
+    "TestTensorExprFuser.test_broadcast3",  # test_tensorexpr
+    "TestTensorExprFuser.test_three_arg",  # test_tensorexpr
+    "TestTensorExprFuser.test_min_max_reduction",  # test_tensorexpr
+    "TestTensorExprFuser.test_clamp",  # test_tensorexpr
+    "TestTensorExprFuser.test_broadcast_2",  # test_tensorexpr
+    "TestTensorExprFuser.test_half_gelu",  # test_tensorexpr
+    "TestTensorExprFuser.test_eq",  # test_tensorexpr
+    "TestTensorExprFuser.test_propagated_mem_layout",  # test_tensorexpr
+    "TestTensorExprFuser.test_min_max_reduction_dim1",  # test_tensorexpr
+    "TestTensorExprFuser.test_unary_ops",  # test_tensorexpr
+    "TestTensorExprFuser.test_cat_with_constant_dim",  # test_tensorexpr
+    "TestTensorExprFuser.test_four_arg",  # test_tensorexpr
+    "TestTensorExprFuser.test_multi_rand",  # test_tensorexpr
 }
 
 # see NOTE [dynamo_test_failures.py] for more details
