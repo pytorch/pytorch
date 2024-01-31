@@ -272,6 +272,10 @@ def channel_shuffle(input: TensorLikeType, groups: int) -> TensorLikeType:
     """
     Reference implementation of :func:`torch.nn.functional.channel_shuffle`.
     """
+    torch._check(
+        groups > 0,
+        lambda: f"Number of groups to divide channels in must be positive. Value of groups:{groups}",
+    )
     batches = input.shape[:-3]
     C = input.shape[-3]
     Cg = C // groups
