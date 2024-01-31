@@ -1471,6 +1471,11 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         matcher=lambda sample: len(sample.input.shape) == 0,
         reason="fixme: https://github.com/onnx/onnx/issues/4986",
     ),
+    skip(
+        "mm",
+        matcher=lambda sample: torch.numel(sample.input) == 0,
+        reason="values of matmul of [m, 0] and [0, n] matrices are undefined",
+    ),
     xfail(
         "native_batch_norm",
         matcher=lambda sample: sample.args[-3] is True
@@ -1612,19 +1617,6 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         "softmax",
         matcher=lambda sample: len(sample.input.shape) == 0,
         reason="fixme: LogSoftMax does not support empty tensor as input",
-    ),
-    xfail(
-        "split",
-        variant_name="list_args",
-        matcher=lambda sample: isinstance(sample.args[0], torch.Size),
-        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
-        reason=onnx_test_common.reason_dynamo_does_not_support("pytree flatten error"),
-    ),
-    xfail(
-        "split_with_sizes",
-        matcher=lambda sample: isinstance(sample.args[0], torch.Size),
-        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
-        reason=onnx_test_common.reason_dynamo_does_not_support("pytree flatten error"),
     ),
     xfail(
         "t",
