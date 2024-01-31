@@ -207,6 +207,10 @@ The entries are as follows:
 The local file header of each file is padded to a multiple of 64 bytes, ensuring
 that the offset of each file is 64-byte aligned.
 
+..note::
+    Tensors on certain devices such as XLA do not have their storages serialized. In
+    these cases ``data/`` might not exist in the checkpoint.
+
 .. _serialized-file-format:
 
 Serializing torch.nn.Modules and loading them in C++
