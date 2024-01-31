@@ -368,14 +368,15 @@ class AutogradFunctionVariable(VariableTracker):
         ctx = AutogradFunctionContextVariable.create(tx)
         args = [ctx, *args]
         if isinstance(fn, types.FunctionType):
-            return variables.UserFunctionVariable(fn, source=source).call_function(
-                tx, args, kwargs
-            )
+            return variables.UserFunctionVariable(
+                fn, source=source, force_inline=True
+            ).call_function(tx, args, kwargs)
         elif isinstance(fn, types.MethodType):
             return variables.UserMethodVariable(
                 fn.__func__,
                 variables.UserDefinedClassVariable(self.fn_cls),
                 source=source,
+                force_inline=True,
             ).call_function(tx, args, kwargs)
         else:
             unimplemented(
@@ -413,11 +414,15 @@ class AutogradFunctionVariable(VariableTracker):
         elif name == "backward":
             with tx.strict_translation_mode():
                 if isinstance(self.fn_cls.backward, types.FunctionType):
-                    backward = UserFunctionVariable(self.fn_cls.backward)
+                    backward = UserFunctionVariable(
+                        self.fn_cls.backward, force_inline=True
+                    )
                 elif isinstance(self.fn_cls.backward, types.MethodType):
                     backward = UserMethodVariable(
                         self.fn_cls.backward.__func__,
-                        variables.UserDefinedClassVariable(self.fn_cls),
+                        variables.UserDefinedClassVariable(
+                            self.fn_cls, force_inline=True
+                        ),
                     )
                     args = [backward.obj] + args
                 else:
@@ -429,11 +434,12 @@ class AutogradFunctionVariable(VariableTracker):
 
         elif name == "forward":
             if isinstance(self.fn_cls.forward, types.FunctionType):
-                forward = UserFunctionVariable(self.fn_cls.forward)
+                forward = UserFunctionVariable(self.fn_cls.forward, force_inline=True)
             elif isinstance(self.fn_cls.forward, types.MethodType):
                 forward = UserMethodVariable(
                     self.fn_cls.forward.__func__,
                     variables.UserDefinedClassVariable(self.fn_cls),
+                    force_inline=True,
                 )
                 args = [forward.obj] + args
             else:

@@ -2270,6 +2270,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             if func.should_force_inline():
                 # Known sound
                 return skipfiles.SkipResult(False, "allowlist in dynamo known function")
+            breakpoint()
             unimplemented(
                 f"'inline in skipfiles: {func.fn.__qualname__} | {func.get_name()} {func.get_filename()}, {result.reason}'"
             )

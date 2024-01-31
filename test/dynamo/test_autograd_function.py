@@ -975,6 +975,18 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out, out_ref)
         self.assertEqual(x.grad, x_ref.grad)
 
+        x_nograd = x.detach().clone()
+
+        with unittest.mock.patch(
+            "torch._dynamo.skipfiles.get_mod_inlinelist",
+            gen_get_mod_inlinelist(mod_inlinelist),
+        ):
+            out_nograd = torch.compile(fn, backend="aot_eager", fullgraph=True)(
+                x_nograd
+            )
+
+        self.assertEqual(out_nograd, out_ref)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
