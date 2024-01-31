@@ -942,7 +942,10 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             def get_mod_inlinelist():
                 inlinelist = set()
                 for m in dummy_mod_inlinelist:
-                    inlinelist.add(torch._dynamo.skipfiles._module_dir(torch) + m[len("torch.") :].replace(".", "/"))
+                    inlinelist.add(
+                        torch._dynamo.skipfiles._module_dir(torch)
+                        + m[len("torch.") :].replace(".", "/")
+                    )
                 return inlinelist
 
             return get_mod_inlinelist
@@ -951,17 +954,25 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             return SinAutogradFunction.apply(x)
 
         x = torch.rand((4, 6, 8), requires_grad=True)
-        x_ref = x.clone().requires_grad_(True)
+        x_ref = x.detach().clone().requires_grad_(True)
 
         # torch.testing is allowlisted. To simulate an autograd.Function that is not in an allowlisted
         # module, we replace the inlinelist with one that doesn't include torch.testing.
-        mod_inlinelist = {x for x in torch._dynamo.skipfiles.MOD_INLINELIST if x not in "torch.testing._internal.dynamo_utils"}
-        with unittest.mock.patch("torch._dynamo.skipfiles.get_mod_inlinelist", gen_get_mod_inlinelist(mod_inlinelist)):
-            ret = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
-            ret.sum().backward()
+        mod_inlinelist = {
+            x
+            for x in torch._dynamo.skipfiles.MOD_INLINELIST
+            if x not in "torch.testing._internal.dynamo_utils"
+        }
+        with unittest.mock.patch(
+            "torch._dynamo.skipfiles.get_mod_inlinelist",
+            gen_get_mod_inlinelist(mod_inlinelist),
+        ):
+            out = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+            out.sum().backward()
 
-        x_ref.sin().sum().backward()
-        self.assertEqual(x, x_ref)
+        out_ref = x_ref.sin()
+        out_ref.sum().backward()
+        self.assertEqual(out, out_ref)
         self.assertEqual(x.grad, x_ref.grad)
 
 
