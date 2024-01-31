@@ -86,16 +86,17 @@ def _is_composable_with_fsdp(module: nn.Module) -> bool:
 
 
 def _get_dim0_padded_size(tensor_size: torch.Size, dim0_factor: int) -> torch.Size:
-    if tensor_size[0] < dim0_factor:
-        padded_size = torch.Size([dim0_factor]) + tensor_size[1:]
-    elif tensor_size[0] % dim0_factor != 0:
-        padded_size = (
+    if tensor_size[0] % dim0_factor == 0:
+        padded_size = tensor_size
+    elif tensor_size[0] < dim0_factor:
+        padded_size = cast(torch.Size, torch.Size([dim0_factor]) + tensor_size[1:])
+    else:
+        size = (
             torch.Size([tensor_size[0] + dim0_factor - (tensor_size[0] % dim0_factor)])
             + tensor_size[1:]
         )
-    else:
-        padded_size = tensor_size
-    return cast(torch.Size, padded_size)
+        padded_size = cast(torch.Size, size)
+    return padded_size
 
 
 def _chunk_with_empty(
