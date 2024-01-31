@@ -68,14 +68,16 @@ KERNEL_COUNTS = {
     RMSprop: KernelCounts(multitensor=1, singletensor=4),
     Adadelta: KernelCounts(multitensor=1, singletensor=4),
     Adagrad: KernelCounts(multitensor=5, singletensor=8),
-    ASGD: KernelCounts(multitensor=2, singletensor=12),
+    ASGD: KernelCounts(
+        multitensor=2, singletensor=None
+    ),  # Single tensor eager needs to be refactored to enable tracing (#116052)
     SGD: KernelCounts(multitensor=2, singletensor=8),
     RAdam: KernelCounts(
         multitensor=2, singletensor=None
-    ),  # Single tensor eager needs to be refactored to enable tracing
+    ),  # Single tensor eager needs to be refactored to enable tracing (#118230)
     Adamax: KernelCounts(
         multitensor=2, singletensor=None
-    ),  # Single tensor eager needs to be refactored to enable tracing
+    ),  # Single tensor eager needs to be refactored to enable tracing (#117836)
 }
 
 
@@ -100,13 +102,6 @@ def build_compiled_opt_kwarg_db():
                         name += "_" + key
 
                     name += f"_{device}"
-
-                    # Eager for-loop impl doesn't support capturable ASGD nor Adamax (see #117836)
-                    if name in [
-                        "test_asgd_capturable_cuda",
-                        "test_adamax_capturable_cuda",
-                    ]:
-                        continue
 
                     kwargs["foreach"] = foreach
                     kwargs["device"] = device

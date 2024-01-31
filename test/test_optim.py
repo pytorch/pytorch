@@ -189,6 +189,7 @@ class TestOptimRenewed(TestCase):
         optim_inputs = optim_info.optim_inputs_func(device=device)
         optim_cls = optim_info.optim_cls
         for optim_input in optim_inputs:
+            print(optim_input)
             updated_params, state = [], []
             kwargs = deepcopy(optim_input.kwargs)
             if kwargs.get("capturable", False) and str(device) == "cpu":

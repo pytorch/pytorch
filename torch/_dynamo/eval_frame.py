@@ -1531,7 +1531,9 @@ class TorchPatcher:
         }
 
         excluded_single_tensor = {
-            radam,  # https://github.com/pytorch/pytorch/issues/117807
+            radam,  # https://github.com/pytorch/pytorch/issues/118230
+            adamax,  # https://github.com/pytorch/pytorch/issues/117836
+            asgd,  # https://github.com/pytorch/pytorch/issues/116052
         }
 
         for opt_mod in optimizer_modules:
