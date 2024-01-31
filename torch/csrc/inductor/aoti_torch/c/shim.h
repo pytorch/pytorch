@@ -262,6 +262,22 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob(
     AtenTensorHandle* ret // returns new reference
 );
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__embedding_bag(
+    AtenTensorHandle weight,
+    AtenTensorHandle indices,
+    AtenTensorHandle offsets,
+    int32_t scale_grad_by_freq,
+    int32_t mode,
+    int32_t sparse,
+    AtenTensorHandle per_sample_weights, // optional argument
+    int32_t include_last_offset,
+    int32_t padding_idx,
+    AtenTensorHandle* ret0, // returns new reference
+    AtenTensorHandle* ret1, // returns new reference
+    AtenTensorHandle* ret2, // returns new reference
+    AtenTensorHandle* ret3 // returns new reference
+);
+
 // This version is deprecated. We will remove it later
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
     AtenTensorHandle query,
@@ -290,7 +306,7 @@ aoti_torch__scaled_dot_product_flash_attention_v2(
     double dropout_p,
     int is_causal,
     int return_debug_mask,
-    double* scale,
+    double* scale, // optional argument
     AtenTensorHandle* ret0, // returns new reference
     AtenTensorHandle* ret1, // returns new reference
     AtenTensorHandle* ret2, // returns new reference
