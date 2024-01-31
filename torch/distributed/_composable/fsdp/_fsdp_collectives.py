@@ -154,8 +154,8 @@ def foreach_reduce_scatter(
         # Record to mark the end of the reduce-scatter copy-in in the RS stream
         copy_in_event = torch.cuda.Event()
         copy_in_event.record()
-        reduce_scatter_output = torch.empty(
-            (reduce_scatter_output_numel,), dtype=reduce_dtype, device=device
+        reduce_scatter_output = reduce_scatter_input.new_empty(
+            (reduce_scatter_output_numel,)
         )
         dist.reduce_scatter_tensor(
             output=reduce_scatter_output, input=reduce_scatter_input, group=group
