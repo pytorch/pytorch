@@ -371,7 +371,6 @@ dtensor_fails = {
     xfail("nn.functional.relu6"),
     xfail("nn.functional.rrelu"),
     xfail("nn.functional.selu"),
-    xfail("nn.functional.silu"),
     xfail("nn.functional.smooth_l1_loss"),
     xfail("nn.functional.soft_margin_loss"),
     xfail("nn.functional.softplus"),

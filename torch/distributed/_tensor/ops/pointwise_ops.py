@@ -351,6 +351,8 @@ pointwise_ops = [
     aten.sign_.default,
     aten.signbit.default,
     aten.signbit.out,
+    aten.silu.default,
+    aten.silu.out,
     aten.sin.default,
     aten.sin.out,
     aten.sin_.default,
@@ -395,6 +397,7 @@ pointwise_ops = [
     # please keep the entries below alphabetically sorted
     aten.gelu_backward.default,
     aten.sigmoid_backward.default,
+    aten.silu_backward.default,
     aten.tanh_backward.default,
     aten.threshold_backward.default,
 ]
