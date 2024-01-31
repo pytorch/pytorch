@@ -462,6 +462,7 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
       numelIn_(w.numelIn_),
       numelOut_(w.numelOut_),
       store_(w.store_),
+      abortedComms_(w.abortedComms_),
       timingEnabled_(w.timingEnabled_),
       trace_id_(w.trace_id_),
       distDebugLevel_(w.distDebugLevel_) {
@@ -1535,7 +1536,7 @@ void ProcessGroupNCCL::watchdogHandler() {
           }
           abortedComms_.emplace(commId);
          LOG(ERROR) << logPrefix() << "Aborted key in store: " << storeKey << ".";
-        } catch (std::exception& e) {
+        } catch (c10::Error& e) {
           VLOG(1) << "Did not find key in store: " << storeKey << ",  error: " << e.what();
         }
       }
