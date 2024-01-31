@@ -30,7 +30,6 @@ from ..utils import (
     check_constant_args,
     check_numpy_ndarray_args,
     check_unspec_python_args,
-    extract_fake_example_value,
     get_fake_value,
     guard_if_dyn,
     is_utils_checkpoint,
@@ -1605,14 +1604,6 @@ class BuiltinVariable(VariableTracker):
 
         if isinstance(left, TensorVariable) or isinstance(right, TensorVariable):
             from .builder import wrap_fx_proxy_cls
-
-            if op is operator.is_:
-                return ConstantVariable.create(
-                    isinstance(left, TensorVariable)
-                    and isinstance(right, TensorVariable)
-                    and id(extract_fake_example_value(left.as_proxy().node))
-                    == id(extract_fake_example_value(right.as_proxy().node))
-                )
 
             if op not in supported_tensor_comparison_ops.values():
                 _unimplemented()
