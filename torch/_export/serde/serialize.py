@@ -77,6 +77,7 @@ from .schema import (  # type: ignore[attr-defined]
     TensorMeta,
     TREESPEC_VERSION,
     UserInputSpec,
+    UserInputMutationSpec,
     UserOutputSpec,
 )
 from .union import _Union
@@ -409,31 +410,10 @@ class GraphModuleSerializer:
                 metadata=self.serialize_metadata(node),
             )
         elif isinstance(node.target, torch._ops.HigherOrderOperator):
-
-            inputs = [
-                NamedArgument(
-                    name="",  # TODO(zhxchen17) This is sad, should be improved when HOO has schema arg names.
-                    arg=self.serialize_input(a),
-                ) for a in node.args
-            ]
-
-            meta_val = node.meta["val"]
-
-            if isinstance(meta_val, torch.Tensor):
-                outputs = [Argument.create(as_tensor=self.serialize_tensor_output(node.name, meta_val))]
-            elif isinstance(meta_val, (list, tuple)) and all(isinstance(v, torch.Tensor) for v in meta_val):
-                arg_list = self._handle_getitem_users(node)
-                outputs = [Argument.create(as_tensors=arg_list)]
-            else:
-                raise SerializeError(
-                    "Only single tensor output or list of tensor output "
-                    "is supported for HigherOrderOperator serialization"
-                )
-
             ex_node = Node(
                 target=self.serialize_operator(node.target),
-                inputs=inputs,
-                outputs=outputs,
+                inputs=self.serialize_arbitrary_inputs(node.args, node.kwargs),
+                outputs=self.serialize_arbitrary_outputs(node),
                 metadata=self.serialize_metadata(node),
             )
         else:
@@ -527,6 +507,24 @@ class GraphModuleSerializer:
 
 
         return serialized_args
+
+    def serialize_arbitrary_inputs(self, args, kwargs) -> List[NamedArgument]:
+        """
+        For serializing HOO inputs since HOOs do not have a schema.
+        """
+        inputs = [
+            NamedArgument(
+                name="",
+                arg=self.serialize_input(a),
+            ) for a in args
+        ]
+        inputs.extend([
+            NamedArgument(
+                name=name,
+                arg=self.serialize_input(a)
+            ) for name, a in kwargs.items()
+        ])
+        return inputs
 
     def is_sym_int_arg(self, arg) -> bool:
         return isinstance(arg, int) or (
@@ -690,6 +688,8 @@ class GraphModuleSerializer:
             self.custom_objs[custom_obj_name] = arg
             class_fqn = arg._type().qualified_name()  # type: ignore[attr-defined]
             return Argument.create(as_custom_obj=CustomObjArgument(custom_obj_name, class_fqn))
+        elif isinstance(arg, torch._ops.OpOverload):
+            return Argument.create(as_operator=self.serialize_operator(arg))
         else:
             raise SerializeError(f"Unsupported argument type: {type(arg)}")
 
@@ -791,6 +791,15 @@ class GraphModuleSerializer:
             assert isinstance(spec.arg, ep.TensorArgument)
             return OutputSpec.create(
                 gradient_to_user_input=GradientToUserInputSpec(
+                    arg=TensorArgument(name=spec.arg.name),
+                    user_input_name=spec.target,
+                )
+            )
+        elif spec.kind == ep.OutputKind.USER_INPUT_MUTATION:
+            assert spec.target is not None
+            assert isinstance(spec.arg, ep.TensorArgument)
+            return OutputSpec.create(
+                user_input_mutation=UserInputMutationSpec(
                     arg=TensorArgument(name=spec.arg.name),
                     user_input_name=spec.target,
                 )
@@ -938,6 +947,57 @@ class GraphModuleSerializer:
                 output_arguments.append(Argument.create(as_tensors=args))
 
         return output_arguments
+
+    def serialize_arbitrary_outputs(self, node: torch.fx.Node) -> List[Argument]:
+        """
+        For serializing HOO outputs since HOOs do not have a schema.
+        """
+        meta_val = node.meta["val"]
+
+        # Check single value return
+        if isinstance(meta_val, torch.Tensor):
+            # e.g "-> Tensor"
+            return [Argument.create(as_tensor=self.serialize_tensor_output(node.name, meta_val))]
+        elif isinstance(meta_val, torch.SymInt):
+            # e.g "-> SymInt"
+            return [Argument.create(as_sym_int=self.serialize_sym_int_output(node.name, meta_val))]
+        elif isinstance(meta_val, torch.SymBool):
+            # e.g "-> SymBool"
+            return [Argument.create(as_sym_bool=self.serialize_sym_bool_output(node.name, meta_val))]
+
+        # There are a two possibilities at this point:
+        # - This operator returns a list of Tensors.
+        # - This operator returns multiple Tensors.
+        #
+        # Either way, start by gathering a list of TensorArguments with the correct names.
+        # For consistent naming with FX, consult the downstream `getitem` node and
+        # make sure our outputs have the same name.
+        idx_to_name = {}
+        for user in node.users:
+            if user.target is not operator.getitem:
+                continue
+            idx_to_name[user.args[1]] = user.name
+
+        for idx, _ in enumerate(meta_val):
+            # FX does not emit a getitem node for any outputs that are unused.
+            # However, we need a name for them so that the number of outputs will
+            # correctly match the schema. Just assign a dummy name.
+            if idx not in idx_to_name:
+                idx_to_name[idx] = f"{node.name}_unused_{idx}"
+
+        arg_list = []
+        for i, element_meta_val in enumerate(meta_val):
+            arg_list.append(
+                self.serialize_tensor_output(idx_to_name[i], element_meta_val)
+            )
+
+        if len(meta_val) == 1:
+            # The operator returns a list of tensors
+            return [Argument.create(as_tensors=arg_list)]
+        else:
+            # The operator returns multiple tensors
+            return [Argument.create(as_tensor=arg) for arg in arg_list]
+
 
     def _handle_getitem_users(self, node: torch.fx.Node) -> List[TensorArgument]:
         meta_val = node.meta["val"]
@@ -1235,26 +1295,14 @@ class GraphModuleDeserializer:
 
             fx_node = self.graph.create_node("call_function", target, args, {}, name)
             self.deserialize_sym_op_outputs(serialized_node, fx_node)
+
         elif isinstance(target, torch._ops.HigherOrderOperator):
-            assert (
-                len(serialized_node.outputs) == 1
-                and serialized_node.outputs[0].type in ("as_tensors", "as_tensor")
-            ), "Only single tensor output or list of tensor output is supported for higher order operators."
-
-            output = serialized_node.outputs[0]
-
-            name = (
-                output.value.name
-                if output.type == "as_tensor"
-                else None  # FX will generate a name for us.
+            args, kwargs = self.deserialize_arbitrary_inputs(serialized_node.inputs)
+            fx_node = self.graph.create_node(
+                "call_function", target, args, kwargs, None
             )
-            args = tuple(self.deserialize_input(input.arg) for input in serialized_node.inputs)
-            fx_node = self.graph.create_node("call_function", target, args, {}, name)
-
-            if output.type == "as_tensor":
-                self.sync_fx_node(name, fx_node)
-            if output.type == "as_tensors":
-                self.deserialize_multiple_outputs(serialized_node, fx_node)
+            self.deserialize_outputs(serialized_node, fx_node)
+            fx_node.meta.update(self.deserialize_metadata(serialized_node.metadata))
 
         elif isinstance(target, torch._ops.OpOverload):
             # For convenience: if this node returns a single tensor, name the
@@ -1338,6 +1386,12 @@ class GraphModuleDeserializer:
                 arg=ep.TensorArgument(name=o.gradient_to_user_input.arg.name),
                 target=o.gradient_to_user_input.user_input_name
             )
+        elif o.type == "user_input_mutation":
+            return ep.OutputSpec(
+                kind=ep.OutputKind.USER_INPUT_MUTATION,
+                arg=ep.TensorArgument(name=o.user_input_mutation.arg.name),
+                target=o.user_input_mutation.user_input_name
+            )
         else:
             raise AssertionError(f"Unknown output spec {o}")
 
@@ -1400,6 +1454,19 @@ class GraphModuleDeserializer:
                     kwargs[schema_arg.name] = actual_args[schema_arg.name]
         return tuple(args), kwargs
 
+    def deserialize_arbitrary_inputs(self, inputs: List[NamedArgument]):
+        """
+        For deserializing HOO inputs since HOOs do not have a schema.
+        """
+        args = []
+        kwargs = {}
+        for input_ in inputs:
+            if input_.name != "":
+                kwargs[input_.name] = self.deserialize_input(input_.arg)
+            else:
+                args.append(self.deserialize_input(input_.arg))
+        return (tuple(args), kwargs)
+
     def deserialize_input(self, inp: Argument) -> Any:
         value = inp.value
         typ_ = inp.type
@@ -1443,17 +1510,17 @@ class GraphModuleDeserializer:
         elif isinstance(value, list):
             if len(value) == 0:
                 return []
-            elif isinstance(value[0], TensorArgument):
+            elif typ_ == "as_tensors":
                 result = []
                 for arg in value:
                     result.append(self.serialized_name_to_node[arg.name])
                 return result
-            elif isinstance(value[0], (int, float, bool)):
+            elif typ_ in ("as_ints", "as_floats", "as_bools", "as_strings"):
                 # convert from serialized.python.types.List to python list
                 return list(value)
-            elif isinstance(value[0], (SymIntArgument, SymBoolArgument)):
+            elif typ_ in ("as_sym_ints", "as_sym_bools"):
                 return [self.deserialize_sym_argument(arg) for arg in value]
-            elif isinstance(value[0], OptionalTensorArgument):
+            elif typ_ == "as_optional_tensors":
                 def deserialize_optional_tensor_args(a):
                     if a.type == "as_none":
                         return None
@@ -1469,6 +1536,8 @@ class GraphModuleDeserializer:
                 # Custom object has been lifted as an input
                 return self.serialized_name_to_node[inp.as_custom_obj.name]
             return self.constants[inp.as_custom_obj.name]
+        elif typ_ == "as_operator":
+            return self.deserialize_operator(inp.as_operator)
         else:
             raise SerializeError(f"Unhandled argument {inp}")
 
@@ -1489,17 +1558,19 @@ class GraphModuleDeserializer:
         self.sync_fx_node(serialized_node.outputs[0].value.as_name, fx_node)
 
     def deserialize_outputs(self, serialized_node: Node, fx_node: torch.fx.Node):
-        # Simple case for single tensor return.
-        assert isinstance(fx_node.target, torch._ops.OpOverload)
-        returns = fx_node.target._schema.returns
-
         # Check single value return
-        if len(returns) == 0:
+        if len(serialized_node.outputs) == 0:
             return
-        if _is_single_tensor_return(fx_node.target):
+        if (
+            len(serialized_node.outputs) == 1
+            and serialized_node.outputs[0].type == "as_tensor"
+        ):
             self.sync_fx_node(serialized_node.outputs[0].as_tensor.name, fx_node)
             return
-        elif len(returns) == 1 and isinstance(serialized_node.outputs[0].value, (SymIntArgument, SymBoolArgument)):
+        elif (
+            len(serialized_node.outputs) == 1 and
+            isinstance(serialized_node.outputs[0].value, (SymIntArgument, SymBoolArgument))
+        ):
             self.sync_fx_node(serialized_node.outputs[0].value.as_name, fx_node)
             return
 
@@ -1889,6 +1960,8 @@ def _canonicalize_graph(sorted_inputs, sorted_outputs, graph) -> Tuple[Graph, Di
             return a.as_optional_tensors
         elif a.type == "as_custom_obj":
             return None
+        elif a.type == "as_operator":
+            return None
         else:
             raise AssertionError(f"Unknown input type to the ExportedProgram: {a}")
 
@@ -2162,6 +2235,8 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
             return 3, spec.gradient_to_parameter.parameter_name, idx
         elif spec.type == "gradient_to_user_input":
             return 4, None, idx
+        elif spec.type == "user_input_mutation":
+            return 1, None, idx
         else:
             raise AssertionError(f"Unknown output type: {spec}")
 
@@ -2236,6 +2311,10 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
             g = spec.gradient_to_user_input
             g.arg.name = replace_table[g.arg.name]
             g.user_input_name = replace_table[g.user_input_name]
+        elif spec.type == "user_input_mutation":
+            u = spec.user_input_mutation
+            u.arg.name = replace_table[u.arg.name]
+            u.user_input_name = replace_table[u.user_input_name]
         else:
             raise AssertionError(f"Unknown output type: {spec}")
 
