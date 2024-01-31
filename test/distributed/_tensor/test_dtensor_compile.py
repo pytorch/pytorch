@@ -302,6 +302,25 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = opt_fn(x_dt)
         self.assertEqual(ref, res)
 
+    def test_dtensor_dynamo_device_mesh_attrs(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # pass in tensor as inputs/outputs, create DTensor and run redistribute
+        # (allgather collective) inside the fn
+        def fn(x_dt):
+            if x_dt.device_mesh.device_type == "cuda":
+                return x_dt + 1
+            else:
+                return x_dt + 2
+
+        x = torch.ones(4, 4)
+        x_dt = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
+        ref = fn(x_dt)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x_dt)
+        self.assertEqual(ref, res)
+
     def test_dtensor_partial_placement_graph_output(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 

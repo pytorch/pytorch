@@ -21,6 +21,7 @@ from .dicts import (
     DefaultDictVariable,
     SetVariable,
 )
+from .distributed import DistributedVariable
 from .functions import (
     NestedUserFunctionVariable,
     UserFunctionVariable,
