@@ -129,6 +129,10 @@ def is_gcc() -> bool:
     return _is_gcc(_get_cpp_compiler())
 
 
+def cpp_compiler() -> str:
+    return _get_cpp_compiler()
+
+
 def is_clang(cpp_compiler) -> bool:
     return bool(re.search(r"(clang|clang\+\+)", cpp_compiler))
 
