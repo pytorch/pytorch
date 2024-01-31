@@ -3619,8 +3619,12 @@ class ShapeEnv:
         if self.log.isEnabledFor(logging.INFO):
             fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
 
+            str_g = str(g)
+
             # TODO: make this an artifact
             is_debug = False
+            if config.extended_debug_guard_added is not None and str_g == config.extended_debug_guard_added:
+                is_debug = True
             maybe_extra_debug = ""
             if is_debug and user_tb:
                 maybe_extra_debug = (
@@ -3628,10 +3632,13 @@ class ShapeEnv:
                     '  (snipped, see stack below for prefix)\n' +
                     ''.join(traceback.format_list(user_tb))
                 )
+            if is_debug:
+                cpp_stack = CapturedTraceback.extract(cpp=True)
+                maybe_extra_debug += "\nC++ stack trace:\n" + ''.join(cpp_stack.format())
             self.log.info(
                 "%s %s [guard added]%s (%s)%s",
                 prefix,
-                g,
+                str_g,
                 maybe_user_loc,
                 format_frame(fsummary),
                 maybe_extra_debug,
