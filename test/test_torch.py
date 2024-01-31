@@ -5894,7 +5894,6 @@ else:
     # Make sure that the parameters become nonsense when scaled gradients are finite
     # but they get invalidated before `optimizer.step`, after `GradScaler.unscale_`
 
-    @skipIfTorchDynamo("'UserDefinedClassVariable' object has no attribute 'get_function'")
     @onlyNativeDeviceTypes
     def test_params_invalidated_with_grads_invalidated_between_unscale_and_step(self, device):
         device = torch.device(device)
@@ -5915,8 +5914,7 @@ else:
         model, _, optimizer, _, data, loss_fn, _ = _create_scaling_case(
             device, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
         )
-        GradScaler = partial(torch.GradScaler, device=device)
-        scaler = GradScaler(init_scale=128.0)
+        scaler = torch.GradScaler(device=device, init_scale=128.0)
 
         for input, target in data:
             optimizer.zero_grad()
@@ -5935,14 +5933,12 @@ else:
 
         self.assertTrue(all((p.isnan().any() or p.isinf().any()) for p in model.parameters()))
 
-    @skipIfTorchDynamo("'UserDefinedClassVariable' object has no attribute 'get_function'")
     @onlyNativeDeviceTypes
     def test_grad_scale_will_not_overflow(self, device):
         device = torch.device(device)
         model = torch.nn.Linear(5, 1).to(device)
         optimizer = torch.optim.Adam(model.parameters())
-        GradScaler = partial(torch.GradScaler, device=device.type)
-        scaler = GradScaler(growth_interval=1, growth_factor=2**4, init_scale=1e38)
+        scaler = torch.GradScaler(device=device.type, growth_interval=1, growth_factor=2**4, init_scale=1e38)
         optimizer.zero_grad()
         x = torch.randn(1, 5).to(device)
         y = 1e-30 * torch.randn(1, 1).to(device)
