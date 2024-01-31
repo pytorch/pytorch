@@ -1683,7 +1683,6 @@ dynamo_expected_failures = {
     "TestAOTAutograd.test_input_data_and_metadata_mutation_aliases_other_input",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_input_output_view_metadata_mutate_multiple",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_input_data_and_metadata_mutation",  # functorch/test_aotdispatch
-    "TestPythonKeyCPU.test_make_fx_vjp_cpu",  # functorch/test_aotdispatch
     "TestPartitioning.test_min_cut_partitioner_output_tensor_shape_tensor",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_subclass_metadata_mutation_req_grad_False",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_input_output_view_simple",  # functorch/test_aotdispatch
@@ -1720,7 +1719,6 @@ dynamo_expected_failures = {
     "TestAOTAutograd.test_invalid_dupe_fake",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_output_aliases_intermediate_multiple",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_input_mutation_alias_everything",  # functorch/test_aotdispatch
-    "TestPythonKeyCPU.test_make_fx_jacrev_cpu",  # functorch/test_aotdispatch
     "TestPartitioning.test_default_partitioner_output_tensor_shape_tensor",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_input_mutation_aliases_other_input",  # functorch/test_aotdispatch
     "TestPartitioning.test_contiguous",  # functorch/test_aotdispatch

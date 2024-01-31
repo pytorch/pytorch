@@ -985,7 +985,6 @@ class TestGradTransform(TestCase):
         z, = torch.autograd.grad(y, x)
         self.assertEqual(z, 6 * x)
 
-    @xfailIfTorchDynamo
     def test_no_grad_outside_vjp(self, device):
         def h(x):
             return x ** 2
@@ -999,7 +998,6 @@ class TestGradTransform(TestCase):
         self.assertFalse(y.requires_grad)
         self.assertFalse(out.requires_grad)
 
-    @xfailIfTorchDynamo
     def test_no_grad_outside_vjp_fn(self, device):
         def h(x):
             return x ** 2
@@ -1016,7 +1014,6 @@ class TestGradTransform(TestCase):
         z, = torch.autograd.grad(out, x)
         self.assertEqual(z, 2 * x)
 
-    @xfailIfTorchDynamo
     def test_no_grad_outside_vjp_only(self, device):
         def h(x):
             return x ** 2
