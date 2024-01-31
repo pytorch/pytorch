@@ -71,6 +71,34 @@ class TwoTensor(torch.Tensor):
         out = pytree.tree_unflatten(out_flat, spec)
         return return_and_correct_aliasing(func, args, kwargs, out)
 
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        def module_load_from(dest, src):
+            # always convert src to TwoTensor
+            if type(src) is torch.Tensor:
+                return TwoTensor(src, src)
+            elif type(src) is TwoTensor:
+                return src
+            else:
+                raise NotImplementedError(f"module_load_from(): unsupported type(src) {type(src)}")
+
+        def module_load_to(src, dest):
+            if type(dest) in {torch.nn.Parameter, torch.Tensor, TwoTensor}:
+                return src
+            else:
+                raise NotImplementedError(f"module_load_to(): unsupported type(dest) {type(dest)}")
+
+        if func is torch.Tensor.module_load_from:
+            return module_load_from(*args, **kwargs)
+        elif func is torch.Tensor.module_load_to:
+            return module_load_to(*args, **kwargs)
+        else:
+            with torch._C.DisableTorchFunctionSubclass():
+                return func(*args, **kwargs)
+
 
 class TwoTensorMode(torch.utils._python_dispatch.TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):

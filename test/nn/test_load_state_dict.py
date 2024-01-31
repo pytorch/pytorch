@@ -10,6 +10,7 @@ from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import TestCase, \
     TEST_NUMPY, IS_WINDOWS, skipIfTorchDynamo, instantiate_parametrized_tests, \
     run_tests, wrapSwapTensorsTest, skipIfCrossRef
+from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import tree_map
 
 if TEST_NUMPY:
@@ -477,8 +478,12 @@ class TestLoadStateDictSwap(TestCase):
             m = torch.nn.Linear(2, 3, bias=False)
             m.register_buffer('buf', torch.randn(2, 3))
             if subclass is not None:
-                m.weight = torch.nn.Parameter(subclass(m.weight))
-                m.buf = subclass(m.buf)
+                if subclass is TwoTensor:
+                    m.weight = torch.nn.Parameter(subclass(m.weight, m.weight))
+                    m.buf = subclass(m.buf, m.buf)
+                else:
+                    m.weight = torch.nn.Parameter(subclass(m.weight))
+                    m.buf = subclass(m.buf)
             return m
 
         def _test(module_subclass=None, sd_subclass=None):
@@ -505,6 +510,10 @@ class TestLoadStateDictSwap(TestCase):
 
         subclasses = [None, MyLoadTensor, MyWrapperLoadTensor]
         for m_s, sd_s in product(subclasses, subclasses):
+            _test(m_s, sd_s)
+
+        subclasses_two = [None, TwoTensor]
+        for m_s, sd_s in product(subclasses_two, subclasses_two):
             _test(m_s, sd_s)
 
 
