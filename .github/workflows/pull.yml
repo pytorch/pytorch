@@ -200,6 +200,7 @@ jobs:
       build-environment: linux-focal-py3.12-clang10
       docker-image: ${{ needs.linux-focal-py3_12-clang10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-py3_12-clang10-build.outputs.test-matrix }}
+      timeout-minutes: 360
 
   linux-focal-cuda11_8-py3_10-gcc9-build:
     name: linux-focal-cuda11.8-py3.10-gcc9
