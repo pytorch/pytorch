@@ -4996,19 +4996,17 @@ def cumprod(x, axis=None, dtype=None):
     return result
 
 
-
 @register_lowering(aten.logcumsumexp)
 def logcumsumexp(x, dim):
     if is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype()):
-        dtype=torch.int64
+        dtype = torch.int64
     else:
-        dtype=x.get_dtype()
+        dtype = x.get_dtype()
 
     def log_add_exp(a, b):
         min_v = ops.minimum(a, b)
         max_v = ops.maximum(a, b)
         return ops.log1p(ops.exp(min_v - max_v)) + max_v
-
 
     kwargs = _make_scan_inner(x, axis=dim, dtype=dtype)
     result = ir.Scan.create(**kwargs, combine_fn=log_add_exp, init=0)

@@ -366,7 +366,6 @@ def log_sigmoid_backward(grad_output: Tensor, self: Tensor, buffer: Tensor) -> T
     # return (max_deriv - sign * (buffer / (1 + buffer))) * grad_output
 
 
-
 def apply_loss_reduction(loss: Tensor, reduction: int):
     if reduction == Reduction.MEAN.value:
         return torch.mean(loss)
