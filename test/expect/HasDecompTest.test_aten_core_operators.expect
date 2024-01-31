@@ -419,6 +419,10 @@ aten::repeat
 aten::repeat.out
 aten::roll
 aten::roll.out
+aten::round
+aten::round.decimals
+aten::round.decimals_out
+aten::round.out
 aten::round_
 aten::round_.decimals
 aten::rrelu_with_noise_backward
