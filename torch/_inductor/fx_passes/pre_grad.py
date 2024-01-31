@@ -13,7 +13,6 @@ from torch.fx.experimental.optimization import (
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
-
 from .. import config
 
 from ..fx_utils import matches_module_function_pattern
@@ -22,7 +21,7 @@ from ..pattern_matcher import (
     PatternMatcherPass,
     stable_topological_sort,
 )
-from ..utils import is_cpu_device
+from ..utils import is_cpu_device, pass_execution_and_save
 from .group_batch_fusion import group_batch_fusion_passes
 from .misc_patterns import numpy_compat_normalization
 
@@ -35,6 +34,12 @@ unbind_stack_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 efficient_conv_bn_eval_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 merge_getitem_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 predispatch_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+# based on predispatch aten IR
+normalization_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
+merge_splits_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
+split_cat_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
+unbind_stack_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
+merge_getitem_cat_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
 
 pattern_matcher_passes: List[PatternMatcherPass] = [
     normalization_pass,
@@ -43,6 +48,13 @@ pattern_matcher_passes: List[PatternMatcherPass] = [
     split_cat_pass,
     unbind_stack_pass,
     efficient_conv_bn_eval_pass,
+]
+pattern_matcher_passes_aten: List[PatternMatcherPass] = [
+    normalization_pass_aten,
+    merge_getitem_cat_pass_aten,
+    merge_splits_pass_aten,
+    split_cat_pass_aten,
+    unbind_stack_pass_aten,
 ]
 
 
@@ -66,7 +78,6 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
     Consider adding a new pass to post_grad.py or joint_graph.py which
     are after functionalization and normalization.
     """
-
     if config.pattern_matcher:
         lazy_init()
         if hasattr(
@@ -75,8 +86,28 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
             gm_before_fx_passes = gm.__copy__()
         # explicitly run with predispatch atenIR based passes
         if config.is_predispatch:
-            group_batch_fusion_passes(gm.graph, pre_grad=True)
-            predispatch_pass.apply(gm.graph)  # type: ignore[arg-type]
+            pass_execution_and_save(
+                group_batch_fusion_passes,
+                gm,
+                "[Pre grad(predispatch IR)] Apply group_batch_fusion",
+            )
+            pass_execution_and_save(
+                predispatch_pass.apply,
+                gm,
+                "[Pre grad(predispatch IR)] Apply predispatch_pass",
+            )
+            log.debug(
+                "[Pre grad(predispatch IR)]Before split cat in pre grad pass. graph: %s",
+                gm.graph,
+            )
+            for ind, pattern_matcher_pass_aten in enumerate(
+                pattern_matcher_passes_aten
+            ):
+                pass_execution_and_save(
+                    pattern_matcher_pass_aten.apply,
+                    gm,
+                    f"[Pre grad(predispatch IR)]Apply split_cat, index: {ind}",
+                )
         else:
             gm = fuse_fx(gm, example_inputs)
             numpy_compat_normalization(gm.graph)
