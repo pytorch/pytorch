@@ -852,7 +852,7 @@ class SymNodeVariable(VariableTracker):
 
 class NumpyNdarrayVariable(TensorVariable):
     """
-    Represents an np.ndarray, but backed by torch Tensor via torch._numpy.ndarray.
+    Represents a np.ndarray, but backed by torch Tensor via torch._numpy.ndarray.
     Use this for Tensor.numpy() call.
     """
 
@@ -928,6 +928,13 @@ class NumpyNdarrayVariable(TensorVariable):
             raise NotImplementedError()
         return result
 
+    @staticmethod
+    def patch_args(name, args, kwargs):
+        if name == "clip":
+            kwargs_rename = {"a_min": "min", "a_max": "max"}
+            kwargs = {kwargs_rename.get(k, k): v for k, v in kwargs.items()}
+        return args, kwargs
+
     def call_method(
         self,
         tx,
@@ -936,6 +943,8 @@ class NumpyNdarrayVariable(TensorVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from ..utils import numpy_method_wrapper
+
+        args, kwargs = self.patch_args(name, args, kwargs)
 
         if name in ["__len__", "size", "tolist"]:
             # delegate back to TensorVariable
