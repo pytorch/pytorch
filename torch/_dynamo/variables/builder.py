@@ -1183,8 +1183,9 @@ class VariableBuilder:
                 # know if bare integers are actually going to be sizevars
                 # and it is inappropriate to eagerly duck size them with
                 # real sizevars
+                log.info("automatic dynamic DISABLED 1")
                 if (
-                    config.automatic_dynamic_shapes and frame_state_entry.scalar is None
+                    False and frame_state_entry.scalar is None
                 ) or not config.assume_static_by_default:
                     dynamic_dim = DimDynamic.DYNAMIC
                 else:  # assume_static_by_default
@@ -1702,7 +1703,8 @@ def _automatic_dynamic(
         marked_static = i in getattr(e, "_dynamo_static_indices", set())
 
         # NB: both static and dynamic have precedence over
-        automatic_dynamic = config.automatic_dynamic_shapes and (
+        log.info("automatic dynamic DISABLED 2")
+        automatic_dynamic = False and (
             frame_state_entry.size is None or frame_state_entry.size[i] is None
         )
 
