@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import contextlib
 import functools
 import itertools
@@ -105,7 +107,7 @@ class UnsupportedOperatorException(RuntimeError):
 
 
 def ordered_set(*items):
-    return {k: True for k in items}
+    return dict.fromkeys(items, True)
 
 
 _device_not_kwarg_ops = ordered_set(

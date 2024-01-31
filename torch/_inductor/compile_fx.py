@@ -29,6 +29,7 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo import (
     compiled_autograd,
+    config as dynamo_config,
     logging as dynamo_logging,
     utils as dynamo_utils,
 )
@@ -42,6 +43,7 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
 from .._dynamo.backends.common import aot_autograd
+from ..fx._lazy_graph_module import _use_lazy_graph_module  # type: ignore[attr-defined]
 from ..fx.graph import _PyTreeCodeGen
 from . import config, metrics
 from .debug import DebugContext
@@ -58,7 +60,7 @@ if config.is_fbcode():
     from torch._inductor.fb.utils import time_and_log
 else:
     # no-op decorator
-    def time_and_log(attr: str):
+    def time_and_log(attr: str, extra_loggings: Optional[Dict[str, str]] = None):
         return dynamo_utils.identity
 
 
@@ -144,13 +146,25 @@ def _warn_tf32_disabled():
 
 
 def _unlift_graph(mod, gm, graph_signature):
+    from torch.export.unflatten import _assign_attr, _AttrKind
+
     state_dict = {}
     for name, param in mod.named_parameters(remove_duplicate=False):
-        gm.register_parameter(name.replace(".", "_"), param)
         state_dict[name] = param
+        _assign_attr(
+            param,
+            gm,
+            name,
+            attr_kind=_AttrKind.PARAMETER,
+        )
     for name, buffer in mod.named_buffers(remove_duplicate=False):
-        gm.register_buffer(name.replace(".", "_"), buffer)
         state_dict[name] = buffer
+        _assign_attr(
+            buffer,
+            gm,
+            name,
+            attr_kind=_AttrKind.BUFFER,
+        )
 
     placeholder_nodes = [node for node in gm.graph.nodes if node.op == "placeholder"]
     lifted_inputs = []
@@ -257,9 +271,23 @@ def fake_tensor_prop(
     return fake_mode
 
 
+# pass config dict back to user
+def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
+    with config.patch(config_patches):
+        return config.get_config_copy()
+
+
 @DebugContext.wrap
 @torch.utils._python_dispatch._disable_current_modes()
-@time_and_log(attr="compilation time (in seconds)")
+@time_and_log(
+    attr="compilation time (in seconds)",
+    extra_loggings={"config_dict": str(get_patched_config_dict())},
+)
+# Need this decorator for compile_fx_inner even if we already have one for
+# compile_fx. The reason is the compilation for backward graph may happen after
+# compile_fx return and we may want to use the _LazyGraphModule for compiling
+# the backward graph as well.
+@_use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
@@ -282,6 +310,11 @@ def compile_fx_inner(
     also update the call to save_args_for_compile_fx_inner below accordingly.
     """
     if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
+        # trigger the real recompilation for _LazyGraphModule before returning
+        # the forward method.
+        from torch.fx._lazy_graph_module import _LazyGraphModule
+
+        _LazyGraphModule.force_recompile(gm)
         return make_boxed_func(gm.forward)
 
     assert isinstance(
@@ -964,6 +997,7 @@ def fw_compiler_freezing(
     return wrapper
 
 
+@_use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
 def compile_fx(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],
@@ -1206,12 +1240,6 @@ def compile_fx(
             partition_fn=partition_fn,
             keep_inference_input_mutations=True,
         )(model_, example_inputs_)
-
-
-# pass config dict back to user
-def get_patched_config_dict(config_patches=None):
-    with config.patch(config_patches):
-        return config.get_config_copy()
 
 
 def _shape_env_from_inputs(inputs: List[torch.Tensor]):
