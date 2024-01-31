@@ -2261,19 +2261,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             return cls.inline_call_(parent, func, args, kwargs)
 
     @staticmethod
-    def check_inlineable(func):
+    def check_inlineable(func) -> skipfiles.SkipResult:
         if func.has_self():
             unimplemented("inline with __self__")
 
         result = skipfiles.check_verbose(func, is_inlined_call=True)
         if result.skipped:
-            from torch._dynamo.variables.misc import produce_trampoline_autograd_apply
-
-            # _origin marks this as coming from an internal dynamo known function that is safe to
-            # trace through.
-            if hasattr(func.fn, "_origin") and func.fn._origin in [
-                produce_trampoline_autograd_apply,
-            ]:
+            if func.should_force_inline():
                 # Known sound
                 return skipfiles.SkipResult(False, "allowlist in dynamo known function")
             unimplemented(

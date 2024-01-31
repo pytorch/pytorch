@@ -1502,13 +1502,18 @@ class AutogradFunctionApplyVariable(VariableTracker):
         fwd_src = AttrSource(self.parent_source, member="forward")
         ctx = AutogradFunctionContextVariable.create(tx)
         if isinstance(self.fwd_graph, types.FunctionType):
-            fwd_fn = UserFunctionVariable(self.fwd_graph, source=fwd_src)
+            fwd_fn = UserFunctionVariable(
+                self.fwd_graph,
+                source=fwd_src,
+                force_inline=True,  # if this is blocked by skipfiles, still try to inline
+            )
             fwd_args = [ctx, *args]
         elif isinstance(self.fwd_graph, types.MethodType):
             fwd_fn = UserMethodVariable(
                 self.fwd_graph.__func__,
                 UserDefinedClassVariable(self.fwd_graph.__class__),
                 source=fwd_src,
+                force_inline=True,  # if this is blocked by skipfiles, still try to inline
             )
             fwd_args = [fwd_fn.obj, ctx, *args]
         else:
@@ -1555,12 +1560,17 @@ class AutogradFunctionApplyVariable(VariableTracker):
 
         bwd_src = AttrSource(self.parent_source, member="backward")
         if isinstance(self.bwd_graph, types.FunctionType):
-            bwd_fn = UserFunctionVariable(self.bwd_graph, source=bwd_src)
+            bwd_fn = UserFunctionVariable(
+                self.bwd_graph,
+                source=bwd_src,
+                force_inline=True,  # if this is blocked by skipfiles, still try to inline
+            )
         elif isinstance(self.bwd_graph, types.MethodType):
             bwd_fn = UserMethodVariable(
                 self.bwd_graph.__func__,
                 UserDefinedClassVariable(self.bwd_graph.__class__),
                 source=bwd_src,
+                force_inline=True,  # if this is blocked by skipfiles, still try to inline
             )
             bwd_args = [bwd_fn.obj, *bwd_args]
         else:
