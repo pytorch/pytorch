@@ -176,7 +176,7 @@ can use this pattern:
     >>> new_m.load_state_dict(m_state_dict)
     <All keys matched successfully>
 
-.. _serializing-python-modules:
+.. _serialized-file-format:
 
 Serialized file format for ``torch.save``
 -----------------------------------------
@@ -212,7 +212,7 @@ ensuring that the offset of each file is 64-byte aligned.
     Tensors on certain devices such as XLA do not have their storages serialized. In
     these cases ``data/`` might not exist in the checkpoint.
 
-.. _serialized-file-format:
+.. _serializing-python-modules:
 
 Serializing torch.nn.Modules and loading them in C++
 ----------------------------------------------------
