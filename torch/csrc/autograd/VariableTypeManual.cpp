@@ -50,6 +50,12 @@ std::vector<at::DeprecatedTypeProperties*> allXPUTypes() {
   return allTypesForBackends({Backend::XPU, Backend::SparseXPU});
 }
 
+std::vector<at::DeprecatedTypeProperties*> allPrivateUser1Types() {
+  at::globalContext().lazyInitPrivateUse1();
+  return allTypesForBackends(
+      {Backend::PrivateUse1, Backend::SparsePrivateUse1});
+}
+
 namespace {
 const Variable& checked_cast_variable(
     const Tensor& t,
