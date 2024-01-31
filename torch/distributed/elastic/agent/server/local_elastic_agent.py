@@ -15,7 +15,7 @@ import socket
 from string import Template
 import tempfile
 import uuid
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Set
 
 import torch.distributed.elastic.timer as timer
 from torch.distributed.elastic import events
@@ -140,6 +140,7 @@ class LocalElasticAgent(SimpleElasticAgent):
         exit_barrier_timeout: float = 300,
         log_dir: Optional[str] = None,
         log_line_prefix_template: Optional[str] = None,
+        filter_local_ranks: Optional[Set[int]] = None,
     ):
         super().__init__(spec, exit_barrier_timeout)
         self._start_method = start_method
@@ -148,6 +149,7 @@ class LocalElasticAgent(SimpleElasticAgent):
         self._rdzv_handler = spec.rdzv_handler
         self._log_dir = self._make_log_dir(log_dir, rdzv_run_id)
         self._log_line_prefix_template = log_line_prefix_template
+        self._filter_local_ranks = filter_local_ranks
         self._worker_watchdog: Optional[timer.FileTimerServer] = None
 
     def _make_log_dir(self, log_dir: Optional[str], rdzv_run_id: str):
@@ -300,6 +302,7 @@ class LocalElasticAgent(SimpleElasticAgent):
             start_method=self._start_method,
             redirects=spec.redirects,
             tee=spec.tee,
+            filter_local_ranks=self._filter_local_ranks,
         )
 
         return self._pcontext.pids()
