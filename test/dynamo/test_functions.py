@@ -1775,19 +1775,28 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return a
 
         arr = np.zeros(4)
-        self.assertEqual(fn(arr, np.s_[...], np.ones(4)),  np.ones(4))
+        self.assertEqual(fn(arr, np.s_[...], np.ones(4)), np.ones(4))
 
-        arr = np.array([[1,1],[2,2]])
-        self.assertEqual(fn(arr, np.s_[0,...], np.zeros(2)), np.array([[0,0], [2,2]]))
+        arr = np.array([[1, 1], [2, 2]])
+        self.assertEqual(
+            fn(arr, np.s_[0, ...], np.zeros(2)), np.array([[0, 0], [2, 2]])
+        )
 
-        arr = np.array([[1,1],[2,2]])
-        self.assertEqual(fn(arr, np.s_[1,...], np.zeros(2)), np.array([[1, 1], [0,0]]))
+        arr = np.array([[1, 1], [2, 2]])
+        self.assertEqual(
+            fn(arr, np.s_[1, ...], np.zeros(2)), np.array([[1, 1], [0, 0]])
+        )
 
-        arr = np.array([[1,1],[2,2]])
-        self.assertEqual(fn(arr, np.s_[...,0], np.array([3,3])), np.array([[3,1], [3,2]]))
+        arr = np.array([[1, 1], [2, 2]])
+        self.assertEqual(
+            fn(arr, np.s_[..., 0], np.array([3, 3])), np.array([[3, 1], [3, 2]])
+        )
 
-        arr = np.array([[1,1],[2,2]])
-        self.assertEqual(fn(arr, np.s_[...,1], np.array([3,3])), np.array([[1,3], [2,3]]))
+        arr = np.array([[1, 1], [2, 2]])
+        self.assertEqual(
+            fn(arr, np.s_[..., 1], np.array([3, 3])), np.array([[1, 3], [2, 3]])
+        )
+
 
 def udf_mul(x, y):
     return x * y
