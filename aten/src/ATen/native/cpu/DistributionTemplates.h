@@ -234,7 +234,7 @@ void normal_kernel(const TensorBase &self, double mean, double std, RNG generato
     normal_fill_AVX2(self, static_cast<float>(mean), static_cast<float>(std), generator);
 #else
     normal_fill_vectorize(self, static_cast<float>(mean), static_cast<float>(std), generator);
-#endif 
+#endif
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "normal_kernel_cpu", [&] {
       if (size >= 16 && self.is_contiguous()) {
