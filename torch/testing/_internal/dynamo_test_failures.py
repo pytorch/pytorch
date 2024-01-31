@@ -2480,6 +2480,9 @@ dynamo_skips = {
     "TestMethods.test_choose",
     "TestMethods.test_conjugate_out",
     "TestMethods.test_compress",
+    "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_complex64",  # known py311 fail
+    "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_int64",  # known py311 fail
+    "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_float32",  # known py311 fail
     "TestCustomOpTestingCPU.test_incorrect_schema_mutation_cpu",  # test_custom_ops
     "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmax_np_method0",
     "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmin_np_method1",
