@@ -1870,8 +1870,6 @@ dynamo_expected_failures = {
     "TestAutograd.test_backward_with_inputs",  # test_autograd
     "TestAutograd.test_setitem",  # test_autograd
     "TestAutogradDeviceTypeCPU.test_inplace_on_view_python_cpu",  # test_autograd
-    "TestAutogradForwardMode.test_make_dual_inference_tensor_in_inference_mode",  # test_autograd
-    "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_normal_mode_inplace_op",  # test_autograd
     "TestAutograd.test_custom_function_save_for_forward",  # test_autograd
     "TestAutograd.test_sparse_mm_backward",  # test_autograd
     "TestAutograd.test_checkpointing_without_reentrant_with_context_fn",  # test_autograd
@@ -1891,7 +1889,6 @@ dynamo_expected_failures = {
     "TestNestedCheckpoint.test_nested_checkpoint_kwargs_early_stop_False",  # test_autograd
     "TestAutograd.test_checkpointing_non_reentrant_autocast_cpu",  # test_autograd
     "TestAutograd.test_named_tensor_for_complex_views",  # test_autograd
-    "TestAutogradInferenceMode.test_inference_mode_existing_autograd_session",  # test_autograd
     "TestAutograd.test_set_grad_generator_functions_recursive",  # test_autograd
     "TestAutograd.test_increment_version",  # test_autograd
     "TestAutograd.test_record_function_callbacks",  # test_autograd
@@ -1903,7 +1900,6 @@ dynamo_expected_failures = {
     "TestAutograd.test_custom_function_forward_mode_forward_is_no_op",  # test_autograd
     "TestNestedCheckpoint.test_nested_checkpoint_set_early_stop",  # test_autograd
     "TestAutograd.test_version_counter",  # test_autograd
-    "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_normal_mode_view_op",  # test_autograd
     "TestAutograd.test_set_grad_generator_functions",  # test_autograd
     "TestAutograd.test_record_function",  # test_autograd
     "TestAutograd.test_custom_function_forward_mode_view_checks",  # test_autograd
@@ -1920,7 +1916,6 @@ dynamo_expected_failures = {
     "TestAutogradInferenceMode.test_inference_mode_tensor_creation",  # test_autograd
     "TestAutograd.test_set_grad_coroutines",  # test_autograd
     "TestAutograd.test_no_grad_copy_sparse",  # test_autograd
-    "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_inf_mode_view_op",  # test_autograd
     "TestAutograd.test_set_grad_coroutines_exit",  # test_autograd
     "TestNestedCheckpoint.test_nested_checkpoint_reentrant_backwards_early_stop_True",  # test_autograd
     "TestAutograd.test_saved_tensor_hooks_custom_function_intermediates",  # test_autograd
@@ -1933,8 +1928,6 @@ dynamo_expected_failures = {
     "TestMultithreadAutograd.test_fork_join_in_middle",  # test_autograd
     "TestAutograd.test_hook_closure_cycle_use_custom_function_True_use_tensor_hook_False",  # test_autograd
     "TestAutograd.test_accumulate_grad_tensor_reference",  # test_autograd
-    "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_inf_mode_functional_op",  # test_autograd
-    "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_normal_mode_functional_op",  # test_autograd
     "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_inf_mode_inplace_op",  # test_autograd
     "TestAutogradDeviceTypeCPU.test_scatter_index_reduce_prod_gradgrad_error_cpu",  # test_autograd
     "TestAutograd.test_nested_anomaly_detect_nan",  # test_autograd
@@ -2461,6 +2454,11 @@ dynamo_expected_failures = {
     "LoggingTests.test_dynamo_info",  # dynamo/test_logging
     "LoggingTests.test_graph_breaks",  # dynamo/test_logging
     "LoggingTests.test_aot",  # dynamo/test_logging
+    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape2_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape3_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_is_causal_and_mask_fails_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape1_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape0_cpu",  # test_transformers.py
 }
 
 # see NOTE [dynamo_test_failures.py] for more details
@@ -2529,23 +2527,40 @@ dynamo_skips = {
     "TestPruningNN.test_global_pruning_importance_scores",  # flaky
     "TestOpenMP_ParallelFor.test_one_thread",  # test_openmp
     "TestTorchrun.test_multi_threads",  # backends/xeon/test_launch
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape3_cpu",  # known py38 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_UPPER_LEFT_shape0_cpu",  # known py38 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape1_cpu",  # known py38 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape2_cpu",  # known py38 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_UPPER_LEFT_shape3_cpu",  # known py38 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape0_cpu",  # known py38 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_UPPER_LEFT_shape2_cpu",  # known py38 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_UPPER_LEFT_shape1_cpu",  # known py38 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_1_shape0_cpu",  # known py311 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_2_shape2_cpu",  # known py311 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_2_shape0_cpu",  # known py311 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape3_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_CausalVariant_UPPER_LEFT_shape0_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape1_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape2_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_CausalVariant_UPPER_LEFT_shape3_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape0_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_CausalVariant_UPPER_LEFT_shape2_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_CausalVariant_UPPER_LEFT_shape1_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_CausalVariant_LOWER_RIGHT_shape3_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_CausalVariant_UPPER_LEFT_shape0_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_CausalVariant_LOWER_RIGHT_shape1_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_CausalVariant_LOWER_RIGHT_shape2_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_CausalVariant_UPPER_LEFT_shape3_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_CausalVariant_LOWER_RIGHT_shape0_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_CausalVariant_UPPER_LEFT_shape2_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_CausalVariant_UPPER_LEFT_shape1_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_1_shape0_cpu",  # known py311 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_2_shape2_cpu",  # known py311 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_2_shape0_cpu",  # known py311 fail
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_2_shape3_cpu",  # known py311 fail
+    "TestAttnBiasCUDA.test_causal_variants_compile_causal_variant_CausalVariant_LOWER_RIGHT_shape3_CUDA",  # known py38 fail
+    "TestAttnBiasCUDA.test_causal_variants_compile_causal_variant_CausalVariant_UPPER_LEFT_shape0_CUDA",  # known py38 fail
+    "TestAttnBiasCUDA.test_causal_variants_compile_causal_variant_CausalVariant_LOWER_RIGHT_shape1_CUDA",  # known py38 fail
+    "TestAttnBiasCUDA.test_causal_variants_compile_causal_variant_CausalVariant_LOWER_RIGHT_shape2_CUDA",  # known py38 fail
+    "TestAttnBiasCUDA.test_causal_variants_compile_causal_variant_CausalVariant_UPPER_LEFT_shape3_CUDA",  # known py38 fail
+    "TestAttnBiasCUDA.test_causal_variants_compile_causal_variant_CausalVariant_LOWER_RIGHT_shape0_CUDA",  # known py38 fail
+    "TestAttnBiasCUDA.test_causal_variants_compile_causal_variant_CausalVariant_UPPER_LEFT_shape2_CUDA",  # known py38 fail
+    "TestAttnBiasCUDA.test_causal_variants_compile_causal_variant_CausalVariant_UPPER_LEFT_shape1_CUDA",  # known py38 fail
     "TestTransformersCPU.test_decoder_padding_and_src_mask_bool_cpu",  # known py311 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_2_shape3_cpu",  # known py311 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_1_shape3_cpu",  # known py311 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_1_shape2_cpu",  # known py311 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_1_shape1_cpu",  # known py311 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_2_shape1_cpu",  # known py311 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_2_shape3_cpu",  # known py311 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_1_shape3_cpu",  # known py311 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_1_shape2_cpu",  # known py311 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_1_shape1_cpu",  # known py311 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_2_shape1_cpu",  # known py311 fail
     "TestFunctionalAutogradBenchmark.test_fast_tasks",  # flaky?
     "TestFrameworkUtils.test_filtering_env_var",  # known py38 fail
     "TestAsArrayCPU.test_default_device_cpu",  # known py38 fail
@@ -7303,6 +7318,13 @@ dynamo_skips = {
     "TestFrozenOptimizations.test_conv_bn_folding",  # test_jit.py
     "TestArgmax.test_combinations_data58",
     "TestArgmax.test_combinations_data61",
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_1_shape0_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_2_shape0_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_1_shape3_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_2_shape2_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_1_shape2_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_2_shape1_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_1_shape1_cpu",  # test_transformers.py
 }
 
 

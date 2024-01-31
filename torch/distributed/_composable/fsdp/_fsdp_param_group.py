@@ -29,10 +29,16 @@ class FSDPCommContext:
     """This has the communication state shared across FSDP states/parameter groups."""
 
     default_stream: torch.cuda.Stream
-    all_gather_copy_in_stream: torch.cuda.Stream
-    all_gather_stream: torch.cuda.Stream
-    reduce_scatter_stream: torch.cuda.Stream
+    # All-gather state and copy-in stream allow overlapping the next copy-in
+    # with the current all-gather in forward; copy-in overlaps with reduce-
+    # scatter in backward without the separate copy-in stream
     all_gather_state: AllGatherStateHolder
+    all_gather_copy_in_stream: torch.cuda.Stream
+    # All-gather stream allows overlapping next all-gather with current compute
+    all_gather_stream: torch.cuda.Stream
+    # Reduce-scatter stream gives separate execution "thread" for post-backward
+    # logic like pre/post-gradient division and reduce-scatter
+    reduce_scatter_stream: torch.cuda.Stream
 
     def init(self):
         # Setting the all-gather/reduce-scatter streams to be higher priority
