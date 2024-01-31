@@ -112,8 +112,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   // Stream-related functions
   bool queryStream(const Stream& stream) const override {
     XPUStream xpu_stream{stream};
-    // return xpu_stream.query();
-    return false;
+    return xpu_stream.query();
   }
 
   void synchronizeStream(const Stream& stream) const override {
