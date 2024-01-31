@@ -91,7 +91,7 @@ if __name__ == "__main__":
     )
     # linux-focal-py3.11-clang10 (default) Test Reports (xml) directory
     parser.add_argument("eager_dir")
-    # linux-focal-py3.8-clang10 (dynamo) Test Reports (xml) directory
+    # linux-focal-py3.11-clang10 (dynamo) Test Reports (xml) directory
     parser.add_argument("dynamo_dir")
     args = parser.parse_args()
     compute_pass_rate(args.eager_dir, args.dynamo_dir)

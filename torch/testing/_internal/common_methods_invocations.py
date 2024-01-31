@@ -1184,6 +1184,8 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
     # addmm of empty matrices
     if dtype.is_floating_point:
         yield SampleInput(make_arg(S, M), make_arg(S, 0), make_arg(0, M), **kwargs)
+        # empty matmul with broadcastable input
+        yield SampleInput(make_arg(M), make_arg(S, 0), make_arg(0, M), **kwargs).with_metadata(broadcasts_input=True)
 
 def sample_inputs_sparse_sampled_addmm(op_info, device, dtype, requires_grad, **kwargs):
     alpha = 2 + 3j if dtype.is_complex else 0.6
@@ -20711,6 +20713,14 @@ python_ref_db = [
         torch_opinfo_name="log_softmax",  # alias
         torch_opinfo_variant_name="with_dtype",
         supports_out=False,
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.pixel_shuffle",
+        torch_opinfo_name="nn.functional.pixel_shuffle",
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.pixel_unshuffle",
+        torch_opinfo_name="nn.functional.pixel_unshuffle",
     ),
     PythonRefInfo(
         "_refs.nn.functional.poisson_nll_loss",
