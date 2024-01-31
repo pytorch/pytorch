@@ -178,6 +178,37 @@ can use this pattern:
 
 .. _serializing-python-modules:
 
+``torch.save`` serialized file format
+-------------------------------------
+
+Since PyTorch 1.6.0, ``torch.save`` defaults to returning an uncompressed ZIP64
+archive unless the user sets ``_use_new_zipfile_serialization=False``.
+
+In this archive, the files are ordered as follows
+
+.. code-block:: python
+    checkpoint.pth
+    ├── data.pkl
+    ├── byteorder  # in PyTorch >= 2.1
+    ├── data
+    │   ├── 0
+    │   ├── 1
+    │   └── 2
+    │   └── …
+    └── version
+
+The entries are:
+* ``data.pkl`` is the result of pickling the object passed to ``torch.save``
+  except  ``torch.Storage``s
+* ``byteorder`` records the ``sys.byteorder`` when saving (“little” or “big”)
+* ``data/`` contains all the saved storages, where each storage is a separate file
+* ``version`` contains a version number for internal use
+
+The local file header of each file is padded to a multiple of 64 bytes, ensuring
+that the offset of each file is 64-byte aligned.
+
+.. _serialized-file-format:
+
 Serializing torch.nn.Modules and loading them in C++
 ----------------------------------------------------
 
