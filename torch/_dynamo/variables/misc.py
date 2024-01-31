@@ -815,6 +815,8 @@ class NumpyVariable(VariableTracker):
                 msg += f"confg.use_numpy_random_stream={config.use_numpy_random_stream}"
                 unimplemented(msg)
 
+            args, kwargs = NumpyNdarrayVariable.patch_args(func.__name__, args, kwargs)
+
             constant_args = check_constant_args(args, kwargs)
             unspec_python_args = check_unspec_python_args(args, kwargs)
 
