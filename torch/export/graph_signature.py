@@ -289,35 +289,21 @@ class ExportGraphSignature:
 
     # Graph node names of pytree-flattened inputs of original program
     @property
-    def user_inputs(self) -> Collection[Union[int, float, bool, None, str]]:
-        user_inputs: List[Union[int, float, bool, None, str]] = []
-        for s in self.input_specs:
-            if s.kind != InputKind.USER_INPUT:
-                continue
-
-            if isinstance(s.arg, (TensorArgument, SymIntArgument)):
-                user_inputs.append(s.arg.name)
-            elif isinstance(s.arg, ConstantArgument):
-                user_inputs.append(s.arg.value)
-            else:
-                raise RuntimeError(f"{s.arg} is not a valid user inputs")
-        return tuple(user_inputs)
+    def user_inputs(self) -> Collection[str]:
+        return tuple(
+            s.arg.name
+            for s in self.input_specs
+            if s.kind == InputKind.USER_INPUT and isinstance(s.arg, TensorArgument)
+        )
 
     # Graph node names of pytree-flattened outputs of original program
     @property
-    def user_outputs(self) -> Collection[Union[int, float, bool, None, str]]:
-        user_outputs: List[Union[int, float, bool, None, str]] = []
-        for s in self.output_specs:
-            if s.kind != OutputKind.USER_OUTPUT:
-                continue
-
-            if isinstance(s.arg, (TensorArgument, SymIntArgument)):
-                user_outputs.append(s.arg.name)
-            elif isinstance(s.arg, ConstantArgument):
-                user_outputs.append(s.arg.value)
-            else:
-                raise RuntimeError(f"{s.arg} is not a valid user output")
-        return tuple(user_outputs)
+    def user_outputs(self) -> Collection[str]:
+        return tuple(
+            s.arg.name
+            for s in self.output_specs
+            if s.kind == OutputKind.USER_OUTPUT and isinstance(s.arg, TensorArgument)
+        )
 
     # A dictionary mapping graph input node names to parameters. If a graph input
     # name is found in this dictionary, it is guranteed to be a lifted parameter.
