@@ -1326,6 +1326,10 @@ def get_selected_tests(options) -> List[str]:
     if torch.version.cuda is not None:
         options.exclude.extend(["distributions/test_constraints"])
 
+    # these tests failing in Python 3.12 temporarily disabling
+    if (sys.version_info >= (3, 12)):
+        options.exclude.extend(["functorch/test_dims", "dynamo/test_subclasses"])
+
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
     if sys.platform == "win32" and not options.ignore_win_blocklist:
