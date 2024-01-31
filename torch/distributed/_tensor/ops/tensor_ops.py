@@ -626,7 +626,12 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
 
 
 @register_prop_rule(
-    [aten.split.Tensor, aten.split_with_sizes.default], schema_info=RuntimeSchemaInfo(1)
+    [
+        aten.split.Tensor,
+        aten.split_with_sizes.default,
+        aten.split_with_sizes_copy.default,
+    ],
+    schema_info=RuntimeSchemaInfo(1),
 )
 def split_rule(op_schema: OpSchema) -> OutputSharding:
     output_spec_list: List[DTensorSpec] = []
