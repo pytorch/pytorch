@@ -5894,6 +5894,7 @@ else:
     # Make sure that the parameters become nonsense when scaled gradients are finite
     # but they get invalidated before `optimizer.step`, after `GradScaler.unscale_`
 
+    @skipIfTorchDynamo("'UserDefinedClassVariable' object has no attribute 'get_function'")
     @onlyNativeDeviceTypes
     def test_params_invalidated_with_grads_invalidated_between_unscale_and_step(self, device):
         device = torch.device(device)

@@ -3747,6 +3747,24 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
+    def test_fusing_write_into_disjoint_read(self):
+        def test_flip(a):
+            return a.copy_(torch.flip(a, (0,)))
+
+        self.common(test_flip, (torch.rand([20]),))
+
+        assertGeneratedKernelCountEqual(self, 2)
+
+        # issue only manifests on cuda with large tensors
+        if self.device != "cpu":
+
+            def f(a):
+                a[:, 20:40] = a[:, 20:40] + 1
+                a[:, 2:900025] = a[:, 1:900024] + 2
+
+            a = torch.rand((1, 1000000), device="cuda")
+            self.common(f, (a,))
+
     def test_gather_scatter(self):
         def fn(node_feat, edge_index):
             src_node_feat = node_feat[edge_index[0]]
@@ -8427,6 +8445,12 @@ class CommonTemplate:
         else:
             # should_pad_bench always returns False if has_triton returns False
             self.assertFalse(should_pad)
+
+    def test_bessel_j0(self):
+        def fn(x):
+            return torch.special.bessel_j0(x)
+
+        self.common(fn, (torch.randn(8, 8),))
 
 
 @dataclasses.dataclass
