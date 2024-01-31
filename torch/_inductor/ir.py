@@ -4479,7 +4479,7 @@ class ExternKernelNode:
 
 
 has_c_shim = {
-    aten._embedding_bag,
+    aten._embedding_bag.default,
     aten._scaled_dot_product_efficient_attention.default,
     aten._scaled_dot_product_flash_attention.default,
     aten.addmm.out,
