@@ -1093,6 +1093,8 @@ def main():
         "jinja2",
         "fsspec",
     ]
+    if IS_WINDOWS:
+        install_requires.append("mkl>=2021.1.1,<=2021.4.0")
 
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
@@ -1184,6 +1186,7 @@ def main():
         "include/ATen/native/mps/*.h",
         "include/ATen/native/quantized/*.h",
         "include/ATen/native/quantized/cpu/*.h",
+        "include/ATen/native/sparse/*.h",
         "include/ATen/native/utils/*.h",
         "include/ATen/quantized/*.h",
         "include/caffe2/serialize/*.h",

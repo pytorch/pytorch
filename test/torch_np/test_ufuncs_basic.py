@@ -89,16 +89,18 @@ class TestUnaryUfuncs(TestCase):
 
         res_out = ufunc(x, out=out)
         res_bcast = ufunc(x_b)
-        assert_equal(res_out, res_bcast)
+        # TODO: switching the order causes a graph break, failing the test.
+        # See test/dynamo/test_misc.py -k test_numpy_graph_break
         assert res_out is out
+        assert_equal(res_out, res_bcast)
 
         out = np.empty((1, x.shape[0]))
         x_b = np.broadcast_to(x, out.shape)
 
         res_out = ufunc(x, out=out)
         res_bcast = ufunc(x_b)
-        assert_equal(res_out, res_bcast)
         assert res_out is out
+        assert_equal(res_out, res_bcast)
 
 
 ufunc_op_iop_numeric = [
@@ -206,8 +208,10 @@ class TestBinaryUfuncs(TestCase):
         res_out = ufunc(x, y, out=out)
         res_bcast = ufunc(x_b, y_b)
 
-        assert_equal(res_out, res_bcast)
+        # TODO: switching the order causes a graph break, failing the test.
+        # See test/dynamo/test_misc.py -k test_numpy_graph_break
         assert res_out is out
+        assert_equal(res_out, res_bcast)
 
 
 dtypes_numeric = [np.int32, np.float32, np.float64, np.complex128]

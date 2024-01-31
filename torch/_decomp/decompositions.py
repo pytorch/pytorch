@@ -1153,16 +1153,6 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
     return result
 
 
-@register_decomposition(aten.rsub.Tensor)
-def rsub_Tensor(self: Tensor, other: Tensor, alpha: float = 1) -> Tensor:
-    return torch.sub(other, self, alpha=alpha)
-
-
-@register_decomposition(aten.rsub.Scalar)
-def rsub_Scalar(self: Tensor, other: float, alpha: float = 1) -> Tensor:
-    return torch.sub(other, self, alpha=alpha)
-
-
 @register_decomposition(aten.embedding)
 @out_wrapper()
 def embedding(
@@ -1289,7 +1279,7 @@ def tensor_split_tensor_indices_or_sections_py_impl(
     self: Tensor,
     tensor_indices_or_sections: Tensor,
     dim: int = 0,
-) -> List[Tensor]:
+) -> Tuple[Tensor, ...]:
     assert tensor_indices_or_sections.device.type == "cpu"
     assert tensor_indices_or_sections.dtype == torch.int64
     split_dim = tensor_indices_or_sections.dim()
@@ -2832,7 +2822,7 @@ def _rnn_helper(
             final_hiddens.append(bwd_hidden)
 
         if bidirectional:
-            input = torch.cat([fwd_inp, bwd_inp], fwd_inp.dim() - 1)
+            input = torch.cat([fwd_inp, bwd_inp], fwd_inp.dim() - 1)  # type: ignore[possibly-undefined]
         else:
             input = fwd_inp
 

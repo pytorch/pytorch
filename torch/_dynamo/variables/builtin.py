@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import contextlib
 import functools
 import inspect
@@ -106,6 +108,7 @@ class BuiltinVariable(VariableTracker):
             chr,
             divmod,
             float,
+            getattr,
             int,
             len,
             max,
@@ -843,6 +846,13 @@ class BuiltinVariable(VariableTracker):
         )
         return abs_method.call_function(tx, [], {})
 
+    def call_pos(self, tx, arg: "VariableTracker"):
+        # Call arg.__pos__()
+        pos_method = BuiltinVariable(getattr).call_function(
+            tx, [arg, ConstantVariable.create("__pos__")], {}
+        )
+        return pos_method.call_function(tx, [], {})
+
     def call_round(self, tx, arg, *args, **kwargs):
         # Call arg.__round__()
         round_method = BuiltinVariable(getattr).call_function(
@@ -1296,8 +1306,6 @@ class BuiltinVariable(VariableTracker):
             if is_utils_checkpoint(member):
                 options["source"] = source
                 return build_checkpoint_variable(**options)
-            elif trace_rules.lookup(member) is not None:
-                return trace_rules.lookup(member)(member, **options)
             elif source is not None:
                 return VariableBuilder(tx, source)(member)
             else:
