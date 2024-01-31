@@ -1,12 +1,12 @@
 #include <c10/cuda/CUDAAllocatorConfig.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/util/llvmMathExtras.h>
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
 #endif
 
-namespace c10 {
-namespace cuda {
-namespace CUDACachingAllocator {
+namespace c10::cuda::CUDACachingAllocator {
 
 constexpr size_t kRoundUpPowerOfTwoIntervals = 16;
 
@@ -352,6 +352,4 @@ void setAllocatorSettings(const std::string& env) {
   CUDACachingAllocator::CUDAAllocatorConfig::instance().parseArgs(env.c_str());
 }
 
-} // namespace CUDACachingAllocator
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda::CUDACachingAllocator

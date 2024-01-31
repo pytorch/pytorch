@@ -525,8 +525,15 @@ static inline bool isSignedType(ScalarType t) {
     case ScalarType::ComplexFloat:
     case ScalarType::ComplexDouble:
       return true;
-      AT_FORALL_SCALAR_TYPES_AND5(
-          Half, Bool, BFloat16, Float8_e5m2, Float8_e4m3fn, CASE_SIGNED)
+      AT_FORALL_SCALAR_TYPES_AND7(
+          Half,
+          Bool,
+          BFloat16,
+          Float8_e5m2,
+          Float8_e4m3fn,
+          Float8_e5m2fnuz,
+          Float8_e4m3fnuz,
+          CASE_SIGNED)
     default:
       TORCH_CHECK(false, "Unknown ScalarType");
   }
