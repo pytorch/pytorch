@@ -55,8 +55,12 @@ def repro(testcase):
     return f"PYTORCH_TEST_WITH_DYNAMO=1 pytest {testcase.attrib['file']} -v -k {testcase.attrib['name']}"
 
 
+def all_tests(testcase):
+    return f"{testcase.attrib['file']}::{testcase.attrib['classname']}.{testcase.attrib['name']}"
+
+
 # e.g. "17c5f69852/eager", "17c5f69852/dynamo"
-def failures_histogram(eager_dir, dynamo_dir):
+def failures_histogram(eager_dir, dynamo_dir, verbose=False):
     fail_keys = compute_pass_rate(eager_dir, dynamo_dir)
     xmls = open_test_results(dynamo_dir)
 
@@ -64,14 +68,29 @@ def failures_histogram(eager_dir, dynamo_dir):
     testcases = [t for t in testcases if key(t) in fail_keys]
     dct = get_failures(testcases)
 
-    a = [(x, y, repro(z[0])) for x, y, z in dct]
+    result = []
+    for count, reason, testcases in dct:
+        if verbose:
+            row = (
+                count,
+                reason,
+                repro(testcases[0]),
+                [all_tests(t) for t in testcases],
+            )
+        else:
+            row = (count, reason, repro(testcases[0]))
+        result.append(row)
 
-    counts, _, _ = zip(*a)
-
-    print("(num_failed_tests, error_msg, sample_test)")
-    for row in a:
+    header = (
+        "(num_failed_tests, error_msg, sample_test, all_tests)"
+        if verbose
+        else "(num_failed_tests, error_msg, sample_test)"
+    )
+    print(header)
+    sum_counts = sum([r[0] for r in result])
+    for row in result:
         print(row)
-    print("[counts]", sum(counts))
+    print("[counts]", sum_counts)
 
 
 if __name__ == "__main__":
@@ -83,5 +102,8 @@ if __name__ == "__main__":
     parser.add_argument("eager_dir")
     # linux-focal-py3.11-clang10 (dynamo) Test Reports (xml) directory
     parser.add_argument("dynamo_dir")
+    parser.add_argument(
+        "-v", "--verbose", help="Prints all failing test names", action="store_true"
+    )
     args = parser.parse_args()
-    failures_histogram(args.eager_dir, args.dynamo_dir)
+    failures_histogram(args.eager_dir, args.dynamo_dir, args.verbose)
