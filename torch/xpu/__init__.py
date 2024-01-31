@@ -476,6 +476,7 @@ from .random import *  # noqa: F403
 
 
 __all__ = [
+    "DeferredXpuCallError".
     "Event",
     "Stream",
     "StreamContext",
