@@ -184,12 +184,12 @@ can use this pattern:
 Since PyTorch 1.6.0, ``torch.save`` defaults to returning an uncompressed ZIP64
 archive unless the user sets ``_use_new_zipfile_serialization=False``.
 
-In this archive, the files are ordered as follows
+In this archive, the files are ordered as such
 
 .. code-block:: python
     checkpoint.pth
     ├── data.pkl
-    ├── byteorder  # in PyTorch >= 2.1
+    ├── byteorder  # added in PyTorch >= 2.1
     ├── data
     │   ├── 0
     │   ├── 1
@@ -197,7 +197,7 @@ In this archive, the files are ordered as follows
     │   └── …
     └── version
 
-The entries are:
+The entries are as follows:
 * ``data.pkl`` is the result of pickling the object passed to ``torch.save``
   except  ``torch.Storage``s
 * ``byteorder`` records the ``sys.byteorder`` when saving (“little” or “big”)
