@@ -1606,7 +1606,7 @@ def main():
     )
 
     with open(
-        REPO_ROOT / "test" / "test-reports" / "td_heuristic_rankings.log", "w"
+        REPO_ROOT / "test" / "test-reports" / "td_heuristic_rankings.log", "a"
     ) as f:
         if IS_CI:
             # downloading test cases configuration to local environment
