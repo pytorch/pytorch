@@ -148,7 +148,7 @@ struct FusedAdamMathFunctor {
            i_start * kILP < n && i_start * kILP < chunk_size;
            i_start += blockDim.x) {
 #pragma unroll
-        for (uint8_t i = 0; i < depth; i++) {
+        for (int i = 0; i < depth; i++) {
           load_store(r_args[i], args[i], 0, i_start);
         }
         adam_math<scalar_type, opmath_t, depth, adam_mode, amsgrad>(
@@ -164,7 +164,7 @@ struct FusedAdamMathFunctor {
             bias_correction1,
             bias_correction2_sqrt);
 #pragma unroll
-        for (uint8_t i = 0; i < depth; i++) {
+        for (int i = 0; i < depth; i++) {
           if (i != kGradIdx || grad_scale_ptr) {
             load_store(args[i], r_args[i], i_start, 0);
           }
@@ -187,7 +187,7 @@ struct FusedAdamMathFunctor {
             bias_correction1,
             bias_correction2_sqrt);
 #pragma unroll
-        for (uint8_t i = 0; i < depth; i++) {
+        for (int i = 0; i < depth; i++) {
           if (i != kGradIdx || grad_scale_ptr) {
             store_args(args[i], r_args[i], i_start, chunk_size, n);
           }
