@@ -29,7 +29,9 @@ check_shape_env_recorded_events = False
 # matches this.  For example, set this to "Ne(s0, 10)" and whenever we issue
 # this guard, we will generate full Python and C++ backtrace
 # [@compile_ignored: debug]
-extended_debug_guard_added = os.environ.get("TORCHDYNAMO_EXTENDED_DEBUG_GUARD_ADDED", None)
+extended_debug_guard_added = os.environ.get(
+    "TORCHDYNAMO_EXTENDED_DEBUG_GUARD_ADDED", None
+)
 
 # [@compile_ignored: debug] Show a warning for every specialization
 print_specializations = False
