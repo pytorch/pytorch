@@ -538,6 +538,15 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if not x.is_cuda:
             return x + 1
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @make_test
+    def test_get_device_properties_tensor_device(a):
+        x = a.to("cuda")
+        prop = torch.cuda.get_device_properties(x.device)
+        if prop.major == 8:
+            return x + prop.multi_processor_count
+        return x + prop.max_threads_per_multi_processor
+
     @make_test
     def test_tensor_type(a, b):
         m = a.to(torch.float16)
@@ -1734,7 +1743,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_pos(self):
         def fn(x, y):
-            return operator.pos(x) * operator.pos(y)
+            return operator.pos(x) * +y
 
         opt_fn = torch.compile(fullgraph=True, dynamic=True)(fn)
 
@@ -1747,6 +1756,23 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         test(-1.1, 1.1)
         test(True, False)
         test(torch.ones(4, dtype=torch.float32), 1.1)
+
+    def test_truth(self):
+        def fn(x, y):
+            return operator.truth(x) and bool(y)
+
+        opt_fn = torch.compile(fullgraph=True, dynamic=False)(fn)
+
+        def test(x, y):
+            self.assertEqual(opt_fn(x, y), fn(x, y))
+
+        test(1, 100)
+        test(-1.1, True)
+        test(-1.1, 1.1)
+        test(True, False)
+        test(torch.ones(1), 1)
+        test(torch.zeros(1), 1)
+        test(torch.ones(1), torch.ones(1))
 
     def test_unary_fold_op(self):
         for op in (operator.abs, abs, operator.neg, operator.pos, operator.truth):
