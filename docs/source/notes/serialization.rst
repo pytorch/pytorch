@@ -193,7 +193,7 @@ In this archive, the files are ordered as such
     ├── data
     │   ├── 0
     │   ├── 1
-    │   └── 2
+    │   ├── 2
     │   └── …
     └── version
 
