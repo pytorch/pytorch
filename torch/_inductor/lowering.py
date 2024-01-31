@@ -249,7 +249,7 @@ def _register_foreach_lowering(aten_fn, decomp_fn):
 
     aten_fns = get_overloads(aten_fn)
     foreach_ops.update(aten_fns)
-    lowerings.update({fn: wrapped for fn in aten_fns})
+    lowerings.update(dict.fromkeys(aten_fns, wrapped))
     return wrapped
 
 
@@ -299,7 +299,7 @@ def _register_lowering(
 
     aten_fn = get_overloads(aten_fn)
 
-    lowerings.update({fn: wrapped for fn in aten_fn})
+    lowerings.update(dict.fromkeys(aten_fn, wrapped))
     return wrapped
 
 
@@ -607,7 +607,7 @@ def register_pointwise(
         fn,
         override_return_dtype=override_return_dtype,
         override_fn_when_input_bool=override_fn_when_input_bool,
-        override_fn_when_cuda_float64=fn_libdevice if use_libdevice_for_f64 else None,
+        override_fn_when_cuda_float64=fn_libdevice if use_libdevice_for_f64 else None,  # type: ignore[possibly-undefined]
         allow_alpha=allow_alpha,
     )
     fn = register_lowering(
@@ -2223,8 +2223,6 @@ make_fallback(aten.mode)
 make_fallback(aten.nanmedian)
 make_fallback(aten.ormqr)
 make_fallback(aten._pdist_forward)
-make_fallback(aten.pixel_shuffle)
-make_fallback(aten.pixel_unshuffle)
 make_fallback(aten.polygamma)
 make_fallback(aten.put)
 make_fallback(aten.resize)
@@ -3630,8 +3628,8 @@ def _reflection_padnd_backward(grad_output, x, padding):
                     out = right_reflect[i]
                     index_range = (xyz[i], dhw[i] - padding_right[i], dhw[i] - 1)
 
-                outs.append(out)
-                index_ranges.append(index_range)
+                outs.append(out)  # type: ignore[possibly-undefined]
+                index_ranges.append(index_range)  # type: ignore[possibly-undefined]
 
             grad = accumulate(grad, outs, index_ranges)
 
