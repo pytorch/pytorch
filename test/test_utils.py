@@ -21,6 +21,7 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     instantiate_device_type_tests,
 )
+import asdfrandomdoesntexist
 from torch.testing._internal.common_methods_invocations import op_db
 import torch.cuda
 from torch.utils._pytree import tree_any, tree_all_only
