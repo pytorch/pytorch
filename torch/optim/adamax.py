@@ -277,6 +277,12 @@ def _single_tensor_adamax(
         exp_inf = exp_infs[i]
         step_t = state_steps[i]
 
+        # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+        if not torch._utils.is_compiling() and capturable:
+            assert (param.is_cuda and step_t.is_cuda) or (
+                param.is_xla and step_t.is_xla
+            ), "If capturable=True, params and state_steps must be CUDA or XLA tensors."
+
         # update step
         step_t += 1
 
@@ -292,22 +298,32 @@ def _single_tensor_adamax(
         # Update biased first moment estimate.
         exp_avg.lerp_(grad, 1 - beta1)
         # Update the exponentially weighted infinity norm.
-        if not differentiable:
+        if capturable or differentiable:
+            step = step_t
+
+            bias_correction = 1 - beta1 ** step
+            clr = lr / bias_correction
+            clr_neg = clr.neg()
+
+            norm_buf = torch.cat(
+                [exp_inf.mul_(beta2).unsqueeze(0), grad.abs().add_(eps).unsqueeze_(0)],
+                0,
+            )
+            exp_inf.copy_(torch.amax(norm_buf, 0, keepdim=False))
+            exp_avg.mul_(clr_neg)
+            param.addcdiv_(exp_avg, exp_inf)
+        else:
+            step = _get_value(step_t)
+
             torch.maximum(
                 exp_inf.mul_(beta2),
                 grad.abs().add_(eps),
                 out=exp_inf,
             )
-        else:
-            norm_buf = torch.cat(
-                [exp_inf.mul_(beta2).unsqueeze(0), grad.abs().add_(eps).unsqueeze_(0)], 0
-            )
-            exp_inf.copy_(torch.amax(norm_buf, 0, keepdim=False))
+            bias_correction = 1 - beta1 ** step
+            clr = lr / bias_correction
 
-        bias_correction = 1 - beta1 ** _get_value(step_t)
-        clr = lr / bias_correction
-
-        param.addcdiv_(exp_avg, exp_inf, value=-clr)
+            param.addcdiv_(exp_avg, exp_inf, value=-clr)
 
 
 def _multi_tensor_adamax(
