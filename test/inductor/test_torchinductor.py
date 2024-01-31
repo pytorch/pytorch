@@ -710,6 +710,26 @@ class CommonTemplate:
         fn(x)
         self.assertEqual(x, y)
 
+    def test_add_complex4(self):
+        @torch.compile
+        def fn(a, b):
+            c = a + b
+            d = a + b
+            return c + d
+
+        for dtype in [torch.complex32, torch.complex64, torch.complex128]:
+            x = torch.tensor(
+                [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1], dtype=dtype
+            )
+            y = torch.tensor(
+                [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1], dtype=dtype
+            )
+
+            _, code = run_and_get_code(fn, x, y)
+            self.assertEqual(
+                code[0].count("::view_dtype" if config.cpp_wrapper else "aten.view"), 3
+            )
+
     def test_concat_add_inplace(self):
         def fn(x, y, z):
             return torch.cat([x, y], dim=1).add_(z)
@@ -5131,10 +5151,7 @@ class CommonTemplate:
         fn(arg1)
         opt_fn = torch._dynamo.optimize_assert(compile_fx)(fn)
         opt_fn(arg2)
-
-        # TODO, fix: See https://github.com/pytorch/pytorch/issues/94693
-        if self.device != "cpu":
-            self.assertTrue(same(arg1, arg2))
+        self.assertTrue(same(arg1, arg2))
 
     def test_slice_mutation3(self):
         def fn(a):

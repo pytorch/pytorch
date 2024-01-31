@@ -59,7 +59,7 @@ def all_tests(testcase):
     return f"{testcase.attrib['file']}::{testcase.attrib['classname']}.{testcase.attrib['name']}"
 
 
-# e.g. "17c5f69852/dynamo"
+# e.g. "17c5f69852/eager", "17c5f69852/dynamo"
 def failures_histogram(eager_dir, dynamo_dir, verbose=False):
     fail_keys = compute_pass_rate(eager_dir, dynamo_dir)
     xmls = open_test_results(dynamo_dir)
@@ -100,7 +100,7 @@ if __name__ == "__main__":
     )
     # linux-focal-py3.11-clang10 (default) Test Reports (xml) directory
     parser.add_argument("eager_dir")
-    # linux-focal-py3.8-clang10 (dynamo) Test Reports (xml) directory
+    # linux-focal-py3.11-clang10 (dynamo) Test Reports (xml) directory
     parser.add_argument("dynamo_dir")
     parser.add_argument(
         "-v", "--verbose", help="Prints all failing test names", action="store_true"

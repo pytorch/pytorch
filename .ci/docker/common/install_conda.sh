@@ -55,7 +55,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   if [ "$ANACONDA_PYTHON_VERSION" = "3.11" ]; then
     conda_install numpy=1.23.5 ${CONDA_COMMON_DEPS}
   else
-    conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS}
+    conda_install numpy=1.22.4 ${CONDA_COMMON_DEPS}
   fi
 
   # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
