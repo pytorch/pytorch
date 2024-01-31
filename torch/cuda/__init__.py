@@ -1006,6 +1006,18 @@ def clock_rate(device: Optional[Union[Device, int]] = None) -> int:
     return pynvml.nvmlDeviceGetClockInfo(handle, 1)
 
 
+def max_clock_rate(device: Optional[Union[Device, int]] = None) -> int:
+    r"""Return the maximum clock speed of the GPU SM in Hz (Hertz).
+
+    Args:
+        device (torch.device or int, optional): selected device. Returns
+            statistic for the current device, given by :func:`~torch.cuda.current_device`,
+            if :attr:`device` is ``None`` (default).
+    """
+    handle = _get_pynvml_handle(device)
+    return pynvml.nvmlDeviceGetMaxClockInfo(handle, 1)
+
+
 def _get_device(device: Union[int, str, torch.device]) -> torch.device:
     r"""Return the torch.device type object from the passed in device.
 

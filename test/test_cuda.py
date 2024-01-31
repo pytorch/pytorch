@@ -3888,6 +3888,10 @@ class TestCudaMallocAsync(TestCase):
     def test_clock_speed(self):
         self.assertTrue(torch.cuda.clock_rate() >= 0)
 
+    @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
+    def test_max_clock_speed(self):
+        self.assertTrue(torch.cuda.clock_rate() >= 0)
+
 
 MIN_BLOCK_SIZE = 512
 SMALL_SIZE = 1048576

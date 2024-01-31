@@ -1159,7 +1159,7 @@ def get_device_tflops(dtype):
 
     if inspect.signature(get_max_simd_tflops).parameters.get("clock_rate"):
         # Triton API change in https://github.com/openai/triton/pull/2293
-        cur_sm_clock = _max_clock_rate()
+        cur_sm_clock = torch.cuda.max_clock_rate()
         if dtype in (torch.float16, torch.bfloat16):
             return get_max_tensorcore_tflops(dtype, sm_clock)
 

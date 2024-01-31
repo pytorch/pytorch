@@ -2361,6 +2361,7 @@ torch_non_c_binding_in_graph_functions = {
         "torch.cuda.can_device_access_peer",
         "torch.cuda.check_error",
         "torch.cuda.clock_rate",
+        "torch.cuda.max_clock_rate",
         "torch.cuda.cudart",
         "torch.cuda.current_blas_handle",
         "torch.cuda.current_stream",

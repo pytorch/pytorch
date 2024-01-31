@@ -36,6 +36,7 @@ torch.cuda
     temperature
     power_draw
     clock_rate
+    max_clock_rate
     OutOfMemoryError
 
 Random Number Generator
