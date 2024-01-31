@@ -3,6 +3,7 @@ import copy
 import os
 import sys
 import tempfile
+import types
 import unittest
 from typing import Dict, Tuple
 
@@ -78,7 +79,8 @@ def check_model(
         }
     ):
         torch.manual_seed(0)
-        model = model.to(self.device)
+        if not isinstance(model, types.FunctionType):
+            model = model.to(self.device)
         ref_model = copy.deepcopy(model)
         ref_inputs = copy.deepcopy(example_inputs)
         expected = ref_model(*ref_inputs)
