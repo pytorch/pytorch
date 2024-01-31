@@ -2108,13 +2108,13 @@ class TestStdVar(TestCase):
         out = np.array(0.0)
         r = np.std(d, out=out)
         assert_(r is out)
-        # assert_array_equal(r, out)
-        # r = np.var(d, out=out)
-        # assert_(r is out)
-        # assert_array_equal(r, out)
-        # r = np.mean(d, out=out)
-        # assert_(r is out)
-        # assert_array_equal(r, out)
+        assert_array_equal(r, out)
+        r = np.var(d, out=out)
+        assert_(r is out)
+        assert_array_equal(r, out)
+        r = np.mean(d, out=out)
+        assert_(r is out)
+        assert_array_equal(r, out)
 
 
 class TestStdVarComplex(TestCase):

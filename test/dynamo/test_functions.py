@@ -1768,6 +1768,37 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
                 opt_fn = torch._dynamo.optimize(nopython=True)(fn)
                 self.assertEqual(opt_fn(), fn())
 
+    def test_is_with_tensor_arg(self):
+        # When the result of is or is not is determined statically we optimize the check away.
+        # testing those scenarios.
+
+        # One input is tensor and the other is not tensor.
+        @torch.compile(fullgraph=True, backend="eager")
+        def test1():
+            x = torch.ones(3)
+            y = 1
+            assert x is not y
+            assert y is not x
+
+        # Two inputs are tensor with same symbol.
+        @torch.compile(fullgraph=True, backend="eager")
+        def test2():
+            x = torch.ones(3)
+            y = x
+            assert x is y
+
+        test1()
+        test2()
+
+        # Result undecided, since is_ is not supported this will fail with fullgraph=True.
+        @torch.compile(fullgraph=True, backend="eager")
+        def test3():
+            x = np.True_
+            s = x | x
+            assert x is s
+
+        self.assertRaises(torch._dynamo.exc.Unsupported, test3())
+
 
 def udf_mul(x, y):
     return x * y

@@ -1607,6 +1607,7 @@ class BuiltinVariable(VariableTracker):
             from .builder import wrap_fx_proxy_cls
 
             if op is operator.is_ or op is operator.is_not:
+
                 def return_constant(bool_value):
                     if op is operator.is_:
                         return ConstantVariable.create(bool_value)
