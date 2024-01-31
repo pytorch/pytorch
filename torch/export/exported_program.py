@@ -15,6 +15,8 @@ from typing import (
     Union,
 )
 
+from torch.fx.immutable_collections import immutable_dict, immutable_list
+
 if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
     # such as auto-completion in tools like pylance, even when these modules are not explicitly
@@ -26,7 +28,7 @@ if TYPE_CHECKING:
 
 import torch
 import torch.utils._pytree as pytree
-from torch.export._tree_utils import reorder_kwargs
+from torch.export._tree_utils import is_equivalent, reorder_kwargs
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
 
@@ -79,6 +81,31 @@ def _disable_prexisiting_fake_mode(fn):
             return fn(*args, **kwargs)
 
     return wrapper
+
+
+def _fx_collection_equivalence_fn(
+    spec1_type: Optional[type],
+    spec1_context: pytree.Context,
+    spec2_type: Optional[type],
+    spec2_context: pytree.Context,
+) -> bool:
+    """Treat containers and their immutable variants as the same type. Otherwise
+    compare as normal.
+    """
+    if spec1_type is None or spec2_type is None:
+        return spec1_type is spec2_type and spec1_context == spec2_context
+
+    if issubclass(spec1_type, (dict, immutable_dict)) and issubclass(
+        spec2_type, (dict, immutable_dict)
+    ):
+        return spec1_context == spec2_context
+
+    if issubclass(spec1_type, (list, immutable_list)) and issubclass(
+        spec2_type, (list, immutable_list)
+    ):
+        return spec1_context == spec2_context
+
+    return spec1_type is spec2_type and spec1_context == spec2_context
 
 
 class ExportedProgram:
@@ -254,7 +281,9 @@ class ExportedProgram:
             (args, kwargs)
         )  # type: ignore[possibly-undefined]
 
-        if in_spec is not None and received_spec != in_spec:
+        if in_spec is not None and not is_equivalent(
+            received_spec, in_spec, _fx_collection_equivalence_fn
+        ):
             raise ValueError(
                 "Trying to flatten user inputs with exported input tree spec: \n"
                 f"{in_spec}\n"
