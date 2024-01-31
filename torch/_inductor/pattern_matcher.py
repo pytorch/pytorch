@@ -888,6 +888,7 @@ def register_replacement(
     scalar_workaround=(),
     exclusive_arg_names=(),
     search_fn_pattern=None,
+    allow_duplicate=False,
 ):
     """
     Create a replacement rule based on example functions that get traced
@@ -901,6 +902,7 @@ def register_replacement(
         trace_fn: fwd_only or joint_fwd_bwd
         pass_dict: dict of passes to register to
         extra_check: additional check to run on match(using real shapes)
+        allow_duplicate: whether to raise error when we have seen a search pattern before
     """
     argnames_static = [*inspect.signature(search_fn).parameters.keys()]
 
@@ -1032,7 +1034,8 @@ def register_replacement(
             pattern = search_fn_pattern
 
         pattern_repr = PatternPrettyPrinter.run(pattern)
-        assert pattern_repr not in _seen_patterns
+        if not allow_duplicate:
+            assert pattern_repr not in _seen_patterns
         _seen_patterns.add(pattern_repr)
         pattern = ReplacementPatternEntry(
             pattern=pattern,

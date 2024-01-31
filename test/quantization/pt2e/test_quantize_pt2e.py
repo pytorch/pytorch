@@ -1523,9 +1523,9 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         # Do the subgraph rewriting
         torch.ao.quantization.move_exported_model_to_eval(m)
 
-        # Assert that dropout op is now replaced with a clone op
         targets = [n.target for n in m.graph.nodes]
         if inplace:
+            # inplace dropout op is not decomposed yet, it will remain in the graph.
             dropout_eval_node = None
             for node in m.graph.nodes:
                 if node.target == torch.ops.aten.dropout_.default:
@@ -1533,7 +1533,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             self.assertTrue(dropout_eval_node is not None)
             self.assertFalse(dropout_eval_node.args[2])
         else:
-            self.assertTrue(torch.ops.aten.clone.default in targets)
+            # Assert that dropout op is now removed. The graph has no computation.
+            # The output just returns the input.
+            ops = [n.op for n in m.graph.nodes]
+            self.assertTrue(all(op in {"placeholder", "output"} for op in ops))
             self.assertTrue(torch.ops.aten.native_dropout.default not in targets)
 
     def test_move_exported_model_to_eval(self):
