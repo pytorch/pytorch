@@ -3,6 +3,8 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/split_with_sizes_copy_native.h>
+#include <aten/src/ATen/native/Resize.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Logging.h>
 
@@ -366,6 +368,7 @@ void split_with_sizes_copy_out_cuda(
     }
     TORCH_CHECK(
         self.dim() != 0, "split expects at least a 1-dimensional tensor")
+
     const int64_t dim_size = self.size(dim);
     int64_t split_sizes_sum = 0;
     for (const auto i : c10::irange(split_sizes.size())) {
@@ -385,14 +388,39 @@ void split_with_sizes_copy_out_cuda(
         "), ",
         "but got split_sizes=",
         split_sizes);
+
+    TORCH_CHECK(
+        out.size() == split_sizes.size(),
+        "split_with_sizes_copy_out() expected an out= argument of size ",
+        split_sizes.size(),
+        ", got size ",
+        out.size());
+
+    auto out_shape = out[0].sizes().vec();
+    for (const auto i : c10::irange(split_sizes.size())) {
+      out_shape[dim] = split_sizes[i];
+      if (resize_output_check(out[i], out_shape)) {
+        out[i].resize_(out_shape);
+      }
+      TORCH_CHECK(
+          out[i].dtype() == self.dtype(),
+          "Expected out tensor to have dtype ",
+          self.dtype(),
+          ", but got ",
+          out[i].dtype(),
+          " instead");
+      TORCH_CHECK(
+          out[i].device() == self.device(),
+          "Expected out tensor to have device ",
+          self.device(),
+          ", but got ",
+          out[i].device(),
+          " instead");
+    }
     split_with_sizes_copy_out_cuda_contiguous_no_cast(
         self, split_sizes, dim, out);
   } else {
-    // Fallback to the composite impl
-    auto tmp = self.split_with_sizes(split_sizes, dim);
-    for (const auto i : c10::irange(out.size())) {
-      out[i].copy_(tmp[i]);
-    }
+    at::native::split_with_sizes_copy_out(self, split_sizes, dim, out);
   }
 }
 
