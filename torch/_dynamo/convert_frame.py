@@ -237,6 +237,10 @@ def has_tensor_in_frame(frame):
             return False
 
     # Check if the passed arguments are of type Tensor
+    if not hasattr(frame.f_locals, "values"):
+        unimplemented(
+            f"Expected frames.f_locals to be dict-like, got f{type(frame.f_locals)}"
+        )
     for value in frame.f_locals.values():
         if has_tensor(value):
             return True

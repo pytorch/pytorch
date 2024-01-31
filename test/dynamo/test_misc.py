@@ -4569,6 +4569,19 @@ def fn():
             exp_n_cached_backend,
         )
 
+    def test_eval_locals_with_no_values(self):
+        class Weird:
+            def __getitem__(self, item):
+                return None
+
+        def f():
+            return eval("1", {}, Weird())  # type: ignore[arg-type]
+
+        opt_f = torch._dynamo.optimize(backend="eager")(f)
+        expected = f()
+        result = opt_f()
+        self.assertEqual(result, expected)
+
     def test_backend_match_guard(self):
         x = torch.randn([3, 4])
 
