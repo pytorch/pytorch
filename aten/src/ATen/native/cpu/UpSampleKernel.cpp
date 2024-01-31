@@ -822,8 +822,9 @@ struct HelperInterpBase {
     // For example, for bicubic mode for output index i = 0, we have input_index = -1,
     // then we have unbound_index_min = -2 and unbound_index_max = 1 => unbounded input indices are [-2, -1, 0, 1] and
     // valid input indices will be [0, 1]
-    // For unbounded input indices we compute four weight non-zero values [w0, w1, w2, w3] and as only two weights can
+    // For unbounded input indices we compute four non-zero weights values [w0, w1, w2, w3] and as only two weights can
     // be used with valid input indcies, we accumulate values in the following way: [w0 + w1 + w2, w3, 0.0, 0.0]
+    // This is equivalent to the float path which would compute indices as [0, 0, 0, 1] and weights as [w0, w1, w2, s3].
     // A similar accumulation should done for unbounded indices larger than input size.
     auto w_index = 0;
     scalar_t wt_max = 0.0;

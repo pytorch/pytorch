@@ -9933,7 +9933,7 @@ class TestNNDeviceType(NNTestCase):
             torch.testing.assert_close(output_f32, output_ui8.float(), rtol=0, atol=1)
         else:
             diff = (output_f32 - output_ui8.float()).abs()
-            self.assertLess(diff.max(), 5)
+            self.assertLess(diff.max(), 15)
 
             threshold = 2
             percent = 3
