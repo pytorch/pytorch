@@ -509,7 +509,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         codegen.load_import_from(__name__, "_create_nested_fn")
         codegen(self.code)
         codegen.extend_output([codegen._create_load_const(self.f_globals)])
-        codegen(ConstantVariable(self.code.value.co_name))
+        codegen(ConstantVariable.create(self.code.value.co_name))
 
         if self.defaults:
             codegen(self.defaults)
