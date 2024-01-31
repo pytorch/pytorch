@@ -1651,7 +1651,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 self.prefix.splice(run_impl_proto)
         else:
             self.prefix.splice(
-                f"""std::vector<at::Tensor> {self.call_func_name}(const std::vector<at::Tensor>& inputs) {{"""
+                f"""std::vector<at::Tensor> {self.call_func_name}(std::vector<at::Tensor>& inputs) {{"""
             )
         with self.prefix.indent():
             # assign inputs and outputs in both cases so the later codegen can be simplified
@@ -1703,9 +1703,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                             f"{cpp_dtype} {input_key} = inputs[{idx}].item<{cpp_dtype}>();"
                         )
                     else:
-                        self.prefix.writeline(
-                            f"auto {input_key} = std::move(inputs[{idx}]);"
-                        )
+                        self.prefix.writeline(f"auto& {input_key} = inputs[{idx}];")
 
             assert all(
                 isinstance(v, torch.Tensor) for v in list(V.graph.constants.values())
