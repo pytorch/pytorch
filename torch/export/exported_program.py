@@ -25,8 +25,8 @@ if TYPE_CHECKING:
     from torch.utils._sympy.value_ranges import ValueRanges
 
 import torch
-import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
+from torch.export._tree_utils import reorder_kwargs
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
 
@@ -246,20 +246,21 @@ class ExportedProgram:
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         import torch._export.error as error
 
-        if self.call_spec.in_spec is not None:
-            try:
-                user_args = (args, kwargs or {})
-                args = fx_pytree.tree_flatten_spec(
-                    user_args, self.call_spec.in_spec, exact_structural_match=True
-                )  # type: ignore[assignment]
-            except Exception:
-                _, received_spec = pytree.tree_flatten(user_args)
-                raise TypeError(  # noqa: TRY200
-                    "Trying to flatten user inputs with exported input tree spec: \n"
-                    f"{self.call_spec.in_spec}\n"
-                    "but actually got inputs with tree spec of: \n"
-                    f"{received_spec}"
-                )
+        in_spec = self.call_spec.in_spec
+        if in_spec is not None:
+            kwargs = reorder_kwargs(kwargs, in_spec)
+
+        flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
+            (args, kwargs)
+        )  # type: ignore[possibly-undefined]
+
+        if in_spec is not None and received_spec != in_spec:
+            raise ValueError(
+                "Trying to flatten user inputs with exported input tree spec: \n"
+                f"{in_spec}\n"
+                "but actually got inputs with tree spec of: \n"
+                f"{received_spec}"
+            )
 
         additional_inputs = []
         for input_ in self.graph_signature.input_specs:
@@ -271,13 +272,14 @@ class ExportedProgram:
                 additional_inputs.append(self.constants[input_.target])
         additional_inputs = tuple(additional_inputs)
 
-        self._check_input_constraints(*args)
+        self._check_input_constraints(flat_args_with_path)
+        flat_args = [x[1] for x in flat_args_with_path]
 
         # NOTE: calling convention is first params, then buffers, then args as user supplied them.
         # See: torch/_functorch/aot_autograd.py#L1034
         res = torch.fx.Interpreter(self.graph_module).run(
             *additional_inputs,
-            *args,
+            *flat_args,
             enable_io_processing=False,
         )
 
@@ -322,7 +324,7 @@ class ExportedProgram:
                             for i, spec in enumerate(user_inputs)
                             if spec.arg.name == output_spec.target
                         )
-                        args[index].copy_(value)
+                        flat_args[index].copy_(value)
                     else:
                         raise AssertionError(f"Unexpected kind: {output_spec.kind}")
 
@@ -567,7 +569,7 @@ class ExportedProgram:
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
         return transformed_ep
 
-    def _check_input_constraints(self, *args):
+    def _check_input_constraints(self, flat_args_with_path):
         from torch._export.utils import _check_input_constraints_for_graph
 
         placeholders = [p for p in self.graph.nodes if p.op == "placeholder"]
@@ -577,7 +579,7 @@ class ExportedProgram:
             if s.kind == InputKind.USER_INPUT
         ]
         _check_input_constraints_for_graph(
-            input_placeholders, args, self.range_constraints
+            input_placeholders, flat_args_with_path, self.range_constraints
         )
 
     def _validate(self):
@@ -626,6 +628,9 @@ def _get_updated_range_constraints(
         for k, v in shape_env.var_to_range.items()
         if k not in shape_env.replacements
     }
+    # Only when we have an unbacked symint, and it's used as constructor inputs,
+    # runtime_var_to_range will make a difference compated to var_to_range.
+    # e.g. [2, oo) -> [0, oo)
     for k, v in shape_env.runtime_var_to_range.items():
         if k not in shape_env.replacements:
             range_constraints[k] = v
