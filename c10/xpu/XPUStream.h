@@ -82,8 +82,7 @@ class C10_XPU_API XPUStream {
   }
 
   bool query() const {
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false, "The query method of Stream on XPU backend is not implemented.");
+    return queue().ext_oneapi_empty();
   }
 
   void synchronize() const {
