@@ -1562,8 +1562,7 @@ class TestCompositeCompliance(TestCase):
                     # forward view_func
                     new_inp = inp.clone()
                     _assert_match_metadata(new_inp, inp)
-                    # specify identity SymInt / tensor visitors
-                    new_out = out._view_func(new_inp, lambda s: s, lambda t: t)
+                    new_out = out._view_func_unsafe(new_inp)
                     _assert_match_metadata(new_out, out)
 
                     # reverse view_func
