@@ -20,22 +20,9 @@ class AllGatherResult(NamedTuple):
 
 
 class AllGatherState(NamedTuple):
+    # Keep a reference to the all-gather result to avoid reusing memory early
     all_gather_result: AllGatherResult
-    event: torch.cuda.Event  # copy-out
-
-
-class AllGatherStateHolder:
-    def __init__(self):
-        self._state: Optional[AllGatherState] = None
-
-    def put(self, state: AllGatherState) -> None:
-        assert self._state is None, "Expects to hold only one all-gather state"
-        self._state = state
-
-    def pop(self) -> Optional[AllGatherState]:
-        state = self._state
-        self._state = None
-        return state
+    event: torch.cuda.Event  # all-gather copy-out
 
 
 @torch.no_grad()
@@ -199,12 +186,19 @@ def foreach_reduce_scatter_copy_in(
     world_size: int,
 ) -> None:
     grad_views: List[torch.Tensor] = []
+    copy_srcs: List[torch.Tensor] = []
+    copy_dsts: List[torch.Tensor] = []
     for grad in unsharded_grads:
         grad_size = grad.size()
         dim0_padded_size = _get_dim0_padded_size(grad_size, world_size)
         if dim0_padded_size != grad_size:
-            grad.resize_(dim0_padded_size)
+            padded_grad = grad.new_empty(dim0_padded_size)
+            copy_dsts.append(padded_grad[: grad.size(0)])
+            copy_srcs.append(grad)
+            grad = padded_grad
         grad_views.append(grad.view(world_size, -1))
+    if copy_dsts:
+        torch._foreach_copy_(copy_dsts, copy_srcs)
     torch.cat(grad_views, dim=-1, out=reduce_scatter_input.view(world_size, -1))
 
 
