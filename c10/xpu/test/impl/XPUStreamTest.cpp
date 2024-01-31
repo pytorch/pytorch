@@ -176,11 +176,14 @@ TEST(XPUStreamTest, StreamFunction) {
   }
 
   auto stream = c10::xpu::getStreamFromPool();
+  ASSERT_TRUE(stream.query());
   int* deviceData = sycl::malloc_device<int>(numel, stream);
 
   // H2D
   asyncMemCopy(stream, deviceData, hostData, sizeof(int) * numel);
+  ASSERT_FALSE(stream.query());
   c10::xpu::syncStreamsOnDevice();
+  ASSERT_TRUE(stream.query());
 
   clearHostData(hostData, numel);
 
