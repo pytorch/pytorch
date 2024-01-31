@@ -9,6 +9,12 @@ namespace at::xpu {
  * constructed lazily when first recorded. It has a device, and this device is
  * acquired from the first recording stream. Later streams that record the event
  * must match the same device.
+ *
+ * Currently, XPUEvent does NOT support to export an inter-process event from
+ * another process via inter-process comunication(IPC). So it means that
+ * inter-process communication for event handles between different processes is
+ * not available. This could impact some applications that rely on cross-process
+ * synchronization and communication.
  */
 struct TORCH_XPU_API XPUEvent {
   // Constructors
