@@ -54,8 +54,10 @@ def get_failures(testcases):
 def repro(testcase):
     return f"PYTORCH_TEST_WITH_DYNAMO=1 pytest {testcase.attrib['file']} -v -k {testcase.attrib['name']}"
 
+
 def all_tests(testcase):
     return f"{testcase.attrib['file']}::{testcase.attrib['classname']}.{testcase.attrib['name']}"
+
 
 # e.g. "17c5f69852/dynamo"
 def failures_histogram(eager_dir, dynamo_dir, verbose=False):
@@ -69,12 +71,21 @@ def failures_histogram(eager_dir, dynamo_dir, verbose=False):
     result = []
     for count, reason, testcases in dct:
         if verbose:
-            row = (count, reason, repro(testcases[0]), [all_tests(t) for t in testcases])
+            row = (
+                count,
+                reason,
+                repro(testcases[0]),
+                [all_tests(t) for t in testcases],
+            )
         else:
             row = (count, reason, repro(testcases[0]))
         result.append(row)
 
-    header = "(num_failed_tests, error_msg, sample_test, all_tests)" if verbose else "(num_failed_tests, error_msg, sample_test)"
+    header = (
+        "(num_failed_tests, error_msg, sample_test, all_tests)"
+        if verbose
+        else "(num_failed_tests, error_msg, sample_test)"
+    )
     print(header)
     sum_counts = sum([r[0] for r in result])
     for row in result:
@@ -91,6 +102,8 @@ if __name__ == "__main__":
     parser.add_argument("eager_dir")
     # linux-focal-py3.8-clang10 (dynamo) Test Reports (xml) directory
     parser.add_argument("dynamo_dir")
-    parser.add_argument("-v", "--verbose", help="Prints all failing test names", action="store_true")
+    parser.add_argument(
+        "-v", "--verbose", help="Prints all failing test names", action="store_true"
+    )
     args = parser.parse_args()
     failures_histogram(args.eager_dir, args.dynamo_dir, args.verbose)
