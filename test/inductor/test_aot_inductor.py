@@ -1635,6 +1635,18 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), (x, y))
 
+    def test_embedding_bag(self):
+        class Model(torch.nn.Module):
+            def forward(self, w, i, o):
+                return torch.ops.aten._embedding_bag(w, i, o, False, 0, False, None)
+
+        example_inputs = (
+            torch.randn([10, 4], device=self.device),
+            torch.randint(10, [8], device=self.device),
+            torch.tensor([0, 2, 6], device=self.device),
+        )
+        self.check_model(Model(), example_inputs)
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
@@ -1764,6 +1776,7 @@ if not IS_FBCODE:
     CPU_TEST_FAILURES.update(
         {
             "test_duplicated_params": fail_stack_allocation(is_skip=True),
+            "test_embedding_bag": fail_stack_allocation(is_skip=True),
             "test_fqn": fail_stack_allocation(is_skip=True),
             "test_no_args": fail_stack_allocation(is_skip=True),
             "test_output_misaligned": fail_stack_allocation(is_skip=True),
