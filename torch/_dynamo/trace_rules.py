@@ -20,7 +20,7 @@ import torch
 from .utils import hashable, is_function, NP_SUPPORTED_MODULES
 
 from .variables import (
-    FunctorchVmapHigherOrderVariable,
+    FunctorchHigherOrderVariable,
     SkipFilesVariable,
     TorchCtxManagerClassVariable,
     TorchInGraphFunctionVariable,
@@ -157,10 +157,10 @@ manual_torch_name_rule_map = {
     "torch._functorch.vmap.restore_vmap": UserFunctionVariable,
     "torch._functorch.apis.vmap": UserFunctionVariable,
     "torch._functorch.vmap.unwrap_batched": UserFunctionVariable,
-    "torch._functorch.vmap.vmap_impl": FunctorchVmapHigherOrderVariable,
+    "torch._functorch.vmap.vmap_impl": FunctorchHigherOrderVariable,
     "torch._functorch.vmap.wrap_batched": UserFunctionVariable,
     # functorch/grad
-    "torch._functorch.eager_transforms.grad_impl": UserFunctionVariable,
+    "torch._functorch.eager_transforms.grad_impl": FunctorchHigherOrderVariable,
     "torch._functorch.apis.grad_and_value": UserFunctionVariable,
     "torch._functorch.eager_transforms._as_tuple": UserFunctionVariable,
     "torch._functorch.eager_transforms._check_unique_non_empty": UserFunctionVariable,
@@ -171,7 +171,6 @@ manual_torch_name_rule_map = {
     "torch._functorch.eager_transforms._validate_and_wrap_argnums": UserFunctionVariable,
     "torch._functorch.eager_transforms._wrap_all_tensors": UserFunctionVariable,
     "torch._functorch.eager_transforms._wrap_tensor_for_grad": UserFunctionVariable,
-    # "torch._functorch.eager_transforms.enable_inplace_requires_grad": UserFunctionVariable,
 }
 
 
@@ -181,6 +180,7 @@ torch_ctx_manager_classes = {
     for k in [
         "torch._C.DisableTorchFunctionSubclass",
         "torch._functorch.vmap.vmap_increment_nesting",
+        "torch._functorch.eager_transforms.grad_increment_nesting",
         "torch._functorch.eager_transforms.enable_inplace_requires_grad",
         "torch.amp.autocast_mode.autocast",
         "torch.autograd.grad_mode.enable_grad",

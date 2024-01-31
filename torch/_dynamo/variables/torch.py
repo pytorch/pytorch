@@ -141,6 +141,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from . import (
+            GradIncrementNestingCtxManagerVariable,
             GradInplaceRequiresGradCtxManagerVariable,
             GradModeVariable,
             InferenceModeVariable,
@@ -199,6 +200,9 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         elif self.value is torch._C.DisableTorchFunctionSubclass:
             assert not (args or kwargs)
             return TorchFunctionDisableVariable.create(tx)
+        elif self.value is torch._functorch.eager_transforms.grad_increment_nesting:
+            assert len(args) == 0
+            return GradIncrementNestingCtxManagerVariable.create(tx)
         elif self.value is torch._functorch.vmap.vmap_increment_nesting:
             assert len(args) == 2
             return VmapIncrementNestingCtxManagerVariable.create(

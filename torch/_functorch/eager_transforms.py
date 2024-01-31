@@ -39,7 +39,9 @@ from torch._C._functorch import (
     _assert_wrapped_functional,
     _propagate_functional_input_mutation,
     set_inplace_requires_grad_allowed,
-    get_inplace_requires_grad_allowed
+    get_inplace_requires_grad_allowed,
+    peek_interpreter_stack,
+    TransformType,
 )
 from torch._functorch.utils import exposed_in, argnums_t
 
@@ -278,6 +280,28 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
         should not depend on the result of a context manager outside of ``f``.
     """
     return _vjp_with_argnums(func, *primals, has_aux=has_aux)
+
+
+@contextlib.contextmanager
+def maybe_disable_grad_dls_dispatch():
+    st = peek_interpreter_stack()
+    if st and st.key() == TransformType.Grad:
+        try:
+            _grad_decrement_nesting()
+            yield
+        finally:
+            _grad_increment_nesting()
+    else:
+        yield
+
+
+@contextlib.contextmanager
+def grad_increment_nesting():
+    try:
+        grad_level = _grad_increment_nesting()
+        yield grad_level
+    finally:
+        _grad_decrement_nesting()
 
 
 @doesnt_support_saved_tensors_hooks
@@ -1218,8 +1242,7 @@ def hessian(func, argnums=0):
 
 @doesnt_support_saved_tensors_hooks
 def grad_and_value_impl(func, argnums, has_aux, args, kwargs) -> Callable:
-    level = _grad_increment_nesting()
-    try:
+    with grad_increment_nesting() as level:
         output, aux, grad_input = None, None, None
         # See NOTE [grad and vjp interaction with no_grad]
         with torch.enable_grad():
@@ -1261,9 +1284,6 @@ def grad_and_value_impl(func, argnums, has_aux, args, kwargs) -> Callable:
         if has_aux:
             return grad_input, (output, aux)
         return grad_input, output
-    finally:
-        _grad_decrement_nesting()
-#     return wrapper
 
 
 def grad_impl(func: Callable, argnums: argnums_t, has_aux: bool, args, kwargs):

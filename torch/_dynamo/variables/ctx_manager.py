@@ -188,6 +188,35 @@ class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
         return variables.ConstantVariable.create(None)
 
 
+class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
+    @staticmethod
+    def create(tx, **kwargs):
+        var = GradIncrementNestingCtxManagerVariable(
+            target_values=None,
+            initial_values=None,
+            **kwargs,
+        )
+        return var
+
+    def enter(self, tx):
+        grad_level = torch._C._functorch._grad_increment_nesting()
+        self.set_cleanup_hook(tx, lambda: torch._C._functorch._grad_decrement_nesting())
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch._C._functorch._grad_increment_nesting,
+            (),
+            {},
+        )
+        return variables.ConstantVariable.create(grad_level)
+
+    def exit(self, tx, *args):
+        self.state.cleanup()
+        tx.output.create_node(
+            "call_function", torch._C._functorch._grad_decrement_nesting, (), {}
+        )
+        return variables.ConstantVariable.create(None)
+
+
 class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     """represents torch VMap increment/decrement nesting"""
 

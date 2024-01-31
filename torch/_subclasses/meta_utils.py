@@ -11,7 +11,6 @@ from torch._C._functorch import (
     current_level,
     get_unwrapped,
     is_batchedtensor,
-    is_gradtrackingtensor,
     maybe_get_bdim,
     maybe_get_level,
     peek_interpreter_stack,
@@ -134,12 +133,7 @@ class MetaConverter:
         # hold a weak ref to self, otherwise it will be kept alive
         # by the del_ten closure
         self_weak_ref = weakref.ref(self)
-        if (
-            t.is_sparse
-            or t.is_mkldnn
-            or is_batchedtensor(t)
-            or is_gradtrackingtensor(t)
-        ):
+        if t.is_sparse or t.is_mkldnn or is_batchedtensor(t):
             weak_st = None
         else:
             weak_st = StorageWeakRef(t._typed_storage())
@@ -333,7 +327,7 @@ class MetaConverter:
                     if t.requires_grad and not is_leaf:
                         with torch.enable_grad():
                             r = r.clone()
-                elif is_batchedtensor(t) or is_gradtrackingtensor(t):
+                elif is_batchedtensor(t):
                     # Wraps a BatchedTensor in a FakeTensor
                     def _to_fake_tensor(t):
                         if is_batchedtensor(t):
@@ -341,10 +335,6 @@ class MetaConverter:
                             lvl = maybe_get_level(t)
                             bdim = maybe_get_bdim(t)
                             r = _add_batch_dim(ft, bdim, lvl)
-                        # elif is_gradtrackingtensor(t):
-                        #     ft = get_unwrapped(t)
-                        #     lvl = maybe_get_level(t)
-                        #     r = _wrap_for_grad(ft, lvl)
                         else:
                             # regular tensor
                             sizes = t.size()
@@ -539,14 +529,16 @@ class MetaConverter:
                             outer_stride=strides,
                         )
                     else:
-                        r = callback(
-                            lambda: torch.empty_strided(
-                                sizes,
-                                strides,
-                                dtype=t.dtype,
-                                device="meta",
+                        with torch._functorch.eager_transforms.maybe_disable_grad_dls_dispatch():
+                            r = callback(
+                                lambda: torch.empty_strided(
+                                    sizes,
+                                    strides,
+                                    dtype=t.dtype,
+                                    device="meta",
+                                )
                             )
-                        )
+
                     assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     if t.requires_grad:
                         r.requires_grad = t.requires_grad
