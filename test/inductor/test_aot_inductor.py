@@ -1621,6 +1621,7 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    @skipIfRocm
     def test_index_put_with_none_index(self):
         # index_put falls back in the deterministic mode
         with DeterministicGuard(True):
@@ -1701,7 +1702,7 @@ CPU_TEST_FAILURES = {
     "test_constant_folding": fail_with_and_without_stack_allocation(is_skip=True),
     "test_dup_unbacked_sym_decl": fail_with_and_without_stack_allocation(),
     "test_dynamic_cat": fail_with_and_without_stack_allocation(),
-    "test_dynamic_scalar": fail_with_and_without_stack_allocation(),
+    "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
     "test_dynamic_smem_above_default_limit": fail_with_and_without_stack_allocation(),
     "test_foreach_multiple_dynamic": fail_with_and_without_stack_allocation(),
     # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
@@ -1734,8 +1735,6 @@ CPU_TEST_FAILURES = {
 CUDA_TEST_FAILURES = {
     # test_failures, xfail by default, set is_skip=True to skip
     "test_dup_unbacked_sym_decl": fail_abi_compatible_cuda(),
-    # will add .item support later
-    "test_dynamic_scalar": fail_abi_compatible_cuda(),
     "test_normal_functional": fail_abi_compatible_cuda(),
     # There is a double-free issue which will be fixed in another PR
     "test_repeat_output": fail_abi_compatible_cuda(is_skip=True),

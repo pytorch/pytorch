@@ -603,7 +603,8 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
 
   std::unordered_map<std::string, AtenTensorHandle> const_run_impl(
       DeviceStreamType stream,
-      AOTIProxyExecutorHandle proxy_executor);
+      AOTIProxyExecutorHandle proxy_executor,
+      bool initialization = false);
 
   void _const_run_impl(
       std::vector<AtenTensorHandle>& output_handles,
