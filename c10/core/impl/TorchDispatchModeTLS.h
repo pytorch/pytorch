@@ -3,8 +3,7 @@
 #include <c10/core/SafePyObject.h>
 #include <c10/macros/Export.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 enum class TorchDispatchModeKey : int8_t {
   FAKE,
@@ -61,5 +60,4 @@ C10_API bool dispatch_mode_enabled();
 
 C10_API std::string to_string(TorchDispatchModeKey mode_key);
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl
