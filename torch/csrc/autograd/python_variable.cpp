@@ -574,34 +574,21 @@ struct ViewFuncSavedStateGuard {
 };
 
 static PyObject* view_func_impl(
-    PyObject* self_,
+    PyObject* _self,
     PyObject* args,
+    PyObject* kwargs,
     bool check_has_same_meta) {
   HANDLE_TH_ERRORS
-  const auto& self = THPVariable_Unpack(self_);
+  const auto& self = THPVariable_Unpack(_self);
 
-  // NB: can't use PythonArgParser because we're expecting callables to be
-  // passed in.
-  // TODO: can this be done in a nice kw-driven way?
-  Py_ssize_t nargs = args ? PyTuple_GET_SIZE(args) : 0;
-  TORCH_CHECK(
-      nargs >= 1 && nargs <= 3,
-      "expected usage: _view_func(new_root, [symint_visitor_fn], [tensor_visitor_fn])");
-
-  PyObject* new_base_obj = PyTuple_GET_ITEM(args, 0);
-  TORCH_CHECK(
-      THPVariable_Check(new_base_obj),
-      "_view_func expects the first argument to be a Tensor");
-  const auto& new_base = THPVariable_Unpack(new_base_obj);
-
-  PyObject* symint_visitor_fn = nullptr;
-  PyObject* tensor_visitor_fn = nullptr;
-  if (nargs >= 2) {
-    symint_visitor_fn = PyTuple_GET_ITEM(args, 1);
-  }
-  if (nargs == 3) {
-    tensor_visitor_fn = PyTuple_GET_ITEM(args, 2);
-  }
+  static PythonArgParser parser({
+      "_view_func(Tensor new_base, PyObject* symint_visitor_fn=None, PyObject* tensor_visitor_fn=None)",
+  });
+  ParsedArgs<3> parsed_args{};
+  auto r = parser.parse(_self, args, kwargs, parsed_args);
+  auto new_base = r.tensor(0);
+  PyObject* symint_visitor_fn = r.pyobject(1);
+  PyObject* tensor_visitor_fn = r.pyobject(2);
 
   // Ensure that self is indeed a backward differentiable view
   // If not, we return an undefined Tensor (None) and let the user handle it.
@@ -618,7 +605,7 @@ static PyObject* view_func_impl(
 
         // Mutate saved SymInt / tensor state as needed.
         c10::optional<std::vector<c10::SymInt>> new_symints = c10::nullopt;
-        if (symint_visitor_fn) {
+        if (symint_visitor_fn != Py_None) {
           new_symints = map_py_func(
               symint_visitor_fn,
               view_func->get_symints(),
@@ -632,7 +619,7 @@ static PyObject* view_func_impl(
         }
 
         c10::optional<std::vector<at::Tensor>> new_tensors = c10::nullopt;
-        if (tensor_visitor_fn) {
+        if (tensor_visitor_fn != Py_None) {
           new_tensors = map_py_func(
               tensor_visitor_fn,
               view_func->get_tensors(),
@@ -658,12 +645,18 @@ static PyObject* view_func_impl(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPVariable_view_func(PyObject* self_, PyObject* args) {
-  return view_func_impl(self_, args, /*check_has_same_meta=*/true);
+static PyObject* THPVariable_view_func(
+    PyObject* self_,
+    PyObject* args,
+    PyObject* kwargs) {
+  return view_func_impl(self_, args, kwargs, /*check_has_same_meta=*/true);
 }
 
-static PyObject* THPVariable_view_func_unsafe(PyObject* self_, PyObject* args) {
-  return view_func_impl(self_, args, /*check_has_same_meta=*/false);
+static PyObject* THPVariable_view_func_unsafe(
+    PyObject* self_,
+    PyObject* args,
+    PyObject* kwargs) {
+  return view_func_impl(self_, args, kwargs, /*check_has_same_meta=*/false);
 }
 
 static PyObject* rev_view_func_impl(PyObject* self_, PyObject* arg) {
@@ -1768,8 +1761,14 @@ static PyMethodDef extra_methods[] = {
      METH_STATIC | METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_fix_weakref", THPVariable_fix_weakref, METH_NOARGS, nullptr},
-    {"_view_func", THPVariable_view_func, METH_VARARGS, nullptr},
-    {"_view_func_unsafe", THPVariable_view_func_unsafe, METH_VARARGS, nullptr},
+    {"_view_func",
+     castPyCFunctionWithKeywords(THPVariable_view_func),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_view_func_unsafe",
+     castPyCFunctionWithKeywords(THPVariable_view_func_unsafe),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
     {"_rev_view_func_unsafe",
      THPVariable_rev_view_func_unsafe,
      METH_O,
