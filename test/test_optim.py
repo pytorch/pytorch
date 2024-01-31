@@ -173,21 +173,24 @@ class TestOptimRenewed(TestCase):
             grads_losses = []
 
             def real_closure():
-                for p in real_params:
-                    p.grad = torch.randn_like(p)
-                    grads_losses.append(p.grad.clone())
-                    real_steps.append(p.clone())
-                grads_losses.append(torch.randn(1))
-                return grads_losses[-1].clone()
+                for param in real_params:
+                    grad = torch.randn_like(param)
+                    param.grad = grad
+                    real_steps.append(param.detach().clone())
+                    grads_losses.append(grad.clone())
+                loss = torch.randn(1)
+                grads_losses.append(loss.clone())
+                return loss
 
             def complex_closure():
-                for p in complex_params:
-                    if torch.is_complex(p):
-                        p.grad = torch.view_as_complex(grads_losses.pop(0))
-                        complex_steps.append(torch.view_as_real_copy(p))
+                for param in complex_params:
+                    if torch.is_complex(param):
+                        grad = torch.view_as_complex(grads_losses.pop(0))
+                        complex_steps.append(torch.view_as_real_copy(param.detach()))
                     else:
-                        p.grad = grads_losses.pop(0)
-                        complex_steps.append(p.clone())
+                        grad = grads_losses.pop(0)
+                        complex_steps.append(param.detach().clone())
+                    param.grad = grad
                 return grads_losses.pop(0)
 
             for _ in range(3):
@@ -202,9 +205,15 @@ class TestOptimRenewed(TestCase):
                     real_optimizer.step()
                     complex_optimizer.step()
 
-            # All intermediate steps should be the same
+            # Final Parameters should be the same
+            complex_params_asreal = [torch.view_as_real(param) if param.is_complex() else param for param in complex_params]
+            self.assertEqual(real_params, complex_params_asreal)
+
+            # All intermediate steps should also be the same
             # also checks steps taken within for example a line search
             self.assertEqual(complex_steps, real_steps)
+
+
 
 
     def _test_derived_optimizers(self, device, dtype, optim_info, flag, reduced_precision=False, assert_step_dtype=None):
