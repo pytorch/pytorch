@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import torch._dynamo.test_case
 import unittest.mock
 import os

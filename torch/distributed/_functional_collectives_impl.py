@@ -1,7 +1,8 @@
 import logging
+import os
 import warnings
 import weakref
-from typing import cast, List, Optional
+from typing import cast, Dict, List, Optional
 
 import torch
 import torch.distributed as dist
@@ -23,9 +24,11 @@ _wait_all
 
 """
 
+USE_NATIVE_C10D_FUNCTIONAL = "_USE_NATIVE_C10D_FUNCTIONAL" in os.environ
+
 logger = logging.getLogger(__name__)
 
-data_ptr_to_work = dict()
+data_ptr_to_work: Dict[int, "_WaitRegistration"] = dict()
 work_version = 0
 
 
@@ -92,6 +95,14 @@ def _wait_reg_dec(ptr, wait_reg):
 
 
 def _register_tensor_wrapper(tensor) -> None:
+    if USE_NATIVE_C10D_FUNCTIONAL:
+        # Tensor storage -> work mapping is maintained in C++
+        weakref.finalize(
+            tensor,
+            torch.ops._c10d_functional.wait_tensor,
+            tensor,
+        )
+        return
     global data_ptr_to_work
     data_ptr = tensor.elem.data_ptr()
     # Note: we should NEVER try to trace this, bc it registers runtime stuff during trace.

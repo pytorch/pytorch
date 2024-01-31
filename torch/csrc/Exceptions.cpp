@@ -224,13 +224,6 @@ void translate_exception_to_python(const std::exception_ptr& e_ptr) {
   CATCH_ALL_ERRORS(return)
 }
 
-IndexError::IndexError(const char* format, ...) {
-  va_list fmt_args{};
-  va_start(fmt_args, format);
-  msg = formatMessage(format, fmt_args);
-  va_end(fmt_args);
-}
-
 TypeError::TypeError(const char* format, ...) {
   va_list fmt_args{};
   va_start(fmt_args, format);
