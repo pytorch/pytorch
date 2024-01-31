@@ -4570,7 +4570,7 @@ class FallbackKernel(ExternKernelAlloc):
         # AOTAutograd functionalized them away); the only way for an in-place
         # op to show up here is if a lowering or pass introduced it.
         if torch._library.utils.is_inplace_aten_op(self.op_overload):
-            self.mutation_names.append(tensor_args[0])
+            self.mutation_names.append(tensor_args[0].get_name())
             return
 
         if schema.is_mutable and not can_auto_functionalize(kernel):
