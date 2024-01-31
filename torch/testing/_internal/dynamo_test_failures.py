@@ -428,9 +428,7 @@ dynamo_expected_failures = {
     "TestRequire.test_C_and_F_simul",  # torch_np/numpy_tests/core/test_numeric
     "TestNonarrayArgs.test_dunder_round_edgecases_val_2147483647_ndigits_-1",  # torch_np/numpy_tests/core/test_numeric
     "TestClip.test_simple_complex",  # torch_np/numpy_tests/core/test_numeric
-    "TestBroadcast.test_broadcast_single_arg",  # torch_np/numpy_tests/core/test_numeric
     "TestRequire.test_unknown_requirement",  # torch_np/numpy_tests/core/test_numeric
-    "TestBroadcast.test_broadcast_error_kwargs",  # torch_np/numpy_tests/core/test_numeric
     "TestNonarrayArgs.test_dunder_round_edgecases_val_2147483647_ndigits_-9",  # torch_np/numpy_tests/core/test_numeric
     "TestNonarrayArgs.test_dunder_round_edgecases_val_2147483647_ndigits_-10",  # torch_np/numpy_tests/core/test_numeric
     "TestCross.test_broadcasting_shapes",  # torch_np/numpy_tests/core/test_numeric
