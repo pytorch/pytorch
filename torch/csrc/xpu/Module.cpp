@@ -175,6 +175,8 @@ PyObject* THXPModule_xpuSynchronize(PyObject* self, PyObject* arg) {
   int device = THPUtils_unpackInt(arg);
   {
     pybind11::gil_scoped_release no_gil;
+    // Only the SYCL queues we have reserved will be synchronized, see Note
+    // [Synchronize Streams on Device].
     c10::xpu::syncStreamsOnDevice(static_cast<c10::DeviceIndex>(device));
   }
   Py_RETURN_NONE;

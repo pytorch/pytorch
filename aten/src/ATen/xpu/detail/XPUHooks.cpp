@@ -45,6 +45,8 @@ DeviceIndex XPUHooks::current_device() const {
 }
 
 void XPUHooks::deviceSynchronize(DeviceIndex device_index) const {
+  // Only the SYCL queues we have reserved will be synchronized, see Note
+  // [Synchronize Streams on Device].
   c10::xpu::syncStreamsOnDevice(device_index);
 }
 
