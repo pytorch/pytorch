@@ -4940,7 +4940,7 @@ class FallbackKernel(ExternKernelAlloc):
 
 
 @dataclasses.dataclass
-class ComplexView(ExternKernelAlloc):
+class ComplexView(FallbackKernel):
     """View a complex number as two dtyped numbers or vice versa"""
 
     def should_allocate(self):
@@ -4953,55 +4953,18 @@ class ComplexView(ExternKernelAlloc):
     def __init__(
         self,
         layout,
-        python_kernel_name,
-        cpp_kernel_name,
+        kernel,
         tensor_args,
         nontensor_args,
+        unflatten_args,
     ):
         super().__init__(
             layout,
-            tuple(tensor_args),
-            tuple(nontensor_args),
-        )
-        # We need output buffers for generating kernel arguments in the
-        # abi-compatible mode, where we retrieve outputs by pass each individual
-        # output through the abi-compatible interface.
-        self.outputs: Sequence[Any] = []
-        self.python_kernel_name = python_kernel_name
-        self.cpp_kernel_name = cpp_kernel_name
-
-    @classmethod
-    def create(cls, kernel, *args, **kwargs):
-        context = V.graph.fake_mode
-        with context:
-            (
-                example_output,
-                tensor_args,
-                non_tensor_args,
-                unflatten_args,
-            ) = cls.process_kernel(kernel, *args, **kwargs)
-
-        device = FallbackKernel.find_device(tensor_args, example_output)
-        assert device, "Not sure where to find device info"
-
-        packed = ComplexView(
-            MultiOutputLayout(device),
-            str(kernel),
-            get_aten_cpp_kernel_name(kernel),
+            kernel,
             tensor_args,
-            non_tensor_args,
+            nontensor_args,
+            unflatten_args,
         )
-
-        layout = FixedLayout(
-            example_output.device,
-            example_output.dtype,
-            convert_shape_to_inductor(example_output.size()),
-            convert_shape_to_inductor(example_output.stride()),
-        )
-        outputs = MultiOutput(layout, packed, [])
-
-        packed.outputs = [outputs]
-        return outputs
 
 
 @dataclasses.dataclass
@@ -5053,8 +5016,7 @@ class MultiOutput(ExternKernel):
         return [
             inp.get_name()
             for inp in self.inputs
-            if isinstance(inp, (FallbackKernel, ComplexView))
-            and len(inp.get_alias_names()) > 0
+            if isinstance(inp, FallbackKernel) and len(inp.get_alias_names()) > 0
         ]
 
 
