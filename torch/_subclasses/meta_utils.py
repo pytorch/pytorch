@@ -269,6 +269,42 @@ class MetaConverter:
                 device="meta",
             )
 
+        def metafy_subclass(
+            t,
+            outer_size,
+            outer_stride,
+            symbolic_context=symbolic_context,
+            callback=callback,
+            source=source,
+        ):
+            from torch._dynamo.source import AttrSource
+            from torch.fx.experimental.symbolic_shapes import SubclassSymbolicContext
+
+            assert symbolic_context is None or isinstance(
+                symbolic_context, SubclassSymbolicContext
+            )
+
+            # Note: transform_subclass will use __tensor_unflatten__ to generate
+            # a fresh subclass wrapper. We assume that if the inner tensors of
+            # the subclass are given symbolic sizes, their sizes will be used
+            # to construct the (symbolic) sizes of the wrapper tensor.
+            return transform_subclass(
+                t,
+                lambda attr, inner_t: callback(
+                    lambda: empty_create(
+                        inner_t,
+                        AttrSource(source, attr),
+                        symbolic_context=(
+                            None
+                            if symbolic_context is None
+                            else symbolic_context.inner_contexts[attr]
+                        ),
+                    )
+                ),
+                outer_size=outer_size,
+                outer_stride=outer_stride,
+            )
+
         # see expired-storages
         self.check_expired_count += 1
         if self.check_expired_count >= self.check_expired_frequency:
@@ -453,9 +489,21 @@ class MetaConverter:
                                         fake_t, attr
                                     )
 
+                                from torch._dynamo.source import (
+                                    TensorPropertySource, TensorProperty)
+
                                 def symint_visitor_fn(s):
-                                    # TODO: handle this
-                                    return s
+                                    # TODO: Fix the source
+                                    sym_source = TensorPropertySource(
+                                        source, TensorProperty.SIZE, 0)
+                                    val = int(s)
+                                    symbol = shape_env.create_symbol(val, sym_source)
+                                    sym = shape_env.create_symintnode(
+                                        symbol,
+                                        hint=val,
+                                        source=sym_source,
+                                    )
+                                    return sym
 
                                 def tensor_visitor_fn(t):
                                     # assume the only closed-over tensors we run into
@@ -464,7 +512,7 @@ class MetaConverter:
 
                                 # replay the view, swapping out any non-symbolic SymInts
                                 # or real tensors for symbolic SymInts or fake tensors
-                                fake_t = t._full_view_func_unsafe(
+                                fake_t = t._view_func_unsafe(
                                     base, symint_visitor_fn, tensor_visitor_fn
                                 )
                                 return fake_t
@@ -531,31 +579,7 @@ class MetaConverter:
                     # If we have a subclass that desugars into dense tensors,
                     # perform our callback on each inner tensor.
                     if is_traceable_wrapper_subclass(t):
-                        # Note: transform_subclass will use __tensor_unflatten__ to generate
-                        # a fresh subclass wrapper. We assume that if the inner tensors of
-                        # the subclass are given symbolic sizes, their sizes will be used
-                        # to construct the (symbolic) sizes of the wrapper tensor.
-                        from torch._dynamo.source import AttrSource
-
-                        assert symbolic_context is None or isinstance(
-                            symbolic_context, SubclassSymbolicContext
-                        )
-                        r = transform_subclass(
-                            t,
-                            lambda attr, inner_t: callback(
-                                lambda: empty_create(
-                                    inner_t,
-                                    AttrSource(source, attr),
-                                    symbolic_context=(
-                                        None
-                                        if symbolic_context is None
-                                        else symbolic_context.inner_contexts[attr]
-                                    ),
-                                )
-                            ),
-                            outer_size=sizes,
-                            outer_stride=strides,
-                        )
+                        r = metafy_subclass(t, outer_size=sizes, outer_stride=strides)
                     else:
                         r = callback(
                             lambda: torch.empty_strided(
