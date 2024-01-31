@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import logging
 import re
+import warnings
 from collections import OrderedDict
 from contextlib import nullcontext
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -503,6 +504,7 @@ def _export(
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     constraints: Optional[List[Constraint]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
     *,
     strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
@@ -519,8 +521,29 @@ def _export(
 
         kwargs: optional example keyword inputs.
 
-        constraints: A optional list of constraints on the dynamic arguments specifying
-            their possible range of their shapes
+        constraints: [DEPRECATED: use ``dynamic_shapes`` instead, see below]
+         An optional list of constraints on the dynamic arguments
+         that specify their possible range of shapes. By default, shapes of
+         input torch.Tensors are assumed to be static. If an input torch.Tensor
+         is expected to have dynamic shapes, please use :func:`dynamic_dim`
+         to define :class:`Constraint` objects that specify the dynamics and the possible
+         range of shapes. See :func:`dynamic_dim` docstring for examples on
+         how to use it.
+
+        dynamic_shapes:
+         An optional argument where the type should either be:
+         1) a dict from argument names of ``f`` to their dynamic shape specifications,
+         2) a tuple that specifies dynamic shape specifications for each input in original order.
+         If you are specifying dynamism on keyword args, you will need to pass them in the order that
+         is defined in the original function signature.
+
+         The dynamic shape of a tensor argument can be specified as either
+         (1) a dict from dynamic dimension indices to :func:`Dim` types, where it is
+         not required to include static dimension indices in this dict, but when they are,
+         they should be mapped to None; or (2) a tuple / list of :func:`Dim` types or None,
+         where the :func:`Dim` types correspond to dynamic dimensions, and static dimensions
+         are denoted by None. Arguments that are dicts or tuples / lists of tensors are
+         recursively specified by using mappings or sequences of contained specifications.
 
         preserve_module_call_signature: A list of submodule paths for which the original
             calling conventions are preserved as metadata.
@@ -528,7 +551,19 @@ def _export(
     Returns:
         An ExportedProgram containing the traced method.
     """
-    constraints = constraints or []
+    from .dynamic_shapes import _process_dynamic_shapes
+
+    if constraints is not None:
+        warnings.warn(
+            "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
+            "and will not be supported in the future. "
+            "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    else:
+        constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes) or []
+
     kwargs = kwargs or {}
 
     flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
