@@ -465,16 +465,12 @@ def _get_param_module_infos(
 
 class RegisterPostBackwardHook(torch.autograd.Function):
     @staticmethod
-    def forward(
-        ctx,
-        param_group,
-        *inputs,
-    ):
+    def forward(ctx, param_group: FSDPParamGroup, *inputs: torch.Tensor):
         # All tensors in `inputs` should require gradient
         ctx.param_group = param_group
         return inputs
 
     @staticmethod
-    def backward(ctx, *grads):
+    def backward(ctx, *grads: torch.Tensor):
         ctx.param_group._post_backward()
         return (None,) + grads
