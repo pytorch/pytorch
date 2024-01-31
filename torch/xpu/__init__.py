@@ -109,10 +109,6 @@ def _lazy_call(callable, **kwargs):
             _queued_calls.append((callable, traceback.format_stack()))
 
 
-class DeferredXpuCallError(Exception):
-    pass
-
-
 def init():
     r"""Initialize PyTorch's XPU state.
     This is a Python API about lazy initialization that avoids initializing
@@ -158,7 +154,7 @@ def _lazy_init():
                         f"XPU call failed lazily at initialization with error: {str(e)}\n\n"
                         f"XPU call was originally invoked at:\n\n{''.join(orig_traceback)}"
                     )
-                    raise DeferredXpuCallError(msg) from e
+                    raise Exception(msg) from e
         finally:
             delattr(_tls, "is_initializing")
         _initialized = True
@@ -476,7 +472,6 @@ from .random import *  # noqa: F403
 
 
 __all__ = [
-    "DeferredXpuCallError",
     "Event",
     "Stream",
     "StreamContext",
