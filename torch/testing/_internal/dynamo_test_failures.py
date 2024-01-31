@@ -2808,6 +2808,43 @@ dynamo_expected_failures = {
     "TestTensorExprFuser.test_cat_with_constant_dim",  # test_tensorexpr
     "TestTensorExprFuser.test_four_arg",  # test_tensorexpr
     "TestTensorExprFuser.test_multi_rand",  # test_tensorexpr
+    "TestTEFuserDynamic.test_dims",  # test_jit_fuser_te
+    "TestTEFuserStatic.test_neg_pow",  # test_jit_fuser_te
+    "TestTEFuserStatic.test_profiler",  # test_jit_fuser_te
+    "TestTEFuserDynamic.test_disabled",  # test_jit_fuser_te
+    "TestTEFuserDynamic.test_sum_keepdim_cast",  # test_jit_fuser_te
+    "TestTEFuserDynamic.test_scalar",  # test_jit_fuser_te
+    "TestTEFuserStatic.test_cat_graph_opt",  # test_jit_fuser_te
+    "TestTEFuserStatic.test_to_device",  # test_jit_fuser_te
+    "TestTEFuserDynamic.test_remove_output_used_only_in_size",  # test_jit_fuser_te
+    "TestTEFuserDynamic.test_neg_pow",  # test_jit_fuser_te
+    "TestTEFuserDynamic.test_torch_to",  # test_jit_fuser_te
+    "TestTEFuserDynamic.test_gelu",  # test_jit_fuser_te
+    "TestTEFuserStatic.test_disabled",  # test_jit_fuser_te
+    "TestTEFuserDynamic.test_sum_simple",  # test_jit_fuser_te
+    "TestTEFuserStatic.test_torch_to",  # test_jit_fuser_te
+    "TestTEFuserStatic.test_sum_dim",  # test_jit_fuser_te
+    "TestTEFuserDynamic.test_skip_grad_in_check",  # test_jit_fuser_te
+    "TestTEFuserStatic.test_with_strict_fusion",  # test_jit_fuser_te
+    "TestTEFuserDynamic.test_unsqueeze_var_dim",  # test_jit_fuser_te
+    "TestTEFuserStatic.test_unsqueeze_var_dim",  # test_jit_fuser_te
+    "TestTEFuserStatic.test_dims",  # test_jit_fuser_te
+    "TestTEFuserStatic.test_sum_simple",  # test_jit_fuser_te
+    "TestTEFuserStatic.test_gelu",  # test_jit_fuser_te
+    "TestTEFuserDynamic.test_typecheck",  # test_jit_fuser_te
+    "TestTEFuserStatic.test_inlined_optimized_graph",  # test_jit_fuser_te
+    "TestTEFuserStatic.test_typecheck",  # test_jit_fuser_te
+    "TestTEFuserStatic.test_sum_keepdim_cast",  # test_jit_fuser_te
+    "TestTEFuserDynamic.test_inlined_optimized_graph",  # test_jit_fuser_te
+    "TestTEFuserStatic.test_skip_grad_in_check",  # test_jit_fuser_te
+    "TestTEFuserDynamic.test_cat_graph_opt",  # test_jit_fuser_te
+    "TestTEFuserDynamic.test_to_device",  # test_jit_fuser_te
+    "TestTEFuserStatic.test_scalar",  # test_jit_fuser_te
+    "TestTEFuserDynamic.test_sum_dim",  # test_jit_fuser_te
+    "TestTEFuserDynamic.test_with_strict_fusion",  # test_jit_fuser_te
+    "TestTEFuserStatic.test_remove_output_used_only_in_size",  # test_jit_fuser_te
+    "TestTEFuserDynamic.test_profiler",  # test_jit_fuser_te
+    "TestTEFuserStatic.test_conv2d",  # test_jit_fuser_te
 }
 
 # see NOTE [dynamo_test_failures.py] for more details
@@ -7677,6 +7714,9 @@ dynamo_skips = {
     "TestScript.test_tensor_number_math",  # known py38 fail
     "TestScript.test_is_isnot",  # known py38 fail
     "TestJit.test_pytorch_jit_env_off",  # known py38 fail
+    "TestTEFuserDynamic.test_matmul",  # known py38 fail
+    "TestTEFuserStatic.test_unary_ops",  # known py311 fail
+    "TestTEFuserDynamic.test_unary_ops",  # known py311 fail
 }
 
 
