@@ -32,6 +32,7 @@
 #include <ATen/ops/scalar_tensor.h>
 #include <ATen/ops/scatter.h>
 #include <ATen/ops/scatter_reduce.h>
+#include <ATen/ops/view_ops.h>
 
 #endif
 
@@ -73,61 +74,32 @@ int32_t aoti_torch_device_type_cuda() {
   return (int32_t)c10::DeviceType::CUDA;
 }
 
-int32_t aoti_torch_dtype_float8_e5m2() {
-  return (int32_t)c10::ScalarType::Float8_e5m2;
-}
+#define AOTI_TORCH_DTYPE_IMPL(dtype, stype) \
+  int32_t aoti_torch_dtype_##dtype() {      \
+    return (int32_t)c10::ScalarType::stype; \
+  }
 
-int32_t aoti_torch_dtype_float8_e4m3fn() {
-  return (int32_t)c10::ScalarType::Float8_e4m3fn;
-}
-
-int32_t aoti_torch_dtype_float8_e5m2fnuz() {
-  return (int32_t)c10::ScalarType::Float8_e5m2fnuz;
-}
-
-int32_t aoti_torch_dtype_float8_e4m3fnuz() {
-  return (int32_t)c10::ScalarType::Float8_e4m3fnuz;
-}
-
-int32_t aoti_torch_dtype_bfloat16() {
-  return (int32_t)c10::ScalarType::BFloat16;
-}
-
-int32_t aoti_torch_dtype_float16() {
-  return (int32_t)c10::ScalarType::Half;
-}
-
-int32_t aoti_torch_dtype_float32() {
-  return (int32_t)c10::ScalarType::Float;
-}
-
-int32_t aoti_torch_dtype_float64() {
-  return (int32_t)c10::ScalarType::Double;
-}
-
-int32_t aoti_torch_dtype_uint8() {
-  return (int32_t)c10::ScalarType::Byte;
-}
-
-int32_t aoti_torch_dtype_int8() {
-  return (int32_t)c10::ScalarType::Char;
-}
-
-int32_t aoti_torch_dtype_int16() {
-  return (int32_t)c10::ScalarType::Short;
-}
-
-int32_t aoti_torch_dtype_int32() {
-  return (int32_t)c10::ScalarType::Int;
-}
-
-int32_t aoti_torch_dtype_int64() {
-  return (int32_t)c10::ScalarType::Long;
-}
-
-int32_t aoti_torch_dtype_bool() {
-  return (int32_t)c10::ScalarType::Bool;
-}
+AOTI_TORCH_DTYPE_IMPL(float8_e5m2, Float8_e5m2)
+AOTI_TORCH_DTYPE_IMPL(float8_e4m3fn, Float8_e4m3fn)
+AOTI_TORCH_DTYPE_IMPL(float8_e5m2fnuz, Float8_e5m2fnuz)
+AOTI_TORCH_DTYPE_IMPL(float8_e4m3fnuz, Float8_e4m3fnuz)
+AOTI_TORCH_DTYPE_IMPL(bfloat16, BFloat16)
+AOTI_TORCH_DTYPE_IMPL(float16, Half)
+AOTI_TORCH_DTYPE_IMPL(float32, Float)
+AOTI_TORCH_DTYPE_IMPL(float64, Double)
+AOTI_TORCH_DTYPE_IMPL(uint8, Byte)
+AOTI_TORCH_DTYPE_IMPL(uint16, UInt16)
+AOTI_TORCH_DTYPE_IMPL(uint32, UInt32)
+AOTI_TORCH_DTYPE_IMPL(uint64, UInt64)
+AOTI_TORCH_DTYPE_IMPL(int8, Char)
+AOTI_TORCH_DTYPE_IMPL(int16, Short)
+AOTI_TORCH_DTYPE_IMPL(int32, Int)
+AOTI_TORCH_DTYPE_IMPL(int64, Long)
+AOTI_TORCH_DTYPE_IMPL(bool, Bool)
+AOTI_TORCH_DTYPE_IMPL(complex32, ComplexHalf)
+AOTI_TORCH_DTYPE_IMPL(complex64, ComplexFloat)
+AOTI_TORCH_DTYPE_IMPL(complex128, ComplexDouble)
+#undef AOTI_TORCH_DTYPE_IMPL
 
 #define AOTI_TORCH_ITEM_IMPL(dtype, ctype)                     \
   AOTITorchError aoti_torch_item_##dtype(                      \
@@ -733,6 +705,18 @@ AOTITorchError aoti_torch_index_put_out(
     at::Tensor* values_tensor = tensor_handle_to_tensor_pointer(values);
     at::index_put_out(
         *out_tensor, *self_tensor, indices_, *values_tensor, accumulate);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_view_dtype(
+    AtenTensorHandle self,
+    int32_t dtype,
+    AtenTensorHandle* ret // returns new reference
+) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    *ret = new_tensor_handle(at::_ops::view_dtype::call(
+        *self_tensor, static_cast<c10::ScalarType>(dtype)));
   });
 }
 

@@ -4487,6 +4487,7 @@ has_c_shim = {
     aten._scaled_mm.default,
     aten.repeat_interleave.Tensor,
     aten.nonzero.default,
+    aten.view.dtype,
 }
 
 
