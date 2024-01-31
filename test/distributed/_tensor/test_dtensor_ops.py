@@ -371,7 +371,6 @@ dtensor_fails = {
     xfail("nn.functional.relu6"),
     xfail("nn.functional.rrelu"),
     xfail("nn.functional.selu"),
-    xfail("nn.functional.silu"),
     xfail("nn.functional.smooth_l1_loss"),
     xfail("nn.functional.soft_margin_loss"),
     xfail("nn.functional.softplus"),
@@ -704,7 +703,4 @@ instantiate_device_type_tests(TestDTensorOps, globals(), only_for=(DEVICE_TYPE,)
 
 
 if __name__ == "__main__":
-    # NB: CPU dtensor ops test frequently timeout https://github.com/pytorch/pytorch/issues/98816
-    # so running it only on CUDA
-    if torch.cuda.is_available():
-        run_tests()
+    run_tests()

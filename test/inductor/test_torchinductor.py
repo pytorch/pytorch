@@ -35,6 +35,7 @@ from torch._dynamo.testing import (
     same,
 )
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
+from torch._inductor.fx_passes import pad_mm
 from torch._inductor.utils import (
     add_scheduler_init_hook,
     run_and_get_code,
@@ -72,6 +73,7 @@ from torch.testing._internal.common_utils import (
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
+from torch.utils._triton import has_triton
 from torch.utils.weak import WeakTensorKeyDictionary
 
 if IS_WINDOWS and IS_CI:
@@ -1249,6 +1251,20 @@ class CommonTemplate:
         # Non-persistent reduction
         self.common(fn, (torch.rand(100, 4000),), check_lowp=not TEST_WITH_ROCM)
 
+    def test_cumsum_zero_dim(self):
+        def fn(x):
+            return x.cumsum(0), x.cumsum(-1)
+
+        a = torch.rand(())
+        self.common(fn, (a,))
+
+    def test_cumprod_zero_dim(self):
+        def fn(x):
+            return x.cumprod(0), x.cumprod(-1)
+
+        a = torch.rand(())
+        self.common(fn, (a,))
+
     def test_clamp(self):
         def fn(a, b):
             return (a.clamp(-0.1, 0.1), b.clamp(0), torch.clamp(a + b, max=0))
@@ -2162,6 +2178,7 @@ class CommonTemplate:
             check_lowp=True,
         )
 
+    @with_tf32_off
     @config.patch(use_mixed_mm=True)
     def test_uint4x2_mixed_mm(self):
         def fn(a, b):
@@ -3730,6 +3747,24 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
+    def test_fusing_write_into_disjoint_read(self):
+        def test_flip(a):
+            return a.copy_(torch.flip(a, (0,)))
+
+        self.common(test_flip, (torch.rand([20]),))
+
+        assertGeneratedKernelCountEqual(self, 2)
+
+        # issue only manifests on cuda with large tensors
+        if self.device != "cpu":
+
+            def f(a):
+                a[:, 20:40] = a[:, 20:40] + 1
+                a[:, 2:900025] = a[:, 1:900024] + 2
+
+            a = torch.rand((1, 1000000), device="cuda")
+            self.common(f, (a,))
+
     def test_gather_scatter(self):
         def fn(node_feat, edge_index):
             src_node_feat = node_feat[edge_index[0]]
@@ -5096,10 +5131,19 @@ class CommonTemplate:
         fn(arg1)
         opt_fn = torch._dynamo.optimize_assert(compile_fx)(fn)
         opt_fn(arg2)
+        self.assertTrue(same(arg1, arg2))
 
-        # TODO, fix: See https://github.com/pytorch/pytorch/issues/94693
-        if self.device != "cpu":
-            self.assertTrue(same(arg1, arg2))
+    def test_slice_mutation3(self):
+        def fn(a):
+            a[:2, :2].fill_(10)
+
+        opt_fn = torch._dynamo.optimize_assert(compile_fx)(fn)
+
+        x1 = torch.randn(8, 8, device=self.device)
+        x2 = x1.clone()
+        fn(x1)
+        opt_fn(x2)
+        self.assertEqual(x1, x2)
 
     def test_tensor_index_slice(self):
         def fn(a):
@@ -5501,6 +5545,30 @@ class CommonTemplate:
         args = [torch.tensor([1], dtype=torch.int64), torch.randn(8, 4), torch.randn(4)]
         self.common(fn, args)
 
+    def test_index_put_reinplace(self):
+        def fn(x, idx):
+            src = torch.ones(idx.size(0), device=x.device)
+            x.index_put_((idx,), src)
+            return x.expand((2, x.shape[0]))
+
+        a = torch.randn(1024)
+        idx = torch.arange(10)
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(fn, (a, idx))
+        assertGeneratedKernelCountEqual(self, 1)
+
+    def test_index_put_failed_reinplace(self):
+        def fn(x, idx):
+            src = torch.ones(idx.size(0), device=x.device)
+            y = x.index_put((idx,), src)
+            return x, y
+
+        a = torch.randn(1024)
+        idx = torch.arange(10)
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(fn, (a, idx))
+        assertGeneratedKernelCountEqual(self, 2)
+
     def test_adding_tensor_offsets(self):
         @torch.compile(fullgraph=True)
         def fn(x):
@@ -5691,6 +5759,35 @@ class CommonTemplate:
         a = torch.arange(10, dtype=torch.float)
         b = torch.empty(0)
         self.common(fn, [a, b])
+
+    def test_slice_scatter_reinplace(self):
+        class M(nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.linear1 = nn.Linear(64, 64, bias=False)
+                self.cache_k = torch.zeros((56, 384, 8, 64), device=device)
+
+            def forward(self, x, start_pos):
+                bsz, seqlen, _, _ = x.shape
+                xk = self.linear1(x)
+                with torch.no_grad():
+                    self.cache_k[:bsz, start_pos : start_pos + seqlen] = xk
+                keys = self.cache_k[:bsz, : start_pos + seqlen]
+                scores = torch.matmul(
+                    xk.transpose(1, 2), keys.transpose(1, 2).transpose(2, 3)
+                )
+                return scores
+
+        kv_cache_module = M(self.device)
+        inp = torch.randn(1, 32, 8, 64)
+
+        # Test that the cache update is reinplaced such that the cache is updated inplace
+        # rather than copy-scatter-copy-back.
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        with torch.no_grad():
+            self.common(kv_cache_module, (inp, 1), check_lowp=False)
+        assertGeneratedKernelCountEqual(self, 1)
 
     def test_scatter1(self):
         def fn(a, dim, index, b):
@@ -8316,6 +8413,41 @@ class CommonTemplate:
 
         res = torch.compile(fn)(20)
         self.assertTrue(torch.all((0 <= res) & (res < 10)).item())
+
+    def test_should_pad_bench_for_bmm(self):
+        B = 2
+        M = 1024
+        N = 1024
+        K = 1024 + 1  # a size that requires padding
+
+        mat1 = torch.rand(B, M, K, device=self.device)
+        mat2 = torch.rand(B, K, N, device=self.device)
+
+        def return_true(*args, **kwargs):
+            return True
+
+        # return value of is_mm_compute_bound depends on flops and membw of
+        # the GPU. Mock it so the test does not becomes flaky when running
+        # on different GPUs.
+        patch1 = patch.object(pad_mm, "is_mm_compute_bound", return_true)
+        # mock get_cached_should_pad so the test does not rely on benchmarking
+        # result.
+        patch2 = patch.object(pad_mm, "get_cached_should_pad", return_true)
+
+        with patch1, patch2:
+            should_pad = pad_mm.should_pad_bench(mat1, mat2, torch.ops.aten.bmm)
+
+        if has_triton():
+            self.assertTrue(should_pad)
+        else:
+            # should_pad_bench always returns False if has_triton returns False
+            self.assertFalse(should_pad)
+
+    def test_bessel_j0(self):
+        def fn(x):
+            return torch.special.bessel_j0(x)
+
+        self.common(fn, (torch.randn(8, 8),))
 
 
 @dataclasses.dataclass
