@@ -176,7 +176,7 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
                     "The connection to the C10d store has failed. See inner exception for details."
                 ) from exc
 
-    return store
+    return store  # type: ignore[possibly-undefined]
 
 
 def _create_file_store(params: RendezvousParameters) -> FileStore:
