@@ -3,6 +3,7 @@ import copy
 import os
 import sys
 import tempfile
+import types
 import unittest
 from typing import Dict, Tuple
 
@@ -78,7 +79,8 @@ def check_model(
         }
     ):
         torch.manual_seed(0)
-        model = model.to(self.device)
+        if not isinstance(model, types.FunctionType):
+            model = model.to(self.device)
         ref_model = copy.deepcopy(model)
         ref_inputs = copy.deepcopy(example_inputs)
         expected = ref_model(*ref_inputs)
@@ -1166,6 +1168,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_y}}
         self.check_model(Model(), (x, y), dynamic_shapes=dynamic_shapes)
 
+    @skipIfRocm
     def test_triton_kernel_dynamic_shape_with_div(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -1192,6 +1195,7 @@ class AOTInductorTestsTemplate:
         dynamic_shapes = {"x": {0: dim0_x}}
         self.check_model(Model(), (x,), dynamic_shapes=dynamic_shapes)
 
+    @skipIfRocm
     def test_triton_kernel_reinterpret_view(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -1213,6 +1217,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(4, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    @skipIfRocm
     def test_triton_kernel_with_none_input(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -1548,12 +1553,16 @@ class AOTInductorTestsTemplate:
         model.weight += 1
         self.check_model(model, example_inputs)
 
+    @skipIfRocm
     def test_triton_kernel_extern_kernel_arg(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
 
         class Model(torch.nn.Module):
             def forward(self, x, y):
+                # AOT export does not allow for input mutation
+                x = x.clone()
+                y = y.clone()
                 out = torch.zeros_like(x)
                 # torch.mm is ExternKernelOut
                 add_kernel[(4,)](x, torch.mm(x, y), out, 4, 16)
@@ -1566,12 +1575,16 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), example_inputs)
 
+    @skipIfRocm
     def test_triton_kernel_multi_output_arg(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
 
         class Model(torch.nn.Module):
             def forward(self, x, y):
+                # AOT export does not allow for input mutation
+                x = x.clone()
+                y = y.clone()
                 out = torch.zeros_like(x)
                 # torch.sort creates fallback kernel and hence MultiOutput
                 add_kernel[(4,)](x, torch.sort(y).values, out, 4, 16)
@@ -1583,6 +1596,47 @@ class AOTInductorTestsTemplate:
         )
 
         self.check_model(Model(), example_inputs)
+
+    @skipIfRocm
+    @config.patch({"aot_inductor.abi_compatible": True})
+    def test_triton_kernel_reinterpret_view_mem_leak(self):
+        # Check for memory leak when using user-defined Triton Kernel + AOTI.
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                out = torch.zeros_like(x)
+                yy = y * y
+                # reshape creates a ReinterpretView
+                add_kernel[(4,)](x, yy.reshape_as(x), out, 4, 16)
+                return out
+
+        example_inputs = (
+            torch.randn(4, 4, device="cuda"),
+            torch.randn(1, 16, device="cuda"),
+        )
+
+        so_path: str = AOTIRunnerUtil.compile(
+            Model(),
+            example_inputs,
+        )
+        aot_inductor_module = AOTIRunnerUtil.load("cuda", so_path)
+
+        # Don't assign outputs to a variable b/c it will allocate GPU memory.
+        device: int = torch.cuda.current_device()
+        mem_before = torch.cuda.memory_allocated(device)
+        aot_inductor_module(*example_inputs)
+        aot_inductor_module(*example_inputs)
+        mem_after = torch.cuda.memory_allocated(device)
+        self.assertEqual(mem_before, mem_after)
+
+        actual = aot_inductor_module(*example_inputs)
+        expected = Model()(*example_inputs)
+        torch.testing.assert_close(actual, expected)
 
     @skipIfRocm
     def test_scaled_dot_product_efficient_attention(self):
@@ -1621,6 +1675,31 @@ class AOTInductorTestsTemplate:
                 torch.randn(8, 192, 3, 14, 3, 14, device=self.device),
             )
             self.check_model(Model(), example_inputs)
+
+    def test_add_complex(self):
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                return torch.add(a, b)
+
+        x = torch.tensor(
+            [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1], device=self.device
+        )
+        y = torch.tensor(
+            [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1], device=self.device
+        )
+        self.check_model(Model(), (x, y))
+
+    def test_embedding_bag(self):
+        class Model(torch.nn.Module):
+            def forward(self, w, i, o):
+                return torch.ops.aten._embedding_bag(w, i, o, False, 0, False, None)
+
+        example_inputs = (
+            torch.randn([10, 4], device=self.device),
+            torch.randint(10, [8], device=self.device),
+            torch.tensor([0, 2, 6], device=self.device),
+        )
+        self.check_model(Model(), example_inputs)
 
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
@@ -1679,6 +1758,7 @@ def fail_abi_compatible_cuda(is_skip=False):
 
 # test_failures, xfail by default, set is_skip=True to skip
 CPU_TEST_FAILURES = {
+    "test_add_complex": fail_stack_allocation(is_skip=True),
     "test_addmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
     "test_bmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
     "test_dup_unbacked_sym_decl": fail_with_and_without_stack_allocation(),
@@ -1750,6 +1830,7 @@ if not IS_FBCODE:
     CPU_TEST_FAILURES.update(
         {
             "test_duplicated_params": fail_stack_allocation(is_skip=True),
+            "test_embedding_bag": fail_stack_allocation(is_skip=True),
             "test_fqn": fail_stack_allocation(is_skip=True),
             "test_no_args": fail_stack_allocation(is_skip=True),
             "test_output_misaligned": fail_stack_allocation(is_skip=True),
