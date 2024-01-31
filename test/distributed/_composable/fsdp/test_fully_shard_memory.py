@@ -66,12 +66,15 @@ class TestFullyShardMemory(FSDPTest):
         # Do not use foreach since intermediates increase peak memory
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=False)
 
-        mem_mb = self._get_peak_active_memory_mb()
         # Init: Each module is moved to GPU before sharding parameters
-        self.assertLessEqual(
-            mem_mb - base_mem_mb,
-            (model_sharded_numel + max_unsharded_numel) * 4 / 1e6,
-        )
+        peak_mem_mb = self._get_peak_active_memory_mb()
+        curr_mem_mb = self._get_curr_active_memory_mb()
+        init_mem_mb = (model_sharded_numel + max_unsharded_numel) * 4 / 1e6
+        # Allow for some buffer for the peak memory since original parameters
+        # are not freed until a `fully_shard` call returns
+        buffer_mb = 4
+        self.assertLessEqual(peak_mem_mb - base_mem_mb, init_mem_mb + buffer_mb)
+        self.assertLessEqual(curr_mem_mb - base_mem_mb, init_mem_mb)
 
         # Use a small input to minimize activation memory usage
         inp = torch.randint(0, vocab_size, (1, 4), device="cuda")
@@ -144,6 +147,10 @@ class TestFullyShardMemory(FSDPTest):
     def _get_peak_active_memory_mb(self) -> int:
         mem_stats = torch.cuda.memory_stats()
         return round(mem_stats["active_bytes.all.peak"] / 1e6)
+
+    def _get_curr_active_memory_mb(self) -> int:
+        mem_stats = torch.cuda.memory_stats()
+        return round(mem_stats["active_bytes.all.current"] / 1e6)
 
 
 if __name__ == "__main__":

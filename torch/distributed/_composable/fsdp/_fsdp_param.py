@@ -34,12 +34,14 @@ FSDP considers the following tensors:
 
 We define these tensors to describe the general framework that can accomodate
 extensions, where:
-- all-gather input = pre-all-gather transform(sharded parameter)
-- unsharded parameter = post-all-gather transform(all-gather output)
+- all-gather-input = pre-all-gather-transform(sharded-parameter)
+- unsharded-parameter = post-all-gather-transform(all-gather-output)
 
 For the default ``torch.Tensor`` case, the sharded parameter and all-gather
-input share the same data, and the all-gather output and unsharded parameter
-share the same data, meaning that they can be thought of as the same tensors.
+input share the same underlying tensor data, meaning that they can be thought
+of as the same tensors. The same applies for the all-gather output and
+unsharded parameter. For non-``torch.Tensor`` extensions, these equivalences
+may no longer hold due to the pre/post-all-gather transforms.
 
 [Note: FSDP and autograd]
 FSDP dynamically frees and allocates the unsharded parameter. Since autograd
@@ -111,8 +113,6 @@ class FSDPParam:
     _global_stride: Tuple[int, ...]
     # DTensor attributes (only defined for DTensor `param`):
     _tp_spec: DTensorSpec
-    _tp_global_size: torch.Size
-    _tp_global_stride: Tuple[int, ...]
 
     def __init__(
         self,
@@ -147,8 +147,6 @@ class FSDPParam:
         self.is_dtensor = isinstance(param, DTensor)
         if self.is_dtensor:
             self._tp_spec = cast(DTensor, param)._spec
-            self._tp_global_size = param.size()
-            self._tp_global_stride = param.stride()
             if (
                 self.mesh_info.shard_mesh_dim != 0
                 or self.mesh_info.replicate_mesh_dim is not None
@@ -178,8 +176,8 @@ class FSDPParam:
             global_placements[global_dp_mesh_dim] = Shard(0)
             global_placements[global_tp_mesh_dim] = self._tp_spec.placements[0]
             self._global_placements = tuple(global_placements)
-            self._global_size = self._tp_global_size
-            self._global_stride = self._tp_global_stride
+            self._global_size = param.size()
+            self._global_stride = param.stride()
             param_data = cast(DTensor, param)._local_tensor
         else:
             if _mesh_resources.get_parent_mesh(self.mesh_info.mesh) is not None:
@@ -206,8 +204,8 @@ class FSDPParam:
             self.to_sharded_dtensor(padded_sharded_param[: sharded_param.size(0)])
         )
         self.sharded_param.requires_grad_(param.requires_grad)
-        unsafe_free_storage(param_data)  # free immediately
-        del param_data  # delete PyObject reference to avoid warning
+        # Let `param_data` be freed normally when its ref count reaches 0 when
+        # the `fully_shard` call returns to allow provided parameters to alias
         self._setattr_on_modules(self.sharded_param)
         self.sharded_state = ShardedState.SHARDED
 
@@ -243,8 +241,8 @@ class FSDPParam:
                 unsharded_param,
                 self._tp_spec.mesh,
                 self._tp_spec.placements,
-                self._tp_global_size,
-                self._tp_global_stride,
+                self._global_size,
+                self._global_stride,
             )
         self._unsharded_param = nn.Parameter(unsharded_param)
         self._unsharded_param.requires_grad_(self.sharded_param.requires_grad)
