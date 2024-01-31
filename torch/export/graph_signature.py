@@ -14,7 +14,6 @@ __all__ = [
     "OutputSpec",
     "SymIntArgument",
     "TensorArgument",
-    "CustomObjArgument",
 ]
 
 
@@ -62,7 +61,7 @@ class InputSpec:
         assert isinstance(
             self.arg,
             (TensorArgument, SymIntArgument, ConstantArgument, CustomObjArgument),
-        )
+        ), f"got {type(self.arg)}"
 
 
 class OutputKind(Enum):
