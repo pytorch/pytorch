@@ -3385,9 +3385,9 @@ class ShapeEnv:
         for s in expr.free_symbols:
             stacktrace = ''.join(self.var_to_stack[s].format())
             self.log.debug("Data dependent variable '%s' allocated at:\n%s", s, stacktrace)
-        cpp_stack = CapturedTraceback.extract(cpp=True)
+        # cpp_stack = CapturedTraceback.extract(cpp=True)
         return GuardOnDataDependentSymNode(
-            "C++ stack trace:\n" + ''.join(cpp_stack.format()) + "\n\n"
+            # "C++ stack trace:\n" + ''.join(cpp_stack.format()) + "\n\n"
             "It appears that you're trying to get a value out of symbolic int/float "
             "whose value is data-dependent (and thus we do not know the true value.)  "
             f"The expression we were trying to evaluate is {expr} (unhinted: {unhinted_expr}).  "
@@ -3404,95 +3404,95 @@ class ShapeEnv:
 
         # Precondition: a == tgt
 
-        src_bound = self.var_to_range[a]
+        # Handles NT symbolic variables...
+        tgt_bound = None
+        if a in self.var_to_range:
+            src_bound = self.var_to_range[a]
 
-        # If you have x in [2, maxint], then 2*x in [4, 2*maxint].
-        # But we don't really care that the max bound says we can
-        # go beyond the maximum integer size, because we aren't
-        # using bigints anyway.  Arguably, ValueRanges should know
-        # to do this truncation automaticaly (to avoid doing
-        # bigint compute in range analysis), but right now it doesn't
-        # so we need to get rid of some unnecessary precision.
-        int_range = ValueRanges(-sys.maxsize - 1, sys.maxsize - 1)
+            # If you have x in [2, maxint], then 2*x in [4, 2*maxint].
+            # But we don't really care that the max bound says we can
+            # go beyond the maximum integer size, because we aren't
+            # using bigints anyway.  Arguably, ValueRanges should know
+            # to do this truncation automaticaly (to avoid doing
+            # bigint compute in range analysis), but right now it doesn't
+            # so we need to get rid of some unnecessary precision.
+            int_range = ValueRanges(-sys.maxsize - 1, sys.maxsize - 1)
 
-        def issubset(x, y):
-            return (x & int_range).issubset(y & int_range)
+            def issubset(x, y):
+                return (x & int_range).issubset(y & int_range)
 
-        # First, refine the value range of a based on the computed value range
-        # of tgt.  This is always OK to do, even if we decide not to do the
-        # substitution in the end.  This might be a no-op, if a already has
-        # a tighter bound
-        tgt_bound = self.bound_sympy(tgt)
-        self.var_to_range[a] = src_bound & tgt_bound
+            # First, refine the value range of a based on the computed value range
+            # of tgt.  This is always OK to do, even if we decide not to do the
+            # substitution in the end.  This might be a no-op, if a already has
+            # a tighter bound
+            tgt_bound = self.bound_sympy(tgt)
+            self.var_to_range[a] = src_bound & tgt_bound
 
-        # Next, check if we can update the range of free symbols in tgt
-        # based on the range in a.  But only do it if:
-        #  - the source bound non-trivially improves over what we get out of
-        #    the existing bounds.
-        #  - the replacement is univariate (multivariate makes my brain
-        #    explode)
-        if not issubset(tgt_bound, src_bound) and len(tgt.free_symbols) == 1:
-            b = next(iter(tgt.free_symbols))
-            # Try to invert the equality
-            r = try_solve(sympy.Eq(a, tgt), b, floordiv_inequality=False)
-            if r is not None:
-                b_bound = self.bound_sympy(r[1])
-                self.var_to_range[b] = b_bound & self.var_to_range[b]
-                tgt_bound = self.bound_sympy(tgt)
-                assert issubset(tgt_bound, src_bound)
+            # Next, check if we can update the range of free symbols in tgt
+            # based on the range in a.  But only do it if:
+            #  - the source bound non-trivially improves over what we get out of
+            #    the existing bounds.
+            #  - the replacement is univariate (multivariate makes my brain
+            #    explode)
+            if not issubset(tgt_bound, src_bound) and len(tgt.free_symbols) == 1:
+                b = next(iter(tgt.free_symbols))
+                # Try to invert the equality
+                r = try_solve(sympy.Eq(a, tgt), b, floordiv_inequality=False)
+                if r is not None:
+                    b_bound = self.bound_sympy(r[1])
+                    self.var_to_range[b] = b_bound & self.var_to_range[b]
+                    tgt_bound = self.bound_sympy(tgt)
+                    assert issubset(tgt_bound, src_bound)
 
-        # TODO: Should we propagate size-like-ness?
-        #
-        # Pros: if u0 is size-like, intuitively u0 == u1 should cause u1
-        # to become size-like.
-        #
-        # Cons: if u0 is size-like, what about u0 - 1 == u1?  You CAN'T
-        # propagate in this case, because what if u0 == 0, then u1 is negative
-        # and clearly isn't a size.  So, at minimum, any f(x) whose value
-        # range isn't [0, inf] given x in [0, inf] cannot propagate
-        # size-like-ness.  But there are many situations where you could
-        # imagine u1 is going to be size-like and actually you just didn't
-        # have a refined enough value range on u0.  Since even innocuous
-        # looking arithmetic operations can destroy size-like-ness, it's
-        # best to not propagate it at all and force the user to annotate it
-        # as necessary.
-        #
-        # Compromise: we preserve size-like-ness only for exact equality
-        # and nothing else.
-        if a in self.size_like and isinstance(tgt, sympy.Symbol):
-            self.size_like.add(tgt)
-        elif isinstance(tgt, sympy.Symbol) and tgt in self.size_like:
-            self.size_like.add(a)
+            # TODO: Should we propagate size-like-ness?
+            #
+            # Pros: if u0 is size-like, intuitively u0 == u1 should cause u1
+            # to become size-like.
+            #
+            # Cons: if u0 is size-like, what about u0 - 1 == u1?  You CAN'T
+            # propagate in this case, because what if u0 == 0, then u1 is negative
+            # and clearly isn't a size.  So, at minimum, any f(x) whose value
+            # range isn't [0, inf] given x in [0, inf] cannot propagate
+            # size-like-ness.  But there are many situations where you could
+            # imagine u1 is going to be size-like and actually you just didn't
+            # have a refined enough value range on u0.  Since even innocuous
+            # looking arithmetic operations can destroy size-like-ness, it's
+            # best to not propagate it at all and force the user to annotate it
+            # as necessary.
+            #
+            # Compromise: we preserve size-like-ness only for exact equality
+            # and nothing else.
+            if a in self.size_like and isinstance(tgt, sympy.Symbol):
+                self.size_like.add(tgt)
+            elif isinstance(tgt, sympy.Symbol) and tgt in self.size_like:
+                self.size_like.add(a)
 
-        # Now, decide if we will do the substitution.
-        #
-        #  - If the source has a non-trivial range, only substitute if
-        #    we preserve this range.  Note that we may have propagated
-        #    the src_range to free variables in tgt, which helps us achieve
-        #    this.  This ensures we never "forget" about user defined ranges,
-        #    even if they end up being defined on composite formulas
-        #    like s0 + s1.
-        #
-        #  - If the variable is unbacked, only substitute if the substitution
-        #    would preserve size-like-ness (no loss of information) OR we
-        #    would completely eliminate unbacked SymInts via the substitution
-        #    (because if you get rid of the unbacked symints, size-like-ness
-        #    doesn't matter anymore--you've got hints now, you can handle
-        #    guards directly).
-        #
-        #    Note that because we are very conservative about propagating
-        #    size-like-ness right now, this means something like u0 == u1 * 2
-        #    will NOT result in a substitution (but maybe in the future it
-        #    could)
-        if not issubset(tgt_bound, src_bound):
-            self.log.debug("skipped set_replacement %s = %s (%s) [%s not subset of %s]", a, tgt, msg, tgt_bound, src_bound)
-            return
-        elif self.is_unbacked_symint(a) and a in self.size_like and (
-            not free_unbacked_symbols(tgt) or
-            tgt not in self.size_like
-        ):
-            self.log.debug("skipped set_replacement %s = %s (%s) [rhs not size-like]", a, tgt, msg)
-            return
+            # Now, decide if we will do the substitution.
+            #
+            #  - If the source has a non-trivial range, only substitute if
+            #    we preserve this range.  Note that we may have propagated
+            #    the src_range to free variables in tgt, which helps us achieve
+            #    this.  This ensures we never "forget" about user defined ranges,
+            #    even if they end up being defined on composite formulas
+            #    like s0 + s1.
+            #
+            #  - If the variable is unbacked, only substitute if the substitution
+            #    would preserve size-like-ness (no loss of information) OR we
+            #    would completely eliminate unbacked SymInts via the substitution
+            #    (because if you get rid of the unbacked symints, size-like-ness
+            #    doesn't matter anymore--you've got hints now, you can handle
+            #    guards directly).
+            #
+            #    Note that because we are very conservative about propagating
+            #    size-like-ness right now, this means something like u0 == u1 * 2
+            #    will NOT result in a substitution (but maybe in the future it
+            #    could)
+            if not issubset(tgt_bound, src_bound):
+                self.log.debug("skipped set_replacement %s = %s (%s) [%s not subset of %s]", a, tgt, msg, tgt_bound, src_bound)
+                return
+            elif self.is_unbacked_symint(a) and a in self.size_like and free_unbacked_symbols(tgt) and tgt not in self.size_like:
+                self.log.debug("skipped set_replacement %s = %s (%s) [rhs not size-like]", a, tgt, msg)
+                return
 
         if config.print_specializations and isinstance(tgt, (sympy.Integer, sympy.Float)):
             # specializing to a constant, which is likely unexpected
