@@ -96,7 +96,7 @@ inline C10_HOST_DEVICE float fp8e4m3fn_to_fp32_value(uint8_t input) {
    * mantissa will shift into exponent, turning the biased exponent into 1, and
    * making mantissa normalized (i.e. without leading 1).
    */
-#if defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
   uint32_t renorm_shift = __clz(nonsign);
 #elif defined(__SYCL_DEVICE_ONLY__)
   // Note: zero is not a supported input into `__builtin_clz`

@@ -334,6 +334,16 @@ c10::optional<std::pair<std::string, uint64_t>> libraryFor(void* addr) {
 }
 
 struct Symbolizer {
+  Symbolizer() {
+    auto envar = std::getenv("TORCH_ADDR2LINE_BINARY");
+    if (envar != nullptr) {
+      // currently we take user's input as is without checking
+      addr2line_binary_ = envar;
+      TORCH_WARN("Use custom addr2line binary: ", addr2line_binary_);
+    } else {
+      addr2line_binary_ = "addr2line"; // default
+    }
+  }
   static std::lock_guard<std::mutex> guard() {
     static std::mutex mutex;
     return std::lock_guard<std::mutex>(mutex);
@@ -382,6 +392,7 @@ struct Symbolizer {
 
  private:
   static constexpr int BLOCK = 1024;
+  const char* addr2line_binary_;
   struct Entry {
     std::unique_ptr<Communicate> comm;
     std::vector<void*> queried;
@@ -396,11 +407,13 @@ struct Symbolizer {
     if (it == entries_.end()) {
       // NOLINTNEXTLINE(*-c-arrays*)
       const char* args[] = {
-          "addr2line", "-C", "-f", "-e", name.c_str(), nullptr};
+          addr2line_binary_, "-C", "-f", "-e", name.c_str(), nullptr};
       it = entries_
                .insert_or_assign(
                    name,
-                   Entry{std::make_unique<Communicate>("addr2line", args), {}})
+                   Entry{
+                       std::make_unique<Communicate>(addr2line_binary_, args),
+                       {}})
                .first;
     }
     return it->second;

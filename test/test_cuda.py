@@ -3113,7 +3113,12 @@ exit(2)
             for optimizer_ctor, amsgrad in product((torch.optim.Adam, torch.optim.AdamW), (False, True))
         ] + [
             (optimizer_ctor, {"lr": 0.1, "foreach": True, "maximize": maximize, "weight_decay": weight_decay})
-            for optimizer_ctor, maximize, weight_decay in product((torch.optim.Adamax, torch.optim.ASGD), (False, True), (0, 0.1))]
+            for optimizer_ctor, maximize, weight_decay in product((torch.optim.Adamax, torch.optim.ASGD), (False, True), (0, 0.1))
+        ] + [
+            (torch.optim.RAdam, {"lr": 0.1, "foreach": True, "decoupled_weight_decay": decoupled_weight_decay,
+                                 "weight_decay": weight_decay})
+            for decoupled_weight_decay, weight_decay in product((False, True), (0.0, 0.1))
+        ]
 
         for optimizer_ctor, kwargs in cases:
             with self.subTest(optimizer_ctor=optimizer_ctor, kwargs=kwargs):
@@ -3623,6 +3628,21 @@ class TestCudaMallocAsync(TestCase):
             finally:
                 torch.cuda.memory._record_memory_history(None)
 
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
+    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
+    def test_memory_plots_free_segment_stack(self):
+        for context in ["alloc", "all", "state"]:
+            try:
+                torch.cuda.memory.empty_cache()
+                torch.cuda.memory._record_memory_history(context=context)
+                x = torch.rand(3, 4, device='cuda')
+                del x
+                torch.cuda.memory.empty_cache()
+
+                ss = json.dumps(torch.cuda.memory._snapshot())
+                self.assertTrue(('empty_cache' in ss) == (context == 'all'))
+            finally:
+                torch.cuda.memory._record_memory_history(None)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     def test_memory_snapshot_script(self):
