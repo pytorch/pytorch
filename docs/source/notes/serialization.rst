@@ -186,10 +186,10 @@ archive unless the user sets ``_use_new_zipfile_serialization=False``.
 
 In this archive, the files are ordered as such
 
-.. code-block:: python
+.. code-block:: text
     checkpoint.pth
     ├── data.pkl
-    ├── byteorder  # added in PyTorch >= 2.1
+    ├── byteorder  # added in PyTorch 2.1.0
     ├── data
     │   ├── 0
     │   ├── 1
@@ -202,7 +202,7 @@ The entries are as follows:
     excluding ``torch.Storage`` objects that it contains
   * ``byteorder`` records the ``sys.byteorder`` when saving (“little” or “big”)
   * ``data/`` contains all the storages in the object, where each storage is a separate file
-  * ``version`` contains a version number for internal use
+  * ``version`` contains a version number at save time that can be used at load time
 
 The local file header of each file is padded to a multiple of 64 bytes, ensuring
 that the offset of each file is 64-byte aligned.
