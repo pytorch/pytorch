@@ -178,8 +178,8 @@ can use this pattern:
 
 .. _serializing-python-modules:
 
-``torch.save`` serialized file format
--------------------------------------
+Serialized file format for ``torch.save``
+-----------------------------------------
 
 Since PyTorch 1.6.0, ``torch.save`` defaults to returning an uncompressed ZIP64
 archive unless the user sets ``_use_new_zipfile_serialization=False``.
@@ -205,10 +205,10 @@ The entries are as follows:
   * ``data/`` contains all the storages in the object, where each storage is a separate file
   * ``version`` contains a version number at save time that can be used at load time
 
-The local file header of each file is padded to a multiple of 64 bytes, ensuring
-that the offset of each file is 64-byte aligned.
+The local file header of each file is padded to an offset that is a multiple of 64 bytes,
+ensuring that the offset of each file is 64-byte aligned.
 
-..note::
+.. note::
     Tensors on certain devices such as XLA do not have their storages serialized. In
     these cases ``data/`` might not exist in the checkpoint.
 
