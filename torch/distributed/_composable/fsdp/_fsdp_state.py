@@ -25,8 +25,11 @@ class FSDPStateContext:
     """This has state shared across FSDP states."""
 
     def __init__(self):
+        # All FSDP states in one module tree
         self.all_states: List[FSDPState] = []
-        # Iteration's forward root runs the once-per-forward logic
+        # Iteration's forward root runs the once-per-forward logic; this root
+        # may not be the overall root set by lazy initialization in cases where
+        # only a submodule runs forward
         self.iter_forward_root: Optional[FSDPState] = None
         # Final callback should only be queued once per backward
         self.post_backward_final_callback_queued: bool = False
@@ -81,15 +84,28 @@ class FSDPState(_State):
         return args, kwargs
 
     def _lazy_init(self) -> None:
+        """
+        Lazy initialization logically represents when all modules' parallelisms
+        have finalized (e.g. FSDP has been applied to all desired modules).
+        This means that we can determine root state. We identify the root by
+        the 1st state to run forward.
+        """
         if self._is_root is not None:
             return  # no-op: already initialized
         self._is_root = True
         root_module = self._module
-        for module in root_module.modules():
-            if (state := _get_module_fsdp_state(module)) is not None:
-                if module is not root_module:
-                    state._is_root = False
-                self._state_ctx.all_states.append(state)
+        for module_name, module in root_module.named_modules():
+            if (state := _get_module_fsdp_state(module)) is None:
+                continue
+            if module is not root_module:
+                if state._is_root is not None:
+                    raise RuntimeError(
+                        "FSDP state has already been lazily initialized for "
+                        f"{module_name}\nFSDP requires running forward through "
+                        "the root module first"
+                    )
+                state._is_root = False
+            self._state_ctx.all_states.append(state)
         if self._fsdp_param_group:
             # For the root, do not reshard after forward since for training,
             # the parameters would be freed and all-gathered immediately
