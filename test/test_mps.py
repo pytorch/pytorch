@@ -297,6 +297,7 @@ def mps_ops_modifier(ops):
         'slice',
         'split',
         'split_with_sizes',
+        'split_with_sizes_copy',
         'splitlist_args',
         'squeeze',
         'squeezemultiple',

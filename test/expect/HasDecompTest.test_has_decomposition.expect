@@ -1288,8 +1288,6 @@ aten::special_shifted_chebyshev_polynomial_w.x_scalar
 aten::special_shifted_chebyshev_polynomial_w.x_scalar_out
 aten::split_copy.Tensor
 aten::split_copy.Tensor_out
-aten::split_with_sizes_copy
-aten::split_with_sizes_copy.out
 aten::squeeze_
 aten::squeeze_.dim
 aten::squeeze_.dims
