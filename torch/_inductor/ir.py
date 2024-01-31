@@ -37,6 +37,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
+from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -4543,9 +4544,10 @@ class FallbackKernel(ExternKernelAlloc):
         self.kwargs = {} if kwargs is None else kwargs
         V.graph.warn_fallback(self.python_kernel_name)
 
-        # The names of the inputs that were mutated and not returned as
-        # outputs from the operator.
-        self.mutated_but_not_returned_inputs = []
+        # args that are aliased
+        self.alias_names = []
+        # args that are mutated AND returned from the op
+        self.mutation_names = []
 
         if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
             # We assume here that HOPs with FallbackKernel are functional.
@@ -4554,12 +4556,12 @@ class FallbackKernel(ExternKernelAlloc):
             return
 
         schema = self.op_overload._schema
-        from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 
         # NOTE: [FallbackKernel supported operators]
         # We only support three types of operators:
         # - functional ops
         # - view ops
+        # - inplace aten ops
         # - mutating ops that are auto-functionalizable. That is,
         # the operator may mutate any number of inputs, but its outputs
         # may not alias any of the inputs.
@@ -4567,6 +4569,10 @@ class FallbackKernel(ExternKernelAlloc):
         # The unsupported cases usually do not show up here (because
         # AOTAutograd functionalized them away); the only way for an in-place
         # op to show up here is if a lowering or pass introduced it.
+        if torch._library.utils.is_inplace_aten_op(self.op_overload):
+            self.mutation_names.append(tensor_args[0])
+            return
+
         if schema.is_mutable and not can_auto_functionalize(kernel):
             raise NotImplementedError(
                 f"NYI: Can't generate FallbackKernel for {kernel}"
@@ -4576,12 +4582,12 @@ class FallbackKernel(ExternKernelAlloc):
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
         input_alias_sets = set()
         for arg, info in zip(args, schema_args):
-            if info.alias_info is None or not info.alias_info.is_write:
+            if arg is None:
                 continue
-            if arg is not None:
-                # NB: can_auto_functionalize check guarantees that the arg
-                # is not directly a return of the operator.
-                self.mutated_but_not_returned_inputs.append(arg.get_name())
+            if info.alias_info is None:
+                continue
+            self.alias_names.append(arg.get_name())
+            if info.alias_info.is_write:
                 mark_node_as_mutating(self, arg)
 
     def set_cpp_kernel(self, kernel):
@@ -4738,21 +4744,10 @@ class FallbackKernel(ExternKernelAlloc):
         return get_schema_info(self.op_overload).is_mutable()
 
     def get_alias_names(self):
-        if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
-            return []
-        # See NOTE [FallbackKernel supported operators]
-        if self.op_overload._schema.is_mutable:
-            return self.mutated_but_not_returned_inputs
-        if torch._inductor.utils.is_view(self.op_overload):
-            # TODO - use op._schema.arguments alias_info to figure out
-            # precise list
-            return [inp.get_name() for inp in self.inputs]
-        return []
+        return self.alias_names
 
     def get_mutation_names(self):
-        # See NOTE [FallbackKernel supported operators]
-        # NB: this is inputs that are mutated AND returned as outputs
-        return []
+        return self.mutation_names
 
     def fill_non_provided_args(self, args, kwargs, convert_val_to_str=False):
         assert isinstance(args, (list, tuple))
