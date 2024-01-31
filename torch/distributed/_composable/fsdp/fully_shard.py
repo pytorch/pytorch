@@ -57,7 +57,7 @@ def fully_shard(
         raise ValueError(f"fully_shard expects a 1D or 2D DeviceMesh but got {mesh}")
     elif mesh.ndim == 1:
         mesh_info = FSDPMeshInfo(mesh, shard_mesh_dim=0)
-    elif mesh.ndim == 2:
+    else:
         mesh_info = HSDPMeshInfo(mesh, shard_mesh_dim=1, replicate_mesh_dim=0)
     device = _get_device_from_mesh(mesh)
     post_forward_mesh_info = _get_post_forward_mesh_info(
@@ -69,7 +69,7 @@ def fully_shard(
 
     managed_modules = _get_managed_modules(module)
     params, buffers = _get_managed_states(managed_modules)
-    _move_states_to_device(params, buffers, device, mesh_info)  # type: ignore[possibly-undefined]
+    _move_states_to_device(params, buffers, device, mesh_info)
     if params:
         state._fsdp_param_group = FSDPParamGroup(
             params, module, mesh_info, post_forward_mesh_info, device
