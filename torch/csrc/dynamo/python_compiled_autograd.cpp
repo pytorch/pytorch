@@ -385,7 +385,7 @@ variable_list compiled_autograd(
       // at::getStepCallbacksUnlessEmpty(at::RecordScope::BACKWARD_FUNCTION);
       // if (C10_UNLIKELY(step_callbacks.has_value())) { ... }
 
-      variable_list inputs = input_buffers.lookup(call.node.get()).buffer;
+      variable_list& inputs = input_buffers.lookup(call.node.get()).buffer;
 
       if (!call.tensor_pre_hooks.empty()) {
         THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
