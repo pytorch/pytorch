@@ -13,7 +13,6 @@ from torch.distributed._composable_state import (
 from torch.distributed.utils import _to_kwargs
 from torch.utils._pytree import tree_flatten
 from torch.utils.hooks import RemovableHandle
-from ._fsdp_collectives import AllGatherStateHolder
 from ._fsdp_common import TrainingState
 from ._fsdp_param import FSDPParam
 from ._fsdp_param_group import FSDPCommContext, FSDPParamGroup
@@ -33,12 +32,6 @@ class FSDPStateContext:
 class FSDPState(_State):
     _module: nn.Module  # permit ref cycle since module and state lifetimes are 1:1
     _device: torch.device
-    _default_stream: torch.cuda.Stream
-    _all_gather_copy_in_stream: torch.cuda.Stream
-    _all_gather_stream: torch.cuda.Stream
-    _reduce_scatter_stream: torch.cuda.Stream
-    # For overlapping current copy-out and next all-gather in forward
-    _all_gather_state: AllGatherStateHolder
 
     def __init__(self):
         super().__init__()
@@ -142,12 +135,12 @@ class FSDPState(_State):
         output = self._register_pre_backward_hook(output)
         self._training_state = TrainingState.IDLE
         if self._state_ctx.iter_forward_root is self:
-            if (all_gather_state := self._comm_ctx.all_gather_state.pop()) is not None:
+            if all_gather_state := self._comm_ctx.all_gather_state:
                 self._comm_ctx.all_gather_copy_in_stream.wait_event(
                     all_gather_state.event
                 )
                 self._comm_ctx.all_gather_stream.wait_event(all_gather_state.event)
-                del all_gather_state  # free
+                self._comm_ctx.all_gather_state = None  # free the all-gather result
             self._state_ctx.iter_forward_root = None
 
     def _pre_backward(self, *unused: Any) -> None:
