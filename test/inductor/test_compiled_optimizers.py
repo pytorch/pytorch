@@ -191,8 +191,10 @@ def make_test(
     def test_fn(self):
         stack = ExitStack()
         try:
-            is_gpu = device == "cuda"
-            if is_gpu:
+            # https://github.com/pytorch/pytorch/issues/118715 for capturable Adagrad support
+            # https://github.com/pytorch/pytorch/issues/118018 for capturable SGD support
+            run_cudagraphs = device == "cuda" and optim_cls not in (Adagrad, SGD)
+            if run_cudagraphs:
                 stack.enter_context(config.patch({"triton.cudagraphs": True}))
 
             torch._dynamo.reset()
@@ -237,8 +239,7 @@ def make_test(
                         rtol=rtol,
                     )
 
-            # https://github.com/pytorch/pytorch/issues/118715 for capturable Adagrad support
-            if is_gpu and optim_cls is not Adagrad:
+            if run_cudagraphs:
                 self.check_cudagraphs_ran()
 
             if self.check_kernel_count:
