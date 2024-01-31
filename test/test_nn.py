@@ -9910,37 +9910,11 @@ class TestNNDeviceType(NNTestCase):
             self.assertTrue(output_ui8.is_contiguous(memory_format=memory_format))
             self.assertTrue(output_f32.is_contiguous(memory_format=memory_format))
 
-        diff = (output_f32 - output_ui8.float()).abs()
         if mode == "bilinear":
             torch.testing.assert_close(output_f32, output_ui8.float(), rtol=0, atol=1)
         else:
-            if torch.device(device).type == "xla":
-                # Test were failing with lower threshold for xla device
-                # TODO: invertigate why 16 failing tests with threshold 15, diff.max() is 16.0 or 19.0
-                # test_upsamplingBiMode2d_consistency_memory_format0_mode_bicubic_antialias_False_align_corners_False
-                #   _num_channels_3_output_size_600_check_as_unsqueezed_3d_tensor_False_non_contig_restrided_batch_size_1_xla
-                #   _num_channels_3_output_size_600_check_as_unsqueezed_3d_tensor_False_non_contig_restrided_batch_size_5_xla
-                #   _num_channels_3_output_size_600_check_as_unsqueezed_3d_tensor_True_non_contig_restrided_batch_size_1_xla
-                #   _num_channels_3_output_size_600_check_as_unsqueezed_3d_tensor_True_non_contig_restrided_batch_size_5_xla
-                #
-                #   _num_channels_5_output_size_600_check_as_unsqueezed_3d_tensor_False_non_contig_restrided_batch_size_1_xla
-                #   _num_channels_5_output_size_600_check_as_unsqueezed_3d_tensor_False_non_contig_restrided_batch_size_5_xla
-                #   _num_channels_5_output_size_600_check_as_unsqueezed_3d_tensor_True_non_contig_restrided_batch_size_1_xla
-                #   _num_channels_5_output_size_600_check_as_unsqueezed_3d_tensor_True_non_contig_restrided_batch_size_5_xla
-                #
-                #   _num_channels_3_output_size_600_check_as_unsqueezed_3d_tensor_False_non_contig_restrided_batch_size_1_xla
-                #   _num_channels_3_output_size_600_check_as_unsqueezed_3d_tensor_False_non_contig_restrided_batch_size_5_xla
-                #   _num_channels_3_output_size_600_check_as_unsqueezed_3d_tensor_True_non_contig_restrided_batch_size_1_xla
-                #   _num_channels_3_output_size_600_check_as_unsqueezed_3d_tensor_True_non_contig_restrided_batch_size_5_xla
-                #
-                #   _num_channels_5_output_size_600_check_as_unsqueezed_3d_tensor_False_non_contig_restrided_batch_size_1_xla
-                #   _num_channels_5_output_size_600_check_as_unsqueezed_3d_tensor_False_non_contig_restrided_batch_size_5_xla
-                #   _num_channels_5_output_size_600_check_as_unsqueezed_3d_tensor_True_non_contig_restrided_batch_size_1_xla
-                #   _num_channels_5_output_size_600_check_as_unsqueezed_3d_tensor_True_non_contig_restrided_batch_size_5_xla
-
-                self.assertLess(diff.max(), 22)
-            else:
-                self.assertLess(diff.max(), 15)
+            diff = (output_f32 - output_ui8.float()).abs()
+            self.assertLess(diff.max(), 15)
 
             threshold = 2
             percent = 3

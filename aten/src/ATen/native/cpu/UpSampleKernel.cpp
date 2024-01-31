@@ -742,30 +742,30 @@ struct HelperInterpBase {
     }
   }
 
+  // This is a helper function for _compute_index_ranges_weights method that computes
+  // source two int64 scalars index min and size and a list weights (of size max_interp_size)
+  // for interpolation with antialiasing=true mode. It returns the maximal weights value
   template <typename scalar_t, typename aa_filter_fn_t>
-  static inline scalar_t _compute_weights_aa(
+  static inline scalar_t _compute_indices_min_size_weights_aa(
     const int64_t i, const int64_t input_size, const scalar_t scale, const scalar_t support,
     scalar_t* wt_ptr, const int64_t max_interp_size, aa_filter_fn_t filter_fn,
-    int64_t& xmin, int64_t& xsize, bool antialias, double align_corners_delta
+    int64_t& xmin, int64_t& xsize
   ) {
 
-    // align_corners_delta is 0.5 for uint8 and align_corners=true and antialias=false
-    //                     is 0.0 otherwise
-    scalar_t center = scale * (i + 0.5 - align_corners_delta);
+    scalar_t center = scale * (i + 0.5);
     scalar_t total_w = 0.0;
-    scalar_t invscale = (scale >= 1.0 && antialias) ? 1.0 / scale : 1.0;
+    scalar_t invscale = (scale >= 1.0) ? 1.0 / scale : 1.0;
     xmin = std::max(
-        static_cast<int64_t>(center - support + 0.5 + align_corners_delta), static_cast<int64_t>(0));
+        static_cast<int64_t>(center - support + 0.5), static_cast<int64_t>(0));
     xsize = std::min(
-        static_cast<int64_t>(center + support + 0.5 + align_corners_delta), input_size) - xmin;
-
+        static_cast<int64_t>(center + support + 0.5), input_size) - xmin;
     // There are rare cases when due to precision xsize can be larger than max_interp_size by one.
     // We have to clip the value
     xsize = std::clamp(xsize, static_cast<int64_t>(0), max_interp_size);
 
     int64_t j = 0;
     for (; j < xsize; j++) {
-      scalar_t w = filter_fn((j + xmin - center + 0.5 - align_corners_delta) * invscale);
+      scalar_t w = filter_fn((j + xmin - center + 0.5) * invscale);
       wt_ptr[j] = w;
       total_w += w;
     }
@@ -784,10 +784,72 @@ struct HelperInterpBase {
     return wt_max;
   }
 
+  // This is a helper function for _compute_index_ranges_weights method that computes
+  // source two int64 scalars index min and size and a list weights (of size max_interp_size)
+  // for interpolation with antialiasing=false mode. It returns the maximal weights value.
+  // This function is templated with scalar_t for type of scale and weights but is only used for
+  // bilinear/bicubic modes on uint8 input and antialiasing=false (in this case scalar_t is double).
+  // For float input types we are using upsample_generic_Nd_kernel_impl and compute_indices_weights methods
+  template <typename scalar_t, typename aa_filter_fn_t>
+  static inline scalar_t _compute_indices_min_size_weights(
+    const int64_t i, const int64_t input_size, const scalar_t scale,
+    scalar_t* wt_ptr, const int64_t max_interp_size, aa_filter_fn_t filter_fn,
+    bool align_corners, int64_t& index_min, int64_t& index_size
+  ) {
+    // Notes. We do not use opmath_t in this method as f16 and other smaller float types are not routed here.
+    // Typical usage of this method is with scalar_t = double when computing indices and weights for uint8 input
+    // The code below partly adapts indices and lambda computation from compute_indices_weights method and
+    // index_min/index_size from _compute_indices_min_size_weights_aa
+
+    bool cubic = max_interp_size > 2;
+    const auto real_input_index = area_pixel_compute_source_index<scalar_t>(
+        scale, i, align_corners, /*cubic=*/cubic);
+
+    scalar_t lambda;
+    int64_t input_index;
+    guard_index_and_lambda(real_input_index, input_size, input_index, lambda);
+
+    const auto support = static_cast<int64_t>(max_interp_size * 0.5);
+    const auto unbound_index_min = input_index - support + 1;
+    const auto unbound_index_max = input_index + support + 1;
+    index_min = std::max(unbound_index_min, static_cast<int64_t>(0));
+    index_size = std::min(unbound_index_max, input_size) - index_min;
+    // There are rare cases when due to precision xsize can be larger than max_interp_size by one.
+    // We have to clip the value
+    index_size = std::clamp(index_size, static_cast<int64_t>(0), max_interp_size);
+
+    // Below the weights are computed using filter_fn and accumulating values for indices being out of bounds
+    // For example, for bicubic mode for output index i = 0, we have input_index = -1,
+    // then we have unbound_index_min = -2 and unbound_index_max = 1 => unbounded input indices are [-2, -1, 0, 1] and
+    // valid input indices will be [0, 1]
+    // For unbounded input indices we compute four non-zero weights values [w0, w1, w2, w3] and as only two weights can
+    // be used with valid input indcies, we accumulate values in the following way: [w0 + w1 + w2, w3, 0.0, 0.0]
+    // This is equivalent to the float path which would compute indices as [0, 0, 0, 1] and weights as [w0, w1, w2, s3].
+    // A similar accumulation should done for unbounded indices larger than input size.
+    auto w_index = 0;
+    scalar_t wt_max = 0.0;
+    for (const auto j : c10::irange(max_interp_size)) {
+      // initialize weights value as we will accumulate below
+      wt_ptr[j] = 0.0;
+
+      scalar_t w = filter_fn(static_cast<scalar_t>(j + 1 - support) - lambda);
+      if (unbound_index_min + j <= 0) {
+        w_index = 0;
+      } else if (unbound_index_min + j >= input_size - 1) {
+        w_index = index_size - 1;
+      }
+      wt_ptr[w_index] += w;
+      wt_max = std::max(wt_max, wt_ptr[w_index]);
+      w_index++;
+    }
+
+    return wt_max;
+  }
+
   // Note [ Support for antialias=False as a subcase of antilias=True ]
   // This function was originally written with the hard assumption that
-  // antialias=True (hence the aa in the name). It was later extended to support
-  // antialias=False. The only difference between aa and no-aa is in how the
+  // antialias=True and it was later extended to support antialias=False.
+  // The only difference between aa and no-aa is in how the
   // weights and indices are computed (and their number). In aa their number is
   // variable but with no-aa, they're fixed to interp_size. The same "filters"
   // can be used otherwise. HOWEVER, support for antialias=False here may not be
@@ -795,10 +857,10 @@ struct HelperInterpBase {
   // indices, but this can be optimized further when aa=False since we know
   // their actual dimensions.
   template <typename scalar_t, typename aa_filter_fn_t, int weight_index_stride=sizeof(scalar_t)>
-  static inline std::tuple<std::vector<Tensor>, int, scalar_t> _compute_indices_weights_aa(
+  static inline std::tuple<std::vector<Tensor>, int, scalar_t> _compute_index_ranges_weights(
     int64_t input_size, int64_t output_size, int64_t stride, int64_t ndims,
     int64_t reshape_dim, scalar_t scale,
-    int interp_size, aa_filter_fn_t aa_filter_fn, bool antialias, double align_corners_delta
+    int interp_size, aa_filter_fn_t aa_filter_fn, bool antialias, bool align_corners
   ) {
 
     std::vector<Tensor> output;
@@ -846,24 +908,35 @@ struct HelperInterpBase {
 
     scalar_t wt_max = 0.0;
     for (const auto i : c10::irange(output_size)) {
-      int64_t xmin, xmax;
-      auto wt_max_i = HelperInterpBase::_compute_weights_aa(
-          i,
-          input_size,
-          scale,
-          support,
-          wt_ptr + i * max_interp_size,
-          max_interp_size,
-          aa_filter_fn,
-          xmin,
-          xmax,
-          antialias,
-          align_corners_delta);
-
+      int64_t xmin, xsize;
+      scalar_t wt_max_i;
+      if (antialias) {
+        wt_max_i = HelperInterpBase::_compute_indices_min_size_weights_aa(
+            i,
+            input_size,
+            scale,
+            support,
+            wt_ptr + i * max_interp_size,
+            max_interp_size,
+            aa_filter_fn,
+            xmin,
+            xsize);
+      } else {
+        wt_max_i = HelperInterpBase::_compute_indices_min_size_weights(
+            i,
+            input_size,
+            scale,
+            wt_ptr + i * max_interp_size,
+            max_interp_size,
+            aa_filter_fn,
+            align_corners,
+            xmin,
+            xsize);
+      }
       wt_max = std::max(wt_max, wt_max_i);
 
       idx_ptr_xmin[i] = xmin * stride;
-      idx_ptr_size[i] = xmax;
+      idx_ptr_size[i] = xsize;
       idx_ptr_stride[i] = stride;
       wt_idx_ptr[i] = i * max_interp_size * weight_index_stride;
     }
@@ -912,7 +985,7 @@ struct HelperInterpBase {
       = what we wanted
   */
   template <typename aa_filter_fn_t>
-  static inline std::tuple<std::vector<Tensor>, int, unsigned int> _compute_indices_int16_weights_aa(
+  static inline std::tuple<std::vector<Tensor>, int, unsigned int> _compute_index_ranges_int16_weights(
     int64_t input_size, int64_t output_size, int64_t stride, int64_t ndims,
     int64_t reshape_dim, bool align_corners, const c10::optional<double> opt_scale,
     int interp_size, aa_filter_fn_t aa_filter_fn, bool antialias, bool align_i32=false
@@ -922,10 +995,9 @@ struct HelperInterpBase {
         input_size, output_size, align_corners, opt_scale);
 
     std::vector<Tensor> indices_weights;
-    auto align_corners_delta = (align_corners && !antialias) ? 0.5 : 0.0;
     double wt_max;
-    std::tie(indices_weights, interp_size, wt_max) = HelperInterpBase::_compute_indices_weights_aa<double, aa_filter_fn_t, sizeof(int16_t)>(
-        input_size, output_size, stride, ndims, reshape_dim, scale, interp_size, aa_filter_fn, antialias, align_corners_delta);
+    std::tie(indices_weights, interp_size, wt_max) = HelperInterpBase::_compute_index_ranges_weights<double, aa_filter_fn_t, sizeof(int16_t)>(
+        input_size, output_size, stride, ndims, reshape_dim, scale, interp_size, aa_filter_fn, antialias, align_corners);
 
     // Rescale float weights to int16 and compute weights precision
     auto weights_f64 = indices_weights[3];
@@ -1150,7 +1222,7 @@ struct HelperInterpLinear : public HelperInterpBase {
     return 0.0;
   }
 
-  static inline std::vector<Tensor> compute_indices_weights_aa(
+  static inline std::vector<Tensor> compute_index_ranges_weights(
     at::ScalarType scalar_type,
     int64_t input_size,
     int64_t output_size,
@@ -1164,7 +1236,7 @@ struct HelperInterpLinear : public HelperInterpBase {
 
     std::vector<Tensor> indices_weights;
     AT_DISPATCH_FLOATING_TYPES(
-      scalar_type, "compute_indices_weights_aa", [&] {
+      scalar_type, "compute_index_ranges_weights", [&] {
 
         scalar_t scale = area_pixel_compute_scale<scalar_t>(
             input_size, output_size, align_corners, opt_scale);
@@ -1172,9 +1244,8 @@ struct HelperInterpLinear : public HelperInterpBase {
         auto interp_size = HelperInterpLinear::interp_size;
         int unused;
         scalar_t unused_2;
-        auto align_corners_delta = (align_corners && !antialias) ? 0.5 : 0.0;
 
-        std::tie(indices_weights, unused, unused_2) = HelperInterpLinear::_compute_indices_weights_aa<scalar_t>(
+        std::tie(indices_weights, unused, unused_2) = HelperInterpLinear::_compute_index_ranges_weights<scalar_t>(
             input_size,
             output_size,
             stride,
@@ -1184,13 +1255,13 @@ struct HelperInterpLinear : public HelperInterpBase {
             interp_size,
             &HelperInterpLinear::aa_filter<scalar_t>,
             /*antialias=*/antialias,
-            /*align_corners_delta=*/align_corners_delta);
+            /*align_corners=*/align_corners);
       }
     );
     return indices_weights;
   }
 
-  static inline std::tuple<std::vector<Tensor>, int, unsigned int> compute_indices_int16_weights_aa(
+  static inline std::tuple<std::vector<Tensor>, int, unsigned int> compute_index_ranges_int16_weights(
     int64_t input_size,
     int64_t output_size,
     int64_t stride,
@@ -1204,7 +1275,7 @@ struct HelperInterpLinear : public HelperInterpBase {
 
     auto interp_size = HelperInterpLinear::interp_size;
     auto fn = HelperInterpLinear::aa_filter<double>;
-    return HelperInterpLinear::_compute_indices_int16_weights_aa(
+    return HelperInterpLinear::_compute_index_ranges_int16_weights(
         input_size, output_size, stride, ndims, reshape_dim,
         align_corners, opt_scale, interp_size, fn, antialias, align_i32);
   }
@@ -1287,7 +1358,7 @@ struct HelperInterpCubic : public HelperInterpBase {
     return 0.0;
   }
 
-  static inline std::vector<Tensor> compute_indices_weights_aa(
+  static inline std::vector<Tensor> compute_index_ranges_weights(
     at::ScalarType scalar_type,
     int64_t input_size,
     int64_t output_size,
@@ -1301,7 +1372,7 @@ struct HelperInterpCubic : public HelperInterpBase {
 
     std::vector<Tensor> indices_weights;
     AT_DISPATCH_FLOATING_TYPES(
-      scalar_type, "compute_indices_weights_aa", [&] {
+      scalar_type, "compute_index_ranges_weights", [&] {
 
         scalar_t scale = area_pixel_compute_scale<scalar_t>(
             input_size, output_size, align_corners, opt_scale);
@@ -1309,9 +1380,8 @@ struct HelperInterpCubic : public HelperInterpBase {
         auto interp_size = HelperInterpCubic::interp_size;
         int unused;
         scalar_t unused_2;
-        auto align_corners_delta = (align_corners && !antialias) ? 0.5 : 0.0;
 
-        std::tie(indices_weights, unused, unused_2) = HelperInterpCubic::_compute_indices_weights_aa<scalar_t>(
+        std::tie(indices_weights, unused, unused_2) = HelperInterpCubic::_compute_index_ranges_weights<scalar_t>(
             input_size,
             output_size,
             stride,
@@ -1321,13 +1391,13 @@ struct HelperInterpCubic : public HelperInterpBase {
             interp_size,
             &HelperInterpCubic::aa_filter<scalar_t>,
             /*antialias=*/antialias,
-            /*align_corners_delta*/align_corners_delta);
+            /*align_corners=*/align_corners);
       }
     );
     return indices_weights;
   }
 
-  static inline std::tuple<std::vector<Tensor>, int, unsigned int> compute_indices_int16_weights_aa(
+  static inline std::tuple<std::vector<Tensor>, int, unsigned int> compute_index_ranges_int16_weights(
     int64_t input_size,
     int64_t output_size,
     int64_t stride,
@@ -1343,7 +1413,7 @@ struct HelperInterpCubic : public HelperInterpBase {
     // We have to use the -0.75 constant when aa is False so that this uint8
     // path is as close as possible to float results.
     auto fn = antialias ? HelperInterpCubic::aa_filter<double, true> : HelperInterpCubic::aa_filter<double, false>;
-    return HelperInterpCubic::_compute_indices_int16_weights_aa(
+    return HelperInterpCubic::_compute_index_ranges_int16_weights(
         input_size, output_size, stride, ndims, reshape_dim,
         align_corners, opt_scale, interp_size, fn, antialias, align_i32);
   }
@@ -1505,7 +1575,7 @@ void _separable_upsample_generic_Nd_kernel_impl_single_dim(
     // This is a special branch to provide uint8 dtype support for bilinear and bicubic modes only
     TORCH_INTERNAL_ASSERT(F::interp_size == 2 || F::interp_size == 4);
     std::tie(indices_weights, unused, weights_precision) =
-      F::compute_indices_int16_weights_aa(
+      F::compute_index_ranges_int16_weights(
         input.size(interp_dim), oshape[interp_dim],
         input.stride(interp_dim) * input.element_size(),
         input.dim(), interp_dim, align_corners, scales[interp_dim - 2],
@@ -1513,7 +1583,7 @@ void _separable_upsample_generic_Nd_kernel_impl_single_dim(
     TORCH_INTERNAL_ASSERT(weights_precision > 0);
   } else {
     indices_weights =
-      F::compute_indices_weights_aa(
+      F::compute_index_ranges_weights(
         input_scalar_type, input.size(interp_dim), oshape[interp_dim],
         input.stride(interp_dim) * input.element_size(),
         input.dim(), interp_dim, align_corners, scales[interp_dim - 2],
@@ -1940,7 +2010,7 @@ void cpu_upsample_genNd_backward_aa(
     aa_filter_fn_t filter_fn = &F::aa_filter;
 
     for (const auto oh : c10::irange(output_height)) {
-      F::_compute_weights_aa(
+      F::_compute_indices_min_size_weights_aa(
           oh,
           input_height,
           height_scale,
@@ -1949,12 +2019,10 @@ void cpu_upsample_genNd_backward_aa(
           interp_height,
           filter_fn,
           ymin,
-          ysize,
-          /*antialias=*/true,
-          /*align_corners_delta=*/0.0);
+          ysize);
 
       for (const auto ow : c10::irange(output_width)) {
-        F::_compute_weights_aa(
+        F::_compute_indices_min_size_weights_aa(
             ow,
             input_width,
             width_scale,
@@ -1963,9 +2031,7 @@ void cpu_upsample_genNd_backward_aa(
             interp_width,
             filter_fn,
             xmin,
-            xsize,
-            /*antialias=*/true,
-            /*align_corners_delta=*/0.0);
+            xsize);
 
         for (const auto c : c10::irange(begin, end)) {
           scalar_t grad_output_value =
