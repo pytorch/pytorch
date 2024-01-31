@@ -20618,6 +20618,11 @@ python_ref_db = [
         torch_opinfo_name="nn.functional.celu",
         supports_out=True,
     ),
+    PythonRefInfo(
+        "_refs.nn.functional.channel_shuffle",
+        torch_opinfo_name="nn.functional.channel_shuffle",
+        supports_out=True,
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.threshold",
         torch_opinfo_name="nn.functional.threshold",

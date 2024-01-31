@@ -25,6 +25,7 @@ __all__ = [
     "alpha_dropout",
     "celu",
     "celu_",
+    "channel_shuffle",
     "dropout",
     "elu",
     "elu_",
@@ -259,6 +260,29 @@ def relu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
         raise NotImplementedError
 
     return torch.where(torch.le(a, 0), 0, a)
+
+
+@register_decomposition(aten.channel_shuffle)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("input",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def channel_shuffle(input: TensorLikeType, groups: int) -> TensorLikeType:
+    """
+    Reference implementation of :func:`torch.nn.functional.channel_shuffle`.
+    """
+    batches = input.shape[:-3]
+    C = input.shape[-3]
+    Cg = C // groups
+    H, W = input.shape[-2:]
+    g_dim = len(batches)
+    return (
+        input.view(*batches, groups, Cg, H, W)
+        .transpose(g_dim, g_dim + 1)
+        .reshape(input.shape)
+        .clone(memory_format=utils.suggest_memory_format(input))
+    )
 
 
 def group_norm(
