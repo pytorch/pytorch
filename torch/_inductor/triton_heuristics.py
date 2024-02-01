@@ -838,7 +838,6 @@ def cached_autotune(
         # Remove XBLOCK from config if it's not a function argument.
         # This way, coordinate descent tuning will not try to tune it.
         #
-        # Context: When TritonKernel.no_x_dim is True, we hardcode XBLOCK to 1.
         import inspect
 
         if "XBLOCK" not in inspect.signature(fn.fn).parameters:
@@ -1076,7 +1075,6 @@ def pointwise(
     Construct @triton.heuristics() based on size_hints.
     """
     inductor_meta = {} if inductor_meta is None else inductor_meta
-    assert not inductor_meta.get("no_x_dim")
 
     numel = functools.reduce(operator.mul, size_hints)
     bs = max(256, min(numel // 128, 1024))
@@ -1186,8 +1184,6 @@ def reduction(
     """args to @triton.heuristics()"""
     inductor_meta = {} if inductor_meta is None else inductor_meta
     inductor_meta["reduction_hint"] = reduction_hint
-    if inductor_meta.get("no_x_dim"):
-        size_hints = [1, *size_hints[1:]]
 
     assert triton_meta is not None
     rnumel = size_hints[-1]
@@ -1267,8 +1263,6 @@ def persistent_reduction(
 ):
     inductor_meta = {} if inductor_meta is None else inductor_meta
     inductor_meta["reduction_hint"] = reduction_hint
-    if inductor_meta.get("no_x_dim"):
-        size_hints = [1, *size_hints[1:]]
 
     xnumel, rnumel = size_hints
 
