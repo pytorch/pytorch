@@ -12,8 +12,7 @@ from ._fsdp_collectives import (
     foreach_all_gather,
     foreach_all_gather_copy_out,
 )
-
-from ._fsdp_common import FSDPMeshInfo, TrainingState
+from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo, TrainingState
 from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
 
 
@@ -47,6 +46,7 @@ class FSDPParamGroup:
         self.all_gather_copy_in_stream: torch.cuda.Stream = default_stream
         self.all_gather_stream: torch.cuda.Stream = default_stream
         self.all_gather_state = AllGatherStateHolder()
+        self._init_grad_divide_factors()
 
         # - CUDA events for stream synchronization
         # Holds the all-gather output buffer, sync objects, and metadata
@@ -62,6 +62,27 @@ class FSDPParamGroup:
             )
         self._orig_dtype = next(iter(orig_dtypes))
         self._param_dtype = self._orig_dtype
+
+    def _init_grad_divide_factors(self):
+        """
+        For N data parallel workers, each worker computes g_i, and they
+        collectively reduce to compute (g_1 + ... + g_N) / N. To avoid overflow
+        and underflow, we divide by ~sqrt(N) before and after the reduction.
+        """
+        data_parallel_world_size = 1
+        data_parallel_world_size *= self.mesh_info.shard_mesh_size
+        if isinstance(self.mesh_info, HSDPMeshInfo):
+            data_parallel_world_size *= self.mesh_info.replicate_mesh_size
+        factor: int = 1
+        while (
+            data_parallel_world_size % factor == 0
+            and data_parallel_world_size / factor > factor
+        ):
+            factor *= 2
+        self._grad_predivide_factor: float = float(factor)
+        self._grad_postdivide_factor: float = (
+            data_parallel_world_size / self._grad_predivide_factor
+        )
 
     # Runtime #
     def unshard(self, async_op: bool = False):
