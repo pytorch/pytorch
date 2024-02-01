@@ -137,3 +137,5 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 /torch/serialization.py @mikaylagawarecki
 /torch/storage.py @mikaylagawarecki
 /torch/csrc/Storage* @mikaylagawarecki
+# subscribing for PyTorchFileWriter/PyTorchFileReader changes
+/torch/csrc/jit/python/init.cpp @mikaylagawarecki
