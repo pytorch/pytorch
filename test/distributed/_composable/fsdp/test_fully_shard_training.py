@@ -95,25 +95,21 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
 
         # Multiple FSDP groups
         for reshard_after_forward in (True, False, 2):
-            model = MLP(8, device)
-            fully_shard(model.in_proj, reshard_after_forward=reshard_after_forward)
-            fully_shard(model.out_proj, reshard_after_forward=reshard_after_forward)
+            model = nn.Sequential(MLP(8, device), MLP(8, device))
+            fully_shard(model[0].in_proj, reshard_after_forward=reshard_after_forward)
+            fully_shard(model[0].out_proj, reshard_after_forward=reshard_after_forward)
             fully_shard(model, reshard_after_forward=reshard_after_forward)
 
             self._assert_dtensor_params(model.parameters())
             model(inp)
-            non_root_params = list(model.in_proj.parameters()) + list(
-                model.out_proj.parameters()
+            non_root_params = list(model[0].in_proj.parameters()) + list(
+                model[0].out_proj.parameters()
             )
-            root_params = list(model.parameters(recurse=False))
-            if reshard_after_forward is True:
-                self._assert_dtensor_params(non_root_params)
-            elif reshard_after_forward is False:
+            root_params = list(set(model.parameters()) - set(non_root_params))
+            if reshard_after_forward is False:
                 self._assert_tensor_params(non_root_params)
             else:
-                # Do not register the sharded post-forward parameters
-                self.assertEqual(len(non_root_params), 0)
-                self.assertEqual(len(root_params), 0)
+                self._assert_dtensor_params(non_root_params)
             self._assert_tensor_params(root_params)
             for module in model.modules():
                 if isinstance(module, FSDP):
@@ -144,11 +140,13 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             self._assert_dtensor_params(model.parameters())
 
     def _assert_tensor_params(self, params: Iterable[nn.Parameter]):
+        self.assertGreater(len(list(params)), 0)
         for param in params:
             self.assertNotIsInstance(param, DTensor)
             self.assertIsInstance(param, torch.Tensor)
 
     def _assert_dtensor_params(self, params: Iterable[nn.Parameter]):
+        self.assertGreater(len(list(params)), 0)
         for param in params:
             self.assertIsInstance(param, DTensor)
 
