@@ -53,7 +53,7 @@ struct DisableFuncTorch {
 };
 
 struct DisableAutocast {
-  c10::impl::ExcludeDispatchKeyGuard guard_{c10::autocast_dispatch_keyset};
+  at::autocast::ExcludeAutocastGuard guard_;
 };
 
 struct EnableTorchFunction {
@@ -501,7 +501,7 @@ static PyObject* is_autocast_enabled(PyObject* _unused, PyObject* arg) {
 
 static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (at::autocast::is_enabled()) {
+  if (at::autocast::is_any_autocast_enabled()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -524,6 +524,50 @@ static PyObject* set_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
 static PyObject* is_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (at::autocast::is_cpu_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* set_autocast_ipu_enabled(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK_TYPE(
+      PyBool_Check(arg),
+      "enabled must be a bool (got ",
+      Py_TYPE(arg)->tp_name,
+      ")");
+  at::autocast::set_ipu_enabled(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* is_autocast_ipu_enabled(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (at::autocast::is_ipu_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* set_autocast_xla_enabled(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK_TYPE(
+      PyBool_Check(arg),
+      "enabled must be a bool (got ",
+      Py_TYPE(arg)->tp_name,
+      ")");
+  at::autocast::set_xla_enabled(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* is_autocast_xla_enabled(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (at::autocast::is_xla_enabled()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -1087,8 +1131,12 @@ static PyMethodDef methods[] = { // NOLINT
     {"get_autocast_cpu_dtype", get_autocast_cpu_dtype, METH_NOARGS, nullptr},
     {"set_autocast_gpu_dtype", set_autocast_gpu_dtype, METH_O, nullptr},
     {"get_autocast_gpu_dtype", get_autocast_gpu_dtype, METH_NOARGS, nullptr},
+    {"set_autocast_xla_enabled", set_autocast_xla_enabled, METH_O, nullptr},
+    {"is_autocast_xla_enabled", is_autocast_xla_enabled, METH_NOARGS, nullptr},
     {"set_autocast_xla_dtype", set_autocast_xla_dtype, METH_O, nullptr},
     {"get_autocast_xla_dtype", get_autocast_xla_dtype, METH_NOARGS, nullptr},
+    {"set_autocast_ipu_enabled", set_autocast_ipu_enabled, METH_O, nullptr},
+    {"is_autocast_ipu_enabled", is_autocast_ipu_enabled, METH_NOARGS, nullptr},
     {"set_autocast_ipu_dtype", set_autocast_ipu_dtype, METH_O, nullptr},
     {"get_autocast_ipu_dtype", get_autocast_ipu_dtype, METH_NOARGS, nullptr},
     {"autocast_increment_nesting",

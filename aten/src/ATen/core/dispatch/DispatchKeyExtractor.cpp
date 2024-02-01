@@ -5,6 +5,30 @@
 
 namespace c10 {
 
+static std::mutex g_dispatchkeyset_mutex;
+
+ska::flat_hash_map<DispatchKey, DispatchKeySetFuncType>&
+getDispatchKeySetFuncs() {
+  static ska::flat_hash_map<DispatchKey, DispatchKeySetFuncType> funcs;
+  return funcs;
+}
+
+DispatchKeySetFuncs::DispatchKeySetFuncs(
+    DispatchKey key,
+    const DispatchKeySetFuncType func) {
+  std::lock_guard<std::mutex> lock(g_dispatchkeyset_mutex);
+
+  auto& funcs = getDispatchKeySetFuncs();
+  auto found = funcs.find(key);
+  TORCH_CHECK(
+      found == funcs.end(),
+      "The DispatchKey key:",
+      key,
+      "Can only been registered once");
+
+  funcs.emplace(key, std::move(func));
+}
+
 void DispatchKeyExtractor::setOperatorHasFallthroughForKey(DispatchKey k, bool has_fallthrough) {
   // (1) update nonFallthroughKeys_
   if (has_fallthrough) {

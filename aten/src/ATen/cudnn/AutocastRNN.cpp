@@ -119,7 +119,7 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
 }
 
 namespace {
-TORCH_LIBRARY_IMPL(aten, AutocastCUDA, m) {
+TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   m.impl("_cudnn_rnn",
          TORCH_FN((&at::autocast::_cudnn_rnn_cast_reflatten)));
 }
