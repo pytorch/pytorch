@@ -324,6 +324,7 @@ if [[ "${TEST_CONFIG}" == *dynamo_eager* ]]; then
 elif [[ "${TEST_CONFIG}" == *aot_eager* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--backend aot_eager)
 elif [[ "${TEST_CONFIG}" == *aot_inductor* ]]; then
+  export AOT_INDUCTOR_ABI_COMPATIBLE=1
   DYNAMO_BENCHMARK_FLAGS+=(--export-aot-inductor)
 elif [[ "${TEST_CONFIG}" == *inductor* && "${TEST_CONFIG}" != *perf* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--inductor)
@@ -403,7 +404,7 @@ test_perf_for_dashboard() {
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_freezing_autotune_${suite}_${dtype}_${mode}_cuda_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *aotinductor-true* ]] && [[ "$mode" == "inference" ]]; then
-        python "benchmarks/dynamo/$suite.py" \
+        AOT_INDUCTOR_ABI_COMPATIBLE=1 python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --export-aot-inductor --disable-cudagraphs "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_aot_inductor_${suite}_${dtype}_${mode}_cuda_${target}.csv"
       fi
@@ -503,7 +504,7 @@ test_inductor_torchbench_smoketest_perf() {
   # The threshold value needs to be actively maintained to make this check useful
   python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_training_smoketest.csv" -t 1.4
 
-  python benchmarks/dynamo/torchbench.py --device cuda --performance --bfloat16 --inference \
+  AOT_INDUCTOR_ABI_COMPATIBLE=1 python benchmarks/dynamo/torchbench.py --device cuda --performance --bfloat16 --inference \
     --export-aot-inductor --only nanogpt --output "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv"
   # The threshold value needs to be actively maintained to make this check useful
   # The perf number of nanogpt seems not very stable, e.g.
