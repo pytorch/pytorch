@@ -28,7 +28,7 @@ namespace {
 // TODO: clean this up when https://github.com/pytorch/pytorch/issues/60306 is
 // improved
 void record_stream_any_impl(Variable& var, c10::Stream& stream) {
-  const auto guard = c10::impl::VirtualGuardImpl(c10::DeviceType::CUDA);
+  const auto guard = c10::impl::VirtualGuardImpl(device_of(var).value().type());
 
   if (C10_UNLIKELY(at::isBatchedTensor(var))) {
     auto* impl = at::maybeGetBatchedImpl(var);
@@ -138,30 +138,31 @@ void InputBuffer::add(
 
   // Switches to accumulate device
   // The device (and stream) chosen for accumulation is:
-  //  (1) var is not a CUDA variable. Accumulation happens on var's device.
-  //  (2) var is a CUDA variable and it, the consumer, and the producer share
-  //  the same device:
+  //  (1) var is not a CUDA/privateuse1 variable. Accumulation happens on var's
+  //  device. (2) var is a CUDA/privateuse1 variable and it, the consumer, and
+  //  the producer share the same device:
   //       (2a) Uses the consumer's stream as the accumulation stream
   //       (2b) Syncs the accumulation stream with the producer's stream (if
   //       different) (2c) Accumulates.
-  //  (3) var is a CUDA variable and it shares a device with the consumer but
-  //  not the producer:
+  //  (3) var is a CUDA/privateuse1 variable and it shares a device with the
+  //  consumer but not the producer:
   //       (3a) Uses the consumer's stream as the accumulation stream
   //       (3b) Syncs the accumulation stream with the consumer device's default
   //       stream (3c) Accumulates.
-  //  (4) var is a CUDA variable and it shares a device with the producer but
-  //  not the consumer:
+  //  (4) var is a CUDA/privateuse1 variable and it shares a device with the
+  //  producer but not the consumer:
   //       (4a) Uses the producer device's default stream as the accumulation
   //       stream (4b) Syncs the accumulation stream with the producer's
   //       stream (4c) Accumulates.
-  //  (5) var is a CUDA variable and it does not share a device with the
-  //  consumer or producer.
+  //  (5) var is a CUDA/privateuse1 variable and it does not share a device with
+  //  the consumer or producer.
   //      Accumulation happens on the var device's default stream.
 
   TORCH_INTERNAL_ASSERT(device_of(var));
   c10::optional<c10::Stream> opt_accumulate_stream = c10::nullopt;
+  const auto device_type = device_of(var).value().type();
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  if (device_of(var)->is_cuda()) {
+  if (device_of(var)->is_cuda() || device_of(var)->is_privateuseone()) {
     const auto on_producer =
         opt_producer_stream && device_of(var) == opt_producer_stream->device();
     const auto on_consumer =
@@ -172,14 +173,14 @@ void InputBuffer::add(
       opt_accumulate_stream = opt_consumer_stream;
       if (opt_accumulate_stream != opt_producer_stream) {
         // (2b)
-        auto event = c10::Event{c10::DeviceType::CUDA};
+        auto event = c10::Event{device_type};
         event.record(*opt_producer_stream);
         opt_accumulate_stream->wait(event);
         record_stream_any_impl(var, *opt_accumulate_stream);
       }
     } else {
       c10::optional<c10::Stream> opt_sync_stream = c10::nullopt;
-      const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
+      const auto guard = c10::impl::VirtualGuardImpl{device_type};
       if (on_consumer && !on_producer) {
         // (3a)
         opt_accumulate_stream = opt_consumer_stream;
@@ -197,10 +198,10 @@ void InputBuffer::add(
       if (opt_sync_stream && (opt_accumulate_stream != opt_sync_stream)) {
         // (3b), (4b)
         c10::OptionalDeviceGuard device_guard{opt_sync_stream->device()};
-        auto event = c10::Event{c10::DeviceType::CUDA};
+        auto event = c10::Event{device_type};
         event.record(*opt_sync_stream);
         opt_accumulate_stream->wait(event);
-        const auto guard = c10::impl::VirtualGuardImpl(c10::DeviceType::CUDA);
+        const auto guard = c10::impl::VirtualGuardImpl(device_type);
         record_stream_any_impl(var, *opt_accumulate_stream);
       }
     }
@@ -214,7 +215,7 @@ void InputBuffer::add(
       c10::OptionalStreamGuard stream_guard{opt_accumulate_stream};
       accumulate(buffer, pos, std::move(var));
     } else {
-      // (1) non-CUDA variable
+      // (1) non-CUDA/privateuse1 variable
       //     Accumulation happens on variable's device
       c10::OptionalDeviceGuard device_guard{device_of(var)};
       accumulate(buffer, pos, std::move(var));
