@@ -1078,6 +1078,18 @@ def cat(inputs, dim=0):
     )
     inputs = [to_dtype(inp, dtype) for inp in inputs]
 
+    def unwrap_tensor(x: Union[TensorBox, ir.StorageBox]) -> ir.IRNode:
+        if isinstance(x, TensorBox):
+            if isinstance(x.data, ir.BaseView):
+                return x.data.unwrap_view()
+            else:
+                return x.data
+
+        if isinstance(x, ir.StorageBox):
+            return x.data
+
+        return x
+
     def should_lower_cat_input(x) -> bool:
         # Unrealized inputs will not be storage and layouts, and we dont want to realize
         # them in case we want to fuse
@@ -1085,25 +1097,39 @@ def cat(inputs, dim=0):
             storage, _ = ir.as_storage_and_layout(x, freeze=False)
             return not ir.ConcatKernel.can_realize_into_without_copy(storage)
 
-        if isinstance(x, TensorBox):
-            if isinstance(x.data, ir.BaseView):
-                return should_lower_cat_input(x.data.unwrap_view())
-            else:
-                return should_lower_cat_input(x.data)
-
-        if isinstance(x, ir.StorageBox):
-            return should_lower_cat_input(x.data)
+        if isinstance(x, (TensorBox, ir.StorageBox)):
+            return should_lower_cat_input(unwrap_tensor(x))
 
         if isinstance(x, ir.Pointwise):
             return True
 
         return False
 
+    def is_reduction(t):
+        return isinstance(t, ir.ComputedBuffer) and isinstance(t.data, ir.Reduction)
+
+    def can_fuse_reduction(t):
+        if isinstance(t, (TensorBox, ir.StorageBox)):
+            return can_fuse_reduction(unwrap_tensor(t))
+
+        return (
+            is_reduction(t)
+            or isinstance(t, ir.Pointwise)
+            and any(
+                can_fuse_reduction(V.graph.get_buffer(read))
+                for read in t.get_read_names()
+            )
+        )
+
+    # fusing reducutions into computed concat buffer can cause regressions.
+    fusable_reduction = any(can_fuse_reduction(t) for t in inputs)
+
     # TODO: We observed negative performance impact of pointwise_cat optimization on CPU so disabled it.
     #             We will revisit this later after enabling vectorization on index_expr.
     if (
         len(inputs) <= config.max_pointwise_cat_inputs
         and inputs[0].get_device().type != "cpu"
+        and not fusable_reduction
     ):
         pointwise_uses = all(is_pointwise_use(use) for use in V.current_node.users)
         all_pointwise_inputs = all(should_lower_cat_input(inp) for inp in inputs)
