@@ -24,6 +24,7 @@ layout(set = 0, binding = 4) uniform PRECISION restrict Block {
   int dilation;
   int in_group_size;
   int out_group_size;
+  int batch_size;
 }
 uBlock;
 
@@ -36,8 +37,8 @@ int ceil(int a, int b) {
 
 // Let us define
 //
-// input = (n=1, in_C, in_L),
-// output = (n=1, out_C, out_L),
+// input = (n, in_C, in_L),
+// output = (n, out_C, out_L),
 // groups = G,
 // kernel = K,
 //
@@ -59,16 +60,11 @@ void main() {
   const int dilation = uBlock.dilation;
   const int in_group_size = uBlock.in_group_size;
   const int out_group_size = uBlock.out_group_size;
+  const int batch_size = uBlock.batch_size;
 
   // The global workgroup should have taken care of it. We perform one shader
   // invocation, per 1D length array of the output tensor.
-  if (pos.x >= 1) {
-    return;
-  }
-
-  // Assume n = 1, do not handle n > 1 case for now.
-  int n = pos.z;
-  if (n >= 1) {
+  if (pos.x >= 1 || pos.z >= 1) {
     return;
   }
 
@@ -90,7 +86,6 @@ void main() {
   int out_l = 0;
 
   for (int in_l = l_start; in_l < l_end; in_l += strides, ++out_l) {
-    vec4 v = vec4(0,0,0,0);
 
     // "k" tracks the kernel's index for our input-kernel computation.
     // The kstart/kend borders detect when the corresponding input index is out
@@ -98,26 +93,32 @@ void main() {
     int k_start = max(0, ceil(-in_l, dilation));
     int k_end = min(kernel_size, ceil(in_length-in_l, dilation));
 
-    for (int in_c = c_start; in_c < c_end; ++in_c) {
-      for (int k = k_start; k < k_end; ++k) {
-        int in_pos_x = in_l + k * dilation;
-        const ivec3 in_pos = ivec3(in_pos_x, in_c, 0);
-        const vec4 input_value = texelFetch(uInput, in_pos, 0);
+    // Since the input/output tensors are channel-packed, which is along the
+    // batch dimension, we can batch-read/write four elements at a time.
+    for (int n = 0; n < batch_size; n += 4) {
+      vec4 v = vec4(0,0,0,0);
 
-        // Note that we are reading weight in the inner loop, this could be
-        // improved by moving it before the outer loop. Since the weight vector is
-        // contant for the entire call.
+      for (int in_c = c_start; in_c < c_end; ++in_c) {
+        for (int k = k_start; k < k_end; ++k) {
+          int in_pos_x = in_l + k * dilation;
+          const ivec3 in_pos = ivec3(in_pos_x, in_c, n / 4);
+          const vec4 input_value = texelFetch(uInput, in_pos, 0);
 
-        // weight in input-space: (out_c, in_c % in_group_size, k);
-        // notice that c is 4-packed. We need to mod 4 to get the actual weight.
-        const ivec3 w_pos = ivec3(k, in_c % in_group_size, out_c / 4);
-        const vec4 weight = texelFetch(uKernel, w_pos, 0);
+          // Note that we are reading weight in the inner loop, this could be
+          // improved by moving it before the outer loop. Since the weight vector is
+          // contant for the entire call.
 
-        v += weight[out_c % 4] * input_value.x;
+          // weight in input-space: (out_c, in_c % in_group_size, k);
+          // notice that c is 4-packed. We need to mod 4 to get the actual weight.
+          const ivec3 w_pos = ivec3(k, in_c % in_group_size, out_c / 4);
+          const vec4 weight = texelFetch(uKernel, w_pos, 0);
+
+          v += weight[out_c % 4] * input_value;
+        }
       }
-    }
 
-    ivec3 out_pos = ivec3(out_l, out_c, 0);
-    imageStore(uOutput, out_pos, vec4(v.x + bias.x, 0, 0, 0));
+      ivec3 out_pos = ivec3(out_l, out_c, n / 4);
+      imageStore(uOutput, out_pos, v + bias.x);
+    }
   }
 }

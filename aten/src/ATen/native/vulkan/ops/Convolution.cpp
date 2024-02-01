@@ -834,11 +834,11 @@ Tensor quantized_convolution(
 
 namespace conv1d {
 
-// This implementation only supports batch size n=1. For algorithm details,
-// refer to the shader kernel code.
+// This is a full implementation. For algorithm details, refer to the shader
+// kernel code.
 //
 // There are multiple perf improvement opportunities: e.g. width-packing
-// input and weight tensors, batch reading when groups is low.
+// weight tensor.
 
 Tensor run_conv1d_context_impl(
     const Tensor& input_arg,
@@ -878,8 +878,6 @@ Tensor run_conv1d_context_impl(
   TORCH_CHECK(
       out_channels % groups == 0, "out_channels must be divisible by groups");
 
-  TORCH_CHECK(input_sizes[0] == 1, "Only support single batch");
-
   const vTensor& v_input = convert(input);
   const vTensor& v_weight = convert(weight);
   const vTensor& v_bias = convert(bias);
@@ -898,6 +896,7 @@ Tensor run_conv1d_context_impl(
     int32_t dilation;
     int32_t in_group_size;
     int32_t out_group_size;
+    int32_t batch_size;
   } block{
       static_cast<int32_t>(input_sizes[2]),
       kernel_size,
@@ -906,6 +905,7 @@ Tensor run_conv1d_context_impl(
       static_cast<int32_t>(dilation[0]),
       static_cast<int32_t>(in_channels / groups),
       static_cast<int32_t>(out_channels / groups),
+      static_cast<int32_t>(input_sizes[0]),
   };
 
   api::UniformParamsBuffer params(context, block);
