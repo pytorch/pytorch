@@ -885,7 +885,7 @@ def _materialize_meta_module(
         warnings.warn(
             "Unable to call `reset_parameters()` for module on meta "
             f"device with error {str(e)}. Please ensure that your module of"
-            f"type {type(module)} implements a `reset_parameters()` method."
+            f"type {type(module)} implements a `reset_parameters()` method."  # type: ignore[possibly-undefined]
         )
         raise e
 
@@ -994,7 +994,7 @@ def _move_states_to_device(
                     param.grad.data = param.grad.to(device_from_device_id)
         for buffer in buffers:
             buffer.data = buffer.to(device_from_device_id)
-    elif current_device == cpu_device:
+    elif current_device == cpu_device:  # type: ignore[possibly-undefined]
         _warn_cpu_init()
 
 
