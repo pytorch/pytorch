@@ -264,7 +264,9 @@ class Timer:
         return max(self._timer.timeit(number), 1e-9)
 
     def timeit(self, number: int = 1000000) -> common.Measurement:
-        """Mirrors the semantics of timeit.Timer.timeit().
+        """Mirrors the semantics of timeit method.
+
+        timeit.Timer.timeit()
 
         Execute the main statement (`stmt`) `number` times.
         https://docs.python.org/3/library/timeit.html#timeit.Timer.timeit

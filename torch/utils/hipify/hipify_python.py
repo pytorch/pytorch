@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-""" The Python Hipify script.
+"""The Python Hipify script.
+
 ##
 # Copyright (c) 2015-2016 Advanced Micro Devices, Inc. All rights reserved.
 #               2017-2018 Advanced Micro Devices, Inc. and
@@ -105,7 +106,8 @@ class bcolors:
 # not recompile unchanged files), but in cases where you don't want to
 # keep them (e.g. in the CI), this can be used to remove files.
 class GeneratedFileCleaner:
-    """Context Manager to clean up generated files"""
+    """Context Manager to clean up generated files."""
+
     def __init__(self, keep_intermediates=False):
         self.keep_intermediates = keep_intermediates
         self.files_to_clean = set()
@@ -138,7 +140,7 @@ class GeneratedFileCleaner:
 
 
 def match_extensions(filename: str, extensions: Iterable) -> bool:
-    """Helper method to see if filename ends with certain extension"""
+    """Check to see if filename ends with certain extension."""
     return any(filename.endswith(e) for e in extensions)
 
 
@@ -229,7 +231,7 @@ def compute_stats(stats):
 
 
 def add_dim3(kernel_string, cuda_kernel):
-    '''adds dim3() to the second and third arguments in the kernel launch'''
+    """Add dim3() to the second and third arguments in the kernel launch."""
     count = 0
     closure = 0
     kernel_string = kernel_string.replace("<<<", "").replace(">>>", "")
@@ -267,7 +269,7 @@ RE_KERNEL_LAUNCH = re.compile(r'([ ]+)(detail?)::[ ]+\\\n[ ]+')
 
 
 def processKernelLaunches(string, stats):
-    """ Replace the CUDA style Kernel launches with the HIP style kernel launches."""
+    """Replace the CUDA style Kernel launches with the HIP style kernel launches."""
     # Concat the namespace with the kernel names. (Find cleaner way of doing this later).
     string = RE_KERNEL_LAUNCH.sub(lambda inp: f"{inp.group(1)}{inp.group(2)}::", string)
 
@@ -331,7 +333,7 @@ def processKernelLaunches(string, stats):
                         return [(pos["kernel_name"]), (pos["template"]), (pos["kernel_launch"])]
 
     def find_kernel_bounds(string):
-        """Finds the starting and ending points for all kernel launches in the string."""
+        """Find the starting and ending points for all kernel launches in the string."""
         kernel_end = 0
         kernel_positions = []
 
@@ -421,7 +423,7 @@ def processKernelLaunches(string, stats):
 
 
 def find_closure_group(input_string, start, group):
-    """Generalization for finding a balancing closure group
+    """Generalization for finding a balancing closure group.
 
          if group = ["(", ")"], then finds the first balanced parentheses.
          if group = ["{", "}"], then finds the first balanced bracket.
@@ -433,7 +435,6 @@ def find_closure_group(input_string, start, group):
         >>> find_closure_group("(hi)", 0, ["(", ")"])
         (0, 3)
     """
-
     inside_parenthesis = False
     parens = 0
     pos = start
@@ -459,12 +460,12 @@ def find_closure_group(input_string, start, group):
 
 
 def find_bracket_group(input_string, start):
-    """Finds the first balanced parantheses."""
+    """Find the first balanced parantheses."""
     return find_closure_group(input_string, start, group=["{", "}"])
 
 
 def find_parentheses_group(input_string, start):
-    """Finds the first balanced bracket."""
+    """Find the first balanced bracket."""
     return find_closure_group(input_string, start, group=["(", ")"])
 
 
@@ -472,12 +473,12 @@ RE_ASSERT = re.compile(r"\bassert[ ]*\(")
 
 
 def replace_math_functions(input_string):
-    """FIXME: Temporarily replace std:: invocations of math functions
-        with non-std:: versions to prevent linker errors NOTE: This
-        can lead to correctness issues when running tests, since the
-        correct version of the math function (exp/expf) might not get
-        called.  Plan is to remove this function once HIP supports
-        std:: math function calls inside device code
+    """FIXME: Temporarily replace std:: invocations of math functions with non-std:: versions to prevent linker errors.
+
+    NOTE: This can lead to correctness issues when running tests,
+    since the correct version of the math function (exp/expf) might not get
+    called.  Plan is to remove this function once HIP supports
+    std:: math function calls inside device code.
 
     """
     output_string = input_string
@@ -491,12 +492,11 @@ RE_SYNCTHREADS = re.compile(r":?:?\b(__syncthreads)\b(\w*\()")
 
 
 def hip_header_magic(input_string):
-    """If the file makes kernel builtin calls and does not include the cuda_runtime.h header,
-    then automatically add an #include to match the "magic" includes provided by NVCC.
+    """Add hip/hip_runtime.h header to a file that makes kernel builtin calls but does not include the cuda_runtime.h header.
+
     TODO:
         Update logic to ignore cases where the cuda_runtime.h is included by another file.
     """
-
     # Copy the input.
     output_string = input_string
 
@@ -524,10 +524,12 @@ RE_EXTERN_SHARED = re.compile(r"extern\s+([\w\(\)]+)?\s*__shared__\s+([\w:<>\s]+
 
 def replace_extern_shared(input_string):
     """Match extern __shared__ type foo[]; syntax and use HIP_DYNAMIC_SHARED() MACRO instead.
-       https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_kernel_language.md#__shared__
+
+    https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_kernel_language.md#__shared__
+
     Example:
         "extern __shared__ char smemChar[];" => "HIP_DYNAMIC_SHARED( char, smemChar)"
-        "extern __shared__ unsigned char smem[];" => "HIP_DYNAMIC_SHARED( unsigned char, my_smem)"
+        "extern __shared__ unsigned char smem[];" => "HIP_DYNAMIC_SHARED( unsigned char, my_smem)".
     """
     output_string = input_string
     output_string = RE_EXTERN_SHARED.sub(
@@ -537,9 +539,7 @@ def replace_extern_shared(input_string):
 
 
 def get_hip_file_path(rel_filepath, is_pytorch_extension=False):
-    """
-    Returns the new name of the hipified file
-    """
+    """Return the new name of the hipified file."""
     # At the moment, some PyTorch source files are HIPified in place.  The predicate
     # is_out_of_place tells us if this is the case or not.
     assert not os.path.isabs(rel_filepath)
@@ -663,7 +663,9 @@ def is_caffe2_gpu_file(rel_filepath):
 # Cribbed from https://stackoverflow.com/questions/42742810/speed-up-millions-of-regex-replacements-in-python-3/42789508#42789508
 class Trie:
     """Regex::Trie in Python. Creates a Trie out of a list of words. The trie can be exported to a Regex pattern.
-    The corresponding Regex should match much faster than a simple Regex union."""
+
+    The corresponding Regex should match much faster than a simple Regex union.
+    """
 
     def __init__(self):
         self.data = {}
@@ -782,7 +784,7 @@ def preprocessor(
         is_pytorch_extension: bool,
         clean_ctx: GeneratedFileCleaner,
         show_progress: bool) -> HipifyResult:
-    """ Executes the CUDA -> HIP conversion on the specified file. """
+    """Execute the CUDA -> HIP conversion on the specified file."""
     fin_path = os.path.abspath(os.path.join(output_directory, filepath))
     hipify_result = HIPIFY_FINAL_RESULT[fin_path]
     if filepath not in all_files:
@@ -980,7 +982,7 @@ def file_add_header(filepath, header):
 
 
 def fix_static_global_kernels(in_txt):
-    """Static global kernels in HIP results in a compilation error."""
+    """Fix static global kernels in HIP results in a compilation error."""
     in_txt = in_txt.replace(" __global__ static", "__global__")
     return in_txt
 
@@ -989,16 +991,16 @@ RE_INCLUDE = re.compile(r"#include .*\n")
 
 
 def extract_arguments(start, string):
-    """ Return the list of arguments in the upcoming function parameter closure.
-        Example:
-        string (input): '(blocks, threads, 0, THCState_getCurrentStream(state))'
-        arguments (output):
-            '[{'start': 1, 'end': 7},
-            {'start': 8, 'end': 16},
-            {'start': 17, 'end': 19},
-            {'start': 20, 'end': 53}]'
-    """
+    """Return the list of arguments in the upcoming function parameter closure.
 
+    Example:
+    string (input): '(blocks, threads, 0, THCState_getCurrentStream(state))'
+    arguments (output):
+    '[{'start': 1, 'end': 7},
+    {'start': 8, 'end': 16},
+    {'start': 17, 'end': 19},
+    {'start': 20, 'end': 53}]'.
+    """
     arguments = []
     closures = {
         "<": 0,
@@ -1035,8 +1037,11 @@ def extract_arguments(start, string):
 
 
 def str2bool(v):
-    """ArgumentParser doesn't support type=bool. Thus, this helper method will convert
-    from possible string types to True / False."""
+    """Argumentparser doesn't support type=bool.
+
+    Thus, this helper method will convert
+    from possible string types to True / False.
+    """
     if v.lower() in ('yes', 'true', 't', 'y', '1'):
         return True
     elif v.lower() in ('no', 'false', 'f', 'n', '0'):

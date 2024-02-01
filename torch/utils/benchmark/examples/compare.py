@@ -1,4 +1,4 @@
-"""Example of Timer and Compare APIs:
+"""Example of Timer and Compare APIs.
 
 $ python -m examples.compare
 """
@@ -19,6 +19,7 @@ class FauxTorch:
     writing serialized measurements, but this simplifies that model to
     make the example clearer.
     """
+
     def __init__(self, real_torch, extra_ns_per_element):
         self._real_torch = real_torch
         self._extra_ns_per_element = extra_ns_per_element

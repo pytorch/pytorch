@@ -21,6 +21,7 @@ _DISTRIBUTIONS = (
 
 class FuzzedParameter:
     """Specification for a parameter to be generated during fuzzing."""
+
     def __init__(
         self,
         name: str,
@@ -29,7 +30,8 @@ class FuzzedParameter:
         distribution: Optional[Union[str, Dict[Any, float]]] = None,
         strict: bool = False,
     ):
-        """
+        """Initialize a parameter for fuzzing.
+
         Args:
             name:
                 A string name with which to identify the parameter.
@@ -151,6 +153,7 @@ class ParameterAlias:
 
     Chains of alias' are allowed, but may not contain cycles.
     """
+
     def __init__(self, alias_to):
         self.alias_to = alias_to
 
@@ -192,7 +195,8 @@ class FuzzedTensor:
         cuda=False,
         tensor_constructor: Optional[Callable] = None
     ):
-        """
+        """Initialize a tensor parameter for fuzzing.
+
         Args:
             name:
                 A string identifier for the generated Tensor.
@@ -348,7 +352,8 @@ class Fuzzer:
         constraints: Optional[List[Callable]] = None,
         seed: Optional[int] = None
     ):
-        """
+        """Initialize a Fuzzer with parameters, tensors, constraints, and a seed.
+
         Args:
             parameters:
                 List of FuzzedParameters which provide specifications

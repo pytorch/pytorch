@@ -16,6 +16,7 @@ _MEASURE_TIME = 1.0
 
 def assert_dicts_equal(dict_0, dict_1):
     """Builtin dict comparison will not compare numpy arrays.
+
     e.g.
         x = {"a": np.ones((2, 1))}
         x == x  # Raises ValueError

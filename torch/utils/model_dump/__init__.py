@@ -194,7 +194,6 @@ def get_model_info(
     The result is suitable for being saved as model_info.json,
     or passed to burn_in_info.
     """
-
     if isinstance(path_or_file, os.PathLike):
         default_title = os.fspath(path_or_file)
         file_size = path_or_file.stat().st_size  # type: ignore[attr-defined]
@@ -357,7 +356,6 @@ def get_inline_skeleton():
     The returned HTML page has no external network dependencies for code.
     It can load model_info.json over HTTP, or be passed to burn_in_info.
     """
-
     import importlib.resources
 
     skeleton = importlib.resources.read_text(__package__, "skeleton.html")
@@ -376,7 +374,6 @@ def burn_in_info(skeleton, info):
     The result will render the hard-coded model info and
     have no external network dependencies for code or data.
     """
-
     # Note that Python's json serializer does not escape slashes in strings.
     # Since we're inlining this JSON directly into a script tag, a string
     # containing "</script>" would end the script prematurely and
