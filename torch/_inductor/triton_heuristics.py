@@ -487,7 +487,7 @@ class CachingAutotuner(KernelInterface):
             log.debug("Benchmark all input configs for %s, get:", self.fn.__name__)
             for k, v in timings.items():
                 log.debug(
-                    "%s: %f, nreg %d, nspill %d, #shared-mem %d",
+                    "%s: %f, nreg %d, nspill %d, #shared-mem %s",
                     k.config,
                     v,
                     k.n_regs,
