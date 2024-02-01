@@ -1,5 +1,4 @@
 import contextlib
-import functools
 
 from typing import Any, cast, Dict, List, Optional, Sequence, Set, Tuple
 
@@ -320,13 +319,6 @@ class FSDPParamGroup:
                 ):
                     target_fsdp_param_group.unshard()
 
-    # State Dict #
-    def _pre_save_state_dict_hook(self, module: nn.Module, *args, **kwargs):
-        self._to_sharded()
-
-    def _pre_load_state_dict_hook(self, module: nn.Module, *args, **kwargs):
-        self._to_sharded()
-
     # Utilities #
     def _to_sharded(self):
         if self._sharded_state != ShardedState.SHARDED:
@@ -415,17 +407,17 @@ class FSDPParamGroup:
         modules_with_fsdp_params: Set[nn.Module] = {
             fsdp_param._module_info.module for fsdp_param in self.fsdp_params
         }
+
+        def to_sharded_hook(*args: Any, **kwargs: Any) -> None:
+            self._to_sharded()
+
         for module in modules_with_fsdp_params:
             self._module_to_pre_save_state_dict_hook_handle[
                 module
-            ] = module.register_state_dict_pre_hook(
-                functools.partial(self._pre_save_state_dict_hook, module)
-            )
+            ] = module.register_state_dict_pre_hook(to_sharded_hook)
             self._module_to_pre_load_state_dict_hook_handle[
                 module
-            ] = module._register_load_state_dict_pre_hook(
-                functools.partial(self._pre_load_state_dict_hook, module)
-            )
+            ] = module._register_load_state_dict_pre_hook(to_sharded_hook)
 
     # Properties #
     @property
