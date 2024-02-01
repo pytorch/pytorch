@@ -527,7 +527,6 @@ dynamo_expected_failures = {
     "TestAssertCloseSparseBSC.test_mismatching_row_indices_msg",  # test_testing
     "TestAssertCloseSparseCOO.test_mismatching_values_msg",  # test_testing
     "TestAssertCloseQuantized.test_matching_per_channel",  # test_testing
-    "TestTestParametrizationDeviceTypeCPU.test_ops_decorator_applies_op_and_param_specific_decorators_cpu",  # test_testing
     "TestAssertCloseSparseCOO.test_matching_uncoalesced",  # test_testing
     "TestAssertCloseSparseCSR.test_matching",  # test_testing
     "TestAssertCloseSparseBSR.test_mismatching_crow_indices_msg",  # test_testing
@@ -550,15 +549,11 @@ dynamo_expected_failures = {
     "TestAssertCloseSparseCSC.test_mismatching_ccol_indices_msg",  # test_testing
     "TestTensorBoardUtils.test_to_HWC",  # test_tensorboard
     "TestTensorBoardEmbedding.test_embedding",  # test_tensorboard
-    "TestTensorProtoSummary.test_float_tensor_proto",  # test_tensorboard
     "TestTensorBoardSummary.test_image_without_channel",  # test_tensorboard
     "TestTensorBoardUtils.test_numpy_vid_uint8",  # test_tensorboard
-    "TestTensorProtoSummary.test_complex_tensor_proto",  # test_tensorboard
     "TestTensorBoardSummary.test_image_with_one_channel",  # test_tensorboard
     "TestTensorBoardEmbedding.test_embedding_64",  # test_tensorboard
     "TestTensorBoardSummary.test_video",  # test_tensorboard
-    "TestTensorProtoSummary.test_int_tensor_proto",  # test_tensorboard
-    "TestTensorProtoSummary.test_empty_tensor_proto",  # test_tensorboard
     "TestTensorBoardSummary.test_uint8_image",  # test_tensorboard
     "TestAsArrayCPU.test_copy_list_cpu_float64",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_int64",  # test_tensor_creation_ops
@@ -574,23 +569,16 @@ dynamo_expected_failures = {
     "TestAsArrayCPU.test_copy_list_cpu_bool",  # test_tensor_creation_ops
     "TestTensorCreationCPU.test_constructor_dtypes_cpu",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_complex128",  # test_tensor_creation_ops
-    "TestTensorCreationCPU.test_tensor_factory_copy_var_cpu",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_int16",  # test_tensor_creation_ops
     "TestTensorCreationCPU.test_cartesian_prod_cpu",  # test_tensor_creation_ops
     "TestSubclass.test_parametrization_non_wrapper_tensor_leave_parametrized_True",  # test_subclass
     "TestSubclass.test_module_optimization_non_wrapper_tensor",  # test_subclass
     "TestSubclass.test_serialization_non_wrapper_tensor_as_param_True",  # test_subclass
-    "TestSubclass.test_param_invariants_non_wrapper_tensor_tensor_requires_grad_False",  # test_subclass
-    "TestSubclass.test_param_invariants_sparse_tensor_tensor_requires_grad_True",  # test_subclass
-    "TestSubclass.test_param_invariants_diag_tensor_below_tensor_requires_grad_True",  # test_subclass
-    "TestSubclass.test_param_invariants_diag_tensor_below_tensor_requires_grad_False",  # test_subclass
-    "TestSubclass.test_param_invariants_non_wrapper_tensor_tensor_requires_grad_True",  # test_subclass
     "TestSubclass.test_parametrization_non_wrapper_tensor_leave_parametrized_False",  # test_subclass
     "TestSubclass.test_type_propagation_non_wrapper_tensor_as_param_False",  # test_subclass
     "TestSubclass.test_parametrization_base_tensor_leave_parametrized_True",  # test_subclass
     "TestSubclass.test_type_propagation_non_wrapper_tensor_as_param_True",  # test_subclass
     "TestSubclass.test_parametrization_base_tensor_leave_parametrized_False",  # test_subclass
-    "TestSubclass.test_param_invariants_sparse_tensor_tensor_requires_grad_False",  # test_subclass
     "TestStatelessFunctionalAPI.test_reparametrize_module_fail_reset_to_original_torch_func",  # test_stateless
     "TestStatelessFunctionalAPI.test_reparametrized_module_change_parametrization_original_stateless",  # test_stateless
     "TestStatelessFunctionalAPI.test_reparametrized_module_change_parametrization_original_torch_func",  # test_stateless
@@ -1678,14 +1666,10 @@ dynamo_expected_failures = {
     "TestAOTAutograd.test_input_data_and_metadata_mutation",  # functorch/test_aotdispatch
     "TestPythonKeyCPU.test_make_fx_vjp_cpu",  # functorch/test_aotdispatch
     "TestPartitioning.test_min_cut_partitioner_output_tensor_shape_tensor",  # functorch/test_aotdispatch
-    "TestAOTAutograd.test_subclass_metadata_mutation_req_grad_False",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_input_output_view_simple",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_output_aliases_intermediate_multi_output_view",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_output_aliases_intermediate_returned_multiple_times",  # functorch/test_aotdispatch
-    "TestAOTAutograd.test_input_metadata_mutation_aliases",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_output_aliases_input_multi_output_view",  # functorch/test_aotdispatch
-    "TestAOTAutograd.test_subclass_metadata_mutation_req_grad_True",  # functorch/test_aotdispatch
-    "TestAOTAutograd.test_input_mutation_aliases_other_input2",  # functorch/test_aotdispatch
     "TestAOTDispatch.test_aot_dispatch_input_mutation_and_output_alias",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_input_aliased_with_mutation_output_alias",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_invalid_dupe_left_bias",  # functorch/test_aotdispatch
@@ -1715,7 +1699,6 @@ dynamo_expected_failures = {
     "TestAOTAutograd.test_input_mutation_alias_everything",  # functorch/test_aotdispatch
     "TestPythonKeyCPU.test_make_fx_jacrev_cpu",  # functorch/test_aotdispatch
     "TestPartitioning.test_default_partitioner_output_tensor_shape_tensor",  # functorch/test_aotdispatch
-    "TestAOTAutograd.test_input_mutation_aliases_other_input",  # functorch/test_aotdispatch
     "TestPartitioning.test_contiguous",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_outputs_are_aliased",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_input_mutation_aliases_and_none_require_gradients",  # functorch/test_aotdispatch
@@ -1785,14 +1768,8 @@ dynamo_expected_failures = {
     "TestExperiment.test_with_buffer_as_submodule",  # export/test_experimental
     "ExampleTests.test_exportdb_supported_case_constrain_as_size_example",  # export/test_db
     "ExampleTests.test_exportdb_supported_case_assume_constant_result",  # export/test_db
-    "TestOpCPU.test_addmm_cpu_bfloat16",  # test_jit_llga_fuser
     "TestOpCPU.test_cat_cpu_float32",  # test_jit_llga_fuser
-    "TestOpCPU.test_addmm_cpu_float32",  # test_jit_llga_fuser
-    "TestOpCPU.test_add_scalar_cpu_bfloat16",  # test_jit_llga_fuser
-    "TestOpCPU.test_add_scalar_cpu_float32",  # test_jit_llga_fuser
     "TestOpCPU.test_cat_cpu_bfloat16",  # test_jit_llga_fuser
-    "TestOpCPU.test_identity_binary_cpu_bfloat16",  # test_jit_llga_fuser
-    "TestOpCPU.test_identity_binary_cpu_float32",  # test_jit_llga_fuser
     "TestTorch.test_type",  # test_torch
     "TestTorch.test_cuda_not_built",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_quint4x2",  # test_torch
@@ -1822,7 +1799,6 @@ dynamo_expected_failures = {
     "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_qint32",  # test_torch
     "TestTorchDeviceTypeCPU.test_exponential_kstest_cpu_float16",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_qint8",  # test_torch
-    "TestTorchDeviceTypeCPU.test_untyped_storage_meta_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_remainder_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool1d_cpu_float32",  # test_torch
     "TestTorchDeviceTypeCPU.test_uniform_kstest_cpu_float64",  # test_torch
@@ -2048,7 +2024,6 @@ dynamo_expected_failures = {
     "TestEqualizeFx.test_selective_equalization",  # test_quantization
     "TestQuantizeFx.test__convert_to_reference_decomposed_fx",  # test_quantization
     "TestQuantizeFx.test_remove_qconfig",  # test_quantization
-    "TestBackendConfig.test_backend_op_config_set_input_type_to_index",  # test_quantization
     "TestQuantizedLinear.test_qlinear_relu",  # test_quantization
     "TestQuantizePT2E.test_constant_prop_preserve_metadata",  # test_quantization
     "TestQuantizedTensor.test_qtensor_permute",  # test_quantization
@@ -2118,7 +2093,6 @@ dynamo_expected_failures = {
     "TestQuantizeFx.test_static_lstm_consume_tuple",  # test_quantization
     "TestXNNPACKQuantizer.test_conv_linear_no_permute",  # test_quantization
     "TestReferenceQuantizedModule.test_rnn_cell",  # test_quantization
-    "TestBackendConfig.test_backend_op_config_add_dtype_config",  # test_quantization
     "TestStaticQuantizedModule.test_conv2d_add",  # test_quantization
     "TestQuantizedConv.test_qconv2d_relu_pt2e",  # test_quantization
     "TestPT2ERepresentation.test_add",  # test_quantization
@@ -2147,7 +2121,6 @@ dynamo_expected_failures = {
     "TestQuantizedTensor.test_qtensor_sub_byte_not_aligned_cols",  # test_quantization
     "TestQuantizeFx.test_conv_linear_reference",  # test_quantization
     "TestQuantizePT2E.test_composable_quantizer_linear_conv",  # test_quantization
-    "TestBackendConfig.test_backend_op_config_from_dict",  # test_quantization
     "TestFakeQuantizeOps.test_learnable_backward_per_tensor_cuda",  # test_quantization
     "TestXNNPACKQuantizer.test_linear_with_dynamic_shape",  # test_quantization
     "TestQuantizedOps.test_empty_batch",  # test_quantization
@@ -2320,7 +2293,6 @@ dynamo_expected_failures = {
     "TestQuantizedOps.test_hardtanh",  # test_quantization
     "TestQuantizeFx.test_qconfig_function",  # test_quantization
     "TestQuantizeFx.test_ref_conv_module",  # test_quantization
-    "TestBackendConfig.test_backend_op_config_set_num_tensor_args_to_observation_type",  # test_quantization
     "TestQuantizedOps.test_max_pool1d",  # test_quantization
     "TestStaticQuantizedModule.test_linear",  # test_quantization
     "TestQuantizeFxOps.test_mul_relu",  # test_quantization
