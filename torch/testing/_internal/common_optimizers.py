@@ -1271,11 +1271,10 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/115607"
+                    "cpu fails due to #115607; both devices fail cuz #117836"
                 ),
                 "TestOptimRenewed",
                 "test_can_load_older_state_dict",
-                device_type="cpu",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
