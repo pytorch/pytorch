@@ -26,6 +26,9 @@ Instructions:
 - Wait for all the tests to finish running.
 - Find the full SHA of your commit and run this command.
 
+This script requires the `gh` cli. You'll need to install it and then
+authenticate with it via `gh auth login` before using this script.
+https://docs.github.com/en/github-cli/github-cli/quickstart
 """
 
 

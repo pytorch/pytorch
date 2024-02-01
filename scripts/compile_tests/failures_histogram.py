@@ -12,6 +12,10 @@ python failures_histogram.py commit_sha
 Analyzes skip reasons for Dynamo tests and prints a histogram with repro
 commands. You'll need to provide the commit_sha for a commit on the main branch,
 from which we will pull CI test results.
+
+This script requires the `gh` cli. You'll need to install it and then
+authenticate with it via `gh auth login` before using this script.
+https://docs.github.com/en/github-cli/github-cli/quickstart
 """
 
 
