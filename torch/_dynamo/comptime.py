@@ -9,9 +9,9 @@ import builtins
 import dis
 import traceback
 from typing import Optional, Union
-from torch.fx.experimental.symbolic_shapes import free_symbols
 
 import torch
+from torch.fx.experimental.symbolic_shapes import free_symbols
 
 from .exc import unimplemented
 from .variables.tensor import SymNodeVariable
@@ -151,7 +151,9 @@ class ComptimeContext:
         """
         Asserts that the int is static (and not dynamic, per dynamic shapes)
         """
-        assert not val.is_dynamic(), "expected static but got dynamic (run with TORCH_LOGS=dynamic for more info)"
+        assert (
+            not val.is_dynamic()
+        ), "expected static but got dynamic (run with TORCH_LOGS=dynamic for more info)"
 
     def print_graph(self, *, verbose=True, file=None):
         """
@@ -322,9 +324,7 @@ class _Comptime:
 
     @staticmethod
     def assert_static(val):
-        comptime(
-            lambda ctx: ctx.assert_static(ctx.get_local("val"))
-        )
+        comptime(lambda ctx: ctx.assert_static(ctx.get_local("val")))
 
     @staticmethod
     def breakpoint():
