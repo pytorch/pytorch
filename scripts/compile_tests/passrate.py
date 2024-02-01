@@ -40,10 +40,12 @@ def should_exclude(key):
     # C++ tests
     if test_file == "UNKNOWN":
         return True
-    # Policy: "pass rate" does not include inductor or export tests.
+    # Policy: "pass rate" does not include inductor, export, or dynamo tests.
     if test_file.startswith("inductor/"):
         return True
     if test_file.startswith("export/"):
+        return True
+    if test_file.startswith("dynamo/"):
         return True
     return False
 
@@ -57,10 +59,10 @@ def compute_pass_rate(eager_dir, dynamo_dir):
     eager_passed = get_passed_testcases(eager_xmls)
     dynamo_passed = get_passed_testcases(dynamo_xmls)
     dynamo_pass_keys = {key(testcase) for testcase in dynamo_passed}
-    dynamo_pass_keys = {key for key in dynamo_pass_keys if not should_exclude(key)}
+    dynamo_pass_keys = {key_ for key_ in dynamo_pass_keys if not should_exclude(key_)}
     tmp_eager_pass_keys = {key(testcase) for testcase in eager_passed}
     tmp_eager_pass_keys = {
-        key for key in tmp_eager_pass_keys if not should_exclude(key)
+        key_ for key_ in tmp_eager_pass_keys if not should_exclude(key_)
     }
     excluded = [key(t) for t in get_excluded_testcases(dynamo_xmls)]
     eager_pass_keys = tmp_eager_pass_keys - set(excluded)
@@ -70,6 +72,18 @@ def compute_pass_rate(eager_dir, dynamo_dir):
     total_tests = len(eager_pass_keys)
     print("pass rate", total_subset / total_tests, total_subset, total_tests)
 
+    dynamo_testcases = get_testcases(dynamo_xmls)
+    tc = {key(t): t for t in dynamo_testcases}
+
+    # Useful for debugging
+    not_there_keys = set()
+    for key_ in eager_pass_keys:
+        if key_ not in tc:
+            not_there_keys.add(key_)
+
+    fail_keys = eager_pass_keys - subset
+    return fail_keys
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -77,7 +91,7 @@ if __name__ == "__main__":
     )
     # linux-focal-py3.11-clang10 (default) Test Reports (xml) directory
     parser.add_argument("eager_dir")
-    # linux-focal-py3.8-clang10 (dynamo) Test Reports (xml) directory
+    # linux-focal-py3.11-clang10 (dynamo) Test Reports (xml) directory
     parser.add_argument("dynamo_dir")
     args = parser.parse_args()
     compute_pass_rate(args.eager_dir, args.dynamo_dir)
