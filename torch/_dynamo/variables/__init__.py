@@ -22,6 +22,7 @@ from .dicts import (
     SetVariable,
 )
 from .functions import (
+    FunctoolsPartialVariable,
     NestedUserFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
