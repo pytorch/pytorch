@@ -6,9 +6,10 @@
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/empty.h>
-#include <ATen/ops/split_with_sizes_copy.h>
+#include <ATen/ops/split_with_sizes_copy_native.h>
 #endif
 
 namespace at::native {
@@ -423,7 +424,7 @@ void split_with_sizes_copy_out_cuda(
     split_with_sizes_copy_out_cuda_contiguous_no_cast(
         self, split_sizes, dim, out);
   } else {
-    at::split_with_sizes_copy_out(out, self, split_sizes, dim);
+    at::native::split_with_sizes_copy_out(self, split_sizes, dim, out);
   }
 }
 
