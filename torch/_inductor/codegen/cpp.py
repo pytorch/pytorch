@@ -7,7 +7,7 @@ import math
 import re
 import sys
 from copy import copy, deepcopy
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
@@ -85,7 +85,9 @@ DTYPE_TO_ATEN = {
     torch.uint8: "at::kByte",
     torch.bool: "at::kBool",
     torch.bfloat16: "at::kBFloat16",
+    torch.complex32: "at::kComplexHalf",
     torch.complex64: "at::kComplexFloat",
+    torch.complex128: "at::kComplexDouble",
     torch.float8_e4m3fn: "at::kFloat8_e4m3fn",
     torch.float8_e5m2: "at::kFloat8_e5m2",
     torch.float8_e4m3fnuz: "at::kFloat8_e4m3fnuz",
@@ -283,28 +285,19 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
         f"struct {struct_name} {{size_t index; {DTYPE_TO_CPP[src_dtype]} value;}};",
         f"{struct_name} {tmpvar}{{0, {reduction_init(reduction_type, src_dtype)}}};",
     ]
-    if reduction_type == "argmax":
+
+    if reduction_type in ["argmax", "argmin"]:
+        compare_op = "greater_or_nan" if reduction_type == "argmax" else "less_or_nan"
         prefix.extend(
             [
                 "#if !defined(__clang_major__) || __clang_major__ > 9",
-                f"#pragma omp declare reduction(argmax : {struct_name} :\\",
-                "    omp_out.value = omp_in.value < omp_out.value ? omp_out.value : omp_in.value,\\",
-                "    omp_out.index = omp_in.value < omp_out.value ? omp_out.index : omp_in.index)\\",
+                f"#pragma omp declare reduction({reduction_type} : {struct_name} :\\",
+                f"    omp_out = {compare_op}(omp_in.value, omp_out.value, omp_in.index, omp_out.index) ? omp_in : omp_out)\\",
                 f"\tinitializer(omp_priv = {{0, {reduction_init(reduction_type, src_dtype)}}})",
                 "#endif",
             ]
         )
-    elif reduction_type == "argmin":
-        prefix.extend(
-            [
-                "#if !defined(__clang_major__) || __clang_major__ > 9",
-                f"#pragma omp declare reduction(argmin : {struct_name} :\\",
-                "    omp_out.value = omp_in.value > omp_out.value ? omp_out.value : omp_in.value,\\",
-                "    omp_out.index = omp_in.value > omp_out.value ? omp_out.index : omp_in.index)\\",
-                f"\tinitializer(omp_priv = {{0, {reduction_init(reduction_type, src_dtype)}}})",
-                "#endif",
-            ]
-        )
+
     return prefix
 
 
@@ -575,7 +568,7 @@ def get_current_node_opt_ctx() -> OptimizationContext:
 
 
 class CppCSEVariable(CSEVariable):
-    def __init__(self, name, bounds: ValueRanges):
+    def __init__(self, name, bounds: ValueRanges[Any]):
         super().__init__(name, bounds)
         self.is_vec = False
         self.dtype: Optional[torch.dtype] = None
@@ -980,6 +973,10 @@ class CppOverrides(OpOverrides):
         code.writeline(f"auto {result} = {left} - {right};")
         V.kernel.compute.splice(code)
         return result
+
+    @staticmethod
+    def bessel_j0(x):
+        return f"bessel_j0_forward({x})"
 
 
 class CppVecOverrides(CppOverrides):
@@ -1563,14 +1560,16 @@ class CppKernel(Kernel):
             self.reduction_prefix.writelines(
                 argmax_argmin_prefix(reduction_type, src_dtype, acc)
             )
-            compare_op = "<" if reduction_type == "argmax" else ">"
+            compare_op = (
+                "greater_or_nan" if reduction_type == "argmax" else "less_or_nan"
+            )
             assert self.reduction_depth is not None
             index = self.itervars[self.reduction_depth]
             for i in range(self.reduction_depth + 1, len(self.itervars)):
                 index = index * self.ranges[i] + self.itervars[i]
             self.stores.writelines(
                 [
-                    f"if ({acc}.value {compare_op} {value}) {{",
+                    f"if(!({compare_op}({acc}.value, {value}, {acc}.index, {cexpr_index(index)}))) {{",
                     f"    {acc}.index = {cexpr_index(index)}; {acc}.value = {value};",
                     "}",
                 ],
@@ -2040,7 +2039,10 @@ class CppVecKernel(CppKernel):
         }
         assert dtype == torch.float
         assert src_dtype == torch.float
-        assert isinstance(value, CppCSEVariable) and value.is_vec, value
+        assert isinstance(value, CppCSEVariable), value
+
+        if not value.is_vec:
+            value = self.broadcast(value)
 
         vec_ns = "at::vec"
         vec = f"{vec_ns}::Vectorized<{DTYPE_TO_CPP[dtype]}>"
@@ -2669,6 +2671,7 @@ class CppVecKernelChecker(CppVecKernel):
                         torch.int32,
                         torch.bfloat16,
                         torch.float16,
+                        torch.bool,
                     ]
 
                     if opt_ctx.dtype not in supported_dtypes or (
