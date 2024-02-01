@@ -40,7 +40,7 @@ from ..codecache import code_hash, get_path, PyCodeCache
 from ..dependencies import MemoryDep, StarDep
 from ..ir import IRNode, ReductionHint, TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
-from ..scheduler import BaseScheduling, WhyNoFuse
+from ..scheduler import BaseScheduling, WhyNoFuse, SchedulerNode
 from ..triton_heuristics import AutotuneHint
 from ..utils import (
     cache_on_self,
@@ -3371,9 +3371,11 @@ class TritonScheduling(BaseScheduling):
 
         return kernel_name
 
-    def codegen_template(self, template_node, epilogue_nodes):
+    def codegen_template(self, template_node, epilogue_nodes, only_gen_src_code=False) -> Optional[str]:
         """
         Codegen a triton template
+
+        If `only_gen_src_code` the src code will be returned instead of codegen'd into the wrapper
         """
         _, (numel, rnumel) = template_node.group
         assert rnumel == 1
@@ -3405,7 +3407,11 @@ class TritonScheduling(BaseScheduling):
                     f"{kernel.codegen_kernel_benchmark(grid).getvalue()}"
                 )
 
+            if only_gen_src_code:
+                return src_code
+
             kernel_name = self.define_kernel(src_code, node_schedule)
+
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name, template_node.node)
         V.graph.removed_buffers |= kernel.removed_buffers
@@ -3600,27 +3606,36 @@ class TritonScheduling(BaseScheduling):
         return False
 
     def benchmark_fused_nodes(self, nodes):
-        _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
-        node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
-        tiled_groups = self.select_tiling(node_schedule, numel, rnumel)
-        reduction_hint_val, mutations, index_dtype = self.get_kernel_args(
-            node_schedule, numel, rnumel
-        )
-
-        kernel = TritonKernel(
-            *tiled_groups,
-            reduction_hint=reduction_hint_val,
-            mutations=mutations,
-            index_dtype=index_dtype,
-        )
-
         # empty last_usage. May cause more aggressive 'evict_last'. Should be fine.
+        # we dont know subsequent fusions
         for n in nodes:
             n.last_usage = set()
 
-        self.codegen_node_schedule_with_kernel(node_schedule, kernel)
-        with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):
-            src_code = kernel.codegen_kernel()
+        if not nodes[0].is_template():
+            _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
+            node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
+
+            tiled_groups = self.select_tiling(node_schedule, numel, rnumel)
+            reduction_hint_val, mutations, index_dtype = self.get_kernel_args(
+                node_schedule, numel, rnumel
+            )
+
+            kernel = TritonKernel(
+                *tiled_groups,
+                reduction_hint=reduction_hint_val,
+                mutations=mutations,
+                index_dtype=index_dtype,
+            )
+
+            self.codegen_node_schedule_with_kernel(node_schedule, kernel)
+            with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):
+                src_code = kernel.codegen_kernel()
+        else:
+            template_node = nodes[0]
+            epilogue_nodes = nodes[1:]
+
+            with config.patch("benchmark_kernel", True):
+                src_code = self.codegen_template(template_node, epilogue_nodes, only_gen_src_code=True)
 
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
         mod = PyCodeCache.load(src_code)
