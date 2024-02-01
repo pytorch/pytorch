@@ -1211,6 +1211,7 @@ _has_mps: _bool
 has_lapack: _bool
 _has_cuda: _bool
 _has_magma: _bool
+_has_xpu: _bool
 _has_mkldnn: _bool
 _has_cudnn: _bool
 has_spectral: _bool
@@ -1873,6 +1874,26 @@ class _CUDAGraph:
 def _cuda_isCurrentStreamCapturing() -> _bool: ...
 def _graph_pool_handle() -> Tuple[_int, _int]: ...
 
+# Defined in torch/csrc/xpu/Module.cpp
+def _xpu_setDevice(device: _int) -> None: ...
+def _xpu_exchangeDevice(device: _int) -> _int: ...
+def _xpu_maybeExchangeDevice(device: _int) -> _int: ...
+def _xpu_getDevice() -> _int: ...
+def _xpu_getDeviceCount() -> _int: ...
+def _xpu_init() -> None: ...
+
+class _XpuDeviceProperties:
+    name: str
+    platform_name: str
+    total_memory: _int
+    max_compute_units: _int
+    gpu_eu_count: _int
+    gpu_subslice_count: _int
+    max_work_group_size: _int
+    max_num_sub_groups: _int
+    sub_group_sizes: List[_int]
+    type: str
+
 # Defined in torch/csrc/DataLoader.cpp
 def _set_worker_signal_handlers(
     *arg: Any,
@@ -2113,3 +2134,4 @@ def _save_jit_module_to_bytes(m: ScriptModule,  extra_files: Dict[str, Any]) -> 
 def _get_module_info_from_flatbuffer(data: bytes): ...
 def _jit_resolve_packet(op_name: str, *args, **kwargs) -> str: ...
 def _swap_tensor_impl(t1: Tensor, t2: Tensor): ...
+def _save_pickle(obj: Any) -> bytes: ...
