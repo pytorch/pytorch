@@ -963,6 +963,24 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.testing.standard_test(self, fn, 1, expected_ops=1)
 
+    @unittest.skipIf(sys.version_info[:2] <= (3, 8), "Requires astunparse")
+    def test_cse_dict_guards(self):
+        def fn(x):
+            ret = torch.zeros(3)
+            for v in x.values():
+                ret = ret + v
+            return ret
+
+        from torch._dynamo.guards import build_guard_function, CLOSURE_VARS
+
+        x = {3: torch.randn(3), 2: torch.randn(3), 4: torch.randn(3)}
+        _, guards = torch._dynamo.export(fn, x)
+
+        code_lists = [c for g in guards for c in g.code_list or []]
+        _, pycode = build_guard_function(code_lists, [])
+        # Make sure we just call "list(dict.keys())" once
+        self.assertEqual(pycode.count("keys"), 1)
+
     def test_sys_modules(self):
         def fn(x, y):
             mod_a = sys.modules.get("aaaaaaaa")

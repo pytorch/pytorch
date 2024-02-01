@@ -58,7 +58,6 @@ from .source import DefaultsSource, LocalSource, TypeSource
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     common_constant_types,
-    dict_keys_getitem,
     dict_keys_repr,
     guard_failures,
     istype,
@@ -102,7 +101,6 @@ CLOSURE_VARS = {
     "___key_to_id": key_to_id,
     "___dict_version": dict_version,
     "___dict_contains": lambda a, b: a in b,
-    "___dict_keys_getitem": dict_keys_getitem,
     "___tuple_iterator_len": tuple_iterator_len,
     "___tuple_iterator_getitem": tuple_iterator_getitem,
     "__math_isnan": math.isnan,
