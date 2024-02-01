@@ -5708,6 +5708,7 @@ else:
         self.assertEqual(growth_tracker, 0)
         self.assertEqual(scale, 2.0)
 
+    @skipIfTorchDynamo("Failed running call_function for sparse_coo_tensor. See https://github.com/pytorch/pytorch/issues/118856")
     @onlyNativeDeviceTypes
     @dtypes(torch.float)
     def test_grad_scaling_unscale_sparse(self, device, dtype):
