@@ -346,6 +346,9 @@ class GetItemSource(ChainedSource):
 
 @dataclasses.dataclass(frozen=True)
 class ConstDictKeySource(GetItemSource):
+    def is_dict_key(self):
+        return True
+
     def reconstruct(self, codegen):
         return [
             *codegen.create_load_import_from(utils.__name__, "dict_keys_getitem"),
