@@ -37,10 +37,10 @@ dead_code_elimination = True
 # object. It also controls the maximum size of cache entries if they don't have
 # any ID_MATCH'd guards.
 # [@compile_ignored: runtime_behaviour]
-cache_size_limit = 10000
+cache_size_limit = 8
 
 # [@compile_ignored: runtime_behaviour] controls the maximum number of entries for a code object.
-accumulated_cache_size_limit = 100000
+accumulated_cache_size_limit = 64
 
 # whether or not to specialize on int inputs.  This only has an effect with
 # dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
