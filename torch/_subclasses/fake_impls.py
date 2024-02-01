@@ -20,11 +20,11 @@ from torch._prims_common import (
 
 from torch._subclasses.fake_tensor import (
     DataDependentOutputException,
-    UnsupportedOperatorException,
     DynamicOutputShapeException,
     FakeTensor,
     in_kernel_invocation_manager,
     run_fallback_kernel,
+    UnsupportedOperatorException,
 )
 from torch.fx.operator_schemas import normalize_function
 
