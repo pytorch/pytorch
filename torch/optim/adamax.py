@@ -316,7 +316,7 @@ def _single_tensor_adamax(
                     grad.abs().add_(eps),
                     out=exp_inf,
                 )
-            exp_avg.mul_(clr_neg)
+            exp_avg = exp_avg.mul(clr_neg)
             param.addcdiv_(exp_avg, exp_inf)
         else:
             step = _get_value(step_t)
