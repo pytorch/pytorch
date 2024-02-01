@@ -5,6 +5,7 @@ from typing import Collection, Dict, List, Mapping, Optional, Set, Tuple, Union
 
 __all__ = [
     "ConstantArgument",
+    "CustomObjArgument",
     "ExportBackwardSignature",
     "ExportGraphSignature",
     "InputKind",
@@ -27,11 +28,19 @@ class SymIntArgument:
 
 
 @dataclasses.dataclass
+class CustomObjArgument:
+    name: str
+    class_fqn: str
+
+
+@dataclasses.dataclass
 class ConstantArgument:
     value: Union[int, float, bool, None]
 
 
-ArgumentSpec = Union[TensorArgument, SymIntArgument, ConstantArgument]
+ArgumentSpec = Union[
+    TensorArgument, SymIntArgument, ConstantArgument, CustomObjArgument
+]
 
 
 class InputKind(Enum):
@@ -39,6 +48,7 @@ class InputKind(Enum):
     PARAMETER = auto()
     BUFFER = auto()
     CONSTANT_TENSOR = auto()
+    CUSTOM_OBJ = auto()
 
 
 @dataclasses.dataclass
@@ -48,7 +58,10 @@ class InputSpec:
     target: Optional[str]
 
     def __post_init__(self):
-        assert isinstance(self.arg, (TensorArgument, SymIntArgument, ConstantArgument))
+        assert isinstance(
+            self.arg,
+            (TensorArgument, SymIntArgument, ConstantArgument, CustomObjArgument),
+        ), f"got {type(self.arg)}"
 
 
 class OutputKind(Enum):
@@ -264,23 +277,47 @@ class ExportGraphSignature:
             if isinstance(s.target, str)
         ]
 
+    @property
+    def lifted_custom_objs(self) -> Collection[str]:
+        # TODO Make this tuple.
+        return [
+            s.target
+            for s in self.input_specs
+            if s.kind == InputKind.CUSTOM_OBJ
+            if isinstance(s.target, str)
+        ]
+
     # Graph node names of pytree-flattened inputs of original program
     @property
-    def user_inputs(self) -> Collection[str]:
-        return tuple(
-            s.arg.name
-            for s in self.input_specs
-            if s.kind == InputKind.USER_INPUT and isinstance(s.arg, TensorArgument)
-        )
+    def user_inputs(self) -> Collection[Union[int, float, bool, None, str]]:
+        user_inputs: List[Union[int, float, bool, None, str]] = []
+        for s in self.input_specs:
+            if s.kind != InputKind.USER_INPUT:
+                continue
+
+            if isinstance(s.arg, (TensorArgument, SymIntArgument, CustomObjArgument)):
+                user_inputs.append(s.arg.name)
+            elif isinstance(s.arg, ConstantArgument):
+                user_inputs.append(s.arg.value)
+            else:
+                raise RuntimeError(f"{s.arg} is not a valid user inputs")
+        return tuple(user_inputs)
 
     # Graph node names of pytree-flattened outputs of original program
     @property
-    def user_outputs(self) -> Collection[str]:
-        return tuple(
-            s.arg.name
-            for s in self.output_specs
-            if s.kind == OutputKind.USER_OUTPUT and isinstance(s.arg, TensorArgument)
-        )
+    def user_outputs(self) -> Collection[Union[int, float, bool, None, str]]:
+        user_outputs: List[Union[int, float, bool, None, str]] = []
+        for s in self.output_specs:
+            if s.kind != OutputKind.USER_OUTPUT:
+                continue
+
+            if isinstance(s.arg, (TensorArgument, SymIntArgument)):
+                user_outputs.append(s.arg.name)
+            elif isinstance(s.arg, ConstantArgument):
+                user_outputs.append(s.arg.value)
+            else:
+                raise RuntimeError(f"{s.arg} is not a valid user output")
+        return tuple(user_outputs)
 
     # A dictionary mapping graph input node names to parameters. If a graph input
     # name is found in this dictionary, it is guranteed to be a lifted parameter.
@@ -340,6 +377,16 @@ class ExportGraphSignature:
         }
 
     @property
+    def inputs_to_lifted_custom_objs(self) -> Mapping[str, str]:
+        return {
+            s.arg.name: s.target
+            for s in self.input_specs
+            if s.kind == InputKind.CUSTOM_OBJ
+            and isinstance(s.arg, CustomObjArgument)
+            and isinstance(s.target, str)
+        }
+
+    @property
     def backward_signature(self) -> Optional[ExportBackwardSignature]:
         loss_output = None
         gradients_to_parameters: Dict[str, str] = {}
@@ -391,7 +438,19 @@ class ExportGraphSignature:
         """
         assert isinstance(old, str)
         assert isinstance(new, str)
+        arg_types = (TensorArgument, SymIntArgument, CustomObjArgument)
         for o in self.output_specs:
-            if isinstance(o.arg, TensorArgument):
+            if isinstance(o.arg, arg_types):
                 if o.arg.name == old:
                     o.arg.name = new
+        for i in self.input_specs:
+            if isinstance(i.arg, arg_types):
+                if i.arg.name == old:
+                    i.arg.name = new
+
+    def get_replace_hook(self):
+        def _(old, new, user):
+            if user.op in ("output", "input"):
+                self.replace_all_uses(old.name, new)
+
+        return _

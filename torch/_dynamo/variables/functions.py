@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import functools
 import inspect
 import itertools
@@ -12,6 +14,7 @@ from ..exc import unimplemented, Unsupported
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import get_first_attr, make_cell
 from .base import typestr, VariableTracker
+from .constant import ConstantVariable
 
 if TYPE_CHECKING:
     from torch._guards import Source
@@ -104,6 +107,13 @@ class BaseUserFunctionVariable(VariableTracker):
 
 class UserFunctionVariable(BaseUserFunctionVariable):
     """Some unsupported user-defined global function"""
+
+    @classmethod
+    def create_with_source(cls, value, source):
+        return cls(
+            value,
+            source=source,
+        )
 
     def __init__(self, fn, is_constant=False, **kwargs):
         super().__init__(**kwargs)
@@ -253,6 +263,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     def export_freevars(self, parent, child):
         pass
+
+    def call_hasattr(self, tx, name: str) -> VariableTracker:
+        result = hasattr(self.fn, name)
+        return variables.ConstantVariable.create(result)
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -495,7 +509,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         codegen.load_import_from(__name__, "_create_nested_fn")
         codegen(self.code)
         codegen.extend_output([codegen._create_load_const(self.f_globals)])
-        codegen(self.fn_name)
+        codegen(ConstantVariable.create(self.code.value.co_name))
 
         if self.defaults:
             codegen(self.defaults)

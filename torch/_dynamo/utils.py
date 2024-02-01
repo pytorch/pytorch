@@ -28,6 +28,7 @@ import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
 from pathlib import Path
+from types import MethodWrapperType
 from typing import (
     Any,
     Callable,
@@ -517,8 +518,16 @@ def is_numpy_float_type(value):
     )
 
 
+def is_function_or_wrapper(value):
+    return (
+        is_function(value)
+        or isinstance(value, functools._lru_cache_wrapper)
+        and is_function(inspect.getattr_static(value, "__wrapped__"))
+    )
+
+
 def is_function(value):
-    return istype(
+    return isinstance(
         value,
         (
             types.FunctionType,
@@ -527,6 +536,12 @@ def is_function(value):
             types.WrapperDescriptorType,
         ),
     )
+
+
+def unwrap_if_wrapper(value):
+    if isinstance(value, functools._lru_cache_wrapper):
+        value = inspect.getattr_static(value, "__wrapped__")
+    return value
 
 
 def is_numpy_ndarray(value):
@@ -758,7 +773,7 @@ def preserve_rng_state():
         with torch.utils._python_dispatch._disable_current_modes():
             torch.random.set_rng_state(rng_state)
             if torch.cuda.is_available():
-                torch.cuda.set_rng_state(cuda_rng_state)
+                torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
 
 
 def is_jit_model(model0):
@@ -877,7 +892,7 @@ def timed(model, example_inputs, times=1):
         result = model(*example_inputs)
         synchronize()
     t1 = time.perf_counter()
-    return result, t1 - t0
+    return result, t1 - t0  # type: ignore[possibly-undefined]
 
 
 def check_is_cuda(gm, example_inputs):
@@ -897,10 +912,12 @@ def rot_n_helper(n):
 common_constant_types = {
     int,
     float,
+    complex,
     bool,
     str,
     bytes,
     type(None),
+    Ellipsis.__class__,
     types.CodeType,
     torch.device,
     torch.dtype,
@@ -1062,11 +1079,13 @@ def iter_contains(items, search, tx, check_tensor_identity=False):
     return found
 
 
-def tensor_or_module_to_id(value):
-    return [
-        id(k) if isinstance(k, (torch.Tensor, torch.nn.Module)) else k
-        for k in value.keys()
-    ]
+def key_is_id(k):
+    """Returns whether it indexes dictionaries using its id"""
+    return isinstance(k, (torch.Tensor, torch.nn.Module, MethodWrapperType))
+
+
+def key_to_id(value):
+    return [id(k) if key_is_id(k) else k for k in value.keys()]
 
 
 def const_repr(x, *, local) -> str:
@@ -1107,8 +1126,7 @@ def dict_keys_repr(const_keys, *, local) -> str:
     return "[" + keys_str + "]"
 
 
-def global_key_name(key):
-    return f"__dict_key_{id(key)}"
+GLOBAL_KEY_PREFIX = "__dict_key"
 
 
 from torch._subclasses import (  # noqa: F401
@@ -1605,8 +1623,17 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         elif isinstance(
             cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
         ):
+            op = cause.func
+            import_suggestion = ""
+            if isinstance(op, torch._ops.OpOverload):
+                maybe_pystub = torch._C._dispatch_pystub(
+                    op._schema.name, op._schema.overload_name
+                )
+                if maybe_pystub is not None:
+                    module, ctx = maybe_pystub
+                    import_suggestion = f"you may need to `import {module}` ({ctx}) for support, otherwise "
             unimplemented(
-                f"unsupported operator: {cause.func} (see "
+                f"unsupported operator: {cause.func} ({import_suggestion}see "
                 "https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0"
                 " for how to fix)"
             )
@@ -2039,18 +2066,18 @@ def defake(x):
     size: "torch._prims_common.ShapeType"
     stride: "torch._prims_common.StrideType"
     if x._has_symbolic_sizes_strides:
-        size = [
-            s.node.shape_env.size_hint(s.node.expr)
-            if isinstance(s, torch.SymInt)
-            else s
-            for s in x.size()
-        ]
-        stride = [
-            s.node.shape_env.size_hint(s.node.expr)
-            if isinstance(s, torch.SymInt)
-            else s
-            for s in x.stride()
-        ]
+        size = []
+        for s in x.size():
+            if isinstance(s, torch.SymInt):
+                size.append(s.node.shape_env.size_hint(s.node.expr))
+            else:
+                size.append(s)
+        stride = []
+        for s in x.stride():
+            if isinstance(s, torch.SymInt):
+                stride.append(s.node.shape_env.size_hint(s.node.expr))
+            else:
+                stride.append(s)
     else:
         size = x.size()
         stride = x.stride()
