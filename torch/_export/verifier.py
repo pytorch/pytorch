@@ -82,6 +82,15 @@ class _VerifierMeta(type):
         metacls._registry[attrs["dialect"]] = ret  # type: ignore[assignment]
         return ret
 
+def getattr_recursive(obj: Any, target: str) -> Any:
+    target_atoms = target.split('.')
+    attr_itr = obj
+    for i, atom in enumerate(target_atoms):
+        if not hasattr(attr_itr, atom):
+            raise RuntimeError(f"Node referenced nonexistent target {'.'.join(target_atoms[:i])}")
+        attr_itr = getattr(attr_itr, atom)
+    return attr_itr
+
 
 class Verifier(metaclass=_VerifierMeta):
     dialect = "ATEN"
@@ -204,7 +213,7 @@ class Verifier(metaclass=_VerifierMeta):
                             f"Expected get_attr target to be string, but got {type(node.target)}"
                         )
 
-                    attr = getattr(mod, node.target)
+                    attr = getattr_recursive(mod, node.target)
                     if isinstance(attr, torch.nn.Module):
                         def _is_type(name, ty):
                             return isinstance(getattr(attr, name, None), ty)
