@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import contextlib
 import functools
 import inspect
@@ -55,7 +57,12 @@ from .lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
-from .tensor import FakeItemVariable, SymNodeVariable, UnspecializedPythonVariable
+from .tensor import (
+    FakeItemVariable,
+    SymNodeVariable,
+    TensorVariable,
+    UnspecializedPythonVariable,
+)
 from .user_defined import UserDefinedVariable
 
 log = logging.getLogger(__name__)
@@ -844,6 +851,13 @@ class BuiltinVariable(VariableTracker):
         )
         return abs_method.call_function(tx, [], {})
 
+    def call_pos(self, tx, arg: "VariableTracker"):
+        # Call arg.__pos__()
+        pos_method = BuiltinVariable(getattr).call_function(
+            tx, [arg, ConstantVariable.create("__pos__")], {}
+        )
+        return pos_method.call_function(tx, [], {})
+
     def call_round(self, tx, arg, *args, **kwargs):
         # Call arg.__round__()
         round_method = BuiltinVariable(getattr).call_function(
@@ -920,6 +934,10 @@ class BuiltinVariable(VariableTracker):
             arg, (variables.UserDefinedClassVariable, BaseUserFunctionVariable)
         ):
             return variables.ConstantVariable.create(True)
+        elif isinstance(arg, UserDefinedVariable):
+            return variables.ConstantVariable.create(callable(arg.value))
+        elif isinstance(arg, (ConstantVariable, SymNodeVariable, TensorVariable)):
+            return variables.ConstantVariable.create(False)
 
     def call_cast(self, _, *args, **kwargs):
         if len(args) == 2:
@@ -1297,8 +1315,6 @@ class BuiltinVariable(VariableTracker):
             if is_utils_checkpoint(member):
                 options["source"] = source
                 return build_checkpoint_variable(**options)
-            elif trace_rules.lookup(member) is not None:
-                return trace_rules.lookup(member)(member, **options)
             elif source is not None:
                 return VariableBuilder(tx, source)(member)
             else:
