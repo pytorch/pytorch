@@ -27,8 +27,6 @@ from torch._decomp import decompositions
 _NEW_OP_NAMESPACE: str = "onnx_export"
 """The namespace for the custom operator."""
 
-import torch
-
 
 class DecompSkip(abc.ABC):
     op_callable: Callable
