@@ -3,7 +3,15 @@
 #include <torch/csrc/utils/python_compat.h>
 
 #ifdef __cplusplus
+
+#include <pybind11/pybind11.h>
+#include <torch/csrc/utils/pybind.h>
+#include <list>
+
+namespace py = pybind11;
+
 extern "C" {
+
 #endif
 
 // Flag to just run a frame normally
@@ -12,27 +20,38 @@ extern "C" {
 // Points to the extra scratch space on the code object
 extern Py_ssize_t extra_index;
 
+// function to call when cache lookup errors
+extern PyObject* guard_error_hook;
+
 typedef PyObject FrameState;
-typedef struct cache_entry CacheEntry;
+typedef struct CacheEntry CacheEntry;
 
 // ExtraState encasulates CacheEntry and FrameState. ExtraState is the highest
 // level of abstraction of what is stored on the extra code object. Previously,
 // we saved different parts on different extra indexes.  We prefer this way
 // because of cleaner abstraction and faster SetExtra access.
 
-// TODO(anijain2305) - Consider making this a PyObject. Benefits are
-//   1) Modular dealloc - destroy_extra_state just becomes Py_DECREF(extra)
-//   2) We can directly send the extra object to convert_frame callback. One
-//   data structure - easier to understand code.
-// There might be some perf impact of going through a PyObject on the critical
-// path, but it should not be too bad.
-typedef struct {
-  // Cache entry for the code object
-  CacheEntry* cache_entry;
+#ifdef __cplusplus
+
+#pragma GCC visibility push(hidden)
+
+typedef struct ExtraState {
+  // List of cache entries for compiled code objects
+  std::list<CacheEntry> cache_entry_list;
   // Frame state to detect dynamic shape dims
-  FrameState* frame_state;
+  py::dict frame_state;
+
+  CacheEntry* get_first_entry();
+  void move_to_front(CacheEntry* cache_entry);
 } ExtraState;
 
+#pragma GCC visibility pop
+
+#else
+
+typedef struct ExtraState ExtraState;
+
+#endif
 
 // Helper to extra the cache_entry from the extra state.
 // Ownership contract
@@ -101,9 +120,29 @@ void set_extra_state(PyCodeObject* code, ExtraState* extra_state);
 // the final owner of these references.
 ExtraState* init_and_set_extra_state(PyCodeObject* code);
 
-// get the cache entry out of a code object
-PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args);
+// Lookup the cache held by extra_state.
+// Ownership contract
+// args
+//  - extra_state: Borrowed
+//  - f_locals: Borrowed
+// return:
+//   - Py_None or PyCodeObject: Borrowed reference.
+PyObject* lookup(ExtraState* extra_state, PyObject* f_locals);
+
+// Create a new cache entry at extra_state holding on to guarded_code.
+// Ownership contract
+// args
+//  - extra_state: Borrowed
+//  - guarded_code: Borrowed
+// return:
+//  - cache_entry: Borrowed reference
+CacheEntry* create_cache_entry(ExtraState* extra_state, PyObject* guraded_code);
 
 #ifdef __cplusplus
+
+// Returns the list of CacheEntry corresponding to code_obj.
+std::list<CacheEntry> _debug_get_cache_entry_list(const py::handle& code_obj);
+
 } // extern "C"
+
 #endif

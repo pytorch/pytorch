@@ -747,6 +747,7 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/optim/schedulers/step_lr.cpp",
     "torch/csrc/api/src/serialize/input-archive.cpp",
     "torch/csrc/api/src/serialize/output-archive.cpp",
+    "torch/csrc/api/src/xpu.cpp",
 ]
 
 libtorch_python_cuda_core_sources = [
@@ -765,6 +766,10 @@ libtorch_python_cuda_sources = libtorch_python_cuda_core_sources + [
     "torch/csrc/cuda/python_nccl.cpp",
     "torch/csrc/cuda/shared/cudnn.cpp",
     "torch/csrc/cuda/Tensor.cpp",
+]
+
+libtorch_python_xpu_sources = [
+    "torch/csrc/xpu/Module.cpp",
 ]
 
 libtorch_python_core_sources = [

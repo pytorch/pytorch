@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdio.h>
+
 #ifdef _WIN32
 #define unlikely(x) (x)
 #else

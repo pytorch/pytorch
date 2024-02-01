@@ -450,6 +450,40 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         else:
             return x - 1
 
+    def test_callable_class(self):
+        class CallableClass:
+            def __call__():
+                pass
+
+        class NotCallableClass:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn1(x, arg):
+            if callable(arg):
+                return x
+            return x + 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn2(x, arg):
+            if callable(arg):
+                return x * 2
+            return x + 1
+
+        input = torch.randn(4)
+
+        for f in [fn1, fn2]:
+            self.assertEqual(f(input, NotCallableClass()), input + 1)
+            self.assertEqual(
+                f(input, CallableClass()), input if f is fn1 else input * 2
+            )
+
+            # passing tensor and scalars
+            self.assertEqual(f(input, 1), input + 1)
+            self.assertEqual(f(input, 1.1), input + 1)
+            self.assertEqual(f(input, True), input + 1)
+            self.assertEqual(f(input, input), input + 1)
+
     @make_test
     def test_len_constant_misc_iterables(x):
         a = len((1, 2, 3))
@@ -537,6 +571,15 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_device(x):
         if not x.is_cuda:
             return x + 1
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @make_test
+    def test_get_device_properties_tensor_device(a):
+        x = a.to("cuda")
+        prop = torch.cuda.get_device_properties(x.device)
+        if prop.major == 8:
+            return x + prop.multi_processor_count
+        return x + prop.max_threads_per_multi_processor
 
     @make_test
     def test_tensor_type(a, b):
@@ -729,6 +772,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         tmp["c"] = v + tmp["d"]
         if "c" in tmp and "missing" not in tmp:
             return tmp["c"] - tmp["a"] + len(tmp)
+
+    @make_test
+    def test_inline_jit__unwrap_optional(x):
+        if torch.jit._unwrap_optional(x) is None:
+            return torch.ones(2, 2)
+        return x.sin()
 
     def test_dict_param_keys(self):
         a_param = torch.nn.Parameter(torch.ones([4, 4]))
@@ -1728,7 +1777,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_pos(self):
         def fn(x, y):
-            return operator.pos(x) * operator.pos(y)
+            return operator.pos(x) * +y
 
         opt_fn = torch.compile(fullgraph=True, dynamic=True)(fn)
 
@@ -1742,6 +1791,23 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         test(True, False)
         test(torch.ones(4, dtype=torch.float32), 1.1)
 
+    def test_truth(self):
+        def fn(x, y):
+            return operator.truth(x) and bool(y)
+
+        opt_fn = torch.compile(fullgraph=True, dynamic=False)(fn)
+
+        def test(x, y):
+            self.assertEqual(opt_fn(x, y), fn(x, y))
+
+        test(1, 100)
+        test(-1.1, True)
+        test(-1.1, 1.1)
+        test(True, False)
+        test(torch.ones(1), 1)
+        test(torch.zeros(1), 1)
+        test(torch.ones(1), torch.ones(1))
+
     def test_unary_fold_op(self):
         for op in (operator.abs, abs, operator.neg, operator.pos, operator.truth):
             with self.subTest(op=op):
@@ -1752,6 +1818,35 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
                 opt_fn = torch._dynamo.optimize(nopython=True)(fn)
                 self.assertEqual(opt_fn(), fn())
+
+    def test_elipsis(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(a, ind, val):
+            a[ind] = val
+            return a
+
+        arr = np.zeros(4)
+        self.assertEqual(fn(arr, np.s_[...], np.ones(4)), np.ones(4))
+
+        arr = np.array([[1, 1], [2, 2]])
+        self.assertEqual(
+            fn(arr, np.s_[0, ...], np.zeros(2)), np.array([[0, 0], [2, 2]])
+        )
+
+        arr = np.array([[1, 1], [2, 2]])
+        self.assertEqual(
+            fn(arr, np.s_[1, ...], np.zeros(2)), np.array([[1, 1], [0, 0]])
+        )
+
+        arr = np.array([[1, 1], [2, 2]])
+        self.assertEqual(
+            fn(arr, np.s_[..., 0], np.array([3, 3])), np.array([[3, 1], [3, 2]])
+        )
+
+        arr = np.array([[1, 1], [2, 2]])
+        self.assertEqual(
+            fn(arr, np.s_[..., 1], np.array([3, 3])), np.array([[1, 3], [2, 3]])
+        )
 
 
 def udf_mul(x, y):
@@ -2039,6 +2134,21 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x, y), fn_opt(x, y))
         self.assertEqual(fn(x, x), fn_opt(x, x))
 
+    def test_is_not_tensor_tensor(self):
+        def fn(x, y):
+            if x is not y:
+                return x * 2
+            else:
+                return x + y
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        x = torch.zeros(2)
+        y = torch.ones(2)
+
+        self.assertEqual(fn(x, y), fn_opt(x, y))
+        self.assertEqual(fn(x, x), fn_opt(x, x))
+
     def test_is_mutated_tensor_tensor(self):
         def fn(x):
             y = x.add_(1)
@@ -2178,6 +2288,26 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         # Test aliased
         self.assertEqual(opt_fn(param, param), fn(param, param))
         self.assertEqual(cnts.frame_count, 2)  # Recompiles
+
+    def test_reconstructed_name(self):
+        lst = []
+
+        @torch._dynamo.disable
+        def disallowed(g):
+            lst.append(g.__name__)
+
+        def f():
+            def g():
+                return ()
+
+            disallowed(g)
+
+        f_opt = torch._dynamo
+        opt_f = torch._dynamo.optimize(backend="eager")(f)
+        opt_f()
+        f()
+        self.assertEqual(len(lst), 2)
+        self.assertEqual(lst[0], lst[1])
 
     @unittest.skipIf(
         sys.version_info < (3, 10),

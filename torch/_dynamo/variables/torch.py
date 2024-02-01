@@ -1,4 +1,5 @@
-import functools
+# mypy: ignore-errors
+
 import inspect
 import logging
 
@@ -33,6 +34,7 @@ from ..utils import (
     hashable,
     product,
     proxy_args_kwargs,
+    unwrap_if_wrapper,
 )
 from .base import VariableTracker
 from .ctx_manager import (
@@ -58,6 +60,7 @@ supported_ctx_manager_classes = {
     torch.autograd.grad_mode.inference_mode,
     torch.autograd.grad_mode.no_grad,
     torch.autograd.grad_mode.set_grad_enabled,
+    torch.autograd.graph.disable_saved_tensors_hooks,
     torch.cpu.amp.autocast_mode.autocast,
     torch.cuda.amp.autocast_mode.autocast,
 }
@@ -72,6 +75,7 @@ constant_fold_functions = [
     torch._assert,
     torch._utils._get_device_index,
     torch._C._get_cublas_allow_tf32,
+    torch.cuda.get_device_properties,
     torch.cuda.is_available,
     torch.distributed.is_available,
     torch.get_autocast_gpu_dtype,
@@ -159,8 +163,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
     @staticmethod
     def is_matching_cls(value):
         # Unwrap if it's a functools.lru_cache wrapper
-        if isinstance(value, functools._lru_cache_wrapper):
-            value = value.__wrapped__
+        value = unwrap_if_wrapper(value)
         # We can't do isinstance(value, type) check because some ctx managers
         # are implemented as a function decorated by contextlib.contextmanager,
         # E.g., torch._functorch.vmap.vmap_increment_nesting.
@@ -170,6 +173,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from . import (
+            DisabledSavedTensorsHooksVariable,
             GradModeVariable,
             InferenceModeVariable,
             StreamVariable,
@@ -196,7 +200,9 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 tx, args[0].as_python_constant(), initialized=True
             )
         elif self.value is torch.inference_mode:
-            return InferenceModeVariable.create(tx, args[0].as_python_constant())
+            assert len(args) <= 1 and len(kwargs) == 0
+            inf_mode = args[0].as_python_constant() if len(args) == 1 else True
+            return InferenceModeVariable.create(tx, inf_mode)
         elif inspect.isclass(self.value) and issubclass(self.value, _StreamBase):
             from torch._dynamo.variables.builder import wrap_fx_proxy_cls
 
@@ -233,6 +239,11 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 tx,
                 [guard_if_dyn(x) for x in args],
             )
+        elif self.value is torch.autograd.graph.disable_saved_tensors_hooks:
+            assert len(args) == 1
+            return DisabledSavedTensorsHooksVariable.create(
+                tx, args[0].as_python_constant()
+            )
 
 
 class TorchInGraphFunctionVariable(BaseTorchVariable):
@@ -247,7 +258,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         from . import (
             ConstantVariable,
             DeterministicAlgorithmsVariable,
-            DisabledSavedTensorsHooksVariable,
             GradModeVariable,
             SDPAParamsVariable,
             StreamContextVariable,
@@ -357,11 +367,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             assert not (args or kwargs)
             install_guard(DeterministicAlgorithmsVariable._guards_singleton)
             return ConstantVariable.create(torch.are_deterministic_algorithms_enabled())
-        elif self.value is torch.autograd.graph.disable_saved_tensors_hooks:
-            assert len(args) == 1
-            return DisabledSavedTensorsHooksVariable.create(
-                tx, args[0].as_python_constant()
-            )
         elif self.value is torch._C._is_torch_function_enabled:
             assert not (args or kwargs)
             install_guard(TorchFunctionDisableVariable._guards_singleton)

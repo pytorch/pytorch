@@ -5,18 +5,42 @@
 
 Py_ssize_t extra_index = -1;
 
+CacheEntry* ExtraState::get_first_entry() {
+  if (this->cache_entry_list.empty()) {
+    return NULL;
+  }
+  return &this->cache_entry_list.front();
+}
+
+void ExtraState::move_to_front(CacheEntry* cache_entry) {
+  CHECK(cache_entry->_owner == this);
+  CHECK(!this->cache_entry_list.empty());
+  CHECK(cache_entry == &*cache_entry->_owner_loc);
+  if (cache_entry == &cache_entry->_owner->cache_entry_list.front()) {
+    // already at front
+    return;
+  }
+  auto old_iter = cache_entry->_owner_loc;
+  // moving doesn't seem to work
+  this->cache_entry_list.emplace_front(*cache_entry);
+  auto new_iter = this->cache_entry_list.begin();
+  this->cache_entry_list.erase(old_iter);
+  new_iter->_owner = this;
+  new_iter->_owner_loc = new_iter;
+}
+
 CacheEntry* extract_cache_entry(ExtraState* extra_state) {
   if (extra_state == NULL || extra_state == SKIP_CODE) {
     return NULL;
   }
-  return extra_state->cache_entry;
+  return extra_state->get_first_entry();
 }
 
 FrameState* extract_frame_state(ExtraState* extra_state) {
   if (extra_state == NULL || extra_state == SKIP_CODE) {
     return NULL;
   }
-  return extra_state->frame_state;
+  return (FrameState*)extra_state->frame_state.ptr();
 }
 
 ExtraState* get_extra_state(PyCodeObject* code) {
@@ -28,51 +52,79 @@ ExtraState* get_extra_state(PyCodeObject* code) {
 void destroy_extra_state(void* obj) {
   ExtraState* extra = (ExtraState*)obj;
   if (extra != NULL && extra != SKIP_CODE) {
-    // Cpython gc will call cache_entry_dealloc on its own when the ref count
-    // goes to 0.
-    Py_XDECREF(extra->cache_entry);
-    Py_XDECREF(extra->frame_state);
-    free(extra);
+    delete extra;
   }
 }
 
 void set_extra_state(PyCodeObject* code, ExtraState* extra_state) {
   ExtraState* old_extra_state = get_extra_state(code);
-  CHECK(old_extra_state == NULL || old_extra_state == SKIP_CODE || old_extra_state != extra_state);
+  CHECK(
+      old_extra_state == NULL || old_extra_state == SKIP_CODE ||
+      old_extra_state != extra_state);
   _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
 }
 
 ExtraState* init_and_set_extra_state(PyCodeObject* code) {
-  // Invariant - Extra state should not have been set before, therefore it should be NULL.
+  // Invariant - Extra state should not have been set before, therefore it
+  // should be NULL.
   CHECK(get_extra_state(code) == NULL);
-  ExtraState* extra_state = (ExtraState*)malloc(sizeof(ExtraState));
-  DEBUG_NULL_CHECK(extra_state);
-  // We set the last node in the linked list to Py_None. We incref the Py_None
-  // here, the corresponding decref is in cache_entry_dealloc.
-  Py_INCREF(Py_None);
-  extra_state->cache_entry = (CacheEntry*)Py_None;
-  extra_state->frame_state = PyDict_New();
+  ExtraState* extra_state = new ExtraState();
+  NULL_CHECK(extra_state);
   set_extra_state(code, extra_state);
   return extra_state;
 }
 
-PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
-  PyObject* object = NULL;
-  if (!PyArg_ParseTuple(args, "O", &object)) {
-    return NULL;
+PyObject* lookup(ExtraState* extra_state, PyObject* f_locals) {
+  size_t index = 0;
+  CacheEntry* found = nullptr;
+  py::handle locals(f_locals);
+  for (CacheEntry& cache_entry : extra_state->cache_entry_list) {
+    py::object valid = py::none();
+    try {
+      valid = cache_entry.check_fn(locals);
+    } catch (...) {
+      if (guard_error_hook) {
+        py::handle guard_error_hook_handle(guard_error_hook);
+        guard_error_hook_handle(
+            cache_entry.check_fn,
+            cache_entry.code,
+            locals,
+            index,
+            index == extra_state->cache_entry_list.size() - 1);
+      }
+      throw;
+    }
+    if (valid.cast<bool>()) {
+      found = &cache_entry;
+      break;
+    }
+    ++index;
   }
-  if (!PyCode_Check(object)) {
-    PyErr_SetString(PyExc_TypeError, "expected a code object!");
-    return NULL;
+  if (found) {
+    extra_state->move_to_front(found);
+    return found->code.ptr();
   }
-  PyCodeObject* code = (PyCodeObject*)object;
+  return py::none().ptr();
+}
 
-  ExtraState* extra = get_extra_state(code);
-  CacheEntry* current_node = extract_cache_entry(extra);
-  if (current_node == NULL)
-  {
-    Py_RETURN_NONE;
+CacheEntry* create_cache_entry(
+    ExtraState* extra_state,
+    PyObject* guarded_code) {
+  extra_state->cache_entry_list.emplace_front(guarded_code);
+  auto new_iter = extra_state->cache_entry_list.begin();
+  new_iter->_owner = extra_state;
+  new_iter->_owner_loc = new_iter;
+  return &*new_iter;
+}
+
+std::list<CacheEntry> _debug_get_cache_entry_list(const py::handle& code_obj) {
+  if (!py::isinstance(code_obj, py::module::import("types").attr("CodeType"))) {
+    throw py::type_error("expected a code object!");
   }
-  Py_INCREF(current_node);
-  return (PyObject*)current_node;
+  PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
+  ExtraState* extra = get_extra_state(code);
+  if (!extra) {
+    return {};
+  }
+  return extra->cache_entry_list;
 }
