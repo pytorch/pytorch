@@ -130,3 +130,12 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 # torch.export
 /torch/export/ @avikchaudhuri @gmagogsfm @tugsbayasgalan @zhxchen17
 /torch/_export/ @avikchaudhuri @gmagogsfm @tugsbayasgalan @zhxchen17
+
+# serialization-related files
+/aten/src/ATen/MapAllocator* @mikaylagawarecki
+/caffe2/serialize/ @mikaylagawarecki
+/torch/serialization.py @mikaylagawarecki
+/torch/storage.py @mikaylagawarecki
+/torch/csrc/Storage* @mikaylagawarecki
+# subscribing for PyTorchFileWriter/PyTorchFileReader changes
+/torch/csrc/jit/python/init.cpp @mikaylagawarecki
