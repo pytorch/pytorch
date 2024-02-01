@@ -39,7 +39,7 @@ class AutoFunctionalized(HigherOrderOperator):
     This HOP runs a "functional" version of _mutable_op.
 
     Concretely, it clones kwargs that `_mutable_op` mutates (specified by
-    _mutated_args_names), runs `out = _nonfunction_op(**kwargs)` with the cloned
+    _mutated_args_names), runs `out = _mutable_op(**kwargs)` with the cloned
     values, and then returns (out, Tuple of the cloned values that were
     mutated).
 
@@ -47,7 +47,7 @@ class AutoFunctionalized(HigherOrderOperator):
     See `can_auto_functionalize` for the restrictions. We can likely lift
     many of these if users request it.
 
-    The reason why _nonfunction_op and _mutated_args_names are prefixed with an
+    The reason why _mutable_op and _mutated_args_names are prefixed with an
     underscore is to prevent collisions with kwarg names in **kwargs.
     """
 
