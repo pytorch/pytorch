@@ -53,10 +53,10 @@ class FSDPState(_State):
         _insert_module_state(module, self)
         self._module = module
         self._device = device
-        self._pre_forward_hook_handle = self._module.register_forward_pre_hook(
+        self._pre_forward_hook_handle = module.register_forward_pre_hook(
             self._pre_forward, prepend=True, with_kwargs=True
         )
-        self._post_forward_hook_handle = self._module.register_forward_hook(
+        self._post_forward_hook_handle = module.register_forward_hook(
             self._post_forward, prepend=False
         )
 
