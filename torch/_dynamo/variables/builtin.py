@@ -1057,7 +1057,7 @@ class BuiltinVariable(VariableTracker):
             arg_type = arg.python_type()
         except NotImplementedError:
             unimplemented(
-                "isinstance({arg}, {isinstance_type}): can't determine type of {arg}"
+                f"isinstance({arg}, {isinstance_type}): can't determine type of {arg}"
             )
 
         isinstance_type = isinstance_type.as_python_constant()
