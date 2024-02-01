@@ -4,20 +4,17 @@
 # if updates are needed in torch/csrc/autograd/autograd_not_implemented_fallback.cpp
 # The fallback is expected to mimic this codegen, so we should keep the two in sync.
 
-from typing import List
+from typing import List, Tuple
 
+import torchgen.api.dispatcher as dispatcher
 from torchgen.api.autograd import NativeFunctionWithDifferentiabilityInfo
+from torchgen.api.translate import translate
 from torchgen.api.types import (
     BaseCType,
     Binding,
-    intArrayRefT,
-    longT,
     NamedCType,
-    OptionalCType,
-    optionalIntArrayRefT,
-    optionalSymIntArrayRefT,
-    symIntArrayRefT,
     SymIntT,
+    tensorT,
     VectorCType,
 )
 from torchgen.code_template import CodeTemplate
@@ -43,9 +40,9 @@ struct TORCH_API ${op} : public ${superclass} {
   ${op}(${constructor_args}) ${initializer_list}
   {};
   virtual ~${op}() override {};
-  virtual std::vector<c10::SymInt> get_symints() override;
+  virtual std::vector<c10::SymInt> get_symints() const override;
   virtual void set_symints(const std::vector<c10::SymInt>&) override;
-  virtual std::vector<at::Tensor> get_tensors() override;
+  virtual std::vector<at::Tensor> get_tensors() const override;
   virtual void set_tensors(const std::vector<at::Tensor>&) override;
   virtual at::Tensor operator()(const at::Tensor&) override;
   ${state}
@@ -55,23 +52,19 @@ struct TORCH_API ${op} : public ${superclass} {
 
 FUNCTION_DEFINITION = CodeTemplate(
     """\
-std::vector<c10::SymInt> ${op}::get_symints() {
-  std::vector<c10::SymInt> ${symints_vec};
+std::vector<c10::SymInt> ${op}::get_symints() const {
   ${get_symints}
-  return ${symints_vec};
 }
 
-void ${op}::set_symints(const std::vector<c10::SymInt>& symints) {
-  TORCH_INTERNAL_ASSERT(symints.size() == static_cast<size_t>(${num_symints}));
+void ${op}::set_symints(const std::vector<c10::SymInt>& ${symints_vec}) {
   ${set_symints}
 }
 
-std::vector<at::Tensor> ${op}::get_tensors() {
-  return {${tensor_list}};
+std::vector<at::Tensor> ${op}::get_tensors() const {
+  ${get_tensors}
 }
 
-void ${op}::set_tensors(const std::vector<at::Tensor>& tensors) {
-  TORCH_INTERNAL_ASSERT(tensors.size() == static_cast<size_t>(${num_tensors}));
+void ${op}::set_tensors(const std::vector<at::Tensor>& ${tensors_vec}) {
   ${set_tensors}
 }
 
@@ -106,40 +99,10 @@ def is_symint_or_tensor(arg: Argument) -> bool:
     return arg.type.is_tensor_like() or arg.type.is_symint_like()
 
 
-def maybe_convert_ref_to_value_type(nctype: NamedCType) -> NamedCType:
-    nctype = nctype.remove_const_ref()
-    arg_type = nctype.type
-    arg_name = nctype.name
-
-    val_type = arg_type
-    if arg_type == BaseCType(intArrayRefT):
-        val_type = VectorCType(BaseCType(longT))
-    elif arg_type == BaseCType(symIntArrayRefT):
-        val_type = VectorCType(BaseCType(SymIntT))
-    elif arg_type == BaseCType(optionalIntArrayRefT) or arg_type == OptionalCType(
-        BaseCType(intArrayRefT)
-    ):
-        val_type = OptionalCType(VectorCType(BaseCType(longT)))
-    elif arg_type == BaseCType(optionalSymIntArrayRefT) or arg_type == OptionalCType(
-        BaseCType(symIntArrayRefT)
-    ):
-        val_type = OptionalCType(VectorCType(BaseCType(SymIntT)))
-
-    return NamedCType(name=arg_name, type=val_type)
-
-
-def maybe_convert_ref_to_value_name(nctype: NamedCType, name: str) -> str:
-    val_name = name
-    arg_type = nctype.type
-    if arg_type == BaseCType(intArrayRefT) or arg_type == BaseCType(symIntArrayRefT):
-        val_name += ".vec()"
-    return val_name
-
-
-def get_value_type_binding(binding: Binding) -> Binding:
+def remove_const_ref(binding: Binding) -> Binding:
     return Binding(
         name=binding.name,
-        nctype=maybe_convert_ref_to_value_type(binding.nctype),
+        nctype=binding.nctype.remove_const_ref(),
         argument=binding.argument,
         default=binding.default,
     )
@@ -153,21 +116,99 @@ def returns_multi_tensor(fn: NativeFunction) -> bool:
     return returns_list_like and returns_tensor_like
 
 
+# Generates strings with logic for getting / setting state of a particular type.
+#
+# Args:
+#   bindings (list): List of state bindings of interest (may be empty)
+#   state_vec_type (NamedCType): Type of vector to either return or copy from
+#
+# Returns:
+#   tuple: (list of getter logic strings, list of setter logic strings)
+def generate_state_getter_setter(
+    bindings: List[Binding],
+    state_vec_type: NamedCType,
+) -> Tuple[List[str], List[str]]:
+    getter_logic = []
+    setter_logic = []
+
+    state_vec = state_vec_type.name
+    getter_logic.append(f"{state_vec_type.cpp_type()} {state_vec};")
+    if len(bindings) > 0:
+        setter_logic.append("auto i = 0;")
+
+    num_exprs = []
+    for i, b in enumerate(bindings):
+        assert isinstance(b.argument, Argument)
+        if b.argument.type.is_list_like():
+            # Handle list-likes.
+            num_expr = f"{b.name}.size()"
+            num_exprs.append(num_expr)
+            getter = f"{state_vec}.insert({state_vec}.end(), {b.name}.begin(), {b.name}.end());"
+            setter = f"std::copy({state_vec}.begin() + i, {state_vec}.begin() + i + {b.name}.size(), {b.name}.begin());"
+        elif isinstance(b.argument.type, OptionalType):
+            # Handle optionals.
+            num_expr = f"({b.name}.has_value() ? 1 : 0)"
+            num_exprs.append(num_expr)
+            conditional = f"if({b.name}.has_value())"
+            getter = (
+                f"{conditional} {state_vec}.insert({state_vec}.end(), *({b.name}));"
+            )
+            setter = f"{conditional} {b.name} = {state_vec}[i];"
+        else:
+            num_expr = "1"
+            num_exprs.append(num_expr)
+            getter = f"{state_vec}.push_back({b.name});"
+            setter = f"{b.name} = {state_vec}[i];"
+
+        getter_logic.append(getter)
+        setter_logic.append(setter)
+        if i < len(bindings) - 1:
+            setter_logic.append(f"i += {num_expr};")
+
+    # Reserve / assert based on the total number of items expression.
+    num_items = "0" if len(num_exprs) == 0 else " + ".join(num_exprs)
+    if len(bindings) > 0:
+        getter_logic.insert(1, f"{state_vec}.reserve({num_items});")
+        setter_logic.insert(
+            0,
+            f"TORCH_INTERNAL_ASSERT({state_vec}.size() == static_cast<size_t>({num_items}));",
+        )
+
+    getter_logic.append(f"return {state_vec};")
+
+    return getter_logic, setter_logic
+
+
 def process_function(fn: NativeFunction, template: CodeTemplate) -> str:
     bindings = extract_bindings(fn)
     non_self_bindings = [b for b in bindings if b.name != "self"]
 
-    constructor_args = [b.defn() for b in non_self_bindings]
-    state_variables = [
-        f"{get_value_type_binding(b).defn()};" for b in non_self_bindings
+    non_self_args = fn.func.arguments.flat_all[1:]
+    non_self_value_bindings = [
+        dispatcher.argument(a, remove_non_owning_ref_types=True) for a in non_self_args
     ]
+
+    # Generate constructor args for the generated struct.
+    constructor_args = [b.defn() for b in non_self_bindings]
+
+    # Generate state variable declarations for the generated struct.
+    state_variables = [
+        f"{remove_const_ref(b).defn()};" for b in non_self_value_bindings
+    ]
+
+    # Generate initializer list expressions for the generated struct.
+    # allow_expensive_conversions=True because we need to store e.g. SymIntArrayRefs as
+    # vector<SymInt>s.
+    init_exprs = translate(
+        non_self_bindings, non_self_value_bindings, allow_expensive_conversions=True
+    )
     initializers = []
-    for b in non_self_bindings:
+    for b, init_expr in zip(non_self_bindings, init_exprs):
         name = b.nctype.name
         assert isinstance(name, str)
-        initializers.append(
-            f"{name}({maybe_convert_ref_to_value_name(b.nctype, name)})"
-        )
+        initializers.append(f"{name}({init_expr.expr})")
+
+    # Generate call to underlying view op
     call_input_name = "input_base"
     op_call_args = [call_input_name, *(b.name for b in non_self_bindings)]
     op_call = CALL_DISPATCH.substitute(
@@ -185,63 +226,30 @@ def process_function(fn: NativeFunction, template: CodeTemplate) -> str:
         initializers.append(f"{view_idx_name}({view_idx_name})")
         op_call += f"[{view_idx_name}]"
 
-    # Handle any symints, which often show up in lists.
+    # Generate initializer list for the generated struct.
+    initializer_list = f": {', '.join(initializers)}" if len(initializers) > 0 else ""
+
+    # Generate getter / setter logic for any symints.
     symint_bindings = [
         b
         for b in non_self_bindings
         if isinstance(b.argument, Argument) and b.argument.type.is_symint_like()
     ]
-    symints_vec = "symints"
-    get_symints = []
-    set_symints = []
+    symints_vec_type = NamedCType("symints", VectorCType(BaseCType(SymIntT)))
+    get_symints, set_symints = generate_state_getter_setter(
+        symint_bindings, symints_vec_type
+    )
 
-    if len(symint_bindings) > 0:
-        set_symints.append("auto i = 0;")
-
-    num_exprs = []
-    for i, b in enumerate(symint_bindings):
-        assert isinstance(b.argument, Argument)
-        if b.argument.type.is_list_like():
-            num_expr = f"{b.name}.size()"
-            num_exprs.append(num_expr)
-            get_symint = f"{symints_vec}.insert({symints_vec}.end(), {b.name}.begin(), {b.name}.end());"
-            set_symint = f"std::copy(symints.begin() + i, symints.begin() + i + {b.name}.size(), {b.name}.begin());"
-        elif isinstance(b.argument.type, OptionalType):
-            num_expr = f"({b.name}.has_value() ? 1 : 0)"
-            num_exprs.append(num_expr)
-            conditional = f"if({b.name}.has_value())"
-            get_symint = (
-                f"{conditional} {symints_vec}.insert({symints_vec}.end(), *({b.name}));"
-            )
-            set_symint = f"{conditional} {b.name} = symints[i];"
-        else:
-            num_expr = "1"
-            num_exprs.append(num_expr)
-            get_symint = f"{symints_vec}.push_back({b.name});"
-            set_symint = f"{b.name} = symints[i];"
-
-        get_symints.append(get_symint)
-        set_symints.append(set_symint)
-        if i < len(symint_bindings) - 1:
-            set_symints.append(f"i += {num_expr};")
-
-    num_symints = "0" if len(num_exprs) == 0 else " + ".join(num_exprs)
-    if len(symint_bindings) > 0:
-        get_symints.insert(0, f"{symints_vec}.reserve({num_symints});")
-
-    # Handle any tensors. Assumes no tensor lists, which is currently the case for views.
+    # Generate getter / setter logic for any tensors.
     tensor_bindings = [
         b
         for b in non_self_bindings
         if isinstance(b.argument, Argument) and b.argument.type.is_tensor_like()
     ]
-    tensor_list = [b.name for b in tensor_bindings]
-    set_tensors = []
-    for i, b in enumerate(tensor_bindings):
-        set_tensor = f"{b.name} = tensors[{i}];"
-        set_tensors.append(set_tensor)
-
-    initializer_list = f": {', '.join(initializers)}" if len(initializers) > 0 else ""
+    tensors_vec_type = NamedCType("tensors", VectorCType(BaseCType(tensorT)))
+    get_tensors, set_tensors = generate_state_getter_setter(
+        tensor_bindings, tensors_vec_type
+    )
 
     return template.substitute(
         op=view_func_name(fn),
@@ -250,13 +258,12 @@ def process_function(fn: NativeFunction, template: CodeTemplate) -> str:
         initializer_list=initializer_list,
         state=state_variables,
         constructor_args=constructor_args,
-        symints_vec=symints_vec,
+        symints_vec=symints_vec_type.name,
         get_symints=get_symints,
         set_symints=set_symints,
-        num_symints=num_symints,
-        tensor_list=tensor_list,
+        tensors_vec=tensors_vec_type.name,
+        get_tensors=get_tensors,
         set_tensors=set_tensors,
-        num_tensors=f"{len(set_tensors)}",
         call_input_name=call_input_name,
         op_call=op_call,
     )
