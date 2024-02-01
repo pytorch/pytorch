@@ -322,22 +322,22 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             actual_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_d_dict_keys_getitem_L_d_0_ : torch.Tensor, L_d_dict_keys_getitem_L_d_1_0_ : torch.Tensor, L_d_dict_keys_getitem_L_d_1_1_2_ : torch.Tensor):
-        l_d_dict_keys_getitem_l_d_0_ = L_d_dict_keys_getitem_L_d_0_
-        l_d_dict_keys_getitem_l_d_1_0_ = L_d_dict_keys_getitem_L_d_1_0_
-        l_d_dict_keys_getitem_l_d_1_1_2_ = L_d_dict_keys_getitem_L_d_1_1_2_
+    def forward(self, L_d_list_L_d_keys_0_ : torch.Tensor, L_d_list_L_d_keys_1_0_ : torch.Tensor, L_d_list_L_d_keys_1_1_2_ : torch.Tensor):
+        l_d_list_l_d_keys_0_ = L_d_list_L_d_keys_0_
+        l_d_list_l_d_keys_1_0_ = L_d_list_L_d_keys_1_0_
+        l_d_list_l_d_keys_1_1_2_ = L_d_list_L_d_keys_1_1_2_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_d_dict_keys_getitem_l_d_0_, l_d_dict_keys_getitem_l_d_1_0_, l_d_dict_keys_getitem_l_d_1_1_2_);  wrap_body_0 = l_d_dict_keys_getitem_l_d_0_ = l_d_dict_keys_getitem_l_d_1_0_ = l_d_dict_keys_getitem_l_d_1_1_2_ = None
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_d_list_l_d_keys_0_, l_d_list_l_d_keys_1_0_, l_d_list_l_d_keys_1_1_2_);  wrap_body_0 = l_d_list_l_d_keys_0_ = l_d_list_l_d_keys_1_0_ = l_d_list_l_d_keys_1_1_2_ = None
         getitem = wrap[0];  wrap = None
         return (getitem,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_d_dict_keys_getitem_l_d_0_, l_d_dict_keys_getitem_l_d_1_0_, l_d_dict_keys_getitem_l_d_1_1_2_):
-            sin = l_d_dict_keys_getitem_l_d_0_.sin();  l_d_dict_keys_getitem_l_d_0_ = None
-            cos = l_d_dict_keys_getitem_l_d_1_0_.cos();  l_d_dict_keys_getitem_l_d_1_0_ = None
+        def forward(self, l_d_list_l_d_keys_0_, l_d_list_l_d_keys_1_0_, l_d_list_l_d_keys_1_1_2_):
+            sin = l_d_list_l_d_keys_0_.sin();  l_d_list_l_d_keys_0_ = None
+            cos = l_d_list_l_d_keys_1_0_.cos();  l_d_list_l_d_keys_1_0_ = None
             add = sin + cos;  sin = cos = None
-            sin_1 = l_d_dict_keys_getitem_l_d_1_1_2_.sin();  l_d_dict_keys_getitem_l_d_1_1_2_ = None
+            sin_1 = l_d_list_l_d_keys_1_1_2_.sin();  l_d_list_l_d_keys_1_1_2_ = None
             sub = add - sin_1;  add = sin_1 = None
             return (sub,)
 """,  # NOQA: B950
@@ -2338,7 +2338,7 @@ class GraphModule(torch.nn.Module):
         self.assertExpectedInline(
             graph.code.strip(),
             """\
-def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytree_in_1_0_0_0_ : torch.Tensor, L_pytree_in_2_ : torch.Tensor, L_pytree_in_3_0_ : torch.Tensor, L_pytree_in_3_1_0_ : torch.Tensor, L_pytree_in_3_2_ : torch.Tensor, L_pytree_in_4_dict_keys_getitem_L_pytree_in_4_0_ : torch.Tensor):
+def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytree_in_1_0_0_0_ : torch.Tensor, L_pytree_in_2_ : torch.Tensor, L_pytree_in_3_0_ : torch.Tensor, L_pytree_in_3_1_0_ : torch.Tensor, L_pytree_in_3_2_ : torch.Tensor, L_pytree_in_4_list_L_pytree_in_4_keys_0_ : torch.Tensor):
     l_pred_ = L_pred_
     l_pytree_in_0_ = L_pytree_in_0_
     l_pytree_in_1_0_0_0_ = L_pytree_in_1_0_0_0_
@@ -2346,10 +2346,10 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
     l_pytree_in_3_0_ = L_pytree_in_3_0_
     l_pytree_in_3_1_0_ = L_pytree_in_3_1_0_
     l_pytree_in_3_2_ = L_pytree_in_3_2_
-    l_pytree_in_4_dict_keys_getitem_l_pytree_in_4_0_ = L_pytree_in_4_dict_keys_getitem_L_pytree_in_4_0_
+    l_pytree_in_4_list_l_pytree_in_4_keys_0_ = L_pytree_in_4_list_L_pytree_in_4_keys_0_
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, [l_pytree_in_0_, l_pytree_in_1_0_0_0_, l_pytree_in_2_, l_pytree_in_3_0_, l_pytree_in_3_1_0_, l_pytree_in_3_2_, l_pytree_in_4_dict_keys_getitem_l_pytree_in_4_0_]);  l_pred_ = cond_true_0 = cond_false_0 = l_pytree_in_0_ = l_pytree_in_1_0_0_0_ = l_pytree_in_2_ = l_pytree_in_3_0_ = l_pytree_in_3_1_0_ = l_pytree_in_3_2_ = l_pytree_in_4_dict_keys_getitem_l_pytree_in_4_0_ = None
+    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, [l_pytree_in_0_, l_pytree_in_1_0_0_0_, l_pytree_in_2_, l_pytree_in_3_0_, l_pytree_in_3_1_0_, l_pytree_in_3_2_, l_pytree_in_4_list_l_pytree_in_4_keys_0_]);  l_pred_ = cond_true_0 = cond_false_0 = l_pytree_in_0_ = l_pytree_in_1_0_0_0_ = l_pytree_in_2_ = l_pytree_in_3_0_ = l_pytree_in_3_1_0_ = l_pytree_in_3_2_ = l_pytree_in_4_list_l_pytree_in_4_keys_0_ = None
     getitem = cond[0];  cond = None
     return (getitem,)""",  # noqa: B950
         )
