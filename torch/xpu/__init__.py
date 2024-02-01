@@ -4,7 +4,6 @@ Intel GPU optimization.
 
 You can use :func:`is_available()` to determine if your system supports XPU.
 """
-#refactor
 from functools import lru_cache
 from typing import Any, Dict, Optional, Union
 
