@@ -53,11 +53,6 @@ class TestXpu(TestCase):
         self.assertTrue(device_capability["max_work_group_size"] > 0)
         self.assertTrue(device_capability["max_num_sub_groups"] > 0)
 
-    @unittest.skipIf(
-        TEST_WITH_TSAN,
-        "TSAN is not fork-safe since we're forking in a multi-threaded environment",
-    )
-    @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
     def test_wrong_xpu_fork(self):
         stderr = TestCase.runWithPytorchAPIUsageStderr(
             """\
