@@ -5001,7 +5001,7 @@ def logcumsumexp(x, dim):
     def log_add_exp_helper(a, b):
         min_v = ops.minimum(a, b)
         max_v = ops.maximum(a, b)
-        mask = ops.logical_or(ops.ne(min_v, max_v), ops.logical_not(ops.isinf(min_v)))
+        mask = (min_v != max_v) | (~ops.isinf(min_v))
         return ops.where(mask, ops.log1p(ops.exp(min_v - max_v)) + max_v, a)
 
     dtype = x.get_dtype()
