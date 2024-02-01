@@ -2956,6 +2956,16 @@ class CPUReproTests(TestCase):
             self.common(fn, (100, y))
             assert metrics.generated_cpp_vec_kernel_count == 2
 
+    @config.patch({"cpp.dynamic_threads": True})
+    def test_reduction_with_dynamic_threads(self):
+        def fn(a, b):
+            return a.sum(), b.sum()
+
+        self.common(
+            fn,
+            (torch.randn(1000), torch.rand(1000)),
+        )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
