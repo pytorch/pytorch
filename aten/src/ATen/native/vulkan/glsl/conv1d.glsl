@@ -99,21 +99,20 @@ void main() {
       vec4 v = vec4(0,0,0,0);
 
       for (int in_c = c_start; in_c < c_end; ++in_c) {
-        for (int k = k_start; k < k_end; ++k) {
-          int in_pos_x = in_l + k * dilation;
-          const ivec3 in_pos = ivec3(in_pos_x, in_c, n / 4);
-          const vec4 input_value = texelFetch(uInput, in_pos, 0);
+        for (int k = k_start; k < k_end;) {
 
-          // Note that we are reading weight in the inner loop, this could be
-          // improved by moving it before the outer loop. Since the weight vector is
-          // contant for the entire call.
-
-          // weight in input-space: (out_c, in_c % in_group_size, k);
-          // notice that c is 4-packed. We need to mod 4 to get the actual weight.
-          const ivec3 w_pos = ivec3(k, in_c % in_group_size, out_c / 4);
+          // Since the weight tensor is width-packed, which is along the kernel
+          // dimension, we can batch-read four elements at a time.
+          const ivec3 w_pos = ivec3(k / 4, in_c % in_group_size, out_c);
           const vec4 weight = texelFetch(uKernel, w_pos, 0);
 
-          v += weight[out_c % 4] * input_value;
+          for (int k_off = k % 4; k_off < 4 && k < k_end; ++k, ++k_off) {
+            int in_pos_x = in_l + k * dilation;
+            const ivec3 in_pos = ivec3(in_pos_x, in_c, n / 4);
+            const vec4 input_value = texelFetch(uInput, in_pos, 0);
+
+            v += weight[k_off] * input_value;
+          }
         }
       }
 
