@@ -6,7 +6,7 @@ import re
 import warnings
 from collections import OrderedDict
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch._dynamo
@@ -27,7 +27,6 @@ from torch._export.wrappers import _wrap_submodules
 from torch._functorch.aot_autograd import aot_export_module, GraphSignature
 from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-from torch.export.exported_program import OutputKind
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     free_unbacked_symbols,
@@ -109,26 +108,11 @@ def _convert_input_to_fake(gm, args, kwargs):
     return fake_args, fake_kwargs, fake_params_buffers, fake_mode
 
 
-def _replace_param_buffer_names(param_buffer_table, sig, constants):
+def _replace_param_buffer_names(param_buffer_table, sig):
     for spec in sig.input_specs:
-        if spec.kind in (
-            InputKind.PARAMETER,
-            InputKind.BUFFER,
-        ):
-            spec.target = param_buffer_table[spec.target]
-
-            if spec.persistent is False:
-                # we store non-persistent buffers in the constant table, so rewrite
-                # there as well
-                non_persistent_buffer = constants[spec.target]
-                del constants[spec.target]
-                constants[param_buffer_table[spec.target]] = non_persistent_buffer
+        spec.target = param_buffer_table.get(spec.target, spec.target)
     for spec in sig.output_specs:
-        if spec.kind in (
-            OutputKind.BUFFER_MUTATION,
-            OutputKind.GRADIENT_TO_PARAMETER,
-        ):
-            spec.target = param_buffer_table[spec.target]
+        spec.target = param_buffer_table.get(spec.target, spec.target)
 
 
 def _reorder_kwargs_by_names(
@@ -487,7 +471,9 @@ def _export_non_strict(
     )
 
     constants = rewrite_script_object_meta(gm)
-    constants.update(lift_constants_pass(gm, export_graph_signature))
+    more_constants = lift_constants_pass(gm, export_graph_signature)
+    for k, v in more_constants.items():
+        constants[k] = v
 
     @dataclasses.dataclass
     class _ExportedProgramNonStrict:
@@ -512,50 +498,9 @@ def _get_params_buffers(mod: torch.nn.Module) -> Dict[str, torch.Tensor]:
     return params_buffers
 
 
-def rewrite_dynamo_tensor_constants(
-    orig_mod_buffers: Set[torch.Tensor],
-    traced_mod_buffers: Dict[str, torch.Tensor],
-    graph_signature: ExportGraphSignature,
-    constants: Dict[str, Union[torch.Tensor, torch.ScriptObject]],
-):
-    """Dynamo erroneously marks tensor attributes on modules as a buffers.
-
-    Rewrite them to be tensor constants.
-    """
-    for spec in graph_signature.input_specs:
-        if spec.kind == InputKind.BUFFER:
-            assert spec.target is not None
-            value = traced_mod_buffers[spec.target]
-            if value not in orig_mod_buffers:
-                # This was a tensor constant erroneously marked as a buffer.
-                # Convert it int oa constant in the graph signature, and add its
-                # value to the constants table.
-                spec.kind = InputKind.CONSTANT_TENSOR
-                constants[spec.target] = value
-
-
-def rewrite_non_persistent_buffers(
-    orig_mod: torch.nn.Module,
-    graph_signature: ExportGraphSignature,
-    constants: Dict[str, Union[torch.Tensor, torch.ScriptObject]],
-):
-    """Dynamo erroneously drops the persistent flag on buffers.
-
-    Rewrite non-persistent buffers to reflect the original module.
-    """
-    state_dict = orig_mod.state_dict()
-    for spec in graph_signature.input_specs:
-        if spec.kind == InputKind.BUFFER:
-            assert spec.target is not None
-            if spec.target not in state_dict:
-                assert spec.target not in constants
-                spec.persistent = False
-                constants[spec.target] = orig_mod.get_buffer(spec.target)
-
-
 @_disable_prexisiting_fake_mode
 def _export(
-    f: torch.nn.Module,
+    f: Callable,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     constraints: Optional[List[Constraint]] = None,
@@ -734,13 +679,11 @@ def _export(
             assert res is not None
             gm = res.graph_module
 
-        rewrite_non_persistent_buffers(f, ep_non_strict.sig, ep_non_strict.constants)
-
         return ExportedProgram(
             root=gm,
             graph=gm.graph,
             graph_signature=ep_non_strict.sig,
-            state_dict=f.state_dict(keep_vars=True),
+            state_dict=_get_params_buffers(f),
             range_constraints=range_constraints,
             module_call_graph=[
                 ModuleCallEntry(
@@ -765,6 +708,8 @@ def _export(
         preserve_module_call_signature=preserve_module_call_signature,
         restore_fqn=False,  # don't need to restore because we will do it later
     )
+
+    params_buffers = _get_params_buffers(gm_torch_level)
 
     # We detect the fake_mode by looking at gm_torch_level's placeholders, this is the fake_mode created in dynamo.
     (
@@ -845,6 +790,13 @@ def _export(
     )
     gm_torch_level.recompile()
 
+    # Restore FQN of param/buffers
+    param_buffer_table: Dict[str, str] = (
+        _get_param_buffer_mapping(f, gm_torch_level)
+        if isinstance(f, torch.nn.Module)
+        else {}
+    )
+
     if isinstance(f, torch.nn.Module):
         _normalize_nn_module_stack(gm_torch_level, type(f))
 
@@ -919,21 +871,12 @@ def _export(
         flat_args,
     )
 
-    # Do some cleanups on the graph module to restore the state dict to the
-    # expected form. Each of these steps should probably get fixed upstream.
-    # 1. Remove tensor constants that were added as buffers.
-    rewrite_dynamo_tensor_constants(
-        orig_mod_buffers=set(f.buffers()),
-        traced_mod_buffers=dict(gm_torch_level.named_buffers()),
-        graph_signature=ep_non_strict.sig,
-        constants=ep_non_strict.constants,
-    )
-    # 2. Restore FQN of param/buffers
-    param_buffer_table: Dict[str, str] = _get_param_buffer_mapping(f, gm_torch_level)
-    _replace_param_buffer_names(param_buffer_table, export_graph_signature, constants)
-
-    # 3. Remove non-persistent buffers from the graph signature
-    rewrite_non_persistent_buffers(f, ep_non_strict.sig, ep_non_strict.constants)
+    if isinstance(f, torch.nn.Module):
+        _replace_param_buffer_names(param_buffer_table, export_graph_signature)
+        params_buffers = {
+            param_buffer_table.get(name, name): tensor
+            for name, tensor in params_buffers.items()
+        }
 
     module_call_signatures = {
         fqn: ModuleCallSignature(inputs=[], outputs=[], **specs)
@@ -950,7 +893,8 @@ def _export(
         root=gm,
         graph=gm.graph,
         graph_signature=export_graph_signature,
-        state_dict=f.state_dict(keep_vars=True),
+        # TODO(zhxchen17) Return empty state_dict for functions.
+        state_dict=params_buffers,
         range_constraints=range_constraints,
         module_call_graph=[
             ModuleCallEntry(

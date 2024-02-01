@@ -306,19 +306,9 @@ def _verify_exported_program_signature(exported_program) -> None:
                 )
 
             buffer = input_spec.target
-            if input_spec.persistent is None:
-                raise SpecViolationError(
-                    f"Buffer {buffer} is missing a persistence flag"
-                )
-
-            if input_spec.persistent is True and buffer not in exported_program.state_dict:
+            if buffer not in exported_program.state_dict:
                 raise SpecViolationError(
                     f"Buffer {buffer} is not in the state dict."
-                )
-
-            if input_spec.persistent is False and buffer in exported_program.state_dict:
-                raise SpecViolationError(
-                    f"Non-persistent buffer {buffer} is in the state dict, it should not be."
                 )
         elif input_spec.kind == InputKind.CONSTANT_TENSOR:
             if not isinstance(input_spec.arg, TensorArgument):

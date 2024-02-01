@@ -305,15 +305,12 @@ class TestPasses(TestCase):
             ep.module()(torch.tensor(False), torch.tensor([6]), torch.tensor([6]))
 
     def test_functionalize_inline_constraints(self) -> None:
-        class Foo(torch.nn.Module):
-            def forward(self, x):
-                a = x.item()
-                torch._constrain_as_value(a, 4, 7)
-                return torch.empty((a, 4))
+        def f(x):
+            a = x.item()
+            torch._constrain_as_value(a, 4, 7)
+            return torch.empty((a, 4))
 
-        f = Foo()
-
-        ep = torch.export.export(f, (torch.tensor([7]),))
+        ep = torch._export.export(f, (torch.tensor([7]),))
         gm = ep.graph_module
         FileCheck().check_count(
             "torch.ops.aten.sym_constrain_range.default",

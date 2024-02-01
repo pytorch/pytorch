@@ -959,7 +959,6 @@ def aot_export_module(
         raise RuntimeError("pre_dispatch is not supported when trace_joint is True.")
     named_parameters = dict(mod.named_parameters(remove_duplicate=False))
     named_buffers = dict(mod.named_buffers(remove_duplicate=False))
-
     params_and_buffers = {
         **dict(named_parameters),
         **dict(named_buffers),

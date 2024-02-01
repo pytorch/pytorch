@@ -601,17 +601,14 @@ unittest.expectedFailure(
 class TestSaveLoad(TestCase):
     def test_save_buffer(self):
         inp = (torch.tensor([0.1, 0.1]),)
+        linear = torch.nn.Linear(2, 2)
 
         class Module(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(2, 2)
-
             def forward(self, x):
                 x = x + 1
                 y = x.t()
                 y = y.relu()
-                y = self.linear(y)
+                y = linear(y)
                 return y
 
         ep = export(Module(), inp)
