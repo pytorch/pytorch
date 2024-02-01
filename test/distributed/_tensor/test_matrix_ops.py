@@ -54,13 +54,7 @@ class DistMatrixOpsTest(DTensorTestBase):
 
         dist_res = torch.addmm(inp, mat1, mat2)
         local_res = torch.addmm(input_tensor, tensor_to_shard, tensor_to_replicate)
-        # The behavior of torch.ops.aten.addmm.default is different on CPU and GPU.
-        # For more info see: https://github.com/pytorch/pytorch/issues/118131
-        # TODO: these two tensors should be equal on GPU. fix this.
-        if self.device_type == "cuda":
-            self.assertNotEqual(dist_res.full_tensor(), local_res)
-        else:
-            self.assertEqual(dist_res.full_tensor(), local_res)
+        self.assertEqual(dist_res.full_tensor(), local_res)
 
     @with_comms
     def test_addmm_auto_redistribute(self):
