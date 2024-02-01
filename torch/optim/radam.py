@@ -320,7 +320,10 @@ def _single_tensor_radam(
 
         # update step
         step_t += 1
-        step = step_t if capturable else _get_value(step_t)
+        if capturable:
+            step = step_t
+        else:
+            step = _get_value(step_t)
 
         bias_correction1 = 1 - beta1 ** step
         bias_correction2 = 1 - beta2 ** step
@@ -345,16 +348,12 @@ def _single_tensor_radam(
 
         if rho_t > 5.0:
             # Compute the variance rectification term and update parameters accordingly
-            if capturable:
-                rect = (rho_t - 4).mul(rho_t - 2).mul(rho_inf).div((rho_inf - 4) * (rho_inf - 2) * rho_t)
-                rect = rect.sqrt()
-            else:
-                rect = math.sqrt(
-                    (rho_t - 4)
-                    * (rho_t - 2)
-                    * rho_inf
-                    / ((rho_inf - 4) * (rho_inf - 2) * rho_t)
-                )
+            rect = (
+                (rho_t - 4)
+                * (rho_t - 2)
+                * rho_inf
+                / ((rho_inf - 4) * (rho_inf - 2) * rho_t)
+            ) ** 0.5
             exp_avg_sq_sqrt = exp_avg_sq.sqrt()
             if differentiable:
                 exp_avg_sq_sqrt = exp_avg_sq_sqrt.add(eps)
