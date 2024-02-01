@@ -171,7 +171,13 @@ if __name__ == "__main__":
     )
     # dynamo_test_failures path
     parser.add_argument("filename")
-    parser.add_argument("commit")
+    parser.add_argument(
+        "commit",
+        help=(
+            "The commit sha for the latest commit on a PR from which we will "
+            "pull CI test results, e.g. 7e5f597aeeba30c390c05f7d316829b3798064a5"
+        ),
+    )
     args = parser.parse_args()
     dynamo38, dynamo311, eager311 = download_reports(args.commit)
     update(args.filename, dynamo38, dynamo311)

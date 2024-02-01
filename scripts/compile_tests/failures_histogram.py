@@ -106,9 +106,7 @@ def failures_histogram(eager_dir, dynamo_dir, verbose=False, format_issues=False
     print("[counts]", sum_counts)
 
 
-def as_issue(count, msg, repro, tests=None):
-    if tests is None:
-        print("please pass --verbose to use --print-issues")
+def as_issue(count, msg, repro, tests):
     tests = "\n".join(tests)
     result = f"""
 {'-' * 50}
@@ -140,7 +138,13 @@ if __name__ == "__main__":
         prog="failures_histogram",
         description="See statistics about skipped Dynamo tests",
     )
-    parser.add_argument("commit")
+    parser.add_argument(
+        "commit",
+        help=(
+            "The commit sha for the latest commit on a PR from which we will "
+            "pull CI test results, e.g. 7e5f597aeeba30c390c05f7d316829b3798064a5"
+        ),
+    )
     parser.add_argument(
         "-v", "--verbose", help="Prints all failing test names", action="store_true"
     )
@@ -150,5 +154,13 @@ if __name__ == "__main__":
         action="store_true",
     )
     args = parser.parse_args()
+
+    # args.format_issues implies verbose=True
+    verbose = args.verbose
+    if args.format_issues:
+        verbose = True
+
+    failures_histogram(args.eager_dir, args.dynamo_dir, verbose, args.format_issues)
+
     dynamo38, dynamo311, eager311 = download_reports(args.commit)
-    failures_histogram(eager311, dynamo311, args.verbose, args.format_issues)
+    failures_histogram(eager311, dynamo311, verbose, args.format_issues)
