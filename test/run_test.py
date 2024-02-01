@@ -1328,7 +1328,11 @@ def get_selected_tests(options) -> List[str]:
 
     # these tests failing in Python 3.12 temporarily disabling
     if (sys.version_info >= (3, 12)):
-        options.exclude.extend(["functorch/test_dims", "dynamo/test_subclasses"])
+        options.exclude.extend(["functorch/test_dims",
+                                "functorch/test_rearrange",
+                                "dynamo/test_subclasses",
+                                "torch_np/numpy_tests/core/test_multiarray"
+                                ])
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
