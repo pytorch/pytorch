@@ -777,6 +777,7 @@ if(NOT NO_API AND NOT BUILD_LITE_INTERPRETER)
     ${TORCH_SRC_DIR}/csrc/api/src/optim/schedulers/reduce_on_plateau_scheduler.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/xpu.cpp
   )
 endif()
 
@@ -1835,6 +1836,9 @@ if(BUILD_TEST)
         endif()
       endif()
     endforeach()
+    if(TARGET context_gpu_test)
+      target_link_libraries(context_gpu_test caffe2::curand caffe2::cublas)
+    endif()
   endif()
 
   if(USE_XPU)

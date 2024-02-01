@@ -485,7 +485,7 @@ class TestFindIndependentSubsetGreedy(TestCase):
         unsatisfied = 0
         while desc:
             unsatisfied += 1
-            assert unsatisfied <= len(desc)
+            assert unsatisfied <= len(desc) # cycle or bad input?
             name, v = desc.popleft()
             args = tuple(lookup.get(n, None) for n in v)
             if None in args:
@@ -1055,6 +1055,40 @@ class TestFindIndependentSubsetGreedy(TestCase):
                 ["n7"],
             ],
         )
+
+    def test_find_independent_subset_greedy_fuse(self):
+        # ensure that fusing the sets during iteration results in the correct
+        # iteration results. In the example graph after we merge n2 and n3,
+        # n4 is no longer independent from n1.
+        g, lookup = self.build_graph({
+            "n0": (),
+            "n1": (),
+            "n2": ("n0",),
+            "n3": ("n1",),
+            "n4": ("n2",),
+            "n5": (),
+        })
+        opts = {
+            "min_fuse_set_size": 0,
+            "max_fuse_set_size": 100,
+        }
+        subnodes = ["n2", "n3", "n4", "n0", "n1", "n5"]
+        subnodes = [lookup[n] for n in subnodes]
+        i = torch._inductor.fx_passes.group_batch_fusion.find_independent_subset_greedy(subnodes, opts)
+        self.assertEqual(next(i), [lookup[n] for n in ["n2", "n3", "n5"]])
+
+        # fuse n2 and n3 which makes n4 now dependant on n1.
+        args = tuple(lookup[n] for n in ["n0", "n1"])
+        fused = g.create_node("placeholder", "target", name="n2+n3", args=args)
+        lookup["n2"].replace_all_uses_with(fused)
+        g.erase_node(lookup["n2"])
+        lookup["n3"].replace_all_uses_with(fused)
+        g.erase_node(lookup["n3"])
+
+        self.assertEqual(next(i), [lookup[n] for n in ["n4"]])
+        self.assertEqual(next(i), [lookup[n] for n in ["n0", "n1"]])
+        self.assertRaises(StopIteration, lambda: next(i))
+
 
 
 if __name__ == "__main__":
