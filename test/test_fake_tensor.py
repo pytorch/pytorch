@@ -1286,6 +1286,27 @@ class FakeTensorPropTest(TestCase):
             graph_model = torch.fx.symbolic_trace(model, (value, None, another_optional_value))
             FakeTensorProp(graph_model, fake_mode).propagate(value, None, another_optional_value)
 
+    def test_torch_load_with_fake_mode(self):
+        import tempfile
+
+        class TheModelClass(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(5, 10)
+
+            def forward(self, x):
+                return self.fc1(x)
+
+        with tempfile.NamedTemporaryFile() as state_dict_file:
+            # Create state_dict to be loaded later
+            model = TheModelClass()
+            torch.save(model.state_dict(), state_dict_file.name)
+
+            fake_mode = FakeTensorMode()
+            with fake_mode:
+                # This is where the bug is triggered
+                torch.load(state_dict_file.name)
+
 
 class FakeTensorDispatchCache(TestCase):
     def test_shape_env_settings(self):
