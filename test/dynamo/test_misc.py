@@ -9300,6 +9300,25 @@ fn
         self.assertIn(0, result)
         self.assertTrue(same(result[0], torch.tensor(3)))
 
+    def test_dynamo_reset_clears_cache(self):
+        """Test that dynamo bytecode cache is freed
+           when dynamo reset is called
+        """
+
+        def fn(x):
+            return torch.sin(x)
+
+        opt_fn = torch.compile(backend="eager")(fn)
+        opt_fn(torch.randn(3, 3))
+
+        c1 = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(c1), 1)
+
+        torch._dynamo.reset()
+        c2 = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(c2), 0)
+
+
     def test_dynamo_cache_move_to_front(self):
         class Mod(torch.nn.Module):
             def __init__(self):

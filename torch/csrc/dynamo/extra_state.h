@@ -139,10 +139,10 @@ CacheEntry* create_cache_entry(ExtraState* extra_state, PyObject* guraded_code);
 
 #ifdef __cplusplus
 
+} // extern "C"
+
 // Returns the list of CacheEntry corresponding to code_obj.
 // Warning: returns references whose lifetimes are controlled by C++
 py::list _debug_get_cache_entry_list(const py::handle& code_obj);
-
-} // extern "C"
 
 #endif

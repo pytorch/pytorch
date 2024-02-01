@@ -113,6 +113,12 @@ else()
       -Wno-strict-aliasing)
 endif()
 
+# Enable hidden visibility if compiler supports it.
+if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
+  list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
+    -fvisibility=hidden)
+endif()
+
 if(USE_ITT)
   list(APPEND TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/itt.cpp

@@ -1684,6 +1684,7 @@ cc_library(
     hdrs = glob([
         "torch/csrc/generic/*.cpp",
     ]),
+    compiler_flags = ["-fvisibility=hidden" ],
     copts = COMMON_COPTS + if_cuda(["-DUSE_CUDA=1"]),
     deps = [
         ":torch",
