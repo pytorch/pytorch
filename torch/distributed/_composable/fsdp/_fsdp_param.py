@@ -214,7 +214,12 @@ class FSDPParam:
         shard_world_size = self.mesh_info.shard_mesh_size
         chunks = _chunk_with_empty(param_data, shard_world_size, dim=0)
         sharded_param = chunks[shard_rank]
-        self.sharded_size = sharded_param.size()
+        self.sharded_size = (
+            sharded_param.size()
+            if sharded_param.numel() > 0
+            # For 0 numel, we need to preserve trailing dims for DTensor APIs
+            else cast(torch.Size, torch.Size([0]) + param_data.size()[1:])
+        )
         self.contiguous_sharded_stride = make_contiguous_strides_for(self.sharded_size)
         padded_sharded_size = chunks[0].size()  # 0th always padded
         padded_sharded_param = param_data.new_zeros(padded_sharded_size)
@@ -297,11 +302,9 @@ class FSDPParam:
                 f"All-gather output size ({self.all_gather_output.numel()}) must "
                 f"be divisible by the shard world size ({shard_world_size})"
             )
-        self._sharded_post_forward_param_data = torch.as_strided(
-            self.all_gather_output,
-            size=torch.Size([numel // shard_world_size]),  # padded
-            stride=(1,),  # 1D tensor stride
-            storage_offset=numel // shard_world_size * shard_rank,
+        sharded_numel = numel // shard_world_size
+        self._sharded_post_forward_param_data = (
+            self.all_gather_output.narrow(0, sharded_numel * shard_rank, sharded_numel)
         ).clone()  # clone to be able to free all-gather output
         sharded_post_forward_tensor = torch.as_strided(
             self._sharded_post_forward_param_data,
@@ -346,9 +349,6 @@ class FSDPParam:
         Converts a local tensor representing either the sharded parameter or
         sharded gradient to DTensor.
         """
-        if tensor.numel() == 0:
-            # Normalize as (0) instead of possibly (0, *) for padding-only case
-            tensor = tensor.view(0)
         if tensor.shape != self.sharded_size:
             _raise_assert_with_print(
                 f"Expects a tensor with the sharded size {self.sharded_size} "

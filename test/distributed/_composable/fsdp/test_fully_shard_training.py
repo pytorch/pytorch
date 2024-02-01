@@ -84,23 +84,37 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
         device = torch.device("cuda", 0)
         # Single FSDP group
         for reshard_after_forward in (True, False, 2):
-            model = MLP(8, device)
+            torch.manual_seed(42)
+            model = MLP(3, device)
+            # Since seed is per process, not per thread, we broadcast to ensure
+            # the same parameters across ranks
+            for param in model.parameters():
+                dist.broadcast(param, src=0)
+            ref_model = copy.deepcopy(model)
             fully_shard(model, reshard_after_forward=reshard_after_forward)  # root only
-            inp = torch.randn((2, 8), device="cuda")
+            inp = torch.randn((2, 3), device="cuda")
             self._assert_dtensor_params(model.parameters())
+            self._assert_same_params(model.parameters(), ref_model.parameters())
             model(inp)  # root does not reshard after forward
             self._assert_tensor_params(model.parameters())
+            self._assert_same_params(model.parameters(), ref_model.parameters())
             model.reshard()  # however, we can manually reshard
             self._assert_dtensor_params(model.parameters())
+            self._assert_same_params(model.parameters(), ref_model.parameters())
 
         # Multiple FSDP groups
         for reshard_after_forward in (True, False, 2):
-            model = nn.Sequential(MLP(8, device), MLP(8, device))
+            torch.manual_seed(42)
+            model = nn.Sequential(MLP(3, device), MLP(3, device))
+            for param in model.parameters():
+                dist.broadcast(param, src=0)
+            ref_model = copy.deepcopy(model)
             fully_shard(model[0].in_proj, reshard_after_forward=reshard_after_forward)
             fully_shard(model[0].out_proj, reshard_after_forward=reshard_after_forward)
             fully_shard(model, reshard_after_forward=reshard_after_forward)
 
             self._assert_dtensor_params(model.parameters())
+            self._assert_same_params(model.parameters(), ref_model.parameters())
             model(inp)
             non_root_params = list(model[0].in_proj.parameters()) + list(
                 model[0].out_proj.parameters()
@@ -111,10 +125,12 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             else:
                 self._assert_dtensor_params(non_root_params)
             self._assert_tensor_params(root_params)
+            self._assert_same_params(model.parameters(), ref_model.parameters())
             for module in model.modules():
                 if isinstance(module, FSDP):
                     module.reshard()  # however, we can manually reshard
             self._assert_dtensor_params(model.parameters())
+            self._assert_same_params(model.parameters(), ref_model.parameters())
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_param_registration_after_backward(self):
@@ -149,6 +165,17 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
         self.assertGreater(len(list(params)), 0)
         for param in params:
             self.assertIsInstance(param, DTensor)
+
+    def _assert_same_params(
+        self, params: Iterable[nn.Parameter], ref_params: Iterable[nn.Parameter]
+    ):
+        params, ref_params = list(params), list(ref_params)
+        self.assertEqual(len(params), len(ref_params))
+        for param, ref_param in zip(params, ref_params):
+            if isinstance(param, DTensor):
+                param = param.full_tensor()
+            self.assertEqual(param.shape, ref_param.shape)
+            self.assertEqual(param, ref_param)
 
 
 class TestFullyShard1DTrainingCore(FSDPTest):
