@@ -98,9 +98,12 @@ class FSDPParam:
     _orig_size: torch.Size  # ND
     sharded_size: torch.Size  # ND
     contiguous_sharded_stride: Tuple[int, ...]  # goes with sharded size
+    sharded_post_forward_size: torch.Size  # ND
+    contiguous_sharded_post_forward_stride: Tuple[int, ...]
     _sharded_param_data: torch.Tensor  # 1D
-    _sharded_post_forward_param_data: Optional[torch.Tensor]  # 1D
     sharded_param: nn.Parameter  # ND
+    _sharded_post_forward_param_data: Optional[torch.Tensor]  # 1D
+    _sharded_post_forward_param: Optional[nn.Parameter]  # ND
     _unsharded_param: nn.Parameter  # ND
     _global_placements: Tuple[Placement, ...]
     _global_size: torch.Size
@@ -122,6 +125,8 @@ class FSDPParam:
         self.device = device
         self._init_dtype_attrs(param)
         self._init_sharded_param(param, device)
+        if self.post_forward_mesh_info:
+            self._init_sharded_post_forward_param_metadata(param)
         self.all_gather_output = torch.empty(0)
         self._param_fqn: Optional[str] = None  # prefixed from root module
 
@@ -204,6 +209,16 @@ class FSDPParam:
         self._setattr_on_modules(self.sharded_param)
         self.sharded_state = ShardedState.SHARDED
 
+    def _init_sharded_post_forward_param_metadata(self, param: torch.Tensor) -> None:
+        mesh_info = self.post_forward_mesh_info
+        assert mesh_info is not None
+        param_data = param._local_tensor if isinstance(param, DTensor) else param
+        chunks = _chunk_with_empty(param_data, mesh_info.shard_mesh_size, dim=0)
+        self.sharded_post_forward_size = chunks[mesh_info.shard_mesh_rank].size()
+        self.contiguous_sharded_post_forward_stride = make_contiguous_strides_for(
+            self.sharded_post_forward_size
+        )
+
     @torch.no_grad()
     def init_all_gather_output(
         self,
@@ -248,21 +263,35 @@ class FSDPParam:
         self.sharded_state = ShardedState.SHARDED
 
     def to_sharded_post_forward(self) -> None:
+        if self.is_dtensor:
+            raise NotImplementedError(
+                "Resharding to smaller mesh with TP is not supported yet"
+            )
         self._assert_in_states(ShardedState.UNSHARDED)
         assert self.post_forward_mesh_info is not None  # mypy
         shard_world_size = self.post_forward_mesh_info.shard_mesh_size
         shard_rank = self.post_forward_mesh_info.shard_mesh_rank
-        if self.all_gather_output.numel() % shard_world_size != 0:
+        if (numel := self.all_gather_output.numel()) % shard_world_size != 0:
             _raise_assert_with_print(
                 f"All-gather output size ({self.all_gather_output.numel()}) must "
                 f"be divisible by the shard world size ({shard_world_size})"
             )
-        chunks = torch.chunk(self.all_gather_output, shard_world_size, dim=0)
-        # NOTE: This constructs a new Tensor object.
-        self._sharded_post_forward_param_data = chunks[shard_rank].clone()
-        self._setattr_on_modules(self._sharded_post_forward_param_data, as_param=False)
-        # Do not strip padding here since this resharded parameter should never
-        # be used in any ops and is only meant as a temporary storage
+        self._sharded_post_forward_param_data = torch.as_strided(
+            self.all_gather_output,
+            size=torch.Size([numel // shard_world_size]),  # padded
+            stride=(1,),  # 1D tensor stride
+            storage_offset=numel // shard_world_size * shard_rank,
+        ).clone()  # clone to be able to free all-gather output
+        sharded_post_forward_tensor = torch.as_strided(
+            self._sharded_post_forward_param_data,
+            size=self.sharded_post_forward_size,
+            stride=self.contiguous_sharded_post_forward_stride,
+            storage_offset=0,
+        )
+        self._sharded_post_forward_param = nn.Parameter(
+            self.to_sharded_post_forward_dtensor(sharded_post_forward_tensor)
+        )
+        self._setattr_on_modules(self._sharded_post_forward_param)
         self.free_all_gather_output()
         self.sharded_state = ShardedState.SHARDED_POST_FORWARD
 
@@ -276,12 +305,12 @@ class FSDPParam:
             # copy-in. Since this method is only called in the copy-out after
             # waiting for the all-gather to finish, this data's lifetime is
             # ensured without further synchronization.
+            self._sharded_post_forward_param = None
             self._sharded_post_forward_param_data = None  # free
         self.sharded_state = ShardedState.UNSHARDED
 
-    def _setattr_on_modules(self, tensor: torch.Tensor, as_param: bool = True) -> None:
-        setter = unsafe_setattr_param if as_param else unsafe_setattr_tensor
-        setter(
+    def _setattr_on_modules(self, tensor: torch.Tensor) -> None:
+        unsafe_setattr_param(
             self._module_info.module,
             self._module_info.param_name,
             tensor,
@@ -289,7 +318,7 @@ class FSDPParam:
         for shared_module, shared_param_name in zip(
             self._module_info.shared_modules, self._module_info.shared_param_names
         ):
-            setter(shared_module, shared_param_name, tensor)
+            unsafe_setattr_param(shared_module, shared_param_name, tensor)
 
     def to_sharded_dtensor(self, tensor: torch.Tensor) -> DTensor:
         """
@@ -308,6 +337,17 @@ class FSDPParam:
             tensor,
             self._global_mesh,
             self._global_placements,
+            self._global_size,
+            self._global_stride,
+        )
+
+    def to_sharded_post_forward_dtensor(self, tensor: torch.Tensor) -> DTensor:
+        assert self.post_forward_mesh_info is not None  # mypy
+        # TODO: Prefer this DTensor to be read-only.
+        return _from_local_no_grad(
+            tensor,
+            self.post_forward_mesh_info.mesh,
+            (Shard(0),),  # TODO: generalize once we support TP
             self._global_size,
             self._global_stride,
         )
@@ -377,16 +417,6 @@ def unsafe_setattr_param(
         super(nn.Module, module).__setattr__(param_name, param)
     else:  # slow path
         setattr(module, param_name, param)
-
-
-def unsafe_setattr_tensor(
-    module: nn.Module, param_name: str, tensor: torch.Tensor
-) -> None:
-    if getattr(module.__setattr__, "__func__", None) is nn.Module.__setattr__:
-        module._parameters.pop(param_name, None)
-        super(nn.Module, module).__setattr__(param_name, tensor)
-    else:  # slow path
-        setattr(module, param_name, tensor)
 
 
 def set_requires_grad_if_needed(
