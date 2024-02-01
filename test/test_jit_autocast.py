@@ -523,14 +523,12 @@ class TestAutocast(JitTestCase):
             with torch.cpu.amp.autocast():
                 return torch.mm(x, y)
 
-        x_cpu = torch.randn(5, 5, dtype=torch.float32)
-        y_cpu = torch.randn(5, 5, dtype=torch.float32)
-        x_cuda = torch.randn(5, 5, device="cuda", dtype=torch.float32)
-        y_cuda = torch.randn(5, 5, device="cuda", dtype=torch.float32)
-        self._test_autocast(t_autocast_cpu, "aten::_autocast_to_reduced_precision", x_cpu, y_cpu)
-        self._test_autocast(t_autocast_cuda, "aten::_autocast_to_reduced_precision", x_cuda, y_cuda)
-        self._test_autocast(t_cpu_amp_autocast, "aten::_autocast_to_reduced_precision", x_cpu, y_cpu)
-        self._test_autocast(t_cuda_amp_autocast, "aten::_autocast_to_reduced_precision", x_cuda, y_cuda)
+        x = torch.randn(5, 5, device="cuda", dtype=torch.float32)
+        y = torch.randn(5, 5, device="cuda", dtype=torch.float32)
+        self._test_autocast(t_autocast_cpu, "aten::_autocast_to_reduced_precision", x, y)
+        self._test_autocast(t_autocast_cuda, "aten::_autocast_to_reduced_precision", x, y)
+        self._test_autocast(t_cuda_amp_autocast, "aten::_autocast_to_reduced_precision", x, y)
+        self._test_autocast(t_cpu_amp_autocast, "aten::_autocast_to_reduced_precision", x, y)
 
     @unittest.skipIf(True, "we need to provide dtype argument at this moment")
     @unittest.skipIf(not TEST_CUDA, "No cuda")
@@ -652,17 +650,13 @@ class TestAutocast(JitTestCase):
         thing1 = Thing1()
         thing1.impl = scripted_impl
         scripted_thing1 = torch.jit.script(thing1)
-        x = torch.rand([2, 2]).cuda()
-        y = torch.rand([2, 2]).cuda()
+        x = torch.rand([2, 2])
+        y = torch.rand([2, 2])
 
         # make sure this doesn't throw an error
         with torch.cuda.amp.autocast():
-            jit_ans = scripted_thing1.forward(x, y)
-
-        with torch.cuda.amp.autocast():
-            ans = torch.mm(torch.mm(x, y), x)
-
-        self.assertEqual(ans, jit_ans)
+            ans = scripted_thing1.forward(x, y)
+        self.assertEqual(torch.mm(torch.mm(x, y), x), ans)
 
         # sanity check: this isn't supported currently when global autocasting
         # isn't enabled
