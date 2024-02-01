@@ -762,7 +762,7 @@ py::object invokeOperatorFromPython(
     py::args args,
     const py::kwargs& kwargs,
     c10::optional<c10::DispatchKey> dk) {
-  auto [found_op, opWithStack] = getOpWithStack(operations, args, kwargs);
+  auto [found_op, stack] = getOpWithStack(operations, args, kwargs);
   {
     pybind11::gil_scoped_release no_gil_guard;
     if (dk) {
