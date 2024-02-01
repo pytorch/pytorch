@@ -532,10 +532,16 @@ def to_dtype(x: TensorBox, dtype: torch.dtype, copy=False):
 @register_lowering(prims.convert_element_type, type_promotion_kind=None)
 def _convert_element_type(x: TensorBox, dtype: torch.dtype):
     if dtype.is_complex or x.get_dtype().is_complex:
-        # Decompose and fallback to aten.copy_, since fallback to an aten op is more friendly to codegen
-        dst = empty(x.get_size(), dtype=dtype, device=x.get_device())
-        ir.InplaceCopyFallback.create(dst, x)
-        return dst
+        if x.get_size():
+            # Decompose since aa aten fallback is more friendly for c++ codegen.
+            # This decompostion doesn't work for empty tensor, which needs more investigation.
+            dst = empty_like(x, dtype=dtype)
+            ir.InplaceCopyFallback.create(dst, x)
+            return dst
+        else:
+            return fallback_handler(
+                prims.convert_element_type.default, add_to_fallback_set=False
+            )(x, dtype)
     return to_dtype(x, dtype, copy=True)
 
 
