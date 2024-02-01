@@ -1060,6 +1060,8 @@ void ProcessGroupNCCL::abortCommsFromMap(
     auto& ncclComms = it.second;
 
     for (const auto& ncclComm : ncclComms) {
+      LOG(INFO) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
+                << ncclComm->ncclComm_ << " on CUDA device: " << devName;
       ncclComm->ncclCommAbort(abortReason);
     }
     // Note that we don't remove the aborted communicators from the
@@ -1080,8 +1082,9 @@ void ProcessGroupNCCL::abortCommsFromMap(
       }
     }
 
-    LOG(INFO) << logPrefix() << "] Destroyed " << ncclComms.size()
-              << "communicators on CUDA device: " << devName
+    LOG(INFO) << logPrefix() << "ProcessGroupNCCL destroyed "
+              << ncclComms.size()
+              << " communicators on CUDA device: " << devName
               << " with stream: " << streamId;
   }
 }
@@ -1235,7 +1238,12 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           errorMsg = c10::str(
               logPrefix(),
               "Received a global timeout from another rank and will ",
-              "start to dump the debug info.");
+              "start to dump the debug info. ",
+              "Last enqueued NCCL work: ",
+              lastEnqueuedSeq_,
+              ", last completed NCCL work: ",
+              lastCompletedSeq_,
+              ".");
           exitMsg = c10::str(
               "ProcessGroupNCCL's watchdog detected a collective timeout and notified current rank. ",
               "This is most likely caused by incorrect usages of collectives, e.g., wrong ",
@@ -1274,7 +1282,10 @@ void ProcessGroupNCCL::heartbeatMonitor() {
             "you can either increase the timeout (TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC) to a larger value "
             "or disable the heartbeat monitor (TORCH_NCCL_ENABLE_MONITORING=0)."
             "If either of aforementioned helps, feel free to file an issue to PyTorch about the short timeout "
-            "or false positive abort; otherwise, please attempt to debug the hang.");
+            "or false positive abort; otherwise, please attempt to debug the hang. "
+            "workMetaList_.size() = ",
+            workMetaList_.size(),
+            "");
         break;
       }
     }
@@ -1340,17 +1351,21 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     // TODO(fduwjj): After having a hang debug wiki, we need to update the wiki
     // url here.
     const auto finalExitMsg = c10::str(logPrefix(), exitMsg);
-    terminateProcess(finalExitMsg);
+    if (monitorThreadEnabled_.load()) {
+      terminateProcess(finalExitMsg);
+    } else {
+      LOG(ERROR)
+          << "PGNCCL Monitor Thread is disabled, but would have killed this job:\n"
+          << finalExitMsg;
+    }
   }
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
   try {
     VLOG(2) << logPrefix() << "NCCL watchdog thread started!";
-    if (monitorThreadEnabled_.load()) {
-      ncclHeartbeatMonitorThread_ =
-          std::thread(&ProcessGroupNCCL::heartbeatMonitor, this);
-    }
+    ncclHeartbeatMonitorThread_ =
+        std::thread(&ProcessGroupNCCL::heartbeatMonitor, this);
     watchdogHandler();
     VLOG(2) << logPrefix() << "NCCL watchdog thread terminated normally";
   } catch (std::exception& e) {
@@ -1522,6 +1537,15 @@ void ProcessGroupNCCL::watchdogHandler() {
 
         // Report desync state in case of timeout
         if (timedOut) {
+          LOG(ERROR) << c10::str(
+              logPrefix(),
+              "Timeout at NCCL work: ",
+              work.seq_,
+              ", last enqueued NCCL work: ",
+              lastEnqueuedSeq_,
+              ", last completed NCCL work: ",
+              lastCompletedSeq_,
+              ".");
           try {
             if (desyncDebug_ || dumpOnTimeout_) {
               // Set shutdown mode, so the heartbeat monitor thread will not
@@ -1574,6 +1598,7 @@ void ProcessGroupNCCL::watchdogHandler() {
 
       // Clean up completed work
       if (work.isCompleted()) {
+        lastCompletedSeq_ = work.seq_;
         NCCLTraceBuffer::get()->retire_id(work.trace_id_, true);
         if (onCompletionHook_) {
           // Move Work object to completedWorkList_ to be consumed by the hook
@@ -1699,7 +1724,15 @@ std::exception_ptr ProcessGroupNCCL::checkForNCCLErrorsInternal(
               *commFailureReason)));
     }
     ncclResult_t ncclAsyncErr = ncclComm->checkForNcclError();
+// When nonblocking mode is enabled by TORCH_NCCL_USE_COMM_NONBLOCKING,
+// ncclInProgress could be returned when there are pending NCCL calls.
+// In this case, no exception should be thrown
+#ifdef NCCL_HAS_COMM_NONBLOCKING
+    // ncclInProgress is defined only if NCCL_HAS_COMM_NONBLOCKING is defined
+    if (ncclAsyncErr != ncclSuccess && ncclAsyncErr != ncclInProgress) {
+#else
     if (ncclAsyncErr != ncclSuccess) {
+#endif
       return std::make_exception_ptr(C10_BUILD_ERROR(
           DistBackendError,
           "NCCL error: " + ncclGetErrorWithVersion(ncclAsyncErr) + "\n" +
@@ -1965,12 +1998,20 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 #ifndef NCCL_HAS_COMM_NONBLOCKING
   C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
 #else
-  if (!nccl_use_nonblocking()) {
-    C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
+  if (nccl_use_nonblocking()) {
+    // If we use nonblocking mode, allow communicators to be
+    // uninitialized/ncclInProgress until the first communication
+    C10D_NCCL_CHECK_NONBLOCKING(ncclGroupEnd(), c10::nullopt);
   } else {
-    C10D_NCCL_CHECK_TIMEOUT_GROUPEND(ncclGroupEnd(), ncclComms, c10::nullopt);
+    C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
   }
 #endif
+
+  for (const auto i : c10::irange(devices.size())) {
+    int deviceIndex = devices[i].index();
+    LOG(INFO) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
+              << ncclComms[i]->ncclComm_ << " on CUDA device: " << deviceIndex;
+  }
 
   // At this point NCCL should have been initialized, hence we can accurately
   // get the env value even if NCCL sets it by reading from nccl.conf file
@@ -2295,6 +2336,7 @@ void ProcessGroupNCCL::workEnqueue(
     // needs to be destructed in user thread. Otherwise will
     // get deadlock. Here we enqueue work without outputs_.
     workMetaList_.emplace_back(*work);
+    lastEnqueuedSeq_ = work->seq_;
     lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
   }
 }
