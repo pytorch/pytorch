@@ -371,7 +371,6 @@ dtensor_fails = {
     xfail("nn.functional.relu6"),
     xfail("nn.functional.rrelu"),
     xfail("nn.functional.selu"),
-    xfail("nn.functional.silu"),
     xfail("nn.functional.smooth_l1_loss"),
     xfail("nn.functional.soft_margin_loss"),
     xfail("nn.functional.softplus"),
@@ -572,12 +571,6 @@ class TestDTensorOps(DTensorOpTestBase):
         def test():
             samples = op.sample_inputs(DEVICE_TYPE, dtype, requires_grad=True)
             for sample_input in samples:
-                # Skip mm/add over empty tensors, as test fails with `min() arg is an empty sequence`
-                # For more info see https://github.com/pytorch/pytorch/issues/118043
-                if op.name == "addmm" and sample_input.args[0].numel() == 0:
-                    continue
-                if op.name == "mm" and sample_input.input.numel() == 0:
-                    continue
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
 
@@ -710,7 +703,4 @@ instantiate_device_type_tests(TestDTensorOps, globals(), only_for=(DEVICE_TYPE,)
 
 
 if __name__ == "__main__":
-    # NB: CPU dtensor ops test frequently timeout https://github.com/pytorch/pytorch/issues/98816
-    # so running it only on CUDA
-    if torch.cuda.is_available():
-        run_tests()
+    run_tests()

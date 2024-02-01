@@ -46,6 +46,14 @@ void mkl_gemm_bf16bf16f32(
   TORCH_INTERNAL_ASSERT(false, "mkl_gemm_bf16bf16f32: ATen not compiled with MKL support");
 }
 
+void mkl_gemm_f16f16f32(
+    TransposeType trans_A, TransposeType trans_B,
+    int M, int N, int K, const float alpha,
+    const c10::Half* A, int lda, const c10::Half* B, int ldb,
+    const float beta, float* C, int ldc) {
+  TORCH_INTERNAL_ASSERT(false, "mkl_gemm_f16f16f32: ATen not compiled with MKL support");
+}
+
 }}
 
 #else // AT_MKL_ENABLED
@@ -124,6 +132,21 @@ void mkl_gemm_bf16bf16f32(
                          (const MKL_BF16*)A, lda, (const MKL_BF16*)B, ldb, beta, C, ldc);
 #else
   TORCH_INTERNAL_ASSERT(false, "mkl_gemm_bf16bf16f32 requires mkl version > 2021.0");
+#endif
+}
+
+void mkl_gemm_f16f16f32(
+    TransposeType trans_A, TransposeType trans_B,
+    int M, int N, int K, const float alpha,
+    const c10::Half* A, int lda, const c10::Half* B, int ldb,
+    const float beta, float* C, int ldc) {
+#ifdef MKL_HAS_SHGEMM
+  auto transa_cblas = to_cblas(trans_A);
+  auto transb_cblas = to_cblas(trans_B);
+  cblas_gemm_f16f16f32(CblasColMajor, transa_cblas, transb_cblas, M, N, K, alpha,
+                         (const MKL_F16*)A, lda, (const MKL_F16*)B, ldb, beta, C, ldc);
+#else
+  TORCH_INTERNAL_ASSERT(false, "mkl_gemm_f16f16f32 requires mkl version >= 2024.0");
 #endif
 }
 

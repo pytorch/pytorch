@@ -17,12 +17,11 @@ except ModuleNotFoundError:
 
 import torch
 
-from .utils import hashable, is_function, NP_SUPPORTED_MODULES
+from .utils import hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
 
 from .variables import (
     FunctorchVmapHigherOrderVariable,
     SkipFilesVariable,
-    TorchCtxManagerClassVariable,
     TorchInGraphFunctionVariable,
     UserFunctionVariable,
 )
@@ -31,26 +30,22 @@ from .variables.base import VariableTracker
 
 
 """
-Map of torch objects to their tracing rules (Dynamo variables).
+Map of function objects to their tracing rules (Dynamo variables).
 * TorchInGraphFunctionVariable: The functions should be put into the FX graph or can be constant folded. E.g.,
   - torch.add: should be put into the FX graph.
   - torch.is_floating_point: constant folded.
-* TorchCtxManagerClassVariable: The context manager classes are supported by Dynamo. E.g., torch.no_grad
 * SkipFilesVariable: The objects should be skipped from tracing.
 * UserFunctionVariable: The functions should be inlined.
 
-We explicitly list torch objects which should be wrapped as TorchCtxManagerClassVariable.
-The initial list comes from the heuristic in test/dynamo/test_trace_rules.py:generate_allow_list.
-
 For developers: If you add/remove a torch level API, it may trigger failures from
-test/dynamo/test_trace_rules.py:test_torch_name_rule_map. To fix the failures:
+test/dynamo/test_trace_rules.py:test_torch_name_rule_map_updated. To fix the failures:
 If you are adding a new torch level API or Dynamo implementation:
-* Add the name with TorchCtxManagerClassVariable to this map
-  if you are adding Dynamo implementation for that context manager.
-* Remove the object name from test/dynamo/test_trace_rules.ignored_torch_name_rule_set if it's there.
+* Add the name with the corresponding tracing rule to this map
+  if you are adding a new in graph function or Dynamo implementation for an existing function.
+* Remove the object name from test/dynamo/test_trace_rules.ignored_c_binding_in_graph_function_names if it's there.
 
 If you are removing an existing torch level API:
-* Remove the entry represented the API from this map or test/dynamo/test_trace_rules.ignored_torch_name_rule_set
+* Remove the entry represented the API from this map or test/dynamo/test_trace_rules.ignored_c_binding_in_graph_function_names
   depends on where it is.
 
 TODO: We would consolidate the skipfiles.check rules into trace_rules.lookup later.
@@ -59,9 +54,6 @@ and trace_rules.lookup consolidation is done. Then the explicit listing of skip/
 a higher priority, which can be used to override the skipfiles.check rules in some cases.
 """
 manual_torch_name_rule_map = {
-    "torch.profiler.profiler.profile": TorchCtxManagerClassVariable,
-    "torch.autograd.profiler.profile": TorchCtxManagerClassVariable,
-    "torch.autograd.profiler.record_function": TorchCtxManagerClassVariable,
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
     "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,
@@ -73,13 +65,13 @@ manual_torch_name_rule_map = {
     "torch.distributed.get_rank": TorchInGraphFunctionVariable,
     "torch.distributed.get_world_size": TorchInGraphFunctionVariable,
     "torch.distributed._tensor.DTensor#from_local": TorchInGraphFunctionVariable,
+    "torch.distributed.distributed_c10d._get_group_size_by_name": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d._get_group_tag": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d.get_process_group_ranks": TorchInGraphFunctionVariable,
     "torch._utils.is_compiling": TorchInGraphFunctionVariable,
     "torch.overrides.get_default_nowrap_functions": TorchInGraphFunctionVariable,
     "torch.fx._symbolic_trace.is_fx_tracing": TorchInGraphFunctionVariable,
     "torch._dynamo.external_utils.is_compiling": TorchInGraphFunctionVariable,
-    "torch.autograd.graph.disable_saved_tensors_hooks": TorchInGraphFunctionVariable,
     "torch.autograd._profiler_enabled": SkipFilesVariable,
     # We graph break on RNG state setters or getters like
     # `torch.get_rng_state` or `torch.set_rng_state`. These functions
@@ -162,27 +154,9 @@ manual_torch_name_rule_map = {
 }
 
 
-# Dynamo implemented context managers
-torch_ctx_manager_classes = {
-    k: TorchCtxManagerClassVariable
-    for k in [
-        "torch._C.DisableTorchFunctionSubclass",
-        "torch._functorch.vmap.vmap_increment_nesting",
-        "torch.amp.autocast_mode.autocast",
-        "torch.autograd.grad_mode.enable_grad",
-        "torch.autograd.grad_mode.inference_mode",
-        "torch.autograd.grad_mode.no_grad",
-        "torch.autograd.grad_mode.set_grad_enabled",
-        "torch.cpu.amp.autocast_mode.autocast",
-        "torch.cuda.amp.autocast_mode.autocast",
-    ]
-}
-
-
 # In graph functions (including constant folding) that are C bindings
-torch_c_binding_in_graph_functions = {
-    k: TorchInGraphFunctionVariable
-    for k in [
+torch_c_binding_in_graph_functions = dict.fromkeys(
+    [
         "math.acos",
         "math.acosh",
         "math.asin",
@@ -2059,8 +2033,9 @@ torch_c_binding_in_graph_functions = {
         "torch.xlogy",
         "torch.zero_",
         "torch.zeros",
-    ]
-}
+    ],
+    TorchInGraphFunctionVariable,
+)
 
 
 if sys.version_info >= (3, 9):
@@ -2071,9 +2046,8 @@ if sys.version_info >= (3, 11):
 
 
 # In graph functions (including constant folding) that are not C bindings
-torch_non_c_binding_in_graph_functions = {
-    k: TorchInGraphFunctionVariable
-    for k in [
+torch_non_c_binding_in_graph_functions = dict.fromkeys(
+    [
         "torch.__future__.get_overwrite_module_params_on_conversion",
         "torch.__future__.set_overwrite_module_params_on_conversion",
         "torch.__getattr__",
@@ -2742,16 +2716,17 @@ torch_non_c_binding_in_graph_functions = {
         "torch.typename",
         "torch.unique_consecutive",
         "torch.use_deterministic_algorithms",
-    ]
-}
+    ],
+    TorchInGraphFunctionVariable,
+)
 
 
 torch_name_rule_map = [
     manual_torch_name_rule_map,
-    torch_ctx_manager_classes,
     torch_c_binding_in_graph_functions,
     torch_non_c_binding_in_graph_functions,
 ]
+
 
 """
 Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
@@ -2762,7 +2737,7 @@ Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
 def get_torch_obj_rule_map():
     d: Dict[Any, VariableTracker] = dict()
     for m in torch_name_rule_map:
-        for k, v in m.items():
+        for k, v in m.items():  # type: ignore[attr-defined]
             obj = load_object(k)
             if obj is not None:
                 if obj in d and d[obj] != v:
@@ -2998,12 +2973,14 @@ def is_numpy(obj) -> bool:
 
 
 """
-Main entry point for looking up the trace rule (the Dynamo variable) for a given object.
-E.g, the lookup result of `torch.amp.autocast_mode.autocast` is `TorchCtxManagerClassVariable`.
+Main entry point for looking up the trace rule (the Dynamo variable) for a given function object.
+E.g, the lookup result of `torch.sin` is `TorchInGraphFunctionVariable`.
 """
 
 
 def lookup(obj):
+    # Unwrap if it's a functools.lru_cache wrapper
+    obj = unwrap_if_wrapper(obj)
     if not hashable(obj):
         return None
     # Custom allow/disallow in graph takes precedence over the `torch_name_rule_map`.
@@ -3011,18 +2988,7 @@ def lookup(obj):
         return SkipFilesVariable
     if callable(obj) and is_callable_allowed(obj):
         return TorchInGraphFunctionVariable
-    # Unwrap if the function is wrapped by functools.lru_cache or functools.wraps.
-    if isinstance(obj, functools._lru_cache_wrapper) or (
-        is_function(obj) and hasattr(obj, "__wrapped__")
-    ):
-        # TODO: Weird case, should not unwrap if it's wrapped as _VariableFunctionsClass.
-        if not (
-            hasattr(obj, "__qualname__")
-            and str(obj.__qualname__).startswith("_VariableFunctionsClass")
-        ):
-            obj = obj.__wrapped__
-    rule = get_torch_obj_rule_map().get(obj, None)
-    if rule is None and is_aten_op_or_tensor_method(obj):
+    if is_aten_op_or_tensor_method(obj):
         return TorchInGraphFunctionVariable
-    else:
-        return rule
+    rule = get_torch_obj_rule_map().get(obj, None)
+    return rule
