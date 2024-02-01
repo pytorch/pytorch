@@ -184,6 +184,22 @@ AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
           /*validate_full_update*/ true);
 }
 
+AOTIRuntimeError AOTInductorModelContainerRunConstantFolding(
+    AOTInductorModelContainerHandle container_handle,
+    bool use_inactive,
+    AOTInductorStreamHandle stream_handle,
+    AOTIProxyExecutorHandle proxy_executor_handle) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  auto stream =
+      reinterpret_cast<torch::aot_inductor::DeviceStreamType>(stream_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    AOTINoGradGuard guard;
+    container->run_const_fold(use_inactive, stream, proxy_executor_handle);
+  })
+}
+
 AOTIRuntimeError AOTInductorModelContainerSwapConstantBuffer(
     AOTInductorModelContainerHandle container_handle) {
   auto* container =

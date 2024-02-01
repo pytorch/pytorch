@@ -1466,6 +1466,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.header.writeline(f"// {name} {hashed}")
 
     def write_header(self):
+        if V.graph.is_const_graph:
+            # We do not write header for constant graph, it will be written by main module.
+            return
+
         if V.graph.aot_mode:
             for header_cpp_file in ("interface.cpp", "implementation.cpp"):
                 with open(
@@ -1543,6 +1547,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.output_is_tensor = output_is_tensor
 
     def write_prefix(self):
+        if V.graph.is_const_graph:
+            # We do not write prefix for constant graph, it will be written by main module.
+            return
+
         if V.graph.aot_mode:
             self.prefix.writeline("namespace torch {")
             self.prefix.writeline("namespace aot_inductor {")
@@ -1571,7 +1579,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())
         if V.graph.aot_mode:
-            if config.use_minimal_arrayref_interface:
+            if config.use_minimal_arrayref_interface and not V.graph.is_const_graph:
                 from .cpp import DTYPE_TO_CPP
 
                 input_cpp_types = ", ".join(
@@ -1591,64 +1599,93 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     """
                 )
 
-            run_impl_proto = """
-                void AOTInductorModel::run_impl(
-                    AtenTensorHandle*
-                        input_handles, // array of input AtenTensorHandle; handles
-                                        // are stolen; the array itself is borrowed
-                    AtenTensorHandle*
-                        output_handles, // array for writing output AtenTensorHandle; handles
-                                        // will be stolen by the caller; the array itself is
-                                        // borrowed
-                    DeviceStreamType stream,
-                    AOTIProxyExecutorHandle proxy_executor
-                ) {
-                """
-            if config.use_minimal_arrayref_interface:
+            if V.graph.const_module:
+                self.header.splice(V.graph.const_module.wrapper_code.header)
+                self.prefix.splice(V.graph.const_code)
+
+            if V.graph.is_const_graph:
                 self.prefix.splice(
                     """
-                    template <>
-                    AOTInductorModelOutputs AOTInductorModel::run_impl_minimal_arrayref_interface<
-                      AOTInductorModelInputs, AOTInductorModelOutputs>(
-                        const AOTInductorModelInputs& inputs,
+                    void AOTInductorModel::_const_run_impl(
+                        std::vector<AtenTensorHandle>& output_handles,
                         DeviceStreamType stream,
                         AOTIProxyExecutorHandle proxy_executor
                     ) {
                     """
                 )
-                self.suffix.splice(run_impl_proto)
-                self.suffix.splice(
-                    """
-                        AOTInductorModelInputs inputs;
-                        convert_handles_to_inputs(input_handles, inputs);
-                        auto outputs = run_impl_minimal_arrayref_interface<AOTInductorModelInputs, AOTInductorModelOutputs>(
-                            inputs, stream, proxy_executor);
-                        // NOTE: outputs is full of ArrayRef to thread_local storage. If in the future we need this
-                        // interface to perform well for a DSO using the minimal arrayref interface, all we need
-                        // to do is provide ThreadLocalCachedTensor for each one!
-                        convert_outputs_to_handles(outputs, output_handles);
-                    }
-                """
-                )
-
-                self.suffix.splice(
-                    """
-                    extern "C" AOTIRuntimeError AOTInductorModelRunMinimalArrayrefInterface(
-                        AOTInductorModelHandle model_handle,
-                        const AOTInductorModelInputs& inputs,
-                        AOTInductorModelOutputs& outputs) {
-                      auto model = reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);
-                      CONVERT_EXCEPTION_TO_ERROR_CODE({
-                          outputs = model->run_impl_minimal_arrayref_interface<AOTInductorModelInputs, AOTInductorModelOutputs>(
-                              inputs,
-                              (torch::aot_inductor::DeviceStreamType)nullptr,
-                              nullptr);
-                      })
-                    }
-                """
-                )
             else:
-                self.prefix.splice(run_impl_proto)
+                if not config.aot_inductor.use_runtime_constant_folding:
+                    # If we do not split the constant graph, we'll just create
+                    # an empty implementation when wrapping the main module.
+                    self.prefix.splice(
+                        """
+                        void AOTInductorModel::_const_run_impl(
+                            std::vector<AtenTensorHandle>& output_handles,
+                            DeviceStreamType stream,
+                            AOTIProxyExecutorHandle proxy_executor
+                        ) {}
+
+                        """
+                    )
+
+                run_impl_proto = """
+                    void AOTInductorModel::run_impl(
+                        AtenTensorHandle*
+                            input_handles, // array of input AtenTensorHandle; handles
+                                            // are stolen; the array itself is borrowed
+                        AtenTensorHandle*
+                            output_handles, // array for writing output AtenTensorHandle; handles
+                                            // will be stolen by the caller; the array itself is
+                                            // borrowed
+                        DeviceStreamType stream,
+                        AOTIProxyExecutorHandle proxy_executor
+                    ) {
+                    """
+                if config.use_minimal_arrayref_interface:
+                    self.prefix.splice(
+                        """
+                        template <>
+                        AOTInductorModelOutputs AOTInductorModel::run_impl_minimal_arrayref_interface<
+                          AOTInductorModelInputs, AOTInductorModelOutputs>(
+                            const AOTInductorModelInputs& inputs,
+                            DeviceStreamType stream,
+                            AOTIProxyExecutorHandle proxy_executor
+                        ) {
+                        """
+                    )
+                    self.suffix.splice(run_impl_proto)
+                    self.suffix.splice(
+                        """
+                            AOTInductorModelInputs inputs;
+                            convert_handles_to_inputs(input_handles, inputs);
+                            auto outputs = run_impl_minimal_arrayref_interface<AOTInductorModelInputs, AOTInductorModelOutputs>(
+                                inputs, stream, proxy_executor);
+                            // NOTE: outputs is full of ArrayRef to thread_local storage. If in the future we need this
+                            // interface to perform well for a DSO using the minimal arrayref interface, all we need
+                            // to do is provide ThreadLocalCachedTensor for each one!
+                            convert_outputs_to_handles(outputs, output_handles);
+                        }
+                    """
+                    )
+
+                    self.suffix.splice(
+                        """
+                        extern "C" AOTIRuntimeError AOTInductorModelRunMinimalArrayrefInterface(
+                            AOTInductorModelHandle model_handle,
+                            const AOTInductorModelInputs& inputs,
+                            AOTInductorModelOutputs& outputs) {
+                          auto model = reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);
+                          CONVERT_EXCEPTION_TO_ERROR_CODE({
+                              outputs = model->run_impl_minimal_arrayref_interface<AOTInductorModelInputs, AOTInductorModelOutputs>(
+                                  inputs,
+                                  (torch::aot_inductor::DeviceStreamType)nullptr,
+                                  nullptr);
+                          })
+                        }
+                    """
+                    )
+                else:
+                    self.prefix.splice(run_impl_proto)
         else:
             self.prefix.splice(
                 f"""std::vector<at::Tensor> {self.call_func_name}(const std::vector<at::Tensor>& inputs) {{"""
@@ -1657,19 +1694,20 @@ class CppWrapperCodeGen(WrapperCodeGen):
             # assign inputs and outputs in both cases so the later codegen can be simplified
             if not config.use_minimal_arrayref_interface:
                 if V.graph.aot_mode:
-                    if config.aot_inductor.abi_compatible:
-                        self.prefix.splice(
-                            """
-                                auto inputs = steal_from_raw_handles_to_raii_handles(input_handles, num_inputs());
-                            """
-                        )
-                    else:
-                        # This looks dumb, but can avoid creating two versions of code in the AOTInductor runtime.
-                        self.prefix.splice(
-                            """
-                                auto inputs = alloc_tensors_by_stealing_from_handles(input_handles, num_inputs());
-                            """
-                        )
+                    if not V.graph.is_const_graph:
+                        if config.aot_inductor.abi_compatible:
+                            self.prefix.splice(
+                                """
+                                    auto inputs = steal_from_raw_handles_to_raii_handles(input_handles, num_inputs());
+                                """
+                            )
+                        else:
+                            # This looks dumb, but can avoid creating two versions of code in the AOTInductor runtime.
+                            self.prefix.splice(
+                                """
+                                    auto inputs = alloc_tensors_by_stealing_from_handles(input_handles, num_inputs());
+                                """
+                            )
                 else:
                     self.prefix.splice(
                         """
@@ -1733,11 +1771,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
 
             if V.graph.aot_mode:
-                if config.use_minimal_arrayref_interface:
-                    # TODO: input shape checking for regular tensor interface as well?
-                    self.codegen_input_numel_asserts()
-                else:
-                    self.prefix.writeline("inputs.clear();")
+                if not V.graph.is_const_graph:
+                    if config.use_minimal_arrayref_interface:
+                        # TODO: input shape checking for regular tensor interface as well?
+                        self.codegen_input_numel_asserts()
+                    else:
+                        self.prefix.writeline("inputs.clear();")
                 self.prefix.writeline(
                     "auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
                 )
@@ -1777,9 +1816,13 @@ class CppWrapperCodeGen(WrapperCodeGen):
             "class AOTInductorModelKernels : public AOTInductorModelKernelsBase {"
         )
         self.prefix.writeline("  public:")
-        for kernel in chain(
-            self.src_to_kernel.values(), self.user_defined_kernel_cache.values()
-        ):
+        declare_kernel = set(self.src_to_kernel.values())
+        declare_kernel.update(self.user_defined_kernel_cache.values())
+        if V.graph.const_module:
+            declare_kernel.update(
+                V.graph.const_module.wrapper_code.src_to_kernel.values()
+            )
+        for kernel in declare_kernel:
             self.prefix.writeline(f"    CUfunction {kernel}{{nullptr}};")
         self.prefix.writeline("};")
         self.prefix.writeline("}  // namespace")
@@ -1836,6 +1879,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 self.prefix.writeline(
                     f"constants_info_[{idx}].data_size = {tensor.untyped_storage().nbytes()};"
                 )
+                from_folded = "true" if name in V.graph.folded_constants else "false"
+                self.prefix.writeline(
+                    f"constants_info_[{idx}].from_folded = {from_folded};"
+                )
 
                 size_str = ", ".join([str(s) for s in tensor.size()])
                 self.prefix.writeline(f"constants_info_[{idx}].shape = {{{size_str}}};")
@@ -1880,10 +1927,93 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         self.prefix.writeline("}")
 
+    def codegen_const_run_driver(self):
+        """
+        // Generated code example
+        std::unordered_map<std::string, AtenTensorHandle> AOTInductorModel::const_run_impl(
+            DeviceStreamType stream,
+            AOTIProxyExecutorHandle proxy_executor,
+            bool initialization
+        ) {
+            std::unordered_map<std::string, AtenTensorHandle> folded_constants_map;
+            std::vector<AtenTensorHandle> output_handles;
+            // build up output_handles over here.
+            _const_run_impl(output_handles, stream, proxy_executor);
+            // build up folded_constants_map
+            return folded_constants_map;
+        }
+        """
+
+        self.prefix.splice(
+            """
+            std::unordered_map<std::string, AtenTensorHandle> AOTInductorModel::const_run_impl(
+                DeviceStreamType stream,
+                AOTIProxyExecutorHandle proxy_executor,
+                bool initialization
+            ) {
+            """
+        )
+        if not config.aot_inductor.use_runtime_constant_folding:
+            self.prefix.splice(
+                """
+                    if (!initialization) {
+                        throw std::runtime_error(std::string("use_runtime_constant_folding is not set."));
+                    }
+                    return {};
+                }
+                """
+            )
+            return
+
+        with self.prefix.indent():
+            # This is a mapping to the index of constant folding graph's output
+            const_index_mapping: List[Optional[Tuple[int, str]]] = [None] * len(
+                V.graph.const_output_index
+            )
+            for idx, (name, _) in enumerate(V.graph.constants.items()):
+                if name in V.graph.const_output_index:
+                    const_index_mapping[V.graph.const_output_index[name]] = (idx, name)  # type: ignore[call-overload]
+            assert (
+                None not in const_index_mapping
+            ), "Not all constant gets mapped for constant folding graph."
+
+            self.prefix.writeline(
+                f"""
+                std::unordered_map<std::string, AtenTensorHandle> folded_constants_map;
+                folded_constants_map.reserve({len(const_index_mapping)});
+                std::vector<AtenTensorHandle> output_handles({len(const_index_mapping)});
+                """
+            )
+
+            self.prefix.splice(
+                """
+                // The below assignment of output_handles to constants is not used directly.
+                // It's only used to memo the correspondence of handle and constants.
+                """
+            )
+
+            for output_idx, (const_idx, _) in enumerate(const_index_mapping):  # type: ignore[misc]
+                self.prefix.writeline(
+                    f"output_handles[{output_idx}] = constants_->at({const_idx});"
+                )
+
+            self.prefix.writeline(
+                "_const_run_impl(output_handles, stream, proxy_executor);"
+            )
+
+            for output_idx, (_, const_name) in enumerate(const_index_mapping):  # type: ignore[misc]
+                self.prefix.writeline(
+                    f'folded_constants_map["{const_name}"] = output_handles[{output_idx}];'
+                )
+            self.prefix.writeline("return folded_constants_map;")
+
+        self.prefix.writeline("}")
+
     def generate(self, is_inference):
-        if V.graph.aot_mode:
+        if V.graph.aot_mode and not V.graph.is_const_graph:
             self.codegen_model_kernels()
             self.codegen_model_constructor()
+            self.codegen_const_run_driver()
         self.write_wrapper_decl()
         return super().generate(is_inference)
 
@@ -1920,7 +2050,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def generate_return(self, output_refs):
         if V.graph.aot_mode:
             cst_names = V.graph.constants.keys()
-            arr_iface = config.use_minimal_arrayref_interface  # For brevity.
+            arr_iface = (
+                not V.graph.is_const_graph and config.use_minimal_arrayref_interface
+            )  # For brevity.
 
             def use_thread_local_cached_output_tensor(idx, output):
                 cached_output_name = f"cached_output_{next(self.cached_output_id)}"
@@ -1977,7 +2109,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                         f"if constexpr ({output_is_tensor_handle_expr}) {{"
                     )
                     with self.wrapper_call.indent():
-                        if config.use_minimal_arrayref_interface:
+                        if arr_iface:
                             cached_output_name = (
                                 f"cached_output_{next(self.cached_output_id)}"
                             )
@@ -2045,13 +2177,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.wrapper_call.writeline(f"return {{{', '.join(output_refs)}}};\n}}")
 
     def generate_before_suffix(self, result):
-        if V.graph.aot_mode:
+        if V.graph.aot_mode and not V.graph.is_const_graph:
             result.writeline("} // AOTInductorModel::run_impl")
 
     def generate_end(self, result):
         if V.graph.aot_mode:
-            result.writeline("} // namespace aot_inductor")
-            result.writeline("} // namespace torch")
+            if V.graph.is_const_graph:
+                result.writeline("} // AOTInductorModel::_const_run_impl")
+            else:
+                result.writeline("} // namespace aot_inductor")
+                result.writeline("} // namespace torch")
             return
 
         result.writeline("'''\n)")
@@ -2912,6 +3047,10 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         self.cuda = True
 
     def write_header(self):
+        if V.graph.is_const_graph:
+            # We do not write header for constant graph, it will be written by main module.
+            return
+
         super().write_header()
 
         self.header.splice("#include <filesystem>")
@@ -3081,7 +3220,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         params = CudaKernelParamCache.get(name)
         assert (
             params is not None
-        ), f"cuda kernel parameters for {name} should already exist at this moment"
+        ), f"cuda kernel parameters for {name} should already exist at this moment, only found {CudaKernelParamCache.get_keys()}"
         block_cfg = {
             "XBLOCK": params["x_block"],
             "YBLOCK": params["y_block"],

@@ -200,6 +200,63 @@ def _unlift_graph(mod, gm, graph_signature):
     return unlifted_gm
 
 
+def split_const_gm(
+    gm: torch.fx.GraphModule,
+) -> Tuple[torch.fx.GraphModule, Dict[str, int]]:
+    """
+    This function takes an GraphModule input "gm".
+    The gm will be split into 2 components,
+      1) const_gm, which consists the subgraph of gm that can be constant folded.
+      2) gm (being inplace modified,) which returns the graph after constant folding.
+
+    const_output_index is a mapping of corresponding node name from gm to the
+    output index of const_gm.
+    Returns (const_gm, const_output_index)
+    """
+    from torch._inductor.constant_folding import (
+        CONST_MODULE_TAG,
+        META_TAG,
+        MODULE_TAG,
+        replace_node_with_constant,
+        run_and_get_constant_graph,
+    )
+
+    const_gm = run_and_get_constant_graph(gm)
+    const_result = const_gm()
+
+    const_outputs = {
+        x.name: idx for idx, x in enumerate(tuple(const_gm.graph.nodes)[-1].args[0])
+    }
+
+    to_erase_node = []
+    to_replace_node = []
+    const_output_index = {}
+    for node in gm.graph.nodes:
+        if node.name in const_outputs:
+            to_replace_node.append(node)
+        elif node.meta[META_TAG] == CONST_MODULE_TAG:
+            to_erase_node.append(node)
+
+    for node in to_replace_node:
+        new_const_name = "_FOLDED_CONST_" + node.name
+        replace_node_with_constant(
+            gm,
+            node,
+            const_result[const_outputs[node.name]],
+            new_const_name,
+        )
+        const_output_index[new_const_name] = const_outputs[node.name]
+    for node in to_erase_node[::-1]:
+        if node.users:
+            for n in node.users:
+                assert n.meta[META_TAG] == MODULE_TAG, f"node: {node} user not empty."
+        else:
+            gm.graph.erase_node(node)
+    gm.recompile()
+
+    return const_gm, const_output_index
+
+
 def is_tf32_warning_applicable(gm: torch.fx.GraphModule):
     aten = torch.ops.aten
     tf32_ops = {
@@ -569,6 +626,32 @@ def fx_codegen_and_compile(
         )
 
     with V.set_fake_mode(fake_mode):
+        const_output_index = None
+        const_graph = None
+        const_code = None
+
+        if aot_mode and config.aot_inductor.use_runtime_constant_folding:
+            const_gm, const_output_index = split_const_gm(gm)
+
+            const_graph = GraphLowering(
+                const_gm,
+                example_inputs=[],
+                shape_env=shape_env,
+                num_static_inputs=num_fixed,
+                graph_id=graph_id,
+                cpp_wrapper=cpp_wrapper,
+                aot_mode=aot_mode,
+                user_visible_outputs=user_visible_outputs,
+                extern_node_serializer=extern_node_serializer,
+                is_inference=is_inference,
+                is_const_graph=True,
+            )
+            with V.set_graph_handler(const_graph):
+                assert cpp_wrapper, "AOT mode only supports C++ wrapper"
+                const_graph.run()
+
+                const_code, _ = const_graph.codegen_with_cpp_wrapper()
+
         graph = GraphLowering(
             gm,
             # example_inputs will be used by AOTInductor to dry-run the generated code for Triton kernel tuning.
@@ -583,6 +666,9 @@ def fx_codegen_and_compile(
             user_visible_outputs=user_visible_outputs,
             extern_node_serializer=extern_node_serializer,
             is_inference=is_inference,
+            const_output_index=const_output_index,
+            const_code=const_code,
+            const_module=const_graph,
         )
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)

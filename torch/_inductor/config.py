@@ -601,6 +601,9 @@ class aot_inductor:
     # Serialized tree spec for flattening outputs
     serialized_out_spec = ""
 
+    # flag to decide whether to create a submodule for constant graph.
+    use_runtime_constant_folding: bool = False
+
 
 class cuda:
     # CUDA arch to use for CUDA template kernel compilation.
