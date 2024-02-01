@@ -209,7 +209,10 @@ class FSDPParam:
         chunks = _chunk_with_empty(param_data, shard_world_size, dim=0)
         sharded_param = chunks[shard_rank]
         self.sharded_size = sharded_param.size()
-        self.sharded_stride = sharded_param.stride()
+        # TODO: DTensor's local tensor may not have the correct stride for the
+        # uneven sharding case, so we construct a new tensor to get the stride:
+        # https://github.com/pytorch/pytorch/issues/118836
+        self.sharded_stride = torch.empty(self.sharded_size).stride()
         padded_sharded_size = chunks[0].size()  # 0th always padded
         padded_sharded_param = param_data.new_zeros(padded_sharded_size)
         if sharded_param.numel() > 0:
