@@ -1664,16 +1664,19 @@ def remainder(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 
 # reverse sub
+@register_decomposition(aten.rsub)
+@out_wrapper()
 def rsub(
     a: Union[TensorLikeType, NumberType],
     b: Union[TensorLikeType, NumberType],
     *,
-    alpha: Optional[NumberType] = None,
+    alpha: NumberType = 1,
 ):
     if isinstance(a, Number):
         msg = "Received a Number for the first argument, but expected a Tensor"
         raise ValueError(msg)
-    return sub(b, a, alpha=alpha)
+
+    return torch.sub(b, a, alpha=alpha)
 
 
 # TODO: consider refactoring this with add impl
@@ -1688,7 +1691,7 @@ def sub(
     a: Union[TensorLikeType, NumberType],
     b: Union[TensorLikeType, NumberType],
     *,
-    alpha: Optional[NumberType] = None,
+    alpha: NumberType = 1,
 ):
     """
     Reference implementation of torch.sub
@@ -1696,7 +1699,7 @@ def sub(
 
     a, b = _maybe_broadcast(a, b)
 
-    if alpha is not None:
+    if alpha != 1:
         dtype = a.dtype if isinstance(a, TensorLike) else b.dtype  # type: ignore[union-attr]
         python_type = utils.dtype_to_type(dtype)
         if not utils.is_weakly_lesser_type(type(alpha), python_type):
@@ -4875,16 +4878,16 @@ def arange(
     # other integral dtypes we don't. Weird... but needed to match ATen shapes.
     if dtype == torch.int64:
         # Uses floordiv to avoid ceil in inductor.
-        sgn = bool(xstep > 0) - bool(xstep < 0)
-        length = (xend - xstart + xstep - sgn) // xstep
+        sgn = bool(xstep > 0) - bool(xstep < 0)  # type: ignore[possibly-undefined]
+        length = (xend - xstart + xstep - sgn) // xstep  # type: ignore[possibly-undefined]
     else:
         length = math.ceil((end - start) / step)
 
     if is_integer:
         return prims.iota(
             length,
-            start=xstart,
-            step=xstep,
+            start=xstart,  # type: ignore[possibly-undefined]
+            step=xstep,  # type: ignore[possibly-undefined]
             dtype=dtype,
             device=device,
             requires_grad=requires_grad,

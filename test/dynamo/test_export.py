@@ -2319,7 +2319,10 @@ def forward(self, x):
         torch.export.save(exp_program, output_buffer)
         loaded_model = torch.export.load(output_buffer)
         self.assertTrue(
-            isinstance(loaded_model.module().features_0_weight, torch.nn.Parameter)
+            isinstance(
+                loaded_model.module().get_parameter("features.0.weight"),
+                torch.nn.Parameter,
+            )
         )
 
     def test_export_meta(self):
@@ -4328,6 +4331,26 @@ def forward(self, x):
         out = gm_no_inference(inp)
         self.assertEqual(out.requires_grad, False)
         out.requires_grad = True
+
+        def fn(x):
+            with torch.inference_mode():
+                return x + 1
+
+        gm, _ = torch._dynamo.export(fn)(torch.rand(2, 2))
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x):
+    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    l_x_ = arg0
+    _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(True)
+    add = l_x_ + 1;  l_x_ = None
+    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = None
+    return pytree.tree_unflatten([add], self._out_spec)""",
+        )
+        inp = torch.randn(2, 2, requires_grad=True)
+        out = gm(inp)
+        self.assertEqual(out.requires_grad, False)
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
