@@ -346,7 +346,7 @@ def _single_tensor_radam(
         # compute the length of the approximated SMA
         rho_t = rho_inf - 2 * step * (beta2 ** step) / bias_correction2
 
-        if rho_t > 5.0:
+        def rho_t_above_5():
             # Compute the variance rectification term and update parameters accordingly
             rect = (
                 (rho_t - 4)
@@ -365,8 +365,11 @@ def _single_tensor_radam(
             else:
                 adaptive_lr = math.sqrt(bias_correction2) / exp_avg_sq_sqrt
             param.add_(bias_corrected_exp_avg * lr * adaptive_lr * rect, alpha=-1.0)
-        else:
+        
+        def rho_t_less_5() :
             param.add_(bias_corrected_exp_avg * lr, alpha=-1.0)
+        
+        torch.cond(rho_t > 5, rho_t_above_5, rho_t_less_5)
 
 
 def _multi_tensor_radam(
