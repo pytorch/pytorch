@@ -2958,12 +2958,12 @@ class CPUReproTests(TestCase):
 
     @config.patch({"cpp.dynamic_threads": True})
     def test_reduction_with_dynamic_threads(self):
-        def fn(a):
-            return a.sum()
+        def fn(a, b):
+            return a.sum(), b.sum()
 
         self.common(
             fn,
-            (torch.randn(1000),),
+            (torch.randn(1000), torch.rand(1000)),
         )
 
 
