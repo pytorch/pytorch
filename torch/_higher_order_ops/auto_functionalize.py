@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -34,17 +34,21 @@ from torch.fx.experimental.proxy_tensor import (
 
 
 class AutoFunctionalized(HigherOrderOperator):
-    """auto_functionalized(op, mutated_args_names, kwargs)
+    """auto_functionalized(_mutable_op, _mutated_args_names, **kwargs)
 
-    This HOP runs a "functional" version of op.
+    This HOP runs a "functional" version of _mutable_op.
 
-    Concretely, it clones kwargs that `op` mutates (specified by
-    mutated_args_names), runs `out = op(**kwargs)` with the cloned values,
-    and then returns (out, Tuple of the cloned values that were mutated).
+    Concretely, it clones kwargs that `_mutable_op` mutates (specified by
+    _mutated_args_names), runs `out = _mutable_op(**kwargs)` with the cloned
+    values, and then returns (out, Tuple of the cloned values that were
+    mutated).
 
-    We have some restrictions on `op`.
+    We have some restrictions on `_mutable_op`.
     See `can_auto_functionalize` for the restrictions. We can likely lift
     many of these if users request it.
+
+    The reason why _mutable_op and _mutated_args_names are prefixed with an
+    underscore is to prevent collisions with kwarg names in **kwargs.
     """
 
     def __init__(self):
@@ -52,14 +56,14 @@ class AutoFunctionalized(HigherOrderOperator):
 
     def __call__(
         self,
-        op: torch._ops.OpOverload,
-        mutated_args_names: List[str],
-        kwargs: Dict[str, Any],
+        _mutable_op: torch._ops.OpOverload,
+        _mutated_args_names: List[str],
+        **kwargs: Dict[str, Any],
     ) -> Tuple[Any, Tuple[Tensor, ...]]:
-        assert can_auto_functionalize(op)
-        assert isinstance(mutated_args_names, list)
+        assert can_auto_functionalize(_mutable_op)
+        assert isinstance(_mutated_args_names, list)
         assert isinstance(kwargs, dict)
-        return super().__call__(op, mutated_args_names, kwargs)
+        return super().__call__(_mutable_op, _mutated_args_names, **kwargs)
 
 
 auto_functionalized = AutoFunctionalized()
@@ -105,50 +109,56 @@ def can_auto_functionalize(op: torch._ops.OperatorBase) -> bool:
 
 @auto_functionalized.py_impl(DispatchKey.CompositeExplicitAutograd)
 def auto_functionalized_dense(
-    op: torch._ops.OpOverload, mutated_args_names: List[str], kwargs: Dict[str, Any]
+    _mutable_op: torch._ops.OpOverload,
+    _mutated_args_names: List[str],
+    **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     new_kwargs = dict(**kwargs)
     result = []
-    for name in mutated_args_names:
+    for name in _mutated_args_names:
         new_kwargs[name] = (
             clone_preserve_strides(kwargs[name]) if kwargs[name] is not None else None
         )
         result.append(new_kwargs[name])
-    out = op(**new_kwargs)
-    return out, tuple(result)
+    out = _mutable_op(**new_kwargs)
+
+    if isinstance(out, tuple):
+        return (*out, *result)
+    else:
+        return (out, *result)
 
 
 @auto_functionalized.py_impl(FakeTensorMode)
 def auto_functionalized_fake(
     mode,
-    op: torch._ops.OpOverload,
-    mutated_args_names: List[str],
-    kwargs: Dict[str, Any],
+    _mutable_op: torch._ops.OpOverload,
+    _mutated_args_names: List[str],
+    **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     with mode:
-        result = auto_functionalized_dense(op, mutated_args_names, kwargs)
+        result = auto_functionalized_dense(_mutable_op, _mutated_args_names, **kwargs)
         return result
 
 
 @auto_functionalized.py_impl(ProxyTorchDispatchMode)
 def auto_functionalized_proxy(
     mode,
-    op: torch._ops.OpOverload,
-    mutated_args_names: List[str],
-    kwargs: Dict[str, Any],
+    _mutable_op: torch._ops.OpOverload,
+    _mutated_args_names: List[str],
+    **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     if not mode.enable_tracing:
-        return auto_functionalized(op, mutated_args_names, kwargs)
+        return auto_functionalized(_mutable_op, _mutated_args_names, **kwargs)
 
     with disable_proxy_modes_tracing():
-        out = auto_functionalized(op, mutated_args_names, kwargs)
+        out = auto_functionalized(_mutable_op, _mutated_args_names, **kwargs)
 
     proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
     out_proxy = mode.tracer.create_proxy(
         "call_function",
         auto_functionalized,
-        (op, mutated_args_names, proxy_kwargs),
-        {},
+        (_mutable_op, _mutated_args_names),
+        proxy_kwargs,
     )
     result = track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
     return result
@@ -194,11 +204,24 @@ def do_auto_functionalize(
 
     unwrapped_kwargs = ctx.unwrap_tensors(normalized_kwargs)  # type: ignore[arg-type]
     with ctx.redispatch_to_next():
-        unwrapped_actual_out, unwrapped_outs = auto_functionalized(
-            op, mutable_args_names, unwrapped_kwargs  # type: ignore[arg-type]
+        unwrapped_outs = auto_functionalized(
+            op, mutable_args_names, **unwrapped_kwargs  # type: ignore[arg-type]
         )
-    assert len(unwrapped_outs) == len(mutable_args_names)
-    for name, unwrapped_out in zip(mutable_args_names, unwrapped_outs):
+    unwrapped_actual_out: Union[Any, Tuple[Any]] = unwrapped_outs[
+        : -len(mutable_args_names)
+    ]
+    unwrapped_mutable_out = unwrapped_outs[-len(mutable_args_names) :]
+
+    if len(op._schema.returns) == 0:
+        assert unwrapped_actual_out[0] is None
+        unwrapped_actual_out = None
+    elif len(op._schema.returns) == 1:
+        assert len(unwrapped_actual_out) == 1
+        unwrapped_actual_out = unwrapped_actual_out[0]
+    else:
+        assert len(unwrapped_actual_out) == len(op._schema.returns)
+
+    for name, unwrapped_out in zip(mutable_args_names, unwrapped_mutable_out):
         # Can be None if input was `Tensor(a!)?`
         if unwrapped_out is None:
             continue
@@ -208,4 +231,4 @@ def do_auto_functionalize(
         ctx.commit_update(orig_arg)
         ctx.sync(orig_arg)
 
-    return ctx.wrap_tensors(unwrapped_actual_out)
+    return ctx.wrap_tensors(unwrapped_actual_out)  # type: ignore[arg-type]
