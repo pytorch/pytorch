@@ -135,7 +135,7 @@ def foreach_reduce_scatter(
             (reduce_scatter_input_numel,), dtype=reduce_dtype, device=device
         )
         foreach_reduce_scatter_copy_in(
-            fsdp_params, unsharded_grads, reduce_scatter_input, world_size
+            unsharded_grads, reduce_scatter_input, world_size
         )
         _div_if_needed(reduce_scatter_input, predivide_factor)
         # Record to mark the end of the reduce-scatter copy-in in the RS stream
@@ -157,7 +157,7 @@ def foreach_reduce_scatter(
             new_sharded_grad = torch.as_strided(
                 reduce_scatter_output,
                 size=fsdp_param.sharded_size,
-                stride=fsdp_param.sharded_stride,
+                stride=fsdp_param.contiguous_sharded_stride,
                 storage_offset=flat_grad_offset,
             )
             to_accumulate_grad = fsdp_param.sharded_param.grad is not None
@@ -182,7 +182,6 @@ def foreach_reduce_scatter(
 
 
 def foreach_reduce_scatter_copy_in(
-    fsdp_params: List[FSDPParam],
     unsharded_grads: List[torch.Tensor],
     reduce_scatter_input: torch.Tensor,
     world_size: int,
