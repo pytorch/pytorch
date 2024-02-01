@@ -1421,13 +1421,14 @@ void test_conv1d(
     int64_t padding = 0,
     int64_t dilation = 1,
     int64_t in_group_size = 1,
-    int64_t out_group_size = 1) {
+    int64_t out_group_size = 1,
+    int64_t batch_size = 1) {
   c10::InferenceMode mode;
 
   int64_t in_channels = in_group_size * groups;
   int64_t out_channels = out_group_size * groups;
 
-  const auto input_cpu = at::rand({1, in_channels, lengths}, at::kFloat);
+  const auto input_cpu = at::rand({batch_size, in_channels, lengths}, at::kFloat);
   const auto weights_cpu = at::rand({out_channels, in_group_size, kernel_size}, at::kFloat);
   const auto bias_cpu = at::rand({out_channels,}, at::kFloat);
 
@@ -1463,6 +1464,9 @@ TEST_F(VulkanAPITest, conv1d) {
   test_conv1d(6, 22, 30, 5, 5, 3);
   test_conv1d(6, 5, 30, 5, 5, 3, 3, 5);
   test_conv1d(6, 5, 30, 5, 5, 3, 4, 2);
+  test_conv1d(6, 5, 30, 5, 5, 3, 4, 2, 2);
+  test_conv1d(6, 5, 30, 5, 5, 3, 4, 2, 5);
+  test_conv1d(6, 5, 30, 5, 5, 3, 4, 2, 9);
 }
 
 
