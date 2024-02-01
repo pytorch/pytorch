@@ -83,7 +83,9 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
                 if arg_name.startswith("in_out_ptr")
             ]
         )
-        num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
+        num_gb = triton_kernel.inductor_meta.get("kernel_num_gb", None)
+        if num_gb is None:
+            num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
 
         def get_info_str(ms, n_regs, n_spills, shared, prefix=""):
             if not any(x is None for x in [n_regs, n_spills, shared]):
