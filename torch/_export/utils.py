@@ -12,8 +12,11 @@ from torch.utils._pytree import (
     DumpableContext,
     FlattenFunc,
     FromDumpableContextFn,
+    KeyPath,
+    keystr,
+    MappingKey,
+    SequenceKey,
     ToDumpableContextFn,
-    tree_flatten,
     UnflattenFunc,
 )
 
@@ -21,32 +24,25 @@ from torch.utils._pytree import (
 SERIALIZED_DATACLASS_TO_PYTHON_DATACLASS: Dict[str, Type[Any]] = {}
 
 
-@torch._dynamo.disable
-def _check_input_constraints_pre_hook(self, *args, **kwargs):
-    args, received_spec = tree_flatten(args)
-
-    if received_spec != self._in_spec:
-        raise TypeError(  # noqa: TRY200
-            "Trying to flatten user inputs with exported input tree spec: \n"
-            f"{self._in_spec}\n"
-            "but actually got inputs with tree spec of: \n"
-            f"{received_spec}"
-        )
-
-    return _check_input_constraints_for_graph(
-        [node for node in self.graph.nodes if node.op == "placeholder"],
-        args,
-        self.range_constraints,
-    )
-
-
 def _check_input_constraints_for_graph(
-    input_placeholders: List[torch.fx.Node], args, range_constraints
+    input_placeholders: List[torch.fx.Node], flat_args_with_path, range_constraints
 ):
-    def check(cond, msg):
-        if not cond:
-            # TODO(avik): maybe add more context, e.g., graph signature
-            raise RuntimeError(msg)
+    def get_keystr(key_path: KeyPath) -> str:
+        """For a given index into the flat_args, return a human readable string
+        describing how to access it, e.g. "*args["foo"][0].bar"
+        """
+        # Prefix the keypath with "*args" or "**kwargs" to make it clearer where
+        # the arguments come from. Ultimately we ought to serialize the
+        # original arg names for the best error message here.
+        args_kwargs_key_path = key_path[0]
+        assert isinstance(args_kwargs_key_path, SequenceKey)
+        if args_kwargs_key_path.idx == 0:
+            return f"*args{keystr(key_path[1:])}"
+        else:
+            kwarg_key = key_path[1]
+            assert isinstance(kwarg_key, MappingKey)
+            name = str(kwarg_key)[1:-1]  # get rid of the enclosed []
+            return f"{name}{keystr(key_path[2:])}"
 
     import sympy
 
@@ -54,36 +50,38 @@ def _check_input_constraints_for_graph(
         _convert_range_to_int,
     )
 
-    check(
-        len(args) == len(input_placeholders),
-        "Unexpected number of inputs "
-        f"(expected {len(input_placeholders)}, got {len(args)})",
-    )
+    if len(flat_args_with_path) != len(input_placeholders):
+        raise RuntimeError(
+            "Unexpected number of inputs "
+            f"(expected {len(input_placeholders)}, got {len(flat_args_with_path)})"
+        )
     # NOTE: export already guarantees that the same symbol is used in metadata
     # for all InputDims related by equality constraints, so we can just unify
     # symbols with given input dimension values to check equality constraints.
     unification_map: "Dict[sympy.Symbol, Any]" = {}
-    for arg, node in zip(args, input_placeholders):
+    for (key_path, arg), node in zip(flat_args_with_path, input_placeholders):
         node_val = node.meta.get("val")
         if isinstance(node_val, FakeTensor):
-            check(
-                isinstance(arg, torch.Tensor),
-                f"Expected input {node.name} to be a tensor, but got {type(arg)}",
-            )
-            check(
-                len(node_val.shape) == len(arg.shape),
-                f"Unexpected number of dimensions in input {node.name}.shape "
-                f"(expected {node_val.shape}, got {arg.shape})",
-            )
+            if not isinstance(arg, torch.Tensor):
+                raise RuntimeError(
+                    f"Expected input at {get_keystr(key_path)} to be a tensor, but got {type(arg)}",
+                )
+
+            if len(node_val.shape) != len(arg.shape):
+                raise RuntimeError(
+                    f"Unexpected number of dimensions in input at {get_keystr(key_path)}.shape "
+                    f"(expected {node_val.shape}, got {arg.shape})"
+                )
+
             for j, (arg_dim, node_dim) in enumerate(zip(arg.shape, node_val.shape)):
                 if isinstance(node_dim, torch.SymInt):
                     if node_dim.node.expr in unification_map:
                         existing_dim = unification_map[node_dim.node.expr]
-                        check(
-                            arg_dim == existing_dim,
-                            f"Expected input {node.name}.shape[{j}] to be equal to "
-                            f"{existing_dim}, but got {arg_dim}",
-                        )
+                        if arg_dim != existing_dim:
+                            raise RuntimeError(
+                                f"Expected input at {get_keystr(key_path)}.shape[{j}] to be equal to "
+                                f"{existing_dim}, but got {arg_dim}",
+                            )
                     else:
                         unification_map[node_dim.node.expr] = arg_dim
 
@@ -93,28 +91,28 @@ def _check_input_constraints_for_graph(
                         )
                         # NOTE: we allow dimensions to be 0/1 at runtime
                         if min_val > 2:
-                            check(
-                                arg_dim >= min_val,
-                                f"Expected input {node.name}.shape[{j}] to be >= "
-                                f"{min_val}, but got {arg_dim}",
-                            )
+                            if arg_dim < min_val:
+                                raise RuntimeError(
+                                    f"Expected input at {get_keystr(key_path)}.shape[{j}] to be >= "
+                                    f"{min_val}, but got {arg_dim}",
+                                )
                         if max_val < math.inf:
-                            check(
-                                arg_dim <= max_val,
-                                f"Expected input {node.name}.shape[{j}] to be <= "
-                                f"{max_val}, but got {arg_dim}",
-                            )
+                            if arg_dim > max_val:
+                                raise RuntimeError(
+                                    f"Expected input at {get_keystr(key_path)}.shape[{j}] to be <= "
+                                    f"{max_val}, but got {arg_dim}",
+                                )
                 else:
-                    check(
-                        arg_dim == node_dim,
-                        f"Expected input {node.name}.shape[{j}] to be equal to "
-                        f"{node_dim}, but got {arg_dim}",
-                    )
+                    if arg_dim != node_dim:
+                        raise RuntimeError(
+                            f"Expected input at {get_keystr(key_path)}.shape[{j}] to be equal to "
+                            f"{node_dim}, but got {arg_dim}",
+                        )
         elif isinstance(node_val, (int, float, str)):
-            check(
-                type(arg) == type(node_val) and arg == node_val,
-                f"Expected input {node.name} to be equal to {node_val}, but got {arg}",
-            )
+            if type(arg) != type(node_val) or arg != node_val:
+                raise RuntimeError(
+                    f"Expected input at {get_keystr(key_path)} to be equal to {node_val}, but got {arg}",
+                )
 
 
 def register_dataclass_as_pytree_node(
@@ -149,7 +147,7 @@ def register_dataclass_as_pytree_node(
 
     def default_unflatten_fn(values: Iterable[Any], context: Context) -> Any:
         typ, flat_names, none_names = context
-        return typ(**dict(zip(flat_names, values)), **{k: None for k in none_names})
+        return typ(**dict(zip(flat_names, values)), **dict.fromkeys(none_names))
 
     def default_to_dumpable_context(context: Context) -> DumpableContext:
         return (serialized_type, context[1], context[2])
