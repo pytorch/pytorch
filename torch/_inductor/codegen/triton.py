@@ -423,7 +423,7 @@ def triton_constant(value):
 
 
 class TritonCSEVariable(CSEVariable):
-    def __init__(self, name, bounds: ValueRanges):
+    def __init__(self, name, bounds: ValueRanges[Any]):
         super().__init__(name, bounds)
         # We'll use this to track which masks the variable needs when used for indirect indexing
         self.mask_vars: Set[str] = set()
@@ -2300,7 +2300,7 @@ class TritonKernel(Kernel):
             self.compute, f"tl.broadcast_to({value}, {self.dense_size_str()})"
         )
 
-        default = init
+        default = triton_constant(init)
         default_tensor = self.cse.generate(
             self.body,
             f"tl.full({[1] * self.triton_tensor_ndim()}, {default}, {triton_compute_type(dtype)})",
