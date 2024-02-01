@@ -96,7 +96,6 @@ from .dicts import (
     DataClassVariable,
     DefaultDictVariable,
     HFPretrainedConfigVariable,
-    is_hashable_python_var,
     PythonSysModulesVariable,
     SetVariable,
 )
@@ -413,9 +412,7 @@ class VariableBuilder:
             return ConstDictVariable(result, type(value))
         elif value is sys.modules:
             return PythonSysModulesVariable(source=self.source)
-        elif istype(
-            value, (dict, collections.defaultdict, collections.OrderedDict)
-        ) and all(is_hashable_python_var(k) for k in value.keys()):
+        elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             if not value and self.get_source().is_nn_module():
                 # It is faster to guard on 'false' property than to guard
                 # on actual dict keys, but we can't do this fast guard in general because
@@ -426,26 +423,22 @@ class VariableBuilder:
                 # but not completely secure job ensuring a property wasn't changed.
                 self.install_guards(GuardBuilder.BOOL_FALSE)
             else:
-                self.install_guards(GuardBuilder.DICT_KEYS)
+                self.install_guards(GuardBuilder.LIST_LENGTH)
 
-            idx = 0
-
-            def build_key_value(k, v):
-                nonlocal idx
-                if ConstantVariable.is_literal(k):
-                    key = ConstantVariable.create(k)
-                    source_key = k
-                else:
-                    source_key = ConstDictKeySource(self.get_source(), idx)
-                    key = VariableBuilder(self.tx, source_key)(k)
+            # We need all the keys to be hashable. We do this within the
+            # _HashableTracker class in dicts.py
+            def build_key_value(i, k, v):
+                source_key = ConstDictKeySource(self.get_source(), i)
+                key = LazyVariableTracker.create(k, source_key)
 
                 source_value = GetItemSource(self.get_source(), source_key)
                 value = LazyVariableTracker.create(v, source_value)
 
-                idx += 1
                 return key, value
 
-            result = dict(build_key_value(k, v) for k, v in value.items())
+            result = dict(
+                build_key_value(i, k, v) for i, (k, v) in enumerate(value.items())
+            )
 
             if istype(value, collections.defaultdict):
                 result = DefaultDictVariable(
