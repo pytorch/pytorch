@@ -1,0 +1,26 @@
+name: Commit Keyword Monitor
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  check-commit-message:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      
+      - name: Check for keyword in commit message
+        run: |
+          echo "Checking for keyword in the commit messages..."
+          KEYWORD="inductor"
+          FOUND_KEYWORD=$(git log --format=%B -n 1 | grep -i $KEYWORD)
+          if [ "$FOUND_KEYWORD" != "" ]; then
+            echo "Found keyword '$KEYWORD' in the commit message."
+            # You can add additional steps here, such as sending a notification
+          else
+            echo "Keyword '$KEYWORD' not found in the commit message."
+          fi
