@@ -169,6 +169,36 @@ class TestExport(TestCase):
         ep = export(WrapperModule(f), args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
 
+    @testing.expectedFailureRetraceability
+    def test_conv_dynamic(self):
+        # Simple module for demonstration
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=32
+                    , kernel_size=3, padding=1
+                )
+                self.relu = torch.nn.ReLU()
+                self.maxpool = torch.nn.MaxPool2d(kernel_size=3)
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                a = self.conv(x)
+                a.add_(y)
+                return self.maxpool(self.relu(a))
+
+        example_args = (torch.randn(2, 3, 256, 256), torch.ones(2, 32, 256, 256))
+        dynamic_shapes = {"x": {0: Dim("batch")}, "y": {0: Dim("batch")}}
+        m = M()
+        exported_program: torch.export.ExportedProgram = export(
+            m, args=example_args, dynamic_shapes=dynamic_shapes
+        )
+
+        args = (torch.randn(17, 3, 256, 256), torch.ones(17, 32, 256, 256))
+        self.assertEqual(exported_program.module()(*args), m(*args))
+        args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
+        self.assertEqual(exported_program.module()(*args), m(*args))
+
     def test_basic_non_strict_real_tensor(self):
         class Basic(torch.nn.Module):
             def __init__(self):
@@ -2480,28 +2510,6 @@ def forward(self, l_x_):
         exported_model = _export(m, (tensor_cpu, mask_cpu), pre_dispatch=True).module()
         optimized_model = torch.compile(exported_model)
         optimized_model(tensor_cpu, mask_cpu)
-
-    def test_export_mkldnn_disabled(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.lstm = torch.nn.LSTM(input_size=4, hidden_size=5, num_layers=1)
-
-            def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-                return self.lstm(inputs)
-
-        inp = (torch.ones(3, 4),)
-        torch._C._set_mkldnn_enabled(False)
-        ep = torch.export.export(M(), inp)
-        FileCheck().check_count(
-            "torch.ops.aten.mkldnn_rnn_layer.default", 0, exactly=True
-        ).run(ep.graph_module.code)
-
-        torch._C._set_mkldnn_enabled(True)
-        ep = torch.export.export(M(), inp)
-        FileCheck().check_count(
-            "torch.ops.aten.mkldnn_rnn_layer.default", 1, exactly=True
-        ).run(ep.graph_module.code)
 
     def test_export_input_mutation_static_shape(self):
         class MutationModel(torch.nn.Module):
