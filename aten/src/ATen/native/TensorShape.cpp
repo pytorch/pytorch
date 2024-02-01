@@ -4024,6 +4024,13 @@ void split_with_sizes_copy_out(const at::Tensor & self, at::IntArrayRef split_si
 
   TORCH_CHECK(out.size() == tmp.size(), "split_with_sizes_copy_out() expected an out= argument of size ", tmp.size(), ", got size ", out.size());
   for (const auto i : c10::irange(out.size())) {
+    if (resize_output_check(out[i], tmp[i].sizes())) {
+      out[i].resize_(tmp[i].sizes());
+    }
+    TORCH_CHECK(out[i].dtype() == tmp[i].dtype(),
+        "Expected out tensor to have dtype ", tmp[i].dtype(), ", but got ", out[i].dtype(), " instead");
+    TORCH_CHECK(out[i].device() == tmp[i].device(),
+        "Expected out tensor to have device ", tmp[i].device(), ", but got ", out[i].device(), " instead");
     out[i].copy_(tmp[i]);
   }
 }
