@@ -2105,6 +2105,21 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x, y), fn_opt(x, y))
         self.assertEqual(fn(x, x), fn_opt(x, x))
 
+    def test_is_not_tensor_tensor(self):
+        def fn(x, y):
+            if x is not y:
+                return x * 2
+            else:
+                return x + y
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        x = torch.zeros(2)
+        y = torch.ones(2)
+
+        self.assertEqual(fn(x, y), fn_opt(x, y))
+        self.assertEqual(fn(x, x), fn_opt(x, x))
+
     def test_is_mutated_tensor_tensor(self):
         def fn(x):
             y = x.add_(1)
@@ -2244,6 +2259,26 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         # Test aliased
         self.assertEqual(opt_fn(param, param), fn(param, param))
         self.assertEqual(cnts.frame_count, 2)  # Recompiles
+
+    def test_reconstructed_name(self):
+        lst = []
+
+        @torch._dynamo.disable
+        def disallowed(g):
+            lst.append(g.__name__)
+
+        def f():
+            def g():
+                return ()
+
+            disallowed(g)
+
+        f_opt = torch._dynamo
+        opt_f = torch._dynamo.optimize(backend="eager")(f)
+        opt_f()
+        f()
+        self.assertEqual(len(lst), 2)
+        self.assertEqual(lst[0], lst[1])
 
     @unittest.skipIf(
         sys.version_info < (3, 10),

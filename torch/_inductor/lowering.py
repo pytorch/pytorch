@@ -752,12 +752,13 @@ def floor(x):
     return make_pointwise(fn)(x)
 
 
-@register_lowering(aten.round)
+@register_lowering(aten.round.default)
 def round(x):
     if is_integer_type(x):
         return clone(x)
-    fn = ops_wrapper("round")
-    return make_pointwise(fn)(x)
+    else:
+        fn = ops_wrapper("round")
+        return make_pointwise(fn)(x)
 
 
 @register_lowering(aten.trunc)
@@ -2223,8 +2224,6 @@ make_fallback(aten.mode)
 make_fallback(aten.nanmedian)
 make_fallback(aten.ormqr)
 make_fallback(aten._pdist_forward)
-make_fallback(aten.pixel_shuffle)
-make_fallback(aten.pixel_unshuffle)
 make_fallback(aten.polygamma)
 make_fallback(aten.put)
 make_fallback(aten.resize)
