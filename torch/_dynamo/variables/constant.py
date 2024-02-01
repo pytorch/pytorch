@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import operator
 from typing import Dict, List
 
@@ -7,7 +9,7 @@ from torch._dynamo.source import GetItemSource
 from .. import variables
 from ..exc import unimplemented, UserError, UserErrorType
 from ..guards import GuardBuilder, install_guard
-from ..utils import istype, np
+from ..utils import common_constant_types, istype, np
 from .base import typestr, VariableTracker
 
 _type_to_assert_reason = {
@@ -95,16 +97,7 @@ class ConstantVariable(VariableTracker):
 
     @staticmethod
     def is_literal(obj):
-        if type(obj) in (
-            int,
-            float,
-            bool,
-            type(None),
-            str,
-            Ellipsis.__class__,
-            torch.dtype,
-            torch.device,
-        ):
+        if type(obj) in common_constant_types:
             return True
         # The structure within is_literal get routed to variables.BaseListVariable
         if type(obj) in (list, tuple, set, frozenset, torch.Size):
