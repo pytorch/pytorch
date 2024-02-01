@@ -4,9 +4,9 @@ from typing import cast, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
-from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
 from torch._prims_common import make_contiguous_strides_for
+from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed._tensor import DTensor, Placement, Replicate, Shard
 from torch.distributed._tensor.device_mesh import _mesh_resources
 from torch.distributed._tensor.placement_types import DTensorSpec
