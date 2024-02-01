@@ -110,7 +110,6 @@ def _construct_state_dict_and_metadata(
     state_dict = torch.load(fp_name, map_location="cpu")
 
     state_dict_metadata = {}
-    placement = [Shard(0)]
     for key, value in state_dict.items():
         # Sharded the tensor into a DTensor with each rank contains a shard.
         size = value.size()
