@@ -52,9 +52,9 @@ from .schema import (  # type: ignore[attr-defined]
     GraphSignature,
     InputSpec,
     InputToBufferSpec,
-    InputToCustomObjSpec,
     InputToParameterSpec,
     InputToTensorConstantSpec,
+    InputToCustomObjSpec,
     Layout,
     LossOutputSpec,
     MemoryFormat,
@@ -727,12 +727,10 @@ class GraphModuleSerializer:
         elif spec.kind == ep.InputKind.BUFFER:
             assert spec.target is not None
             assert isinstance(spec.arg, ep.TensorArgument)
-            assert spec.persistent is not None
             return InputSpec.create(
                 buffer=InputToBufferSpec(
                     arg=TensorArgument(name=spec.arg.name),
                     buffer_name=spec.target,
-                    persistent=spec.persistent,
                 )
             )
         elif spec.kind == ep.InputKind.CONSTANT_TENSOR:
@@ -1293,7 +1291,6 @@ class GraphModuleDeserializer:
                 kind=ep.InputKind.BUFFER,
                 arg=ep.TensorArgument(name=i.buffer.arg.name),
                 target=i.buffer.buffer_name,
-                persistent=i.buffer.persistent,
             )
         elif i.type == "tensor_constant":
             return ep.InputSpec(
@@ -1308,7 +1305,7 @@ class GraphModuleDeserializer:
                 target=i.custom_obj.custom_obj_name,
             )
         else:
-            raise AssertionError(f"Unknown input spec {i}")
+            raise AssertionError(f"Unkown input spec {i}")
 
     def deserialize_output_spec(self, o: OutputSpec) -> ep.OutputSpec:
         if o.type == "user_output":
@@ -2140,7 +2137,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
         idx, (arg, spec) = inp
         assert isinstance(spec, InputSpec)
         if spec.type == "user_input":
-            return 5, None, idx
+            return 4, None, idx
         elif spec.type == "parameter":
             return 1, spec.parameter.parameter_name, idx
         elif spec.type == "buffer":
@@ -2148,7 +2145,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
         elif spec.type == "tensor_constant":
             return 3, spec.tensor_constant.tensor_constant_name, idx
         elif spec.type == "custom_obj":
-            return 4, spec.custom_obj.custom_obj_name, idx
+            return 3, spec.custom_obj.custom_obj_name, idx
         else:
             raise AssertionError(f"Unknown input type: {spec}")
 

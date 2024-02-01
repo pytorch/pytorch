@@ -219,12 +219,8 @@ class ExportedProgram:
         Returns an iterator over original module buffers, yielding
         both the name of the buffer as well as the buffer itself.
         """
-        non_persistent_buffers = set(self.graph_signature.non_persistent_buffers)
         for buffer_name in self.graph_signature.buffers:
-            if buffer_name in non_persistent_buffers:
-                yield buffer_name, self.constants[buffer_name]
-            else:
-                yield buffer_name, self.state_dict[buffer_name]
+            yield buffer_name, self.state_dict[buffer_name]
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -299,20 +295,9 @@ class ExportedProgram:
         for input_ in self.graph_signature.input_specs:
             if input_.kind == InputKind.USER_INPUT:
                 continue
-            elif input_.kind in (
-                InputKind.PARAMETER,
-                InputKind.BUFFER,
-            ):
-                if input_.persistent is False:
-                    # This is a non-persistent buffer, grab it from our
-                    # constants instead of the state dict.
-                    additional_inputs.append(self.constants[input_.target])
-                else:
-                    additional_inputs.append(self.state_dict[input_.target])
-            elif input_.kind in (
-                InputKind.CONSTANT_TENSOR,
-                InputKind.CUSTOM_OBJ,
-            ):
+            elif input_.kind in (InputKind.PARAMETER, InputKind.BUFFER):
+                additional_inputs.append(self.state_dict[input_.target])
+            elif input_.kind in (InputKind.CONSTANT_TENSOR, InputKind.CUSTOM_OBJ):
                 additional_inputs.append(self.constants[input_.target])
         additional_inputs = tuple(additional_inputs)
 
@@ -470,12 +455,7 @@ class ExportedProgram:
         }
 
         input_specs = [
-            InputSpec(
-                spec.kind,
-                update_arg(spec.arg, new_placeholders[i]),
-                spec.target,
-                spec.persistent,
-            )
+            InputSpec(spec.kind, update_arg(spec.arg, new_placeholders[i]), spec.target)
             for i, spec in enumerate(self.graph_signature.input_specs)
         ]
         output_specs = [
@@ -573,12 +553,7 @@ class ExportedProgram:
                     else type(old_input_spec.arg)(node.name)
                 )
                 new_input_specs.append(
-                    InputSpec(
-                        old_input_spec.kind,
-                        arg,
-                        old_input_spec.target,
-                        old_input_spec.persistent,
-                    )
+                    InputSpec(old_input_spec.kind, arg, old_input_spec.target)
                 )
 
             output_node = list(new_gm.graph.nodes)[-1]

@@ -56,13 +56,8 @@ class InputSpec:
     kind: InputKind
     arg: ArgumentSpec
     target: Optional[str]
-    persistent: Optional[bool] = None
 
     def __post_init__(self):
-        if self.kind == InputKind.BUFFER:
-            assert (
-                self.persistent is not None
-            ), "Failed to specify persistent flag on BUFFER."
         assert isinstance(
             self.arg,
             (TensorArgument, SymIntArgument, ConstantArgument, CustomObjArgument),
@@ -116,14 +111,7 @@ def _sig_to_specs(
             )
         elif name in inputs_to_buffers:
             return InputSpec(
-                kind=InputKind.BUFFER,
-                arg=i,
-                target=inputs_to_buffers[name],
-                # Mark as True for now; we will fix this up to distinguish
-                # persistent from non-persistent later in tracing.
-                # See: rewrite_non_persistent_buffers()
-                # TODO(suo): this is horrible.
-                persistent=True,
+                kind=InputKind.BUFFER, arg=i, target=inputs_to_buffers[name]
             )
         else:
             raise AssertionError(f"Unknown tensor input kind: {name}")
@@ -278,16 +266,6 @@ class ExportGraphSignature:
             if isinstance(s.target, str)
         ]
 
-    @property
-    def non_persistent_buffers(self) -> Collection[str]:
-        return [
-            s.target
-            for s in self.input_specs
-            if s.kind == InputKind.BUFFER
-            if s.persistent is False
-            if isinstance(s.target, str)
-        ]
-
     # A list of lifted constant tensors
     @property
     def lifted_tensor_constants(self) -> Collection[str]:
@@ -358,7 +336,7 @@ class ExportGraphSignature:
     @property
     def inputs_to_buffers(self) -> Mapping[str, str]:
         return {
-            s.arg.name: s.target  # type: ignore[union-attr, misc]
+            s.arg.name: s.target
             for s in self.input_specs
             if s.kind == InputKind.BUFFER
             and isinstance(s.arg, TensorArgument)
