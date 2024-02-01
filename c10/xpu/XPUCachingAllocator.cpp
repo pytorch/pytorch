@@ -7,9 +7,8 @@
 #include <mutex>
 #include <vector>
 
-namespace c10::xpu {
+namespace c10::xpu::XPUCachingAllocator {
 
-namespace XPUCachingAllocator {
 // newly allocated memory with 512-byte alignment.
 constexpr size_t kDeviceAlignment = 512;
 // all sizes are rounded to at least 512 bytes
@@ -569,5 +568,4 @@ void recordStream(const DataPtr& dataPtr, XPUStream stream) {
 
 REGISTER_ALLOCATOR(kXPU, &allocator)
 
-} // namespace XPUCachingAllocator
-} // namespace c10::xpu
+} // namespace c10::xpu::XPUCachingAllocator
