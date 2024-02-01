@@ -1427,7 +1427,7 @@ def _checkpoint_without_reentrant_generator(
     new_frame.forward_completed = True
 
     if getattr(device_module, "_initialized", False) and \
-       preserve_rng_state and not had_device_in_fwd:
+       preserve_rng_state and not had_device_in_fwd:  # type: ignore[possibly-undefined]
         # Device was not initialized before running the forward, so we didn't
         # stash the device state.
         raise RuntimeError(
