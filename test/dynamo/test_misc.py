@@ -1063,6 +1063,16 @@ utils_device.CURRENT_DEVICE == None""".split(
         r2 = opt_fn(i)
         self.assertTrue(same(r1, r2))
 
+    def test_typing_dict(self):
+        def fn(d):
+            return d[T]
+
+        d = {T: torch.randn(3)}
+        r1 = fn(d)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        r2 = opt_fn(d)
+        self.assertEqual(r1, r2)
+
     def test_tensor_iter(self):
         def fn(x):
             for y in x:
