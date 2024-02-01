@@ -510,7 +510,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 assert self.source  # OrderedDict, dict subtypes must always have source
                 keys = list(self.value.keys())
                 assert all(map(ConstantVariable.is_literal, keys))
-                install_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
+                install_guard(self.source.make_guard(GuardBuilder.DICT_CONST_KEYS))
                 return TupleVariable([ConstantVariable.create(k) for k in keys])
 
             if (
@@ -522,7 +522,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ):
                 assert not kwargs
                 assert self.source  # OrderedDict, dict subtypes must always have source
-                install_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
+                install_guard(self.source.make_guard(GuardBuilder.DICT_CONST_KEYS))
                 return ConstantVariable.create(
                     args[0].as_python_constant() in self.value
                 )
