@@ -62,14 +62,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 ret_val = self.value._init_group(*py_args, **py_kwargs)
                 self.map_sources_and_install_guards(tx)
                 self.update_list_args(tx, args, kwargs, py_args, py_kwargs)
-                # this next line has the side effect of installing guards
-                # It must be executed after update_list_args, as we first need to
-                # place the guards on the args / kwargs and then on the param_groups
-                from .builder import VariableBuilder
-
-                VariableBuilder(tx, AttrSource(self.source, "param_groups"))(
-                    self.value.param_groups
-                ).recursive_realize()
                 # stash a weak_ptr to optimizer to invalidate code
                 # if the optimizer object dies
                 mangled_name = f"__optimizer_{id(self.value)}"
@@ -120,12 +112,21 @@ class OptimizerVariable(UserDefinedObjectVariable):
         self.grad_to_source = {}
         self.tensor_to_source = {}
 
-        for g_ind, group in enumerate(self.value.param_groups):
-            group_source = GetItemSource(AttrSource(self.source, "param_groups"), g_ind)
-            for p_ind, p in enumerate(group["params"]):
-                param_source = GetItemSource(
-                    GetItemSource(group_source, "params"), p_ind
-                )
+        from .builder import VariableBuilder
+
+        param_groups_vt = VariableBuilder(tx, AttrSource(self.source, "param_groups"))(
+            self.value.param_groups
+        ).recursive_realize()
+
+        for g_ind, (group, group_vt) in enumerate(
+            zip(self.value.param_groups, param_groups_vt.items)
+        ):
+            group_source = group_vt.source
+            params_vt = group_vt.getitem_const(ConstantVariable.create("params"))
+            for p_ind, (p, p_vt) in enumerate(
+                zip(group["params"], params_vt.unpack_var_sequence(tx))
+            ):
+                param_source = p_vt.source
                 self.tensor_to_source[p] = param_source
                 if p.grad is not None:
                     self.grad_to_source[p.grad] = AttrSource(
