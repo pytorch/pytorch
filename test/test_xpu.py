@@ -4,14 +4,7 @@ import sys
 import unittest
 
 import torch
-from torch.testing._internal.common_utils import (
-    IS_WINDOWS,
-    NoTest,
-    run_tests,
-    TEST_WITH_TSAN,
-    TEST_XPU,
-    TestCase,
-)
+from torch.testing._internal.common_utils import NoTest, run_tests, TEST_XPU, TestCase
 
 if not TEST_XPU:
     print("XPU not available, skipping tests", file=sys.stderr)
