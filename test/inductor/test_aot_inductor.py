@@ -730,7 +730,7 @@ class AOTInductorTestsTemplate:
             x := torch.randn((3, 2), device=self.device),
             torch.randn((1, 2), device=self.device),
         )
-        torch._dynamo.mark_dynamic(x, index=0) # Create dynamic symbol
+        torch._dynamo.mark_dynamic(x, index=0)  # Create dynamic symbol
 
         # Compile & run model where dynamic dim size > 0.
         so_path: str = AOTIRunnerUtil.compile(
