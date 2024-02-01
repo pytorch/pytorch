@@ -1797,7 +1797,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             s = x | x
             assert x is s
 
-        self.assertRaises(torch._dynamo.exc.Unsupported, test3())
+        self.assertRaises(torch._dynamo.exc.Unsupported, test3)
 
 
 def udf_mul(x, y):

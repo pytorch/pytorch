@@ -1614,27 +1614,19 @@ class BuiltinVariable(VariableTracker):
                     else:
                         return ConstantVariable.create(not bool_value)
 
-                if isinstance(left, TensorVariable) and isinstance(
+                if isinstance(left, TensorVariable) != isinstance(
                     right, TensorVariable
                 ):
-                    is_match = id(
-                        extract_fake_example_value(left.as_proxy().node)
-                    ) == id(extract_fake_example_value(right.as_proxy().node))
+                    return return_constant(False)
+                elif id(extract_fake_example_value(left.as_proxy().node)) == id(
+                    extract_fake_example_value(right.as_proxy().node)
+                ):
                     # if is_match is false, result actual result can still be true.
                     # but if is_match then its true.
                     #  x = np.True_
                     #  z = x | x
                     #  assert(x is z) => should be true, would give false
-                    if is_match:
-                        return return_constant(True)
-                elif isinstance(left, TensorVariable) and not isinstance(
-                    right, TensorVariable
-                ):
-                    return return_constant(False)
-                elif not isinstance(left, TensorVariable) and isinstance(
-                    right, TensorVariable
-                ):
-                    return return_constant(False)
+                    return return_constant(True)
 
             if op not in supported_tensor_comparison_ops.values():
                 _unimplemented()
