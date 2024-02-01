@@ -931,7 +931,8 @@ def CppExtension(name, sources, *args, **kwargs):
     bare minimum (but often sufficient) arguments to build a C++ extension.
 
     All arguments are forwarded to the :class:`setuptools.Extension`
-    constructor.
+    constructor. Full list arguments can be found at
+    https://setuptools.pypa.io/en/latest/userguide/ext_modules.html#extension-api-reference
 
     Example:
         >>> # xdoctest: +SKIP
@@ -944,7 +945,8 @@ def CppExtension(name, sources, *args, **kwargs):
         ...         CppExtension(
         ...             name='extension',
         ...             sources=['extension.cpp'],
-        ...             extra_compile_args=['-g']),
+        ...             extra_compile_args=['-g'],
+        ...             extra_link_flags=['-Wl,--no-as-needed', '-lm'])
         ...     ],
         ...     cmdclass={
         ...         'build_ext': BuildExtension
@@ -979,7 +981,8 @@ def CUDAExtension(name, sources, *args, **kwargs):
     library.
 
     All arguments are forwarded to the :class:`setuptools.Extension`
-    constructor.
+    constructor. Full list arguments can be found at
+    https://setuptools.pypa.io/en/latest/userguide/ext_modules.html#extension-api-reference
 
     Example:
         >>> # xdoctest: +SKIP
@@ -993,7 +996,8 @@ def CUDAExtension(name, sources, *args, **kwargs):
         ...                 name='cuda_extension',
         ...                 sources=['extension.cpp', 'extension_kernel.cu'],
         ...                 extra_compile_args={'cxx': ['-g'],
-        ...                                     'nvcc': ['-O2']})
+        ...                                     'nvcc': ['-O2']},
+        ...                 extra_link_flags=['-Wl,--no-as-needed', '-lcuda'])
         ...     ],
         ...     cmdclass={
         ...         'build_ext': BuildExtension
