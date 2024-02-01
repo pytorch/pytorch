@@ -4,7 +4,6 @@
 
 #ifdef __cplusplus
 
-#include <pybind11/pybind11.h>
 #include <torch/csrc/utils/pybind.h>
 #include <list>
 
@@ -141,7 +140,8 @@ CacheEntry* create_cache_entry(ExtraState* extra_state, PyObject* guraded_code);
 #ifdef __cplusplus
 
 // Returns the list of CacheEntry corresponding to code_obj.
-std::list<CacheEntry> _debug_get_cache_entry_list(const py::handle& code_obj);
+// Warning: returns references whose lifetimes are controlled by C++
+py::list _debug_get_cache_entry_list(const py::handle& code_obj);
 
 } // extern "C"
 

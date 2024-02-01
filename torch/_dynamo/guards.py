@@ -1008,7 +1008,6 @@ class CheckFunctionManager:
 
             guard.create(builder)
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
-        print("check_fn created at", self.check_fn)
         self._weakrefs.clear()
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and check_fn and is used to

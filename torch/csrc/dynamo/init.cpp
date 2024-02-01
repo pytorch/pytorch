@@ -6,9 +6,6 @@
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
-
-#include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
 #include <torch/csrc/utils/pybind.h>
 
 static struct PyModuleDef _module =

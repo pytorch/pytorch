@@ -8,14 +8,14 @@ CacheEntry::CacheEntry(const py::handle& guarded_code) {
   this->code = guarded_code.attr("code");
 }
 
-py::object CacheEntry::next() const {
+py::object CacheEntry::next() {
   NULL_CHECK(this->_owner);
   auto it = this->_owner_loc;
   ++it;
   if (it == this->_owner->cache_entry_list.end()) {
     return py::none();
   }
-  return py::cast(*it);
+  return py::cast(*it, py::return_value_policy::reference);
 }
 
 PyCodeObject* CacheEntry_get_code(CacheEntry* e) {

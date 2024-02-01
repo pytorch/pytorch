@@ -16,17 +16,10 @@ void ExtraState::move_to_front(CacheEntry* cache_entry) {
   CHECK(cache_entry->_owner == this);
   CHECK(!this->cache_entry_list.empty());
   CHECK(cache_entry == &*cache_entry->_owner_loc);
-  if (cache_entry == &cache_entry->_owner->cache_entry_list.front()) {
-    // already at front
-    return;
-  }
-  auto old_iter = cache_entry->_owner_loc;
-  // moving doesn't seem to work
-  this->cache_entry_list.emplace_front(*cache_entry);
-  auto new_iter = this->cache_entry_list.begin();
-  this->cache_entry_list.erase(old_iter);
-  new_iter->_owner = this;
-  new_iter->_owner_loc = new_iter;
+  this->cache_entry_list.splice(
+      this->cache_entry_list.begin(),
+      this->cache_entry_list,
+      cache_entry->_owner_loc);
 }
 
 CacheEntry* extract_cache_entry(ExtraState* extra_state) {
@@ -117,14 +110,17 @@ CacheEntry* create_cache_entry(
   return &*new_iter;
 }
 
-std::list<CacheEntry> _debug_get_cache_entry_list(const py::handle& code_obj) {
+py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
   if (!py::isinstance(code_obj, py::module::import("types").attr("CodeType"))) {
     throw py::type_error("expected a code object!");
   }
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
-  if (!extra) {
-    return {};
+  py::list result;
+  if (extra) {
+    for (CacheEntry& e : extra->cache_entry_list) {
+      result.append(py::cast(e, py::return_value_policy::reference));
+    }
   }
-  return extra->cache_entry_list;
+  return result;
 }

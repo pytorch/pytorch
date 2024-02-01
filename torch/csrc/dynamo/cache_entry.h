@@ -4,7 +4,6 @@
 
 #ifdef __cplusplus
 
-#include <pybind11/pybind11.h>
 #include <torch/csrc/utils/pybind.h>
 #include <list>
 
@@ -50,7 +49,8 @@ typedef struct CacheEntry {
 
   CacheEntry(const py::handle& guarded_code);
 
-  py::object next() const;
+  // Warning: returns a reference whose lifetime is controlled by C++
+  py::object next();
 } CacheEntry;
 
 #endif
