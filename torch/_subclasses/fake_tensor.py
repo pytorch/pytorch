@@ -383,13 +383,15 @@ class FakeTensorConverter:
                     constant=t if make_constant else None,
                 )
 
-        out = self.meta_converter(
-            t,
-            shape_env=shape_env,
-            callback=mk_fake_tensor,
-            source=source,
-            symbolic_context=symbolic_context,
-        )
+        disable_functorch = torch._C._DisableFuncTorch
+        with disable_functorch():
+            out = self.meta_converter(
+                t,
+                shape_env=shape_env,
+                callback=mk_fake_tensor,
+                source=source,
+                symbolic_context=symbolic_context,
+            )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
         if make_constant:

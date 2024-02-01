@@ -763,12 +763,10 @@ def clone_inputs(example_inputs):
 
 @contextmanager
 def preserve_rng_state():
-    with torch.utils._python_dispatch._disable_current_modes():
+    disable_functorch = torch._C._DisableFuncTorch
+    disable_current_modes = torch.utils._python_dispatch._disable_current_modes
+    with disable_current_modes(), disable_functorch():
         rng_state = torch.clone(torch.random.get_rng_state())
-        if torch._C._functorch.is_functorch_wrapped_tensor(rng_state):
-            # Very hacky way to get the tensor from a GradTrackingTensor.
-            # Probably needs another approach.
-            rng_state = torch._C._functorch.get_unwrapped(rng_state)
         if torch.cuda.is_available():
             cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
     try:

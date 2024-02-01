@@ -42,8 +42,6 @@ from torch._C._functorch import (
     _propagate_functional_input_mutation,
     set_inplace_requires_grad_allowed,
     get_inplace_requires_grad_allowed,
-    peek_interpreter_stack,
-    TransformType,
 )
 from torch._functorch.utils import exposed_in, argnums_t
 
@@ -282,19 +280,6 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
         should not depend on the result of a context manager outside of ``f``.
     """
     return _vjp_with_argnums(func, *primals, has_aux=has_aux)
-
-
-@contextlib.contextmanager
-def maybe_disable_grad_dls_dispatch():
-    st = peek_interpreter_stack()
-    if st and st.key() == TransformType.Grad:
-        try:
-            _grad_decrement_nesting()
-            yield
-        finally:
-            _grad_increment_nesting()
-    else:
-        yield
 
 
 @contextlib.contextmanager

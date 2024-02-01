@@ -10,7 +10,7 @@ import copy
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, parametrize, subtest, instantiate_parametrized_tests,
     IS_FBCODE, freeze_rng_state, skipIfTorchDynamo, IS_WINDOWS, IS_MACOS, IS_ARM64,
-    markDynamoStrictTest, xfailIfTorchDynamo, TEST_WITH_TORCHDYNAMO
+    markDynamoStrictTest, xfailIfTorchDynamo
 )
 import torch
 import torch.nn as nn
@@ -1646,11 +1646,6 @@ jacrev_and_jacfwd = parametrize("jacapi", [subtest(jacrev, name='jacrev'), subte
 
 FIXME_jacrev_only = parametrize("jacapi", [subtest(jacrev, name='jacrev')])
 
-FIXME_skip_jacrev_dynamo = parametrize("jacapi", [
-    subtest(jacrev, name='jacrev', decorators=[unittest.expectedFailure] if TEST_WITH_TORCHDYNAMO else None),
-    subtest(jacfwd, name='jacfwd')
-])
-
 @markDynamoStrictTest
 class TestJac(TestCase):
     @xfailIfTorchDynamo
@@ -1681,7 +1676,7 @@ class TestJac(TestCase):
 
         self.assertEqual(jacrev(func)(x), torch.autograd.functional.jacobian(func, x))
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_diff_numel(self, device, jacapi):
         x = torch.randn(2, 4, device=device)
 
@@ -1698,14 +1693,14 @@ class TestJac(TestCase):
         expected[2, 0, 0, 3] = 1
         self.assertEqual(y, expected)
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_vmap_on_jac_simple(self, device, jacapi):
         x = torch.randn(2, 3, device=device)
         y = vmap(jacapi(torch.sin))(x)
         expected = torch.stack([torch.diagflat(x[i].cos()) for i in range(2)])
         assert torch.allclose(y, expected)
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_nested_jac_simple(self, device, jacapi):
         def foo(x):
             return x.sin().sum()
@@ -1767,7 +1762,7 @@ class TestJac(TestCase):
         self.assertTrue(isinstance(z[0], tuple))
         self.assertEqual(z, ((expected_out0_x,), (expected_out1_x,)))
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_multiple_outputs_pytree(self, device, jacapi):
         def f(x, y):
             return {'left': 2 * x + 3 * y, 'right': 4 * x + 5 * y}
@@ -1828,7 +1823,7 @@ class TestJac(TestCase):
         self.assertEqual(result.dim(), 2)
         self.assertEqual(result, x.new_ones(1, 1))
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_aux_tensor(self, device, jacapi):
         def f(x):
             y = x.clone()
@@ -1924,7 +1919,7 @@ class TestJac(TestCase):
         )
         self.assertEqual(result, expected)
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_multiple_inputs_outputs_pytree_multidim(self, device, jacapi):
         def f(dct):
             a = dct['a']
@@ -2373,7 +2368,6 @@ class TestJvp(TestCase):
         self.assertTrue(isinstance(result, tuple))
         self.assertEqual(result, expected)
 
-    @xfailIfTorchDynamo
     def test_multiple_inputs(self, device):
         x = torch.randn(2, 3, device=device)
         y = torch.randn(2, 3, device=device)
@@ -2388,7 +2382,6 @@ class TestJvp(TestCase):
         self.assertTrue(isinstance(result, tuple))
         self.assertEqual(result, expected)
 
-    @xfailIfTorchDynamo
     def test_pytree_inputs(self, device):
         def f(x, y, z):
             a, b = x
@@ -2444,7 +2437,6 @@ class TestJvp(TestCase):
         self.assertTrue(isinstance(result, tuple))
         self.assertEqual(result, expected)
 
-    @xfailIfTorchDynamo
     def test_strict_mode(self, device):
         y = torch.randn(2, 3, device=device)
 
@@ -2457,7 +2449,6 @@ class TestJvp(TestCase):
         with self.assertRaisesRegex(RuntimeError, "strict"):
             jvp(f, (x,), (tx,), strict=True)
 
-    @xfailIfTorchDynamo
     def test_multiple_outputs(self, device):
         x = torch.randn(2, 3, device=device)
         t = torch.randn(2, 3, device=device)
@@ -2555,7 +2546,6 @@ class TestJvp(TestCase):
             assert isinstance(out[i][0], tuple) and \
                 isinstance(out[i][0][1], dict)
 
-    @xfailIfTorchDynamo
     def test_aux_tensor(self, device):
 
         x = torch.randn(3, device=device)
@@ -2625,7 +2615,6 @@ class TestJvp(TestCase):
             _, y = jvp(torch.sin, (x,), (t,))
         self.assertEqual(y, x.cos())
 
-    @xfailIfTorchDynamo
     def test_disable_fwd_grad_inside(self, device):
         def f(x):
             with fwAD._set_fwd_grad_enabled(False):
