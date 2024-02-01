@@ -34,17 +34,21 @@ from torch.fx.experimental.proxy_tensor import (
 
 
 class AutoFunctionalized(HigherOrderOperator):
-    """auto_functionalized(_nonfunctional_op, mutated_args_names, kwargs)
+    """auto_functionalized(_mutable_op, _mutated_args_names, **kwargs)
 
-    This HOP runs a "functional" version of op.
+    This HOP runs a "functional" version of _mutable_op.
 
-    Concretely, it clones kwargs that `op` mutates (specified by
-    mutated_args_names), runs `out = op(**kwargs)` with the cloned values,
-    and then returns (out, Tuple of the cloned values that were mutated).
+    Concretely, it clones kwargs that `_mutable_op` mutates (specified by
+    _mutated_args_names), runs `out = _nonfunction_op(**kwargs)` with the cloned
+    values, and then returns (out, Tuple of the cloned values that were
+    mutated).
 
-    We have some restrictions on `op`.
+    We have some restrictions on `_mutable_op`.
     See `can_auto_functionalize` for the restrictions. We can likely lift
     many of these if users request it.
+
+    The reason why _nonfunction_op and _mutated_args_names are prefixed with an
+    underscore is to prevent collisions with kwarg names in **kwargs.
     """
 
     def __init__(self):
@@ -52,14 +56,14 @@ class AutoFunctionalized(HigherOrderOperator):
 
     def __call__(
         self,
-        _nonfunctional_op: torch._ops.OpOverload,
+        _mutable_op: torch._ops.OpOverload,
         _mutated_args_names: List[str],
         **kwargs: Dict[str, Any],
     ) -> Tuple[Any, Tuple[Tensor, ...]]:
-        assert can_auto_functionalize(_nonfunctional_op)
+        assert can_auto_functionalize(_mutable_op)
         assert isinstance(_mutated_args_names, list)
         assert isinstance(kwargs, dict)
-        return super().__call__(_nonfunctional_op, _mutated_args_names, **kwargs)
+        return super().__call__(_mutable_op, _mutated_args_names, **kwargs)
 
 
 auto_functionalized = AutoFunctionalized()
@@ -105,7 +109,7 @@ def can_auto_functionalize(op: torch._ops.OperatorBase) -> bool:
 
 @auto_functionalized.py_impl(DispatchKey.CompositeExplicitAutograd)
 def auto_functionalized_dense(
-    _nonfunctional_op: torch._ops.OpOverload,
+    _mutable_op: torch._ops.OpOverload,
     _mutated_args_names: List[str],
     **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
@@ -116,7 +120,7 @@ def auto_functionalized_dense(
             clone_preserve_strides(kwargs[name]) if kwargs[name] is not None else None
         )
         result.append(new_kwargs[name])
-    out = _nonfunctional_op(**new_kwargs)
+    out = _mutable_op(**new_kwargs)
 
     if isinstance(out, tuple):
         return (*out, *result)
@@ -127,35 +131,33 @@ def auto_functionalized_dense(
 @auto_functionalized.py_impl(FakeTensorMode)
 def auto_functionalized_fake(
     mode,
-    _nonfunctional_op: torch._ops.OpOverload,
+    _mutable_op: torch._ops.OpOverload,
     _mutated_args_names: List[str],
     **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     with mode:
-        result = auto_functionalized_dense(
-            _nonfunctional_op, _mutated_args_names, **kwargs
-        )
+        result = auto_functionalized_dense(_mutable_op, _mutated_args_names, **kwargs)
         return result
 
 
 @auto_functionalized.py_impl(ProxyTorchDispatchMode)
 def auto_functionalized_proxy(
     mode,
-    _nonfunctional_op: torch._ops.OpOverload,
+    _mutable_op: torch._ops.OpOverload,
     _mutated_args_names: List[str],
     **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     if not mode.enable_tracing:
-        return auto_functionalized(_nonfunctional_op, _mutated_args_names, **kwargs)
+        return auto_functionalized(_mutable_op, _mutated_args_names, **kwargs)
 
     with disable_proxy_modes_tracing():
-        out = auto_functionalized(_nonfunctional_op, _mutated_args_names, **kwargs)
+        out = auto_functionalized(_mutable_op, _mutated_args_names, **kwargs)
 
     proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
     out_proxy = mode.tracer.create_proxy(
         "call_function",
         auto_functionalized,
-        (_nonfunctional_op, _mutated_args_names),
+        (_mutable_op, _mutated_args_names),
         proxy_kwargs,
     )
     result = track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
