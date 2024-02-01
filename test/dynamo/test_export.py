@@ -2319,7 +2319,10 @@ def forward(self, x):
         torch.export.save(exp_program, output_buffer)
         loaded_model = torch.export.load(output_buffer)
         self.assertTrue(
-            isinstance(loaded_model.module().features_0_weight, torch.nn.Parameter)
+            isinstance(
+                loaded_model.module().get_parameter("features.0.weight"),
+                torch.nn.Parameter,
+            )
         )
 
     def test_export_meta(self):

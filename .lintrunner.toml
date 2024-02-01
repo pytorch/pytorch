@@ -1,5 +1,3 @@
-merge_base_with = "origin/main"
-
 [[linter]]
 code = 'FLAKE8'
 include_patterns = ['**/*.py']
