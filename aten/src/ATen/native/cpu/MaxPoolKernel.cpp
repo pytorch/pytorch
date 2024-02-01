@@ -65,7 +65,7 @@ template <typename scalar_t, typename opmath_t>
 inline
 typename std::enable_if<std::is_same<scalar_t, opmath_t>::value, void>::type
 compute_internal(
-  scalar_t* input_data,
+  const scalar_t* input_data,
   scalar_t* out_data,
   opmath_t* max_ptr,
   vec::int_same_size_t<opmath_t>* index_ptr,
@@ -99,7 +99,7 @@ compute_internal(
   for (int64_t id = id0; id < id1; id += dilationD) {
     for (int64_t ih = ih0; ih < ih1; ih += dilationH) {
       for (int64_t iw = iw0; iw < iw1; iw += dilationW) {
-        scalar_t* in = input_data + (n * input_depth * input_height * input_width +
+        const scalar_t* in = input_data + (n * input_depth * input_height * input_width +
             id * input_height * input_width + ih * input_width + iw) * channels;
 
         int64_t d2 = 0;
@@ -138,7 +138,7 @@ template <typename scalar_t, typename opmath_t>
 inline
 typename std::enable_if<!std::is_same<scalar_t, opmath_t>::value, void>::type
 compute_internal(
-  scalar_t* input_data,
+  const scalar_t* input_data,
   scalar_t* out_data,
   opmath_t* max_ptr,
   vec::int_same_size_t<opmath_t>* index_ptr,
@@ -172,7 +172,7 @@ compute_internal(
   for (int64_t id = id0; id < id1; id += dilationD) {
     for (int64_t ih = ih0; ih < ih1; ih += dilationH) {
       for (int64_t iw = iw0; iw < iw1; iw += dilationW) {
-        scalar_t* in = input_data + (n * input_depth * input_height * input_width +
+        const scalar_t* in = input_data + (n * input_depth * input_height * input_width +
             id * input_height * input_width + ih * input_width + iw) * channels;
 
         int64_t d2 = 0;
@@ -260,7 +260,7 @@ void cpu_max_pool(
   auto output = output_.contiguous();
   auto indices = indices_.contiguous();
 
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
   auto indices_data = indices.data_ptr<int64_t>();
 
@@ -291,7 +291,7 @@ void cpu_max_pool(
   // parallel on dim N, C
   at::parallel_for(0, channels, 0, [&](int64_t begin, int64_t end) {
     for (int64_t c = begin; c < end; c++) {
-      scalar_t* input_ptr = input_data + c * input_depth * input_height * input_width;
+      const scalar_t* input_ptr = input_data + c * input_depth * input_height * input_width;
       scalar_t* output_ptr = output_data + c * output_depth * output_height * output_width;
       int64_t* indices_ptr = indices_data + c * output_depth * output_height * output_width;
 
@@ -390,7 +390,7 @@ void cpu_max_pool_channels_last(
   auto output = output_.contiguous(memory_format);
   auto indices = indices_.contiguous(memory_format);
 
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
   auto indices_data = indices.data_ptr<int64_t>();
 

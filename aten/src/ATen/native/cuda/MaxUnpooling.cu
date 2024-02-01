@@ -51,8 +51,8 @@ __global__ void max_unpooling2d_forward_kernel(
 
 template <typename T>
 __global__ void max_unpooling3d_forward_kernel(
-    PackedTensorAccessor64<T, 4> input,
-    PackedTensorAccessor64<int64_t, 4> indices,
+    PackedTensorAccessor64<T, 4, ConstPtrTraits> input,
+    PackedTensorAccessor64<int64_t, 4, ConstPtrTraits> indices,
     T* output,
     const int64_t oT,
     const int64_t oH,
@@ -370,8 +370,8 @@ Tensor& max_unpooling3d_forward_out_cuda(const Tensor& self_,
               block,
               0,
               at::cuda::getCurrentCUDAStream()>>>(
-              self.packed_accessor64<scalar_t, 4>(),
-              indices.packed_accessor64<int64_t, 4>(),
+              self.packed_const_accessor64<scalar_t, 4>(),
+              indices.packed_const_accessor64<int64_t, 4>(),
               output.mutable_data_ptr<scalar_t>(),
               oT,
               oH,

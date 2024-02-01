@@ -18,6 +18,11 @@ struct DefaultPtrTraits {
   typedef T* PtrType;
 };
 
+template <typename T>
+struct ConstPtrTraits {
+  typedef const T* PtrType;
+};
+
 #if defined(__CUDACC__) || defined(__HIPCC__)
 template <typename T>
 struct RestrictPtrTraits {
@@ -98,6 +103,7 @@ public:
       const index_t* sizes_,
       const index_t* strides_)
       : TensorAccessorBase<T, 1, PtrTraits, index_t>(data_,sizes_,strides_) {}
+  template <typename U = PtrType, typename = std::enable_if_t<!std::is_const<std::remove_pointer_t<U>>::value>>
   C10_HOST_DEVICE T & operator[](index_t i) {
     // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
     return this->data_[this->strides_[0]*i];

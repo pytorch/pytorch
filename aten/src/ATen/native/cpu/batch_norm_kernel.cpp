@@ -34,8 +34,8 @@ void batch_norm_cpu_collect_linear_and_constant_terms(
     const Tensor& save_mean, const Tensor& save_invstd,
     const Tensor& running_mean, const Tensor& running_var, bool train, double eps) {
 
-  const param_t* weight_data = weight.defined() ? weight.data_ptr<param_t>() : nullptr;
-  const param_t* bias_data = bias.defined() ? bias.data_ptr<param_t>() : nullptr;
+  const param_t* weight_data = weight.defined() ? weight.const_data_ptr<param_t>() : nullptr;
+  const param_t* bias_data = bias.defined() ? bias.const_data_ptr<param_t>() : nullptr;
 
   auto save_mean_a = conditional_accessor_1d<param_t>(save_mean);
   auto save_invstd_a = conditional_accessor_1d<param_t>(save_invstd);

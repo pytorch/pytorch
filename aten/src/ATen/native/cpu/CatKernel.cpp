@@ -12,11 +12,11 @@ namespace at::native {
 namespace {
 
 struct InputMeta {
-  void* data_ptr;
+  const void* data_ptr;
   int64_t inner_size;
 
   InputMeta(const Tensor& t, int64_t dim, int64_t inner)
-    : data_ptr(t.data_ptr())
+    : data_ptr(t.const_data_ptr())
     , inner_size(t.sizes()[dim] * inner) {}
 };
 
@@ -38,7 +38,7 @@ void cat_serial_kernel_impl(const Tensor& result, const MaterializedITensorListR
   for (const auto i : c10::irange(outer)) {
     for (const auto j : c10::irange(ninputs)) {
       int64_t local_inner = inputs[j].inner_size;
-      scalar_t* input_ptr = (scalar_t*)(inputs[j].data_ptr) + i * local_inner;
+      const scalar_t* input_ptr = (const scalar_t*)(inputs[j].data_ptr) + i * local_inner;
       int64_t d = 0;
       for (; d < local_inner - (local_inner % Vec::size()); d += Vec::size()) {
         Vec in_vec = Vec::loadu(input_ptr + d);

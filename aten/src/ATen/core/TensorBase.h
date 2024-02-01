@@ -625,6 +625,17 @@ class TORCH_API TensorBase {
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() && = delete;
 
+  // Return a const `TensorAccessor` for CPU `Tensor`s. You have to specify scalar type and
+  // dimension.
+  template<typename T, size_t N>
+  TensorAccessor<T,N,ConstPtrTraits> const_accessor() const& {
+    static_assert(N > 0, "const_accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
+    TORCH_CHECK(dim() == N, "TensorAccessor expected ", N, " dims but tensor has ", dim());
+    return TensorAccessor<T,N,ConstPtrTraits>(const_data_ptr<T>(),sizes().data(),strides().data());
+  }
+  template<typename T, size_t N>
+  TensorAccessor<T,N,ConstPtrTraits> const_accessor() && = delete;
+
   // Return a `GenericPackedTensorAccessor` for CUDA `Tensor`s. You have to specify scalar type and
   // dimension. You can optionally specify RestrictPtrTraits as a template parameter to
   // cast the data pointer to a __restrict__ pointer.
@@ -638,6 +649,15 @@ class TORCH_API TensorBase {
   }
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
   GenericPackedTensorAccessor<T,N> generic_packed_accessor() && = delete;
+
+  template<typename T, size_t N, typename index_t = int64_t>
+  GenericPackedTensorAccessor<T,N,ConstPtrTraits,index_t> generic_packed_const_accessor() const& {
+    static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *const_data_ptr<T>()");
+    TORCH_CHECK(dim() == N, "TensorAccessor expected ", N, " dims but tensor has ", dim());
+    return GenericPackedTensorAccessor<T,N,ConstPtrTraits,index_t>(static_cast<typename ConstPtrTraits<T>::PtrType>(const_data_ptr<T>()),sizes().data(),strides().data());
+  }
+  template<typename T, size_t N, typename index_t = int64_t>
+  GenericPackedTensorAccessor<T,N,ConstPtrTraits> generic_packed_const_accessor() && = delete;
 
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
   PackedTensorAccessor32<T,N,PtrTraits> packed_accessor32() const& {
@@ -656,6 +676,13 @@ class TORCH_API TensorBase {
   }
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
   PackedTensorAccessor64<T,N,PtrTraits> packed_accessor64() && = delete;
+
+  template<typename T, size_t N>
+  PackedTensorAccessor64<T,N,ConstPtrTraits> packed_const_accessor64() const& {
+    return generic_packed_const_accessor<T,N,int64_t>();
+  }
+  template<typename T, size_t N>
+  PackedTensorAccessor64<T,N,ConstPtrTraits> packed_const_accessor64() && = delete;
 
   // ~~~~~ Autograd API ~~~~~
 

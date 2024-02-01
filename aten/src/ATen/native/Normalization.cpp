@@ -177,11 +177,11 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
 
   auto iter = TensorIteratorConfig()
     .add_output(output)
-    .add_input(input)
-    .add_input(mean)
-    .add_input(invstd)
-    .add_input(w)
-    .add_input(b)
+    .add_const_input(input)
+    .add_const_input(mean)
+    .add_const_input(invstd)
+    .add_const_input(w)
+    .add_const_input(b)
     .check_all_same_dtype(false)
     .promote_inputs_to_common_dtype(false)
     .build();
@@ -240,9 +240,9 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
 
   // non-contiguous path
   auto channel_stride = input.strides()[1];
-  auto in_data = input.data_ptr<scalar_t>();
+  auto in_data = input.const_data_ptr<scalar_t>();
   auto reduce_iter = TensorIteratorConfig()
-      .add_input(input)
+      .add_const_input(input)
       .resize_outputs(false)
       .declare_static_shape(input.sizes(), /*squash_dims=*/1)
       .check_all_same_dtype(false)
@@ -253,7 +253,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
     TensorIterator iter(reduce_iter);
     for (const auto f : c10::irange(b_begin, b_end)) {
       // compute variance per input
-      iter.unsafe_replace_operand(0, in_data + channel_stride * f);
+      iter.unsafe_replace_operand(0, const_cast<scalar_t*>(in_data + channel_stride * f));
       accscalar_t var_sum = 0;
       auto mean = static_cast<accscalar_t>(save_mean_a[f]);
       cpu_serial_kernel(iter, [&](const scalar_t i) -> void {
@@ -358,8 +358,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
   auto sum_a = sum.accessor<scalar_t, 1>();
 
   auto reduce_iter = TensorIteratorConfig()
-      .add_input(input)
-      .add_input(grad_out_)
+      .add_const_input(input)
+      .add_const_input(grad_out_)
       .resize_outputs(false)
       .declare_static_shape(input.sizes(), /*squash_dims=*/1)
       .build();
@@ -370,7 +370,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
     unary_iter.build(
         TensorIteratorConfig()
         .add_output(grad_input)
-        .add_input(train ? input : grad_out_)
+        .add_const_input(train ? input : grad_out_)
         .resize_outputs(false)
         .declare_static_shape(input.sizes(), /*squash_dims=*/1));
 
@@ -378,15 +378,15 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
       binary_iter.build(
           TensorIteratorConfig()
           .add_output(grad_input)
-          .add_input(grad_input)
-          .add_input(grad_out_)
+          .add_const_input(grad_input)
+          .add_const_input(grad_out_)
           .resize_outputs(false)
           .declare_static_shape(input.sizes(), /*squash_dims=*/1));
     }
   }
 
   auto in_channel_stride = input.strides()[1];
-  auto in_data = input.data_ptr<scalar_t>();
+  auto in_data = input.const_data_ptr<scalar_t>();
   auto grad_in_channel_stride = grad_input_mask[0] ? grad_input.strides()[1] : 0;
   auto grad_in_data = grad_input_mask[0] ? grad_input.mutable_data_ptr<scalar_t>() : nullptr;
   auto grad_out_channel_stride = grad_out_.strides()[1];
@@ -412,7 +412,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
         // dot product of the Q(X) and gradOuput
         accscalar_t dotp = 0;
         reduce_iter_local.unsafe_replace_operand(
-            0, in_data + f * in_channel_stride);
+            0, const_cast<scalar_t*>(in_data + f * in_channel_stride));
         reduce_iter_local.unsafe_replace_operand(
             1, grad_out_data + f * grad_out_channel_stride);
 
@@ -433,7 +433,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
               unary_iter_local.unsafe_replace_operand(
                   0, grad_in_data + f * grad_in_channel_stride);
               unary_iter_local.unsafe_replace_operand(
-                  1, in_data + f * in_channel_stride);
+                  1, const_cast<scalar_t*>(in_data + f * in_channel_stride));
               cpu_serial_kernel(unary_iter_local, [&](const scalar_t i) -> scalar_t {
                 return (i - mean) * k;
               });

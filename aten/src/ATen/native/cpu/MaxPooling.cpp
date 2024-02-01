@@ -39,7 +39,7 @@ void max_pool1d_impl(
       [&] {
         const Tensor in = input.contiguous();
         scalar_t* const OP = output.data_ptr<scalar_t>();
-        const scalar_t* const IP = in.data_ptr<scalar_t>();
+        const scalar_t* const IP = in.const_data_ptr<scalar_t>();
 
         // Value used for padding
         scalar_t FILL = std::numeric_limits<scalar_t>::has_infinity
