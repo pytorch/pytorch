@@ -27,9 +27,9 @@ namespace torch {
 namespace autograd {
 
 // Returns a ViewFunc with a corresponding view that matches the shape,
-// stride, and storage offset of the given tensor. Requires the generated
-// AsStridedViewFunc to be available, which may not be the case (e.g. for
-// mobile).
+// stride, and storage offset of the given tensor.
+// NB: On mobile, the as_strided() op and thus the generated AsStridedViewFunc
+// may not be available.
 static std::shared_ptr<ViewFunc> create_view_func_matching(const Variable& t) {
 #ifdef AS_STRIDED_VIEW_FUNC_AVAILABLE
   return std::make_shared<torch::autograd::generated::AsStridedViewFunc>(

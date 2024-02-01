@@ -19,7 +19,7 @@ ChainedViewFunc::ChainedViewFunc(
     num_second_symints(-1),
     num_second_tensors(-1) {}
 
-std::vector<c10::SymInt> ChainedViewFunc::get_symints() {
+std::vector<c10::SymInt> ChainedViewFunc::get_symints() const {
   auto symints = first->get_symints();
   num_first_symints = symints.size();
   auto second_symints = second->get_symints();
@@ -38,7 +38,7 @@ void ChainedViewFunc::set_symints(const std::vector<c10::SymInt>& symints) {
   second->set_symints(second_symints);
 }
 
-std::vector<at::Tensor> ChainedViewFunc::get_tensors() {
+std::vector<at::Tensor> ChainedViewFunc::get_tensors() const {
   auto tensors = first->get_tensors();
   num_first_tensors = tensors.size();
   auto second_tensors = second->get_tensors();
