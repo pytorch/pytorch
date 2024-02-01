@@ -2707,7 +2707,7 @@ class TritonKernel(Kernel):
 
     def triton_tensor_ndim(self):
         no_r_dim = self.numels[-1] == 1
-        return len(self.range_trees)
+        return len(self.range_trees) - no_r_dim
 
     def indexing_size_str(self, i=None, x=None):
         sizes = ["None"] * self.triton_tensor_ndim()
