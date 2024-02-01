@@ -12742,6 +12742,68 @@ class TestFusionUtils(TestCase):
             self.assertEqual(weight.requires_grad, w_rg)
             self.assertEqual(bias.requires_grad, b_rg)
 
+class TestConsumePrefix(TestCase):
+    # pr-117464 fixes issue-106942
+    def test_consume_prefix_in_state_dict_if_present(self):
+        # 0. Case non-DDP model empty state_dict
+        net = nn.Module()
+        state_dict = net.state_dict()
+        nn.modules.utils.consume_prefix_in_state_dict_if_present(state_dict, 'module.')
+        # check they are the same preserving order
+        self.assertEqual(list(state_dict.keys()), list(net.state_dict().keys()))
+        self.assertEqual(list(state_dict._metadata.keys()), list(net.state_dict()._metadata.keys()))
+
+        # 1. Case non-DDP model test example state_dict
+        l = nn.Linear(5, 5)
+        block = nn.Module()
+        block.conv1 = nn.Conv2d(3, 3, 3, bias=True)
+        block.conv2 = nn.Conv2d(3, 3, 3, bias=False)
+        net = nn.Module()
+        net.linear1 = l
+        net.linear2 = l
+        net.bn = nn.BatchNorm2d(2)
+        net.block = block
+        state_dict = net.state_dict()
+        nn.modules.utils.consume_prefix_in_state_dict_if_present(state_dict, 'module.')
+        # Check they are the same preserving order
+        self.assertEqual(list(state_dict.keys()), list(net.state_dict().keys()))
+        self.assertEqual(list(state_dict._metadata.keys()), list(net.state_dict()._metadata.keys()))
+
+        # 2. Case DDP model test example state_dict
+        l = nn.Linear(5, 5)
+        bn = nn.BatchNorm2d(2)
+        conv1 = nn.Conv2d(3, 3, 3, bias=True)
+        net = nn.Module()
+        net.linear = l
+        net.bn = bn
+        net.conv1 = conv1
+        state_dict = net.state_dict()
+
+        # create ddp state_dict
+        net = nn.Module()
+        ddp_state_dict = net.state_dict()
+        ddp_state_dict.update({
+            'module.linear.weight': l.weight,
+            'module.linear.bias': l.bias,
+            'module.bn.weight': bn.weight,
+            'module.bn.bias': bn.bias,
+            'module.bn.running_mean': bn.running_mean,
+            'module.bn.running_var': bn.running_var,
+            'module.bn.num_batches_tracked': bn.num_batches_tracked,
+            'module.conv1.weight': conv1.weight,
+            'module.conv1.bias': conv1.bias,
+        })
+        ddp_state_dict._metadata.update({
+            'module': state_dict._metadata[''],
+            'module.linear': state_dict._metadata['linear'],
+            'module.bn': state_dict._metadata['bn'],
+            'module.conv1': state_dict._metadata['conv1']
+        })
+        nn.modules.utils.consume_prefix_in_state_dict_if_present(ddp_state_dict, 'module.')
+        # Check they are the same preserving order
+        self.assertEqual(list(state_dict.keys()), list(ddp_state_dict.keys()))
+        self.assertEqual(list(state_dict._metadata.keys()), list(ddp_state_dict._metadata.keys()))
+
 instantiate_device_type_tests(TestNNDeviceType, globals())
 instantiate_parametrized_tests(TestNN)
 

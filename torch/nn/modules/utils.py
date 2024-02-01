@@ -57,28 +57,25 @@ def consume_prefix_in_state_dict_if_present(
         state_dict (OrderedDict): a state-dict to be loaded to the model.
         prefix (str): prefix.
     """
-    keys_to_move = list(state_dict.keys())
-    for key in keys_to_move:
-        # Key starts with the prefix
+    keys = list(state_dict.keys())
+    for key in keys:
         if key.startswith(prefix):
-            new_key = key[len(prefix):]
-            state_dict[new_key] = state_dict.pop(key)
+            newkey = key[len(prefix) :]
+            state_dict[newkey] = state_dict.pop(key)
 
-        # Key corresponds to the metadata
-        elif key == "_metadata":
-            metadata = state_dict["_metadata"]
-            metadata_keys = list(state_dict["_metadata"].keys())
-            for metadata_key in metadata_keys:
-                if len(metadata_key) == 0:
-                    continue
-                new_key = metadata_key
-                if metadata_key.startswith(prefix):
-                    new_key = metadata_key[len(prefix):]
-                metadata[new_key] = metadata.pop(metadata_key)
-
-            # while the order is kept within _metadata, we need to reinsert it
-            state_dict["_metadata"] = state_dict.pop("_metadata")
-
-        # if any of the previous options did not work, we reinsert it as it is
-        else:
-            state_dict[key] = state_dict.pop(key)
+    # also strip the prefix in metadata if any.
+    if hasattr(state_dict, "_metadata"):
+        keys = list(state_dict._metadata.keys())
+        for key in keys:
+            # for the metadata dict, the key can be:
+            # '': for the DDP module, which we want to remove.
+            # 'module': for the actual model.
+            # 'module.xx.xx': for the rest.
+            if len(key) == 0:
+                continue
+            # we also remove the key 'module'
+            if key == 'module':
+                state_dict._metadata.pop(key)
+            if key.startswith(prefix):
+                newkey = key[len(prefix) :]
+                state_dict._metadata[newkey] = state_dict._metadata.pop(key)
