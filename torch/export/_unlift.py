@@ -182,13 +182,16 @@ def _register_attrs_to_new_gm(
     state_dict: Dict[str, Any],
     constants: Dict[str, Any],
 ) -> None:
+    non_persistent_buffers = set(graph_signature.non_persistent_buffers)
     for name in graph_signature.buffers:
-        value = state_dict[name]
+        if name in non_persistent_buffers:
+            persistent = False
+            value = constants[name]
+        else:
+            persistent = True
+            value = state_dict[name]
         _assign_attr(
-            value,
-            new_gm,
-            name,
-            attr_kind=_AttrKind.BUFFER,
+            value, new_gm, name, attr_kind=_AttrKind.BUFFER, persistent=persistent
         )
     for name in graph_signature.parameters:
         value = state_dict[name]
@@ -232,12 +235,16 @@ class _StatefulGraphModuleFactory(type):
 class _StatefulGraphModule(torch.fx.GraphModule, metaclass=_StatefulGraphModuleFactory):
     def __init__(self, root, graph, range_constraints=None):
         super().__init__(root, graph)
+        # Need to fix up non-persistent buffers.
         self.range_constraints = range_constraints or []
 
 
 def _create_stateful_graph_module(
     plain_graph_module: torch.fx.GraphModule,
     range_constraints,
+    # TODO(suo) this should not be optional, but is since we still ahve
+    # capture_pre_autograd_graph grr
+    graph_signature: Optional[ExportGraphSignature] = None,
 ):
     stateful_gm = _StatefulGraphModule._create(
         plain_graph_module,
@@ -247,6 +254,21 @@ def _create_stateful_graph_module(
     stateful_gm.register_forward_pre_hook(
         _check_input_constraints_pre_hook, with_kwargs=True
     )
+
+    if graph_signature is None:
+        return stateful_gm
+    # Fix up non-persistent buffers. torch.fx does not distinguish between
+    # persistent and non-persistent buffers, so we must restore that distinction
+    # here.
+    for buffer in graph_signature.non_persistent_buffers:
+        _assign_attr(
+            stateful_gm.get_buffer(buffer),
+            stateful_gm,
+            buffer,
+            attr_kind=_AttrKind.BUFFER,
+            persistent=False,
+        )
+
     return stateful_gm
 
 
@@ -283,6 +305,8 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
         ep.state_dict,
         ep.constants,
     )
-    unlift_gm = _create_stateful_graph_module(new_gm, ep.range_constraints)
+    unlift_gm = _create_stateful_graph_module(
+        new_gm, ep.range_constraints, ep.graph_signature
+    )
     unlift_gm.meta.update(ep.graph_module.meta)
     return unlift_gm
