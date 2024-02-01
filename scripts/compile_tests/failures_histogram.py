@@ -153,6 +153,4 @@ if __name__ == "__main__":
     if args.format_issues:
         verbose = True
 
-    failures_histogram(
-        args.eager_dir, args.dynamo_dir, verbose, args.format_issues
-    )
+    failures_histogram(args.eager_dir, args.dynamo_dir, verbose, args.format_issues)
