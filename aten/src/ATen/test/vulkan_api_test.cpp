@@ -1415,26 +1415,31 @@ TEST_F(VulkanAPITest, conv1d_simple) {
 
 void test_conv1d(
     int64_t kernel_size,
-    int64_t channels,
+    int64_t groups,
     int64_t lengths,
     int64_t stride = 1,
     int64_t padding = 0,
-    int64_t dilation = 1) {
+    int64_t dilation = 1,
+    int64_t in_group_size = 1,
+    int64_t out_group_size = 1) {
   c10::InferenceMode mode;
 
-  const auto input_cpu = at::rand({1, channels, lengths}, at::kFloat);
-  const auto weights_cpu = at::rand({channels, 1, kernel_size}, at::kFloat);
-  const auto bias_cpu = at::rand({channels,}, at::kFloat);
+  int64_t in_channels = in_group_size * groups;
+  int64_t out_channels = out_group_size * groups;
+
+  const auto input_cpu = at::rand({1, in_channels, lengths}, at::kFloat);
+  const auto weights_cpu = at::rand({out_channels, in_group_size, kernel_size}, at::kFloat);
+  const auto bias_cpu = at::rand({out_channels,}, at::kFloat);
 
   const auto input_vk = input_cpu.vulkan();
   const auto weights_vk = weights_cpu.vulkan();
   const auto bias_vk = bias_cpu.vulkan();
 
   const auto output_cpu = at::conv1d(
-      input_cpu, weights_cpu, bias_cpu, stride, padding, dilation, channels);
+      input_cpu, weights_cpu, bias_cpu, stride, padding, dilation, groups);
 
   const auto output_vk = at::conv1d(
-      input_vk, weights_vk, bias_vk, stride, padding, dilation, channels);
+      input_vk, weights_vk, bias_vk, stride, padding, dilation, groups);
   const auto output_vk_cpu = output_vk.cpu();
 
   const bool check = almostEqual(output_cpu, output_vk_cpu);
@@ -1456,6 +1461,8 @@ TEST_F(VulkanAPITest, conv1d) {
   test_conv1d(3, 5, 9, 2, 1, 2);
   test_conv1d(3, 5, 9, 1, 4, 2);
   test_conv1d(6, 22, 30, 5, 5, 3);
+  test_conv1d(6, 5, 30, 5, 5, 3, 3, 5);
+  test_conv1d(6, 5, 30, 5, 5, 3, 4, 2);
 }
 
 
