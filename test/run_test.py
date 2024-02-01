@@ -592,10 +592,10 @@ def run_test_retries(
         signal_name = f" ({SIGNALS_TO_NAMES_DICT[-ret_code]})" if ret_code < 0 else ""
         print_to_file(f"Got exit code {ret_code}{signal_name}")
 
-        stepcurrent_file_name = (
+        stepcurrent_file = (
             REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key
         )
-        if not stepcurrent_file_name.exists():
+        if not stepcurrent_file.exists():
             # Pytest didn't even get to run, this is probably a failure related
             # to imports in the test file
             break
