@@ -67,7 +67,7 @@ class FSDPParamGroup:
         """
         For N data parallel workers, each worker computes g_i, and they
         collectively reduce to compute (g_1 + ... + g_N) / N. To avoid overflow
-        and underflow, we divide by sqrt(N) before and after the reduction.
+        and underflow, we divide by ~sqrt(N) before and after the reduction.
         """
         data_parallel_world_size = 1
         data_parallel_world_size *= self.mesh_info.shard_mesh_size
