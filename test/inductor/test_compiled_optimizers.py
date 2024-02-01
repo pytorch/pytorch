@@ -74,11 +74,11 @@ KERNEL_COUNTS = {
     ASGD: KernelCounts(multitensor=2, singletensor=12),
     SGD: KernelCounts(multitensor=2, singletensor=8),
     RAdam: KernelCounts(
-        multitensor=2, singletensor=None
-    ),  # Single tensor eager needs to be refactored to enable tracing (#118230)
+        multitensor=2, singletensor=12
+    ),
     Adamax: KernelCounts(
-        multitensor=2, singletensor=None
-    ),  # Single tensor eager needs to be refactored to enable tracing (#117836)
+        multitensor=2, singletensor=8
+    ),
 }
 
 
@@ -329,6 +329,7 @@ class CompiledOptimizerTests(TestCase):
     test_adam_recompile = make_recompile_test(Adam, lr=0.01)
     test_adamw_recompile = make_recompile_test(AdamW, lr=0.01)
     test_adamax_recompile = make_recompile_test(Adamax, lr=0.01)
+    test_radam_recompile = make_recompile_test(RAdam, lr=0.01)
     test_nadam_recompile = make_recompile_test(NAdam, lr=0.01)
     test_rprop_recompile = make_recompile_test(Rprop, kernel_count=1, lr=0.01)
     test_rmsprop_recompile = make_recompile_test(RMSprop, kernel_count=1, lr=0.01)
