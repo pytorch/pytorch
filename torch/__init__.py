@@ -57,8 +57,7 @@ __all__ = [
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
     'SymBool', 'sym_not', 'unravel_index',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'sym_ite', 'compile', 'vmap',
-    'sym_sqrt',
-    'export', 'autocast', 'cond',
+    'export', 'autocast', 'cond', 'GradScaler',
 ]
 
 ################################################################################
@@ -280,6 +279,12 @@ class SymInt:
     def __ge__(self, other) -> builtins.bool:
         raise AssertionError("type stub not overridden")
 
+    def __add__(self, other) -> "SymInt":
+        raise AssertionError("type stub not overridden")
+
+    def __mul__(self, other) -> "SymInt":
+        raise AssertionError("type stub not overridden")
+
     def __sym_max__(self, other):
         raise AssertionError("type stub not overridden")
 
@@ -491,15 +496,33 @@ def sym_min(a, b):
         return b.__sym_min__(a)
     return builtins.min(a, b)  # type: ignore[operator]
 
-# Drop in replacement for math.sqrt
-def sym_sqrt(a):
-    from .overrides import has_torch_function_unary, handle_torch_function
+# Drop in replacement for math.sqrt, math.sin, math.cos etc
+current_module = sys.modules[__name__]
 
-    if has_torch_function_unary(a):
-        return handle_torch_function(sym_sqrt, (a,), a)
-    if hasattr(a, "__sym_sqrt__"):
-        return a.__sym_sqrt__()
-    return math.sqrt(a)
+def _get_sym_math_fn(name):
+    def fn(a):
+        from .overrides import has_torch_function_unary, handle_torch_function
+
+        if has_torch_function_unary(a):
+            return handle_torch_function(fn, (a,), a)
+        if hasattr(a, f"__sym_{name}__"):
+            return getattr(a, f"__sym_{name}__")()
+        return getattr(math, name)(a)
+
+    return fn
+
+for name in ("sqrt", "cos", "cosh", "sin", "sinh", "tan", "tanh", "asin", "acos", "atan"):
+    sym_name = f"_sym_{name}"
+    fn = _get_sym_math_fn(name)
+    fn.__qualname__ = fn.__name__ = sym_name
+    setattr(current_module, sym_name, fn)
+
+# Adding temporary shortcut
+sym_sqrt = current_module._sym_sqrt
+__all__.append("sym_sqrt")
+
+del fn, name, sym_name, current_module  # type: ignore[possibly-undefined]
+
 
 def sym_ite(b, t, f):
     from .overrides import has_torch_function, handle_torch_function
@@ -1445,7 +1468,7 @@ def manager_path():
         raise RuntimeError("Unable to find torch_shm_manager at " + path)
     return path.encode('utf-8')
 
-from torch.amp import autocast
+from torch.amp import autocast, GradScaler
 
 # Initializing the extension shadows the built-in python float / int classes;
 # store them for later use by SymInt / SymFloat.
@@ -1537,6 +1560,7 @@ def _assert(condition, message):
 from torch import cuda as cuda
 from torch import cpu as cpu
 from torch import mps as mps
+from torch import xpu as xpu
 from torch import autograd as autograd
 from torch.autograd import (
     no_grad as no_grad,

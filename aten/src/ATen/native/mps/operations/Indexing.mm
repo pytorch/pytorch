@@ -55,7 +55,8 @@ static std::string getBitSizeString(ScalarType scalar_type) {
 static std::string getIndexFunctionName(ScalarType scalar_type,
                                         bool index_select,
                                         bool accumulate,
-                                        bool serial = false) {
+                                        bool serial,
+                                        bool use_64bit_indexing) {
   std::string indexFunction = index_select     ? "index_select_"
       : (accumulate && (scalar_type != kBool)) ? "index_put_accumulate_"
                                                : (serial ? "index_put_serial_" : "index_put_");
@@ -68,6 +69,7 @@ static std::string getIndexFunctionName(ScalarType scalar_type,
     string dtypeString = (scalar_type == ScalarType::Float) ? "_float" : "_int";
     indexFunction += dtypeString;
   }
+  indexFunction += use_64bit_indexing ? "_idx64" : "_idx32";
   return indexFunction;
 }
 
@@ -96,10 +98,11 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
       uint32_t numThreads = iter.numel();
 
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      auto kernelDataOffsets = generateKernelDataOffsets(computeEncoder, iter);
+      const bool use_64bit_indexing = !iter.can_use_32bit_indexing();
+      auto kernelDataOffsets = generateKernelDataOffsets(computeEncoder, iter, use_64bit_indexing);
 
-      std::string indexFunction =
-          getIndexFunctionName(inputTensor.scalar_type(), index_select, accumulate, serial_index_put);
+      auto indexFunction = getIndexFunctionName(
+          inputTensor.scalar_type(), index_select, accumulate, serial_index_put, use_64bit_indexing);
       id<MTLComputePipelineState> indexSelectPSO = nil;
       id<MTLBuffer> indexAB = nil;
 #if defined(__MAC_13_0)

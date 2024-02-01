@@ -1,9 +1,12 @@
 import copy
 import dataclasses
 import functools
+import logging
 import re
+import warnings
 from collections import OrderedDict
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from contextlib import nullcontext
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch._dynamo
@@ -16,13 +19,17 @@ from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
 )
 from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
-from torch._export.passes.lift_constant_tensor_pass import lift_constant_tensor_pass
+from torch._export.passes.lift_constants_pass import (
+    lift_constants_pass,
+    rewrite_script_object_meta,
+)
 from torch._export.wrappers import _wrap_submodules
 from torch._functorch.aot_autograd import aot_export_module, GraphSignature
 from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
+    free_unbacked_symbols,
     GuardOnDataDependentSymNode,
     ShapeEnv,
 )
@@ -43,10 +50,14 @@ from .graph_signature import (
     _sig_to_specs,
     ArgumentSpec,
     ConstantArgument,
+    CustomObjArgument,
     ExportGraphSignature,
     SymIntArgument,
     TensorArgument,
 )
+
+
+log = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
@@ -378,12 +389,19 @@ def _export_non_strict(
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
     pre_dispatch=False,
 ):
+    # [NOTE] If the user is exporting under training mode, we want to detect if there is any
+    # state change in the autograd global state and error. If the user is exporting under inference
+    # mode, we don't care.
+    is_grad_enabled = torch._C.is_grad_enabled()
+    grad_safe_guard = (
+        AutogradStateOpsFailSafeguard() if is_grad_enabled else nullcontext()
+    )
     # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
     with torch.nn.utils.stateless._reparametrize_module(
         mod, fake_params_buffers
-    ), AutogradStateOpsFailSafeguard():
+    ), grad_safe_guard:  # type: ignore[attr-defined]
         gm, graph_signature = transform(aot_export_module)(
             mod,
             (*fake_args, *fake_kwargs.values()),
@@ -407,13 +425,25 @@ def _export_non_strict(
     is_joint = graph_signature.backward_signature is not None
 
     def make_argument_spec(node) -> ArgumentSpec:
-        assert "val" in node.meta, f"{node} has no 'val' metadata field"
+        if isinstance(node, (int, bool, float, type(None))):
+            # For const outputs we just directly return this
+            return ConstantArgument(value=node)
+
+        assert (
+            "val" in node.meta
+        ), f"{node} is not a constant or a node with a 'val' metadata field"
         val = node.meta["val"]
         if isinstance(val, FakeTensor):
             return TensorArgument(name=node.name)
         elif isinstance(val, torch.SymInt):
             return SymIntArgument(name=node.name)
+        elif isinstance(val, torch.ScriptObject):
+            return CustomObjArgument(
+                name=node.name, class_fqn=val._type().qualified_name()  # type: ignore[attr-defined]
+            )
         else:
+            # TODO: this branch is likely wrong, all permissible ConstantArgument type
+            # should have been handled already
             return ConstantArgument(value=val)
 
     input_specs, output_specs = _sig_to_specs(
@@ -440,18 +470,21 @@ def _export_non_strict(
         input_specs=input_specs, output_specs=output_specs
     )
 
-    tensor_constants = lift_constant_tensor_pass(gm, export_graph_signature)
+    constants = rewrite_script_object_meta(gm)
+    more_constants = lift_constants_pass(gm, export_graph_signature)
+    for k, v in more_constants.items():
+        constants[k] = v
 
     @dataclasses.dataclass
     class _ExportedProgramNonStrict:
         gm: torch.fx.GraphModule
         sig: ExportGraphSignature
-        tensor_constants: Dict[str, torch.Tensor]
+        constants: Dict[str, Union[torch.Tensor, torch._C.ScriptObject]]
 
     return _ExportedProgramNonStrict(
         gm,
         export_graph_signature,
-        tensor_constants,
+        constants,
     )
 
 
@@ -471,6 +504,7 @@ def _export(
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     constraints: Optional[List[Constraint]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
     *,
     strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
@@ -487,8 +521,29 @@ def _export(
 
         kwargs: optional example keyword inputs.
 
-        constraints: A optional list of constraints on the dynamic arguments specifying
-            their possible range of their shapes
+        constraints: [DEPRECATED: use ``dynamic_shapes`` instead, see below]
+         An optional list of constraints on the dynamic arguments
+         that specify their possible range of shapes. By default, shapes of
+         input torch.Tensors are assumed to be static. If an input torch.Tensor
+         is expected to have dynamic shapes, please use :func:`dynamic_dim`
+         to define :class:`Constraint` objects that specify the dynamics and the possible
+         range of shapes. See :func:`dynamic_dim` docstring for examples on
+         how to use it.
+
+        dynamic_shapes:
+         An optional argument where the type should either be:
+         1) a dict from argument names of ``f`` to their dynamic shape specifications,
+         2) a tuple that specifies dynamic shape specifications for each input in original order.
+         If you are specifying dynamism on keyword args, you will need to pass them in the order that
+         is defined in the original function signature.
+
+         The dynamic shape of a tensor argument can be specified as either
+         (1) a dict from dynamic dimension indices to :func:`Dim` types, where it is
+         not required to include static dimension indices in this dict, but when they are,
+         they should be mapped to None; or (2) a tuple / list of :func:`Dim` types or None,
+         where the :func:`Dim` types correspond to dynamic dimensions, and static dimensions
+         are denoted by None. Arguments that are dicts or tuples / lists of tensors are
+         recursively specified by using mappings or sequences of contained specifications.
 
         preserve_module_call_signature: A list of submodule paths for which the original
             calling conventions are preserved as metadata.
@@ -496,14 +551,38 @@ def _export(
     Returns:
         An ExportedProgram containing the traced method.
     """
-    constraints = constraints or []
+    from .dynamic_shapes import _process_dynamic_shapes
+
+    if constraints is not None:
+        warnings.warn(
+            "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
+            "and will not be supported in the future. "
+            "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    else:
+        constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes) or []
+
     kwargs = kwargs or {}
+
+    flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
 
     if not strict:
         assert isinstance(f, torch.nn.Module)
-        assert len(preserve_module_call_signature) == 0
         assert len(kwargs) == 0, "keyword arguments NYI"
         out_spec = None
+
+        module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
+
+        def strip_root(x):
+            if isinstance(x, str) and x.startswith("_export_root"):
+                stripped = x[len("_export_root") :]
+                return stripped[1:] if stripped.startswith(".") else stripped
+            return x
+
+        def fixup_key(x):
+            return "L__self__" + strip_root(x)
 
         def _tuplify_outputs(aot_export):
             def _aot_export_non_strict(mod, args, **kwargs):
@@ -514,21 +593,26 @@ def _export(
 
                     def forward(self, *args, **kwargs):
                         nonlocal out_spec
-                        flat_outs, out_spec = pytree.tree_flatten(
-                            self._export_root(*args, **kwargs)
-                        )
+                        if isinstance(self._export_root, torch.fx.GraphModule):
+                            with torch.fx.traceback.preserve_node_meta():
+                                tree_out = torch.fx.Interpreter(self._export_root).run(
+                                    *args, **kwargs
+                                )
+                        else:
+                            tree_out = self._export_root(*args, **kwargs)
+                        flat_outs, out_spec = pytree.tree_flatten(tree_out)
                         return tuple(flat_outs)
 
-                gm, sig = aot_export(Wrapper(mod), args, **kwargs)
-
-                def strip_root(x):
-                    if isinstance(x, str) and x.startswith("_export_root"):
-                        stripped = x[len("_export_root") :]
-                        return stripped[1:] if stripped.startswith(".") else stripped
-                    return x
-
-                def fixup_key(x):
-                    return "L__self__" + strip_root(x)
+                wrapped_mod = Wrapper(mod)
+                # Patch export_root to the signatures so that wrapper module correctly populates the
+                # in/out spec
+                new_preserved_call_signatures = [
+                    "_export_root." + i for i in preserve_module_call_signature
+                ]
+                with _wrap_submodules(
+                    wrapped_mod, new_preserved_call_signatures, module_call_specs
+                ):
+                    gm, sig = aot_export(wrapped_mod, args, **kwargs)
 
                 sig.parameters = pytree.tree_map(strip_root, sig.parameters)
                 sig.buffers = pytree.tree_map(strip_root, sig.buffers)
@@ -544,8 +628,6 @@ def _export(
                 for node in gm.graph.nodes:
                     if "nn_module_stack" in node.meta:
                         nn_module_stack = node.meta["nn_module_stack"]
-                        # Delete the wrapper module reference
-                        del nn_module_stack[""]
                         node.meta["nn_module_stack"] = {
                             fixup_key(key): val
                             for key, val in pytree.tree_map(
@@ -567,9 +649,39 @@ def _export(
             fake_mode, src_equalities, original_signature, ep_non_strict.gm
         )
         assert out_spec is not None
+
+        gm = ep_non_strict.gm
+
+        module_call_signatures = {
+            strip_root(fqn): ModuleCallSignature(inputs=[], outputs=[], **specs)
+            for fqn, specs in module_call_specs.items()
+        }
+
+        if len(preserve_module_call_signature) > 0:
+            for node in gm.graph.nodes:
+                if node.target == torch.ops.higher_order._export_tracepoint:
+                    if "path" in node.kwargs:
+                        path = strip_root(node.kwargs["path"])
+                        with gm.graph.inserting_before(node):
+                            new_node = gm.graph.create_node(
+                                "call_function",
+                                torch.ops.higher_order._export_tracepoint,
+                                args=node.args,
+                                kwargs={
+                                    "path": path,
+                                    "kind": node.kwargs["kind"],
+                                },
+                            )
+                            node.replace_all_uses_with(new_node)
+                            gm.graph.erase_node(node)
+
+            res = CollectTracepointsPass(module_call_signatures, ep_non_strict.sig)(gm)
+            assert res is not None
+            gm = res.graph_module
+
         return ExportedProgram(
-            root=ep_non_strict.gm,
-            graph=ep_non_strict.gm.graph,
+            root=gm,
+            graph=gm.graph,
             graph_signature=ep_non_strict.sig,
             state_dict=_get_params_buffers(f),
             range_constraints=range_constraints,
@@ -577,12 +689,15 @@ def _export(
                 ModuleCallEntry(
                     "",
                     ModuleCallSignature(
-                        [], [], pytree.tree_flatten((args, {}))[1], out_spec
+                        inputs=[], outputs=[], in_spec=orig_in_spec, out_spec=out_spec
                     ),
                 )
+            ]
+            + [
+                ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()
             ],
             example_inputs=(args, kwargs),
-            tensor_constants=ep_non_strict.tensor_constants,
+            constants=ep_non_strict.constants,
         )
 
     gm_torch_level = _export_to_torch_ir(
@@ -715,7 +830,7 @@ def _export(
 
     gm = ep_non_strict.gm
     export_graph_signature = ep_non_strict.sig
-    tensor_constants = ep_non_strict.tensor_constants
+    constants = ep_non_strict.constants
 
     # After aot_export, set the param/buffer metadata back into placeholders
     # Technically, users can still construct this data from param names
@@ -739,7 +854,7 @@ def _export(
     gm.meta["inline_constraints"] = {
         k: v
         for k, v in dynamo_fake_mode.shape_env.runtime_var_to_range.items()
-        if re.match(r"^[if]\d+$", str(k))
+        if free_unbacked_symbols(k)
     }
 
     num_lifted = next(
@@ -750,7 +865,6 @@ def _export(
         ),
         len(export_graph_signature.input_specs),
     )
-    flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
     range_constraints = _process_constraints(
         gm,
         num_lifted,
@@ -792,8 +906,9 @@ def _export(
         ]
         + [ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()],
         example_inputs=(args, kwargs),
-        tensor_constants=tensor_constants,
+        constants=constants,
     )
+    log.debug("Exported program from AOTAutograd:\n%s", exported_program)
 
     if len(range_constraints) > 0:
         exported_program = exported_program._transform_do_not_use(

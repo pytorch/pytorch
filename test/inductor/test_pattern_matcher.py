@@ -63,13 +63,26 @@ class TestPatternMatcher(TestCase):
         def fn(a, b, c, d):
             return torch.add(torch.mm(a, b), torch.mm(c, d))
 
-        args_list = [
+        # when m1 == n1 and m2 == n2, mm_plus_mm can be matched to fused op
+        fusible_args_list = [
             (
                 torch.randn(16, 16, device="cuda"),
                 torch.randn(16, 16, device="cuda"),
                 torch.randn(16, 16, device="cuda"),
                 torch.randn(16, 16, device="cuda"),
             ),
+            (
+                torch.randn(1, 4, device="cuda"),
+                torch.randn(4, 2, device="cuda"),
+                torch.randn(1, 5, device="cuda"),
+                torch.randn(5, 2, device="cuda"),
+            ),
+        ]
+        for args in fusible_args_list:
+            self.common(fn, args, 1, 3)
+
+        # if not fusible, it can only match add(mm())
+        unfusible_args_list = [
             # https://github.com/pytorch/pytorch/issues/100670.
             (
                 torch.randn(1, 4, device="cuda"),
@@ -83,15 +96,9 @@ class TestPatternMatcher(TestCase):
                 torch.randn(1, 4, device="cuda"),
                 torch.randn(4, 2, device="cuda"),
             ),
-            (
-                torch.randn(1, 4, device="cuda"),
-                torch.randn(4, 2, device="cuda"),
-                torch.randn(1, 5, device="cuda"),
-                torch.randn(5, 2, device="cuda"),
-            ),
         ]
-        for args in args_list:
-            self.common(fn, args, 1, 3)
+        for args in unfusible_args_list:
+            self.common(fn, args, 1, 2)
 
     def _test_fused_int_mm_mul_impl(self, fn, args, fused_int_mm_mul_expected=True):
         torch._dynamo.reset()
@@ -762,6 +769,77 @@ class TestPatternMatcher(TestCase):
             torch.randn(2, 5, device="cuda"),
         ]
         self.common(fn, args, 0, 0)
+
+    def test_symint_pattern_matching(self):
+        import torch._inductor.config as config
+        from torch._inductor.pattern_matcher import (
+            fwd_only,
+            PatternMatcherPass,
+            register_replacement,
+        )
+
+        saved_graph = None
+
+        class _CustomPass(PatternMatcherPass):
+            def __init__(self):
+                super().__init__()
+
+            def __call__(self, g: torch.fx.graph.Graph):
+                self.apply(g)
+                nonlocal saved_graph
+                saved_graph = g
+
+        with config.patch(
+            # leave custom pass only in post_grad_passes()
+            pattern_matcher=False,
+            # define pattern match as custom post grad opt pass
+            post_grad_custom_pre_pass=None,
+            post_grad_custom_post_pass=_CustomPass(),
+        ):
+
+            def add(x, y):
+                return x + y
+
+            # testing that
+            def sym_minus(x, y):
+                return (x - (-y.size(0))) - (y * -1) - y.size(0)
+
+            device = "cpu"
+            my_args = [
+                torch.empty([8, 1], device=device),
+                torch.empty([10], device=device),
+            ]
+
+            invoked = False
+
+            def extra_check(match):
+                nonlocal invoked
+                invoked = True
+                return True
+
+            register_replacement(
+                add,
+                sym_minus,
+                my_args,
+                fwd_only,
+                [config.post_grad_custom_post_pass],
+                extra_check=extra_check,
+            )
+
+            @torch.compile(dynamic=True)
+            def foo(x, y):
+                return x + y
+
+            x = torch.rand([8, 1])
+            y = torch.rand([10])
+
+            self.assertEqual(foo(x, y), x + y)
+
+            self.assertTrue(invoked)
+            # we trace out the y.sym_size in replacement
+            FileCheck().check("sym_size_int").check_same("num_users=2").check_same(
+                "target=torch.ops.aten.sym_size"
+            ).run(str(saved_graph))
 
     def test_match_with_mutation(self):
         counter = 0
