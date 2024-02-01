@@ -601,7 +601,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
         qconfig = QConfig(
             activation=observer.PlaceholderObserver,
             weight=per_channel_weight_observer_range_neg_127_to_127.with_args(
-                quant_min=0, quant_max=15
+                quant_min=-8, quant_max=7
             ),
         )
         qconfig_mapping = QConfigMapping().set_global(qconfig)
