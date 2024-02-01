@@ -625,7 +625,7 @@ def run_test_retries(
     if len(consistent_failures) > 0:
         print_to_file(f"The following tests failed consistently: {consistent_failures}")
         return 1, True
-    return 0, any(x > 0 for x in num_failures.values())
+    return ret_code, any(x > 0 for x in num_failures.values())
 
 
 def run_test_with_subprocess(test_module, test_directory, options):
