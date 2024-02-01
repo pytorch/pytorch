@@ -425,7 +425,7 @@ def triton_constant(value):
 
 
 class TritonCSEVariable(CSEVariable):
-    def __init__(self, name, bounds: ValueRanges[Any]):
+    def __init__(self, name, bounds: ValueRanges):
         super().__init__(name, bounds)
         # We'll use this to track which masks the variable needs when used for indirect indexing
         self.mask_vars: Set[str] = set()

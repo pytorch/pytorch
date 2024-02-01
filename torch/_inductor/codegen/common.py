@@ -797,7 +797,7 @@ class CSEVariable:
     See example of TritonCSEVariable in triton.py
     """
 
-    def __init__(self, name, bounds: ValueRanges[Any]):
+    def __init__(self, name, bounds: ValueRanges):
         assert isinstance(bounds, ValueRanges)
         self.name = name
         self.bounds = bounds
@@ -876,7 +876,7 @@ class CSE:
         buffer: IndentedBuffer,
         expr: Union[str, CSEVariable, OpsValue, IndentedBuffer],
         *,
-        bounds: ValueRanges[Any] = ValueRanges.unknown(),
+        bounds: ValueRanges = ValueRanges.unknown(),
         write=True,
         assignment=True,
     ) -> CSEVariable:
@@ -917,7 +917,7 @@ class CSE:
 
         return var
 
-    def newvar(self, bounds: ValueRanges[Any] = ValueRanges.unknown()) -> CSEVariable:
+    def newvar(self, bounds: ValueRanges = ValueRanges.unknown()) -> CSEVariable:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
         var = V.kernel.create_cse_var(var_name, bounds)
         self.varname_map[var_name] = var
@@ -1002,7 +1002,7 @@ class Kernel(CodeGen):
         self._load_mask = None
         # set in set_current_node
         self.current_node = None
-        self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges[Any]]] = None
+        self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = None
         # Upper bounds for indirect_indexing and their str representation
         # NB: None, None is never stored in map, but it is the assumed
         # "not set" value for the dict

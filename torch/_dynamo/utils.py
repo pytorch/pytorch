@@ -2066,18 +2066,18 @@ def defake(x):
     size: "torch._prims_common.ShapeType"
     stride: "torch._prims_common.StrideType"
     if x._has_symbolic_sizes_strides:
-        size = []
-        for s in x.size():
-            if isinstance(s, torch.SymInt):
-                size.append(s.node.shape_env.size_hint(s.node.expr))
-            else:
-                size.append(s)
-        stride = []
-        for s in x.stride():
-            if isinstance(s, torch.SymInt):
-                stride.append(s.node.shape_env.size_hint(s.node.expr))
-            else:
-                stride.append(s)
+        size = [
+            s.node.shape_env.size_hint(s.node.expr)
+            if isinstance(s, torch.SymInt)
+            else s
+            for s in x.size()
+        ]
+        stride = [
+            s.node.shape_env.size_hint(s.node.expr)
+            if isinstance(s, torch.SymInt)
+            else s
+            for s in x.stride()
+        ]
     else:
         size = x.size()
         stride = x.stride()

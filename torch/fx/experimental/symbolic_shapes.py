@@ -93,7 +93,7 @@ CURRENT_NODE_KEY = "current_node"
 # These are modules that contain generic code for interacting with ShapeEnv
 # which are unlikely to identify a particular interesting guard statement
 @lru_cache(None)
-def uninteresting_files() -> Set[str]:
+def uninteresting_files():
     import torch._inductor.sizevars
     import torch._library.abstract_impl
     import torch._subclasses.meta_utils
@@ -120,18 +120,16 @@ def uninteresting_files() -> Set[str]:
 class ConstraintViolationError(RuntimeError):
     pass
 
-def has_symbolic_sizes_strides(elem) -> bool:
+def has_symbolic_sizes_strides(elem):
     return elem._has_symbolic_sizes_strides
 
-Int = Union[torch.SymInt, int]
-
-def create_contiguous(shape: Sequence[Int]) -> List[Int]:
-    strides: List[Int] = [1]
+def create_contiguous(shape):
+    strides = [1]
     for dim in reversed(shape[:-1]):
         strides.append(dim * strides[-1])
     return list(reversed(strides))
 
-def hint_int(a: Union[torch.SymInt, int], fallback: Optional[int] = None) -> int:
+def hint_int(a, fallback=None):
     """
     Retrieve the hint for an int (based on the underlying real values as observed
     at runtime).  If no hint is available (e.g., because data dependent shapes),
@@ -142,14 +140,12 @@ def hint_int(a: Union[torch.SymInt, int], fallback: Optional[int] = None) -> int
     assert type(a) is int, a
     return a
 
-Scalar = Union[torch.SymInt, torch.SymFloat, torch.SymBool, int, float, bool]
-
-def has_hint(a: Scalar) -> bool:
+def has_hint(a):
     if isinstance(a, SymTypes):
         return a.node.has_hint()
     return True
 
-def is_concrete_int(a: Union[int, SymInt]) -> bool:
+def is_concrete_int(a: Union[int, SymInt]):
     r""" Utility to check if underlying object
     in SymInt is concrete value. Also returns
     true if integer is passed in.
@@ -167,9 +163,7 @@ def is_concrete_int(a: Union[int, SymInt]) -> bool:
 
     return False
 
-SympyBoolean = sympy.logic.boolalg.Boolean
-
-def canonicalize_bool_expr(expr: SympyBoolean) -> SympyBoolean:
+def canonicalize_bool_expr(expr: sympy.Expr):
     r""" Canonicalize a boolean expression by transforming it into a lt / le
     inequality and moving all the non-constant terms to the rhs.
     We canonicalize And / Ors / Not via cnf and then canonicalize their subexpr
@@ -192,7 +186,7 @@ def canonicalize_bool_expr(expr: SympyBoolean) -> SympyBoolean:
         expr = sympy.logic.boolalg.to_cnf(expr)
     return _canonicalize_bool_expr_impl(expr)
 
-def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
+def _canonicalize_bool_expr_impl(expr: sympy.Expr):
     if isinstance(expr, (sympy.And, sympy.Or)):
         return type(expr)(*map(canonicalize_bool_expr, expr.args))
 
@@ -217,7 +211,7 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
         rhs = -sympy.Add(*cts)
     return t(lhs, rhs)
 
-def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
+def is_concrete_bool(a: Union[bool, SymBool]):
     r""" Utility to check if underlying object
     in SymBool is concrete value. Also returns
     true if integer is passed in.
@@ -234,7 +228,7 @@ def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
 
     return False
 
-def is_singleton(s: Int) -> bool:
+def is_singleton(s):
     # check for SingletonSymNode
     if not isinstance(s, torch.SymInt):
         return False
