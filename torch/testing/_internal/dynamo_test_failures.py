@@ -2406,68 +2406,27 @@ dynamo_expected_failures = {
 dynamo_skips = {
     "TestMatmulOperator.test_matmul_raises",
     "TestMatmulOperator.test_exceptions",
-    "TestMatmulOperator.test_matmul_inplace",
-    "TestMethods.test_diagonal",
     "TestMethods.test_searchsorted_complex",
     "TestMethods.test_round",
     "TestMethods.test_searchsorted_type_specific_2",
-    "TestMethods.test_dot",
     "TestMethods.test_dot_out_mem_overlap",
     "TestMethods.test_partition_iterative",
-    "TestMethods.test_trace",
     "TestMethods.test_matmul_out",
     "TestMethods.test_transpose",
-    "TestMethods.test_conjugate",
-    "TestMethods.test_choose_2",
-    "TestMethods.test_size_zero_memleak",
     "TestMethods.test_searchsorted_with_invalid_sorter",
-    "TestMethods.test_choose",
-    "TestMethods.test_conjugate_out",
     "TestMethods.test_compress",
-    "TestCustomOpTestingCPU.test_incorrect_schema_mutation_cpu",  # test_custom_ops
-    "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmax_np_method0",
-    "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmin_np_method1",
-    "TestIsreal.test_fail",  # known py311 fail
-    "TestIscomplexobj.test_basic",  # known py311 fail
-    "TestIsrealobj.test_basic",  # known py311 fail
-    "TestIsreal.test_pass",  # known py311 fail
-    "TestIscomplex.test_pass",  # known py311 fail
-    "TestIscomplexobj.test_list",  # known py311 fail
-    "TestDiag.test_matrix",  # known py311 fail
-    "TestVander.test_dtypes",  # known py311 fail
-    "TestDstack.test_generator",  # known py311 fail
-    "TestColumnStack.test_generator",  # known py311 fail
-    "TestCov.test_complex",  # known py311 fail
-    "TestSortComplex.test_sort_complex",  # known py311 fail
-    "TestCorrCoef.test_xy",  # known py311 fail
-    "TestCov.test_xy",  # known py311 fail
-    "TestCorrCoef.test_complex",  # known py311 fail
-    "TestUnique.test_simple_complex",  # known py311 fail
-    "TestDigitize.test_casting_error",  # known py311 fail
     "TestConstant.test_check_constant",  # known py311 fail
     "TestFFTShift.test_fft_n",  # known py311 fail
-    "TestHstack.test_generator",  # known py311 fail
     "TestVstack.test_generator",  # known py311 fail
     "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_I_operation0",  # torch_np/numpy_tests/core/test_scalarmath
     "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_I_operation1",  # torch_np/numpy_tests/core/test_scalarmath
     "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_L_operation1",  # torch_np/numpy_tests/core/test_scalarmath
-    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_Q_operation1",  # torch_np/numpy_tests/core/test_scalarmath
-    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_Q_operation0",  # torch_np/numpy_tests/core/test_scalarmath
     "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_P_operation0",  # torch_np/numpy_tests/core/test_scalarmath
     "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_P_operation1",  # torch_np/numpy_tests/core/test_scalarmath
     "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_H_operation0",  # torch_np/numpy_tests/core/test_scalarmath
     "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_H_operation1",  # torch_np/numpy_tests/core/test_scalarmath
     "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_L_operation0",  # torch_np/numpy_tests/core/test_scalarmath
-    "TestCorrelate.test_complex",  # known py311 fail
-    "TestStdVarComplex.test_basic",  # known py311 fail
-    "TestEinsum.test_broadcasting_dot_cases",  # known py311 fail
-    "WeakTest.test_make_weak_keyed_dict_from_dict",  # known py311 fail
-    "TestViewOpsCPU.test_as_strided_gradients_cpu",  # known py311 fail
-    "TestViewOpsLAZY.test_as_strided_gradients_lazy",  # known py311 fail
-    "LoggingTest.testApiUsage",  # flaky?
-    "TestPruningNN.test_global_pruning_importance_scores",  # flaky
     "TestOpenMP_ParallelFor.test_one_thread",  # test_openmp
-    "TestTorchrun.test_multi_threads",  # backends/xeon/test_launch
     "TestAttnBiasCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape3_cpu",  # known py38 fail
     "TestAttnBiasCPU.test_causal_variants_causal_variant_CausalVariant_UPPER_LEFT_shape0_cpu",  # known py38 fail
     "TestAttnBiasCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape1_cpu",  # known py38 fail
@@ -2502,21 +2461,11 @@ dynamo_skips = {
     "TestAttnBiasCPU.test_causal_variants_causal_variant_1_shape2_cpu",  # known py311 fail
     "TestAttnBiasCPU.test_causal_variants_causal_variant_1_shape1_cpu",  # known py311 fail
     "TestAttnBiasCPU.test_causal_variants_causal_variant_2_shape1_cpu",  # known py311 fail
-    "TestFunctionalAutogradBenchmark.test_fast_tasks",  # flaky?
-    "TestFrameworkUtils.test_filtering_env_var",  # known py38 fail
-    "TestAsArrayCPU.test_default_device_cpu",  # known py38 fail
-    "TestAsArrayCPU.test_astensor_consistency_cpu",  # known py311 fail
-    "TestTensorCreationCPU.test_vander_types_cpu_complex128",  # known py311 fail
-    "TestTensorCreationCPU.test_vander_types_cpu_complex64",  # known py311 fail
-    "TestTensorCreationCPU.test_torch_polar_cpu_float32",  # known py311 fail
-    "TestTensorCreationCPU.test_torch_polar_cpu_float64",  # known py311 fail
     "TestSWAUtils.test_averaged_model_all_devices_ema_True",  # flaky
     "TestSWAUtils.test_averaged_model_exponential_use_multi_avg_fn_True_use_buffers_False",  # flaky
     "TestSWAUtils.test_averaged_model_exponential_use_multi_avg_fn_True_use_buffers_True",  # flaky
-    "TestOpenMP_ParallelFor.test_n_threads",  # known py311 fail
     "TestNativeFunctions.test_intlist_error_with_overload",  # known py311 fail
     "TestMkldnnFusion.test_single_conv",  # known py311 fail
-    "TestTorchDlPackCPU.test_dlpack_export_is_conj_cpu",  # known py311 fail
     "TestPythonDispatcher.test_quantized_structured_not_implemented",  # known py38 fail
     "TestLazyReuseIr.testAdd",  # known py311 fail
     "TestLazyReuseIr.testAddSubFallback",  # known py311 fail
@@ -2828,18 +2777,10 @@ dynamo_skips = {
     "ReproTests.test_optim_state_references_cleared",  # weird
     "ReproTests.test_reformer_train",  # weird
     "TraceRuleTests.test_torch_name_rule_map_updated",  # weird
-    "TestTorchFunctionOverride.test_TensorBase_H___get__",  # known py311 fail
     "TestCheckpoint.test_checkpoint_trigger",  # known py38 fail
-    "TestBottleneck.test_bottleneck_cpu_only",  # known py38 fail
     "TestUnaryUfuncsCPU.test_sinc_cpu_float64",  # known py38 fail
-    "TestUnaryUfuncsCPU.test_silu_complex_cpu_complex64",  # known py38 fail
-    "TestUnaryUfuncsCPU.test_exp_cpu_complex128",  # known py38 fail
     "TestUnaryUfuncsCPU.test_special_i0_i1_vs_scipy_cpu_float32",  # known py38 fail
-    "TestUnaryUfuncsCPU.test_silu_complex_cpu_complex128",  # known py38 fail
     "TestUnaryUfuncsCPU.test_special_i0_i1_vs_scipy_cpu_float64",  # known py38 fail
-    "TestUnaryUfuncsCPU.test_log1p_complex_cpu_complex64",  # known py38 fail
-    "TestUnaryUfuncsCPU.test_exp_cpu_complex64",  # known py38 fail
-    "TestUnaryUfuncsCPU.test_log1p_complex_cpu_complex128",  # known py38 fail
     "TestUnaryUfuncsCPU.test_special_i0_i1_vs_scipy_cpu_bfloat16",  # known py38 fail
     "TestSparseCSRCPU.test_sparse_csc_to_dense_cpu_int32",  # known py38 fail
     "TestSparseCompressedCPU.test_select_copy_SparseCSC_int64_cpu_int64",  # known py38 fail
@@ -3277,7 +3218,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_diagflat_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_atleast_1d_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_max_unpool2d_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_guards_equal",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_var_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_byte_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_tril_cpu_float32",  # known py38 fail
@@ -3288,7 +3228,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_randn_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_tensorinv_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_ldl_factor_ex_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorReal.test_varargs",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_embedding_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_argwhere_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_index_select_cpu_float32",  # known py38 fail
@@ -3308,7 +3247,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_ldl_factor_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_equal_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_i0_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_pre_dispatch_mode_stack",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_shifted_chebyshev_polynomial_w_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_square_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_floor_divide_cpu_float32",  # known py38 fail
@@ -3327,7 +3265,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_modified_bessel_k0_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_zeros_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_scatter_reduce_amin_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorFake.test_pr_86917",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_ldexp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_lu_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_hardshrink_cpu_float32",  # known py38 fail
@@ -3337,7 +3274,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_resolve_neg_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_new_full_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_cumsum_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_empty_like_doesnt_burn_in_defaults",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_polygamma_special_polygamma_n_0_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_clamp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_pinverse_cpu_float32",  # known py38 fail
@@ -3347,7 +3283,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fft_ifftn_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_adaptive_avg_pool2d_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_half_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_sqrt_size",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_argmax_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_triplet_margin_with_distance_loss_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_broadcast_to_cpu_float32",  # known py38 fail
@@ -3363,7 +3298,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_cross_entropy_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_remainder_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_view_as_complex_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_pre_dispatch_linear",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_neg_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_reciprocal_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_topk_cpu_float32",  # known py38 fail
@@ -3372,7 +3306,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_transpose_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_cumprod_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nan_to_num_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_new_empty",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fmod_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_hardshrink_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_bilinear_cpu_float32",  # known py38 fail
@@ -3412,7 +3345,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_matmul_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_float_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_signbit_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorFake.test_proxy_tensor",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_max_pool1d_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_take_along_dim_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_NumpyViewCopyCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
@@ -3453,14 +3385,12 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_vander_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_mul_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nonzero_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_make_fx_overloads",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_svd_lowrank_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive___getitem___cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_logaddexp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_expm1_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_lt_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_min_reduction_no_dim_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_guard_upperbound_range_refinement_multivariate",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_norm_nuc_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_column_stack_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_index_fill_cpu_float32",  # known py38 fail
@@ -3484,7 +3414,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_cdist_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_addbmm_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_tensorinv_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorReal.test_pre_dispatch_mode_stack",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_scatter_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_polygamma_polygamma_n_3_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_polygamma_polygamma_n_0_cpu_float32",  # known py38 fail  # noqa: B950
@@ -3536,7 +3465,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_matrix_rank_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_local_response_norm_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_interpolate_nearest_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorReal.test_val_metadata_mutation",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_softplus_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_min_reduction_with_dim_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_max_unpool1d_cpu_float32",  # known py38 fail  # noqa: B950
@@ -3582,7 +3510,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_nll_loss_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_stack_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_rsub_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorFake.test_varargs",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_expand_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fft_rfft_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_ones_cpu_float32",  # known py38 fail
@@ -3628,7 +3555,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_dsplit_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_multi_dot_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_log_ndtr_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_symbolic_repeat_interleave",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_scatter_reduce_sum_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_avg_pool3d_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_pad_circular_cpu_float32",  # known py38 fail
@@ -3638,7 +3564,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_log2_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_digamma_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_sort_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorFake.test_decomposition_interpreter",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_instance_norm_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_lu_unpack_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_sin_cpu_float32",  # known py38 fail
@@ -3646,7 +3571,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_isposinf_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_std_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_signal_windows_hann_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_constant_blowup",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_expand_as_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_index_select_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_tanh_cpu_float32",  # known py38 fail
@@ -3698,7 +3622,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_bool_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_floor_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_chebyshev_polynomial_v_cpu_float32",  # known py38 fail  # noqa: B950
-    "TestGenericProxyTensorFake.test_resnet18_backward_trace",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_trunc_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_logical_or_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_addcdiv_cpu_float32",  # known py38 fail
@@ -3709,7 +3632,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_feature_alpha_dropout_without_train_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_amax_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_float_power_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_return_symint",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fmax_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_det_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_isneginf_cpu_float32",  # known py38 fail
@@ -3746,7 +3668,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_atleast_1d_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_rfft_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_max_reduction_with_dim_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_repeat_interleave_unbacked_output_size",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_trapz_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_log_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_huber_loss_cpu_float32",  # known py38 fail
@@ -3783,7 +3704,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_signal_windows_gaussian_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_solve_triangular_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_index_reduce_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_resnet18_backward_trace",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_max_reduction_no_dim_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_avg_pool1d_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_relu_cpu_float32",  # known py38 fail  # noqa: B950
@@ -3803,7 +3723,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_lu_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_std_unbiased_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_tril_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorReal.test_proxy_tensor_mode_with_decomp_table_preserves_proxy",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_var_unbiased_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_baddbmm_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_vecdot_cpu_float32",  # known py38 fail
@@ -3811,7 +3730,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_conv_transpose2d_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_float_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive___rsub___cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorFake.test_isolated_graphmodule",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_norm_fro_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_div_floor_rounding_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_block_diag_cpu_float32",  # known py38 fail
@@ -3881,8 +3799,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_trapezoid_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_as_strided_partial_views_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fft_hfftn_cpu_float32",  # known py38 fail
-    "TestFakeProxyTensor.test_free_fake",  # known py38 fail
-    "TestGenericProxyTensorReal.test_decomp_of_capture",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_diagonal_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_tile_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_NumpyCubeCustomOp_cpu_float32",  # known py38 fail
@@ -3966,7 +3882,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_multi_head_attention_forward_cpu_float32",  # known py38 fail  # noqa: B950
     "TestGenericProxyTensorSymbolic.test_amp_cache",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_baddbmm_cpu_float32",  # known py38 fail
-    "TestFakeProxyTensor.test_meta",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nan_to_num_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_sign_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_ifftn_cpu_float32",  # known py38 fail
@@ -3975,9 +3890,7 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_tensordot_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_logsumexp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_max_pool2d_with_indices_backward_cpu_float32",  # known py38 fail  # noqa: B950
-    "TestGenericProxyTensorSymbolic.test_scalar_device",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_amin_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_unbacked_unification",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_eigvalsh_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive___rsub___cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_diagonal_scatter_cpu_float32",  # known py38 fail
@@ -4011,7 +3924,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_conv_transpose1d_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_var_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_upsample_bilinear_cpu_float32",  # known py38 fail  # noqa: B950
-    "TestSymbolicTracing.test_invalidate_nonzero",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_clamp_max_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_squeeze_multiple_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_bilinear_cpu_float32",  # known py38 fail
@@ -4019,12 +3931,10 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cauchy_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_softmin_with_dtype_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_new_empty_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorFake.test_constant_proxy_tensor_mut",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_movedim_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_signal_windows_exponential_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_clone_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_jiterator_binary_return_by_ref_cpu_float32",  # known py38 fail  # noqa: B950
-    "TestGenericProxyTensorSymbolic.test_strides",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_acosh_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_inv_ex_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nextafter_cpu_float32",  # known py38 fail
@@ -4059,7 +3969,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_scatter_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_einsum_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_real_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorFake.test_decomp_of_capture",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_acosh_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_polar_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_dot_cpu_float32",  # known py38 fail
@@ -4075,12 +3984,10 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_positive_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_conv3d_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_exp_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorFake.test_constant_blowup",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_max_reduction_no_dim_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_NumpySortCustomOp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_median_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_tensor_split_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorFake.test_make_fx_reentrant_dispatch",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_interpolate_trilinear_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_norm_inf_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_trace_cpu_float32",  # known py38 fail
@@ -4092,14 +3999,11 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_item_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_scatter_reduce_mean_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_randn_like_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_constant_specialization",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_mm_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_median_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_isreal_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_mv_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_decomp_of_capture",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_ifftn_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorReal.test_pre_dispatch_linear",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_sum_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_matrix_norm_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_max_unpool3d_grad_cpu_float32",  # known py38 fail  # noqa: B950
@@ -4145,9 +4049,7 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nanmean_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_sort_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_irfftn_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_debug_interpreter",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_bessel_y0_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_tensor_constants",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_median_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_i1_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_addbmm_cpu_float32",  # known py38 fail
@@ -4189,15 +4091,12 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_max_unpool2d_grad_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_minimum_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_argmax_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_broadcast_shapes",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_hypot_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_max_pool1d_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_atan_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_conv1d_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_lu_factor_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_new_ones_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorFake.test_pre_dispatch_mode_stack",  # known py38 fail
-    "TestGenericProxyTensorFake.test_pickle_issue89626",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_pixel_shuffle_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_adaptive_max_pool1d_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_count_nonzero_cpu_float32",  # known py38 fail
@@ -4226,7 +4125,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_native_dropout_backward_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_solve_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_frac_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorReal.test_pre_dispatch_no_grad",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_erfc_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_ndtri_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_interpolate_bilinear_cpu_float32",  # known py38 fail  # noqa: B950
@@ -4234,7 +4132,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_diagonal_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_float_power_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_interpolate_area_cpu_float32",  # known py38 fail  # noqa: B950
-    "TestGenericProxyTensorFake.test_mode_tracing_factory_function",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_acosh_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_logit_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_new_zeros_cpu_float32",  # known py38 fail
@@ -4254,7 +4151,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_square_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_erfinv_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_cauchy_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_sym_storage_offset",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_gradient_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_i0_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_chebyshev_polynomial_w_cpu_float32",  # known py38 fail  # noqa: B950
@@ -4264,7 +4160,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_logical_xor_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_reciprocal_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_i1e_cpu_float32",  # known py38 fail
-    "TestFakeProxyTensor.test_fused_adam",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_kthvalue_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_adaptive_avg_pool1d_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_pow_cpu_float32",  # known py38 fail
@@ -4281,7 +4176,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_histogramdd_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_cosh_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_conv1d_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_arange_unbacked_output_size",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_signal_windows_gaussian_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_hardtanh_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_lu_cpu_float32",  # known py38 fail
@@ -4309,7 +4203,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_prelu_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_poisson_nll_loss_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_eigvals_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorFake.test_make_fx_overloads",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_margin_ranking_loss_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nan_to_num_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_true_divide_cpu_float32",  # known py38 fail
@@ -4337,7 +4230,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_logdet_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fliplr_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_maximum_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorFake.test_allclose",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_unfold_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_round_decimals_0_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_atan2_cpu_float32",  # known py38 fail
@@ -4352,7 +4244,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_batch_norm_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_layer_norm_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_unfold_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_size_with_tensor",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_interpolate_trilinear_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_grid_sample_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_norm_nuc_cpu_float32",  # known py38 fail
@@ -4377,7 +4268,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_cross_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_transpose_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_mH_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorFake.test_make_fx_model_fwd_bwd",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_view_copy_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_H_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_split_cpu_float32",  # known py38 fail
@@ -4393,7 +4283,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_prod_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_vecdot_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_diagonal_copy_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorFake.test_proxy_tensor_mode_with_decomp_table_preserves_proxy",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_shifted_chebyshev_polynomial_t_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_ctc_loss_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_sin_cpu_float32",  # known py38 fail
@@ -4403,7 +4292,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_erfinv_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_triangular_solve_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_qr_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_int_input",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_amax_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fft_rfftn_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_NumpyCatCustomOp_cpu_float32",  # known py38 fail
@@ -4518,8 +4406,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_heaviside_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_atan_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_lstsq_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_partial_decomp",  # known py38 fail
-    "TestSymbolicTracing.test_rmethod",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_multilabel_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_clamp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_max_pool2d_cpu_float32",  # known py38 fail
@@ -4573,7 +4459,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nextafter_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_chebyshev_polynomial_w_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_l1_loss_cpu_float32",  # known py38 fail  # noqa: B950
-    "TestGenericProxyTensorReal.test_tensor_constants",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_ifft_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_amin_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_hardsigmoid_cpu_float32",  # known py38 fail  # noqa: B950
@@ -4596,7 +4481,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_softmax_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_frexp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_short_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_make_fx_model_fwd_bwd",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_NumpyNMSCustomOp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_NumpySplitCopyWithIntCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_embedding_cpu_float32",  # known py38 fail
@@ -4633,7 +4517,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_cfloat_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fft_irfftn_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_add_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_mega_guard",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_fractional_max_pool3d_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_div_floor_rounding_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_trapezoid_cpu_float32",  # known py38 fail
@@ -4693,7 +4576,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_narrow_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_feature_alpha_dropout_without_train_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_soft_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
-    "TestGenericProxyTensorFake.test_empty_like_doesnt_burn_in_defaults",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_slice_scatter_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_MapControlflowOp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_shifted_chebyshev_polynomial_v_cpu_float32",  # known py38 fail  # noqa: B950
@@ -4703,7 +4585,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_neg_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_scatter_reduce_amin_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_stack_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_guard_lowerbound_range_refinement",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_NumpyCubeCustomOp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_adaptive_max_pool3d_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace___rsub___cpu_float32",  # known py38 fail
@@ -4725,7 +4606,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_T_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_logsumexp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_rfft_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_neg_shape",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_max_pool3d_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_index_add_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_aminmax_cpu_float32",  # known py38 fail
@@ -4775,7 +4655,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_logaddexp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_bmm_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_elu_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorReal.test_trace_subclasses",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_eq_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_smooth_l1_loss_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fliplr_cpu_float32",  # known py38 fail
@@ -4804,7 +4683,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_instance_norm_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_to_sparse_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_zero__cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_view_divisibility_unbacked",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_embedding_bag_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_roll_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_kl_div_cpu_float32",  # known py38 fail  # noqa: B950
@@ -4816,7 +4694,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_jiterator_unary_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_inv_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_celu_cpu_float32",  # known py38 fail  # noqa: B950
-    "TestSymbolicTracing.test_item",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_softsign_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_svd_lowrank_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_scatter_add_cpu_float32",  # known py38 fail
@@ -4844,12 +4721,9 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fft_ihfft2_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_exponential_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_sgn_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_split_unbacked_sizes",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_normal_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_conv1d_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_rot90_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_trace_subclasses",  # known py38 fail
-    "TestSymbolicTracing.test_expand",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_stft_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_normalize_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_MapControlflowOp_cpu_float32",  # known py38 fail
@@ -4879,7 +4753,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_gather_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_adaptive_avg_pool3d_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_sub_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_unbacked_unify_guard_transitivity",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_normal_number_mean_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_corrcoef_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fmin_cpu_float32",  # known py38 fail
@@ -4936,12 +4809,10 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_igamma_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_round_decimals_0_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_clamp_max_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorFake.test_val_metadata_mutation",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_normalize_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_log_softmax_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_hermite_polynomial_he_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_polygamma_polygamma_n_2_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_make_fx_model_double_param",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_signal_windows_kaiser_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linspace_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_solve_ex_cpu_float32",  # known py38 fail
@@ -5013,7 +4884,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_log_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_logical_not_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_prod_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorFake.test_tensor_constants",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_ldexp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_uniform_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_norm_cpu_float32",  # known py38 fail
@@ -5074,7 +4944,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_lu_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_floor_divide_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_eig_cpu_float32",  # known py38 fail
-    "TestRealProxyTensor.test_error_on_data_dependent_ops",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_lu_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_sub_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_broadcast_tensors_cpu_float32",  # known py38 fail  # noqa: B950
@@ -5097,7 +4966,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_dsplit_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_put_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_signal_windows_cosine_cpu_float32",  # known py38 fail  # noqa: B950
-    "TestGenericProxyTensorSymbolic.test_proxy_tensor",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_ldl_factor_ex_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_matrix_exp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_pow_cpu_float32",  # known py38 fail
@@ -5105,7 +4973,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_lu_solve_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_atleast_3d_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cumsum_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_constant_random",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_irfft2_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_matrix_exp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_mm_cpu_float32",  # known py38 fail
@@ -5118,7 +4985,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_isnan_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_unique_consecutive_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_cholesky_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorReal.test_scalar_device",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_index_select_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_chebyshev_polynomial_u_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_ceil_cpu_float32",  # known py38 fail
@@ -5135,7 +5001,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_isin_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_cholesky_solve_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_flip_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_resize_from_zero",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_sparse_mm_reduce_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_take_along_dim_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_adaptive_max_pool3d_cpu_float32",  # known py38 fail  # noqa: B950
@@ -5156,14 +5021,12 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_spherical_bessel_j0_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_conv_transpose1d_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_complex_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_make_fx_with_custom_tracer_preserving_nn_module_stack",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_scatter_reduce_prod_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_matrix_exp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_NumpyCatCustomOp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nonzero_static_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_min_reduction_no_dim_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_max_pool2d_with_indices_backward_cpu_float32",  # known py38 fail  # noqa: B950
-    "TestGenericProxyTensorFake.test_make_fx_model_fwd_bwd_wgtupdate",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_split_with_sizes_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_where_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_repeat_interleave_cpu_float32",  # known py38 fail
@@ -5207,8 +5070,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_diagonal_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_feature_alpha_dropout_without_train_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_dstack_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_make_fx_model_fwd_bwd_wgtupdate",  # known py38 fail
-    "TestFakeProxyTensor.test_issue82547",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_select_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_hfft2_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_shifted_chebyshev_polynomial_w_cpu_float32",  # known py38 fail  # noqa: B950
@@ -5250,7 +5111,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_lerp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_tanhshrink_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_view_copy_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorFake.test_pre_dispatch_no_grad",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_gelu_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_matrix_power_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_hermite_polynomial_h_cpu_float32",  # known py38 fail  # noqa: B950
@@ -5271,10 +5131,8 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_xlog1py_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_flatten_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_logical_and_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_nonidentity_transitive_guards",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_std_mean_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_uniform_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_guard_upperbound_range_refinement",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_unfold_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_std_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_logical_or_cpu_float32",  # known py38 fail
@@ -5291,7 +5149,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_max_unpool3d_grad_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_angle_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_bmm_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorFake.test_scalar_device",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_ihfft2_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_minimum_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_empty_strided_cpu_float32",  # known py38 fail
@@ -5303,7 +5160,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_svd_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_pad_constant_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_hardsigmoid_cpu_float32",  # known py38 fail  # noqa: B950
-    "TestGenericProxyTensorSymbolic.test_constant_proxy_tensor_mut",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_addmm_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_igammac_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_index_fill_cpu_float32",  # known py38 fail
@@ -5316,8 +5172,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_long_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_logical_not_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_randint_like_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_make_fx_reentrant_dispatch",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_decomposition_interpreter",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_argmax_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_deg2rad_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_div_no_rounding_mode_cpu_float32",  # known py38 fail
@@ -5418,7 +5272,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_item_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_char_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_as_strided_partial_views_cpu_float32",  # known py38 fail  # noqa: B950
-    "TestGenericProxyTensorFake.test_partial_decomp",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_softmin_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_frexp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_logaddexp2_cpu_float32",  # known py38 fail
@@ -5445,7 +5298,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_conv_transpose2d_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_cummin_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_softsign_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorReal.test_partial_decomp",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_eigh_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_atanh_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_slogdet_cpu_float32",  # known py38 fail
@@ -5461,9 +5313,7 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_inv_ex_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_broadcast_to_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_diagonal_scatter_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorReal.test_pre_dispatch_functionalization_view_op",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_interpolate_area_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_unbacked_slice",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_lstsq_grad_oriented_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_sum_to_size_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive___rmod___cpu_float32",  # known py38 fail
@@ -5495,7 +5345,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_split_with_sizes_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_reciprocal_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_as_strided_scatter_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_metadata",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_interpolate_bilinear_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_logsumexp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_kron_cpu_float32",  # known py38 fail
@@ -5509,11 +5358,9 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_max_reduction_with_dim_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_addmm_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_cummax_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_varargs",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_polygamma_polygamma_n_2_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_conv2d_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_mvlgamma_mvlgamma_p_3_cpu_float32",  # known py38 fail  # noqa: B950
-    "TestGenericProxyTensorFake.test_constant_random",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_atleast_1d_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_bucketize_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_cholesky_ex_cpu_float32",  # known py38 fail  # noqa: B950
@@ -5528,14 +5375,12 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_jiterator_unary_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_H_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_t_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorReal.test_make_fx_reentrant_dispatch",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_i0e_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_eigh_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_narrow_copy_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_log_softmax_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_mse_loss_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_var_unbiased_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_pre_dispatch_functionalization",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_einsum_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_meshgrid_variadic_tensors_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_zeros_cpu_float32",  # known py38 fail
@@ -5554,7 +5399,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_gradient_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_softmin_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_chebyshev_polynomial_w_cpu_float32",  # known py38 fail  # noqa: B950
-    "TestGenericProxyTensorSymbolic.test_make_fx_simple",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cholesky_inverse_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_det_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_var_cpu_float32",  # known py38 fail
@@ -5572,7 +5416,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_modified_bessel_k1_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_lerp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_scatter_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_adv_index_batch",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_deg2rad_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_lu_factor_ex_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_cholesky_solve_cpu_float32",  # known py38 fail
@@ -5628,7 +5471,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_asin_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_adaptive_max_pool2d_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_new_ones_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorFake.test_pre_dispatch_linear",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_erfcx_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_squeeze_multiple_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_cummax_cpu_float32",  # known py38 fail
@@ -5651,7 +5493,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nanquantile_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_sinh_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_normal_number_mean_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_dynamic_pointwise_scalar",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_lu_solve_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_dot_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_any_cpu_float32",  # known py38 fail
@@ -5781,7 +5622,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_sinc_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_multilabel_soft_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_multilabel_soft_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
-    "TestFakeProxyTensor.test_alias",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_rad2deg_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_signal_windows_kaiser_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_logsigmoid_cpu_float32",  # known py38 fail
@@ -5808,7 +5648,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_normalize_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_prod_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_upsample_nearest_cpu_float32",  # known py38 fail  # noqa: B950
-    "TestSymbolicTracing.test_unary",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_empty_like_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_addcmul_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_atleast_3d_cpu_float32",  # known py38 fail
@@ -5817,7 +5656,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_arange_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_log_ndtr_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_full_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_tensor_symfloat",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_narrow_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_take_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fft_rfft_cpu_float32",  # known py38 fail
@@ -5857,7 +5695,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_cov_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_adaptive_max_pool3d_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_svd_lowrank_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorFake.test_make_fx_model_double_param",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_var_mean_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_pow_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_logspace_cpu_float32",  # known py38 fail
@@ -5894,13 +5731,11 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_dist_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_gather_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_pairwise_distance_cpu_float32",  # known py38 fail  # noqa: B950
-    "TestSymbolicTracing.test_symint_to_tensor",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive__segment_reduce_offsets_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_pinverse_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_shifted_chebyshev_polynomial_t_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_div_trunc_rounding_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_linear_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorFake.test_constant_unbind",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_addmm_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_pad_reflect_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_triangular_solve_cpu_float32",  # known py38 fail
@@ -5918,7 +5753,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_empty_strided_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_unsafe_chunk_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_hardtanh_cpu_float32",  # known py38 fail  # noqa: B950
-    "TestGenericProxyTensorFake.test_make_fx_simple",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_NumpyNMSCustomOp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_searchsorted_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_shifted_chebyshev_polynomial_v_cpu_float32",  # known py38 fail  # noqa: B950
@@ -5935,10 +5769,8 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_full_like_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_slice_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive___rmul___cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_setitem_symint",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fft_irfft2_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_argmin_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_pr_86917",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_zeta_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_chunk_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_logaddexp_cpu_float32",  # known py38 fail
@@ -5989,7 +5821,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_spherical_bessel_j0_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_slice_scatter_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_i0e_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_elementwise_meta_with_sym_numbers",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_scalar_tensor_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_sgn_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_mH_cpu_float32",  # known py38 fail
@@ -6058,7 +5889,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_select_scatter_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_std_mean_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_cosine_similarity_cpu_float32",  # known py38 fail  # noqa: B950
-    "TestGenericProxyTensorReal.test_resnet18_backward_trace",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_var_mean_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_norm_nuc_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_scatter_cpu_float32",  # known py38 fail
@@ -6091,14 +5921,12 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_select_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_sign_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_equal_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorFake.test_strides",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_flipud_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_mvlgamma_mvlgamma_p_5_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_signal_windows_bartlett_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_tensorsolve_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_NumpyMulCustomOp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_scaled_modified_bessel_k1_cpu_float32",  # known py38 fail  # noqa: B950
-    "TestGenericProxyTensorSymbolic.test_val_metadata_mutation",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_tensorinv_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_native_batch_norm_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_narrow_cpu_float32",  # known py38 fail
@@ -6108,7 +5936,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_signal_windows_cosine_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_softplus_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nonzero_static_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_multiply_shape",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_ldl_solve_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_fftn_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_prelu_cpu_float32",  # known py38 fail
@@ -6133,7 +5960,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fft_ifftshift_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cov_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_triplet_margin_with_distance_loss_cpu_float32",  # known py38 fail  # noqa: B950
-    "TestSymbolicTracing.test_item_to_constructor",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_feature_alpha_dropout_with_train_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_batch_norm_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_cat_cpu_float32",  # known py38 fail
@@ -6145,8 +5971,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_std_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fft_ifft2_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_cumprod_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_pickle_issue89626",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_proxy_tensor_mode_with_decomp_table_preserves_proxy",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_jiterator_4inputs_with_extra_args_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_matrix_rank_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_multilabel_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
@@ -6175,10 +5999,7 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_isreal_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_shifted_chebyshev_polynomial_v_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_flip_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_allclose",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_pre_dispatch_no_grad",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_unsafe_chunk_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_metadata_fresh",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_cholesky_inverse_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_cond_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_sum_cpu_float32",  # known py38 fail
@@ -6191,7 +6012,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_ones_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_bmm_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_hardswish_cpu_float32",  # known py38 fail  # noqa: B950
-    "TestGenericProxyTensorReal.test_proxy_tensor",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_householder_product_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_tanh_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_bessel_j0_cpu_float32",  # known py38 fail
@@ -6210,7 +6030,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_log_normal_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_argmin_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_select_scatter_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_constant_unbind",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_trace_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_dist_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_as_strided_scatter_cpu_float32",  # known py38 fail
@@ -6221,7 +6040,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_round_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_select_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_mean_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorFake.test_trace_subclasses",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fmod_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fill_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_ravel_cpu_float32",  # known py38 fail
@@ -6302,7 +6120,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_argmin_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_trapezoid_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_exp2_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_binary_broadcast",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_maximum_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_modified_bessel_k0_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_addbmm_cpu_float32",  # known py38 fail
@@ -6340,13 +6157,11 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_allclose_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_atan_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_floor_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_pre_dispatch_functionalization_view_op",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_split_list_args_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fmod_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cos_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_logaddexp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_maximum_cpu_float32",  # known py38 fail
-    "TestFakeProxyTensor.test_use_fake_and_tensor",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_ldexp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_rot90_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_native_batch_norm_cpu_float32",  # known py38 fail  # noqa: B950
@@ -6393,14 +6208,12 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_to_sparse_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_ceil_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_roll_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_unbacked_unify_guard",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_rad2deg_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_flatten_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive___rdiv___cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_solve_ex_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_isinf_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_rfftn_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_non_symint_size_spec",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_isfinite_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_cross_entropy_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_amax_cpu_float32",  # known py38 fail
@@ -6427,7 +6240,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_reshape_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_reshape_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_permute_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorReal.test_strides",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_asinh_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_max_reduction_no_dim_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cumprod_cpu_float32",  # known py38 fail
@@ -6435,7 +6247,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_lstsq_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_resize__cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_mean_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_isolated_graphmodule",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_NumpyViewCopyCustomOp_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_scatter_reduce_mean_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_round_decimals_neg_3_cpu_float32",  # known py38 fail
@@ -6477,7 +6288,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_softmax_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_lu_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_vander_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_guard_lowerbound_range_refinement_multivariate",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_svd_lowrank_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_pixel_shuffle_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_qr_cpu_float32",  # known py38 fail
@@ -6486,10 +6296,8 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_expand_as_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_igammac_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_allclose_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorFake.test_pre_dispatch_functionalization",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_mvlgamma_mvlgamma_p_1_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_lu_solve_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorReal.test_pre_dispatch_functionalization",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_shifted_chebyshev_polynomial_t_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_positive_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_glu_cpu_float32",  # known py38 fail  # noqa: B950
@@ -6545,10 +6353,7 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fft_rfft2_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_vsplit_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_unfold_copy_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_reflect_r_over_x",  # known py38 fail
-    "TestGenericProxyTensorFake.test_pre_dispatch_functionalization_view_op",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_group_norm_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_unbacked_batch_resnet",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_softmin_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_ge_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_diag_embed_cpu_float32",  # known py38 fail
@@ -6569,7 +6374,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_selu_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_to_sparse_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_cdouble_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_cat",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_bmm_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_ifftshift_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_clamp_cpu_float32",  # known py38 fail
@@ -6661,7 +6465,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_add_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_take_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_div_floor_rounding_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_boolean_index",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_tan_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_signal_windows_general_hamming_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_MapControlflowOp_cpu_float32",  # known py38 fail
@@ -6674,7 +6477,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_prod_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_ndtr_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_pow_cpu_float32",  # known py38 fail
-    "TestGenericProxyTensorSymbolic.test_mode_tracing_factory_function",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_chunk_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_index_copy_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_NumpySplitCopyCustomOp_cpu_float32",  # known py38 fail
@@ -6689,7 +6491,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_multi_head_attention_forward_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_sinh_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_matmul_cpu_float32",  # known py38 fail
-    "TestSymbolicTracing.test_repeat_interleave",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_i1_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_normalize_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_addmm_cpu_float32",  # known py38 fail
@@ -6711,13 +6512,11 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_modified_bessel_k1_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_elu_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cat_cpu_float32",  # known py38 fail
-    "TestRefsCPU.test_infinite_loop_from_py_dispatcher_cpu",  # known py38 fail
     "TestBasicsCPU.test_invalid_sparse_csr_values_cpu",  # known py38 fail
     "TestBasicsCPU.test_invalid_sparse_coo_values_cpu",  # known py38 fail
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_uint8",  # known py38 fail
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_int64",  # known py38 fail
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_int16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_pow_scalar_overloads_mem_overlap_cpu_float64",  # known py38 fail
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_float64",  # known py38 fail
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int32_int8",  # known py38 fail
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_int8",  # known py38 fail
@@ -6728,7 +6527,6 @@ dynamo_skips = {
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_int8",  # known py38 fail
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_float16",  # known py38 fail
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int32_int16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_sub_typing_cpu",  # known py38 fail
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_float32",  # known py38 fail
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_float32",  # known py38 fail
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_int8",  # known py38 fail
@@ -6808,96 +6606,29 @@ dynamo_skips = {
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int16",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int8",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_uint8",  # known py38 fail
-    "TestProfiler.test_source_multithreaded_basic_work_in_main_thread_False",
-    "TestProfiler.test_source_multithreaded_complex_work_in_main_thread_False",
-    "TestProfiler.test_source_multithreaded_open_in_scope_work_in_main_thread_False",
-    "TestProfiler.test_source_multithreaded_multiple_preexisting_work_in_main_thread_False",
-    "TestProfiler.test_source_multithreaded_close_in_scope_work_in_main_thread_False",
-    "TestProfiler.test_profiler_disable_fwd_bwd_link",
     "TestProfiler.test_profiler_metadata",
     "TestSerializeCustomClass.test_custom_class",
-    "TestTensorExprPyBind.test_kernel_with_transpose",
     "TestTensorExprPyBind.test_kernel_with_custom_lowering",
-    "TestTensorExprPyBind.test_kernel_with_expand",
-    "TestTensorExprPyBind.test_kernel_with_permute",
-    "TestTensorExprPyBind.test_kernel_with_scalar_inputs",
-    "TestTensorExprPyBind.test_kernel_with_t",
-    "TestTensorExprPyBind.test_kernel_with_tensor_inputs",
     "TestFX.test_assert",  # known py38 fail
     "TestFX.test_annotations_empty_tuple",  # known py38 fail
-    "TestDataLoaderPersistentWorkers.test_early_exit",  # known py38 fail
-    "TestDataLoader.test_fd_limit_exceeded",  # known py38 fail
-    "TestDataLoaderPersistentWorkers.test_fd_limit_exceeded",  # known py38 fail
     "TestLazyDynamicOps.test_nonzero_dynamic",  # known py311 fail
     "TestLazyTensor.test_view_mark_step_preserved",  # known py311 fail
     "TestRepackage.test_repackage_import_indirectly_via_parent_module",  # known py311 fail
     "TestPackageScript.test_load_shared_tensors_repackaged",  # known py311 fail
     "TestFXExperimental.test_optimize_for_inference_cpu_torchvision",
-    "TestXNNPACKOps.test_linear_1d_input",  # flaky
-    "TestXNNPACKOps.test_conv2d",  # flaky
-    "TestXNNPACKOps.test_conv2d_transpose",  # flaky
     "TestProfilerTree.test_profiler_experimental_tree",  # known py311 fail
     "TestExperiment.test_mark_strict_with_container_type",  # known py311 fail
-    "TestExprHandlePyBind.test_unary_ops",  # known py38 fail
-    "TestTorch.test_bmm_multithreaded",
-    "TestTorch.test_terminate_handler_on_crash",  # known py38 fail
-    "TestTorch.test_storage_casts",  # known py311 fail
     "TestAutograd.test_hook_closure_cycle_use_custom_function_True_use_tensor_hook_True",  # known py311 fail
-    "TestQuantizeFxOps.test_fixed_qparams_ops",  # known py38 fail
-    "TestQuantizeFxOps.test_int8_input_no_unnecessary_fq",  # known py38 fail
-    "TestQuantizeFxOps.test_general_value_ops",  # known py38 fail
-    "TestQuantizeFxOps.test_fixed_qparams_ops_wrong_qconfig",  # known py38 fail
-    "TestQuantizeFxOps.test_narrow",  # known py38 fail
-    "TestQuantizeFxOps.test_float_functional",  # known py38 fail
-    "TestQuantizeFxOps.test_copy_node_fp32_input",  # known py38 fail
-    "TestQuantizeFxOps.test_ave_pool_with_custom_cfg",  # known py38 fail
-    "TestQuantizeFxOps.test_pixel_unshuffle",  # known py38 fail
-    "TestQuantizeFxOps.test_quantized_add_qat",  # known py38 fail
-    "TestQuantizeFxOps.test_ref_pattern_multi_use",  # known py38 fail
-    "TestQuantizeFxOps.test_pixel_unshuffle_module",  # known py38 fail
-    "TestQuantizeFxOps.test_pixel_shuffle",  # known py38 fail
-    "TestQuantizeFxOps.test_boolean_tensor",  # known py38 fail
-    "TestQuantizeFxOps.test_bmm_int_reference",  # known py38 fail
-    "TestQuantizeFxOps.test_rnn_cell",  # known py38 fail
-    "TestQuantizeFxOps.test_pixel_shuffle_module",  # known py38 fail
-    "TestQuantizeFxOps.test_fixed_qparams_ops_fp16",  # known py38 fail
-    "TestQuantizeFxOps.test_quantized_mul_qat",  # known py38 fail
-    "TestQuantizeFxOps.test_general_shape_ops",  # known py38 fail
-    "TestQuantizeFxOps.test_add_relu_multiple_uses_of_relu",  # known py38 fail
-    "TestQuantizeFxOps.test_rnn",  # known py38 fail
-    "TestQuantizeFxOps.test_linear_dynamic_fp16",  # known py38 fail
-    "TestQuantizeFxOps.test_linear_static_fp16",  # known py38 fail
-    "TestAutogradFallback.test_no_grad_mode_warn",  # test_autograd_fallback.py
-    "TestAutogradFallback.test_no_autograd_kernel_inplace_mode_warn",  # test_autograd_fallback.py
-    "TestAutogradFallback.test_no_autograd_kernel_mode_warn",  # test_autograd_fallback.py
-    "TestAutogradFallback.test_undefined_grads_mode_nothing",  # test_autograd_fallback.py
-    "TestAutogradFallback.test_post_autograd_returns_mix_of_requires_grad_tensors_mode_warn",  # test_autograd_fallback.py
-    "TestAutogradFallback.test_no_autograd_kernel_inplace_mode_nothing",  # test_autograd_fallback.py
-    "TestAutogradFallback.test_undefined_inputs_outputs_mode_nothing",  # test_autograd_fallback.py
-    "TestAutogradFallback.test_inplace_on_tensor_that_does_not_require_grad_mode_nothing",  # test_autograd_fallback.py
-    "TestAutogradFallback.test_post_autograd_returns_mix_of_requires_grad_tensors_mode_nothing",  # test_autograd_fallback.py
-    "TestAutogradFallback.test_supports_tensor_lists_mode_warn",  # test_autograd_fallback.py
-    "TestAutogradFallback.test_post_autograd_returns_leaf_mode_nothing",  # test_autograd_fallback.py
-    "TestAutogradFallback.test_inplace_on_tensor_that_does_not_require_grad_mode_warn",  # test_autograd_fallback.py
-    "TestAutogradFallback.test_no_grad_mode_nothing",  # test_autograd_fallback.py
-    "TestAutogradFallback.test_post_autograd_returns_leaf_mode_warn",  # test_autograd_fallback.py
-    "TestAutogradFallback.test_undefined_grads_mode_warn",  # test_autograd_fallback.py
-    "TestAutogradFallback.test_no_autograd_kernel_mode_nothing",  # test_autograd_fallback.py
-    "TestAutogradFallback.test_undefined_inputs_outputs_mode_warn",  # test_autograd_fallback.py
-    "TestAutogradFallback.test_supports_tensor_lists_mode_nothing",  # test_autograd_fallback.py
     "TestReductionsCPU.test_logcumsumexp_complex_cpu_complex128",  # test_reductions.py
     "TestReductionsCPU.test_logcumsumexp_complex_cpu_complex64",  # test_reductions.py
-    "TestCustomOp.test_impl_on_existing_op_with_cpu_registration_key_CompositeExplicitAutograd",  # known py38 fail
     "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpyViewCopyCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
     "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpyCatCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
-    "TestPythonDispatcher.test_lstsq",  # known py38 fail
     "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_split_cpu_float32",  # known py38 fail
     "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_split_list_args_cpu_float32",  # known py38 fail
     "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpyNonzeroCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
     "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_mul_cpu_float32",  # known py38 fail
     "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpyMulCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
     "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpySortCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
-    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_out_op_cpu",  # known py38 fail
     "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpyTakeCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
     "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpyCubeCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
     "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_cat_cpu_float32",  # known py38 fail
@@ -6912,353 +6643,98 @@ dynamo_skips = {
     "LoggingTests.test_trace_call_graph_break",  # known py311 fail
     "LoggingTests.test_trace_call_inline_call",  # known py311 fail
     "TestPythonBuiltinOP.test_stepped_tuple_slicing",  # known py38 fail
-    "TestPythonBuiltinOP.test_advancedindex",  # known py38 fail
-    "TestCustomOperators.test_dynamic_op_registry",  # known py38 fail
-    "TestComplex.test_complex_constants_and_ops",  # known py38 fail
-    "TestPythonBuiltinOP.test_index",  # known py38 fail
-    "TestHash.test_hash_tuple_nested_unhashable_type",  # test_jit
-    "TestPeephole.test_peephole_dict_getitem_no_optimization_missing_key",  # test_jit
-    "TestMisc.test_joined_str",  # test_jit
     "TestNnapiBackend.test_to",  # test_jit
-    "TestIsinstance.test_dict_tensor",  # test_jit
-    "TestPythonBuiltinOP.test_adv_indexing_list",  # test_jit
-    "TestUnion.test_union_redundant_arguments_are_skipped",  # test_jit
-    "TestPythonBuiltinOP.test_inf",  # test_jit
-    "TestSymbolicShapeAnalysis.test_register_function_error_checking",  # test_jit
-    "TestPythonBuiltinOP.test_pow",  # test_jit
-    "TestTyping.test_tuple_io",  # test_jit
-    "TestPeephole.test_peephole_dict_len_no_optimization_unsupported_type",  # test_jit
-    "TestRemoveMutation.test_lists_append",  # test_jit
-    "TestSlice.test_slice_tensor",  # test_jit
-    "TestMisc.test_str_refine_any",  # test_jit
     "TestNnapiBackend.test_prelu",  # test_jit
     "TestFreezing.test_freeze_module_with_fork2",  # test_jit
-    "TestPeephole.test_peephole_dict_len_no_optimization_overlapping_keys",  # test_jit
-    "TestPeephole.test_peephole_with_non_output_writes",  # test_jit
-    "TestCustomOperators.test_script_graph_contains_custom_op",  # test_jit
     "TestTorchbind.test_torchbind_getattr",  # test_jit
     "TestRecursiveScript.test_inner_traced_module",  # test_jit
-    "TestAliasAnalysis.test_recursive_calls",  # test_jit
     "TestNnapiBackend.test_pointwise_unary",  # test_jit
-    "TestDeviceAnalysis.test_device_apply",  # test_jit
-    "TestList.test_mutable_list_function_inline",  # test_jit
-    "TestList.test_comprehensions_two_comps",  # test_jit
     "TestNnapiBackend.test_seblock_mul",  # test_jit
     "TestTorchbind.test_torchbind_return_instance",  # test_jit
-    "TestRemoveMutation.test_if_output",  # test_jit
     "TestModels.test_time_sequence_prediction",  # test_jit
-    "TestRemoveMutation.test_list_indexing_removal",  # test_jit
-    "TestTypesAndAnnotation.test_types_as_values",  # test_jit
-    "TestAwait.test_await_multiout_save",  # test_jit
-    "TestHash.test_hash_device",  # test_jit
-    "TestPeephole.test_peephole_dict_len",  # test_jit
-    "TestSlice.test_slice_dynamic_index",  # test_jit
-    "TestGenerator.test_default_generator",  # test_jit
     "TestMisc.test_parse_ir_single_element_tensor_negative",  # test_jit
-    "TestTyping.test_list_unification",  # test_jit
-    "TestList.test_del",  # test_jit
-    "TestAwait.test_script",  # test_jit
     "TestNnapiBackend.test_avg_pool2d",  # test_jit
-    "TestIsinstance.test_list_tensor_type_true",  # test_jit
-    "TestDtypeAnalysis.test_conv_no_mixed_args",  # test_jit
-    "TestBackends.test_errors",  # test_jit
     "TestMisc.test_parse_ir_annotate",  # test_jit
     "TestTorchbind.test_torchbind_pickle_serialization",  # test_jit
-    "TestList.test_copy_list_immutable",  # test_jit
-    "TestAsync.test_async_grad_guard_with_grad",  # test_jit
-    "TestUnion.test_union_branching_does_not_autoinfer_undeclared_union",  # test_jit
     "TestNnapiBackend.test_slice",  # test_jit
-    "TestWarn.test_warn",  # test_jit
-    "TestRemoveMutation.test_special_mapped_op",  # test_jit
-    "TestWarn.test_warn_multiple_calls_same_func_diff_stack",  # test_jit
     "TestSymbolicShapeAnalysis.test_convolution_backward",  # test_jit
-    "TestUnion.test_union_type_refinement_statically_false",  # test_jit
     "TestTorchbind.test_default_args",  # test_jit
-    "TestUpgraders.test_aten_full_other_variants",  # test_jit
-    "TestScriptDict.test_reference_semantics",  # test_jit
-    "TestUnion.test_union_does_not_replace_existing_annotated_type_union",  # test_jit
-    "TestTyping.test_dict_invalid_annotations",  # test_jit
-    "TestWith.test_with_no_grad",  # test_jit
-    "TestUnion.test_union_branching_does_not_widen_existing_inferred_type",  # test_jit
     "TestTorchbind.test_torchbind_return_tuple",  # test_jit
     "TestTorchbind.test_staticmethod",  # test_jit
-    "TestUnion.test_union_variable_can_be_reassigned",  # test_jit
     "TestTorchbind.test_torchbind_def_property_readwrite",  # test_jit
     "TestTorchbind.test_torchbind_attr_exception",  # test_jit
-    "TestFunctionalToInplaceActivation.test_no_functional_to_inplace",  # test_jit
     "TestTorchbind.test_torchbind_class_attr_recursive",  # test_jit
-    "TestBuiltins.test_del",  # test_jit
     "TestNnapiBackend.test_mean",  # test_jit
     "TestNnapiBackend.test_reshape",  # test_jit
     "TestFrozenOptimizations.test_collapse_adjacent_conversions",  # test_jit
     "TestTorchbind.test_torchbind_python_deepcopy",  # test_jit
-    "TestPythonBindings.test_aliasdb",  # test_jit
     "TestParametrization.test_scriptable",  # test_jit
     "TestMKLDNNReinplacing.test_always_alive_values",  # test_jit
-    "TestAsync.test_async_script_multi_waits",  # test_jit
-    "TestTyping.test_dict_type_refinement_annotation_value_mismatch",  # test_jit
-    "TestScriptList.test_reference_semantics",  # test_jit
-    "TestPeephole.test_peephole_arith",  # test_jit
-    "TestPythonBuiltinOP.test_gather",  # test_jit
     "TestNnapiBackend.test_upsample_nearest2d",  # test_jit
-    "TestList.test_copy_list_mutable",  # test_jit
-    "TestWarn.test_warn_only_once",  # test_jit
-    "TestPythonBuiltinOP.test_str_to_float",  # test_jit
-    "TestIsinstance.test_optional",  # test_jit
-    "TestCustomOperators.test_calling_scripted_custom_op",  # test_jit
-    "TestUnion.test_union_T_None_is_equivalent_to_optional_T",  # test_jit
-    "TestSlice.test_slice_tensor_multidim_with_dots",  # test_jit
     "TestNnapiBackend.test_multi_output",  # test_jit
-    "TestSymbolicShapeAnalysis.test_squeeze_dims",  # test_jit
     "TestPeephole.test_peephole_int",  # test_jit
-    "TestUnion.test_unions_of_a_single_argument_vanish",  # test_jit
     "TestTorchbind.test_profiler_custom_op",  # test_jit
     "TestTorchbind.test_torchbind_class_attribute",  # test_jit
-    "TestUnion.test_check_union_annotation",  # test_jit
-    "TestTypesAndAnnotation.test_optional_no_element_type_annotation",  # test_jit
     "TestList.test_comprehension_iterable",  # test_jit
-    "TestUpgraders.test_aten_test_serialization",  # test_jit
-    "TestPythonBuiltinOP.test_mul",  # test_jit
-    "TestAwait.test_nowait",  # test_jit
-    "TestBuiltins.test_del_multiple_operands",  # test_jit
-    "TestTypesAndAnnotation.test_bad_types",  # test_jit
-    "TestSymbolicShapeAnalysis.test_cross_entropy_loss",  # test_jit
-    "TestRemoveMutation.test_aten_inplace",  # test_jit
-    "TestWarn.test_warn_only_once_in_loop_func",  # test_jit
-    "TestDataclasses.test_use_unregistered_dataclass_raises",  # test_jit
     "TestTorchbind.test_torchbind_optional_explicit_attr",  # test_jit
     "TestTorchbind.test_torchbind_pass_wrong_type",  # test_jit
-    "TestList.test_list_variance",  # test_jit
-    "TestMisc.test_subexpression_Dict_int_Future",  # test_jit
-    "TestMisc.test_future_isinstance",  # test_jit
-    "TestPythonBuiltinOP.test_slice",  # test_jit
-    "TestPeephole.test_short_circuit_optimization",  # test_jit
-    "TestPeephole.test_peephole_slice_optimization_not_applied_list_modified",  # test_jit
-    "TestTyping.test_namedtuple_good_error",  # test_jit
-    "TestMisc.test_subexpression_List_Future",  # test_jit
-    "TestDtypeAnalysis.test_combined",  # test_jit
-    "TestFunctionalBlocks.test_subgraph_creation",  # test_jit
-    "TestList.test_extend_list_mutable",  # test_jit
-    "TestPythonBindings.test_cu_get_functions",  # test_jit
     "TestLogging.test_trace_numeric_counter",  # test_jit
-    "TestBatchMM.test_batch_mm_side_prohibited_mutation_common_side",  # test_jit
-    "TestPeephole.test_peephole_dynamic",  # test_jit
     "TestTorchbind.test_torchbind_def_property_getter_setter",  # test_jit
-    "TestSymbolicShapeAnalysis.test_size_and_sizes",  # test_jit
-    "TestAsync.test_async_script",  # test_jit
-    "TestAsync.test_async_parsing",  # test_jit
-    "TestAwait.test_await_func_arg",  # test_jit
-    "TestTyping.test_dict_type_refinement_annotation_key_mismatch",  # test_jit
     "TestNnapiBackend.test_softmax",  # test_jit
-    "TestDataclasses.test__post_init__",  # test_jit
-    "TestPeephole.test_normalized_is_op",  # test_jit
     "TestMisc.test_broadcasting_list",  # test_jit
-    "TestIsinstance.test_optional_no_contained_type",  # test_jit
-    "TestUnion.test_union_argument_order_is_ignored",  # test_jit
-    "TestUnion.test_union_argument_order_is_ignored_container",  # test_jit
-    "TestAutodiffSubgraphSlicing.test_chunk_constant_script_ad",  # test_jit
     "TestBackends.test_save_load",  # test_jit
-    "TestIsinstance.test_list_tensor",  # test_jit
-    "TestComplex.test_tensor_attributes",  # test_jit
-    "TestRemoveMutation.test_lists_insert",  # test_jit
     "TestNnapiBackend.test_qlinear",  # test_jit
     "TestNnapiBackend.test_quantize",  # test_jit
     "TestNnapiBackend.test_unsqueeze",  # test_jit
     "TestTorchbind.test_lambda_as_constructor",  # test_jit
-    "TestTyping.test_dict_comprehension_with_type_annotation",  # test_jit
-    "TestAtenPow.test_aten_pow_zero_negative_exponent",  # test_jit
-    "TestUnion.test_union_as_dict_key",  # test_jit
-    "TestTyping.test_optional_refinement",  # test_jit
-    "TestPeephole.test_peephole_type_refinements",  # test_jit
-    "TestSlice.test_slice_kwarg",  # test_jit
-    "TestStringFormatting.test_string_interpolation_with_too_many_arguments",  # test_jit
     "TestTorchbind.test_torchbind_getstate",  # test_jit
-    "TestTyping.test_dict_comprehension_scope",  # test_jit
-    "TestRemoveMutation.test_if_output_fail",  # test_jit
-    "TestMisc.test_legacy_tensor_constructor",  # test_jit
-    "TestBatchMM.test_batch_mm_prohibited_mutation_multiple_adds",  # test_jit
-    "TestSlice.test_slice_tensor_multidim",  # test_jit
-    "TestPeephole.test_peephole_slice_two_empty_args",  # test_jit
-    "TestTyping.test_namedtuple_py2",  # test_jit
-    "TestUnion.test_union_type_refinement_statically_true",  # test_jit
-    "TestRecursiveScript.test_script_function_attribute",  # test_jit
-    "TestPeephole.test_peephole",  # test_jit
     "TestAwait.test_await_python",  # test_jit
-    "TestPythonBuiltinOP.test_triple",  # test_jit
     "TestTorchbind.test_torchbind_take_as_arg",  # test_jit
     "TestNnapiBackend.test_qadd",  # test_jit
     "TestTypesAndAnnotation.test_pep585_type",  # test_jit
     "TestNnapiBackend.test_detach",  # test_jit
-    "TestAsync.test_async_script_multi_forks",  # test_jit
-    "TestPythonBindings.test_invalidation",  # test_jit
-    "TestTyping.test_for_tuple_unpack",  # test_jit
     "TestTorchbind.test_torchbind_deepcopy",  # test_jit
     "TestTorchbind.test_torchbind_instantiate_missing_class",  # test_jit
-    "TestSymbolicShapeAnalysis.test_if_propagation",  # test_jit
-    "TestPeephole.test_normalized_rsub",  # test_jit
-    "TestPythonIr.test_param_strides",  # test_jit
-    "TestPythonIr.test_permute_inputs_binding",  # test_jit
-    "TestPythonIr.test_python_ir_utils",  # test_jit
-    "TestPythonIr.test_python_ir_utils_graph",  # test_jit
-    "TestComplex.test_complex_list_sum",  # test_jit
-    "TestUnion.test_union_redundant_arguments_are_skipped_optional",  # test_jit
     "TestNnapiBackend.test_conv2d",  # test_jit
     "TestDtypeAnalysis.test_unary",  # test_jit
-    "TestPeephole.test_peephole_dict_len_no_optimization_keys_might_overlap",  # test_jit
-    "TestIsinstance.test_dict_no_contained_type",  # test_jit
-    "TestList.test_extend_list_immutable",  # test_jit
     "TestFrozenOptimizations.test_conv_add_folding",  # test_jit
-    "TestGenerator.test_generator_arg",  # test_jit
-    "TestTensorBuiltins.test_method_on_number",  # test_jit
-    "TestUnion.test_union_optional_of_union_is_flattened",  # test_jit
-    "TestUnion.test_union_type_refinement_tuple_rhs_union",  # test_jit
-    "TestList.test_no_element_type_annotation",  # test_jit
     "TestParametrization.test_traceable",  # test_jit
-    "TestSymbolicShapeAnalysis.test_shape_analysis",  # test_jit
-    "TestScriptProfile.test_script",  # test_jit
-    "TestSymbolicShapeAnalysis.test_write",  # test_jit
-    "TestPeephole.test_peephole_slice_optimization_not_applied_non_const_args",  # test_jit
     "TestNnapiBackend.test_cat",  # test_jit
-    "TestList.test_mutable_list_pop_empty",  # test_jit
-    "TestMisc.test_subexpression_Optional",  # test_jit
-    "TestUnion.test_union_does_not_replace_existing_annotated_type",  # test_jit
     "TestTorchbind.test_torchbind_return_instance_from_method",  # test_jit
-    "TestTyping.test_opt_opt_refinement",  # test_jit
-    "TestIsinstance.test_tuple_tensor",  # test_jit
-    "TestUpgraders.test_populated_test_upgrader_graph",  # test_jit
-    "TestList.test_slice_index",  # test_jit
-    "TestTyping.test_tuple_assignments",  # test_jit
-    "TestAsync.test_async_python",  # test_jit
-    "TestBatchMM.test_batch_mm_prohibited_mutation",  # test_jit
     "TestFreezing.test_freeze_module_with_fork_calling_module_method",  # test_jit
-    "TestUnion.test_unions_of_unions_are_flattened",  # test_jit
-    "TestTypeSharing.test_script_function_attribute_different",  # test_jit
     "TestTorchbind.test_torchbind_lambda_method",  # test_jit
-    "TestTypesAndAnnotation.test_unimported_type_resolution",  # test_jit
-    "TestUnion.test_union_redundant_arguments_are_skipped_container",  # test_jit
     "TestPythonBindings.test_cu_create_function",  # test_jit
     "TestTorchbind.test_torchbind_tracing",  # test_jit
-    "TestWarn.test_warn_once_per_func_in_loop",  # test_jit
-    "TestBackendsWithCompiler.test_errors",  # test_jit
     "TestSaveLoadForOpVersion.test_versioned_div_tensor_inplace",  # test_jit
-    "TestList.test_to_list",  # test_jit
-    "TestUpgraders.test_populated_upgrader_graph",  # test_jit
-    "TestWarn.test_warn_multiple_calls_multiple_warnings",  # test_jit
-    "TestLogging.test_counter_aggregation",  # test_jit
     "TestTorchbind.test_torchbind_take_instance_as_method_arg",  # test_jit
-    "TestComplex.test_complex_parse",  # test_jit
     "TestTorchbind.test_torchbind_save_load",  # test_jit
-    "TestPeephole.test_integer_refinement",  # test_jit
-    "TestBatchMM.test_batch_mm_prohibited_mutation_if_node",  # test_jit
-    "TestHash.test_hash_tensor",  # test_jit
-    "TestAsync.test_trace_fork_wait_inline",  # test_jit
-    "TestTensorBuiltins.test_tensor_item",  # test_jit
-    "TestList.test_list_keyword",  # test_jit
-    "TestTypesAndAnnotation.test_ignore_with_types",  # test_jit
-    "TestPeephole.test_peephole_slice_one_empty_arg",  # test_jit
-    "TestAsync.test_async_script_nested",  # test_jit
     "TestNnapiBackend.test_flatten",  # test_jit
-    "TestAsync.test_future_subtyping",  # test_jit
     "TestTorchbind.test_torchbind_no_init",  # test_jit
     "TestModels.test_vae_quantized",  # test_jit
-    "TestSymbolicShapeAnalysis.test_shared_shape_graph",  # test_jit
     "TestNnapiBackend.test_dequantize",  # test_jit
     "TestPeephole.test_peephole_optional_refine",  # test_jit
     "TestTorchbind.test_torchbind",  # test_jit
-    "TestAwait.test_await_out_of_interpreter",  # test_jit
     "TestNnapiBackend.test_conv2d_transpose",  # test_jit
     "TestNnapiBackend.test_max_pool2d",  # test_jit
-    "TestPeephole.test_peephole_list_ops",  # test_jit
     "TestTyping.test_optional_conversion",  # test_jit
     "TestNnapiBackend.test_linear",  # test_jit
-    "TestPythonBuiltinOP.test_add",  # test_jit
-    "TestIsinstance.test_tuple_no_contained_type",  # test_jit
-    "TestTyping.test_bool_list_io",  # test_jit
-    "TestPeephole.test_peephole_dict_getitem_no_optimization_dict_modified",  # test_jit
     "TestNnapiBackend.test_compile_spec_santiy",  # test_jit
     "TestDtypeAnalysis.test_custom_rules",  # test_jit
-    "TestPeephole.test_peephole_len_list",  # test_jit
-    "TestTyping.test_dict_in_not_in",  # test_jit
-    "TestUnion.test_union_redundant_arguments_are_skipped_subtyping",  # test_jit
-    "TestTensorMethods.test_getitem",  # test_jit
-    "TestPeephole.test_peephole_dict_getitem_no_optimization_overlapping_keys",  # test_jit
-    "TestDataclasses.test_comparators",  # test_jit
-    "TestTyping.test_tuple_specialization",  # test_jit
     "TestModels.test_snli_quantized",  # test_jit
-    "TestGenerator.test_script",  # test_jit
-    "TestAsync.test_async_script_error",  # test_jit
-    "TestUnion.test_union_with_collections",  # test_jit
-    "TestList.test_list_index_not_existing",  # test_jit
-    "TestStringFormatting.test_string_interpolation_with_exponent_placeholder_and_string_variable",  # test_jit
-    "TestStringFormatting.test_string_interpolation_with_too_few_arguments",  # test_jit
-    "TestMisc.test_unsafe_hacked_twin",  # test_jit
-    "TestPeephole.test_peephole_dict_getitem_no_optimization_get_input_arg",  # test_jit
-    "TestTyping.test_singleton_tuple_unpack",  # test_jit
-    "TestUnion.test_union_with_scalar_values",  # test_jit
-    "TestAwait.test_jit_trace",  # test_jit
     "TestBackendsWithCompiler.test_execution",  # test_jit
-    "TestPeephole.test_normalized_isnot_op",  # test_jit
-    "TestTyping.test_list_type_refinement_annotation_element_mismatch",  # test_jit
     "TestTorchbind.test_torchbind_def_property_just_getter",  # test_jit
     "TestNnapiBackend.test_tensor_input",  # test_jit
-    "TestPythonBindings.test_graph_iterator_keepalive",  # test_jit
-    "TestUnion.test_union_subclasses_larger_union",  # test_jit
-    "TestPeephole.test_peephole_dict_getitem_simple",  # test_jit
     "TestBackends.test_execution",  # test_jit
-    "TestPeephole.test_peephole_with_writes",  # test_jit
-    "TestRecursiveScript.test_script_basic",  # test_jit
-    "TestScriptProfile.test_section",  # test_jit
-    "TestPeephole.test_peephole_add_zero",  # test_jit
-    "TestAsync.test_trace_fork_wait",  # test_jit
-    "TestAliasAnalysis.test_nested_list_construct_not_wildcard",  # test_jit
-    "TestList.test_mutable_list_remove_not_existing",  # test_jit
     "TestMisc.test_parse_ir_single_element_tensor_positive",  # test_jit
     "TestNnapiBackend.test_log_softmax",  # test_jit
-    "TestOpDecompositions.test_registered_decomposition",  # test_jit
-    "TestStringFormatting.test_string_interpolation_with_percent_in_string",  # test_jit
-    "TestBatchMM.test_batch_mm_permitted_mutation",  # test_jit
     "TestTorchbind.test_torchbind_tracing_nested",  # test_jit
     "TestNnapiBackend.test_hardtanh",  # test_jit
-    "TestBatchMM.test_batch_mm_no_mutation",  # test_jit
-    "TestIsinstance.test_type_refinement",  # test_jit
-    "TestPeephole.test_peephole_slice_all_three_args",  # test_jit
-    "TestTyping.test_tuple_keyword",  # test_jit
-    "TestOpDecompositions.test_op_decomposition",  # test_jit
-    "TestBatchMM.test_batch_mm_side_permitted_mutation",  # test_jit
     "TestNnapiBackend.test_pointwise_binary_const",  # test_jit
-    "TestTypeSharing.test_script_function_attribute_same",  # test_jit
-    "TestTypesAndAnnotation.test_type_annotate_py3",  # test_jit
-    "TestPeephole.test_peephole_dict_getitem_no_optimization_unsupported_type",  # test_jit
-    "TestMisc.test_subexpression_Tuple_int_int_Future",  # test_jit
-    "TestMisc.test_subexpression_Future_annotate",  # test_jit
-    "TestStringFormatting.test_string_interpolation_with_char_placeholder_and_true_string_variable",  # test_jit
     "TestSlice.test_tuple_slicing",  # test_jit
-    "TestAwait.test_await_isinstance",  # test_jit
     "TestNnapiBackend.test_adaptive_avg_pool2d",  # test_jit
-    "TestIsinstance.test_list_no_contained_type",  # test_jit
-    "TestPeephole.test_peephole_no_output_aliasing",  # test_jit
-    "TestStringFormatting.test_string_interpolation_with_unknown_format_specifier",  # test_jit
-    "TestPeephole.test_refine_integer_values",  # test_jit
-    "TestStringFormatting.test_string_interpolation_with_digit_placeholder_and_string_variable",  # test_jit
-    "TestPeephole.test_peephole_dict_getitem_no_optimization_keys_might_overlap",  # test_jit
-    "TestPeephole.test_peephole_list_len",  # test_jit
-    "TestMisc.test_list_literal_infer",  # test_jit
-    "TestIgnorableArgs.test_add_out_ignorable_args",  # test_jit
     "TestTensorBuiltins.test_scalar_to_num_conversions",  # test_jit
-    "TestWarn.test_warn_once_per_func",  # test_jit
-    "TestAsync.test_async_grad_guard_no_grad",  # test_jit
-    "TestPythonBuiltinOP.test_random",  # test_jit
-    "TestSymbolicShapeAnalysis.test_stitching_concat",  # test_jit
-    "TestMisc.test_if_returning_any",  # test_jit
-    "TestBatchMM.test_batch_mm_side_prohibited_mutation_uncommon_side",  # test_jit
-    "TestList.test_tensor_list_index_not_existing",  # test_jit
-    "TestMisc.test_script_many_decorators",  # test_jit
-    "TestUnion.test_union_does_not_replace_existing_annotated_type_empty_container",  # test_jit
     "TestNnapiBackend.test_pointwise_binary",  # test_jit
-    "TestTypesAndAnnotation.test_tuple_no_element_type_annotation",  # test_jit
     "TestFrozenOptimizations.test_conv_bn_folding",  # test_jit.py
-    "TestArgmax.test_combinations_data58",
-    "TestArgmax.test_combinations_data61",
     "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_1_shape0_cpu",  # test_transformers.py
     "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_2_shape0_cpu",  # test_transformers.py
     "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_1_shape3_cpu",  # test_transformers.py
@@ -7266,7 +6742,6 @@ dynamo_skips = {
     "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_1_shape2_cpu",  # test_transformers.py
     "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_2_shape1_cpu",  # test_transformers.py
     "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_1_shape1_cpu",  # test_transformers.py
-    "TestCustomOpTestingCPU.test_opcheck_fails_basic_cpu",  # test_custom_ops.py
 }
 
 
