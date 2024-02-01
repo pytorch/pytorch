@@ -97,6 +97,11 @@ def _wait_reg_dec(ptr, wait_reg):
 def _register_tensor_wrapper(tensor) -> None:
     if USE_NATIVE_C10D_FUNCTIONAL:
         # Tensor storage -> work mapping is maintained in C++
+        weakref.finalize(
+            tensor,
+            torch.ops._c10d_functional.wait_tensor,
+            tensor,
+        )
         return
     global data_ptr_to_work
     data_ptr = tensor.elem.data_ptr()
