@@ -1703,7 +1703,7 @@ class TestLRScheduler(TestCase):
         self._test_cycle_lr(scheduler, lr_targets, momentum_targets, 10, use_beta1=True)
         self.opt = old_opt  # set optimizer back to SGD
 
-    def test_onecycle_lr_pickleable(self):
+    def test_onecycle_lr_picklable(self):
         adam_opt = Adam(self.net.parameters())
         scheduler = OneCycleLR(adam_opt, max_lr=5, total_steps=200)
         state = scheduler.state_dict()
@@ -1717,17 +1717,19 @@ class TestLRScheduler(TestCase):
         scheduler = OneCycleLR(adam_opt, max_lr=5, total_steps=200, anneal_strategy='cos')
         restored_scheduler = OneCycleLR(adam_opt, max_lr=5, total_steps=200)
         restored_scheduler.load_state_dict(scheduler.state_dict())
-        self.assertTrue(restored_scheduler.anneal_strategy == scheduler.anneal_strategy == 'cos')
         self.assertIsNotNone(restored_scheduler.anneal_func)
         self.assertIsNotNone(scheduler.anneal_func)
+        self.assertEqual(restored_scheduler.anneal_strategy, scheduler.anneal_strategy)
+        self.assertEqual(restored_scheduler.anneal_stragety, 'cos')
 
         # case 2: linear annealing
         scheduler = OneCycleLR(adam_opt, max_lr=5, total_steps=200, anneal_strategy='linear')
         restored_scheduler = OneCycleLR(adam_opt, max_lr=5, total_steps=200)
         restored_scheduler.load_state_dict(scheduler.state_dict())
-        self.assertTrue(restored_scheduler.anneal_strategy == scheduler.anneal_strategy == 'linear')
         self.assertIsNotNone(restored_scheduler.anneal_func)
         self.assertIsNotNone(scheduler.anneal_func)
+        self.assertEqual(restored_scheduler.anneal_strategy, scheduler.anneal_strategy)
+        self.assertEqual(restored_scheduler.anneal_stragety, 'linear')
 
     def test_lambda_lr(self):
         epochs = 10

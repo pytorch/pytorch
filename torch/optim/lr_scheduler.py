@@ -1744,7 +1744,7 @@ class OneCycleLR(LRScheduler):
     def _init_anneal_func(self):
         if self.anneal_strategy not in ['cos', 'linear']:
             raise ValueError(
-                "anneal_strategy must by one of 'cos' or 'linear', instead got {}".format(self.anneal_strategy))
+                f"anneal_strategy must by one of 'cos' or 'linear', instead got {self.anneal_strategy}")
         elif self.anneal_strategy == 'cos':
             self.anneal_func = self._annealing_cos
         elif self.anneal_strategy == 'linear':
