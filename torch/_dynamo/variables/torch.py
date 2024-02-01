@@ -556,10 +556,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
         elif isinstance(self.value, torch._ops.OpOverloadPacket) and any(
             isinstance(arg, TorchScriptObjectVariable)
-            or (
-                isinstance(arg, ConstantVariable)
-                and isinstance(arg.value, torch.ScriptObject)
-            )
             for arg in args + list(kwargs.values())
         ):
             from torch._dynamo.utils import get_fake_value
