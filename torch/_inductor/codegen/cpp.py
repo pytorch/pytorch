@@ -7,7 +7,7 @@ import math
 import re
 import sys
 from copy import copy, deepcopy
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
@@ -85,7 +85,9 @@ DTYPE_TO_ATEN = {
     torch.uint8: "at::kByte",
     torch.bool: "at::kBool",
     torch.bfloat16: "at::kBFloat16",
+    torch.complex32: "at::kComplexHalf",
     torch.complex64: "at::kComplexFloat",
+    torch.complex128: "at::kComplexDouble",
     torch.float8_e4m3fn: "at::kFloat8_e4m3fn",
     torch.float8_e5m2: "at::kFloat8_e5m2",
     torch.float8_e4m3fnuz: "at::kFloat8_e4m3fnuz",
@@ -566,7 +568,7 @@ def get_current_node_opt_ctx() -> OptimizationContext:
 
 
 class CppCSEVariable(CSEVariable):
-    def __init__(self, name, bounds: ValueRanges):
+    def __init__(self, name, bounds: ValueRanges[Any]):
         super().__init__(name, bounds)
         self.is_vec = False
         self.dtype: Optional[torch.dtype] = None

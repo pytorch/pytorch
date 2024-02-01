@@ -5708,7 +5708,6 @@ else:
         self.assertEqual(growth_tracker, 0)
         self.assertEqual(scale, 2.0)
 
-    @skipIfTorchDynamo("sparse_coo_tensor fails in the unit test case")
     @onlyNativeDeviceTypes
     @dtypes(torch.float)
     def test_grad_scaling_unscale_sparse(self, device, dtype):
