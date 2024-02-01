@@ -1,4 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import itertools
 from typing import cast, List, Optional, Sequence, Tuple
 
 import torch
@@ -13,9 +14,12 @@ from torch.distributed._tensor.op_schema import (
     StrategyType,
 )
 from torch.distributed._tensor.ops.common_rules import pointwise_rule
+from torch.distributed._tensor.ops.embedding_ops import _MaskPartial
 from torch.distributed._tensor.ops.utils import (
+    generate_redistribute_costs,
     is_tensor_dim_sharded,
     is_tensor_partial,
+    is_tensor_shardable,
     normalize_dim,
     prod,
     register_op_strategy,
@@ -328,6 +332,70 @@ def replica_only_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType
     """Only allow replication on the input/ouput."""
     replicate_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
     return OpStrategy([PlacementStrategy(replicate_spec)])
+
+
+@register_op_strategy(aten.gather.default)
+def gather_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
+    dim = cast(int, op_schema.args_schema[1])
+    index_strategy = cast(OpStrategy, op_schema.args_schema[2])
+
+    input_shape = input_strategy.output_shape
+    index_shape = index_strategy.output_shape
+
+    all_mesh_dim_strategies = []
+
+    for mesh_dim in range(mesh.ndim):
+        single_mesh_dim_strategies = []
+
+        # placement list stores placements of [output, input, index]
+        # first we always have replicate all for inputs and output
+        all_replicate: List[Placement] = [Replicate()] * 3
+        single_mesh_dim_strategies.append(all_replicate)
+
+        # input sharding, input sharded, index accepts mask partial, output follows index
+        # this only works when the input is sharded on the gather dimension, and
+        # index has size 1 on the gather dimension
+        if index_shape[dim] == 1:
+            index_partial_placement = _MaskPartial(logical_dim_size=input_shape[dim])
+            input_sharding = [
+                index_partial_placement,
+                Shard(dim),
+                index_partial_placement,
+            ]
+            single_mesh_dim_strategies.append(input_sharding)
+
+        # index sharding, input replicated, index sharded, output follows index
+        # this only works when the sharding dimension is the gather dimension
+        index_sharding = [Shard(dim), Replicate(), Shard(dim)]
+        single_mesh_dim_strategies.append(index_sharding)
+
+        all_mesh_dim_strategies.append(single_mesh_dim_strategies)
+
+    strategy_combs = itertools.product(*all_mesh_dim_strategies)
+
+    all_strategies = []
+    for strategy_comb in strategy_combs:
+        spec_list = []
+        for specs in zip(*strategy_comb):
+            spec_list.append(DTensorSpec(mesh, tuple(specs)))
+
+        if is_tensor_shardable(input_shape, spec_list[1]) and is_tensor_shardable(
+            index_shape, spec_list[2]
+        ):
+            input_spec, index_spec = spec_list[1:]
+            redistribute_cost = [
+                generate_redistribute_costs(input_strategy, input_spec),
+                generate_redistribute_costs(index_strategy, index_spec),
+            ]
+            strat = PlacementStrategy(
+                output_specs=spec_list[0],
+                input_specs=spec_list[1:],
+                redistribute_cost=redistribute_cost,
+            )
+            all_strategies.append(strat)
+
+    return OpStrategy(all_strategies)
 
 
 @register_prop_rule(aten.index_select.default, schema_info=RuntimeSchemaInfo(1))

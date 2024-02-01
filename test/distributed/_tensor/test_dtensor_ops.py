@@ -470,7 +470,6 @@ dtensor_fails = {
     xfail("svd"),
     xfail("svd_lowrank"),
     xfail("t"),
-    xfail("take_along_dim"),
     xfail("take"),
     xfail("tensor_split"),
     xfail("to_sparse"),
