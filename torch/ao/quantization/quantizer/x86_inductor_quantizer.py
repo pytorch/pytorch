@@ -7,9 +7,13 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import torch
 import torch.nn.functional as F
-from torch.ao.quantization.fake_quantize import FusedMovingAvgObsFakeQuantize
+from torch.ao.quantization.fake_quantize import (
+    FakeQuantize,
+    FusedMovingAvgObsFakeQuantize,
+)
 from torch.ao.quantization.observer import (
     HistogramObserver,
+    MovingAverageMinMaxObserver,
     MovingAveragePerChannelMinMaxObserver,
     PerChannelMinMaxObserver,
     PlaceholderObserver,
@@ -164,10 +168,25 @@ def _get_supported_x86_inductor_config_and_operators() -> List[OperatorConfig]:
 
 
 @functools.lru_cache
-def get_default_x86_inductor_quantization_config(is_qat: bool = False):
-    act_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
-        FusedMovingAvgObsFakeQuantize if is_qat else HistogramObserver
-    )
+def get_default_x86_inductor_quantization_config(
+    is_qat: bool = False,
+    is_dynamic: bool = False,
+):
+    extra_args: Dict[str, Any] = {"eps": 2**-12}
+    if is_qat:
+        if is_dynamic:
+            act_observer_or_fake_quant_ctr = FakeQuantize
+            dynamic_quant_observer = MovingAverageMinMaxObserver.with_args(
+                averaging_constant=1
+            )
+            extra_args["observer"] = dynamic_quant_observer
+        else:
+            act_observer_or_fake_quant_ctr = FusedMovingAvgObsFakeQuantize  # type: ignore[assignment]
+    else:
+        if is_dynamic:
+            act_observer_or_fake_quant_ctr = PlaceholderObserver  # type: ignore[assignment]
+        else:
+            act_observer_or_fake_quant_ctr = HistogramObserver  # type: ignore[assignment]
 
     # Copy from x86 default qconfig from torch/ao/quantization/qconfig.py
     act_quantization_spec = QuantizationSpec(
@@ -175,9 +194,9 @@ def get_default_x86_inductor_quantization_config(is_qat: bool = False):
         quant_min=0,
         quant_max=255,  # reduce_range=False
         qscheme=torch.per_tensor_affine,
-        is_dynamic=False,
+        is_dynamic=is_dynamic,
         observer_or_fake_quant_ctr=act_observer_or_fake_quant_ctr.with_args(
-            eps=2**-12
+            **extra_args
         ),
     )
 
@@ -185,7 +204,6 @@ def get_default_x86_inductor_quantization_config(is_qat: bool = False):
         FusedMovingAvgObsFakeQuantize if is_qat else PerChannelMinMaxObserver
     )
 
-    extra_args: Dict[str, Any] = {"eps": 2**-12}
     if is_qat:
         # Only support per channel quant for now
         extra_args["observer"] = MovingAveragePerChannelMinMaxObserver  # type: ignore[dict-item]
@@ -200,12 +218,7 @@ def get_default_x86_inductor_quantization_config(is_qat: bool = False):
             **extra_args
         ),
     )
-    bias_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
-        PlaceholderObserver
-    )
-    bias_quantization_spec = QuantizationSpec(
-        dtype=torch.float, observer_or_fake_quant_ctr=bias_observer_or_fake_quant_ctr
-    )
+    bias_quantization_spec = None  # will use placeholder observer by default
     quantization_config = QuantizationConfig(
         act_quantization_spec,
         act_quantization_spec,
@@ -370,7 +383,10 @@ class X86InductorQuantizer(Quantizer):
 
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """just handling global spec for now"""
-        model = self._annotate_for_static_quantization_config(model)
+        if self.global_config and self.global_config.input_activation.is_dynamic:  # type: ignore[union-attr]
+            model = self._annotate_for_dynamic_quantization_config(model)
+        else:
+            model = self._annotate_for_static_quantization_config(model)
         return model
 
     def _annotate_for_static_quantization_config(
@@ -410,6 +426,13 @@ class X86InductorQuantizer(Quantizer):
         for node in model.graph.nodes:
             self._annotate_output_for_int8_in_int8_out_pattern(node, config)
 
+        return model
+
+    def _annotate_for_dynamic_quantization_config(
+        self, model: torch.fx.GraphModule
+    ) -> torch.fx.GraphModule:
+        config = self.global_config
+        self._annotate_linear(model, config)
         return model
 
     def _annotate_qat_conv2d_fusion_pattern(
@@ -550,6 +573,7 @@ class X86InductorQuantizer(Quantizer):
         unary_patterns = [
             [torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU],
             [torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.Hardtanh],
+            [torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.Hardswish],
             [torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU6],
         ]
         for unary_pattern in unary_patterns:
@@ -728,6 +752,7 @@ class X86InductorQuantizer(Quantizer):
         unary_patterns = [
             [torch.nn.Conv2d, torch.nn.ReLU],
             [torch.nn.Conv2d, torch.nn.Hardtanh],
+            [torch.nn.Conv2d, torch.nn.Hardswish],
             [torch.nn.Conv2d, torch.nn.ReLU6],
         ]
         for unary_pattern in unary_patterns:
@@ -760,7 +785,7 @@ class X86InductorQuantizer(Quantizer):
         conv_partitions = get_source_partitions(
             gm.graph, [torch.nn.Conv2d, torch.nn.functional.conv2d]
         )
-        conv_partitions = list(itertools.chain(*conv_partitions.values()))
+        conv_partitions = list(itertools.chain.from_iterable(conv_partitions.values()))
         for conv_partition in conv_partitions:
             if len(conv_partition.output_nodes) > 1:
                 raise ValueError("conv partition has more than one output node")
@@ -935,7 +960,9 @@ class X86InductorQuantizer(Quantizer):
         linear_partitions = get_source_partitions(
             gm.graph, [torch.nn.Linear, torch.nn.functional.linear]
         )
-        linear_partitions = list(itertools.chain(*linear_partitions.values()))
+        linear_partitions = list(
+            itertools.chain.from_iterable(linear_partitions.values())
+        )
         for partition in linear_partitions:
             if len(partition.output_nodes) > 1:
                 raise ValueError(

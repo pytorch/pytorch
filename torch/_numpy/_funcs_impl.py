@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 """A thin pytorch / numpy compat layer.
 
 Things imported from here have numpy-compatible signatures but operate on
@@ -1353,7 +1355,7 @@ def einsum(*operands, out=None, dtype=None, order="K", casting="safe", optimize=
             has_sublistout = len(operands) % 2 == 1
             if has_sublistout:
                 sublistout = operands[-1]
-            operands = list(itertools.chain(*zip(tensors, sublists)))
+            operands = list(itertools.chain.from_iterable(zip(tensors, sublists)))
             if has_sublistout:
                 operands.append(sublistout)
 

@@ -132,12 +132,14 @@ class DynamoFlattenOutputStep(io_adapter.FlattenOutputStep):
 
     def apply(
         self,
-        model: Union[torch.nn.Module, Callable, torch_export.ExportedProgram],
         model_outputs: Any,
+        model: Optional[
+            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
+        ] = None,
     ) -> Sequence[Any]:
         """Flatten the model outputs, under the context of pytree extension."""
         with self._pytree_extension_context:
-            return super().apply(model, model_outputs)
+            return super().apply(model_outputs, model=model)
 
 
 def _wrap_model_with_output_adapter(
@@ -163,7 +165,7 @@ def _wrap_model_with_output_adapter(
     # Preserve original function signature.
     @functools.wraps(model_func)
     def wrapped(*args, **kwargs):
-        return output_adapter.apply(model, model_func(*args, **kwargs))
+        return output_adapter.apply(model_func(*args, **kwargs), model=model)
 
     return wrapped
 

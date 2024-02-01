@@ -9,7 +9,7 @@ import tokenize
 import unittest
 import warnings
 from types import FunctionType, ModuleType
-from typing import Any, Dict, Optional, Set, Tuple, Union
+from typing import Any, Dict, Optional, Set, Union
 from unittest import mock
 
 # Types saved/loaded in configs
@@ -78,10 +78,10 @@ def get_assignments_with_compile_ignored_comments(module):
     tokens = tokenize.tokenize(io.BytesIO(source_code.encode("utf-8")).readline)
     current_comment = "", -1
     prev_name = ""
-    prev_assigned = "", -1
 
     for token in tokens:
         if token.type == tokenize.COMMENT:
+            prev_name = ""
             maybe_current = token.string.strip()
             if COMPILE_IGNORED_MARKER in maybe_current:
                 assert current_comment == (
@@ -89,15 +89,12 @@ def get_assignments_with_compile_ignored_comments(module):
                     -1,
                 ), f"unconsumed {COMPILE_IGNORED_MARKER}"
                 current_comment = maybe_current, token.start[0]
-                if token.start[0] == prev_assigned[1]:
-                    # Check if the current assignment is followed with
-                    # a same-line comment with COMPILE_IGNORED_MARKER
-                    assignments.add(prev_assigned[0])
-                    current_comment = "", -1  # reset
         elif token.type == tokenize.NAME:
-            prev_name = token.string
+            # Only accept the first name token, to handle if you have
+            # something like foo: Bar = ...
+            if not prev_name:
+                prev_name = token.string
         elif token.type == tokenize.OP and token.string == "=":
-            prev_assigned = prev_name, token.start[0]
             # Check if the current assignment follows a comment
             # with COMPILE_IGNORED_MARKER
             if (
@@ -106,6 +103,7 @@ def get_assignments_with_compile_ignored_comments(module):
             ):
                 assignments.add(prev_name)
                 current_comment = "", -1  # reset
+            prev_name = ""
     assert current_comment == ("", -1), f"unconsumed {COMPILE_IGNORED_MARKER}"
     return assignments
 
@@ -172,23 +170,6 @@ class ConfigModule(ModuleType):
             lines.append(f"{mod}.{k} = {v!r}")
         return "\n".join(lines)
 
-    def get_config_and_hash_with_updates(
-        self, updates: Dict[str, Any]
-    ) -> Tuple[Dict[str, Any], bytes]:
-        """Hashes the configs that are not compile_ignored, along with updates"""
-        if any(k in self._compile_ignored_keys for k in updates):
-            raise ValueError("update keys cannot be @compile_ignored")
-        cfg = {
-            k: v for k, v in self._config.items() if k not in self._compile_ignored_keys
-        }
-        cfg.update(updates)
-        hashed = self._get_hash(cfg)
-        return cfg, hashed
-
-    def _get_hash(self, config: Dict[str, Any]) -> bytes:
-        string_to_hash = repr(sorted(config.items()))
-        return hashlib.md5(string_to_hash.encode("utf-8")).digest()
-
     def get_hash(self) -> bytes:
         """Hashes the configs that are not compile_ignored"""
         if self._is_dirty or self._hash_digest is None:
@@ -197,7 +178,8 @@ class ConfigModule(ModuleType):
                 for k, v in self._config.items()
                 if k not in self._compile_ignored_keys
             }
-            self._hash_digest = self._get_hash(dict_to_hash)
+            string_to_hash = repr(sorted(dict_to_hash.items()))
+            self._hash_digest = hashlib.md5(string_to_hash.encode("utf-8")).digest()
             self._is_dirty = False
         return self._hash_digest
 
@@ -283,6 +265,37 @@ class ConfigModule(ModuleType):
                 prior.clear()
 
         return ConfigPatch()
+
+    def _make_closure_patcher(self, **changes):
+        """
+        A lower-overhead version of patch() for things on the critical path.
+
+        Usage:
+
+            # do this off the critical path
+            change_fn = config.make_closure_patcher(foo=True)
+
+            ...
+
+            revert = change_fn()
+            try:
+              ...
+            finally:
+                revert()
+
+        """
+        config = self._config
+
+        def change():
+            prior = {k: config[k] for k in changes}
+            config.update(changes)
+
+            def revert():
+                config.update(prior)
+
+            return revert
+
+        return change
 
 
 class ContextDecorator(contextlib.ContextDecorator):

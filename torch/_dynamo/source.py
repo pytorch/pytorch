@@ -325,15 +325,37 @@ class GetItemSource(ChainedSource):
         return slice_class(*slice_args)
 
     def name(self):
+        # Index can be of following types
+        # 1) ConstDictKeySource
+        # 2) enum.Enum
+        # 3) index is a slice - example 1:4
+        # 4) index is a constant - example string, integer
         if isinstance(self.index, Source):
+            if not isinstance(self.index, ConstDictKeySource):
+                raise ValueError(
+                    "GetItemSource index must be a constant, enum or ConstDictKeySource"
+                )
             return f"{self.base.name()}[{self.index.name()}]"
+        elif self.index_is_slice:
+            return f"{self.base.name()}[{self.unpack_slice()!r}]"
+        elif isinstance(self.index, enum.Enum):
+            return f"{self.base.name()}[{enum_repr(self.index, self.guard_source().is_local())}]"
         else:
-            if self.index_is_slice:
-                return f"{self.base.name()}[{self.unpack_slice()!r}]"
-            elif isinstance(self.index, enum.Enum):
-                return f"{self.base.name()}[{enum_repr(self.index, self.guard_source().is_local())}]"
-            else:
-                return f"{self.base.name()}[{self.index!r}]"
+            return f"{self.base.name()}[{self.index!r}]"
+
+
+@dataclasses.dataclass(frozen=True)
+class ConstDictKeySource(GetItemSource):
+    def reconstruct(self, codegen):
+        return [
+            *codegen.create_load_import_from(utils.__name__, "dict_keys_getitem"),
+            *self.base.reconstruct(codegen),
+            codegen.create_load_const(self.index),
+            *create_call_function(2, True),
+        ]
+
+    def name(self):
+        return f"___dict_keys_getitem({self.base.name()}, {self.index!r})"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -478,3 +500,13 @@ def is_from_local_source(source: Source, *, allow_cell_or_freevar=True):
     if not allow_cell_or_freevar and source.cell_or_freevar:
         return False
     return True
+
+
+# TODO: can probably write a generic "test this on everything in the chain"
+# helper
+def is_from_defaults(source: Source):
+    if isinstance(source, DefaultsSource):
+        return True
+    if isinstance(source, ChainedSource):
+        return is_from_defaults(source.base)
+    return False

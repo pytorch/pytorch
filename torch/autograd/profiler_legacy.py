@@ -184,7 +184,7 @@ def _parse_legacy_records(thread_records):
     record_stack = []
 
     # '__start_profile' is not guaranteed to be first, so we must find it here
-    for record in itertools.chain(*thread_records):
+    for record in itertools.chain.from_iterable(thread_records):
         name = record.name()
         if start_record is None and name == "__start_profile":
             start_record = record

@@ -169,7 +169,7 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
             torch.onnx.utils.model_signature(model)
         )
         self.input_adapter.append_step(bind_input_step)
-        _, named_args = bind_input_step.apply(model, model_args, model_kwargs)
+        _, named_args = bind_input_step.apply(model_args, model_kwargs, model=model)
 
         # Create inputs to call symbolic trace (torch.fx.symbolic_trace)
         # Example content of concrete_args:

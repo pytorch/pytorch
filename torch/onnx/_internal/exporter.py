@@ -103,7 +103,7 @@ class ONNXFakeContext:
     fake_mode: fake_tensor.FakeTensorMode
     """The fake tensor mode used for tracing model using fake tensors and parameters."""
 
-    state_dict_paths: Optional[Tuple[Union[str, io.BytesIO]]] = None
+    state_dict_paths: Optional[Tuple[Union[str, io.BytesIO, Dict[str, Any]]]] = None
     """List of paths of files that contain the model :meth:`state_dict`"""
 
 
@@ -659,6 +659,9 @@ class ONNXProgram:
     _fake_context: Final[Optional[ONNXFakeContext]]
     _export_exception: Final[Optional[Exception]]
     _model_signature: Final[Optional[torch.export.ExportGraphSignature]]
+    _model_torch: Final[
+        Optional[Union[torch.nn.Module, Callable, torch_export.ExportedProgram]]
+    ]
 
     @_beartype.beartype
     def __init__(
@@ -671,9 +674,13 @@ class ONNXProgram:
         fake_context: Optional[ONNXFakeContext] = None,
         export_exception: Optional[Exception] = None,
         model_signature: Optional[torch.export.ExportGraphSignature] = None,
+        model_torch: Optional[
+            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
+        ] = None,
     ):
         self._model_proto = model_proto
         self._model_signature = model_signature
+        self._model_torch = model_torch
         self._input_adapter = input_adapter
         self._output_adapter = output_adapter
         self._diagnostic_context = diagnostic_context
@@ -683,7 +690,9 @@ class ONNXProgram:
     def __call__(
         self,
         *args: Any,
-        model: Union[torch.nn.Module, Callable, torch_export.ExportedProgram],
+        model_with_state_dict: Optional[
+            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
+        ] = None,
         options: Optional[ONNXRuntimeOptions] = None,
         **kwargs: Any,
     ) -> Any:
@@ -692,7 +701,8 @@ class ONNXProgram:
         Args:
             args: The positional inputs to the model.
             kwargs: The keyword inputs to the model.
-            model: The PyTorch model to fetch state from.
+            model_with_state_dict: The PyTorch model to fetch state from.
+                Required when :func:`enable_fake_mode` is used to extract real initializers as needed by the ONNX graph.
             options: The options to use for running the model with ONNX Runtime.
 
         Returns:
@@ -700,7 +710,12 @@ class ONNXProgram:
         """
         import onnxruntime  # type: ignore[import]
 
-        onnx_input = self.adapt_torch_inputs_to_onnx(*args, model=model, **kwargs)
+        # model specified by the user has precedence, when specified
+        model_with_state_dict = model_with_state_dict or self._model_torch
+
+        onnx_input = self.adapt_torch_inputs_to_onnx(
+            *args, model_with_state_dict=model_with_state_dict, **kwargs
+        )
         options = options or ONNXRuntimeOptions()
         providers = options.execution_providers or onnxruntime.get_available_providers()
         onnx_model = self.model_proto.SerializeToString()
@@ -809,7 +824,7 @@ class ONNXProgram:
     def adapt_torch_inputs_to_onnx(
         self,
         *model_args,
-        model: Optional[
+        model_with_state_dict: Optional[
             Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
         ] = None,
         **model_kwargs,
@@ -828,8 +843,10 @@ class ONNXProgram:
         This method replays the adapting steps recorded during export.
 
         Args:
-            model: The PyTorch model to get extra state from. If not specified, the model used during export is used.
             model_args: The PyTorch model inputs.
+            model_with_state_dict: The PyTorch model to get extra state from.
+                If not specified, the model used during export is used.
+                Required when :func:`enable_fake_mode` is used to extract real initializers as needed by the ONNX graph.
             model_kwargs: The PyTorch model keyword inputs.
 
         Returns:
@@ -841,7 +858,7 @@ class ONNXProgram:
             >>> import torch
             >>> import torch.onnx
             >>> from typing import Dict, Tuple
-            >>> def func_with_nested_input_structure(
+            >>> def func_nested_input(
             ...     x_dict: Dict[str, torch.Tensor],
             ...     y_tuple: Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
             ... ):
@@ -857,23 +874,32 @@ class ONNXProgram:
             ...     return x + y1 + y2 + y3
             >>> x_dict = {"a": torch.tensor(1.)}
             >>> y_tuple = (torch.tensor(2.), (torch.tensor(3.), torch.tensor(4.)))
-            >>> onnx_program = torch.onnx.dynamo_export(func_with_nested_input_structure, x_dict, y_tuple)
+            >>> onnx_program = torch.onnx.dynamo_export(func_nested_input, x_dict, y_tuple)
             >>> print(x_dict, y_tuple)
             {'a': tensor(1.)} (tensor(2.), (tensor(3.), tensor(4.)))
-            >>> print(onnx_program.adapt_torch_inputs_to_onnx(x_dict, y_tuple, model=func_with_nested_input_structure))
+            >>> print(onnx_program.adapt_torch_inputs_to_onnx(x_dict, y_tuple, model_with_state_dict=func_nested_input))
             (tensor(1.), tensor(2.), tensor(3.), tensor(4.))
 
         .. warning::
             This API is experimental and is *NOT* backward-compatible.
 
         """
-        return self._input_adapter.apply(*model_args, model=model, **model_kwargs)
+        # model specified by the user has precedence, when specified
+        model_with_state_dict = model_with_state_dict or self._model_torch
+        assert (
+            model_with_state_dict is not None
+        ), "model_with_state_dict must be specified."
+        return self._input_adapter.apply(
+            *model_args, model=model_with_state_dict, **model_kwargs
+        )
 
     @_beartype.beartype
     def adapt_torch_outputs_to_onnx(
         self,
-        model: Union[torch.nn.Module, Callable, torch_export.ExportedProgram],
         model_outputs: Any,
+        model_with_state_dict: Optional[
+            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
+        ] = None,
     ) -> Sequence[Union[torch.Tensor, int, float, bool]]:
         """Converts the PyTorch model outputs to exported ONNX model outputs format.
 
@@ -889,8 +915,10 @@ class ONNXProgram:
         This method replays the adapting steps recorded during export.
 
         Args:
-            model: The PyTorch model to get extra state from.
             model_outputs: The PyTorch model outputs.
+            model_with_state_dict: The PyTorch model to get extra state from.
+                If not specified, the model used during export is used.
+                Required when :func:`enable_fake_mode` is used to extract real initializers as needed by the ONNX graph.
 
         Returns:
             PyTorch model outputs in exported ONNX model outputs format.
@@ -912,14 +940,19 @@ class ONNXProgram:
             >>> pt_output = func_returning_tuples(x, y, z)
             >>> print(pt_output)
             (tensor(3.), (tensor(5.), tensor(8.)))
-            >>> print(onnx_program.adapt_torch_outputs_to_onnx(func_returning_tuples, pt_output))
+            >>> print(onnx_program.adapt_torch_outputs_to_onnx(pt_output, model_with_state_dict=func_returning_tuples))
             [tensor(3.), tensor(5.), tensor(8.)]
 
         .. warning::
             This API is experimental and is *NOT* backward-compatible.
 
         """
-        return self._output_adapter.apply(model, model_outputs)
+        # model specified by the user has precedence, when specified
+        model_with_state_dict = model_with_state_dict or self._model_torch
+        assert (
+            model_with_state_dict is not None
+        ), "model_with_state_dict must be specified."
+        return self._output_adapter.apply(model_outputs, model=model_with_state_dict)
 
     @_beartype.beartype
     def save(
@@ -934,17 +967,14 @@ class ONNXProgram:
         Args:
             destination: The destination to save the ONNX model. It can be either a string or a file-like object.
                 When used with ``model_state_dict``, it must be a string with a full path to the destination.
-                In that case, besides saving the ONNX model, a folder with "_initializers" suffix (without extension)
-                will be created to store the each initializer of the ONNX model in a separate file. For example, if the
-                destination is "/path/model.onnx", the initializers will be saved in "/path/model_initializers/" folder.
+                If `destination` is a string, besides saving the ONNX model into a file, model weights are also stored
+                in separate files in the same directory as the ONNX model. E.g. for `destination="/path/model.onnx"`,
+                the initializers are saved in "/path/" folder along with "onnx.model".
             model_state_dict: The state_dict of the PyTorch model containing all weights on it.
-                It can be either a dict as returned by :meth:`model.state_dict`, or a string with a file name.
-                Required when :func:`enable_fake_mode` is used but real initializers are needed on the ONNX graph.
                 It can be either a string with the path to a checkpoint or a dictionary with the actual model state.
-
+                Required when :func:`enable_fake_mode` is used but real initializers are needed on the ONNX graph.
             serializer: The serializer to use. If not specified, the model will be serialized as Protobuf.
         """
-
         if serializer is None:
             if isinstance(destination, str):
                 serializer = LargeProtobufONNXProgramSerializer(destination)
@@ -952,33 +982,22 @@ class ONNXProgram:
                 serializer = ProtobufONNXProgramSerializer()
 
         # Add initializers when symbolic tracing is enabled
-        _model_state_dict_files: List[Union[str, io.BytesIO]] = []
+        _model_state_dict_files: List[Union[str, io.BytesIO, Dict[str, Any]]] = []
         if model_state_dict is not None:
-            if isinstance(model_state_dict, dict):
-                model_state_dict_file = io.BytesIO()
-                torch.save(model_state_dict, model_state_dict_file)
-                model_state_dict_file.seek(0)
-                _model_state_dict_files.append(model_state_dict_file)
-            else:
-                isinstance(
-                    model_state_dict, str
-                ), "model_state_dict must be a path to the model's state_dict or the actual state_dict"
-                _model_state_dict_files.append(model_state_dict)
+            assert isinstance(
+                model_state_dict, (dict, str)
+            ), "model_state_dict must be a path to the model's state_dict or the actual state_dict"
+            # NOTE: For dict, there can be performance penalty or high memory usage that might lead to OOM
+            #       if the dict wasn't loaded with torch.load(..., mmap=True, map_location="cpu")
+            _model_state_dict_files.append(model_state_dict)
         elif self._fake_context and self._fake_context.state_dict_paths:
             # Load state from previous model.load_state_dict() call within enable_fake_mode() context
             for path in self._fake_context.state_dict_paths:
                 if path in _model_state_dict_files:
                     # ignore duplicate
                     continue
-                try:
-                    extra_state_dict = torch.load(path)
-                    extra_state_dict_file = io.BytesIO()
-                    torch.save(extra_state_dict, extra_state_dict_file)
-                    extra_state_dict_file.seek(0)
-                    _model_state_dict_files.append(extra_state_dict_file)
-                except FileNotFoundError:
-                    # It is ok to ignore transient state_dict file created within context manager
-                    pass
+                if os.path.exists(path):  # type: ignore[arg-type]
+                    _model_state_dict_files.append(path)
 
         if _model_state_dict_files:
             if not isinstance(destination, str):
@@ -986,15 +1005,14 @@ class ONNXProgram:
                     "`destination` must be a string with a path when `model_state_dict` is specified."
                 )
             destination_path, destination_filename = os.path.split(destination)
+            destination_path = destination_path or os.getcwd()
             onnx_model_location = destination_filename
-            onnx_initializer_location = (
-                destination_filename.split(".")[0] + "_initializers"
-            )
+
             # TODO: Should this be part of the serializer?
             fx_serialization.save_model_with_external_data(
                 destination_path,
                 onnx_model_location,
-                onnx_initializer_location,
+                "",  # When initializers >2GB, must be in the same folder as the model
                 tuple(_model_state_dict_files),
                 self.model_proto,
             )
@@ -1053,6 +1071,7 @@ class ONNXProgram:
         # https://github.com/pytorch/pytorch/issues/103764
         import onnx
 
+        # TODO: Should we populate ONNXProgram with more info, such _model_torch for easier debug?
         return ONNXProgram(
             onnx.ModelProto(),  # type: ignore[attr-defined]
             io_adapter.InputAdapter(),
@@ -1136,11 +1155,16 @@ class Exporter:
             self._assert_fake_tensor_mode()
 
     def export(self) -> ONNXProgram:
-        with self.options.diagnostic_context:
+        # TODO: Defer `import onnxscript` out of `import torch` path
+        # https://github.com/pytorch/pytorch/issues/103764
+        from torch.onnx._internal.fx import decomposition_skip
+
+        with self.options.diagnostic_context, decomposition_skip.enable_decomposition_skips(
+            self.options
+        ):
             graph_module = self.options.fx_tracer.generate_fx(
                 self.options, self.model, self.model_args, self.model_kwargs
             )
-
             # TODO: Defer `import onnxscript` out of `import torch` path
             # https://github.com/pytorch/pytorch/issues/103764
             from torch.onnx._internal.fx import fx_onnx_interpreter
@@ -1182,6 +1206,7 @@ class Exporter:
                 model_signature=getattr(
                     self.model, "graph_signature", None
                 ),  # Available for isinstance(self.model, ExportedProgram) only
+                model_torch=self.model,
             )
 
     def _assert_fake_tensor_mode(self):

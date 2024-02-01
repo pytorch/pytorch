@@ -115,7 +115,7 @@ struct TORCH_API GraphFunction : public Function {
   }
 
   void clear_optimized_graphs() {
-    optimized_graphs_.fill(c10::nullopt);
+    optimized_graphs_.fill(nullptr);
   }
 
  private:
@@ -145,9 +145,7 @@ struct TORCH_API GraphFunction : public Function {
   // don't invoke amp pass
   mutable bool force_no_amp_ = false;
   // Optimized graph, computed lazily. Used for inlining.
-  mutable std::array<
-      c10::optional<std::shared_ptr<Graph>>,
-      SpecializationKey::TotalCount>
+  mutable std::array<std::shared_ptr<Graph>, SpecializationKey::TotalCount>
       optimized_graphs_;
 
   // GraphFunctions are invokable from multiple threads, so this lock needs to

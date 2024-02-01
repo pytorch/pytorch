@@ -22,78 +22,140 @@
 
 namespace at::native {
 namespace mps {
-/*
- * Helper functions to be used for mm/addmm for detecting the Transpositions
- * when doing Batched GEMM operations.
- */
+namespace {
+static const char* METAL_LINALG = R"MATMUL_METAL(
+#include <metal_array>
 
-static Tensor prepare_batch_matrix_by_transposing(const Tensor& tensor,
-                                                  bool& transpose_tensor,
-                                                  int64_t& ld_tensor,
-                                                  bool transpose_result,
-                                                  int64_t m,
-                                                  int64_t n) {
-  IntArrayRef tensor_strides = tensor.strides();
-  Tensor tensor_;
-  int fast_dim = transpose_result ? 2 : 1;
-  int leading_dim = transpose_result ? 1 : 2;
+using namespace metal;
+template<typename T>
+T dot_product(constant T *v1, constant T* v2, ulong2 strides, uint32_t size) {
+  T rc = 0.0;
+  for (uint32_t i = 0; i < size; ++i) {
+    rc += v1[i * strides.x] * v2[i * strides.y];
+  }
+  return rc;
+}
 
-  if (tensor_strides[fast_dim] == 1 && (tensor_strides[leading_dim] >= std::max<int64_t>(1, m))) {
-    transpose_tensor = false;
-    tensor_ = tensor;
-    ld_tensor = tensor_strides[leading_dim];
-  } else if ((tensor_strides[leading_dim] == 1) && (tensor_strides[fast_dim] >= std::max<int64_t>(1, n))) {
-    transpose_tensor = true;
-    tensor_ = tensor;
-    ld_tensor = tensor_strides[fast_dim];
-  } else {
-    transpose_tensor = !transpose_result;
-    // gemm call requires leading dimension and stride parameters to be non-zero
-    bool is_stride_non_zero = tensor.stride(1) != 0 && tensor.stride(2) != 0;
-    if (tensor.is_contiguous() && is_stride_non_zero) {
-      tensor_ = tensor;
-    } else {
-      tensor_ = tensor.clone(at::MemoryFormat::Contiguous);
+template<typename T>
+kernel void naive_matmul(
+    constant T                 * mat1Data      [[buffer(0)]],
+    constant T                 * mat2Data      [[buffer(1)]],
+    device   T                 * outputData    [[buffer(2)]],
+    constant array<ulong2, 3>  & strides       [[buffer(3)]],
+    constant uint3             & sizes         [[buffer(4)]],
+    uint                         thread_index [[thread_position_in_grid]]) {
+    uint y = thread_index / sizes.x;
+    uint x = thread_index % sizes.x;
+    if (x >= sizes.x || y >= sizes.z) {
+        return;
     }
-    ld_tensor = tensor_.stride(1);
-  }
-
-  return tensor_;
+    auto rc = dot_product(mat1Data + x * strides[0].x,
+                          mat2Data + y * strides[1].y,
+                          ulong2(strides[0].y, strides[1].x),
+                          sizes.y);
+    outputData[x * strides[2].x + y * strides[2].y] = rc;
 }
 
-/*
- * Helper functions to be used for mm/addmm for detecting the Transpositions
- * when doing GEMM operations.
- */
-static void prepare_matrices_for_broadcasting(const Tensor* bias,
-                                              const Tensor& self,
-                                              const Tensor& other,
-                                              const Scalar* beta,
-                                              bool* transpose_mat1_times_mat2,
-                                              bool& transpose_mat1,
-                                              bool& transpose_mat2) {
-  TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
-  if (bias && beta->toDouble() != 0.0f) {
-    TORCH_CHECK(bias->dim() == 2, "tensors must be 2-D");
+#define INSTANTIATE_NAIVE_MM(DTYPE)                                        \
+template                                                                   \
+[[host_name("naive_matmul_" #DTYPE)]]                                      \
+kernel void naive_matmul<DTYPE>(                                           \
+    constant DTYPE             * mat1Data      [[buffer(0)]],              \
+    constant DTYPE             * mat2Data      [[buffer(1)]],              \
+    device   DTYPE             * outputData    [[buffer(2)]],              \
+    constant array<ulong2, 3>  & strides       [[buffer(3)]],              \
+    constant uint3             & sizes         [[buffer(4)]],              \
+    uint                         thread_index [[thread_position_in_grid]])
+
+INSTANTIATE_NAIVE_MM(float);
+INSTANTIATE_NAIVE_MM(half);
+)MATMUL_METAL";
+
+id<MTLLibrary> compileLinalgOpLibrary(id<MTLDevice> device) {
+  static id<MTLLibrary> linalgLibrary = nil;
+  if (linalgLibrary) {
+    return linalgLibrary;
   }
 
-  std::pair<int64_t, int64_t> mat1_sizes;
-  std::pair<int64_t, int64_t> mat2_sizes;
-
-  mat1_sizes = std::make_pair(self.sizes()[0], self.sizes()[1]);
-  mat2_sizes = std::make_pair(other.sizes()[0], other.sizes()[1]);
-
-  if (mat1_sizes == mat2_sizes) {
-    transpose_mat2 = true;
-    std::swap(mat2_sizes.first, mat2_sizes.second);
-  }
-  if (bias && beta && transpose_mat1_times_mat2) {
-    if (beta->toDouble() != 0.0f && mat1_sizes.first == bias->sizes()[1] && mat2_sizes.second == bias->sizes()[0])
-      *transpose_mat1_times_mat2 = true;
-  }
+  NSError* error = nil;
+  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
+  [options setLanguageVersion:MTLLanguageVersion2_3];
+  linalgLibrary = [device newLibraryWithSource:[NSString stringWithCString:METAL_LINALG encoding:NSASCIIStringEncoding]
+                                       options:options
+                                         error:&error];
+  TORCH_CHECK(linalgLibrary, "Failed to create metal linalg library, error: ", [[error description] UTF8String]);
+  return linalgLibrary;
 }
 
-enum LinearAlgebraOpType { ADDBMM_OP_TYPE, BADDBMM_OP_TYPE };
+id<MTLComputePipelineState> matmulPipelineState(id<MTLDevice> device, ScalarType scalar_type) {
+  std::string kernel = "naive_matmul_" + mps::scalarToMetalTypeString(scalar_type);
+  static std::unordered_map<std::string, id<MTLComputePipelineState>> psoCache;
+  id<MTLComputePipelineState> pso = psoCache[kernel];
+  if (pso) {
+    return pso;
+  }
+
+  NSError* error = nil;
+  id<MTLLibrary> linalgLib = compileLinalgOpLibrary(device);
+  id<MTLFunction> matmulFunc = [linalgLib newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
+  TORCH_CHECK(matmulFunc, "Failed to create function state object for: ", kernel);
+  pso = [device newComputePipelineStateWithFunction:matmulFunc error:&error];
+  TORCH_CHECK(pso, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
+
+  psoCache[kernel] = pso;
+  return pso;
+}
+
+Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
+  auto stream = getCurrentMPSStream();
+  auto device = MPSDevice::getInstance()->device();
+  auto matmulPSO = matmulPipelineState(device, output.scalar_type());
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(matmulPSO, "naive_matmul", {self, other});
+      auto computeEncoder = stream->commandEncoder();
+      [computeEncoder setComputePipelineState:matmulPSO];
+      std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(self.size(0)),
+                                       static_cast<uint32_t>(self.size(1)),
+                                       static_cast<uint32_t>(output.size(1))};
+      std::array<int64_t, 6> strides = {
+          self.stride(0), self.stride(1), other.stride(0), other.stride(1), output.stride(0), output.stride(1)};
+      mtl_setBuffer(computeEncoder, self, 0);
+      mtl_setBuffer(computeEncoder, other, 1);
+      mtl_setBuffer(computeEncoder, output, 2);
+      [computeEncoder setBytes:strides.data() length:sizeof(uint64_t) * strides.size() atIndex:3];
+      [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
+      mtl_dispatch1DJob(computeEncoder, matmulPSO, output.numel());
+      getMPSProfiler().endProfileKernel(matmulPSO);
+    }
+  });
+  return output;
+}
+
+std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* graph,
+                                                                    const Tensor& self,
+                                                                    const Tensor& other) {
+  if (self.numel() == 0 || other.numel() == 0) {
+    auto output = [graph constantWithScalar:0.0
+                                      shape:getMPSShape({self.size(0), other.size(1)})
+                                   dataType:getMPSDataType(self)];
+    return {nil, nil, output};
+  }
+  auto selfTensor = mpsGraphRankedPlaceHolder(graph, self);
+  auto otherTensor = mpsGraphRankedPlaceHolder(graph, other);
+  auto output = [graph matrixMultiplicationWithPrimaryTensor:selfTensor secondaryTensor:otherTensor name:nil];
+  return {selfTensor, otherTensor, output};
+}
+
+bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output) {
+  static bool always_use_metal = std::getenv("PYTORCH_MPS_PREFER_METAL") != nullptr;
+  constexpr auto max_stride_size = 32768;
+  return always_use_metal || self.stride(0) > max_stride_size || self.stride(1) > max_stride_size ||
+      self.size(0) > max_stride_size || self.size(1) > max_stride_size || other.stride(0) > max_stride_size ||
+      other.stride(1) > max_stride_size || other.size(0) > max_stride_size || other.size(1) > max_stride_size;
+}
+
+} // anonymous namespace
 
 static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {
   using namespace mps;
@@ -109,59 +171,46 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
   TORCH_CHECK(output.is_mps());
 
   // Transpose inputs if needed
-  IntArrayRef output_sizes = output.sizes();
-  if ((output_sizes[0] == 0) || (output_sizes[1] == 0)) {
+  if (output.numel() == 0) {
     return output;
   }
 
-  MPSStream* stream = getCurrentMPSStream();
+  // MPS matmul returns silently incorrect results if one of the matrix dimensions is greater than 2**15
+  // And crashes if its a view of matrix with dimensions larger than 2**15
+  // See https://github.com/pytorch/pytorch/issues/116769#issuecomment-1888302095
+  // In such cases, fallback to naive but accurate metal shader
+  if (use_metal_mm(self, other, output)) {
+    return do_metal_mm(self, other, output);
+  }
 
   @autoreleasepool {
     string key = "mm_out_mps_impl" + getTensorsStringKey({self, other});
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* selfTensor = nil;
-      MPSGraphTensor* otherTensor = nil;
-      MPSGraphTensor* outputTensor = nil;
-
-      if (self.numel() == 0 || other.numel() == 0) {
-        outputTensor = [mpsGraph constantWithScalar:0. shape:getMPSShape(output_sizes) dataType:getMPSDataType(output)];
-
-      } else {
-        selfTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, self);
-        otherTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, other);
-        outputTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:selfTensor secondaryTensor:otherTensor name:nil];
-      }
-
-      newCachedGraph->inputTensor_ = selfTensor;
-      newCachedGraph->otherTensor_ = otherTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
+      std::tie(newCachedGraph->inputTensor_, newCachedGraph->otherTensor_, newCachedGraph->outputTensor_) =
+          do_mm(mpsGraph, self, other);
     });
-    Placeholder selfPlaceholder = Placeholder();
-    Placeholder otherPlaceholder = Placeholder();
+    auto selfPlaceholder = self.numel() != 0 ? Placeholder(cachedGraph->inputTensor_, self) : Placeholder();
+    auto otherPlaceholder = other.numel() != 0 ? Placeholder(cachedGraph->otherTensor_, other) : Placeholder();
+    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
-    if (!(self.numel() == 0 || other.numel() == 0)) {
-      selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-      otherPlaceholder = Placeholder(cachedGraph->otherTensor_, other);
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = self.numel() != 0 ? @{
+      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
+      otherPlaceholder.getMPSGraphTensor() : otherPlaceholder.getMPSGraphTensorData(),
     }
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
+                                                                                  : nil;
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = nil;
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
+      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData(),
+    };
 
-    if (!(self.numel() == 0 || other.numel() == 0))
-      feeds = @{
-        selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
-        otherPlaceholder.getMPSGraphTensor() : otherPlaceholder.getMPSGraphTensorData()
-      };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
   }
 
   return output;
 }
+
+enum LinearAlgebraOpType { ADDBMM_OP_TYPE, BADDBMM_OP_TYPE };
 
 static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
                                               const Tensor& batch1,
@@ -317,24 +366,12 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
 
   if (&output != &self) {
     output.resize_(bias_sizes);
-    if (beta.toComplexDouble() != 0.0) {
-      output.copy_(*bias_);
-    }
   }
-  IntArrayRef output_sizes = output.sizes();
-  if ((output_sizes[0] == 0) || (output_sizes[1] == 0)) {
+  if (output.numel() == 0) {
     return output;
   }
 
-  MPSStream* stream = getCurrentMPSStream();
-
-  bool transpose_mat1_times_mat2 = false;
-  bool transpose_mat1 = false;
-  bool transpose_mat2 = false;
   bool is_beta_non_zero = beta.toDouble() != 0.0;
-
-  prepare_matrices_for_broadcasting(
-      &(*bias_), self, other, &beta, &transpose_mat1_times_mat2, transpose_mat1, transpose_mat2);
 
   struct CachedGraph : public mps::MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -345,51 +382,33 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
   };
 
   @autoreleasepool {
-    string key = "addmm_out_mps_impl" + getTensorsStringKey({self, other, *bias_}) + ":" + to_string(transpose_mat1) +
-        ":" + to_string(transpose_mat2) + ":" + to_string(beta.toDouble()) + ":" + to_string(alpha.toDouble());
+    string key = "addmm_out_mps_impl" + getTensorsStringKey({self, other, *bias_}) + ":" + to_string(beta.toDouble()) +
+        ":" + to_string(alpha.toDouble());
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* selfTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, self);
-      MPSGraphTensor* otherTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, other);
-      MPSGraphTensor* biasTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, *bias_);
-
-      MPSGraphTensor* t1 = nil;
-      MPSGraphTensor* t2 = nil;
-
-      if (transpose_mat1)
-        t1 = [mpsGraph transposeTensor:selfTensor dimension:-1 withDimension:-2 name:nil];
-      else
-        t1 = selfTensor;
-
-      if (transpose_mat2)
-        t2 = [mpsGraph transposeTensor:otherTensor dimension:-1 withDimension:-2 name:nil];
-      else
-        t2 = otherTensor;
+      MPSGraphTensor* selfTensor = nil;
+      MPSGraphTensor* otherTensor = nil;
+      MPSGraphTensor* productTensor = nil;
+      MPSGraphTensor* biasTensor = mpsGraphRankedPlaceHolder(mpsGraph, *bias_);
 
       // TODO: Use alpha and beta here with fill_.Scalar and mul
-      // Intermediate as placeholder
-      MPSGraphTensor* productTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:t1
-                                                                      secondaryTensor:t2
-                                                                                 name:@"MM/(mat1@mat2)"];
+      std::tie(selfTensor, otherTensor, productTensor) = do_mm(mpsGraph, self, other);
 
-      // Intermediates for beta and alpha
-      MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta.toDouble()
-                                                       dataType:getMPSScalarType((*bias_).scalar_type())];
-      MPSGraphTensor* alphaTensor = [mpsGraph constantWithScalar:alpha.toDouble()
-                                                        dataType:getMPSScalarType(self.scalar_type())];
+      auto productTimesAlphaTensor = productTensor;
+      if (alpha.toDouble() != 1.0) {
+        auto alphaTensor = [mpsGraph constantWithScalar:alpha.toDouble() dataType:getMPSScalarType(self.scalar_type())];
 
-      // Intermediates for multiplying by beta and alpha
-      MPSGraphTensor* productTimesAlphaTensor = [mpsGraph multiplicationWithPrimaryTensor:productTensor
-                                                                          secondaryTensor:alphaTensor
-                                                                                     name:@"MM/alpha*(mat1@mat2)"];
-      MPSGraphTensor* biasTimesBetaTensor = biasTensor;
-      if (is_beta_non_zero) {
+        productTimesAlphaTensor = [mpsGraph multiplicationWithPrimaryTensor:productTensor
+                                                            secondaryTensor:alphaTensor
+                                                                       name:@"MM/alpha*(mat1@mat2)"];
+      }
+      auto biasTimesBetaTensor = biasTensor;
+      if (is_beta_non_zero && beta.toDouble() != 1.0) {
+        auto betaTensor = [mpsGraph constantWithScalar:beta.toDouble()
+                                              dataType:getMPSScalarType((*bias_).scalar_type())];
         biasTimesBetaTensor = [mpsGraph multiplicationWithPrimaryTensor:biasTensor
                                                         secondaryTensor:betaTensor
                                                                    name:@"MM/beta*input"];
       }
-
-      if (transpose_mat1_times_mat2)
-        biasTimesBetaTensor = [mpsGraph transposeTensor:biasTimesBetaTensor dimension:-1 withDimension:-2 name:nil];
 
       MPSGraphTensor* outputTensor = productTimesAlphaTensor;
       if (is_beta_non_zero) {
@@ -404,21 +423,23 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
       newCachedGraph->outputTensor_ = outputTensor;
     });
 
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->selfTensor_, self);
-    Placeholder otherPlaceholder = Placeholder(cachedGraph->otherTensor_, other);
+    Placeholder selfPlaceholder = self.numel() != 0 ? Placeholder(cachedGraph->selfTensor_, self) : Placeholder();
+    Placeholder otherPlaceholder = other.numel() != 0 ? Placeholder(cachedGraph->otherTensor_, other) : Placeholder();
     Placeholder biasPlaceholder = Placeholder(cachedGraph->biasTensor_, *bias_);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
-      otherPlaceholder.getMPSGraphTensor() : otherPlaceholder.getMPSGraphTensorData(),
-      biasPlaceholder.getMPSGraphTensor() : biasPlaceholder.getMPSGraphTensorData()
-    };
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = self.numel() != 0
+        ? @{
+            selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
+            otherPlaceholder.getMPSGraphTensor() : otherPlaceholder.getMPSGraphTensorData(),
+            biasPlaceholder.getMPSGraphTensor() : biasPlaceholder.getMPSGraphTensorData()
+          }
+        : @{biasPlaceholder.getMPSGraphTensor() : biasPlaceholder.getMPSGraphTensorData()};
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
         @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
 
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
   }
 
   return output;
@@ -488,6 +509,7 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
   using namespace mps;
 
   checkInputsSolver(A, B, left, "linalg.solve_triangular");
+  TORCH_CHECK(!A.is_complex() && !B.is_complex(), "linalg.solve.triangular(); Not supported for complex yet!");
   Tensor A_t, B_t;
   std::tie(B_t, A_t) = _linalg_broadcast_batch_dims(B, A, /*don't check errors*/ nullptr);
   at::native::resize_output(out, B_t.sizes());

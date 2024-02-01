@@ -94,18 +94,18 @@ const c10::FunctionSchema& GraphFunction::getSchema() const {
 
 std::shared_ptr<Graph> GraphFunction::optimized_graph() const {
   std::lock_guard<std::recursive_mutex> lock(compile_mutex);
-  decltype(optimized_graphs_)::value_type opt_graph;
-  auto& opt_graph_ref = !FLAGS_torch_jit_do_not_store_optimized_graph
+  decltype(optimized_graphs_)::value_type graph;
+  auto& graph_ref = !FLAGS_torch_jit_do_not_store_optimized_graph
       ? optimized_graphs_[currentSpecialization()]
-      : opt_graph;
-  if (opt_graph_ref) {
-    return opt_graph_ref.value();
+      : graph;
+  if (graph_ref) {
+    return graph_ref;
   }
-  opt_graph_ref = graph_->copy();
+  graph_ref = graph_->copy();
   if (getGraphExecutorOptimize()) {
-    preoptimizeGraph(opt_graph_ref.value(), force_no_amp_);
+    preoptimizeGraph(graph_ref, force_no_amp_);
   }
-  return opt_graph_ref.value();
+  return graph_ref;
 }
 
 GraphFunction::SpecializationKey GraphFunction::currentSpecialization() const {

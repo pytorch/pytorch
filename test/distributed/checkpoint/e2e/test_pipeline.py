@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import os
 import sys
 
 import torch
@@ -10,7 +11,7 @@ from torch.distributed.checkpoint.state_dict import get_state_dict, set_state_di
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
-from torch.testing._internal.common_utils import TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
@@ -102,3 +103,7 @@ class TestPipeline(FSDPTest):
         self.assertTrue(os.path.exists(pipeline_dir))
         self.save_with_pipeline(pipeline_dir)
         self.load_with_fsdp(pipeline_dir)
+
+
+if __name__ == "__main__":
+    run_tests()

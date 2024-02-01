@@ -566,6 +566,34 @@ static PyObject* THPVariable_view_func_unsafe(PyObject* self_, PyObject* arg) {
   return view_func_impl(self_, arg, /*check_has_same_meta=*/false);
 }
 
+static PyObject* rev_view_func_impl(PyObject* self_, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  const auto& self = THPVariable_Unpack(self_);
+  TORCH_CHECK(
+      THPVariable_Check(arg),
+      "_rev_view_func expect a single argument that is a Tensor");
+  const auto& new_view = THPVariable_Unpack(arg);
+
+  // Ensure that self is indeed a backward differentiable view
+  // If not, we return an undefined Tensor (None) and let the user handle it.
+  auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
+  at::Tensor out;
+  if (diff_view_meta && diff_view_meta->has_bw_view()) {
+    const auto& view_info = diff_view_meta->get_backward_view();
+    // Do the actual view replay
+    TORCH_CHECK(view_info.has_view_fn(), "No _rev_view_func() found");
+    out = view_info.rev_view_fn()(new_view);
+  }
+  return THPVariable_Wrap(std::move(out));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPVariable_rev_view_func_unsafe(
+    PyObject* self_,
+    PyObject* arg) {
+  return rev_view_func_impl(self_, arg);
+}
+
 // Instantiates a subclass of self with the same data.
 static PyObject* THPVariable_as_subclass(
     PyObject* _self,
@@ -579,10 +607,11 @@ static PyObject* THPVariable_as_subclass(
   ParsedArgs<1> parsed_args{};
   auto r = parser.parse(_self, args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
-  if (!PyType_Check(cls)) {
-    throw torch::TypeError(
-        "cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      PyType_Check(cls),
+      "cls must be a type (got ",
+      Py_TYPE(cls)->tp_name,
+      ")");
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
       self.alias(),
@@ -601,10 +630,11 @@ static PyObject* THPVariable_make_subclass(
   ParsedArgs<7> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
-  if (!PyType_Check(cls)) {
-    throw torch::TypeError(
-        "cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      PyType_Check(cls),
+      "cls must be a type (got ",
+      Py_TYPE(cls)->tp_name,
+      ")");
   // guard completely turns off torch dispatch modes, doesn't just pop off the
   // stack
   torch_dispatch_mode::StashTorchDispatchStackGuard td_g;
@@ -897,9 +927,8 @@ static int THPVariable_set_grad_fn(
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_setter(self, "_grad_fn", obj);
   }
-  THPUtils_assertRet(
-      -1, obj, "Deletion of _grad_fn not allowed. Detach tensor instead!");
-  THPUtils_assertRet(-1, obj == Py_None, "_grad_fn can be only set to None");
+  TORCH_CHECK(obj, "Deletion of _grad_fn not allowed. Detach tensor instead!");
+  TORCH_CHECK(obj == Py_None, "_grad_fn can be only set to None");
   THPVariable_Unpack(self).detach_();
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
@@ -919,12 +948,12 @@ int THPVariable_set_data(THPVariable* self, PyObject* data, void* unused) {
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_setter(self, "data", data);
   }
-  THPUtils_assertRet(
-      -1, data, "Deleting tensor data is not allowed. Delete tensor instead!");
-  if (!THPVariable_Check(data)) {
-    throw torch::TypeError(
-        "Variable data has to be a tensor, but got %s", Py_TYPE(data)->tp_name);
-  }
+  TORCH_CHECK(
+      data, "Deleting tensor data is not allowed. Delete tensor instead!");
+  TORCH_CHECK_TYPE(
+      THPVariable_Check(data),
+      "Variable data has to be a tensor, but got ",
+      Py_TYPE(data)->tp_name);
 
   THPVariable_Unpack(self).set_data(THPVariable_Unpack(data));
   return 0;
@@ -946,10 +975,8 @@ int THPVariable_set_grad(THPVariable* self, PyObject* py_grad, void* unused) {
       THPVariable_Check(py_grad),
       "assigned grad expected to be a Tensor or None but got grad of type ",
       THPUtils_typename(py_grad));
-  THPUtils_assertRet(
-      -1,
-      self != (THPVariable*)py_grad,
-      "can't assign Variable as its own grad");
+  TORCH_CHECK(
+      self != (THPVariable*)py_grad, "can't assign Variable as its own grad");
 
   const auto& grad = THPVariable_Unpack(py_grad);
   TORCH_CHECK(
@@ -1111,8 +1138,7 @@ int THPVariable_set_names(PyObject* self, PyObject* names, void* unused) {
   if (names == Py_None) {
     at::internal_set_names_inplace(var, at::nullopt);
   } else {
-    THPUtils_assertRet(
-        -1,
+    TORCH_CHECK(
         THPUtils_checkDimnameList(names),
         "names must either be None or a tuple of dim names");
     at::internal_set_names_inplace(var, torch::parseDimnameList(names));
@@ -1129,8 +1155,7 @@ int THPVariable_set_requires_grad(
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_setter(self, "requires_grad", obj);
   }
-  THPUtils_assertRet(
-      -1, obj && PyBool_Check(obj), "requires_grad must be a bool");
+  TORCH_CHECK(obj && PyBool_Check(obj), "requires_grad must be a bool");
   const auto& var = THPVariable_Unpack(self);
   auto requires_grad = (obj == Py_True);
   if (!var.is_leaf()) {
@@ -1182,7 +1207,7 @@ int THPVariable_set_backwards_hooks(
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_setter(self, "_backward_hooks", obj);
   }
-  THPUtils_assertRet(-1, obj, "Deletion of _backwards_hooks not allowed!");
+  TORCH_CHECK(obj, "Deletion of _backwards_hooks not allowed!");
   if (obj == Py_None) {
     obj = nullptr;
   }
@@ -1223,8 +1248,7 @@ int THPVariable_set_post_accumulate_grad_hooks(
     return handle_torch_function_setter(
         self, "_post_accumulate_grad_hooks", obj);
   }
-  THPUtils_assertRet(
-      -1, obj, "Deletion of _post_accumulate_grad_hooks not allowed!");
+  TORCH_CHECK(obj, "Deletion of _post_accumulate_grad_hooks not allowed!");
   if (obj == Py_None) {
     obj = nullptr;
   }
@@ -1646,6 +1670,10 @@ static PyMethodDef extra_methods[] = {
     {"_fix_weakref", THPVariable_fix_weakref, METH_NOARGS, nullptr},
     {"_view_func", THPVariable_view_func, METH_O, nullptr},
     {"_view_func_unsafe", THPVariable_view_func_unsafe, METH_O, nullptr},
+    {"_rev_view_func_unsafe",
+     THPVariable_rev_view_func_unsafe,
+     METH_O,
+     nullptr},
     {nullptr}};
 
 struct THPVariableMeta {

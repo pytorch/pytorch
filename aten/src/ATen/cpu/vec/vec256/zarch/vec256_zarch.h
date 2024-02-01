@@ -875,6 +875,20 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
     return ret._not();
   }
 
+  bool has_inf_nan() const {
+    for (const auto i : c10::irange(size()/2)) {
+      if(_isnan(_vec0[i]) || _isinf(_vec0[i])) {
+        return true;
+      }
+    }
+    for (const auto i : c10::irange(size()/2)) {
+      if(_isnan(_vec1[i]) || _isinf(_vec1[i])) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   template <
       typename U = T,
       std::enable_if_t<std::is_floating_point<U>::value, int> = 0>
@@ -1071,6 +1085,9 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
   }
   Vectorized<T> expm1() const {
     return mapSleef(Sleef_expm1f4_u10, Sleef_expm1d2_u10);
+  }
+  Vectorized<T> exp_u20() const {
+    return exp();
   }
 
   Vectorized<T> log() const {

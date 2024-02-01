@@ -13,12 +13,12 @@ _tensor_symint_registry = WeakTensorKeyDictionary()
 
 def get_tensor_symint(tensor, *, coeff=1):
     global _tensor_id_counter
-    if tensor not in _tensor_symint_registry:
-        _tensor_symint_registry[tensor] = torch._C._get_singleton_int(
-            _tensor_id_counter, coeff
-        )
+    tensor_symint = _tensor_symint_registry.get(tensor)
+    if tensor_symint is None:
+        tensor_symint = torch._C._get_singleton_int(_tensor_id_counter, coeff)
         _tensor_id_counter += 1
-    return _tensor_symint_registry[tensor]
+        _tensor_symint_registry[tensor] = tensor_symint
+    return tensor_symint
 
 
 # SDPA metadata; max / min seqlens are needed for e.g. flash
@@ -113,7 +113,7 @@ class NestedTensor(torch.Tensor):
         self._lengths = lengths
 
         # holds properties that are computed lazily
-        self._metadata_cache = kwargs.get("_metadata_cache", {})
+        self._metadata_cache = kwargs.get("_metadata_cache") or {}
 
         # collapsed ragged dim must always be dynamic
         torch._dynamo.mark_dynamic(self, self._ragged_idx)
@@ -260,15 +260,21 @@ class ViewBufferFromNested(torch.autograd.Function):
 # Not actually a view!
 class ViewNestedFromBuffer(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, values: torch.Tensor, offsets: torch.Tensor):  # type: ignore[override]
+    def forward(
+        ctx,
+        values: torch.Tensor,
+        offsets: torch.Tensor,
+        metadata_cache: Optional[Dict[str, Any]] = None,
+    ):  # type: ignore[override]
         return NestedTensor(
             values.detach(),
             offsets=offsets,
+            _metadata_cache=metadata_cache,
         )
 
     @staticmethod
     def backward(ctx, gO: NestedTensor):  # type: ignore[override]
-        return gO.values(), None
+        return gO.values(), None, None
 
 
 # Not actually a view!

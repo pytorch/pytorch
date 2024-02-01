@@ -9,11 +9,13 @@ from torch.testing._internal.control_flow_opinfo_db import control_flow_opinfo_d
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, OpDTypes)
+from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 
 # gradcheck requires double precision
 _gradcheck_ops = partial(ops, dtypes=OpDTypes.supported,
                          allowed_dtypes=[torch.double, torch.cdouble])
 
+@unMarkDynamoStrictTest
 class TestBwdGradients(TestGradients):
     # Tests that gradients are computed correctly
     @_gradcheck_ops(op_db + control_flow_opinfo_db + custom_op_db)

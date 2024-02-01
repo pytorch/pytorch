@@ -184,13 +184,11 @@ class ArrayRefTensor {
       MiniArrayRef<T> arr,
       MiniArrayRef<const int64_t> sizes,
       MiniArrayRef<const int64_t> strides,
-      int32_t dtype,
       int32_t device_type,
       int32_t device_idx)
       : arrayRef_(arr),
         sizes_(sizes),
         strides_(strides),
-        dtype_(dtype),
         device_type_(device_type),
         device_idx_(device_idx),
         numel_(arr.size()) {
@@ -205,7 +203,7 @@ class ArrayRefTensor {
         sizes_.size(),
         sizes_.data(),
         strides_.data(),
-        dtype_,
+        aoti_torch_dtype<std::remove_const_t<T>>(),
         device_type_,
         device_idx_,
         &result));
@@ -230,10 +228,6 @@ class ArrayRefTensor {
 
   auto strides() const {
     return strides_;
-  }
-
-  auto dtype() const {
-    return dtype_;
   }
 
   auto device_type() const {
@@ -262,7 +256,6 @@ class ArrayRefTensor {
   // strides for us.
   MiniArrayRef<const int64_t> sizes_;
   MiniArrayRef<const int64_t> strides_;
-  int32_t dtype_ = 0;
   int32_t device_type_ = 0;
   int32_t device_idx_ = 0;
   int32_t numel_ = 0;
@@ -295,7 +288,6 @@ inline ArrayRefTensor<T> reinterpret_tensor_wrapper(
           self.data() + storage_offset, self.numel() - storage_offset),
       MiniArrayRef<const int64_t>(sizes_ptr, ndim),
       MiniArrayRef<const int64_t>(strides_ptr, ndim),
-      self.dtype(),
       self.device_type(),
       self.device_idx());
 }

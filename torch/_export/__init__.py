@@ -3,10 +3,9 @@ import dataclasses
 import functools
 import io
 import json
-import pathlib
+import os
 import re
 import sys
-import os
 import types
 import warnings
 import weakref
@@ -22,9 +21,8 @@ import sympy
 import torch
 import torch._dynamo
 import torch.fx
-import torch.fx._pytree as fx_pytree
-
 import torch.utils._pytree as pytree
+
 from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.exc import UserError, UserErrorType
@@ -35,6 +33,8 @@ from torch._functorch.eager_transforms import functionalize
 from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.functional_tensor import FunctionalTensor
+from torch.export._tree_utils import reorder_kwargs
 from torch.export.exported_program import (
     ExportedProgram,
     ModuleCallEntry,
@@ -55,10 +55,12 @@ from torch.export.graph_signature import (
 )
 from torch.export.dynamic_shapes import (
     Constraint,
+    dims,
     dynamic_dim,
     _process_constraints,
     _process_dynamic_shapes,
 )
+from torch.export._unlift import _create_stateful_graph_module
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
@@ -72,61 +74,13 @@ from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.utils._sympy.value_ranges import ValueRangeError, ValueRanges
 
 from .exported_program import (
-    _create_stateful_graph_module,
     CallSpec,
 )
 from .passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
 )
-from .passes.lift_constant_tensor_pass import lift_constant_tensor_pass
-from .passes.remove_runtime_assertions import _RemoveRuntimeAssertionsPass
-from .passes.replace_sym_size_ops_pass import _replace_sym_size_ops_pass
-from .passes.replace_view_ops_with_view_copy_ops_pass import (
-    ReplaceViewOpsWithViewCopyOpsPass,
-)
 from .wrappers import _wrap_submodules
 from torch._inductor import config
-
-
-def export__RC__(
-    f: Callable,
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
-    *,
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
-    strict: bool = True,
-    preserve_module_call_signature: Tuple[str, ...] = (),
-) -> ExportedProgram:
-    """
-    API for exporting with dynamic shape specifications instead of constraints.
-    It should be considered "release candidate" (RC), meant to replace `export`.
-
-    Here, `dynamic_shapes` is expected to be a dict from
-    argument names of `f` to dynamic shape specifications OR a tuple where each element
-    corresponds to the original order of the arguments defined in the function signature
-    ,as follows:
-    - The dynamic shape of a tensor argument can be specified as:
-      - Either a dict from dynamic dimension indices to Dim types. It is not
-        required to include static dimension indices in this dict, but when
-        they are, they should be mapped to None.
-      - Or a tuple of Dim types or None. The Dim types correspond to dynamic
-        dimensions, whereas static dimensions are denoted by None.
-    - Arguments that are dicts or tuples of tensors are recursively specified
-      by using mappings or sequences of contained specifications.
-
-    See `export` for documentation of `f`, `args`, `kwargs` and return.
-    """
-    from torch.export._trace import _export
-
-    constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
-    return _export(
-        f,
-        args,
-        kwargs,
-        constraints=constraints,
-        strict=strict,
-        preserve_module_call_signature=preserve_module_call_signature
-    )
 
 
 @dataclasses.dataclass
@@ -137,15 +91,13 @@ class ExportDynamoConfig:
     allow_rnn: bool = True
 
 
-DECOMP_TABLE = core_aten_decompositions()
-
-
 @compatibility(is_backward_compatible=False)
 def capture_pre_autograd_graph(
     f: Callable,
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
     constraints: Optional[List[Constraint]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
 ) -> torch.nn.Module:
     """
     A helper function that is intended to trace a module before any pre-autograd
@@ -160,25 +112,51 @@ def capture_pre_autograd_graph(
 
       kwargs: optional example keyword inputs.
 
-      constraints: A optional list of constraints on the dynamic arguments specifying
-            their possible range of their shapes
+      constraints: [DEPRECATED: use ``dynamic_shapes`` instead, see below]
+         An optional list of constraints on the dynamic arguments
+         that specify their possible range of shapes. By default, shapes of
+         input torch.Tensors are assumed to be static. If an input torch.Tensor
+         is expected to have dynamic shapes, please use :func:`dynamic_dim`
+         to define :class:`Constraint` objects that specify the dynamics and the possible
+         range of shapes. See :func:`dynamic_dim` docstring for examples on
+         how to use it.
+
+      dynamic_shapes: Should either be:
+         1) a dict from argument names of ``f`` to their dynamic shape specifications,
+         2) a tuple that specifies dynamic shape specifications for each input in original order.
+         If you are specifying dynamism on keyword args, you will need to pass them in the order that
+         is defined in the original function signature.
+
+         The dynamic shape of a tensor argument can be specified as either
+         (1) a dict from dynamic dimension indices to :func:`Dim` types, where it is
+         not required to include static dimension indices in this dict, but when they are,
+         they should be mapped to None; or (2) a tuple / list of :func:`Dim` types or None,
+         where the :func:`Dim` types correspond to dynamic dimensions, and static dimensions
+         are denoted by None. Arguments that are dicts or tuples / lists of tensors are
+         recursively specified by using mappings or sequences of contained specifications.
 
     Returns:
         An nn.Module containing the traced method.
 
     """
     from torch.export._trace import _convert_input_to_fake, DEFAULT_EXPORT_DYNAMO_CONFIG
-
-    decomp_table = {
-        torch.ops.aten.dropout.default: torch.ops.aten.dropout.default.decompose,
-        torch.ops.aten.batch_norm.default: torch.ops.aten.batch_norm.default.decompose,
-        torch.ops.aten._batch_norm_impl_index.default: torch.ops.aten._batch_norm_impl_index.default.decompose,
-        torch.ops.aten.native_batch_norm.default: torch.ops.aten.native_batch_norm.default.decompose,
-    }
+    from torch.export.dynamic_shapes import _process_dynamic_shapes
 
     if kwargs is None:
         kwargs = {}
 
+    if constraints is not None:
+        warnings.warn(
+            "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
+            "and will not be supported in the future. "
+            "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    else:
+        constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
+
+    decomp_table = {op: op.decompose for op in FunctionalTensor.maybe_aliasing_or_mutating_ops}
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
         m = torch._dynamo.export(
             f,
@@ -193,12 +171,6 @@ def capture_pre_autograd_graph(
             **kwargs,
         )[0]
 
-        def _train(self, mode: bool = True):
-            raise NotImplementedError("Calling train() is not supported yet.")
-
-        def _eval(self, mode: bool = True):
-            raise NotImplementedError("Calling eval() is not supported yet.")
-
         _, _, _, fake_mode = _convert_input_to_fake(m, args, kwargs)
 
         m.meta["inline_constraints"] = {
@@ -207,36 +179,26 @@ def capture_pre_autograd_graph(
             if re.match(r"^[if]\d+$", str(k))
         }
 
+        if isinstance(f, torch.nn.Module):
+            from torch.export._trace import _restore_state_dict
+            _restore_state_dict(f, m)
+
         flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
-        range_constraints, equality_constraints = _process_constraints(m, 0, flat_args)
-        unlifted_m = _create_stateful_graph_module(
+        range_constraints = _process_constraints(m, 0, flat_args)
+        module = _create_stateful_graph_module(
             m,
             range_constraints=range_constraints,
-            equality_constraints=equality_constraints,
         )
-        unlifted_m.train = types.MethodType(_train, m)  # type: ignore[method-assign]
-        unlifted_m.eval = types.MethodType(_eval, m)  # type: ignore[method-assign]
-        return unlifted_m
 
+    def _train(self, mode: bool = True):
+        raise NotImplementedError("Calling train() is not supported yet.")
 
-def _export_to_torch_ir(
-    f: Callable,
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
-    constraints: Optional[List[Constraint]] = None,
-    *,
-    preserve_module_call_signature: Tuple[str, ...] = (),
-    disable_constraint_solver: bool = False,
-) -> torch.fx.GraphModule:
-    from torch.export._trace import _export_to_torch_ir
-    return _export_to_torch_ir(
-        f,
-        args,
-        kwargs,
-        constraints,
-        preserve_module_call_signature=preserve_module_call_signature,
-        disable_constraint_solver=disable_constraint_solver
-    )
+    def _eval(self, mode: bool = True):
+        raise NotImplementedError("Calling eval() is not supported yet.")
+
+    module.train = types.MethodType(_train, module)  # type: ignore[method-assign]
+    module.eval = types.MethodType(_eval, module)  # type: ignore[method-assign]
+    return module
 
 
 def export(
@@ -249,6 +211,7 @@ def export(
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     from torch.export._trace import _export
+    warnings.warn("This function is deprecated. Please use torch.export.export instead.")
 
     if constraints is not None:
         warnings.warn(
@@ -268,153 +231,31 @@ def export(
     )
 
 
-def _export_non_strict(
-    mod,
-    fake_args,
-    fake_kwargs,
-    fake_params_buffers,
-    *,
-    transform=lambda x: x  # TODO(zhxchen17) Revisit if this is needed later.
-):
-    # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
-    # otherwise aot_export_module will error out because it sees a mix of fake_modes.
-    # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
-    with torch.nn.utils.stateless._reparametrize_module(mod, fake_params_buffers):
-        gm, graph_signature = transform(aot_export_module)(
-            mod,
-            (*fake_args, *fake_kwargs.values()),
-            trace_joint=False
-        )
-
-    # NOTE: aot_export adds symint metadata for placeholders with int values;
-    # since these become specialized, we replace such metadata with the original values
-    flat_args = pytree.tree_leaves((fake_args, fake_kwargs))
-    index = 0
-    total_param_buffers = len(graph_signature.parameters) + len(graph_signature.buffers)
-    for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            if index >= total_param_buffers:
-                user_arg = flat_args[index - total_param_buffers]
-                if not isinstance(user_arg, torch.Tensor):
-                    node.meta["val"] = user_arg
-            index += 1
-
-    is_joint = graph_signature.backward_signature is not None
-
-    def make_argument_spec(node) -> ArgumentSpec:
-        assert "val" in node.meta, f"{node} has no 'val' metadata field"
-        val = node.meta["val"]
-        if isinstance(val, FakeTensor):
-            return TensorArgument(name=node.name)
-        elif isinstance(val, torch.SymInt):
-            return SymIntArgument(name=node.name)
-        else:
-            return ConstantArgument(value=val)
-
-    input_specs, output_specs = _sig_to_specs(
-        user_inputs=set(graph_signature.user_inputs),
-        inputs_to_parameters=graph_signature.inputs_to_parameters,  # type: ignore[arg-type]
-        inputs_to_buffers=graph_signature.inputs_to_buffers,  # type: ignore[arg-type]
-        user_outputs=set(graph_signature.user_outputs),  # type: ignore[arg-type]
-        buffer_mutations=graph_signature.buffers_to_mutate,  # type: ignore[arg-type]
-        user_input_mutations=gm.meta.get("user_inputs_to_mutate", {}),  # type: ignore[arg-type]
-        grad_params=graph_signature.backward_signature.gradients_to_parameters if is_joint else {},  # type: ignore[arg-type, union-attr]
-        grad_user_inputs=graph_signature.backward_signature.gradients_to_user_inputs if is_joint else {},  # type: ignore[arg-type, union-attr]
-        loss_output=graph_signature.backward_signature.loss_output if is_joint else None,  # type: ignore[arg-type, union-attr]
-        inputs=[make_argument_spec(node) for node in gm.graph.nodes if node.op == "placeholder"],
-        outputs=[make_argument_spec(node) for node in pytree.tree_leaves(next(iter(reversed(gm.graph.nodes))).args)],
-    )
-    export_graph_signature = ExportGraphSignature(input_specs=input_specs, output_specs=output_specs)
-
-    tensor_constants = lift_constant_tensor_pass(gm, export_graph_signature)
-
-    @dataclasses.dataclass
-    class _ExportedProgramNonStrict:
-        gm: torch.fx.GraphModule
-        sig: ExportGraphSignature
-        tensor_constants: Dict[str, torch.Tensor]
-
-    return _ExportedProgramNonStrict(
-        gm,
-        export_graph_signature,
-        tensor_constants,
-    )
-
-
-def _get_params_buffers(mod: torch.nn.Module) -> Dict[str, torch.Tensor]:
-    params_buffers: Dict[str, torch.Tensor] = {}
-    for name, param in mod.named_parameters(remove_duplicate=False):
-        params_buffers[name] = param
-
-    for name, buffer in mod.named_buffers(remove_duplicate=False):
-        params_buffers[name] = buffer
-    return params_buffers
-
-
-@_disable_prexisiting_fake_mode
-def _export(
-    f: Callable,
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
-    constraints: Optional[List[Constraint]] = None,
-    *,
-    strict: bool = True,
-    preserve_module_call_signature: Tuple[str, ...] = (),
-) -> ExportedProgram:
-    """
-    Traces either an nn.Module's forward function or just a callable with PyTorch
-    operations inside and produce a ExportedProgram.
-
-    Args:
-        m: the `nn.Module` or callable to trace.
-
-        args: example positional inputs.
-
-        kwargs: optional example keyword inputs.
-
-        constraints: A optional list of constraints on the dynamic arguments specifying
-            their possible range of their shapes
-
-        preserve_module_call_signature: A list of submodule paths for which the original
-            calling conventions are preserved as metadata.
-
-    Returns:
-        An ExportedProgram containing the traced method.
-    """
-    from torch.export._trace import _export
-
-    return _export(
-        f,
-        args,
-        kwargs,
-        constraints,
-        strict=strict,
-        preserve_module_call_signature=preserve_module_call_signature,
-    )
-
-
 def save(
     ep: ExportedProgram,
-    f: Union[str, pathlib.Path, io.BytesIO],
+    f: Union[str, os.PathLike, io.BytesIO],
     *,
     extra_files: Optional[Dict[str, Any]] = None,
     opset_version: Optional[Dict[str, int]] = None,
 ) -> None:
+    if not isinstance(ep, ExportedProgram):
+        raise TypeError(f"save() expects an ExportedProgram but got {type(ep)}")
+
     from .serde.serialize import serialize, SerializedArtifact
     from .serde.schema import SCHEMA_VERSION
     artifact: SerializedArtifact = serialize(ep, opset_version)
 
-    if isinstance(f, (str, pathlib.Path)):
-        f = str(f)
+    if isinstance(f, (str, os.PathLike)):
+        f = os.fspath(f)
 
     with zipfile.ZipFile(f, 'w') as zipf:
         # Save every field the SerializedArtifact to a file
-        for field in dataclasses.fields(artifact):
-            field_name = field.name
-            serialized_field = getattr(artifact, field_name)
-            zipf.writestr(f"serialized_{field_name}.json", serialized_field)
+        assert isinstance(artifact.exported_program, bytes)
+        zipf.writestr("serialized_exported_program.json", artifact.exported_program)
+        zipf.writestr("serialized_state_dict.pt", artifact.state_dict)
+        zipf.writestr("serialized_constants.pt", artifact.constants)
 
-        zipf.writestr('version', str(SCHEMA_VERSION))
+        zipf.writestr('version', ".".join(map(str, SCHEMA_VERSION)))
 
         # Add extra files if provided
         if extra_files:
@@ -424,20 +265,23 @@ def save(
 
 
 def load(
-    f: Union[str, pathlib.Path, io.BytesIO],
+    f: Union[str, os.PathLike, io.BytesIO],
     *,
     extra_files: Optional[Dict[str, Any]] = None,
     expected_opset_version: Optional[Dict[str, int]] = None,
 ) -> ExportedProgram:
-    if isinstance(f, (str, pathlib.Path)):
-        f = str(f)
+    if isinstance(f, (str, os.PathLike)):
+        f = os.fspath(f)
+
+    extra_files = extra_files or {}
 
     with zipfile.ZipFile(f, 'r') as zipf:
         # Check the version
-        version = int(zipf.read('version'))
+        version = zipf.read('version').decode().split('.')
         from .serde.schema import SCHEMA_VERSION
 
-        if version != SCHEMA_VERSION:
+        assert len(version) == len(SCHEMA_VERSION)
+        if version[0] != str(SCHEMA_VERSION[0]):
             raise RuntimeError(
                 f"Serialized version {version} does not match our current "
                 f"schema version {SCHEMA_VERSION}."
@@ -446,20 +290,41 @@ def load(
         from .serde.serialize import deserialize, SerializedArtifact
 
         # Load serialized_ep and serialized_state_dict from the zip file
+
+        serialized_exported_program: Optional[bytes] = None
+        serialized_state_dict: Optional[bytes] = None
+        serialized_constants: Optional[bytes] = None
+
+        for file_info in zipf.infolist():
+            file_content = zipf.read(file_info.filename)
+
+            if file_info.filename == "serialized_exported_program.json":
+                serialized_exported_program = file_content
+            elif file_info.filename == "serialized_state_dict.json":
+                warnings.warn("This version of file is deprecated")
+                serialized_state_dict = file_content
+            elif file_info.filename == "serialized_constants.json":
+                warnings.warn("This version of file is deprecated")
+                serialized_constants = file_content
+            elif file_info.filename == "serialized_state_dict.pt":
+                serialized_state_dict = file_content
+            elif file_info.filename == "serialized_constants.pt":
+                serialized_constants = file_content
+            elif file_info.filename.startswith("extra_files"):
+                filename = file_info.filename.split("/", 1)[1]
+                extra_files[filename] = file_content.decode('utf-8')
+
+        assert serialized_exported_program is not None
+        assert serialized_state_dict is not None
+        assert serialized_constants is not None
         artifact: SerializedArtifact = SerializedArtifact(
-            **{
-                field.name: zipf.read(f"serialized_{field.name}.json")
-                for field in dataclasses.fields(SerializedArtifact)
-            }
+            serialized_exported_program,
+            serialized_state_dict,
+            serialized_constants,
         )
 
         # Deserialize ExportedProgram
-        ep = deserialize(artifact)
-
-        # Populate extra_files map
-        if extra_files is not None:
-            for filename in extra_files.keys():
-                extra_files[filename] = zipf.read(f"extra_files/{filename}").decode('utf-8')
+        ep = deserialize(artifact, expected_opset_version)
 
         return ep
 
@@ -511,13 +376,14 @@ def aot_compile(
             "Please use dynamic_shapes instead."
         )
 
+    from torch.export._trace import _export_to_torch_ir
     from torch._inductor.decomposition import select_decomp_table
 
     if constraints is None:
         constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
 
     if config.is_predispatch:
-        gm = capture_pre_autograd_graph(f, args, kwargs, constraints)
+        gm = torch.export._trace._export(f, args, kwargs, constraints, pre_dispatch=True).module()
     else:
         # We want to export to Torch IR here to utilize the pre_grad passes in
         # inductor, which run on Torch IR.
@@ -526,7 +392,10 @@ def aot_compile(
             args,
             kwargs,
             constraints,
-            disable_constraint_solver=disable_constraint_solver
+            disable_constraint_solver=disable_constraint_solver,
+            # Disabling this flag, because instead we can rely on the mapping
+            # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
+            restore_fqn=False,
         )
     flat_example_inputs = pytree.arg_tree_leaves(*args, **(kwargs or {}))
 
@@ -534,3 +403,30 @@ def aot_compile(
         so_path = torch._inductor.aot_compile(gm, flat_example_inputs, options)  # type: ignore[arg-type]
 
     return so_path
+
+def aot_load(so_path: str, device: str) -> Callable:
+    """
+    Loads a shared library generated by aot_compile and returns a callable
+
+    Args:
+        so_path: Path to the shared library
+
+    Returns:
+        A callable
+    """
+    if device == "cpu":
+        runner = torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)  # type: ignore[call-arg]
+    elif device == "cuda" or device.startswith("cuda:"):
+        runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)  # type: ignore[assignment, call-arg]
+    else:
+        raise RuntimeError("Unsupported device " + device)
+
+    def optimized(*args, **kwargs):
+        call_spec = runner.get_call_spec()  # type: ignore[attr-defined]
+        in_spec = pytree.treespec_loads(call_spec[0])
+        out_spec = pytree.treespec_loads(call_spec[1])
+        flat_inputs = pytree.tree_flatten((args, reorder_kwargs(kwargs, in_spec)))[0]
+        flat_outputs = runner.run(flat_inputs)  # type: ignore[attr-defined]
+        return pytree.tree_unflatten(flat_outputs, out_spec)
+
+    return optimized

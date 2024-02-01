@@ -236,6 +236,7 @@ __all__ = [
     "atleast_3d",
     "as_strided",
     "as_strided_scatter",
+    "block_diag",
     "broadcast_shapes",
     "broadcast_tensors",
     "broadcast_to",
@@ -869,13 +870,19 @@ def reciprocal(a):
     return prims.reciprocal(a)
 
 
-# TODO: round takes additional kwargs
-@_make_elementwise_unary_reference(
-    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    aten_op=None,  # TODO: this does need a decomp, but kwarg handling is needed
+@register_decomposition(aten.round)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
-def round(a):
-    return prims.round(a)
+def round(a: TensorLikeType, *, decimals: int = 0) -> TensorLikeType:
+    if decimals == 0:
+        return prims.round(a)
+    else:
+        ten_pow = 10**decimals
+        ten_neg_pow = 10 ** (-decimals)
+        return prims.mul(prims.round(prims.mul(a, ten_pow)), ten_neg_pow)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -1663,16 +1670,19 @@ def remainder(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 
 # reverse sub
+@register_decomposition(aten.rsub)
+@out_wrapper()
 def rsub(
     a: Union[TensorLikeType, NumberType],
     b: Union[TensorLikeType, NumberType],
     *,
-    alpha: Optional[NumberType] = None,
+    alpha: NumberType = 1,
 ):
     if isinstance(a, Number):
         msg = "Received a Number for the first argument, but expected a Tensor"
         raise ValueError(msg)
-    return sub(b, a, alpha=alpha)
+
+    return torch.sub(b, a, alpha=alpha)
 
 
 # TODO: consider refactoring this with add impl
@@ -1687,7 +1697,7 @@ def sub(
     a: Union[TensorLikeType, NumberType],
     b: Union[TensorLikeType, NumberType],
     *,
-    alpha: Optional[NumberType] = None,
+    alpha: NumberType = 1,
 ):
     """
     Reference implementation of torch.sub
@@ -1695,7 +1705,7 @@ def sub(
 
     a, b = _maybe_broadcast(a, b)
 
-    if alpha is not None:
+    if alpha != 1:
         dtype = a.dtype if isinstance(a, TensorLike) else b.dtype  # type: ignore[union-attr]
         python_type = utils.dtype_to_type(dtype)
         if not utils.is_weakly_lesser_type(type(alpha), python_type):
@@ -4277,6 +4287,53 @@ def diag_embed(
     return utils.mask_tensor(cond, t).contiguous()
 
 
+@register_decomposition(aten.block_diag)
+@out_wrapper()
+def _block_diag_iterable(tensors: List[TensorLikeType]) -> TensorLikeType:
+    """
+    Reference implementation of torch.block_diag
+    """
+    tensors_2d = [
+        tensor.view(1, -1) if tensor.dim() <= 1 else tensor for tensor in tensors
+    ]
+
+    ncols = builtins.sum(tensor.shape[1] for tensor in tensors_2d)
+    device = tensors_2d[0].device
+
+    result = []
+
+    col_start = 0
+    for i, tensor in enumerate(tensors_2d):
+        torch._check(
+            tensor.dim() == 2,
+            lambda: "Input tensors must have 2 or fewer dimensions. "
+            f"Input {i} has {tensor.dim()} dimensions",
+        )
+        torch._check(
+            tensor.device == device,
+            lambda: "Input tensors must all be on the same device. "
+            f"Input 0 is on device {device} and input {i} is on device {tensor.device}.",
+        )
+        row, col = tensor.shape
+        left = torch.zeros((row, col_start), device=device, dtype=tensor.dtype)
+        right = torch.zeros(
+            (row, ncols - col_start - col), device=device, dtype=tensor.dtype
+        )
+        result += [torch.cat((left, tensor, right), dim=1)]
+        col_start += col
+
+    return torch.cat(result, dim=0)
+
+
+def block_diag(*tensors: List[TensorLikeType]) -> TensorLikeType:
+    """
+    This is used as an input to PythonRefInfo. `torch.block_diag`
+    expects arguments splatted, but `aten.block_diag` expects only
+    one argument that is a list of Tensors.
+    """
+    return _block_diag_iterable(tensors)
+
+
 # CompositeImplicitAutograd - don't register decomp
 def dsplit(a: TensorLikeType, sections: DimsType) -> TensorSequenceType:
     if a.ndim < 3:
@@ -4827,16 +4884,16 @@ def arange(
     # other integral dtypes we don't. Weird... but needed to match ATen shapes.
     if dtype == torch.int64:
         # Uses floordiv to avoid ceil in inductor.
-        sgn = bool(xstep > 0) - bool(xstep < 0)
-        length = (xend - xstart + xstep - sgn) // xstep
+        sgn = bool(xstep > 0) - bool(xstep < 0)  # type: ignore[possibly-undefined]
+        length = (xend - xstart + xstep - sgn) // xstep  # type: ignore[possibly-undefined]
     else:
         length = math.ceil((end - start) / step)
 
     if is_integer:
         return prims.iota(
             length,
-            start=xstart,
-            step=xstep,
+            start=xstart,  # type: ignore[possibly-undefined]
+            step=xstep,  # type: ignore[possibly-undefined]
             dtype=dtype,
             device=device,
             requires_grad=requires_grad,

@@ -275,16 +275,20 @@
   - wanchaol
   - fduwjj
   - H-Huang
-  - aazzolini
   - kwen2501
   - XilunWu
   - wz337
   - awgu
   - fegin
-  - kumpera
-  - yhcharles
+  - kurman
+  - LucasLLC
+  - sanketpurandare
+  - shuqiangzhang
+  - tianyu-l
   - kiukchung
   - d4l3k
+  - shuqiangzhang
+  - weifengpy
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -351,16 +355,22 @@
   - Lint
   - pull
 
-- name: x86 CPU quantization
+- name: CPU inductor
   patterns:
-  - torch/ao/quantization/quantizer/x86_inductor_quantizer.py
+  - torch/_inductor/fx_passes/mkldnn_fusion.py
   - torch/_inductor/fx_passes/quantization.py
-  - test/quantization/core/test_quantized_op.py
+  - torch/_inductor/codegen/cpp.py
   - test/inductor/test_mkldnn_pattern_matcher.py
+  - test/inductor/test_cpu_repo.py
+  - test/inductor/test_cpu_cpp_wrapper.py
+  - aten/src/ATen/native/quantized/cpu/**
+  - test/quantization/core/test_quantized_op.py
+  - torch/ao/quantization/quantizer/x86_inductor_quantizer.py
   - test/quantization/pt2e/test_x86inductor_quantizer.py
   approved_by:
   - leslie-fang-intel
   - jgong5
+  - EikanWang
   mandatory_checks_name:
   - EasyCLA
   - Lint

@@ -303,6 +303,7 @@ struct AttentionKernel {
           return false;
         }
         q_strideM = q_strideH;
+        bias_strideM = bias_strideH;
         num_queries = num_heads;
         num_heads = 1; // unused but here for intent
         // remove causal since n_query = 1
