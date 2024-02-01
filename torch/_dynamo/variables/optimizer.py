@@ -62,6 +62,14 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 ret_val = self.value._init_group(*py_args, **py_kwargs)
                 self.map_sources_and_install_guards(tx)
                 self.update_list_args(tx, args, kwargs, py_args, py_kwargs)
+                # this next line has the side effect of installing guards
+                # It must be executed after update_list_args, as we first need to
+                # place the guards on the args / kwargs and then on the param_groups
+                from .builder import VariableBuilder
+
+                VariableBuilder(tx, AttrSource(self.source, "param_groups"))(
+                    self.value.param_groups
+                ).recursive_realize()
                 # stash a weak_ptr to optimizer to invalidate code
                 # if the optimizer object dies
                 mangled_name = f"__optimizer_{id(self.value)}"
@@ -109,8 +117,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
         return new_args, new_kwargs
 
     def map_sources_and_install_guards(self, tx):
-        from .builder import VariableBuilder
-
         self.grad_to_source = {}
         self.tensor_to_source = {}
 
@@ -152,11 +158,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
                     )
                 else:
                     raise GuardInstallException()
-
-        # this next line has the side effect of installing guards
-        VariableBuilder(tx, AttrSource(self.source, "param_groups"))(
-            self.value.param_groups
-        ).recursive_realize()
 
     def wrap_tensor(self, tx, tensor_value):
         """Wrap state tensor in a TensorVariable"""
