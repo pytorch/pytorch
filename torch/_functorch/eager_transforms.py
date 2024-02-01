@@ -1015,7 +1015,7 @@ def safe_unflatten(tensor, dim, shape):
 
 
 @exposed_in("torch.func")
-def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, randomness: str = "error"):
+def jacfwd(func: Callable, argnums: Optional[argnums_t] = 0, has_aux: bool = False, *, randomness: str = "error"):
     """
     Computes the Jacobian of ``func`` with respect to the arg(s) at index
     ``argnum`` using forward-mode autodiff
@@ -1023,8 +1023,9 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
     Args:
         func (function): A Python function that takes one or more arguments,
             one of which must be a Tensor, and returns one or more Tensors
-        argnums (int or Tuple[int]): Optional, integer or tuple of integers,
+        argnums (int or Tuple[int, ...]): Optional, integer or tuple of integers,
             saying which arguments to get the Jacobian with respect to.
+            If None, the Jacobian is computed with respect to all inputs.
             Default: 0.
         has_aux (bool): Flag indicating that ``func`` returns a
             ``(output, aux)`` tuple where the first element is the output of
