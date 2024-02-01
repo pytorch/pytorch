@@ -3,7 +3,6 @@
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
 #include <ATen/native/cuda/Pow.cuh>
-#include <utility>
 
 namespace at {
 namespace native {
@@ -18,25 +17,20 @@ constexpr uint8_t kExpAvgIdx = 2;
 constexpr uint8_t kExpAvgSqIdx = 3;
 constexpr uint8_t kMaxExpAvgSqIdx = 4;
 
-template <
-    typename scalar_type,
-    typename opmath_t,
-    int depth,
-    ADAM_MODE adam_mode,
-    bool amsgrad>
-C10_DEVICE inline void adam_math(
+template <typename scalar_type, typename opmath_t, int depth = 4>
+C10_DEVICE __forceinline__ void adam_math(
     scalar_type r_args[depth][kILP],
-    const double& lr,
-    const double& beta1,
-    const double& beta2,
-    const double& weight_decay,
-    const double& eps,
-    const bool& maximize,
+    const float* step_count,
+    const double lr,
+    const double beta1,
+    const double beta2,
+    const double weight_decay,
+    const double eps,
+    const bool maximize,
+    const bool amsgrad,
     const float* grad_scale_ptr,
     const float* found_inf_ptr,
-    const opmath_t& bias_correction1,
-    const opmath_t& bias_correction2_sqrt) {
-  static_assert(depth == 4 || depth == 5);
+    const ADAM_MODE adam_mode) {
 #pragma unroll
   for (int ii = 0; ii < kILP; ii++) {
     // Load values.
@@ -57,17 +51,23 @@ C10_DEVICE inline void adam_math(
     }
     // Update param, grad, 1st and 2nd order momentum.
     if (weight_decay != 0) {
-      if constexpr (adam_mode == ADAM_MODE::ORIGINAL) {
-        grad += param * weight_decay;
-      } else if constexpr (adam_mode == ADAM_MODE::ADAMW) {
-        param -= lr * weight_decay * param;
+      switch (adam_mode) {
+        case ADAM_MODE::ORIGINAL:
+          grad += param * weight_decay;
+          break;
+        case ADAM_MODE::ADAMW:
+          param -= lr * weight_decay * param;
+          break;
       }
     }
     // todo(crcrpar): use lerp
     // ref: https://developer.nvidia.com/blog/lerp-faster-cuda/
     exp_avg = beta1 * exp_avg + (1 - beta1) * grad;
     exp_avg_sq = beta2 * exp_avg_sq + (1 - beta2) * grad * grad;
+    const opmath_t bias_correction1 = 1 - at::native::pow_(beta1, *step_count);
     const opmath_t step_size = lr / bias_correction1;
+    const opmath_t bias_correction2 = 1 - at::native::pow_(beta2, *step_count);
+    const opmath_t bias_correction2_sqrt = std::sqrt(bias_correction2);
     opmath_t denom;
     if (amsgrad) {
       max_exp_avg_sq = std::max(max_exp_avg_sq, exp_avg_sq);
@@ -102,93 +102,90 @@ C10_DEVICE inline void adam_math(
 // parameter updates accordingly. To be functionally on par with `torch.optim`
 // optimizers and `_multi_tensor` ones, the kernel below writes out gradients
 // only when `grad_scale_ptr != nullptr.
-template <typename scalar_type, int depth, ADAM_MODE adam_mode, bool amsgrad>
+template <typename scalar_type, int depth = 4>
 struct FusedAdamMathFunctor {
   static_assert(
       depth == 4 || depth == 5,
       "depth of 4 for Adam, depth of 5 for Adam with AMSGrad.");
   using opmath_t = at::opmath_type<scalar_type>;
-  template <typename index_t>
-  C10_DEVICE inline void operator()(
-      const index_t& chunk_size,
+  C10_DEVICE __forceinline__ void operator()(
+      int chunk_size,
       FusedOptimizerTensorListMetadata<depth>& tl,
       const float* lr_ptr,
-      const double& lr,
-      const double& beta1,
-      const double& beta2,
-      const double& weight_decay,
-      const double& eps,
-      const bool& maximize,
+      const double lr,
+      const double beta1,
+      const double beta2,
+      const double weight_decay,
+      const double eps,
+      const bool maximize,
+      const bool amsgrad,
       const float* grad_scale_ptr,
-      const float* found_inf_ptr) {
-    const index_t tensor_loc = tl.block_to_tensor[blockIdx.x];
-    const index_t chunk_idx = tl.block_to_chunk[blockIdx.x];
-    const double lr_double = lr_ptr ? *lr_ptr : lr;
+      const float* found_inf_ptr,
+      const ADAM_MODE adam_mode) {
+    int tensor_loc = tl.block_to_tensor[blockIdx.x];
+    int chunk_idx = tl.block_to_chunk[blockIdx.x];
+    int n = tl.numel_for_tensor[tensor_loc];
+    double lr_double = lr_ptr ? *lr_ptr : lr;
 
     if (found_inf_ptr && *found_inf_ptr == 1) {
       return;
     }
-    const auto [bias_correction1, bias_correction2_sqrt] =
-        [&]() -> std::pair<double, double> {
-      auto* step_count =
-          reinterpret_cast<const float*>(tl.state_steps_addresses[tensor_loc]);
-      const auto bias_correction1 = 1 - at::native::pow_(beta1, *step_count);
-      const auto bias_correction2 = 1 - at::native::pow_(beta2, *step_count);
-      const auto bias_correction2_sqrt = std::sqrt(bias_correction2);
-      return {bias_correction1, bias_correction2_sqrt};
-    }();
+    auto* step_count =
+        reinterpret_cast<const float*>(tl.state_steps_addresses[tensor_loc]);
 
     scalar_type* args[depth];
-    scalar_type r_args[depth][kILP];
-    const index_t n = tl.numel_for_tensor[tensor_loc] - chunk_idx * chunk_size;
-
     const bool all_aligned{
         init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc)};
+    n -= chunk_idx * chunk_size;
+    scalar_type r_args[depth][kILP];
+
     if ((n % kILP == 0) && (chunk_size % kILP == 0) && all_aligned) {
-      for (index_t i_start = threadIdx.x;
+      for (int64_t i_start = threadIdx.x;
            i_start * kILP < n && i_start * kILP < chunk_size;
            i_start += blockDim.x) {
 #pragma unroll
-        for (uint8_t i = 0; i < depth; i++) {
-          load_store(r_args[i], args[i], static_cast<index_t>(0), i_start);
+        for (int i = 0; i < depth; i++) {
+          load_store(r_args[i], args[i], 0, i_start);
         }
-        adam_math<scalar_type, opmath_t, depth, adam_mode, amsgrad>(
+        adam_math<scalar_type, opmath_t, depth>(
             r_args,
+            step_count,
             lr_double,
             beta1,
             beta2,
             weight_decay,
             eps,
             maximize,
+            amsgrad,
             grad_scale_ptr,
             found_inf_ptr,
-            bias_correction1,
-            bias_correction2_sqrt);
+            adam_mode);
 #pragma unroll
-        for (uint8_t i = 0; i < depth; i++) {
+        for (int i = 0; i < depth; i++) {
           if (i != kGradIdx || grad_scale_ptr) {
-            load_store(args[i], r_args[i], i_start, static_cast<index_t>(0));
+            load_store(args[i], r_args[i], i_start, 0);
           }
         }
       }
     } else {
-      for (index_t i_start = 0; i_start < n && i_start < chunk_size;
+      for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
            i_start += blockDim.x * kILP) {
         load_args<depth>(r_args, args, i_start, chunk_size, n);
-        adam_math<scalar_type, opmath_t, depth, adam_mode, amsgrad>(
+        adam_math<scalar_type, opmath_t, depth>(
             r_args,
+            step_count,
             lr_double,
             beta1,
             beta2,
             weight_decay,
             eps,
             maximize,
+            amsgrad,
             grad_scale_ptr,
             found_inf_ptr,
-            bias_correction1,
-            bias_correction2_sqrt);
+            adam_mode);
 #pragma unroll
-        for (uint8_t i = 0; i < depth; i++) {
+        for (int i = 0; i < depth; i++) {
           if (i != kGradIdx || grad_scale_ptr) {
             store_args(args[i], r_args[i], i_start, chunk_size, n);
           }
