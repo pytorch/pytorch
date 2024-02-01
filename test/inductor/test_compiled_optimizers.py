@@ -13,7 +13,6 @@ import torch
 import torch._inductor
 from torch._inductor import config
 
-# LBFGS, SparseAdam not supported
 from torch.optim import (
     Adadelta,
     Adagrad,
@@ -21,11 +20,13 @@ from torch.optim import (
     Adamax,
     AdamW,
     ASGD,
+    LBFGS,
     NAdam,
     RAdam,
     RMSprop,
     Rprop,
     SGD,
+    SparseAdam,
 )
 
 from torch.testing._internal.common_optimizers import optim_db
@@ -378,6 +379,49 @@ class CompiledOptimizerTests(TestCase):
 
         self.assertTrue(p_ref() is None)
         gc.enable()
+
+    @requires_cuda
+    def test_disabled_lbfgs(self):
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        input = torch.ones([10, 10], device="cuda")
+        model = torch.nn.Sequential(
+            *[torch.nn.Linear(10, 10, device="cuda") for _ in range(2)]
+        )
+        model(input).sum().backward()
+        opt = LBFGS(model.parameters(), lr=0.1)
+
+        @torch.compile()
+        def fn():
+            opt.step(closure=lambda: model(input).sum())
+
+        fn()
+        fn()
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+
+    @requires_cuda
+    def test_disabled_sparseadam(self):
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        input = torch.ones([2, 2], device="cuda")
+        model = torch.nn.Sequential(
+            *[torch.nn.Linear(2, 2, device="cuda", bias=False) for _ in range(2)]
+        )
+
+        for param in model.parameters():
+            param.grad = torch.tensor([[0, 2.0], [3, 0]], device="cuda").to_sparse()
+
+        opt = SparseAdam(model.parameters(), lr=0.1)
+
+        @torch.compile()
+        def fn():
+            opt.step(closure=lambda: model(input).sum())
+
+        fn()
+        fn()
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
 
 for optim_cls, name, kwargs in COMPILED_OPT_KWARG_DB:
