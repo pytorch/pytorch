@@ -9,10 +9,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace c10 {
-namespace cuda {
-namespace CUDACachingAllocator {
-namespace CudaMallocAsync {
+namespace c10::cuda::CUDACachingAllocator::CudaMallocAsync {
 
 #if CUDA_VERSION >= 11040
 // CUDA device allocator that uses cudaMallocAsync to implement
@@ -875,6 +872,10 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   std::string name() override {
     return "cudaMallocAsync";
   }
+  void copy_data(void* dest, const void* src, std::size_t count) const final {
+    C10_CUDA_CHECK(
+        cudaMemcpy(dest, src, count, cudaMemcpyKind::cudaMemcpyDeviceToDevice));
+  }
 };
 
 CudaMallocAsyncAllocator device_allocator;
@@ -894,7 +895,4 @@ CUDAAllocator* allocator() {
 
 #endif
 
-} // namespace CudaMallocAsync
-} // namespace CUDACachingAllocator
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda::CUDACachingAllocator::CudaMallocAsync

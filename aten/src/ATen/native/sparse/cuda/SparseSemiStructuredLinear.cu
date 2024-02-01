@@ -29,8 +29,7 @@ namespace {
 }
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
 #else
@@ -893,12 +892,10 @@ Tensor _sparse_semi_structured_linear(
 #endif
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 // Following is just for testing purposes.
-namespace at {
-namespace native {
+namespace at::native {
 
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
 #else
@@ -1069,5 +1066,4 @@ _to_sparse_semi_structured(const Tensor& dense) {
 #endif
 }
 
-}  // namespace native
-}  // namespace at
+}  // namespace at::native

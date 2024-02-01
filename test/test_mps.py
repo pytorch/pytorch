@@ -297,6 +297,7 @@ def mps_ops_modifier(ops):
         'slice',
         'split',
         'split_with_sizes',
+        'split_with_sizes_copy',
         'splitlist_args',
         'squeeze',
         'squeezemultiple',
@@ -6851,6 +6852,46 @@ class TestMPS(TestCaseMPS):
         # test float16
         helper((2,), 0, [1], (1,), 6.0, x_dtype=torch.float16)
 
+    def test_index_64bit(self):
+        """ Test that index operations work for 4Gb+ tensors """
+        if product_version < 14.0:
+            raise unittest.SkipTest("Sonoma is needed for large tensors, see https://github.com/pytorch/pytorch/issues/84039")
+        # Cleanup memory
+        gc.collect()
+        torch.mps.empty_cache()
+        # Check that index operations work for 4+GB tensors
+        x = torch.rand(16000, 67120, device="mps")
+        self.assertGreater(x.element_size() * x.numel(), 2**32)
+        idx = torch.arange(0, 2, device="mps")
+        x_sampled = x[:, idx]
+        self.assertEqual(x[:, 0], x_sampled[:, 0])
+        # Reclaim memory after running the tests
+        del x
+        gc.collect()
+        torch.mps.empty_cache()
+
+    def test_mm_large(self):
+        """ Test that MM works for matrices with index larger than 32K """
+        x = torch.rand(10, 1, device="mps")
+        y = torch.rand(1, 32769, device="mps")
+        # This used to crash with:
+        # error: subRange.start (24576) is not less than length of dimension[0] (16384)
+        # See https://github.com/pytorch/pytorch/issues/116769#issuecomment-1888302095
+        self.assertNotEqual(torch.mm(x, y[:, 16384:32768]).abs().max().item(), 0.0)
+
+        def compare_mm(m, n, k):
+            x = torch.rand(m, n, device="mps")
+            y = torch.rand(n, k, device="mps")
+            z = torch.mm(x, y).cpu()
+            z_cpu = torch.mm(x.cpu(), y.cpu())
+            self.assertEqual(z, z_cpu)
+
+        # Used to produce incorrect results with MPS on M1 running MacOS 14.3, but correct with Metal
+        compare_mm(1024, 1, 32769)
+        # one more time, but with dimensions inverted
+        # see https://github.com/pytorch/pytorch/issues/116769#issuecomment-1920066984
+        compare_mm(32769, 1, 1025)
+
     # Test flip
     def test_flip(self):
         def helper(shape, dims):
@@ -11197,6 +11238,9 @@ class TestConsistency(TestCaseMPS):
         'nextafter',
         'native_layer_norm',
         'nn.functional.layer_norm',
+        'nn.functional.interpolate',
+        'nn.functional.upsample_bilinear',
+        'nn.functional.upsample_nearest',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
