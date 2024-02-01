@@ -422,3 +422,7 @@ def jagged_from_tensor_and_lengths(
 
 def buffer_from_jagged(jagged):
     return ViewBufferFromNested.apply(jagged)
+
+def nested_from_buffer(values, offsets, layout):
+    assert layout == torch.jagged
+    return ViewNestedFromBuffer.apply(values, offsets)

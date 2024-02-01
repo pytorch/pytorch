@@ -281,6 +281,16 @@ def jagged_torch_function(func, *args, **kwargs):
     if func is torch._C._nn.scaled_dot_product_attention:
         return jagged_scaled_dot_product_attention(*args, **kwargs)
 
+    # Handle batch_norm here because it's CompositeImplicit.
+    if func is torch.nn.functional.batch_norm:
+        _, new_kwargs = normalize_function(
+            func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+        )
+        inp = new_kwargs.pop("input")
+        from torch.nested._internal.nested_tensor import buffer_from_jagged, nested_from_buffer
+        values = buffer_from_jagged(inp)
+        return nested_from_buffer(func(values, **new_kwargs), inp._offsets, torch.jagged)
+
     # Handle flatten() here because it's CompositeImplicit.
     if func.__name__ == "flatten":
 
@@ -948,6 +958,19 @@ def mean_dim(func, *args, **kwargs):
     new_kwargs["dim"] = [_wrap_jagged_dim(inp.dim(), new_kwargs["dim"][0], "mean")]
 
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
+
+
+@register_jagged_func(
+    torch.ops.aten.sum.default, "self: jt"
+)
+def sum_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+
+    return func(inp._values, **new_kwargs)
 
 
 @register_jagged_func(torch.ops.aten.stack.default, "tensors: any, dim: any")
