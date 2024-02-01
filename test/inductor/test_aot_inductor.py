@@ -3,6 +3,7 @@ import copy
 import os
 import sys
 import tempfile
+import types
 import unittest
 from typing import Dict, Tuple
 
@@ -78,7 +79,8 @@ def check_model(
         }
     ):
         torch.manual_seed(0)
-        model = model.to(self.device)
+        if not isinstance(model, types.FunctionType):
+            model = model.to(self.device)
         ref_model = copy.deepcopy(model)
         ref_inputs = copy.deepcopy(example_inputs)
         expected = ref_model(*ref_inputs)
@@ -187,6 +189,24 @@ class AOTInductorTestsTemplate:
             model, example_inputs, options={"aot_inductor.output_path": expected_path}
         )
         self.assertTrue(actual_path == expected_path)
+
+    @requires_cuda
+    def test_constant_folding(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w_pre = torch.randn(4, 4, device=device)
+                self.b = torch.randn(4, device=device)
+
+            def forward(self, x):
+                w_transpose = torch.transpose(self.w_pre, 0, 1)
+                w_relu = torch.nn.functional.relu(w_transpose)
+                w = w_relu + self.b
+                return torch.matmul(x, w)
+
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            self.check_model(Model(self.device), example_inputs)
 
     @requires_cuda
     def test_multi_device(self):
@@ -1558,6 +1578,9 @@ class AOTInductorTestsTemplate:
 
         class Model(torch.nn.Module):
             def forward(self, x, y):
+                # AOT export does not allow for input mutation
+                x = x.clone()
+                y = y.clone()
                 out = torch.zeros_like(x)
                 # torch.mm is ExternKernelOut
                 add_kernel[(4,)](x, torch.mm(x, y), out, 4, 16)
@@ -1577,6 +1600,9 @@ class AOTInductorTestsTemplate:
 
         class Model(torch.nn.Module):
             def forward(self, x, y):
+                # AOT export does not allow for input mutation
+                x = x.clone()
+                y = y.clone()
                 out = torch.zeros_like(x)
                 # torch.sort creates fallback kernel and hence MultiOutput
                 add_kernel[(4,)](x, torch.sort(y).values, out, 4, 16)
@@ -1668,6 +1694,31 @@ class AOTInductorTestsTemplate:
             )
             self.check_model(Model(), example_inputs)
 
+    def test_add_complex(self):
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                return torch.add(a, b)
+
+        x = torch.tensor(
+            [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1], device=self.device
+        )
+        y = torch.tensor(
+            [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1], device=self.device
+        )
+        self.check_model(Model(), (x, y))
+
+    def test_embedding_bag(self):
+        class Model(torch.nn.Module):
+            def forward(self, w, i, o):
+                return torch.ops.aten._embedding_bag(w, i, o, False, 0, False, None)
+
+        example_inputs = (
+            torch.randn([10, 4], device=self.device),
+            torch.randint(10, [8], device=self.device),
+            torch.tensor([0, 2, 6], device=self.device),
+        )
+        self.check_model(Model(), example_inputs)
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
@@ -1725,8 +1776,10 @@ def fail_abi_compatible_cuda(is_skip=False):
 
 # test_failures, xfail by default, set is_skip=True to skip
 CPU_TEST_FAILURES = {
+    "test_add_complex": fail_stack_allocation(is_skip=True),
     "test_addmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
     "test_bmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    "test_constant_folding": fail_with_and_without_stack_allocation(is_skip=True),
     "test_dup_unbacked_sym_decl": fail_with_and_without_stack_allocation(),
     "test_dynamic_cat": fail_with_and_without_stack_allocation(),
     "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
@@ -1796,6 +1849,7 @@ if not IS_FBCODE:
     CPU_TEST_FAILURES.update(
         {
             "test_duplicated_params": fail_stack_allocation(is_skip=True),
+            "test_embedding_bag": fail_stack_allocation(is_skip=True),
             "test_fqn": fail_stack_allocation(is_skip=True),
             "test_no_args": fail_stack_allocation(is_skip=True),
             "test_output_misaligned": fail_stack_allocation(is_skip=True),
@@ -1910,6 +1964,7 @@ copy_tests(
     {
         "test_addmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",)),
         "test_bmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",)),
+        "test_constant_folding": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
         "test_dynamic_smem_above_default_limit": TestFailure(
             ("non_abi_compatible_cpu",)
         ),
