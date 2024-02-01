@@ -332,8 +332,11 @@ struct TORCH_API ViewInfo {
   /// By default we use as_strided to recover views which is more efficient.
   /// view_fn is only saved when as_strided is not supported.
   /// If view_fn has value, we use it to recover views in backward.
-  // NB: mutable so that its state can be tweaked as needed for e.g.
-  // fake-ification
+  /// NB: This is a shared_ptr because it may be copied into a CopySlices node
+  /// for view + in-place rebase handling.
+  /// NB: This is mutable to maintain conceptual const-ness for view_fn() while
+  /// allowing the ViewFunc state to be temporarily modified during
+  /// fake-ification.
   mutable std::shared_ptr<ViewFunc> view_fn_;
 
   /// Analogue of view_fn but in reverse: given a view -> produce the base by
