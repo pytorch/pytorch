@@ -15,6 +15,8 @@ from typing import (
     Union,
 )
 
+from torch.fx.immutable_collections import immutable_dict, immutable_list
+
 if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
     # such as auto-completion in tools like pylance, even when these modules are not explicitly
@@ -26,7 +28,7 @@ if TYPE_CHECKING:
 
 import torch
 import torch.utils._pytree as pytree
-from torch.export._tree_utils import reorder_kwargs
+from torch.export._tree_utils import is_equivalent, reorder_kwargs
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
 
@@ -79,6 +81,31 @@ def _disable_prexisiting_fake_mode(fn):
             return fn(*args, **kwargs)
 
     return wrapper
+
+
+def _fx_collection_equivalence_fn(
+    spec1_type: Optional[type],
+    spec1_context: pytree.Context,
+    spec2_type: Optional[type],
+    spec2_context: pytree.Context,
+) -> bool:
+    """Treat containers and their immutable variants as the same type. Otherwise
+    compare as normal.
+    """
+    if spec1_type is None or spec2_type is None:
+        return spec1_type is spec2_type and spec1_context == spec2_context
+
+    if issubclass(spec1_type, (dict, immutable_dict)) and issubclass(
+        spec2_type, (dict, immutable_dict)
+    ):
+        return spec1_context == spec2_context
+
+    if issubclass(spec1_type, (list, immutable_list)) and issubclass(
+        spec2_type, (list, immutable_list)
+    ):
+        return spec1_context == spec2_context
+
+    return spec1_type is spec2_type and spec1_context == spec2_context
 
 
 class ExportedProgram:
@@ -192,8 +219,12 @@ class ExportedProgram:
         Returns an iterator over original module buffers, yielding
         both the name of the buffer as well as the buffer itself.
         """
+        non_persistent_buffers = set(self.graph_signature.non_persistent_buffers)
         for buffer_name in self.graph_signature.buffers:
-            yield buffer_name, self.state_dict[buffer_name]
+            if buffer_name in non_persistent_buffers:
+                yield buffer_name, self.constants[buffer_name]
+            else:
+                yield buffer_name, self.state_dict[buffer_name]
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -254,7 +285,9 @@ class ExportedProgram:
             (args, kwargs)
         )  # type: ignore[possibly-undefined]
 
-        if in_spec is not None and received_spec != in_spec:
+        if in_spec is not None and not is_equivalent(
+            received_spec, in_spec, _fx_collection_equivalence_fn
+        ):
             raise ValueError(
                 "Trying to flatten user inputs with exported input tree spec: \n"
                 f"{in_spec}\n"
@@ -266,9 +299,20 @@ class ExportedProgram:
         for input_ in self.graph_signature.input_specs:
             if input_.kind == InputKind.USER_INPUT:
                 continue
-            elif input_.kind in (InputKind.PARAMETER, InputKind.BUFFER):
-                additional_inputs.append(self.state_dict[input_.target])
-            elif input_.kind in (InputKind.CONSTANT_TENSOR, InputKind.CUSTOM_OBJ):
+            elif input_.kind in (
+                InputKind.PARAMETER,
+                InputKind.BUFFER,
+            ):
+                if input_.persistent is False:
+                    # This is a non-persistent buffer, grab it from our
+                    # constants instead of the state dict.
+                    additional_inputs.append(self.constants[input_.target])
+                else:
+                    additional_inputs.append(self.state_dict[input_.target])
+            elif input_.kind in (
+                InputKind.CONSTANT_TENSOR,
+                InputKind.CUSTOM_OBJ,
+            ):
                 additional_inputs.append(self.constants[input_.target])
         additional_inputs = tuple(additional_inputs)
 
@@ -426,7 +470,12 @@ class ExportedProgram:
         }
 
         input_specs = [
-            InputSpec(spec.kind, update_arg(spec.arg, new_placeholders[i]), spec.target)
+            InputSpec(
+                spec.kind,
+                update_arg(spec.arg, new_placeholders[i]),
+                spec.target,
+                spec.persistent,
+            )
             for i, spec in enumerate(self.graph_signature.input_specs)
         ]
         output_specs = [
@@ -524,7 +573,12 @@ class ExportedProgram:
                     else type(old_input_spec.arg)(node.name)
                 )
                 new_input_specs.append(
-                    InputSpec(old_input_spec.kind, arg, old_input_spec.target)
+                    InputSpec(
+                        old_input_spec.kind,
+                        arg,
+                        old_input_spec.target,
+                        old_input_spec.persistent,
+                    )
                 )
 
             output_node = list(new_gm.graph.nodes)[-1]
