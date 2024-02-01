@@ -301,6 +301,7 @@ class DistTensorOpsTest(DTensorTestBase):
     @with_comms
     def test_gather(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        comm_mode = CommDebugMode()
 
         # case 1 all replicate: input replicated, index replicated, output replicated
         global_input = torch.randn(12, 8, 16)
@@ -309,7 +310,6 @@ class DistTensorOpsTest(DTensorTestBase):
         index_dt = distribute_tensor(global_index, device_mesh, [Replicate()])
         for gather_dim in [0, 1, 2]:
             global_output = torch.gather(global_input, gather_dim, global_index)
-            comm_mode = CommDebugMode()
             with comm_mode:
                 output_dt = torch.gather(input_dt, gather_dim, index_dt)
                 self.assertEqual(comm_mode.get_total_counts(), 0)
@@ -327,7 +327,6 @@ class DistTensorOpsTest(DTensorTestBase):
         global_output = torch.gather(global_input, gather_dim, global_index)
         input_dt = distribute_tensor(global_input, device_mesh, [Shard(gather_dim)])
         index_dt = distribute_tensor(global_index, device_mesh, [Replicate()])
-        comm_mode = CommDebugMode()
         with comm_mode:
             output_dt = torch.gather(input_dt, gather_dim, index_dt)
             self.assertEqual(comm_mode.get_total_counts(), 0)
@@ -342,7 +341,6 @@ class DistTensorOpsTest(DTensorTestBase):
             input_dt = distribute_tensor(global_input, device_mesh, [Replicate()])
             index_dt = distribute_tensor(global_index, device_mesh, [Shard(gather_dim)])
             global_output = torch.gather(global_input, gather_dim, global_index)
-            comm_mode = CommDebugMode()
             with comm_mode:
                 output_dt = torch.gather(input_dt, gather_dim, index_dt)
                 self.assertEqual(comm_mode.get_total_counts(), 0)
