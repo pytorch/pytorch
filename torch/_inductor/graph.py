@@ -85,7 +85,9 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
         torch.uint8,
         torch.bool,
         torch.bfloat16,
+        torch.complex32,
         torch.complex64,
+        torch.complex128,
         torch.float16,
     }
     if cuda:
@@ -118,6 +120,18 @@ def may_get_constant_buffer_dtype(constant_buffer):
 def is_magic_method(op):
     magic_ops = {method_to_operator(m) for m in magic_methods}
     return op in magic_ops
+
+
+def getattr_recursive(obj, target):
+    target_atoms = target.split(".")
+    attr_itr = obj
+    for i, atom in enumerate(target_atoms):
+        if not hasattr(attr_itr, atom):
+            raise RuntimeError(
+                f"Node referenced nonexistent target {'.'.join(target_atoms[:i])}"
+            )
+        attr_itr = getattr(attr_itr, atom)
+    return attr_itr
 
 
 class GraphLowering(torch.fx.Interpreter):
@@ -191,6 +205,10 @@ class GraphLowering(torch.fx.Interpreter):
         layout_opt=None,
         extern_node_serializer=None,
         is_inference=False,
+        is_const_graph=False,
+        const_output_index=None,
+        const_code=None,
+        const_module=None,
     ):
         super().__init__(gm)
 
@@ -202,6 +220,9 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.num_channels_last_conv = 0
         self.is_inference = is_inference
+        self.is_const_graph = is_const_graph
+        self.const_code = const_code
+        self.const_module = const_module
 
         self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
@@ -214,11 +235,21 @@ class GraphLowering(torch.fx.Interpreter):
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_inputs: Dict[str, TensorBox] = {}
         self.graph_inputs_original: Dict[str, InputBuffer] = {}
-        self.device_types: Set[str] = set()
-        self.device_idxs: Set[int] = set()
+        self.device_types: Set[str] = (
+            const_module.device_types if const_module else set()
+        )
+        self.device_idxs: Set[int] = const_module.device_idxs if const_module else set()
         self.cuda = False
         self.buffers: List[ir.Buffer] = []
-        self.constants: Dict[str, torch.Tensor] = {}
+        self.const_output_index: Dict[str, int] = (
+            const_output_index if const_output_index else {}
+        )
+        self.folded_constants: Set[str] = (
+            set(const_output_index.keys()) if const_output_index else set()
+        )
+        self.constants: Dict[str, torch.Tensor] = (
+            const_module.constants if const_module else {}
+        )
         self.constant_reprs: Dict[str, str] = {}
         self.removed_buffers: Set[str] = set()
         self.removed_inplace_buffers: Set[str] = set()
@@ -258,8 +289,10 @@ class GraphLowering(torch.fx.Interpreter):
             []
         )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported
-        self.disable_cudagraphs = False
-        self.disable_cudagraphs_reason = ""
+        self.disable_cudagraphs_reason: Optional[str] = None
+
+        # only keeping one node per device for stack trace purposes
+        self.device_node_mapping: Dict[torch.device, torch.fx.Node] = {}
         self.orig_gm: torch.fx.GraphModule = gm.__copy__()
         self.dynamo_flat_name_to_original_fqn = self.module.meta.get(
             "dynamo_flat_name_to_original_fqn", {}
@@ -488,6 +521,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.device_types.add(device.type)
         if device.index is not None:
             self.device_idxs.add(device.index)
+        if V.graph.current_node and device not in self.device_node_mapping:
+            self.device_node_mapping[device] = V.graph.current_node
 
     @property
     def fake_mode(self):
@@ -581,16 +616,17 @@ class GraphLowering(torch.fx.Interpreter):
 
     def add_tensor_constant(self, data, name=None):
         def allocate(name):
-            for constant_name, value in self.constants.items():
-                if (
-                    not data.is_mkldnn
-                    and data.size() == value.size()
-                    and data.stride() == value.stride()
-                    and data.dtype == value.dtype
-                    and data.device == value.device
-                    and torch.eq(data, value).all()
-                ):
-                    return constant_name
+            if not config.aot_inductor.use_runtime_constant_folding:
+                for constant_name, value in self.constants.items():
+                    if (
+                        not data.is_mkldnn
+                        and data.size() == value.size()
+                        and data.stride() == value.stride()
+                        and data.dtype == value.dtype
+                        and data.device == value.device
+                        and torch.eq(data, value).all()
+                    ):
+                        return constant_name
 
             if name is None:
                 name = f"constant{len(self.constants)}"
@@ -739,9 +775,13 @@ class GraphLowering(torch.fx.Interpreter):
 
     def get_attr(self, target, args, kwargs):
         # this is a constant
-        value = getattr(self.module, target)
+        value = getattr_recursive(self.module, target)
 
-        if config.always_keep_tensor_constants or unsupported_output_tensor(value):
+        if (
+            config.aot_inductor.use_runtime_constant_folding
+            or config.always_keep_tensor_constants
+            or unsupported_output_tensor(value)
+        ):
             return self.add_tensor_constant(value, target)
 
         with no_dispatch():
@@ -841,11 +881,11 @@ class GraphLowering(torch.fx.Interpreter):
             ):
                 debug("fallback_handler")
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
-                    *args, **kwargs
+                    *args, **kwargs  # type: ignore[possibly-undefined]
                 )
             elif n.op == "call_function" and n.target in layout_constraints:
                 debug("layout_constraints")
-                args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
+                args, kwargs = layout_constraints[n.target](n, *args, **kwargs)  # type: ignore[index]
                 result = self.call_function(n.target, args, kwargs)
             elif is_magic_method(n.target):
                 # TODO: this is sus, it probably should be handled in the
@@ -964,7 +1004,7 @@ class GraphLowering(torch.fx.Interpreter):
                 curr = result.data.data
                 if isinstance(curr, Pointwise):
                     # Use inner fn as a rough proxy. Good enough.
-                    if curr.inner_fn_str_len() > config.realize_bytes_threshold:
+                    if curr.has_large_inner_fn():
                         result.realize()
 
         # This is not complete, but it doesn't have to be: origin_node
