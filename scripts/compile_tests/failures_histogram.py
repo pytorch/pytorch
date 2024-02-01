@@ -102,9 +102,7 @@ def failures_histogram(eager_dir, dynamo_dir, verbose=False, format_issues=False
     print("[counts]", sum_counts)
 
 
-def as_issue(count, msg, repro, tests=None):
-    if tests is None:
-        print("please pass --verbose to use --print-issues")
+def as_issue(count, msg, repro, tests):
     tests = "\n".join(tests)
     result = f"""
 {'-' * 50}
@@ -149,6 +147,12 @@ if __name__ == "__main__":
         action="store_true",
     )
     args = parser.parse_args()
+
+    # args.format_issues implies verbose=True
+    verbose = args.verbose
+    if args.format_issues:
+        verbose = True
+
     failures_histogram(
-        args.eager_dir, args.dynamo_dir, args.verbose, args.format_issues
+        args.eager_dir, args.dynamo_dir, verbose, args.format_issues
     )
