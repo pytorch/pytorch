@@ -97,9 +97,9 @@ test/functorch/test_ops.py @zou3519 @chillee @kshitij12345
 test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
 
 # torch MPS
-test/test_mps.py @kulinseth
-aten/src/ATen/mps/ @kulinseth
-aten/src/ATen/native/mps/ @kulinseth
+test/test_mps.py @kulinseth @malfet
+aten/src/ATen/mps/ @kulinseth @malfet
+aten/src/ATen/native/mps/ @kulinseth @malfet
 
 # Profiler
 torch/csrc/autograd/profiler* @aaronenyeshi
