@@ -13,6 +13,7 @@ from torch.distributed._tensor.placement_types import DTensorSpec
 from ._fsdp_common import (
     _chunk_with_empty,
     _from_local_no_grad,
+    _get_dim0_chunked_size,
     _get_dim0_padded_size,
     _raise_assert_with_print,
     FSDPMeshInfo,
@@ -193,12 +194,7 @@ class FSDPParam:
         shard_world_size = self.mesh_info.shard_mesh_size
         chunks = _chunk_with_empty(param_data, shard_world_size, dim=0)
         sharded_param = chunks[shard_rank]
-        self.sharded_size = (
-            sharded_param.size()
-            if sharded_param.numel() > 0
-            # For 0 numel, we need to preserve trailing dims for DTensor APIs
-            else cast(torch.Size, torch.Size([0]) + param_data.size()[1:])
-        )
+        self.sharded_size = _get_dim0_chunked_size(sharded_param, param_data.size())
         self.contiguous_sharded_stride = make_contiguous_strides_for(self.sharded_size)
         padded_sharded_size = chunks[0].size()  # 0th always padded
         padded_sharded_param = param_data.new_zeros(padded_sharded_size)
@@ -219,7 +215,9 @@ class FSDPParam:
         assert mesh_info is not None
         param_data = param._local_tensor if isinstance(param, DTensor) else param
         chunks = _chunk_with_empty(param_data, mesh_info.shard_mesh_size, dim=0)
-        self.sharded_post_forward_size = chunks[mesh_info.shard_mesh_rank].size()
+        self.sharded_post_forward_size = _get_dim0_chunked_size(
+            chunks[mesh_info.shard_mesh_rank], param_data.size()
+        )
         self.contiguous_sharded_post_forward_stride = make_contiguous_strides_for(
             self.sharded_post_forward_size
         )
@@ -330,8 +328,7 @@ class FSDPParam:
         """
         if tensor.shape != self.sharded_size:
             _raise_assert_with_print(
-                f"Expects a tensor with the sharded size {self.sharded_size} "
-                f"but got {tensor.shape}"
+                f"Expects size {self.sharded_size} but got {tensor.shape}"
             )
         return _from_local_no_grad(
             tensor,
@@ -342,6 +339,10 @@ class FSDPParam:
         )
 
     def to_sharded_post_forward_dtensor(self, tensor: torch.Tensor) -> DTensor:
+        if tensor.shape != self.sharded_post_forward_size:
+            _raise_assert_with_print(
+                f"Expects size {self.sharded_post_forward_size} but got {tensor.shape}"
+            )
         assert self.post_forward_mesh_info is not None  # mypy
         # TODO: Prefer this DTensor to be read-only.
         return _from_local_no_grad(
