@@ -202,7 +202,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 2
 
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(1)
     def test_float16_on_one_submodule(self):
         x = torch.zeros(2, 100, device="cuda")
 
@@ -256,7 +256,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
         self.assertEqual(forward_inputs[model.c1].dtype, torch.float16)
         self.assertEqual(forward_inputs[model.c2].dtype, torch.float32)
 
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(1)
     def test_submodules_with_external_inputs(self):
         self.run_subtests(
             {"enable_submodule_cast": [False, True]},
@@ -309,6 +309,61 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             forward_inputs["l2_input_y"].dtype,
             torch.float16 if enable_submodule_cast else torch.float32,
         )
+
+    @skip_if_lt_x_gpu(1)
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    def test_norm_modules_bf16(self):
+        mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16)
+        self._test_norm_modules(mp_policy)
+
+    @skip_if_lt_x_gpu(1)
+    def test_norm_modules_fp16(self):
+        mp_policy = MixedPrecisionPolicy(param_dtype=torch.float16)
+        self._test_norm_modules(mp_policy)
+
+    def _test_norm_modules(self, mp_policy: MixedPrecisionPolicy):
+        def inner(model: nn.Module, x: torch.Tensor):
+            # Run forward and backward to check for no type mismatch errors
+            z = model(x)
+            self.assertEqual(z.dtype, mp_policy.param_dtype)
+            z.sum().backward()
+
+        # Layer norm
+        model = nn.Sequential(nn.Linear(32, 32), nn.LayerNorm(32), nn.Linear(32, 32))
+        for module in (model[0], model[1], model[2], model):
+            fully_shard(module, mp_policy=mp_policy)
+        inner(model, torch.randn((4, 32)))
+
+        # Batch norm 1D
+        model = nn.Sequential(nn.Linear(32, 32), nn.BatchNorm1d(32), nn.Linear(32, 32))
+        for module in (model[0], model[1], model[2], model):
+            fully_shard(module, mp_policy=mp_policy)
+        inner(model, torch.randn((4, 32)))
+
+        # Batch norm 2D: error in backward from buffer dtype mismatch
+        model = nn.Sequential(nn.Conv2d(1, 5, 3), nn.BatchNorm2d(5), nn.Conv2d(5, 4, 3))
+        for module in (model[0], model[1], model[2], model):
+            fully_shard(module, mp_policy=mp_policy)
+        with self.assertRaisesRegex(RuntimeError, "Expected running_mean to have type"):
+            # Errors in batch norm 2D backward
+            inner(model, torch.randn((3, 1, 9, 9)))
+
+        # Batch norm 2D: cast buffers down to lower precision
+        model = nn.Sequential(nn.Conv2d(1, 5, 3), nn.BatchNorm2d(5), nn.Conv2d(5, 4, 3))
+        for module in (model[0], model[1], model[2], model):
+            fully_shard(module, mp_policy=mp_policy)
+        # Casting batch norm buffers to the lower precision allows backward
+        model[1].running_mean = model[1].running_mean.to(mp_policy.param_dtype)
+        model[1].running_var = model[1].running_var.to(mp_policy.param_dtype)
+        inner(model, torch.randn((3, 1, 9, 9)))
+
+        # Batch norm 2D: use special mixed precision policy
+        model = nn.Sequential(nn.Conv2d(1, 5, 3), nn.BatchNorm2d(5), nn.Conv2d(5, 4, 3))
+        bn_mp_policy = MixedPrecisionPolicy(output_dtype=mp_policy.param_dtype)
+        fully_shard(model[1], mp_policy=bn_mp_policy)
+        for module in (model[0], model[2], model):
+            fully_shard(module, mp_policy=mp_policy)
+        inner(model, torch.randn((3, 1, 9, 9)))
 
 
 if __name__ == "__main__":
