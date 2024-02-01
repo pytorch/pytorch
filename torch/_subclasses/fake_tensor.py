@@ -1964,7 +1964,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Some attribute queries that can be serviced directly
         # See Note [is_coalesced is dispatched]
-        if func in _DISPATCH_HANDLE_DIRECLTY:
+        if func in _DISPATCH_HANDLE_DIRECTLY:
             # NB: no_dispatch is ok here too, this func is very simple
             with in_kernel_invocation_manager(self):
                 return func(*args, **kwargs)
@@ -2533,7 +2533,7 @@ _DISPATCH_META_HANDLERS = {
     torch.ops.aten.storage_offset.default: lambda args: int(args[0].storage_offset()),
 }
 
-_DISPATCH_HANDLE_DIRECLTY = ordered_set(
+_DISPATCH_HANDLE_DIRECTLY = ordered_set(
     torch.ops.aten.is_coalesced.default,
     torch.ops.aten.dense_dim.default,
     torch.ops.aten.sparse_dim.default,
