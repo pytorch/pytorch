@@ -85,7 +85,9 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
         torch.uint8,
         torch.bool,
         torch.bfloat16,
+        torch.complex32,
         torch.complex64,
+        torch.complex128,
         torch.float16,
     }
     if cuda:
@@ -118,6 +120,18 @@ def may_get_constant_buffer_dtype(constant_buffer):
 def is_magic_method(op):
     magic_ops = {method_to_operator(m) for m in magic_methods}
     return op in magic_ops
+
+
+def getattr_recursive(obj, target):
+    target_atoms = target.split(".")
+    attr_itr = obj
+    for i, atom in enumerate(target_atoms):
+        if not hasattr(attr_itr, atom):
+            raise RuntimeError(
+                f"Node referenced nonexistent target {'.'.join(target_atoms[:i])}"
+            )
+        attr_itr = getattr(attr_itr, atom)
+    return attr_itr
 
 
 class GraphLowering(torch.fx.Interpreter):
@@ -743,7 +757,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def get_attr(self, target, args, kwargs):
         # this is a constant
-        value = getattr(self.module, target)
+        value = getattr_recursive(self.module, target)
 
         if config.always_keep_tensor_constants or unsupported_output_tensor(value):
             return self.add_tensor_constant(value, target)
@@ -845,7 +859,7 @@ class GraphLowering(torch.fx.Interpreter):
             ):
                 debug("fallback_handler")
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
-                    *args, **kwargs
+                    *args, **kwargs  # type: ignore[possibly-undefined]
                 )
             elif n.op == "call_function" and n.target in layout_constraints:
                 debug("layout_constraints")
