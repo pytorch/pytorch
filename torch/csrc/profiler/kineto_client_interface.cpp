@@ -1,6 +1,6 @@
 #ifdef USE_KINETO
-#include <libkineto.h>
 #include <ATen/Context.h>
+#include <libkineto.h>
 #include <torch/csrc/autograd/profiler_kineto.h>
 
 // Ondemand tracing is not supported on Apple or edge platform
