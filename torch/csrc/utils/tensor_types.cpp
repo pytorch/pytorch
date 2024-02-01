@@ -16,15 +16,16 @@
 
 using namespace at;
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
-static const char* parse_privateuseone_backend() {
+static const char* parse_privateuseone_backend(bool is_sparse = false) {
   static std::string backend_name = "torch." + get_privateuse1_backend();
-  return backend_name.c_str();
+  static std::string sparse_backend_name = backend_name + ".sparse";
+  return is_sparse == false ? backend_name.c_str()
+                            : sparse_backend_name.c_str();
 }
 
-static const char* backend_to_string(const at::Backend& backend) {
+const char* backend_to_python_module_name(const at::Backend& backend) {
   switch (backend) {
     case at::Backend::CPU:
       return "torch";
@@ -50,6 +51,8 @@ static const char* backend_to_string(const at::Backend& backend) {
       return "torch.mtia";
     case at::Backend::PrivateUse1:
       return parse_privateuseone_backend();
+    case at::Backend::SparsePrivateUse1:
+      return parse_privateuseone_backend(true);
     case at::Backend::Lazy:
       return "torch.lazy";
     case at::Backend::XLA:
@@ -63,15 +66,15 @@ static const char* backend_to_string(const at::Backend& backend) {
 
 std::string options_to_string(const at::TensorOptions& options) {
   std::ostringstream ss;
-  ss << backend_to_string(options.backend()) << "."
+  ss << backend_to_python_module_name(options.backend()) << "."
      << toString(at::typeMetaToScalarType(options.dtype())) << "Tensor";
   return ss.str();
 }
 
 std::string type_to_string(const at::DeprecatedTypeProperties& type) {
   std::ostringstream ss;
-  ss << backend_to_string(type.backend()) << "." << toString(type.scalarType())
-     << "Tensor";
+  ss << backend_to_python_module_name(type.backend()) << "."
+     << toString(type.scalarType()) << "Tensor";
   return ss.str();
 }
 
@@ -179,5 +182,36 @@ std::vector<std::pair<Backend, ScalarType>> all_declared_types() {
   return ret;
 }
 
-} // namespace utils
-} // namespace torch
+std::vector<std::pair<Backend, ScalarType>> all_privateUser1_declared_types() {
+  std::vector<std::pair<Backend, ScalarType>> ret;
+
+  // Backend::SparsePrivateUse1 will be support later when
+  // torch.foo.sparse is supported. (foo is custom device name)
+  auto backends = {Backend::PrivateUse1};
+  auto scalar_types = {
+      ScalarType::Byte,
+      ScalarType::Char,
+      ScalarType::Double,
+      ScalarType::Float,
+      ScalarType::Int,
+      ScalarType::Long,
+      ScalarType::Short,
+      ScalarType::Half,
+      ScalarType::Bool,
+      ScalarType::BFloat16};
+
+  for (auto& backend : backends) {
+    for (auto& scalar_type : scalar_types) {
+      // there is no sparse bool type.
+      if (scalar_type == ScalarType::Bool &&
+          backend == Backend::SparsePrivateUse1) {
+        continue;
+      }
+      ret.emplace_back(backend, scalar_type);
+    }
+  }
+
+  return ret;
+}
+
+} // namespace torch::utils

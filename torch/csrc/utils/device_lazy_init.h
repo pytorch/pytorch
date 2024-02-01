@@ -1,5 +1,6 @@
 #pragma once
 
+#include <aten/src/ATen/Context.h>
 #include <c10/core/TensorOptions.h>
 
 // device_lazy_init() is always compiled, even for CPU-only builds.
@@ -30,6 +31,9 @@ static inline void maybe_initialize_device(at::Device& device) {
   // Add more devices here to enable lazy initialization.
   if (device.is_cuda()) {
     device_lazy_init(device.type());
+  }
+  if (device.is_privateuseone()) {
+    at::globalContext().lazyInitPrivateUse1();
   }
 }
 

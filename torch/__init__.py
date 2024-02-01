@@ -1447,7 +1447,7 @@ _storage_classes = {
     TypedStorage
 }
 
-# The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
+# The _tensor_classes set is initialized by the call to initialize_python_bindings.
 _tensor_classes: Set[Type] = set()
 
 # If you edit these imports, please update torch/__init__.py.in as well
@@ -1899,6 +1899,18 @@ def _register_device_module(device_type, module):
     setattr(m, device_type, module)
     torch_module_name = '.'.join([__name__, device_type])
     sys.modules[torch_module_name] = module
+
+def _register_custom_device_tensor_types(device_type):
+    r"""Register tensor types to torch._tensor_classes for the specific :attr:`device_type`
+    supported by torch.
+    """
+    # Make sure the device_type represent a supported device type for torch.
+    device_type = torch.device(device_type).type
+    m = sys.modules[__name__]
+    if not hasattr(m, device_type):
+        raise RuntimeError(f"The runtime module of '{device_type}' has not "
+                           f"been registered.")
+    _C._register_custom_device_tensor_types()
 
 # expose return_types
 from . import return_types

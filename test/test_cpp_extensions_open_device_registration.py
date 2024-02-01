@@ -26,8 +26,7 @@ def remove_build_path():
     if os.path.exists(default_build_root):
         shutil.rmtree(default_build_root, ignore_errors=True)
 
-
-class DummyModule:
+class DummyClass:
 
     @staticmethod
     def device_count() -> int:
@@ -87,6 +86,20 @@ class TestCppExtensionOpenRgistration(common.TestCase):
     def tearDownClass(cls):
         remove_build_path()
 
+    # Create a module and register for custom devic by using _register_device_module .
+    # https://stackoverflow.com/questions/43183244/difference-between-module-and-class-in-python
+    @staticmethod
+    def create_module():
+        import types
+        module_name = "torch.foo"
+        new_module = types.ModuleType(module_name)
+        new_module.device_count = DummyClass.device_count
+        new_module.get_rng_state = DummyClass.get_rng_state
+        new_module.set_rng_state = DummyClass.set_rng_state
+        new_module.is_available = DummyClass.is_available
+        new_module.current_device = DummyClass.current_device
+        return new_module
+
     def test_open_device_registration(self):
         def test_base_device_registration():
             torch.utils.rename_privateuse1_backend('foo')
@@ -115,7 +128,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         def test_before_common_registration():
             # check that register module name should be the same as custom backend
             with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
-                torch._register_device_module('xxx', DummyModule)
+                torch._register_device_module('xxx', self.create_module())
             # check generator registered before using
             torch.utils.rename_privateuse1_backend('foo')
             with self.assertRaisesRegex(RuntimeError, "torch has no module of"):
@@ -129,9 +142,11 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertFalse(hasattr(torch.UntypedStorage, 'is_foo'))
             self.assertFalse(hasattr(torch.UntypedStorage, 'foo'))
             self.assertFalse(hasattr(torch.nn.Module, 'foo'))
+            self.assertFalse(hasattr(torch, 'foo'))
 
         def test_after_common_registration():
             # check attributes after registered
+            self.assertTrue(hasattr(torch, 'foo'))
             self.assertTrue(hasattr(torch.Tensor, 'is_foo'))
             self.assertTrue(hasattr(torch.Tensor, 'foo'))
             self.assertTrue(hasattr(torch.TypedStorage, 'is_foo'))
@@ -139,6 +154,21 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertTrue(hasattr(torch.UntypedStorage, 'is_foo'))
             self.assertTrue(hasattr(torch.UntypedStorage, 'foo'))
             self.assertTrue(hasattr(torch.nn.Module, 'foo'))
+            container = ["FloatTensor", "ByteTensor", "CharTensor",
+                         "DoubleTensor", "IntTensor", "LongTensor",
+                         "ShortTensor", "HalfTensor", "BFloat16Tensor"]
+            self.assertTrue(hasattr(torch.foo, "BoolTensor"))
+            # Sparse will support later.
+            # self.assertFalse(hasattr(torch.foo.sparse, "BoolTensor"))
+            for item in container:
+                self.assertTrue(hasattr(torch.foo, item))
+                # self.assertTrue(hasattr(torch.foo.sparse, item))
+                attr = getattr(torch.foo, item, None)
+                self.assertEqual(attr.layout, torch.strided)
+                self.assertFalse(attr.is_cuda)
+                # attr = getattr(torch.foo.sparse, item, None)
+                # self.assertEqual(hasattr(attr, "layout"), torch.strided)
+                # self.assertFalse(hasattr(attr, "is_cuda"))
 
         def test_common_registration():
             # first rename custom backend
@@ -147,10 +177,12 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             with self.assertRaisesRegex(RuntimeError, "torch.register_privateuse1_backend()"):
                 torch.utils.rename_privateuse1_backend('xxx')
             # register foo module, torch.foo
-            torch._register_device_module('foo', DummyModule)
+            torch._register_device_module('foo', self.create_module())
             self.assertTrue(torch.utils.backend_registration._get_custom_mod_func("device_count")() == 1)
             with self.assertRaisesRegex(RuntimeError, "Try to call torch.foo"):
                 torch.utils.backend_registration._get_custom_mod_func("func_name_")
+            # register tensor types for custom devices, like torch.foo.FloatTensor.
+            torch._register_custom_device_tensor_types('foo')
             # default set for_tensor and for_module are True, so only set for_storage is True
             torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
             # generator tensor and module can be registered only once

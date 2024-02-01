@@ -85,6 +85,7 @@
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
+#include <torch/csrc/utils/tensor_types.h>
 #include <torch/csrc/utils/verbose.h>
 
 #include <ATen/native/transformers/sdp_utils_cpp.h>
@@ -189,7 +190,9 @@ static PyObject* THPModule_initExtension(
   torch::utils::initializeMemoryFormats();
   torch::utils::initializeQSchemes();
   torch::utils::initializeDtypes();
-  torch::tensors::initialize_python_bindings();
+  // includes CUDA types even when PyTorch is not built with CUDA
+  const auto& declared_types = torch::utils::all_declared_types();
+  torch::tensors::initialize_python_bindings(declared_types);
   std::string path = THPUtils_unpackString(shm_manager_path);
   libshm_init(path.c_str());
 
@@ -334,6 +337,16 @@ PyObject* THPModule_setDefaultTensorType(PyObject* _unused, PyObject* type) {
 PyObject* THPModule_setDefaultDtype(PyObject* _unused, PyObject* dtype) {
   HANDLE_TH_ERRORS
   torch::tensors::py_set_default_dtype(dtype);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_registerCustomDeviceTensorTypes(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  const auto& declared_types = torch::utils::all_privateUser1_declared_types();
+  torch::tensors::initialize_python_bindings(declared_types);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1218,6 +1231,10 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      METH_O,
      nullptr},
     {"_set_default_dtype", THPModule_setDefaultDtype, METH_O, nullptr},
+    {"_register_custom_device_tensor_types",
+     THPModule_registerCustomDeviceTensorTypes,
+     METH_NOARGS,
+     nullptr},
     {"_infer_size", THPModule_inferSize, METH_VARARGS, nullptr},
     {"_abort", THPModule_abort, METH_NOARGS, nullptr},
     {"_crash_if_csrc_asan", THPModule_crashIfCsrcASAN, METH_O, nullptr},

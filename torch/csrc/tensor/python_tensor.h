@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/Backend.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/ScalarType.h>
@@ -14,7 +15,12 @@ namespace tensors {
 
 // Initializes the Python tensor type objects: torch.FloatTensor,
 // torch.DoubleTensor, etc. and binds them in their containing modules.
-void initialize_python_bindings();
+// Pytorch side only register CPU and GPU tensor types, if a third-party device
+// also need to register thire tensor types in torch._tensor_classes, this
+// function can be called at third-party framework.
+void initialize_python_bindings(
+    const std::vector<std::pair<c10::Backend, c10::ScalarType>>&
+        declared_types);
 
 // Same as set_default_tensor_type() but takes a PyObject*
 void py_set_default_tensor_type(PyObject* type_obj);

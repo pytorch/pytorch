@@ -20,6 +20,7 @@
 #include <ATen/EmptyTensor.h>
 #include <ATen/core/GeneratorForPrivateuseone.h>
 #include <ATen/detail/PrivateUse1HooksInterface.h>
+#include <torch/csrc/tensor/python_tensor.h>
 #include <ATen/ops/view.h>
 
 static uint64_t add_counter = 0;
@@ -32,14 +33,13 @@ static uint64_t last_abs_saved_value = 0;
 static uint64_t storageImpl_counter = 0;
 static uint64_t last_storageImpl_saved_value = 0;
 // register guard
-namespace at {
-namespace detail {
+namespace at::detail {
 
 C10_REGISTER_GUARD_IMPL(
     PrivateUse1,
     c10::impl::NoOpDeviceGuardImpl<DeviceType::PrivateUse1>);
 
-}} // namespace at::detail
+} // namespace at::detail
 
 namespace {
 
@@ -47,8 +47,6 @@ void abs_kernel(::at::TensorIteratorBase& iter) {
   // Since this custom device is just for testing, not bothering to implement kernels.
   abs_counter += 1;
 }
-
-} // namespace
 
 void quantize_tensor_per_tensor_affine_privateuse1(
     const at::Tensor& rtensor,
@@ -58,12 +56,15 @@ void quantize_tensor_per_tensor_affine_privateuse1(
     // do nothing
 }
 
+} // namespace
+
 namespace at::native {
 
 REGISTER_PRIVATEUSE1_DISPATCH(abs_stub, &abs_kernel);
 REGISTER_PRIVATEUSE1_DISPATCH(quantize_tensor_per_tensor_affine_stub, &quantize_tensor_per_tensor_affine_privateuse1);
 
 } // namespace at::native
+
 struct CustomBackendMetadata : public c10::BackendMeta {
   // for testing this field will mutate when clone() is called by shallow_copy_from.
   int backend_version_format_{-1};
