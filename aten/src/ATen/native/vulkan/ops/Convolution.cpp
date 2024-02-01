@@ -834,18 +834,9 @@ Tensor quantized_convolution(
 
 namespace conv1d {
 
-// This implementation only supports
+// This implementation only supports batch size n=1. For algorithm details,
+// refer to the shader kernel code.
 //
-// input = (n=1, channels, length)
-// output = (n=1, channels, out_length)
-//
-// where channels = groups. Hence, the shapes we receive should obey:
-//
-// weight = (channels, 1, kernel_size)
-// bias = (channels,)
-//
-// In this implementation, it reduces to running a 1d convolution for each
-// channel.
 // There are multiple perf improvement opportunities: e.g. width-packing
 // input and weight tensors, batch reading when groups is low.
 
@@ -865,7 +856,8 @@ Tensor run_conv1d_context_impl(
   const IntArrayRef& input_sizes = input.sizes();
   const IntArrayRef& weight_sizes = weight.sizes();
 
-  int32_t weight_out_channels = static_cast<int32_t>(weight_sizes[0]);
+  int32_t in_channels = static_cast<int32_t>(input_sizes[1]);
+  int32_t out_channels = static_cast<int32_t>(weight_sizes[0]);
   int32_t kernel_size = static_cast<int32_t>(weight_sizes[2]);
 
   Tensor bias;
@@ -876,17 +868,17 @@ Tensor run_conv1d_context_impl(
       bias = bias_arg_opt.value().vulkan();
     }
   } else {
-    bias = at::zeros({weight_out_channels}).vulkan();
+    bias = at::zeros({out_channels}).vulkan();
   }
 
   TORCH_CHECK(input.dim() == 3, "input must be a 3-dim tensor");
   TORCH_CHECK(weight.dim() == 3, "weight must be a 3-dim tensor");
+  TORCH_CHECK(
+      in_channels % groups == 0, "in_channels must be divisible by groups");
+  TORCH_CHECK(
+      out_channels % groups == 0, "out_channels must be divisible by groups");
 
   TORCH_CHECK(input_sizes[0] == 1, "Only support single batch");
-  TORCH_CHECK(input_sizes[1] == groups, "input_channel must equals to groups");
-  TORCH_CHECK(
-      weight_sizes[0] == groups, "weight.sizes()[0] must equals to groups");
-  TORCH_CHECK(weight_sizes[1] == 1, "weight.sizes()[1] must equals to 1");
 
   const vTensor& v_input = convert(input);
   const vTensor& v_weight = convert(weight);
@@ -899,19 +891,21 @@ Tensor run_conv1d_context_impl(
   };
 
   const struct Block final {
-    int32_t out_channels;
     int32_t in_length;
     int32_t kernel_size;
     int32_t stride;
     int32_t padding;
     int32_t dilation;
+    int32_t in_group_size;
+    int32_t out_group_size;
   } block{
-      weight_out_channels,
       static_cast<int32_t>(input_sizes[2]),
       kernel_size,
       static_cast<int32_t>(stride[0]),
       static_cast<int32_t>(padding[0]),
       static_cast<int32_t>(dilation[0]),
+      static_cast<int32_t>(in_channels / groups),
+      static_cast<int32_t>(out_channels / groups),
   };
 
   api::UniformParamsBuffer params(context, block);
@@ -923,7 +917,7 @@ Tensor run_conv1d_context_impl(
       // pipeline barrier
       pipeline_barrier,
       // global work group size
-      {1, static_cast<uint32_t>(weight_out_channels), 1},
+      {1, static_cast<uint32_t>(out_channels), 1},
       // local work group size
       {1, 1, 1},
       // fence handle
