@@ -1615,13 +1615,17 @@ class BuiltinVariable(VariableTracker):
         if isinstance(left, TensorVariable) or isinstance(right, TensorVariable):
             from .builder import wrap_fx_proxy_cls
 
-            if op is operator.is_:
-                return ConstantVariable.create(
+            if op in [operator.is_, operator.is_not]:
+                is_result = (
                     isinstance(left, TensorVariable)
                     and isinstance(right, TensorVariable)
                     and id(extract_fake_example_value(left.as_proxy().node))
                     == id(extract_fake_example_value(right.as_proxy().node))
                 )
+                if op is operator.is_:
+                    return ConstantVariable.create(is_result)
+                else:
+                    return ConstantVariable.create(not is_result)
 
             if op not in supported_tensor_comparison_ops.values():
                 _unimplemented()
