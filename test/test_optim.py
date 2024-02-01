@@ -158,9 +158,9 @@ class TestOptimRenewed(TestCase):
 
             # Last param is intentionally real to test that we can mix real and complex
             complex_params = [
-                torch.randn(10, 5, dtype=dtype, requires_grad=True),
-                torch.randn(10, dtype=dtype, requires_grad=True),
-                torch.randn(10, 5, dtype=torch.float32, requires_grad=True),
+                torch.randn(10, 5, device=device, dtype=dtype, requires_grad=True),
+                torch.randn(10, device=device, dtype=dtype, requires_grad=True),
+                torch.randn(10, 5, device=device, dtype=torch.float32, requires_grad=True),
             ]
             real_params = [
                 (
@@ -237,7 +237,6 @@ class TestOptimRenewed(TestCase):
         optim_inputs = optim_info.optim_inputs_func(device=device)
         optim_cls = optim_info.optim_cls
         for optim_input in optim_inputs:
-            print(optim_input)
             updated_params, state = [], []
             kwargs = deepcopy(optim_input.kwargs)
             if kwargs.get("capturable", False) and str(device) == "cpu":
