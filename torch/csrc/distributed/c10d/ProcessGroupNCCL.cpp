@@ -2309,6 +2309,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   auto work = initWork(device, rank_, opType, profilingTitle, inputs, {});
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
+  work->outputs_ = std::make_shared<std::vector<at::Tensor>>();
   work->outputs_->push_back(output);
 
   if (avoidRecordStreams) {
@@ -2630,6 +2631,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // Note that these outputs are only valid for recv(), as send() does not
   // modify the inputs but we still create these outputs for use cases such as
   // profiling.
+  work->outputs_ = std::make_shared<std::vector<at::Tensor>>();
   work->outputs_->push_back(tensor);
 
   at::cuda::OptionalCUDAGuard gpuGuard;
