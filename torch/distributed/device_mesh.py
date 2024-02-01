@@ -81,6 +81,7 @@ else:
                     device_mesh.device_type,
                     mesh_1d,
                     mesh_dim_names=(mesh_dim_name,),
+                    _init_process_groups=False,
                 )
                 if cur_rank in mesh_1d:
                     res_sub_mesh = sub_mesh
@@ -133,7 +134,7 @@ else:
                     f"Mesh dimension '{mesh_dim_name}' does not exist.",
                     f"Available mesh dimensions are: mesh_dim_names={device_mesh.mesh_dim_names}",
                 )
-            return not_none(device_mesh.mesh_dim_names.index(mesh_dim_name))
+            return device_mesh.mesh_dim_names.index(mesh_dim_name)  # type: ignore[union-attr]
 
     _mesh_resources: _MeshEnv = _MeshEnv()
 
@@ -196,6 +197,7 @@ else:
             mesh: Union[torch.Tensor, "ArrayLike"],
             *,
             mesh_dim_names: Optional[Tuple[str, ...]] = None,
+            _init_process_groups: bool = True,
         ) -> None:
             self.device_type = device_type
             self.mesh = (
@@ -216,7 +218,8 @@ else:
                 # already. The world pg is used for device mesh identity (rank) on each
                 # process (we need to know if the current global rank is in the mesh or not).
                 self._get_or_create_default_group()
-                self._init_process_groups()
+                if _init_process_groups:
+                    self._init_process_groups()
 
         def _get_or_create_default_group(self):
             default_initialized = is_initialized()
@@ -285,16 +288,10 @@ else:
                     # for each dim and append the groups
                     for dim_mesh in pg_ranks_by_dim:
                         subgroup_ranks = dim_mesh.tolist()
-                        # if dim_group exists for given subgroup_ranks, we re-use it.
-                        # "" is the default tag for user PGs, and it contains all pgs for a given rank.
-                        dim_group = _find_pg_by_ranks_and_tag(
-                            tag="", ranks=subgroup_ranks
-                        )
-                        if not dim_group:
-                            # call new_group regardless of the current rank in the
-                            # pg or not, it's required that all ranks participate
-                            # in subgroup construction
-                            dim_group = new_group(ranks=subgroup_ranks)
+                        # call new_group regardless of the current rank in the
+                        # pg or not, it's required that all ranks participate
+                        # in subgroup construction
+                        dim_group = new_group(ranks=subgroup_ranks)
                         # only add to dim_groups if the current rank in the subgroup
                         if self.get_rank() in subgroup_ranks:
                             if len(dim_group_infos) > dim:
@@ -303,13 +300,10 @@ else:
                                     f"in {subgroup_ranks}!"
                                 )
                             dim_group_infos.append(
-                                (
-                                    _get_group_tag(not_none(dim_group)),
-                                    subgroup_ranks,
-                                    not_none(dim_group).group_name,
-                                )
+                                (_get_group_tag(dim_group), subgroup_ranks)
                             )
             self._dim_group_infos = dim_group_infos
+
 
         def __enter__(self) -> "DeviceMesh":
             # set this mesh as the current mesh in mesh env
@@ -475,11 +469,11 @@ else:
             elif mesh_dim is None:
                 mesh_dim = 0
 
-            mesh_dim_group = not_none(self.get_group(mesh_dim))
+            mesh_dim_group = self.get_group(mesh_dim)  # type: ignore[arg-type]
             assert isinstance(
                 mesh_dim_group, ProcessGroup
             ), "We expect ProcessGroup before calling `get_rank`!"
-            return not_none(get_rank(mesh_dim_group))
+            return get_rank(mesh_dim_group)  # type: ignore[arg-type]
 
         def get_coordinate(self) -> Optional[List[int]]:
             """
