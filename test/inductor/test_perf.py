@@ -204,7 +204,7 @@ class NumBytesMetricTests(TestCase):
             return torch.cat((a + 1, b + 2, c + 3, d + 4, e + 5)) + 10
 
         inp = [T(10, 10) for _ in range(5)]
-        self.assertExpectedInline(count_numel(f, *inp), """2000""")
+        self.assertExpectedInline(count_numel(f, *inp), """1000""")
 
         def f(a, b):
             return torch.cat([a.sum(dim=0), b.sum(dim=0)]) + 10
@@ -250,7 +250,7 @@ class NumBytesMetricTests(TestCase):
             return torch.cat([a + 1, b + 2]) + 3
 
         inp = (T(10, 10), T(10, 10))
-        self.assertExpectedInline(count_numel(f, *inp), """800""")
+        self.assertExpectedInline(count_numel(f, *inp), """400""")
 
     def test_index(self):
         def f(a, b):
