@@ -167,17 +167,19 @@ def foreach_reduce_scatter(
         for padded_unsharded_size, fsdp_param in zip(
             padded_unsharded_sizes, fsdp_params
         ):
-            padded_sharded_numel = padded_unsharded_size.numel() // world_size
-            sharded_numel = fsdp_param.sharded_size.numel()
-            new_sharded_grad = reduce_scatter_output[
-                flat_grad_offset : flat_grad_offset + sharded_numel
-            ].view(fsdp_param.sharded_size)
+            new_sharded_grad = torch.as_strided(
+                reduce_scatter_output,
+                size=fsdp_param.sharded_size,
+                stride=fsdp_param.sharded_stride,
+                storage_offset=flat_grad_offset,
+            )
             to_accumulate_grad = fsdp_param.sharded_param.grad is not None
             new_sharded_dtensor_grad = fsdp_param.to_sharded_dtensor(new_sharded_grad)
             if to_accumulate_grad:
                 fsdp_param.sharded_param.grad += new_sharded_dtensor_grad
             else:
                 fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
+            padded_sharded_numel = padded_unsharded_size.numel() // world_size
             flat_grad_offset += padded_sharded_numel
         reduce_scatter_view_out_event = torch.cuda.Event()
         reduce_scatter_view_out_event.record()
