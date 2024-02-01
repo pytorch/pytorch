@@ -305,11 +305,17 @@ def _single_tensor_adamax(
             clr = lr / bias_correction
             clr_neg = clr.neg()
 
-            norm_buf = torch.cat(
-                [exp_inf.mul_(beta2).unsqueeze(0), grad.abs().add_(eps).unsqueeze_(0)],
-                0,
-            )
-            exp_inf.copy_(torch.amax(norm_buf, 0, keepdim=False))
+            if differentiable:
+                norm_buf = torch.cat(
+                    [exp_inf.mul_(beta2).unsqueeze(0), grad.abs().add_(eps).unsqueeze_(0)], 0
+                )
+                exp_inf.copy_(torch.amax(norm_buf, 0, keepdim=False))
+            else:
+                torch.maximum(
+                    exp_inf.mul_(beta2),
+                    grad.abs().add_(eps),
+                    out=exp_inf,
+                )
             exp_avg.mul_(clr_neg)
             param.addcdiv_(exp_avg, exp_inf)
         else:
