@@ -535,8 +535,8 @@ class triton:
         os.environ.get("TORCHINDUCTOR_PERSISTENT_REDUCTIONS", "1") == "1"
     )
 
-    # 0: disable
-    # 1: enable, use tuning to pick between different subkernels
+    # 0/False: disable
+    # 1/True: enable, use tuning to pick between different subkernels
     # 2: enable, force using persistent reduction (for debugging)
     # 3: enable, force using non-persistent reduction (for debugging)
     multi_kernel = int(os.environ.get("TORCHINDUCTOR_MULTI_KERNEL", "0"))
@@ -600,6 +600,9 @@ class aot_inductor:
 
     # Serialized tree spec for flattening outputs
     serialized_out_spec = ""
+
+    # flag to decide whether to create a submodule for constant graph.
+    use_runtime_constant_folding: bool = False
 
 
 class cuda:

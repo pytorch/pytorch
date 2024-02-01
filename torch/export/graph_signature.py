@@ -295,7 +295,7 @@ class ExportGraphSignature:
             if s.kind != InputKind.USER_INPUT:
                 continue
 
-            if isinstance(s.arg, (TensorArgument, SymIntArgument)):
+            if isinstance(s.arg, (TensorArgument, SymIntArgument, CustomObjArgument)):
                 user_inputs.append(s.arg.name)
             elif isinstance(s.arg, ConstantArgument):
                 user_inputs.append(s.arg.value)
