@@ -6,10 +6,10 @@ import torch
 import torch.nn as nn
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
+from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._tensor import DTensor, Placement, Replicate, Shard
 from torch.distributed._tensor.device_mesh import _mesh_resources
 from torch.distributed._tensor.placement_types import DTensorSpec
-
 from ._fsdp_common import (
     _chunk_with_empty,
     _from_local_no_grad,
@@ -91,7 +91,7 @@ class FSDPParam:
     orig_dtype: torch.dtype
     _orig_size: torch.Size  # ND
     sharded_size: torch.Size  # ND
-    sharded_stride: Tuple[int, ...]  # goes with sharded size
+    contiguous_sharded_stride: Tuple[int, ...]  # goes with sharded size
     _sharded_param_data: torch.Tensor  # 1D
     sharded_param: nn.Parameter  # ND
     _unsharded_param: nn.Parameter  # ND
@@ -180,10 +180,7 @@ class FSDPParam:
         chunks = _chunk_with_empty(param_data, shard_world_size, dim=0)
         sharded_param = chunks[shard_rank]
         self.sharded_size = sharded_param.size()
-        # TODO: DTensor's local tensor may not have the correct stride for the
-        # uneven sharding case, so we construct a new tensor to get the stride:
-        # https://github.com/pytorch/pytorch/issues/118836
-        self.sharded_stride = torch.empty(self.sharded_size).stride()
+        self.contiguous_sharded_stride = make_contiguous_strides_for(self.sharded_size)
         padded_sharded_size = chunks[0].size()  # 0th always padded
         padded_sharded_param = param_data.new_zeros(padded_sharded_size)
         if sharded_param.numel() > 0:
