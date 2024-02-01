@@ -2105,6 +2105,21 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x, y), fn_opt(x, y))
         self.assertEqual(fn(x, x), fn_opt(x, x))
 
+    def test_is_not_tensor_tensor(self):
+        def fn(x, y):
+            if x is not y:
+                return x * 2
+            else:
+                return x + y
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        x = torch.zeros(2)
+        y = torch.ones(2)
+
+        self.assertEqual(fn(x, y), fn_opt(x, y))
+        self.assertEqual(fn(x, x), fn_opt(x, x))
+
     def test_is_mutated_tensor_tensor(self):
         def fn(x):
             y = x.add_(1)
