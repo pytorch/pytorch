@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCaseBase as TestCase,
+    TEST_CUDA_MEM_LEAK_CHECK,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
@@ -311,6 +312,7 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([3.0], device=device))
 
+    @unittest.skipIf(TEST_CUDA_MEM_LEAK_CHECK, "failing memory leak check")
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unbacked_index_select(self, device):
         # Tests if unbacked symbols captured by inner_fn are properly tracked
