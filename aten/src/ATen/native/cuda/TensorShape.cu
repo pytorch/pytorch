@@ -2,11 +2,14 @@
 #include <ATen/Dispatch.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/native/Resize.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
 #include <ATen/ops/empty.h>
-#include <ATen/ops/split_with_sizes_copy_native.h>
-#include <aten/src/ATen/native/Resize.h>
-#include <c10/cuda/CUDAGuard.h>
-#include <c10/util/Logging.h>
+#include <ATen/ops/split_with_sizes_copy.h>
+#endif
 
 namespace at::native {
 
@@ -420,7 +423,7 @@ void split_with_sizes_copy_out_cuda(
     split_with_sizes_copy_out_cuda_contiguous_no_cast(
         self, split_sizes, dim, out);
   } else {
-    at::native::split_with_sizes_copy_out(self, split_sizes, dim, out);
+    at::split_with_sizes_copy_out(out, self, split_sizes, dim);
   }
 }
 
