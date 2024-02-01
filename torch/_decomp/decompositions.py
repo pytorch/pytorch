@@ -3368,20 +3368,20 @@ def _upsample_linear(
 ) -> Tensor:
     # get dimensions of original image
     n_batch, n_channels = input.shape[:2]
-    inp_size = input.shape[2:]
-    d = len(inp_size)
+    inp_sizes = input.shape[2:]
+    n_dims = len(inp_sizes)
 
     _, dtype = utils.elementwise_dtypes(
         input,
         type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     )
 
-    def get_values(inp, out, scales, nsqueeze):
+    def get_values(inp_size, out_size, scales, nsqueeze):
         # First Calculate scaling factor
-        scale_factor = _compute_scale(inp, out, align_corners, scales)
+        scale_factor = _compute_scale(inp_size, out_size, align_corners, scales)
         # We have to create arange with int64 dtype and use .to in order to avoid
         # additional kernels creation in inductor and get a perf slowdown
-        i = torch.arange(out, device=input.device).to(dtype=dtype)
+        i = torch.arange(out_size, device=input.device).to(dtype=dtype)
 
         x_f32 = _compute_source_index(scale_factor, i, align_corners).clamp(min=0.0)
         x_f32 = x_f32.reshape(x_f32.shape[0], *[1] * (nsqueeze))
@@ -3393,23 +3393,25 @@ def _upsample_linear(
         # fails with torch.ops.aten._unsafe_index.Tensor(primals_1, [None, None, _to_copy_1, clamp_2])
         # RuntimeError: _unsafe_index found unexpected index type Float
         # xp1 = (x + 1).clamp(max=in_w - 1); yp1 = (y + 1).clamp(max=in_h - 1)
-        xp1 = torch.where(x < inp - 1, x + 1, x)
+        xp1 = torch.where(x < inp_size - 1, x + 1, x)
         return x_f32, x, xp1
 
     values = [
-        get_values(inp, out, scales, d - 1 - i)
-        for i, (inp, out, scales) in enumerate(zip(inp_size, output_size, scales))
+        get_values(inp_size, out_size, scales, n_dims - 1 - i)
+        for i, (inp_size, out_size, scales) in enumerate(
+            zip(inp_sizes, output_size, scales)
+        )
     ]
     xs_f32, xs, xp1s = list(zip(*values))
 
     vs = []
-    for a in product(*[[0, 1]] * d):
-        idx = [None, None] + [xs[k] if a[k] == 0 else xp1s[k] for k in range(d)]
+    for a in product(*[[0, 1]] * n_dims):
+        idx = [None, None] + [xs[k] if a[k] == 0 else xp1s[k] for k in range(n_dims)]
         v = aten._unsafe_index(input, idx)
         v = _maybe_convert_to_dtype(v, dtype)
         vs.append(v)
 
-    for i in reversed(range(d)):
+    for i in reversed(range(n_dims)):
         xscale = (xs_f32[i] - xs[i]).clamp(0.0, 1.0).to(dtype)
         vs = [
             # x1 * (1 - alpha) + x2 * alpha == x1 + (x2 - x1) * alpha
