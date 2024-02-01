@@ -16,22 +16,6 @@
 
 namespace c10d {
 
-/* Helper used by work::getDuration() and nccl flight recorder */
-float getDurationFromFirstEvent(
-    const std::vector<at::cuda::CUDAEvent>& ncclStartEvents,
-    const std::vector<at::cuda::CUDAEvent>& ncclEndEvents) {
-  TORCH_CHECK(
-      ncclStartEvents.size() == 1,
-      "getDuration only works for single device per ProcessGroup, but found multiple start events.");
-  TORCH_CHECK(
-      ncclEndEvents.size() == 1,
-      "getDuration only works for single device per ProcessGroup, but found multiple end events.");
-  TORCH_CHECK(
-      ncclEndEvents[0].query(),
-      "getDuration can only be called after work is succeeded.")
-  return ncclStartEvents[0].elapsed_time(ncclEndEvents[0]);
-}
-
 /* Trace Utils Related to TORCH_NCCL_DESYNC_DEBUG */
 
 inline std::string getTraceStartKey(const std::string& pgName, int rank) {
@@ -284,6 +268,22 @@ inline std::string retrieveDesyncReport(
  * wasn't done that way, so isn't expected to be fully general at the moment) */
 
 #ifdef USE_C10D_NCCL
+
+/* Helper used by work::getDuration() and nccl flight recorder */
+float getDurationFromFirstEvent(
+    const std::vector<at::cuda::CUDAEvent>& ncclStartEvents,
+    const std::vector<at::cuda::CUDAEvent>& ncclEndEvents) {
+  TORCH_CHECK(
+      ncclStartEvents.size() == 1,
+      "getDuration only works for single device per ProcessGroup, but found multiple start events.");
+  TORCH_CHECK(
+      ncclEndEvents.size() == 1,
+      "getDuration only works for single device per ProcessGroup, but found multiple end events.");
+  TORCH_CHECK(
+      ncclEndEvents[0].query(),
+      "getDuration can only be called after work is succeeded.")
+  return ncclStartEvents[0].elapsed_time(ncclEndEvents[0]);
+}
 
 DebugInfoWriter::~DebugInfoWriter() = default;
 
@@ -556,12 +556,18 @@ struct NCCLTraceBuffer {
   std::string dump() {
     auto result = dump_entries();
     auto entries = new_list();
+    c10::IValue entries_key = "entries";
+    c10::IValue version_key = "version";
+    // Update whenever changing contents or formatting of the dump
+    // (minor when adding fields, major when changing existing fields)
+    c10::IValue version_val = "1.0";
+
     c10::IValue pg_id_key = "pg_id";
     c10::IValue seq_id_key = "seq_id";
     c10::IValue profiling_name_key = "profiling_name";
     c10::IValue input_sizes_key = "input_sizes";
     c10::IValue output_sizes_key = "output_sizes";
-    c10::IValue time_created_key = "time_created_us";
+    c10::IValue time_created_key = "time_created_ns";
     c10::IValue duration_key = "duration_ms";
 
     c10::IValue frames_key = "frames";
@@ -592,7 +598,7 @@ struct NCCLTraceBuffer {
       dict.insert(pg_id_key, int64_t(e.pg_id_));
       dict.insert(seq_id_key, int64_t(e.seq_id_));
       dict.insert(profiling_name_key, e.profiling_name_);
-      dict.insert(time_created_key, int64_t(e.time_created_ / 1000));
+      dict.insert(time_created_key, int64_t(e.time_created_));
       if (e.duration_) {
         dict.insert(duration_key, *e.duration_);
       }
@@ -623,7 +629,12 @@ struct NCCLTraceBuffer {
       dict.insert(frames_key, frames);
       entries.push_back(dict);
     }
-    return pickle_str(entries);
+
+    auto dict = new_dict();
+    dict.insert(entries_key, entries);
+    dict.insert(version_key, version_val);
+
+    return pickle_str(dict);
   }
 };
 
