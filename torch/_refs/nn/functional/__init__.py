@@ -281,12 +281,12 @@ def channel_shuffle(input: TensorLikeType, groups: int) -> TensorLikeType:
     Cg = C // groups
     H, W = input.shape[-2:]
     g_dim = len(batches)
-    return (
-        input.view(*batches, groups, Cg, H, W)
-        .transpose(g_dim, g_dim + 1)
-        .reshape(input.shape)
-        .clone(memory_format=utils.suggest_memory_format(input))
+
+    result = torch.empty_like(input)
+    result.view(*batches, Cg, groups, H, W).copy_(
+        input.view(*batches, groups, Cg, H, W).transpose(g_dim, g_dim + 1)
     )
+    return result
 
 
 def group_norm(
