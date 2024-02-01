@@ -1524,6 +1524,11 @@ TEST_F(FunctionalTest, Bilinear) {
   ASSERT_EQ(y_no_bias.sizes(), torch::IntArrayRef({2, 1}));
   auto y_no_bias_exp = torch::tensor({{448, 1701}}).reshape({2, 1});
   ASSERT_TRUE(torch::allclose(y_no_bias, y_no_bias_exp, 1e-4, 1e-7));
+
+  input1 = input1.to(torch::kFloat64);
+  ASSERT_THROWS_WITH(
+      F::bilinear(input1, input2, weight),
+      "All tensors must have the same dtype, got input1: double, input2: __int64, weight: __int64");
 }
 
 TEST_F(FunctionalTest, Normalize) {
