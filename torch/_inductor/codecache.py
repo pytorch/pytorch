@@ -1035,8 +1035,7 @@ def x86_isa_checker() -> List[str]:
     from filelock import FileLock
 
     lock_dir = get_lock_dir()
-    lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
-    with lock:
+    with FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT) as lock:
         output_dir = os.path.dirname(input_path)
         x86_isa_help_builder = CppBuilder(key, [input_path], CppOptions(), output_dir)
         status, target_file = x86_isa_help_builder.build()
@@ -1903,8 +1902,9 @@ class CppCodeCache:
             from filelock import FileLock
 
             lock_dir = get_lock_dir()
-            lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
-            with lock:
+            with FileLock(
+                os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT
+            ) as lock:
                 output_dir = os.path.dirname(input_path)
                 builder = CppBuilder(
                     key, [input_path], CppTorchOptions(picked_vec_isa), output_dir
