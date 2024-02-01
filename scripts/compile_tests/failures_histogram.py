@@ -160,7 +160,5 @@ if __name__ == "__main__":
     if args.format_issues:
         verbose = True
 
-    failures_histogram(args.eager_dir, args.dynamo_dir, verbose, args.format_issues)
-
     dynamo38, dynamo311, eager311 = download_reports(args.commit)
     failures_histogram(eager311, dynamo311, verbose, args.format_issues)

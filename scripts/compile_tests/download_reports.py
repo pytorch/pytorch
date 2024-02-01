@@ -62,9 +62,7 @@ def download_reports(commit_sha):
                 subprocess.run(["wget", "-P", subdir, url], check=True)
                 path_to_zip = f"{subdir}/{name}"
                 dir_name = path_to_zip[:-4]
-                subprocess.run(
-                    ["unzip", path_to_zip, "-d", dir_name], check=True
-                )
+                subprocess.run(["unzip", path_to_zip, "-d", dir_name], check=True)
                 return
         raise AssertionError("should not be hit")
 
