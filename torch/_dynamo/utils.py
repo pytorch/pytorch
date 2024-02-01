@@ -28,7 +28,6 @@ import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
 from pathlib import Path
-from types import MethodWrapperType
 from typing import (
     Any,
     Callable,
@@ -1077,53 +1076,6 @@ def iter_contains(items, search, tx, check_tensor_identity=False):
     if found is None:
         found = ConstantVariable.create(False)
     return found
-
-
-def key_is_id(k):
-    """Returns whether it indexes dictionaries using its id"""
-    return isinstance(k, (torch.Tensor, torch.nn.Module, MethodWrapperType))
-
-
-def key_to_id(value):
-    return [id(k) if key_is_id(k) else k for k in value.keys()]
-
-
-def const_repr(x, *, local) -> str:
-    from .trace_rules import is_builtin_callable
-
-    if isinstance(x, (list, tuple)):
-        elems_repr = ",".join(const_repr(s, local=local) for s in x)
-        if isinstance(x, list):
-            return f"[{elems_repr}]"
-        else:
-            assert isinstance(x, tuple)
-            if len(x) == 1:
-                return f"({elems_repr},)"
-            else:
-                return f"({elems_repr})"
-    elif isinstance(x, enum.Enum):
-        # To workaround repr(Enum) returning invalid global reference before python 3.11
-        # by calling enum_repr and removing quotes to render enum in guard code.
-        return enum_repr(x, local=local).replace("'", "")
-    elif is_builtin_callable(x):
-        return x.__name__
-    elif isinstance(x, type):
-
-        def fullname(o):
-            klass = o.__class__
-            module = klass.__module__
-            if module == "builtins":
-                return klass.__qualname__  # avoid outputs like 'builtins.str'
-            return module + "." + klass.__qualname__
-
-        return fullname(x)
-    else:
-        return f"{x!r}"
-
-
-def dict_keys_repr(const_keys, *, local) -> str:
-    keys_str = ",".join(const_repr(s, local=local) for s in const_keys)
-    return "[" + keys_str + "]"
 
 
 GLOBAL_KEY_PREFIX = "__dict_key"

@@ -498,7 +498,7 @@ class VariableBuilder:
 
             install_guard(
                 self.get_source().make_guard(GuardBuilder.TYPE_MATCH),
-                keywords_source.make_guard(GuardBuilder.DICT_KEYS),
+                keywords_source.make_guard(GuardBuilder.DICT_CONST_KEYS),
                 args_source.make_guard(GuardBuilder.LIST_LENGTH),
             )
             return FunctoolsPartialVariable(func_obj, args, keywords, original=value)

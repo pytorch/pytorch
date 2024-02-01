@@ -6,8 +6,7 @@ from typing import Dict, List
 import torch
 from ..decorators import mark_static_address
 
-from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, ConstDictKeySource, GetItemSource, GlobalWeakRefSource
+from ..source import AttrSource, GetItemSource, GlobalWeakRefSource
 from ..utils import GLOBAL_KEY_PREFIX
 
 from .base import VariableTracker
@@ -134,31 +133,18 @@ class OptimizerVariable(UserDefinedObjectVariable):
                         "grad",
                     )
 
-        # state guards take a long time to generate
-        # so we manually generate them here
-        state_source = AttrSource(self.source, "state")
-        install_guard(state_source.make_guard(GuardBuilder.DICT_KEYS))
-        for idx, (p, value) in enumerate(self.value.state.items()):
-            tx.store_global_weakref_by_id(GLOBAL_KEY_PREFIX, p)
-            p_state_source = GetItemSource(
-                state_source, ConstDictKeySource(state_source, idx)
-            )
-            install_guard(p_state_source.make_guard(GuardBuilder.DICT_KEYS))
-            for k, v in value.items():
+        state_vt = VariableBuilder(tx, AttrSource(self.source, "state"))(
+            self.value.state
+        ).recursive_realize()
+
+        for value, value_vt in zip(self.value.state.values(), state_vt.items.values()):
+            for v, v_vt in zip(value.values(), value_vt.items.values()):
                 if (
                     isinstance(v, torch.Tensor)
                     and v not in self.grad_to_source
                     and v not in self.tensor_to_source
                 ):
-                    self.tensor_to_source[v] = GetItemSource(p_state_source, k)
-                elif v is None or isinstance(v, (bool, int, float, str)):
-                    install_guard(
-                        GetItemSource(p_state_source, k).make_guard(
-                            GuardBuilder.CONSTANT_MATCH
-                        )
-                    )
-                else:
-                    raise GuardInstallException()
+                    self.tensor_to_source[v] = v_vt.source
 
     def wrap_tensor(self, tx, tensor_value):
         """Wrap state tensor in a TensorVariable"""
