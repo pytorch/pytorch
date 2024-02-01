@@ -2,15 +2,14 @@ import torch
 import torch.nn.functional as F
 
 
-def _replace_dropout_for_eval(m: torch.fx.GraphModule):
+def _replace_dropout(m: torch.fx.GraphModule, train_to_eval: bool):
     """
-    Replace the aten training dropout pattern with a noop, intended for eval.
+    Switch dropout patterns in the model between train and eval modes.
 
-    For models with dropout torch ops (nn.Dropout, F.dropout), calling model.eval()
-    effectively turns these dropout ops into noops. For exported models, however,
-    this is not done automatically, since the aten dropout patterns previously generated
-    for training remain in the graph. Here we rewrite these dropout patterns with noops
-    to avoid incorrectly applying further dropout during eval.
+    Dropout has different behavior in train vs eval mode. For exported models,
+    however, calling `model.train()` or `model.eval()` does not automatically switch
+    the dropout behavior between the two modes, so here we need to rewrite the aten
+    dropout patterns manually to achieve the same effect.
 
     See https://github.com/pytorch/pytorch/issues/103681.
     """
@@ -30,8 +29,12 @@ def _replace_dropout_for_eval(m: torch.fx.GraphModule):
             return F.dropout(x, p=0.5, training=False, inplace=inplace)
 
         example_inputs = (torch.randn(1),)
-        match_pattern = get_aten_graph_module(dropout_train, example_inputs)
-        replacement_pattern = get_aten_graph_module(dropout_eval, example_inputs)
+        if train_to_eval:
+            match_pattern = get_aten_graph_module(dropout_train, example_inputs)
+            replacement_pattern = get_aten_graph_module(dropout_eval, example_inputs)
+        else:
+            match_pattern = get_aten_graph_module(dropout_eval, example_inputs)
+            replacement_pattern = get_aten_graph_module(dropout_train, example_inputs)
 
         from torch.fx.subgraph_rewriter import replace_pattern_with_filters
 
@@ -45,7 +48,15 @@ def _replace_dropout_for_eval(m: torch.fx.GraphModule):
         m.recompile()
 
 
-def _replace_batchnorm_for_eval(m: torch.fx.GraphModule):
+def _replace_batchnorm(m: torch.fx.GraphModule, train_to_eval: bool):
+    """
+    Switch batchnorm patterns in the model between train and eval modes.
+
+    Batchnorm has different behavior in train vs eval mode. For exported models,
+    however, calling `model.train()` or `model.eval()` does not automatically switch
+    the batchnorm behavior between the two modes, so here we need to rewrite the aten
+    batchnorm patterns manually to achieve the same effect.
+    """
     # TODO(Leslie): This function still fails to support custom momentum and eps value.
     # Enable this support in future updates.
 
@@ -85,8 +96,13 @@ def _replace_batchnorm_for_eval(m: torch.fx.GraphModule):
         torch.randn(1),  # bn_running_mean
         torch.randn(1),  # bn_running_var
     )
-    match_pattern = get_aten_graph_module(bn_train, example_inputs)
-    replacement_pattern = get_aten_graph_module(bn_eval, example_inputs)
+    if train_to_eval:
+        match_pattern = get_aten_graph_module(bn_train, example_inputs)
+        replacement_pattern = get_aten_graph_module(bn_eval, example_inputs)
+    else:
+        match_pattern = get_aten_graph_module(bn_eval, example_inputs)
+        replacement_pattern = get_aten_graph_module(bn_train, example_inputs)
+
     from torch.fx.subgraph_rewriter import replace_pattern_with_filters
 
     replace_pattern_with_filters(
@@ -99,7 +115,6 @@ def _replace_batchnorm_for_eval(m: torch.fx.GraphModule):
     m.recompile()
 
 
-# TODO: also support move_exported_model_to_train
 def _move_exported_model_to_eval(model: torch.fx.GraphModule):
     """
     Move an exported GraphModule to eval mode.
@@ -107,6 +122,18 @@ def _move_exported_model_to_eval(model: torch.fx.GraphModule):
     This is equivalent to model.eval() but only for certain special ops like dropout, batchnorm.
     QAT users should call this before performing inference on the model.
     """
-    _replace_dropout_for_eval(model)
-    _replace_batchnorm_for_eval(model)
+    _replace_dropout(model, train_to_eval=True)
+    _replace_batchnorm(model, train_to_eval=True)
+    return model
+
+
+def _move_exported_model_to_train(model: torch.fx.GraphModule):
+    """
+    Move an exported GraphModule to train mode.
+
+    This is equivalent to model.train() but only for certain special ops like dropout, batchnorm.
+    QAT users should call this before performing training on the model.
+    """
+    _replace_dropout(model, train_to_eval=False)
+    _replace_batchnorm(model, train_to_eval=False)
     return model

@@ -156,7 +156,14 @@ def capture_pre_autograd_graph(
     else:
         constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
 
-    decomp_table = {op: op.decompose for op in FunctionalTensor.maybe_aliasing_or_mutating_ops}
+    # Do not decompose dropout for exported models, because in eval mode the dropout
+    # op disappears from the graph, which makes it difficult to switch to train mode.
+    # See https://github.com/pytorch/pytorch/pull/115258#issuecomment-1900755832.
+    decomp_table = {
+        op: op.decompose
+        for op in FunctionalTensor.maybe_aliasing_or_mutating_ops
+        if op != torch.ops.aten.dropout.default
+    }
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
         m = torch._dynamo.export(
             f,
