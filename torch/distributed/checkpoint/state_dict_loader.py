@@ -1,15 +1,17 @@
 import os
 import warnings
-from typing import Any, Dict, Optional, Union
+from typing import Any, cast, Dict, Optional, Union
 
 import torch
 import torch.distributed as dist
 from torch.distributed.checkpoint.stateful import Stateful
+from ._fsspec_filesystem import FsspecReader
 
 from .default_planner import DefaultLoadPlanner
 from .filesystem import FileSystemReader
 from .planner import LoadPlanner
 from .storage import StorageReader
+from .storage_utils import _storage_setup
 from .utils import _all_gather_keys, _api_bc_check, _DistWrapper, _profile
 
 __all__ = ["load_state_dict", "load"]
@@ -132,17 +134,9 @@ def load(
     """
 
     with _profile():
-        if not storage_reader:
-            if not checkpoint_id:
-                raise RuntimeError(
-                    "`checkpoint_id` must be specificed if storage_reader is None."
-                )
-            # TODO: automatically decide whether to use FSSpecFileSystem
-            # https://github.com/pytorch/pytorch/issues/118033 and
-            # https://github.com/pytorch/pytorch/issues/118036
-            storage_reader = FileSystemReader(checkpoint_id)
-
-        storage_reader.reset(checkpoint_id)
+        storage_reader = cast(
+            StorageReader, _storage_setup(storage_reader, checkpoint_id, reader=True)
+        )
 
         if no_dist:
             keys = list(state_dict.keys())

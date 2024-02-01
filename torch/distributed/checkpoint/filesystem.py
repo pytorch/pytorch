@@ -327,6 +327,11 @@ class FileSystemBase(ABC):
     def mkdir(self, path: [str, os.PathLike]) -> None:
         ...
 
+    @staticmethod
+    @abstractmethod
+    def check(path: [str, os.PathLike]) -> None:
+        ...
+
 
 class FileSystem(FileSystemBase):
     @contextmanager
@@ -351,6 +356,20 @@ class FileSystem(FileSystemBase):
 
     def mkdir(self, path: [str, os.PathLike]) -> None:
         cast(os.PathLike, path).mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def check(path: Union[str, os.PathLike, None] = None) -> bool:
+        if isinstance(path, Path):
+            return True
+
+        if "://" in path:
+            return False
+
+        for p in Path(path).parents:
+            if p.exists() and os.access(str(p), os.W_OK):
+                return True
+
+        return False
 
 
 class FileSystemWriter(StorageWriter):
@@ -496,6 +515,10 @@ class FileSystemWriter(StorageWriter):
 
         self.fs.rename(tmp_path, meta_path)
 
+    @staticmethod
+    def check(checkpoint_id: Union[str, os.PathLike, None] = None) -> bool:
+        return FileSystem.check(checkpoint_id)
+
 
 class FileSystemReader(StorageReader):
     def __init__(self, path: Union[str, os.PathLike]) -> None:
@@ -566,3 +589,7 @@ class FileSystemReader(StorageReader):
 
     def prepare_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
         return global_plan
+
+    @staticmethod
+    def check(checkpoint_id: Union[str, os.PathLike, None] = None) -> bool:
+        return FileSystem.check(checkpoint_id)
