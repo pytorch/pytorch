@@ -1528,7 +1528,7 @@ TEST_F(FunctionalTest, Bilinear) {
   input1 = input1.to(torch::kFloat64);
   ASSERT_THROWS_WITH(
       F::bilinear(input1, input2, weight),
-      "All tensors must have the same dtype, got input1: double, input2: __int64, weight: __int64");
+      "All tensors must have the same dtype, got input1: double, input2: long int, weight: long int");
 }
 
 TEST_F(FunctionalTest, Normalize) {
