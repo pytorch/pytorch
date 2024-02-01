@@ -661,7 +661,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
-        error_message="Trying to flatten user inputs with exported input tree spec"
+        error_message="kwarg key mismatch"
     )
     def test_gpt2_tiny_from_config(self):
         # Model
