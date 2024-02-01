@@ -2,7 +2,7 @@
 
 from torch.testing._internal.common_utils import (
     TestCase, TEST_WITH_TORCHDYNAMO, run_tests, skipIfCrossRef, skipIfRocm, skipIfTorchDynamo, parametrize,
-    instantiate_parametrized_tests)
+    instantiate_parametrized_tests, TemporaryFileName)
 import torch
 import torch._dynamo
 import itertools
@@ -1287,7 +1287,6 @@ class FakeTensorPropTest(TestCase):
             FakeTensorProp(graph_model, fake_mode).propagate(value, None, another_optional_value)
 
     def test_torch_load_with_fake_mode(self):
-        import tempfile
 
         class TheModelClass(torch.nn.Module):
             def __init__(self):
@@ -1297,15 +1296,15 @@ class FakeTensorPropTest(TestCase):
             def forward(self, x):
                 return self.fc1(x)
 
-        with tempfile.NamedTemporaryFile() as state_dict_file:
+        with TemporaryFileName() as state_dict_file:
             # Create state_dict to be loaded later
             model = TheModelClass()
-            torch.save(model.state_dict(), state_dict_file.name)
+            torch.save(model.state_dict(), state_dict_file)
 
             fake_mode = FakeTensorMode()
             with fake_mode:
                 # This is where the bug is triggered
-                torch.load(state_dict_file.name)
+                torch.load(state_dict_file)
 
 
 class FakeTensorDispatchCache(TestCase):
