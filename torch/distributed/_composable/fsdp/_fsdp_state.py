@@ -53,10 +53,10 @@ class FSDPState(_State):
         _insert_module_state(module, self)
         self._module = module
         self._device = device
-        self._pre_forward_hook_handle = self._module.register_forward_pre_hook(
+        self._pre_forward_hook_handle = module.register_forward_pre_hook(
             self._pre_forward, prepend=True, with_kwargs=True
         )
-        self._post_forward_hook_handle = self._module.register_forward_hook(
+        self._post_forward_hook_handle = module.register_forward_hook(
             self._post_forward, prepend=False
         )
 
@@ -103,6 +103,8 @@ class FSDPState(_State):
                     )
                 state._is_root = False
             self._state_ctx.all_states.append(state)
+            if state._fsdp_param_group:
+                state._fsdp_param_group.lazy_init()
         if self._fsdp_param_group:
             # For the root, do not reshard after forward since for training,
             # the parameters would be freed and all-gathered immediately
