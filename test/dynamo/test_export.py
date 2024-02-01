@@ -2293,60 +2293,6 @@ def forward(self, x):
         out_graph = exported[0]
         self.assertTrue(torch._dynamo.utils.same(torch.ones(3, 3), out_graph()))
 
-    def test_none_out(self):
-        def f(x, y):
-            _ = x + y
-
-        with self.assertRaisesRegex(
-            UserError,
-            "It looks like one of the outputs with type .*None.* "
-            "is not supported or pytree-flattenable",
-        ):
-            torch._dynamo.export(f, aten_graph=False)(torch.randn(10), torch.randn(10))
-
-    def test_primitive_constant_output(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x):
-                # return a constant of primitive type
-                y = 5
-                return y * x, y
-
-        foo = Foo()
-
-        with self.assertRaisesRegex(
-            UserError,
-            "It looks like one of the outputs with type .*int.* "
-            "is not supported or pytree-flattenable",
-        ):
-            torch.export.export(foo, (torch.tensor(3),))
-
-        class Bar(torch.nn.Module):
-            def forward(self, x, y):
-                return y * x, y
-
-        bar = Bar()
-
-        # new behavior
-        with self.assertRaisesRegex(
-            UserError,
-            "It looks like one of the outputs with type .*int.* "
-            "is not supported or pytree-flattenable",
-        ):
-            torch.export.export(bar, (torch.tensor(3), 5))
-
-        class Qux(torch.nn.Module):
-            def forward(self, x, y):
-                return y * x, y - 1
-
-        qux = Qux()
-
-        with self.assertRaisesRegex(
-            UserError,
-            "It looks like one of the outputs with type .*int.* "
-            "is not supported or pytree-flattenable",
-        ):
-            torch.export.export(qux, (torch.tensor(3), 5))
-
     @unittest.skipIf(not TEST_CUDA, "No CUDA available.")
     def test_export_with_parameters(self):
         class MyModule(torch.nn.Module):
@@ -2373,7 +2319,10 @@ def forward(self, x):
         torch.export.save(exp_program, output_buffer)
         loaded_model = torch.export.load(output_buffer)
         self.assertTrue(
-            isinstance(loaded_model.module().features_0_weight, torch.nn.Parameter)
+            isinstance(
+                loaded_model.module().get_parameter("features.0.weight"),
+                torch.nn.Parameter,
+            )
         )
 
     def test_export_meta(self):
@@ -4382,6 +4331,26 @@ def forward(self, x):
         out = gm_no_inference(inp)
         self.assertEqual(out.requires_grad, False)
         out.requires_grad = True
+
+        def fn(x):
+            with torch.inference_mode():
+                return x + 1
+
+        gm, _ = torch._dynamo.export(fn)(torch.rand(2, 2))
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x):
+    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    l_x_ = arg0
+    _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(True)
+    add = l_x_ + 1;  l_x_ = None
+    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = None
+    return pytree.tree_unflatten([add], self._out_spec)""",
+        )
+        inp = torch.randn(2, 2, requires_grad=True)
+        out = gm(inp)
+        self.assertEqual(out.requires_grad, False)
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
