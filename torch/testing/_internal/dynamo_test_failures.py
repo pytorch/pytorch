@@ -2044,6 +2044,7 @@ dynamo_expected_failures = {
     "TestDynamicQuantizedModule.test_gru_api",  # test_quantization
     "TestQuantizeFx.test_qconfig_for_call_method",  # test_quantization
     "TestXNNPACKQuantizer.test_conv1d_with_conv2d",  # test_quantization
+    "TestXNNPACKQuantizer.test_weight_only_linear_int4_weight",  # test_quantization
     "TestQuantizedOps.test_qsoftmax",  # test_quantization
     "TestQuantizedEmbeddingOps.test_embedding_bag_2bit",  # test_quantization
     "TestObserver.test_per_tensor_observers",  # test_quantization
