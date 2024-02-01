@@ -450,6 +450,40 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         else:
             return x - 1
 
+    def test_callable_class(self):
+        class CallableClass:
+            def __call__():
+                pass
+
+        class NotCallableClass:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn1(x, arg):
+            if callable(arg):
+                return x
+            return x + 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn2(x, arg):
+            if callable(arg):
+                return x * 2
+            return x + 1
+
+        input = torch.randn(4)
+
+        for f in [fn1, fn2]:
+            self.assertEqual(f(input, NotCallableClass()), input + 1)
+            self.assertEqual(
+                f(input, CallableClass()), input if f is fn1 else input * 2
+            )
+
+            # passing tensor and scalars
+            self.assertEqual(f(input, 1), input + 1)
+            self.assertEqual(f(input, 1.1), input + 1)
+            self.assertEqual(f(input, True), input + 1)
+            self.assertEqual(f(input, input), input + 1)
+
     @make_test
     def test_len_constant_misc_iterables(x):
         a = len((1, 2, 3))
@@ -1743,7 +1777,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_pos(self):
         def fn(x, y):
-            return operator.pos(x) * operator.pos(y)
+            return operator.pos(x) * +y
 
         opt_fn = torch.compile(fullgraph=True, dynamic=True)(fn)
 
@@ -1756,6 +1790,23 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         test(-1.1, 1.1)
         test(True, False)
         test(torch.ones(4, dtype=torch.float32), 1.1)
+
+    def test_truth(self):
+        def fn(x, y):
+            return operator.truth(x) and bool(y)
+
+        opt_fn = torch.compile(fullgraph=True, dynamic=False)(fn)
+
+        def test(x, y):
+            self.assertEqual(opt_fn(x, y), fn(x, y))
+
+        test(1, 100)
+        test(-1.1, True)
+        test(-1.1, 1.1)
+        test(True, False)
+        test(torch.ones(1), 1)
+        test(torch.zeros(1), 1)
+        test(torch.ones(1), torch.ones(1))
 
     def test_unary_fold_op(self):
         for op in (operator.abs, abs, operator.neg, operator.pos, operator.truth):
