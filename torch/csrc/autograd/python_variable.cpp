@@ -525,20 +525,17 @@ static PyObject* THPVariable_fix_weakref(PyObject* self, PyObject* noargs) {
   Py_RETURN_NONE;
 }
 
-// Maps the given PyObject callable over a vector of items. The wrapper /
-// unwrapper args define how to convert between PyObject and item type.
-template <typename T, typename Wrapper, typename Unwrapper>
+// Maps the given python callable over a vector of items, returning a vector
+// of the same type of items.
+template <typename T>
 static std::vector<T> map_py_func(
-    PyObject* func,
-    const std::vector<T>& items,
-    Wrapper wrapper,
-    Unwrapper unwrapper) {
+    const py::function& func,
+    const std::vector<T>& items) {
   std::vector<T> new_items;
   new_items.resize(items.size());
   std::transform(
       items.begin(), items.end(), new_items.begin(), [&](const T& item) {
-        PyObject* res = PyObject_CallOneArg(func, wrapper(item));
-        return unwrapper(res);
+        return py::cast<T>(func(item));
       });
   return new_items;
 }
@@ -607,29 +604,15 @@ static PyObject* view_func_impl(
         c10::optional<std::vector<c10::SymInt>> new_symints = c10::nullopt;
         if (symint_visitor_fn != Py_None) {
           new_symints = map_py_func(
-              symint_visitor_fn,
-              view_func->get_symints(),
-              [](const c10::SymInt& s) { return torch::toPyObject(s); },
-              [](PyObject* p) {
-                TORCH_CHECK(
-                    torch::is_symint(py::handle(p)) || PyInt_Check(p),
-                    "Expected symint_visitor_fn to return int or SymInt");
-                return py::cast<c10::SymInt>(py::handle(p));
-              });
+              py::cast<py::function>(symint_visitor_fn),
+              view_func->get_symints());
         }
 
         c10::optional<std::vector<at::Tensor>> new_tensors = c10::nullopt;
         if (tensor_visitor_fn != Py_None) {
           new_tensors = map_py_func(
-              tensor_visitor_fn,
-              view_func->get_tensors(),
-              [](const at::Tensor& t) { return THPVariable_Wrap(t); },
-              [](PyObject* p) {
-                TORCH_CHECK(
-                    THPVariable_Check(p),
-                    "Expected tensor_visitor_fn to return Tensor");
-                return THPVariable_Unpack(p);
-              });
+              py::cast<py::function>(tensor_visitor_fn),
+              view_func->get_tensors());
         }
 
         // call view func

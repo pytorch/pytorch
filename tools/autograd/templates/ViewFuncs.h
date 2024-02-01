@@ -22,12 +22,16 @@ namespace torch { namespace autograd {
 struct TORCH_API ViewFunc {
   virtual ~ViewFunc() {}
   /// Returns any SymInts in the saved state.
-  virtual std::vector<c10::SymInt> get_symints() = 0;
-  /// Sets any SymInts in the saved state.
+  virtual std::vector<c10::SymInt> get_symints() const = 0;
+  /// Sets the values of any SymInts in the saved state. The input vector size must
+  /// match the number of SymInts in the saved state (i.e. the size of the list
+  /// returned by get_symints()).
   virtual void set_symints(const std::vector<c10::SymInt>&) = 0;
   /// Returns any Tensors in the saved state.
-  virtual std::vector<at::Tensor> get_tensors() = 0;
-  /// Sets any Tensors in the saved state.
+  virtual std::vector<at::Tensor> get_tensors() const = 0;
+  /// Sets the values of any Tensors in the saved state. The input vector size must
+  /// match the number of Tensors in the saved state (i.e. the size of the list
+  /// returned by get_tensors()).
   virtual void set_tensors(const std::vector<at::Tensor>&) = 0;
   /// Reapplies the view on the given base using the saved state.
   virtual at::Tensor operator()(const at::Tensor&) = 0;
@@ -38,30 +42,32 @@ struct ChainedViewFunc : public ViewFunc {
       const std::shared_ptr<ViewFunc>&,
       const std::shared_ptr<ViewFunc>&);
   virtual ~ChainedViewFunc() override {};
-  virtual std::vector<c10::SymInt> get_symints() override;
+  virtual std::vector<c10::SymInt> get_symints() const override;
   virtual void set_symints(const std::vector<c10::SymInt>&) override;
-  virtual std::vector<at::Tensor> get_tensors() override;
+  virtual std::vector<at::Tensor> get_tensors() const override;
   virtual void set_tensors(const std::vector<at::Tensor>&) override;
   virtual at::Tensor operator()(const at::Tensor&) override;
 
 private:
   std::shared_ptr<ViewFunc> first;
-  int64_t num_first_symints = -1;
-  int64_t num_first_tensors = -1;
+  // NB: These must be mutable so we can store them during the getter call
+  mutable int64_t num_first_symints = -1;
+  mutable int64_t num_first_tensors = -1;
 
   std::shared_ptr<ViewFunc> second;
-  int64_t num_second_symints = -1;
-  int64_t num_second_tensors = -1;
+  // NB: These must be mutable so we can store them during the getter call
+  mutable int64_t num_second_symints = -1;
+  mutable int64_t num_second_tensors = -1;
 };
 
 struct ErroringViewFunc : public ViewFunc {
   ErroringViewFunc(const std::string& error_msg) : error_msg(error_msg) {}
   virtual ~ErroringViewFunc() override {};
-  virtual std::vector<c10::SymInt> get_symints() override {
+  virtual std::vector<c10::SymInt> get_symints() const override {
     return {};
   }
   virtual void set_symints(const std::vector<c10::SymInt>&) override {}
-  virtual std::vector<at::Tensor> get_tensors() override {
+  virtual std::vector<at::Tensor> get_tensors() const override {
     return {};
   }
   virtual void set_tensors(const std::vector<at::Tensor>&) override {}
