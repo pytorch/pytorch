@@ -2260,6 +2260,26 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(param, param), fn(param, param))
         self.assertEqual(cnts.frame_count, 2)  # Recompiles
 
+    def test_reconstructed_name(self):
+        lst = []
+
+        @torch._dynamo.disable
+        def disallowed(g):
+            lst.append(g.__name__)
+
+        def f():
+            def g():
+                return ()
+
+            disallowed(g)
+
+        f_opt = torch._dynamo
+        opt_f = torch._dynamo.optimize(backend="eager")(f)
+        opt_f()
+        f()
+        self.assertEqual(len(lst), 2)
+        self.assertEqual(lst[0], lst[1])
+
     @unittest.skipIf(
         sys.version_info < (3, 10),
         "zip strict kwargs not implemented for Python < 3.10",

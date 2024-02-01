@@ -14,6 +14,7 @@ from ..exc import unimplemented, Unsupported
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import get_first_attr, make_cell
 from .base import typestr, VariableTracker
+from .constant import ConstantVariable
 
 if TYPE_CHECKING:
     from torch._guards import Source
@@ -508,7 +509,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         codegen.load_import_from(__name__, "_create_nested_fn")
         codegen(self.code)
         codegen.extend_output([codegen._create_load_const(self.f_globals)])
-        codegen(self.fn_name)
+        codegen(ConstantVariable.create(self.code.value.co_name))
 
         if self.defaults:
             codegen(self.defaults)
