@@ -11,8 +11,10 @@ import traceback
 from typing import Optional, Union
 
 import torch
+from torch.fx.experimental.symbolic_shapes import free_symbols
 
 from .exc import unimplemented
+from .variables.tensor import SymNodeVariable
 
 
 class ComptimeVar:
@@ -93,6 +95,12 @@ class ComptimeVar:
         """
         return self.__variable.is_python_constant()
 
+    def is_dynamic(self):
+        if isinstance(self.__variable, SymNodeVariable):
+            fs = free_symbols(self.__variable.sym_num)
+            return bool(fs)
+        return False
+
     def _i_will_not_complain_if_bc_breaks_VariableTracker(self):
         """
         Returns the internal data structure VariableTracker that Dynamo uses
@@ -138,6 +146,14 @@ class ComptimeContext:
         passed to the user compiler after compilation.
         """
         return self.__tx.output.graph
+
+    def assert_static(self, val):
+        """
+        Asserts that the int is static (and not dynamic, per dynamic shapes)
+        """
+        assert (
+            not val.is_dynamic()
+        ), "expected static but got dynamic (run with TORCH_LOGS=dynamic for more info)"
 
     def print_graph(self, *, verbose=True, file=None):
         """
@@ -305,6 +321,10 @@ class _Comptime:
     @staticmethod
     def print_guards():
         comptime(lambda ctx: ctx.print_guards())
+
+    @staticmethod
+    def assert_static(val):
+        comptime(lambda ctx: ctx.assert_static(ctx.get_local("val")))
 
     @staticmethod
     def breakpoint():

@@ -405,6 +405,18 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         compl_fn = torch.compile(fn, dynamic=True, backend="eager", fullgraph=True)
         self.assertEqual(compl_fn(inputs, op_inputs_dict), fn(inputs, op_inputs_dict))
 
+    def test_defaults(self):
+        def g(x, i=8):
+            comptime.assert_static(i)
+            return x * i
+
+        def fn(x):
+            return g(x)
+
+        inputs = torch.randn(2, 3, 4)
+        compl_fn = torch.compile(fn, dynamic=True, backend="eager")
+        self.assertEqual(compl_fn(inputs), fn(inputs))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_data_dependent_evaluate_expr_graph_break(self):
         cnts = torch._dynamo.testing.CompileCounter()
