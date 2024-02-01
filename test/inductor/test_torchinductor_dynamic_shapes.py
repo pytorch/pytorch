@@ -21,10 +21,10 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
     parametrize,
+    TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCaseBase as TestCase,
-    TEST_CUDA_MEM_LEAK_CHECK,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
