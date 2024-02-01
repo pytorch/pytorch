@@ -11,6 +11,8 @@ from torch._C._functorch import (
     current_level,
     get_unwrapped,
     is_batchedtensor,
+    is_functorch_wrapped_tensor,
+    is_gradtrackingtensor,
     maybe_get_bdim,
     maybe_get_level,
     peek_interpreter_stack,
@@ -327,7 +329,7 @@ class MetaConverter:
                     if t.requires_grad and not is_leaf:
                         with torch.enable_grad():
                             r = r.clone()
-                elif is_batchedtensor(t):
+                elif is_functorch_wrapped_tensor(t):
                     # Wraps a BatchedTensor in a FakeTensor
                     def _to_fake_tensor(t):
                         if is_batchedtensor(t):
@@ -335,6 +337,11 @@ class MetaConverter:
                             lvl = maybe_get_level(t)
                             bdim = maybe_get_bdim(t)
                             r = _add_batch_dim(ft, bdim, lvl)
+                        elif is_gradtrackingtensor(t):
+                            et = torch._functorch.eager_transforms
+                            with et.maybe_disable_grad_dls_dispatch():
+                                r = _to_fake_tensor(get_unwrapped(t))
+                                assert is_gradtrackingtensor(r) is False, r
                         else:
                             # regular tensor
                             sizes = t.size()
@@ -529,7 +536,8 @@ class MetaConverter:
                             outer_stride=strides,
                         )
                     else:
-                        with torch._functorch.eager_transforms.maybe_disable_grad_dls_dispatch():
+                        et = torch._functorch.eager_transforms
+                        with et.maybe_disable_grad_dls_dispatch():
                             r = callback(
                                 lambda: torch.empty_strided(
                                     sizes,
@@ -551,8 +559,8 @@ class MetaConverter:
                                 r = r.clone(memory_format=torch.preserve_format)
 
                     # Graph-Break for wrapped tensors
-                    if not is_batchedtensor(
-                        t
+                    if not (
+                        is_batchedtensor(t) or is_gradtrackingtensor(t)
                     ) and torch._C._functorch.is_functorch_wrapped_tensor(t):
                         return NotImplemented
 

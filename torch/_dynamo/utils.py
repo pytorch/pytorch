@@ -765,13 +765,17 @@ def clone_inputs(example_inputs):
 def preserve_rng_state():
     with torch.utils._python_dispatch._disable_current_modes():
         rng_state = torch.clone(torch.random.get_rng_state())
+        if torch._C._functorch.is_functorch_wrapped_tensor(rng_state):
+            # Very hacky way to get the tensor from a GradTrackingTensor.
+            # Probably needs another approach.
+            rng_state = torch._C._functorch.get_unwrapped(rng_state)
         if torch.cuda.is_available():
             cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
     try:
         yield
     finally:
         with torch.utils._python_dispatch._disable_current_modes():
-            # torch.random.set_rng_state(rng_state)
+            torch.random.set_rng_state(rng_state)
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
 
