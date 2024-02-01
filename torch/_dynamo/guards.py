@@ -559,15 +559,15 @@ class GuardBuilder(GuardBuilderBase):
 
         self._produce_guard_code(guard, code)
 
-    def ODICT_KEYS(self, guard):
-        """OrderedDict keys match"""
+    def DICT_CONST_KEYS(self, guard):
+        """Constant keys match"""
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
 
         code = list()
         code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
-        code.append(f"str({ref}.keys()) == {str(value.keys())!r}")
+        code.append(f"list({ref}.keys()) == {list(value.keys())!r}")
 
         self._produce_guard_code(guard, code)
 
