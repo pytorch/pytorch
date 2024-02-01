@@ -9,6 +9,10 @@ import typing
 import weakref
 from typing import Any, Callable, Dict, List, Optional, Set
 
+from torch.fx._lazy_graph_module import (  # type: ignore[attr-defined]
+    _use_lazy_graph_module,
+)
+
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -112,7 +116,7 @@ class Tracker:
 input_codes = Tracker()
 output_codes = Tracker()
 
-initial_global_state = None
+initial_global_state: Optional[GlobalStateGuard] = None
 
 
 @functools.wraps(original_forward_from_src)
@@ -159,7 +163,7 @@ def preserve_global_state(fn):
             random.setstate(py_rng_state)
             torch.random.set_rng_state(torch_rng_state)
             if torch.cuda.is_available():
-                torch.cuda.set_rng_state(cuda_rng_state)
+                torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
             torch.fx.graph_module._forward_from_src = prior_fwd_from_src
             assert (
                 guards.check()
@@ -432,6 +436,7 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
     return handle
 
 
+@_use_lazy_graph_module(config.use_lazy_graph_module)
 @maybe_cprofile
 def _compile(
     code: types.CodeType,
@@ -563,7 +568,7 @@ def _compile(
             code.co_name,
             code.co_filename,
             code.co_firstlineno,
-            out_code,
+            out_code,  # type: ignore[possibly-undefined]
         )
 
         for hook in _bytecode_hooks.values():
