@@ -28,7 +28,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._composable.fsdp._fsdp_param_group import (
     FSDPParamGroup,
-    RegisterPostBackwardHook,
+    RegisterPostBackwardFunction,
 )
 from torch.distributed._tensor import DTensor
 from torch.distributed.fsdp import CPUOffload, FullyShardedDataParallel as FSDP
@@ -923,12 +923,12 @@ def patch_post_backward(new_post_backward: Callable):
 @no_type_check
 @contextlib.contextmanager
 def patch_register_post_backward_hook_backward(new_backward: Callable):
-    orig_backward = RegisterPostBackwardHook.backward
-    RegisterPostBackwardHook.backward = new_backward
+    orig_backward = RegisterPostBackwardFunction.backward
+    RegisterPostBackwardFunction.backward = new_backward
     try:
         yield
     finally:
-        RegisterPostBackwardHook.backward = orig_backward
+        RegisterPostBackwardFunction.backward = orig_backward
 
 
 def reduce_scatter_with_assert(

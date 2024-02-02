@@ -6,7 +6,6 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 from torch.autograd.graph import register_multi_grad_hook
-
 from torch.distributed._composable_state import (
     _get_module_state,
     _insert_module_state,
@@ -30,7 +29,7 @@ class FSDPStateContext:
         self.all_states: List[FSDPState] = []
         # Iteration's forward root runs the once-per-forward logic; this root
         # may not be the overall root set by lazy initialization in cases where
-        # only a submodule runs forward
+        # only a submodule runs forward (e.g. encoder-only for eval)
         self.iter_forward_root: Optional[FSDPState] = None
         # Final callback should only be queued once per backward
         self.post_backward_final_callback_queued: bool = False
@@ -87,9 +86,9 @@ class FSDPState(_State):
 
     def _lazy_init(self) -> None:
         """
-        Lazy initialization logically represents when all modules' parallelisms
-        have finalized (e.g. FSDP has been applied to all desired modules).
-        This means that we can determine root state. We identify the root by
+        Lazy initialization represents when all modules' parallelisms have
+        finalized (e.g. FSDP has been applied to all desired modules). This
+        means that we can determine which state is the root, and we do so by
         the 1st state to run forward.
         """
         if self._is_root is not None:
@@ -184,6 +183,8 @@ class FSDPState(_State):
         self._training_state = TrainingState.IDLE
         if self._state_ctx.iter_forward_root is self:
             if all_gather_state := self._comm_ctx.all_gather_state:
+                # Free the last all-gather result if needed; refer to
+                # [Note: Overlapping all-gather copy-in and all-gather]
                 self._comm_ctx.all_gather_copy_in_stream.wait_event(
                     all_gather_state.event
                 )

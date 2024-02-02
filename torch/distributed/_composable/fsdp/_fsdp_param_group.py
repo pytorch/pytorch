@@ -1,6 +1,6 @@
 import contextlib
 
-from typing import Any, cast, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, cast, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
 
 import torch
 import torch.distributed as dist
@@ -12,7 +12,6 @@ from torch.utils.hooks import RemovableHandle
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_collectives import (
     AllGatherResult,
-    AllGatherState,
     foreach_all_gather,
     foreach_all_gather_copy_out,
     foreach_reduce_scatter,
@@ -36,7 +35,6 @@ class FSDPCommContext:
         # can help avoid some issues where their copies in/out are delayed and
         # block computation
         high_priority = -1
-        self.default_stream = torch.cuda.current_stream()
         # All-gather state and copy-in stream allow overlapping the next
         # copy-in with the current all-gather in forward; copy-in overlaps with
         # reduce-scatter in backward without the separate copy-in stream
@@ -50,6 +48,32 @@ class FSDPCommContext:
         self.reduce_scatter_stream = torch.cuda.Stream(priority=high_priority)
         # Post-forward order for explicit backward prefetching
         self.post_forward_order: List[FSDPParamGroup] = []
+
+    def get_all_gather_streams(
+        self, training_state: TrainingState
+    ) -> Tuple[torch.cuda.Stream, torch.cuda.Stream]:
+        if training_state in (TrainingState.FORWARD, TrainingState.PRE_BACKWARD):
+            # Use separate streams for implicit prefetching
+            return self.all_gather_copy_in_stream, self.all_gather_stream
+        current_stream = torch.cuda.current_stream()
+        return current_stream, current_stream
+
+
+"""
+[Note: Overlapping all-gather copy-in and all-gather]
+For implicit forward prefetching, we want to overlap the next copy-in with the
+current all-gather. We do so using a separate copy-in stream. However, since
+we have the all-gather input as a view into the output, we must make sure to
+copy into different memory from the current all-gather's output. Thus, we keep
+a reference to the current all-gather's output and have the next FSDP state or
+parameter group free it after its copy-in. Finally, we have the last state or
+group free always to avoid holding onto the memory after forward.
+"""
+
+
+class AllGatherState(NamedTuple):
+    all_gather_result: AllGatherResult
+    event: torch.cuda.Event  # all-gather copy-out
 
 
 class FSDPParamGroup:
@@ -175,8 +199,7 @@ class FSDPParamGroup:
             self.fsdp_params,
             self._all_gather_process_group,
             async_op,
-            self._all_gather_copy_in_stream_for_unshard,
-            self._all_gather_stream_for_unshard,
+            *self.comm_ctx.get_all_gather_streams(self._training_state),
             self.device,
             self._param_dtype,
         )
@@ -386,13 +409,12 @@ class FSDPParamGroup:
         inp_tensor_indices: List[int] = []
         inp_tensors: List[torch.Tensor] = []
         for i, obj in enumerate(args_kwargs_list):
-            if not torch.is_tensor(obj) or not obj.requires_grad:
-                continue
-            inp_tensor_indices.append(i)
-            inp_tensors.append(obj)
+            if torch.is_tensor(obj) and obj.requires_grad:
+                inp_tensor_indices.append(i)
+                inp_tensors.append(obj)
         if len(inp_tensors) == 0:
             return args, kwargs  # no tensors that require gradients
-        inp_tensors = RegisterPostBackwardHook.apply(self, *inp_tensors)
+        inp_tensors = RegisterPostBackwardFunction.apply(self, *inp_tensors)
         for inp_tensor_idx, inp_tensor in zip(inp_tensor_indices, inp_tensors):
             args_kwargs_list[inp_tensor_idx] = inp_tensor
         args_list = args_kwargs_list[: len(args_list)]
@@ -447,25 +469,6 @@ class FSDPParamGroup:
         assert isinstance(mesh_info, FSDPMeshInfo)
         return mesh_info.shard_process_group
 
-    @property
-    def _use_all_gather_stream(self) -> bool:
-        return self._training_state in (
-            TrainingState.FORWARD,
-            TrainingState.PRE_BACKWARD,
-        )
-
-    @property
-    def _all_gather_copy_in_stream_for_unshard(self) -> torch.cuda.Stream:
-        if self._use_all_gather_stream:
-            return self.comm_ctx.all_gather_copy_in_stream
-        return self.comm_ctx.default_stream
-
-    @property
-    def _all_gather_stream_for_unshard(self) -> torch.cuda.Stream:
-        if self._use_all_gather_stream:
-            return self.comm_ctx.all_gather_stream
-        return self.comm_ctx.default_stream
-
 
 def _get_param_module_infos(
     params: List[nn.Parameter], module: nn.Module
@@ -493,7 +496,7 @@ def _get_param_module_infos(
     return [param_to_module_info[param] for param in params]
 
 
-class RegisterPostBackwardHook(torch.autograd.Function):
+class RegisterPostBackwardFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, param_group: FSDPParamGroup, *inputs: torch.Tensor):
         # All tensors in `inputs` should require gradient
