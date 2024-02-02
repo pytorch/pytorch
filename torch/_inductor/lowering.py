@@ -596,7 +596,7 @@ def register_pointwise(
     use_libdevice_for_f64=False,
 ):
     """A pointwise function that maps ops.{name} to inputs"""
-    name = name or aten_fn.__name__
+    name = name or aten_fn.__name__.removeprefix('special_')
     fn = ops_wrapper(name)
     if use_libdevice_for_f64:
         fn_libdevice = ops_wrapper("libdevice_" + name)
@@ -784,15 +784,6 @@ def bessel_j0(x):
 )
 def bessel_j1(x):
     fn = ops_wrapper("bessel_j1")
-    return make_pointwise(fn)(x)
-
-
-@register_lowering(
-    [aten.special_modified_bessel_i0],
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
-def modified_bessel_i0(x):
-    fn = ops_wrapper("modified_bessel_i0")
     return make_pointwise(fn)(x)
 
 
@@ -5194,6 +5185,7 @@ register_pointwise_numeric(aten.erfinv)
 register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
+register_pointwise_numeric(aten.special_modified_bessel_i0)
 
 foreach_add_list = register_foreach_pointwise(
     aten._foreach_add.List, add, allow_alpha=True
