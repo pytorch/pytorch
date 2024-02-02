@@ -1767,13 +1767,15 @@ class CppKernel(Kernel):
                             ) = get_reduction_code_buffer(loops, is_suffix=False)
                             if ws_init:
                                 assert ws_tores
-                                worksharing.reduction_init = ws_init
-                                worksharing.reduction_stores = ws_tores
+                                # worksharing.reduction_init = ws_init
+                                # worksharing.reduction_stores = ws_tores
                             if reduction_prefix:
                                 stack_outer.enter_context(code.indent())
                             code.splice(reduction_prefix)
                         if loop_nest.is_reduction_only() and loop.parallel:
                             worksharing.parallel(threads)
+                            if ws_init:
+                                code.splice(ws_init)
 
                     for loop in loops:
                         gen_loop(loop, in_reduction)
@@ -1781,6 +1783,8 @@ class CppKernel(Kernel):
                     if loops:
                         loop = loops[0]
                         if loop_nest.is_reduction_only() and loop.parallel:
+                            if ws_tores:
+                                code.splice(ws_tores)
                             worksharing.close()
                         if loop.is_reduction and not in_reduction:
                             code.splice(
@@ -3529,8 +3533,8 @@ class WorkSharing:
             self.code.writeline(
                 "int tid = omp_get_thread_num();",
             )
-            self.code.splice(self.reduction_init)
-            self.reduction_init = IndentedBuffer()
+            # self.code.splice(self.reduction_init)
+            # self.reduction_init = IndentedBuffer()
 
     def single(self):
         if self.in_parallel:
@@ -3538,8 +3542,8 @@ class WorkSharing:
         return self.in_parallel
 
     def close(self):
-        self.code.splice(self.reduction_stores)
-        self.reduction_stores = IndentedBuffer()
+        # self.code.splice(self.reduction_stores)
+        # self.reduction_stores = IndentedBuffer()
         self.stack.close()
         self.in_parallel = False
 
