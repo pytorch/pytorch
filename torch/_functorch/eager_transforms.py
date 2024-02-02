@@ -364,7 +364,7 @@ def error_if_complex(func_name, args, is_input):
             raise RuntimeError(err_msg)
 
 @exposed_in("torch.func")
-def jacrev(func: Callable, argnums: Optional[argnums_t] = 0, *, has_aux=False,
+def jacrev(func: Callable, argnums: argnums_t = 0, *, has_aux=False,
            chunk_size: Optional[int] = None,
            _preallocate_and_copy=False):
     """
@@ -381,7 +381,6 @@ def jacrev(func: Callable, argnums: Optional[argnums_t] = 0, *, has_aux=False,
             one of which must be a Tensor, and returns one or more Tensors
         argnums (int or Tuple[int, ...]): Optional, integer or tuple of integers,
             saying which arguments to get the Jacobian with respect to.
-            If None, the Jacobian is computed with respect to all inputs.
             Default: 0.
         has_aux (bool): Flag indicating that ``func`` returns a
             ``(output, aux)`` tuple where the first element is the output of
@@ -497,6 +496,9 @@ def jacrev(func: Callable, argnums: Optional[argnums_t] = 0, *, has_aux=False,
     if not (chunk_size is None or chunk_size > 0):
         raise ValueError("jacrev: `chunk_size` should be greater than 0.")
 
+    if not isinstance(argnums, int) and not isinstance(argnums, tuple):
+        raise ValueError(f"jacrev: `argnums` should be int or Tuple[int, ...], got: {type(argnums)}")
+
     @wraps(func)
     def wrapper_fn(*args):
         error_if_complex("jacrev", args, is_input=True)
@@ -515,7 +517,7 @@ def jacrev(func: Callable, argnums: Optional[argnums_t] = 0, *, has_aux=False,
         # Step 1: Construct grad_outputs by splitting the standard basis
         flat_output_numels = tuple(out.numel() for out in flat_output)
 
-        primals = args if argnums is None else _slice_argnums(args, argnums)
+        primals = _slice_argnums(args, argnums)
         flat_primals, primals_spec = tree_flatten(primals)
 
         def compute_jacobian_stacked():
