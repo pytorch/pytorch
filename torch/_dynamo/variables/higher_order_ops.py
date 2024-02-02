@@ -374,6 +374,21 @@ def speculate_subgraph(
                 else contextlib.nullcontext()
             )
 
+            # For handling side effects, we can make an argument that we don't
+            # have to do anything here. The side effects infra does a good job
+            # of graph breaking if we mutate any nonlocal or global variable
+            # while subtracing. As a result if tracing succeeds, side effects
+            # data structure will only contain read-only data structures that
+            # are put there for tracking purposes.
+            # But on the other hand, there is an argument that if we ever write
+            # a new side effect in Dynamo which does not go through the side
+            # effect infra, we can end up in bad state.
+            # Therefore we restore the side effects after tracing. The catch is
+            # that we have to special handle tensor variables. If we have seen a
+            # nonlocal variable tensor during subtracing, we want to keep a
+            # track of that tensor, so that later subtracing or the root tracer
+            # itself does not create a new proxy for the already observed tensor
+            # variable.
             if restore_side_effects:
                 prev_side_effects = tx.output.side_effects.clone()
 
@@ -381,11 +396,10 @@ def speculate_subgraph(
                 output = f.call_function(tx, args, sub_kwargs)
 
             if restore_side_effects:
-                # Captured variables are tracked in side-effects
-                # and they show up in output graph incorrectly.
-                # It is ok to undo this side-effect tracking
-                # as speculate_subgraph will allow only
-                # pure functions.
+                new_side_effects = tx.output.side_effects.clone()
+                prev_side_effects.track_tensor_variables_from_runahead_side_effects(
+                    new_side_effects
+                )
                 tx.output.side_effects = prev_side_effects
 
             treespec = None
