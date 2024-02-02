@@ -1712,6 +1712,7 @@ class TestJac(TestCase):
         expected = torch.diagflat(x)
         assert torch.allclose(z, expected)
 
+    @jacrev_and_jacfwd
     def test_multiple_outputs_multiple_argnums(self, device, jacapi):
         def f(x, y):
             return 2 * x + 3 * y, 4 * x + 5 * y
@@ -1733,6 +1734,7 @@ class TestJac(TestCase):
         self.assertEqual(z[1][0], expected_out1_x)
         self.assertEqual(z[1][1], expected_out1_y)
 
+    @jacrev_and_jacfwd
     def test_multiple_outputs_single_argnums(self, device, jacapi):
         def f(x, y):
             return 2 * x + 3 * y, 4 * x + 5 * y
@@ -1774,6 +1776,7 @@ class TestJac(TestCase):
         self.assertTrue(isinstance(z['right'], tuple))
         self.assertEqual(z, expected)
 
+    @jacrev_and_jacfwd
     def test_multiple_inputs_pytree(self, device, jacapi):
         def f(a, b, c):
             a0, a1 = a
@@ -1798,6 +1801,7 @@ class TestJac(TestCase):
         expected = (torch.tensor(1., device=device), torch.tensor(2., device=device))
         self.assertEqual(result, expected)
 
+    @jacrev_and_jacfwd
     def test_dimensionality(self, device, jacapi):
         def f(x):
             return x
@@ -1824,6 +1828,7 @@ class TestJac(TestCase):
         self.assertEqual(result, torch.eye(3, 3, device=device))
         self.assertEqual(aux, x.cos())
 
+    @jacrev_and_jacfwd
     def test_aux_pytree(self, device, jacapi):
         def f(x):
             y = x.clone()
@@ -1842,6 +1847,7 @@ class TestJac(TestCase):
             with self.assertRaisesRegex(RuntimeError, r"Expected tensors, got unsupported type"):
                 _ = jacapi(lambda x: (x, [x, aux]), has_aux=True)(x)
 
+    @jacrev_and_jacfwd
     def test_outputs_can_any_pytree(self, device, jacapi):
         x = torch.randn(2, 3, device=device)
 
@@ -1875,6 +1881,7 @@ class TestJac(TestCase):
         assert isinstance(out, list)
         assert isinstance(out[0], tuple) and isinstance(out[0][1], dict)
 
+    @jacrev_and_jacfwd
     def test_multiple_inputs_outputs_pytree(self, device, jacapi):
         def f(a, b, c):
             a0, a1 = a
@@ -1922,6 +1929,7 @@ class TestJac(TestCase):
         }
         self.assertEqual(result, expected)
 
+    @jacrev_and_jacfwd
     def test_unrelated_input(self, device, jacapi):
         def f(x, y):
             return x
@@ -1936,6 +1944,7 @@ class TestJac(TestCase):
         self.assertTrue(isinstance(result, tuple))
         self.assertEqual(result, expected)
 
+    @jacrev_and_jacfwd
     def test_unrelated_output(self, device, jacapi):
         y = torch.randn(2, 3, device=device)
 
@@ -1948,6 +1957,7 @@ class TestJac(TestCase):
         expected = x.new_zeros(2, 3, 2, 3)
         self.assertEqual(result, expected)
 
+    @jacrev_and_jacfwd
     def test_empty_output(self, device, jacapi):
         x = torch.randn(3, device=device)
         y = torch.randn(3, device=device)
@@ -1986,6 +1996,7 @@ class TestJac(TestCase):
         assert isinstance(z, torch.Tensor)
         assert torch.allclose(z, expected0)
 
+    @jacrev_and_jacfwd
     def test_argnums_defaults_to_zero(self, device, jacapi):
         def f(x, y):
             return x * 2 + y * 3
@@ -2043,6 +2054,7 @@ class TestJac(TestCase):
         result = jacapi(foo)(inputs)
         self.assertEqual(result, expected)
 
+    @jacrev_and_jacfwd
     def test_against_reference_simple(self, device, jacapi):
         def f(x):
             return 3 * x ** 2
@@ -2050,6 +2062,7 @@ class TestJac(TestCase):
         x = torch.randn(2, 3, 5, device=device)
         self._test_against_reference(f, (x,), jacapi)
 
+    @jacrev_and_jacfwd
     def test_against_reference_multi_input(self, device, jacapi):
         def f(x, y):
             return (x.cos() * x) @ y.sin()
@@ -2058,6 +2071,7 @@ class TestJac(TestCase):
         y = torch.randn(3, 5, device=device)
         self._test_against_reference(f, (x, y), jacapi)
 
+    @jacrev_and_jacfwd
     def test_against_reference_multi_input_multi_output(self, device, jacapi):
         def f(x, y):
             return (x * x) @ y, x @ (x.sum(1) * y), y.sum()
@@ -2066,6 +2080,7 @@ class TestJac(TestCase):
         y = torch.randn(3, 5, device=device)
         self._test_against_reference(f, (x, y), jacapi)
 
+    @jacrev_and_jacfwd
     def test_against_reference_unrelated_outputs(self, device, jacapi):
         def f(x, y):
             return x, y, x, y
@@ -2074,6 +2089,7 @@ class TestJac(TestCase):
         y = torch.randn(3, device=device)
         self._test_against_reference(f, (x, y), jacapi)
 
+    @jacrev_and_jacfwd
     def test_against_reference_zero_dim(self, device, jacapi):
         # zero-dim output
         def f(x, y):
@@ -2098,6 +2114,7 @@ class TestJac(TestCase):
         y = torch.randn(1, device=device)
         self._test_against_reference(h, (x, y), jacapi)
 
+    @jacrev_and_jacfwd
     def test_against_reference_correctness_different_devices(self, device, jacapi):
         def f(x, y):
             return x * y, (x * y).to(device=device)
@@ -2106,6 +2123,7 @@ class TestJac(TestCase):
         y = torch.randn(3)
         self._test_against_reference(f, (x, y), jacapi)
 
+    @jacrev_and_jacfwd
     def test_against_reference_default_arg(self, device, jacapi):
         def f(x, y, z=3.):
             return x * y * z
@@ -2114,6 +2132,7 @@ class TestJac(TestCase):
         y = torch.randn(3, device=device)
         self._test_against_reference(f, (x, y), jacapi)
 
+    @jacrev_and_jacfwd
     def test_inplace(self, device, jacapi):
         def f(x, y):
             y.copy_(x)
@@ -2237,6 +2256,7 @@ class TestJac(TestCase):
         with self.assertRaisesRegex(RuntimeError, "jacfwd: Expected all outputs"):
             jacfwd(fn)(x)
 
+    @jacrev_and_jacfwd
     def test_jac_with_non_tensor_args(self, device, jacapi):
         def f(t, int_x):
             return t + int_x
