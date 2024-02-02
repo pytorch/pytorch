@@ -206,7 +206,7 @@ class TestMatmulCuda(TestCase):
 
 def scaled_mm_supported_device():
     return torch.cuda.is_available() and (
-        torch.cuda.get_device_capability >= (9, 0) or torch.cuda.get_device_capability() == (8, 9)
+        torch.cuda.get_device_capability() >= (9, 0) or torch.cuda.get_device_capability() == (8, 9)
     )
 
 
@@ -300,9 +300,9 @@ class TestFP8MatmulCuda(TestCase):
             lambda: torch._scaled_mm(x, y, bias=bias, out_dtype=torch.float32),
         )
 
-    @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability() >= (9, 0),
-                     "This test is only for devices with compute capability < 9.0")
-    def test_error_message_fp8_non_h100(self, device) -> None:
+    @unittest.skipIf(scaled_mm_supported_device(),
+                     "This test is only for devices with compute capability < 8.9")
+    def test_error_message_fp8_pre_sm89(self, device) -> None:
         (k, l, m) = (16, 48, 32)
         x = torch.rand((k, l), device=device).to(torch.float8_e4m3fn)
         y = torch.rand((m, l), device=device).to(torch.float8_e4m3fn).t()
