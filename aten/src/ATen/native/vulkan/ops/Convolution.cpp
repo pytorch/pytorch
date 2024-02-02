@@ -834,16 +834,17 @@ Tensor quantized_convolution(
 
 namespace conv1d {
 
-// This implementation only cover a special case. It only supports
-// input = (n=1, input_channel, lengths)
-// ouput = (n=1, output_channel, lengths - kernel_size + 1)
-// stride=1, padding=0, dilation=1, groups=input_channels=output_channels
+// This implementation only supports
 //
-// Hence:
-// weight's shape should be (output_channel, 1, kernel_size)
-// bias's shape (if applicable) should be (output_channel,)
+// input = (n=1, channels, length)
+// output = (n=1, channels, out_length)
 //
-// In this implementation, it reduces to running a 1d convolution for reach
+// where channels = groups. Hence, the shapes we receive should obey:
+//
+// weight = (channels, 1, kernel_size)
+// bias = (channels,)
+//
+// In this implementation, it reduces to running a 1d convolution for each
 // channel.
 // There are multiple perf improvement opportunities: e.g. width-packing
 // input and weight tensors, batch reading when groups is low.
@@ -880,9 +881,6 @@ Tensor run_conv1d_context_impl(
 
   TORCH_CHECK(input.dim() == 3, "input must be a 3-dim tensor");
   TORCH_CHECK(weight.dim() == 3, "weight must be a 3-dim tensor");
-  TORCH_CHECK(stride == IntArrayRef(1), "stride must be 1");
-  TORCH_CHECK(padding == IntArrayRef(0), "padding must be 0");
-  TORCH_CHECK(dilation == IntArrayRef(1), "dilation must be 1");
 
   TORCH_CHECK(input_sizes[0] == 1, "Only support single batch");
   TORCH_CHECK(input_sizes[1] == groups, "input_channel must equals to groups");
@@ -891,29 +889,29 @@ Tensor run_conv1d_context_impl(
   TORCH_CHECK(weight_sizes[1] == 1, "weight.sizes()[1] must equals to 1");
 
   const vTensor& v_input = convert(input);
-  const IntArrayRef v_input_sizes = v_input.sizes();
-
   const vTensor& v_weight = convert(weight);
   const vTensor& v_bias = convert(bias);
 
   vTensor v_output{
       context,
-      {
-          v_input_sizes[0],
-          weight_out_channels,
-          v_input_sizes[2] - kernel_size + 1,
-      },
+      conv_output_size(input_sizes, weight_sizes, padding, stride, dilation),
       v_input.dtype(),
   };
 
   const struct Block final {
     int32_t out_channels;
-    int32_t in_lengths;
+    int32_t in_length;
     int32_t kernel_size;
+    int32_t stride;
+    int32_t padding;
+    int32_t dilation;
   } block{
       weight_out_channels,
       static_cast<int32_t>(input_sizes[2]),
       kernel_size,
+      static_cast<int32_t>(stride[0]),
+      static_cast<int32_t>(padding[0]),
+      static_cast<int32_t>(dilation[0]),
   };
 
   api::UniformParamsBuffer params(context, block);
