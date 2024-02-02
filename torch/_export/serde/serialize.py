@@ -46,6 +46,7 @@ from .schema import (  # type: ignore[attr-defined]
     ExportedProgram,
     GradientToParameterSpec,
     GradientToUserInputSpec,
+    UserInputMutationSpec,
     Graph,
     GraphArgument,
     GraphModule,
@@ -795,8 +796,17 @@ class GraphModuleSerializer:
                     user_input_name=spec.target,
                 )
             )
+        elif spec.kind == ep.OutputKind.USER_INPUT_MUTATION:
+            assert spec.target is not None
+            assert isinstance(spec.arg, ep.TensorArgument)
+            return OutputSpec.create(
+                user_input_mutation=UserInputMutationSpec(
+                    arg=TensorArgument(name=spec.arg.name),
+                    user_input_name=spec.target,
+                )
+            )
         else:
-            raise AssertionError(f"Unknown argument kind: {spec}")
+            raise AssertionError(f"Unknown argument kind: {spec.kind}")
 
     def serialize_signature(self, sig: ep.ExportGraphSignature) -> GraphSignature:
         return GraphSignature(
@@ -1337,6 +1347,12 @@ class GraphModuleDeserializer:
                 kind=ep.OutputKind.GRADIENT_TO_USER_INPUT,
                 arg=ep.TensorArgument(name=o.gradient_to_user_input.arg.name),
                 target=o.gradient_to_user_input.user_input_name
+            )
+        elif o.type == "user_input_mutation":
+            return ep.OutputSpec(
+                kind=ep.OutputKind.USER_INPUT_MUTATION,
+                arg=ep.TensorArgument(name=o.user_input_mutation.arg.name),
+                target=o.user_input_mutation.user_input_name
             )
         else:
             raise AssertionError(f"Unknown output spec {o}")
@@ -2158,6 +2174,8 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
             return 2, None, idx
         elif spec.type == "buffer_mutation":
             return 1, spec.buffer_mutation.buffer_name, idx
+        elif spec.type == "user_input_mutation":
+            return 1, spec.user_input_mutation.user_input_name, idx
         elif spec.type == "gradient_to_parameter":
             return 3, spec.gradient_to_parameter.parameter_name, idx
         elif spec.type == "gradient_to_user_input":
@@ -2228,6 +2246,9 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
             t.name = replace_table[t.name]
         elif spec.type == "buffer_mutation":
             t = spec.buffer_mutation.arg
+            t.name = replace_table[t.name]
+        elif spec.type == "user_input_mutation":
+            t = spec.user_input_mutation.arg
             t.name = replace_table[t.name]
         elif spec.type == "gradient_to_parameter":
             t = spec.gradient_to_parameter.arg
