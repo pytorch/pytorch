@@ -1036,7 +1036,7 @@ def pointwise_cat(inputs, dim=0):
             )
 
         next_val = masked_loads[-1]
-        for i in range((len(inputs)) - 1, -1, -1):
+        for i in range((len(inputs)) - 2, -1, -1):
             next_val = ops.where(
                 masks[i],
                 masked_loads[i],
