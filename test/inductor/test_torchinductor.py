@@ -8458,6 +8458,12 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8),))
 
+    def test_bessel_j1(self):
+        def fn(x):
+            return torch.special.bessel_j1(x)
+
+        self.common(fn, (torch.randn(8, 8),))
+
 
 @dataclasses.dataclass
 class TestFailure:
