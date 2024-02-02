@@ -21,7 +21,7 @@
 #ifdef USE_CUDA
 #include "torch/csrc/cuda/Event.h"
 #endif
-#include "torch/csrc/utils/cuda_lazy_init.h"
+#include "torch/csrc/utils/device_lazy_init.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/pycfunction_helpers.h"
 #include "torch/csrc/utils/python_arg_parser.h"
@@ -39,7 +39,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/FuncTorchTLS.h>
 #include "c10/util/Optional.h"
-#include "c10/util/Exception.h"
 #include "c10/core/Stream.h"
 
 #include <stdexcept>
@@ -371,7 +370,9 @@ static PyObject * THPVariable_index_scalar(PyObject* self, PyObject* args) {
   auto& self_ = THPVariable_Unpack(self);
   // TODO: change the condition to `self_.dim() != 0` once we expose scalars
   // in PyTorch.
-  TORCH_CHECK_TYPE(isIntegralType(self_.scalar_type(), /*includeBool=*/true) && self_.sym_numel() == 1, "only integer tensors of a single element can be converted to an index");
+  if (!isIntegralType(self_.scalar_type(), /*includeBool=*/true) || self_.sym_numel() != 1) {
+    throw TypeError("only integer tensors of a single element can be converted to an index");
+  }
   return wrap(dispatch_to<int64_t>(self_));
   END_HANDLE_TH_ERRORS
 }
@@ -388,7 +389,9 @@ static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
     return handle_torch_function(self, "__invert__", args);
   }
   auto& self_ = THPVariable_Unpack(self);
-  TORCH_CHECK_TYPE(isIntegralType(self_.scalar_type(), /*includeBool=*/true), "~ (operator.invert) is only implemented on integer and Boolean-type tensors");
+  if (!isIntegralType(self_.scalar_type(), /*includeBool=*/true)) {
+    throw TypeError("~ (operator.invert) is only implemented on integer and Boolean-type tensors");
+  }
   return THPVariable_Wrap(dispatch_invert(self_));
   END_HANDLE_TH_ERRORS
 }
@@ -492,7 +495,7 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   auto device = r.isNone(0) ? at::Device(at::DeviceType::CUDA) : r.device(0);
   auto opt_memory_format = r.memoryformatOptional(2);
   TORCH_CHECK(device.is_cuda(), "Invalid device, must be cuda device");
-  torch::utils::cuda_lazy_init();
+  torch::utils::device_lazy_init(at::kCUDA);
   return THPVariable_Wrap(dispatch_to(self_, device, r.toBool(1), false, opt_memory_format));
   END_HANDLE_TH_ERRORS
 }
@@ -970,9 +973,7 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
   auto copy = std::get<3>(parsed);
   auto opt_memory_format = std::get<4>(parsed);
   auto& self_ = THPVariable_Unpack(self);
-  if (device && device->is_cuda()) {
-    torch::utils::cuda_lazy_init();
-  }
+  torch::utils::maybe_initialize_device(device);
   if (device && device->is_privateuseone()) {
     at::globalContext().lazyInitPrivateUse1();
   }
@@ -1040,7 +1041,7 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   } else if (THPDtype_Check(obj)) {
     is_dtype = true;
   } else {
-    C10_THROW_ERROR(TypeError, "dtype must be a type, str, or dtype object");
+    throw TypeError("dtype must be a type, str, or dtype object");
   }
   ScalarType scalar_type;
   Device device = self_.device();
@@ -1054,9 +1055,7 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   if (device_type != device.type()) {
     device = at::Device(device_type);
   }
-  if (device.is_cuda()) {
-    torch::utils::cuda_lazy_init();
-  }
+  torch::utils::maybe_initialize_device(device);
   if (device.is_privateuseone()) {
     at::globalContext().lazyInitPrivateUse1();
   }

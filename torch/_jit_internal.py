@@ -65,7 +65,7 @@ try:
 
     LockType = _thread.LockType
 except ImportError:
-    import _dummy_thread
+    import _dummy_thread  # type: ignore[import-not-found]
 
     LockType = _dummy_thread.LockType
 
@@ -937,7 +937,7 @@ _overloaded_methods: Dict[str, Dict[str, List[Callable]]] = {}  # noqa: T484
 
 
 # (qualified_name, class name) => class_fileno
-_overloaded_method_class_fileno = {}
+_overloaded_method_class_fileno: Dict[Tuple[str, str], int] = {}
 
 
 def _overload_method(func):
@@ -1099,8 +1099,10 @@ else:
 
 
 def is_final(ann) -> bool:
-    return ann.__module__ in {"typing", "typing_extensions"} and (
-        get_origin(ann) is Final or isinstance(ann, type(Final))
+    return (
+        hasattr(ann, "__module__")
+        and ann.__module__ in {"typing", "typing_extensions"}
+        and (get_origin(ann) is Final or isinstance(ann, type(Final)))
     )
 
 

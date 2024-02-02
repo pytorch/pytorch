@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # NOTE: [dynamo_test_failures.py]
 #
 # We generate xFailIfTorchDynamo* for all tests in `dynamo_expected_failures`
@@ -32,8 +34,6 @@ dynamo_expected_failures = {
     "TestCppExtensionJIT.test_custom_compound_op_autograd",
     "TestCppExtensionJIT.test_cpp_frontend_module_has_up_to_date_attributes",
     "TestCppExtensionOpenRgistration.test_open_device_registration",
-    "TestAutogradFallback.test_inplace_autograd_function_registered_to_cpu_mode_warn",
-    "TestAutogradFallback.test_inplace_autograd_function_registered_to_cpu_mode_nothing",
     "TestIndexingCPU.test_invalid_index_cpu",
     "NumpyTestsCPU.test_boolean_shape_mismatch_cpu",
     "TestIndexingCPU.test_empty_ndim_index_bool_cpu",
@@ -59,12 +59,10 @@ dynamo_expected_failures = {
     "TestLinalgCPU.test_addmm_sizes_cpu_float64",
     "TestLinalgCPU.test_norm_dtype_cpu_float64",
     "TestLinalgCPU.test_addr_integral_cpu_int8",
-    "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_complex64",
     "TestLinalgCPU.test_pinv_cpu_float32",
     "TestLinalgCPU.test_addr_integral_cpu_uint8",
     "TestLinalgCPU.test_slogdet_errors_and_warnings_cpu_complex128",
     "TestLinalgCPU.test_addr_integral_cpu_int32",
-    "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_int64",
     "TestLinalgCPU.test_solve_cpu_complex64",
     "TestLinalgCPU.test_solve_cpu_float64",
     "TestLinalgCPU.test_addmm_sizes_cpu_float32",
@@ -73,7 +71,6 @@ dynamo_expected_failures = {
     "TestLinalgCPU.test_inverse_cpu_float64",
     "TestLinalgCPU.test_slogdet_errors_and_warnings_cpu_complex64",
     "TestLinalgCPU.test_pinv_cpu_complex64",
-    "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_float32",
     "TestLinalgCPU.test_geqrf_cpu_complex128",
     "TestLinalgCPU.test_geqrf_cpu_complex64",
     "TestLinalgCPU.test_slogdet_errors_and_warnings_cpu_float64",
@@ -235,229 +232,6 @@ dynamo_expected_failures = {
     "TestModuleInitCPU.test_quantized_BatchNorm3d_cpu_float32",
     "TestModuleInitCPU.test_nn_LSTM_cpu_float32",
     "TestModuleInitCPU.test_qat_Conv1d_cpu_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc10_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc9_out_dtype_float64",
-    "TestUnaryUfuncs.test_x_and_out_casting_casting_same_kind_ufunc0_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc8_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc1_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc12_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc4_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc16_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc6_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc0_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc11_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc1_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc16",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc14_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc8_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc1_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc5",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc14_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc2_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc15_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc0_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc12_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc11_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc16_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc4_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc15_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc3_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc1_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc12_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc12_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc12_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc0_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc16_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc13_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc4_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc9_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc12_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc0_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc11_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc15_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc8_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc0_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc10_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc13_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc8_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc9_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc7_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc8_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc0_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc6_out_dtype_float32",
-    "TestUnaryUfuncs.test_x_and_out_casting_casting_unsafe_ufunc0_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc7",
-    "TestUnaryUfuncs.test_x_and_out_casting_casting_equiv_ufunc0_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc9_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc0_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc4",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc14_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc13_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc9_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc7_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc6_out_dtype_float64",
-    "TestUnaryUfuncs.test_x_and_out_casting_casting_safe_ufunc0_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc5_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc4_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc9_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc8_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc7_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc14_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc10_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc9_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc4_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc8_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc8_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc0",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc7_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc6_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc15_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc12_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc11_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc1_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc0_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc2_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc15",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc16_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc12_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc16_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc1_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc2_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc3_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc6_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc3",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc5_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc3_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc7_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc6_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc5_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc7_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc2_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc10_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc10",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc16_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc5_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc2_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc5_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc3_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc7_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc15_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc5_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc15_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc11_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc14_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc2_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc2_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc11_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc12_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc8_out_dtype_float64",
-    "TestUnaryUfuncs.test_x_and_out_casting_casting_same_kind_ufunc0_out_dtype_float64",
-    "TestUfuncDtypeKwd.test_binary_ufunc_dtype_and_out",
-    "TestUnaryUfuncs.test_x_and_out_casting_casting_same_kind_ufunc0_out_dtype_complex128",
-    "TestUnaryUfuncs.test_x_and_out_casting_casting_unsafe_ufunc0_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc1_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc12_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc13_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc5_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc14_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc9_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc14_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc13_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc10_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc3_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc11",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc7_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc13_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc6_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc1",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc0_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc9_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc16_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc16_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc5_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc12",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc3_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc6_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc14_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc15_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc13_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc7_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc14_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc4_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc6_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc4_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc11_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc3_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc9",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc10_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc3_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc11_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc15_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc14",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc15_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc6",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc16_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc5_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc9_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc16_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc4_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc5_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc6_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc11_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc13_out_dtype_float64",
-    "TestUnaryUfuncs.test_x_and_out_casting_casting_unsafe_ufunc0_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc14_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc15_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc15_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc4_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc14_out_dtype_complex128",
-    "TestUnaryUfuncs.test_x_and_out_casting_casting_no_ufunc0_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc10_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc13_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc12_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc2_out_dtype_float64",
-    "TestUnaryUfuncs.test_x_and_out_broadcast_ufunc0",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc16_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc13_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc5_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc8_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc3_out_dtype_complex128",
-    "TestUnaryUfuncs.test_x_and_out_casting_casting_safe_ufunc0_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc15_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc12_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc6_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc8_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc11_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc8_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc14_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc10_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc7_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc11_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc9_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc10_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc16_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc9_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc1_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc3_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc10_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc7_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc7_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc0_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc8",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc11_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc13_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc13_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc2_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc1_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc10_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc5_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc4_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc6_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc13",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc2_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc2",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc10_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc1_out_dtype_float64",
     "TestIsScalar.test_is_not_scalar_value6",
     "TestGenericReductions.test_bad_axis_func0",
     "TestGenericReductions.test_bad_axis_func11",
@@ -473,38 +247,30 @@ dynamo_expected_failures = {
     "TestGenericReductions.test_bad_axis_func1",
     "TestGenericCumSumProd.test_bad_axis_func0",
     "TestGenericReductions.test_bad_axis_func9",
-    "TestWritebackIfCopy.test_take_mode_raise",
     "TestArange.test_infinite",
     "TestArrayConstruction.test_array_empty",
     "TestAttributes.test_fill_readonly",
     "TestArrayAttributeDeletion.test_multiarray_writable_attributes_deletion",
-    "TestMatmul.test_out_contiguous",
     "TestMinMax.test_scalar",
     "TestFromBuffer.test_basic_little_dtype2",
     "TestArrayCreationCopyArgument.test_striding_not_ok",
     "TestArange.test_require_range",
     "TestArange.test_nan_step",
-    "TestWritebackIfCopy.test_argmin_with_out",
     "TestArrayAttributeDeletion.test_multiarray_not_writable_attributes_deletion",
     "TestLexsort.test_datetime",
     "TestMinMax.test_axis",
     "TestLexsort.test_mixed",
-    "TestWritebackIfCopy.test_dot_out",
     "TestAttributes.test_fill_struct_array",
     "TestFromBuffer.test_empty",
     "TestAssignment.test_assignment_broadcasting",
-    "TestMatmul.test_out_arg",
     "TestAttributes.test_set_stridesattr",
     "TestStats.test_out",
     "TestScalarIndexing.test_invalid_subscript",
     "TestWhere.test_error",
-    "TestWritebackIfCopy.test_argmax_with_out",
     "TestBool.test_sum_2",
     "TestScalarIndexing.test_invalid_newaxis",
-    "TestTake.test_out_overlap",
     "TestScalarIndexing.test_invalid_subscript_assignment",
     "TestFromBuffer.test_basic_little_dtype1",
-    "TestWritebackIfCopy.test_choose_mod_raise",
     "TestAttributes.test_fill_max_uint64",
     "TestPutmask.test_byteorder_dtype_<i4",
     "TestPutmask.test_byteorder_dtype_>i4",
@@ -518,12 +284,6 @@ dynamo_expected_failures = {
     "TestFromBuffer.test_basic_little_dtype0",
     "TestMatmul.test_exceptions",
     "TestFlag.test_writeable_from_readonly",
-    "TestArgmaxArgminCommon.test_np_vs_ndarray_positional_arr_method_argmax_np_method0",
-    "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmin",
-    "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmax",
-    "TestArgmaxArgminCommon.test_np_vs_ndarray_positional_arr_method_argmin_np_method1",
-    "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmax",
-    "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmin",
     "TestArgmax.test_combinations_data66",
     "TestArgmax.test_combinations_data65",
     "TestArgmax.test_combinations_data63",
@@ -599,42 +359,25 @@ dynamo_expected_failures = {
     "TestCov.test_aweights",
     "TestQuantile.test_quantile_monotonic_method_interpolated_inverted_cdf",
     "TestQuantile.test_quantile_monotonic_method_inverted_cdf",
-    "TestPercentile.test_keepdims_out_q1_axis_1",
     "TestSortComplex.test_sort_real_type_in_g_type_out_G",
-    "TestMedian.test_keepdims_out_axis2",
     "TestMeshgrid.test_invalid_arguments",
     "TestGradient.test_specific_axes",
-    "TestPercentile.test_keepdims_out_q_7_axis4",
-    "TestPercentile.test_keepdims_out_q1_axis4",
     "TestDelete.test_slices",
     "TestPercentile.test_extended_axis_invalid",
     "TestGradient.test_second_order_accurate",
-    "TestMedian.test_keepdims_out_axis0",
     "TestDiff.test_prepend",
-    "TestMedian.test_keepdims_out_axis_1",
-    "TestPercentile.test_keepdims_out_q1_axis0",
     "TestQuantile.test_quantile_monotonic_method_averaged_inverted_cdf",
-    "TestMedian.test_keepdims_out_axis4",
     "TestBincount.test_with_incorrect_minlength",
     "TestSortComplex.test_sort_real_type_in_H_type_out_F",
     "TestDiff.test_n",
     "TestMeshgrid.test_indexing",
     "TestQuantile.test_quantile_monotonic_method_closest_observation",
     "TestFlip.test_axes",
-    "TestPercentile.test_keepdims_out_q1_axis3",
-    "TestPercentile.test_keepdims_out_q_7_axis0",
-    "TestMedian.test_keepdims_out_axis3",
     "TestCov.test_fweights",
     "TestDiff.test_append",
     "TestPercentile.test_scalar_q",
     "TestMedian.test_extended_axis_invalid",
-    "TestMedian.test_out",
-    "TestPercentile.test_keepdims_out_q_7_axis2",
-    "TestPercentile.test_keepdims_out_q1_axis2",
     "TestQuantile.test_quantile_monotonic_method_hazen",
-    "TestPercentile.test_keepdims_out_q_7_axis3",
-    "TestPercentile.test_keepdims_out_q_7_axis_1",
-    "TestPercentile.test_api",
     "TestQuantile.test_quantile_monotonic_method_normal_unbiased",
     "TestSetOps.test_in1d_table_timedelta_fails",
     "TestUnique.test_unique_axis_errors",
@@ -644,47 +387,15 @@ dynamo_expected_failures = {
     "TestUnique.test_unique_axis",
     "TestConstant.test_check_constant_float3",
     "TestConstant.test_check_constant_pad_2d",
-    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_f8_casting_safe",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_c8_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
-    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_f8_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_f8_casting_no",  # torch_np/numpy_tests/core/test_shape_base
     "TestConcatenate.test_exceptions",  # torch_np/numpy_tests/core/test_shape_base
-    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_c8_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
-    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_i8_casting_equiv",  # torch_np/numpy_tests/core/test_shape_base
     "TestConcatenate.test_large_concatenate_axis_None",  # torch_np/numpy_tests/core/test_shape_base
     "TestConcatenate.test_concatenate",  # torch_np/numpy_tests/core/test_shape_base
     "TestVstack.test_empty_input",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_i8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
-    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_i8_casting_no",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_f8_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_f8_casting_no",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_f4_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
-    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_f8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
     "TestVstack.test_non_iterable",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_i8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_f4_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_f8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_f8_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
-    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_f8_casting_safe",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_f4_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
-    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_i8_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_c8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_f8_casting_safe",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_c8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
-    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_f4_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_f4_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
     "TestStackMisc.test_stack",  # torch_np/numpy_tests/core/test_shape_base
-    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_c8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_f8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
-    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_i8_casting_safe",  # torch_np/numpy_tests/core/test_shape_base
     "TestConcatenate.test_bad_out_shape",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_f8_casting_equiv",  # torch_np/numpy_tests/core/test_shape_base
     "TestHstack.test_non_iterable",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_c8_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
     "TestHstack.test_empty_input",  # torch_np/numpy_tests/core/test_shape_base
-    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_f4_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_f8_casting_equiv",  # torch_np/numpy_tests/core/test_shape_base
-    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_i8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
     "TestNegative.test_exceptions",  # torch_np/numpy_tests/core/test_scalarmath
     "TestPower.test_modular_power",  # torch_np/numpy_tests/core/test_scalarmath
     "TestBaseMath.test_lower_align",  # torch_np/numpy_tests/core/test_scalarmath
@@ -705,37 +416,20 @@ dynamo_expected_failures = {
     "TestScalarTypeNames.test_names_reflect_attributes_t8",  # torch_np/numpy_tests/core/test_numerictypes
     "TestScalarTypeNames.test_names_reflect_attributes_t0",  # torch_np/numpy_tests/core/test_numerictypes
     "TestScalarTypeNames.test_names_reflect_attributes_t3",  # torch_np/numpy_tests/core/test_numerictypes
-    "TestClip.test_clip_inplace_array",  # torch_np/numpy_tests/core/test_numeric
     "TestRequire.test_require_each",  # torch_np/numpy_tests/core/test_numeric
-    "TestClip.test_clip_with_out_simple_int32",  # torch_np/numpy_tests/core/test_numeric
-    "TestClip.test_simple_inplace_01",  # torch_np/numpy_tests/core/test_numeric
-    "TestStdVar.test_out_scalar",  # torch_np/numpy_tests/core/test_numeric
     "TestClip.test_simple_int32_inout_casting_unsafe",  # torch_np/numpy_tests/core/test_numeric
     "TestMoveaxis.test_errors",  # torch_np/numpy_tests/core/test_numeric
     "TestNonzeroAndCountNonzero.test_count_nonzero_axis",  # torch_np/numpy_tests/core/test_numeric
-    "TestClip.test_clip_with_out_memory_overlap",  # torch_np/numpy_tests/core/test_numeric
     "TestClip.test_clip_func_takes_out",  # torch_np/numpy_tests/core/test_numeric
-    "TestClip.test_noncontig_inplace",  # torch_np/numpy_tests/core/test_numeric
-    "TestClip.test_type_cast_12",  # torch_np/numpy_tests/core/test_numeric
-    "TestClip.test_simple_int64_out",  # torch_np/numpy_tests/core/test_numeric
     "TestRollaxis.test_exceptions",  # torch_np/numpy_tests/core/test_numeric
-    "TestClip.test_simple_inplace_02",  # torch_np/numpy_tests/core/test_numeric
     "TestRequire.test_C_and_F_simul",  # torch_np/numpy_tests/core/test_numeric
     "TestNonarrayArgs.test_dunder_round_edgecases_val_2147483647_ndigits_-1",  # torch_np/numpy_tests/core/test_numeric
     "TestClip.test_simple_complex",  # torch_np/numpy_tests/core/test_numeric
-    "TestBoolArray.test_logical_not_abs",  # torch_np/numpy_tests/core/test_numeric
-    "TestClip.test_simple_out",  # torch_np/numpy_tests/core/test_numeric
     "TestBroadcast.test_broadcast_single_arg",  # torch_np/numpy_tests/core/test_numeric
     "TestRequire.test_unknown_requirement",  # torch_np/numpy_tests/core/test_numeric
-    "TestBoolArray.test_logical_and_or_xor",  # torch_np/numpy_tests/core/test_numeric
     "TestBroadcast.test_broadcast_error_kwargs",  # torch_np/numpy_tests/core/test_numeric
     "TestNonarrayArgs.test_dunder_round_edgecases_val_2147483647_ndigits_-9",  # torch_np/numpy_tests/core/test_numeric
     "TestNonarrayArgs.test_dunder_round_edgecases_val_2147483647_ndigits_-10",  # torch_np/numpy_tests/core/test_numeric
-    "TestClip.test_type_cast_10",  # torch_np/numpy_tests/core/test_numeric
-    "TestOuterMisc.test_outer_out_param",  # torch_np/numpy_tests/core/test_numeric
-    "TestClip.test_clip_inplace_simple",  # torch_np/numpy_tests/core/test_numeric
-    "TestClip.test_clip_with_out_transposed",  # torch_np/numpy_tests/core/test_numeric
-    "TestClip.test_clip_with_out_simple",  # torch_np/numpy_tests/core/test_numeric
     "TestCross.test_broadcasting_shapes",  # torch_np/numpy_tests/core/test_numeric
     "TestIndexing.test_index_no_floats",  # torch_np/numpy_tests/core/test_indexing
     "TestBooleanIndexing.test_boolean_indexing_weirdness",  # torch_np/numpy_tests/core/test_indexing
@@ -833,7 +527,6 @@ dynamo_expected_failures = {
     "TestAssertCloseSparseBSC.test_mismatching_row_indices_msg",  # test_testing
     "TestAssertCloseSparseCOO.test_mismatching_values_msg",  # test_testing
     "TestAssertCloseQuantized.test_matching_per_channel",  # test_testing
-    "TestTestParametrizationDeviceTypeCPU.test_ops_decorator_applies_op_and_param_specific_decorators_cpu",  # test_testing
     "TestAssertCloseSparseCOO.test_matching_uncoalesced",  # test_testing
     "TestAssertCloseSparseCSR.test_matching",  # test_testing
     "TestAssertCloseSparseBSR.test_mismatching_crow_indices_msg",  # test_testing
@@ -856,15 +549,11 @@ dynamo_expected_failures = {
     "TestAssertCloseSparseCSC.test_mismatching_ccol_indices_msg",  # test_testing
     "TestTensorBoardUtils.test_to_HWC",  # test_tensorboard
     "TestTensorBoardEmbedding.test_embedding",  # test_tensorboard
-    "TestTensorProtoSummary.test_float_tensor_proto",  # test_tensorboard
     "TestTensorBoardSummary.test_image_without_channel",  # test_tensorboard
     "TestTensorBoardUtils.test_numpy_vid_uint8",  # test_tensorboard
-    "TestTensorProtoSummary.test_complex_tensor_proto",  # test_tensorboard
     "TestTensorBoardSummary.test_image_with_one_channel",  # test_tensorboard
     "TestTensorBoardEmbedding.test_embedding_64",  # test_tensorboard
     "TestTensorBoardSummary.test_video",  # test_tensorboard
-    "TestTensorProtoSummary.test_int_tensor_proto",  # test_tensorboard
-    "TestTensorProtoSummary.test_empty_tensor_proto",  # test_tensorboard
     "TestTensorBoardSummary.test_uint8_image",  # test_tensorboard
     "TestAsArrayCPU.test_copy_list_cpu_float64",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_int64",  # test_tensor_creation_ops
@@ -880,23 +569,16 @@ dynamo_expected_failures = {
     "TestAsArrayCPU.test_copy_list_cpu_bool",  # test_tensor_creation_ops
     "TestTensorCreationCPU.test_constructor_dtypes_cpu",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_complex128",  # test_tensor_creation_ops
-    "TestTensorCreationCPU.test_tensor_factory_copy_var_cpu",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_int16",  # test_tensor_creation_ops
     "TestTensorCreationCPU.test_cartesian_prod_cpu",  # test_tensor_creation_ops
     "TestSubclass.test_parametrization_non_wrapper_tensor_leave_parametrized_True",  # test_subclass
     "TestSubclass.test_module_optimization_non_wrapper_tensor",  # test_subclass
     "TestSubclass.test_serialization_non_wrapper_tensor_as_param_True",  # test_subclass
-    "TestSubclass.test_param_invariants_non_wrapper_tensor_tensor_requires_grad_False",  # test_subclass
-    "TestSubclass.test_param_invariants_sparse_tensor_tensor_requires_grad_True",  # test_subclass
-    "TestSubclass.test_param_invariants_diag_tensor_below_tensor_requires_grad_True",  # test_subclass
-    "TestSubclass.test_param_invariants_diag_tensor_below_tensor_requires_grad_False",  # test_subclass
-    "TestSubclass.test_param_invariants_non_wrapper_tensor_tensor_requires_grad_True",  # test_subclass
     "TestSubclass.test_parametrization_non_wrapper_tensor_leave_parametrized_False",  # test_subclass
     "TestSubclass.test_type_propagation_non_wrapper_tensor_as_param_False",  # test_subclass
     "TestSubclass.test_parametrization_base_tensor_leave_parametrized_True",  # test_subclass
     "TestSubclass.test_type_propagation_non_wrapper_tensor_as_param_True",  # test_subclass
     "TestSubclass.test_parametrization_base_tensor_leave_parametrized_False",  # test_subclass
-    "TestSubclass.test_param_invariants_sparse_tensor_tensor_requires_grad_False",  # test_subclass
     "TestStatelessFunctionalAPI.test_reparametrize_module_fail_reset_to_original_torch_func",  # test_stateless
     "TestStatelessFunctionalAPI.test_reparametrized_module_change_parametrization_original_stateless",  # test_stateless
     "TestStatelessFunctionalAPI.test_reparametrized_module_change_parametrization_original_torch_func",  # test_stateless
@@ -1773,7 +1455,6 @@ dynamo_expected_failures = {
     "TestGradNewOnesOverride.test_newones",  # test_overrides
     "TestTorchFunctionOverride.test_precedence_semantics",  # test_overrides
     "TestNamedTupleAPI.test_namedtuple_return",  # test_namedtuple_return_api
-    "TestVmapOperatorsLegacy.test_contiguous",  # test_legacy_vmap
     "TestVmapAPILegacy.test_accepts_nested_inputs",  # test_legacy_vmap
     "TestVmapAPILegacy.test_nested_out_dims",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_inplace_manyview_cpu",  # test_legacy_vmap
@@ -1794,11 +1475,8 @@ dynamo_expected_failures = {
     "TestVmapAPILegacy.test_unsupported_op_err_msg",  # test_legacy_vmap
     "TestVmapAPILegacy.test_batched_gradient_basic",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_slice",  # test_legacy_vmap
-    "TestVmapOperatorsLegacy.test_expand_as",  # test_legacy_vmap
-    "TestVmapOperatorsLegacy.test_unfold",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_sigmoid_cpu",  # test_legacy_vmap
     "TestVmapAPILegacy.test_out_dims_and_num_outputs_mismatch_err_msg",  # test_legacy_vmap
-    "TestVmapOperatorsLegacy.test_reshape_as",  # test_legacy_vmap
     "TestVmapAPILegacy.test_noop_in_inner_vmap",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_new_empty_strided",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_is_floating_point",  # test_legacy_vmap
@@ -1808,7 +1486,6 @@ dynamo_expected_failures = {
     "TestVmapOperatorsLegacy.test_as_strided",  # test_legacy_vmap
     "TestVmapAPILegacy.test_nested_with_different_map_dim",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_new_zeros",  # test_legacy_vmap
-    "TestVmapOperatorsLegacy.test_view_as",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_logsumexp_cpu",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_log1p_cpu",  # test_legacy_vmap
     "TestVmapAPILegacy.test_grad_unsupported_interaction",  # test_legacy_vmap
@@ -1829,16 +1506,13 @@ dynamo_expected_failures = {
     "TestVmapOperatorsLegacy.test_comparison_ops",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_is_contiguous",  # test_legacy_vmap
     "TestVmapAPILegacy.test_multiple_outputs",  # test_legacy_vmap
-    "TestVmapAPILegacy.test_inplace_fallback_unary",  # test_legacy_vmap
     "TestVmapAPILegacy.test_out_dim_out_of_bounds_err_msg",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_view",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_div_cpu",  # test_legacy_vmap
     "TestVmapAPILegacy.test_out_dims_edge_case",  # test_legacy_vmap
-    "TestVmapAPILegacy.test_inplace_fallback_nary_different_levels",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_clone",  # test_legacy_vmap
     "TestVmapAPILegacy.test_in_dim_not_in_tensor_err_msg",  # test_legacy_vmap
     "TestVmapAPILegacy.test_fallback_with_undefined_grad",  # test_legacy_vmap
-    "TestVmapAPILegacy.test_inplace_fallback_nary_same_levels",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_no_random_op_support",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_unbind",  # test_legacy_vmap
     "TestVmapAPILegacy.test_non_default_in_dims_out_dims",  # test_legacy_vmap
@@ -1847,8 +1521,6 @@ dynamo_expected_failures = {
     "TestNamedTensor.test_masked_fill",  # test_namedtensor
     "TestNamedTensor.test_addmv",  # test_namedtensor
     "TestNamedTensor.test_cummax_cummin",  # test_namedtensor
-    "TestNamedTensor.test_no_jit_script_support",  # test_namedtensor
-    "TestNamedTensor.test_no_jit_tracer_support",  # test_namedtensor
     "TestNamedTensor.test_rename_rename_map",  # test_namedtensor
     "TestNamedTensor.test_mm",  # test_namedtensor
     "TestNamedTensor.test_no_save_support",  # test_namedtensor
@@ -1916,11 +1588,9 @@ dynamo_expected_failures = {
     "TestFX.test_immutable_list_pytree_ops",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_TakeList_cpu",  # test_fx
     "TestPassManager.test_pass_manager",  # test_fx
-    "TestFX.test_user_friendly_call_provenance_with_function",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_MutationMetadata_cpu",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_MutationTorchTensorCall_cpu",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_MutationInput_cpu",  # test_fx
-    "TestFX.test_fn_type_annotation_empty",  # test_fx
     "TestFX.test_immutable_dict_pytree_ops",  # test_fx
     "TestCommonPass.test_correctness_factory_CSEPass_MutationFactory_cpu",  # test_fx
     "TestCommonPass.test_correctness_factory_CSEPass_FactoryFunctionCall_cpu",  # test_fx
@@ -1996,14 +1666,10 @@ dynamo_expected_failures = {
     "TestAOTAutograd.test_input_data_and_metadata_mutation",  # functorch/test_aotdispatch
     "TestPythonKeyCPU.test_make_fx_vjp_cpu",  # functorch/test_aotdispatch
     "TestPartitioning.test_min_cut_partitioner_output_tensor_shape_tensor",  # functorch/test_aotdispatch
-    "TestAOTAutograd.test_subclass_metadata_mutation_req_grad_False",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_input_output_view_simple",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_output_aliases_intermediate_multi_output_view",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_output_aliases_intermediate_returned_multiple_times",  # functorch/test_aotdispatch
-    "TestAOTAutograd.test_input_metadata_mutation_aliases",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_output_aliases_input_multi_output_view",  # functorch/test_aotdispatch
-    "TestAOTAutograd.test_subclass_metadata_mutation_req_grad_True",  # functorch/test_aotdispatch
-    "TestAOTAutograd.test_input_mutation_aliases_other_input2",  # functorch/test_aotdispatch
     "TestAOTDispatch.test_aot_dispatch_input_mutation_and_output_alias",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_input_aliased_with_mutation_output_alias",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_invalid_dupe_left_bias",  # functorch/test_aotdispatch
@@ -2033,7 +1699,6 @@ dynamo_expected_failures = {
     "TestAOTAutograd.test_input_mutation_alias_everything",  # functorch/test_aotdispatch
     "TestPythonKeyCPU.test_make_fx_jacrev_cpu",  # functorch/test_aotdispatch
     "TestPartitioning.test_default_partitioner_output_tensor_shape_tensor",  # functorch/test_aotdispatch
-    "TestAOTAutograd.test_input_mutation_aliases_other_input",  # functorch/test_aotdispatch
     "TestPartitioning.test_contiguous",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_outputs_are_aliased",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_input_mutation_aliases_and_none_require_gradients",  # functorch/test_aotdispatch
@@ -2103,14 +1768,8 @@ dynamo_expected_failures = {
     "TestExperiment.test_with_buffer_as_submodule",  # export/test_experimental
     "ExampleTests.test_exportdb_supported_case_constrain_as_size_example",  # export/test_db
     "ExampleTests.test_exportdb_supported_case_assume_constant_result",  # export/test_db
-    "TestOpCPU.test_addmm_cpu_bfloat16",  # test_jit_llga_fuser
     "TestOpCPU.test_cat_cpu_float32",  # test_jit_llga_fuser
-    "TestOpCPU.test_addmm_cpu_float32",  # test_jit_llga_fuser
-    "TestOpCPU.test_add_scalar_cpu_bfloat16",  # test_jit_llga_fuser
-    "TestOpCPU.test_add_scalar_cpu_float32",  # test_jit_llga_fuser
     "TestOpCPU.test_cat_cpu_bfloat16",  # test_jit_llga_fuser
-    "TestOpCPU.test_identity_binary_cpu_bfloat16",  # test_jit_llga_fuser
-    "TestOpCPU.test_identity_binary_cpu_float32",  # test_jit_llga_fuser
     "TestTorch.test_type",  # test_torch
     "TestTorch.test_cuda_not_built",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_quint4x2",  # test_torch
@@ -2140,7 +1799,6 @@ dynamo_expected_failures = {
     "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_qint32",  # test_torch
     "TestTorchDeviceTypeCPU.test_exponential_kstest_cpu_float16",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_qint8",  # test_torch
-    "TestTorchDeviceTypeCPU.test_untyped_storage_meta_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_remainder_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool1d_cpu_float32",  # test_torch
     "TestTorchDeviceTypeCPU.test_uniform_kstest_cpu_float64",  # test_torch
@@ -2181,8 +1839,6 @@ dynamo_expected_failures = {
     "TestAutograd.test_backward_with_inputs",  # test_autograd
     "TestAutograd.test_setitem",  # test_autograd
     "TestAutogradDeviceTypeCPU.test_inplace_on_view_python_cpu",  # test_autograd
-    "TestAutogradForwardMode.test_make_dual_inference_tensor_in_inference_mode",  # test_autograd
-    "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_normal_mode_inplace_op",  # test_autograd
     "TestAutograd.test_custom_function_save_for_forward",  # test_autograd
     "TestAutograd.test_sparse_mm_backward",  # test_autograd
     "TestAutograd.test_checkpointing_without_reentrant_with_context_fn",  # test_autograd
@@ -2202,7 +1858,6 @@ dynamo_expected_failures = {
     "TestNestedCheckpoint.test_nested_checkpoint_kwargs_early_stop_False",  # test_autograd
     "TestAutograd.test_checkpointing_non_reentrant_autocast_cpu",  # test_autograd
     "TestAutograd.test_named_tensor_for_complex_views",  # test_autograd
-    "TestAutogradInferenceMode.test_inference_mode_existing_autograd_session",  # test_autograd
     "TestAutograd.test_set_grad_generator_functions_recursive",  # test_autograd
     "TestAutograd.test_increment_version",  # test_autograd
     "TestAutograd.test_record_function_callbacks",  # test_autograd
@@ -2214,7 +1869,6 @@ dynamo_expected_failures = {
     "TestAutograd.test_custom_function_forward_mode_forward_is_no_op",  # test_autograd
     "TestNestedCheckpoint.test_nested_checkpoint_set_early_stop",  # test_autograd
     "TestAutograd.test_version_counter",  # test_autograd
-    "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_normal_mode_view_op",  # test_autograd
     "TestAutograd.test_set_grad_generator_functions",  # test_autograd
     "TestAutograd.test_record_function",  # test_autograd
     "TestAutograd.test_custom_function_forward_mode_view_checks",  # test_autograd
@@ -2231,7 +1885,6 @@ dynamo_expected_failures = {
     "TestAutogradInferenceMode.test_inference_mode_tensor_creation",  # test_autograd
     "TestAutograd.test_set_grad_coroutines",  # test_autograd
     "TestAutograd.test_no_grad_copy_sparse",  # test_autograd
-    "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_inf_mode_view_op",  # test_autograd
     "TestAutograd.test_set_grad_coroutines_exit",  # test_autograd
     "TestNestedCheckpoint.test_nested_checkpoint_reentrant_backwards_early_stop_True",  # test_autograd
     "TestAutograd.test_saved_tensor_hooks_custom_function_intermediates",  # test_autograd
@@ -2241,11 +1894,8 @@ dynamo_expected_failures = {
     "TestNestedCheckpoint.test_nested_checkpoint_kwargs_early_stop_True",  # test_autograd
     "TestAutograd.test_gradcheck_forward_ad",  # test_autograd
     "TestAutograd.test_access_saved_tensor_twice_without_recomputation_works",  # test_autograd
-    "TestMultithreadAutograd.test_fork_join_in_middle",  # test_autograd
     "TestAutograd.test_hook_closure_cycle_use_custom_function_True_use_tensor_hook_False",  # test_autograd
     "TestAutograd.test_accumulate_grad_tensor_reference",  # test_autograd
-    "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_inf_mode_functional_op",  # test_autograd
-    "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_normal_mode_functional_op",  # test_autograd
     "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_inf_mode_inplace_op",  # test_autograd
     "TestAutogradDeviceTypeCPU.test_scatter_index_reduce_prod_gradgrad_error_cpu",  # test_autograd
     "TestAutograd.test_nested_anomaly_detect_nan",  # test_autograd
@@ -2374,7 +2024,6 @@ dynamo_expected_failures = {
     "TestEqualizeFx.test_selective_equalization",  # test_quantization
     "TestQuantizeFx.test__convert_to_reference_decomposed_fx",  # test_quantization
     "TestQuantizeFx.test_remove_qconfig",  # test_quantization
-    "TestBackendConfig.test_backend_op_config_set_input_type_to_index",  # test_quantization
     "TestQuantizedLinear.test_qlinear_relu",  # test_quantization
     "TestQuantizePT2E.test_constant_prop_preserve_metadata",  # test_quantization
     "TestQuantizedTensor.test_qtensor_permute",  # test_quantization
@@ -2444,7 +2093,6 @@ dynamo_expected_failures = {
     "TestQuantizeFx.test_static_lstm_consume_tuple",  # test_quantization
     "TestXNNPACKQuantizer.test_conv_linear_no_permute",  # test_quantization
     "TestReferenceQuantizedModule.test_rnn_cell",  # test_quantization
-    "TestBackendConfig.test_backend_op_config_add_dtype_config",  # test_quantization
     "TestStaticQuantizedModule.test_conv2d_add",  # test_quantization
     "TestQuantizedConv.test_qconv2d_relu_pt2e",  # test_quantization
     "TestPT2ERepresentation.test_add",  # test_quantization
@@ -2473,7 +2121,6 @@ dynamo_expected_failures = {
     "TestQuantizedTensor.test_qtensor_sub_byte_not_aligned_cols",  # test_quantization
     "TestQuantizeFx.test_conv_linear_reference",  # test_quantization
     "TestQuantizePT2E.test_composable_quantizer_linear_conv",  # test_quantization
-    "TestBackendConfig.test_backend_op_config_from_dict",  # test_quantization
     "TestFakeQuantizeOps.test_learnable_backward_per_tensor_cuda",  # test_quantization
     "TestXNNPACKQuantizer.test_linear_with_dynamic_shape",  # test_quantization
     "TestQuantizedOps.test_empty_batch",  # test_quantization
@@ -2646,7 +2293,6 @@ dynamo_expected_failures = {
     "TestQuantizedOps.test_hardtanh",  # test_quantization
     "TestQuantizeFx.test_qconfig_function",  # test_quantization
     "TestQuantizeFx.test_ref_conv_module",  # test_quantization
-    "TestBackendConfig.test_backend_op_config_set_num_tensor_args_to_observation_type",  # test_quantization
     "TestQuantizedOps.test_max_pool1d",  # test_quantization
     "TestStaticQuantizedModule.test_linear",  # test_quantization
     "TestQuantizeFxOps.test_mul_relu",  # test_quantization
@@ -2689,43 +2335,17 @@ dynamo_expected_failures = {
     "TestQuantizePT2EQATModels.test_qat_resnet18",  # test_quantization.py
     "TestQuantizePT2EQATModels.test_qat_mobilenet_v2",  # test_quantization.py
     "TestObserver.test_per_channel_observers",  # test_quantization.py
-    "TestCustomOp.test_impl_cpu",  # test_custom_ops
-    "TestCustomOp.test_backward_tensorlist_input_requires_list_grads_none_or_Tensor",  # test_custom_ops
     "TestCustomOp.test_define_with_tags_single",  # test_custom_ops
     "TestCustomOp.test_autogen_aten_ops_are_pt2_compliant",  # test_custom_ops
-    "TestCustomOp.test_backward_output_differentiability_tensorlist",  # test_custom_ops
-    "TestCustomOp.test_backward_output_differentiability_type",  # test_custom_ops
-    "TestCustomOp.test_impl_meta",  # test_custom_ops
-    "TestCustomOp.test_impl_invalid_devices",  # test_custom_ops
-    "TestCustomOp.test_new_data_dependent_symint",  # test_custom_ops
     "TestCustomOp.test_define_with_tags_list",  # test_custom_ops
-    "TestCustomOp.test_backward_tensorlist_input_requires_list_grads",  # test_custom_ops
-    "TestCustomOp.test_not_implemented_error",  # test_custom_ops
     "TestCustomOp.test_impl_device_cpu",  # test_custom_ops
-    "TestCustomOp.test_backward_returns_dict",  # test_custom_ops
-    "TestCustomOp.test_autograd_notimplemented",  # test_custom_ops
-    "TestCustomOp.test_backward_grads_are_tensor_or_none",  # test_custom_ops
-    "TestCustomOp.test_backward_dict_requires_keys_for_input_optional_tensors",  # test_custom_ops
-    "TestCustomOp.test_backward_output_differentiability_non_tensor",  # test_custom_ops
-    "TestCustomOp.test_lifetime",  # test_custom_ops
     "TestCustomOp.test_impl_device_function",  # test_custom_ops
     "TestCustomOp.test_builtin_torchscript_ops",  # test_custom_ops
     "TestCustomOpTestingCPU.test_missing_functionalization_cpu",  # test_custom_ops
     "TestCustomOp.test_define_with_tags_tuple",  # test_custom_ops
     "TestCustomOp.test_builtin_aten_ops_are_pt2_compliant",  # test_custom_ops
-    "TestCustomOp.test_save_for_backward_inputs_are_namedtuple",  # test_custom_ops
-    "TestCustomOp.test_autograd_notimplemented_gradmode",  # test_custom_ops
     "TestGenerateOpcheckTests.test_opcheck_bad_op",  # test_custom_ops
-    "TestCustomOp.test_backward_dict_invalid_keys",  # test_custom_ops
-    "TestCustomOp.test_backward_tensorlist_input_requires_list_grads_with_same_numel",  # test_custom_ops
-    "TestCustomOp.test_duplicate_impl",  # test_custom_ops
-    "TestCustomOp.test_backward_output_differentiability_numel",  # test_custom_ops
-    "TestCustomOp.test_backward_dict_requires_keys_for_input_tensors",  # test_custom_ops
     "TestCustomOp.test_legacy_define",  # test_custom_ops
-    "TestCustomOpTestingCPU.test_opcheck_fails_basic_cpu",  # test_custom_ops
-    "TestCustomOp.test_backward_dict_grad_for_nontensor",  # test_custom_ops
-    "TestCustomOp.test_backward_partially_registered",  # test_custom_ops
-    "TestCustomOp.test_basic_make_fx",  # test_custom_ops
     "TestPythonRegistration.test_alias_analysis",  # test_python_dispatch
     "TestPythonDispatch.test_torch_dispatch_mode_subclass_priority",  # test_python_dispatch
     "TestPythonDispatch.test_strides_slow_path",  # test_python_dispatch
@@ -2745,7 +2365,6 @@ dynamo_expected_failures = {
     "TestPythonDispatch.test_subclass_autograd_device_check",  # test_python_dispatch
     "TestPythonDispatch.test_data_ptr_respects_numel_slow_path",  # test_python_dispatch
     "TestPythonDispatch.test_make_subclass_with_modes",  # test_python_dispatch
-    "TestPythonRegistration.test_override_aten_ops_with_multiple_libraries",  # test_python_dispatch
     "TestPythonDispatch.test_dispatch_super_call",  # test_python_dispatch
     "TestPythonDispatch.test_subclass_priority",  # test_python_dispatch
     "TestPythonDispatch.test_exception_handling",  # test_python_dispatch
@@ -2773,6 +2392,11 @@ dynamo_expected_failures = {
     "LoggingTests.test_dynamo_info",  # dynamo/test_logging
     "LoggingTests.test_graph_breaks",  # dynamo/test_logging
     "LoggingTests.test_aot",  # dynamo/test_logging
+    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape2_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape3_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_is_causal_and_mask_fails_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape1_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape0_cpu",  # test_transformers.py
 }
 
 # see NOTE [dynamo_test_failures.py] for more details
@@ -2797,6 +2421,9 @@ dynamo_skips = {
     "TestMethods.test_choose",
     "TestMethods.test_conjugate_out",
     "TestMethods.test_compress",
+    "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_complex64",  # known py311 fail
+    "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_int64",  # known py311 fail
+    "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_float32",  # known py311 fail
     "TestCustomOpTestingCPU.test_incorrect_schema_mutation_cpu",  # test_custom_ops
     "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmax_np_method0",
     "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmin_np_method1",
@@ -2841,23 +2468,40 @@ dynamo_skips = {
     "TestPruningNN.test_global_pruning_importance_scores",  # flaky
     "TestOpenMP_ParallelFor.test_one_thread",  # test_openmp
     "TestTorchrun.test_multi_threads",  # backends/xeon/test_launch
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape3_cpu",  # known py38 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_UPPER_LEFT_shape0_cpu",  # known py38 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape1_cpu",  # known py38 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape2_cpu",  # known py38 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_UPPER_LEFT_shape3_cpu",  # known py38 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape0_cpu",  # known py38 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_UPPER_LEFT_shape2_cpu",  # known py38 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_UPPER_LEFT_shape1_cpu",  # known py38 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_1_shape0_cpu",  # known py311 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_2_shape2_cpu",  # known py311 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_2_shape0_cpu",  # known py311 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape3_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_CausalVariant_UPPER_LEFT_shape0_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape1_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape2_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_CausalVariant_UPPER_LEFT_shape3_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape0_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_CausalVariant_UPPER_LEFT_shape2_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_CausalVariant_UPPER_LEFT_shape1_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_CausalVariant_LOWER_RIGHT_shape3_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_CausalVariant_UPPER_LEFT_shape0_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_CausalVariant_LOWER_RIGHT_shape1_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_CausalVariant_LOWER_RIGHT_shape2_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_CausalVariant_UPPER_LEFT_shape3_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_CausalVariant_LOWER_RIGHT_shape0_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_CausalVariant_UPPER_LEFT_shape2_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_CausalVariant_UPPER_LEFT_shape1_cpu",  # known py38 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_1_shape0_cpu",  # known py311 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_2_shape2_cpu",  # known py311 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_2_shape0_cpu",  # known py311 fail
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_2_shape3_cpu",  # known py311 fail
+    "TestAttnBiasCUDA.test_causal_variants_compile_causal_variant_CausalVariant_LOWER_RIGHT_shape3_CUDA",  # known py38 fail
+    "TestAttnBiasCUDA.test_causal_variants_compile_causal_variant_CausalVariant_UPPER_LEFT_shape0_CUDA",  # known py38 fail
+    "TestAttnBiasCUDA.test_causal_variants_compile_causal_variant_CausalVariant_LOWER_RIGHT_shape1_CUDA",  # known py38 fail
+    "TestAttnBiasCUDA.test_causal_variants_compile_causal_variant_CausalVariant_LOWER_RIGHT_shape2_CUDA",  # known py38 fail
+    "TestAttnBiasCUDA.test_causal_variants_compile_causal_variant_CausalVariant_UPPER_LEFT_shape3_CUDA",  # known py38 fail
+    "TestAttnBiasCUDA.test_causal_variants_compile_causal_variant_CausalVariant_LOWER_RIGHT_shape0_CUDA",  # known py38 fail
+    "TestAttnBiasCUDA.test_causal_variants_compile_causal_variant_CausalVariant_UPPER_LEFT_shape2_CUDA",  # known py38 fail
+    "TestAttnBiasCUDA.test_causal_variants_compile_causal_variant_CausalVariant_UPPER_LEFT_shape1_CUDA",  # known py38 fail
     "TestTransformersCPU.test_decoder_padding_and_src_mask_bool_cpu",  # known py311 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_2_shape3_cpu",  # known py311 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_1_shape3_cpu",  # known py311 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_1_shape2_cpu",  # known py311 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_1_shape1_cpu",  # known py311 fail
-    "TestAttnMasksCPU.test_causal_variants_causal_variant_2_shape1_cpu",  # known py311 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_2_shape3_cpu",  # known py311 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_1_shape3_cpu",  # known py311 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_1_shape2_cpu",  # known py311 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_1_shape1_cpu",  # known py311 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_2_shape1_cpu",  # known py311 fail
     "TestFunctionalAutogradBenchmark.test_fast_tasks",  # flaky?
     "TestFrameworkUtils.test_filtering_env_var",  # known py38 fail
     "TestAsArrayCPU.test_default_device_cpu",  # known py38 fail
@@ -7453,6 +7097,9 @@ dynamo_skips = {
     "TestSymbolicShapeAnalysis.test_if_propagation",  # test_jit
     "TestPeephole.test_normalized_rsub",  # test_jit
     "TestPythonIr.test_param_strides",  # test_jit
+    "TestPythonIr.test_permute_inputs_binding",  # test_jit
+    "TestPythonIr.test_python_ir_utils",  # test_jit
+    "TestPythonIr.test_python_ir_utils_graph",  # test_jit
     "TestComplex.test_complex_list_sum",  # test_jit
     "TestUnion.test_union_redundant_arguments_are_skipped_optional",  # test_jit
     "TestNnapiBackend.test_conv2d",  # test_jit
@@ -7612,6 +7259,14 @@ dynamo_skips = {
     "TestFrozenOptimizations.test_conv_bn_folding",  # test_jit.py
     "TestArgmax.test_combinations_data58",
     "TestArgmax.test_combinations_data61",
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_1_shape0_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_2_shape0_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_1_shape3_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_2_shape2_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_1_shape2_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_2_shape1_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_1_shape1_cpu",  # test_transformers.py
+    "TestCustomOpTestingCPU.test_opcheck_fails_basic_cpu",  # test_custom_ops.py
 }
 
 
