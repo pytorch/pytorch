@@ -1395,6 +1395,9 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall
         assert typename == 'storage', \
             f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
         storage_type, key, location, numel = data
+        if torch._guards.detect_fake_mode(None) is not None:
+            location = 'meta'
+
         if storage_type is torch.UntypedStorage:
             dtype = torch.uint8
         else:
