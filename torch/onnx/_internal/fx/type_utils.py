@@ -1,6 +1,8 @@
 """Utilities for converting and operating on ONNX, JIT and torch types."""
 from __future__ import annotations
 
+import enum
+
 from typing import (
     Any,
     Dict,
@@ -23,6 +25,12 @@ from torch._subclasses import fake_tensor
 
 if TYPE_CHECKING:
     import onnx.defs.OpSchema.AttrType  # type: ignore[import]
+
+
+class _AttrKind(enum.Enum):
+    PARAMETER = "parameter"
+    BUFFER = "buffer"
+    CONSTANT = "constant"
 
 
 # Enable both TorchScriptTensor and torch.Tensor to be tested

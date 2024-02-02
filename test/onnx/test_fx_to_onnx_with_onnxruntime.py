@@ -20,7 +20,7 @@ import transformers  # type: ignore[import]
 from torch import nn
 
 from torch._subclasses import fake_tensor
-from torch.onnx._internal import _beartype, exporter
+from torch.onnx._internal import _beartype, exporter, io_adapter
 from torch.onnx._internal.fx import (
     fx_symbolic_graph_extractor,
     patcher,
@@ -1067,6 +1067,18 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 # Generate random inputs.
                 args = create_args()
                 kwargs = create_kwargs()
+
+                # NOTE: lifted constant tensors is fakified in FakeTensorMode
+                # TODO: Delete this when we can do torch.save for ExportedProgram.constants
+                if (
+                    export_within_fake_mode
+                    and model_type
+                    == pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+                ):
+                    onnx_program._input_adapter.append_step(
+                        io_adapter.AppendLiftedConstantInputStep()
+                    )
+
                 # Original outputs.
                 # model_with_state_dict=real_model is used to create non-fake weights
                 ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(
@@ -1126,6 +1138,10 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     )
     @pytorch_test_common.xfail_if_model_type_is_not_exportedprogram(
+        error_message="Expected 4 inputs, got 2",
+        reason="https://github.com/pytorch/pytorch/issues/115745",
+    )
+    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
         error_message="Expected 4 inputs, got 2",
         reason="https://github.com/pytorch/pytorch/issues/115745",
     )
@@ -1375,6 +1391,10 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         error_message="Expected 5 inputs, got 3",
         reason="https://github.com/pytorch/pytorch/issues/115745",
     )
+    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
+        error_message="Expected 5 inputs, got 3",
+        reason="https://github.com/pytorch/pytorch/issues/115745",
+    )
     def test_fake_tensor_mode_huggingface_gpt2(self):
         config = transformers.GPT2Config(
             vocab_size=8096, n_positions=256, n_embd=256, n_layer=2, n_head=2
@@ -1421,6 +1441,15 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     @pytorch_test_common.xfail_if_model_type_is_not_exportedprogram(
         error_message="Expected 9 inputs, got 3",
         reason="https://github.com/pytorch/pytorch/issues/115745",
+    )
+    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
+        error_message="Expected 9 inputs, got 3",
+        reason="https://github.com/pytorch/pytorch/issues/115745",
+    )
+    @pytorch_test_common.xfail_within_fake_mode_test(
+        error_message="Expected 11 inputs, got 5",
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        reason="Lifted constant tensors are not in state_dict, instead it's in `ExportedProgram.tensor_constants`",
     )
     def test_fake_tensor_mode_huggingface_databricks_dolly_v2_3b(self):
         config = transformers.GPTNeoXConfig(

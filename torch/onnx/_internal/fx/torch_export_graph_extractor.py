@@ -50,9 +50,6 @@ class TorchExport(exporter.FXGraphExtractor):
         self.input_adapter.append_step(
             io_adapter.FlattenInputWithTreeSpecValidationInputStep()
         )
-        self.input_adapter.append_step(
-            io_adapter.PrependParamsBuffersConstantAotAutogradInputStep()
-        )
 
         # ONNX does not support None inputs. During graph building, all None inputs
         # are removed. Here we register this step to input adapter.
@@ -82,10 +79,6 @@ class TorchExport(exporter.FXGraphExtractor):
         # Output post-processing steps should happen after `FlattenOutputStep`.
         options.fx_tracer.output_adapter.append_step(
             io_adapter.ConvertComplexToRealRepresentationOutputStep()
-        )
-
-        options.fx_tracer.output_adapter.append_step(
-            io_adapter.PrependParamsAndBuffersAotAutogradOutputStep()
         )
 
         # TODO: https://github.com/pytorch/pytorch/issues/114628
@@ -121,6 +114,7 @@ class TorchExport(exporter.FXGraphExtractor):
         # See [NOTE: Modularize pass ordering]
         # sink placeholders and stuff attributes back into the graph
         fx_module = passes.Modularize(
-            diagnostic_context, fx_module, model_state_dict=original_model.state_dict  # type: ignore[union-attr]
+            diagnostic_context, fx_module, exported_program=original_model  # type: ignore[union-attr]
         ).run()
+
         return fx_module

@@ -4,6 +4,7 @@ import abc
 
 import collections
 import copy
+import itertools
 import operator
 
 from typing import (
@@ -24,7 +25,7 @@ import torch
 import torch.fx
 from torch.onnx._internal import _beartype
 
-from torch.onnx._internal.fx import _pass, diagnostics
+from torch.onnx._internal.fx import _pass, diagnostics, type_utils as fx_type_utils
 from torch.utils import _pytree as pytree
 
 _FX_TRACER_NN_MODULE_META_TYPE = Tuple[str, type]
@@ -333,8 +334,6 @@ class _ModuleStackMeta:
 def _module_stack_meta_from_node(
     node: torch.fx.Node, is_exported_program: bool = False
 ) -> _ModuleStackMeta:
-    if node.op == "placeholder":
-        return _ModuleStackMeta(None)
     return _ModuleStackMeta(
         node.meta.get("nn_module_stack"), is_exported_program=is_exported_program
     )
@@ -692,7 +691,6 @@ class _ModuleNode(_IRNode):
             node = fx_graph.output(
                 new_outputs[0] if len(new_outputs) == 1 else new_outputs
             )
-
         graph_module = torch.fx.GraphModule(
             self._reference_module, fx_graph, module_class_name
         )
@@ -835,12 +833,33 @@ class Modularize(_pass.Transform):
         self,
         diagnostic_context: diagnostics.DiagnosticContext,
         module: torch.fx.GraphModule,
-        model_state_dict: Optional[Dict[str, torch.Tensor]] = None,
+        exported_program: Optional[torch.export.ExportedProgram] = None,
     ):
         super().__init__(diagnostic_context, module)
         self.module = module
-        self.model_state_dict = model_state_dict
-        self.is_exported_program = model_state_dict is not None
+        self.is_exported_program = exported_program is not None
+        self.exported_program = (
+            exported_program if exported_program is not None else None
+        )
+        self.graph_signature = (
+            copy.deepcopy(exported_program.graph_signature)
+            if exported_program is not None
+            else None
+        )
+        self.state_dict = (
+            exported_program.state_dict if exported_program is not None else None
+        )
+
+        if exported_program is not None:
+            # To find real attribute name and map it to the input names
+            self.inputs_to_state_dict_mapping: Optional[Dict[str, str]] = {
+                **self.graph_signature.inputs_to_parameters,
+                **self.graph_signature.inputs_to_buffers,
+                **self.graph_signature.inputs_to_lifted_tensor_constants,
+                **self.graph_signature.inputs_to_lifted_custom_objs,
+            }
+        else:
+            self.inputs_to_state_dict_mapping = None
 
     @_beartype.beartype
     def _run(self) -> torch.fx.GraphModule:
@@ -850,6 +869,8 @@ class Modularize(_pass.Transform):
         self.module.graph.eliminate_dead_code()
 
         reference_module = torch.fx.GraphModule(self.module, self.module.graph)
+        if self.is_exported_program:
+            self._turn_placeholder_with_value_to_get_attr(reference_module)
         root_module_node = _ModuleNode(
             reference_module,
             _ModuleStackMeta(
@@ -861,3 +882,151 @@ class Modularize(_pass.Transform):
                 _LeafNode(fx_node, is_exported_program=self.is_exported_program)
             )
         return root_module_node.build_module({})
+
+    @_beartype.beartype
+    def _turn_placeholder_with_value_to_get_attr(
+        self, graph_module: torch.fx.GraphModule
+    ):
+        self._assign_state_dict_to_graph_module(graph_module)
+        graph = graph_module.graph
+
+        assert self.inputs_to_state_dict_mapping is not None
+        attr_nodes: List[torch.fx.Node] = list(
+            filter(
+                lambda n: n.op == "placeholder"  # type: ignore[arg-type]
+                and n.name in self.inputs_to_state_dict_mapping,
+                graph.nodes,
+            )
+        )
+        # NOTE: we need to insert the get_attr right before the node using it,
+        # as the algorithm to build submodules in this pass implicitly requires the order
+        # NOTE: Shared attributes are inserted separately.
+        for node in attr_nodes:
+            users = copy.copy(node.users)
+            for user in users:
+                with graph.inserting_before(user):
+                    node_target = self.inputs_to_state_dict_mapping[node.name].replace(
+                        ".", "/"
+                    )
+                    get_attr_node = graph.create_node("get_attr", node_target)
+                _replace_the_use_with(
+                    node=node,
+                    replace_with=get_attr_node,
+                    user=user,
+                    propagate_meta=True,
+                )
+            graph.erase_node(node)
+
+        # reassign (recompile the graph_module)
+        graph_module.graph = graph
+
+    @_beartype.beartype
+    def _assign_state_dict_to_graph_module(
+        self, graph_module: torch.fx.GraphModule
+    ) -> None:
+        assert self.exported_program is not None
+        assert self.graph_signature is not None
+        for name in self.graph_signature.parameters:
+            cloned = torch.nn.Parameter(self.state_dict[name].clone())
+            _assign_attr(
+                cloned,
+                graph_module,
+                name,
+                attr_kind=fx_type_utils._AttrKind.PARAMETER,
+            )
+        for name in self.graph_signature.buffers:
+            cloned = self.state_dict[name].clone()
+            _assign_attr(
+                cloned,
+                graph_module,
+                name,
+                attr_kind=fx_type_utils._AttrKind.BUFFER,
+            )
+
+        for fqn in itertools.chain(
+            self.graph_signature.lifted_tensor_constants,
+            self.graph_signature.lifted_custom_objs,
+        ):
+            constant = self.exported_program.constants[fqn]
+            if isinstance(constant, torch.Tensor):
+                constant = constant.clone()
+            _assign_attr(
+                constant,
+                graph_module,
+                fqn,
+                attr_kind=fx_type_utils._AttrKind.CONSTANT,
+            )
+
+
+# Assign attribute 'from_obj' to the qualified name 'target' on 'to_module
+# This installs empty Modules where none exist yet if they are subpaths of target
+def _assign_attr(
+    from_obj: Union[torch.Tensor, torch.ScriptObject],
+    to_module: torch.nn.Module,
+    target: str,
+    attr_kind: fx_type_utils._AttrKind,
+    persistent: bool = True,
+):
+    target = target.replace(".", "/")
+    if attr_kind == fx_type_utils._AttrKind.PARAMETER:
+        assert isinstance(from_obj, torch.nn.Parameter)
+        to_module.register_parameter(target, from_obj)
+    elif attr_kind == fx_type_utils._AttrKind.BUFFER:
+        assert isinstance(from_obj, torch.Tensor)
+        to_module.register_buffer(target, from_obj, persistent=persistent)
+    elif attr_kind == fx_type_utils._AttrKind.CONSTANT:
+        assert isinstance(from_obj, (torch.Tensor, torch.ScriptObject))
+        setattr(to_module, target, from_obj)
+
+
+def _replace_the_use_with(
+    node: torch.fx.Node,
+    replace_with: torch.fx.Node,
+    user: torch.fx.Node,
+    propagate_meta=False,
+) -> None:
+    """
+    Replace the use of ``self`` in the Graph with the Node ``replace_with``.
+
+    Args:
+
+        node (Node): The node to replace.
+        replace_with (Node): The node to replace all uses of ``self`` with.
+        user (Node): The node that uses ``node``.
+        propagate_meta (bool): Whether or not to copy all properties
+            on the .meta field of the user node onto the replacement node.
+            For safety, this is only valid to do if the replacement node
+            doesn't already have an existing .meta field.
+    """
+    if propagate_meta:
+        assert len(replace_with.meta) == 0, (
+            "Called node.replace_all_uses_with(replace_with, propagate_meta=True), "
+            "but replace_with already has .meta keys"
+        )
+        for k, v in node.meta.items():
+            if k == "nn_module_stack":
+                # nn_module_stack should follow the user node belonged
+                # module
+                replace_with.meta[k] = user.meta[k]
+            else:
+                replace_with.meta[k] = v
+
+    m = node.graph.owning_module
+
+    def maybe_replace_node(n: torch.fx.Node) -> torch.fx.Node:
+        if n == node:
+            return replace_with
+        else:
+            return n
+
+    if getattr(m, "_replace_hook", None):
+        m._replace_hook(old=node, new=replace_with.name, user=user)
+
+    new_args = torch.fx.node.map_arg(user.args, maybe_replace_node)
+    new_kwargs = torch.fx.node.map_arg(user.kwargs, maybe_replace_node)
+    assert isinstance(new_args, tuple)
+    assert isinstance(new_kwargs, dict)
+    user.args = new_args
+    user.kwargs = new_kwargs
+
+    return
