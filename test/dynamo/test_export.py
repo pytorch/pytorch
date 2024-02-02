@@ -3,6 +3,7 @@
 PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_export_persist_assert)
 """
+import math
 import copy
 import functools
 import inspect
@@ -391,6 +392,16 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result = out_graph(*inps)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
+    @config.patch(capture_scalar_outputs=True)
+    def test_trace_int_float_tensor_item(self):
+        inp = torch.rand(3)
+
+        def f(inp):
+            return torch.full([math.floor(inp[0].item())], 5)
+
+        # doesn't fail
+        torch._dynamo.export(f, aten_graph=True, tracing_mode="symbolic")(inp)
 
     @config.patch(capture_scalar_outputs=True)
     def test_dupes_and_bypass_with_non_tensor_output(self):
