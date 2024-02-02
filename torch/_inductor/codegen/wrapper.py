@@ -2387,18 +2387,13 @@ class CppWrapperCodeGen(WrapperCodeGen):
             and V.graph.cpp_wrapper
             and config.aot_inductor.abi_compatible
         ):
-            # Make the fallback call ABI-compatible in the C++ wrapper file.
-            kernel = kernel.replace("at::", "aoti_torch_")
-            num_indices = str(
-                len(indices)
-            )  # num_indices for indexing into indices array
-            tensor_handle_array_var = (
-                f"tensor_handle_array_{next(self.kernel_callsite_id)}"
+            # See the comment in codegen_reinterpret_view about why having something like
+            # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the correponding
+            # tensor prematurely deallocated, thus this std:vector().data() trick here.
+            indices_str = (
+                f"std::vector<AtenTensorHandle>{{{', '.join(indices)}}}.data()"
             )
-            self.writeline(
-                f"AtenTensorHandle {tensor_handle_array_var}[] = {{{', '.join(indices)}}};"
-            )
-            args = [x, tensor_handle_array_var, num_indices, values, accumulate]
+            args = [x, indices_str, str(len(indices)), values, accumulate]
         else:
             indices_str = (
                 f"{self.open_bracket}{', '.join(indices)}{self.closed_bracket}"
