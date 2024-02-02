@@ -2228,6 +2228,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   const auto key = getKeyFromDevice(device);
   auto ncclStream = ncclStreams_.at(key);
 
+  // Bump collective counter
+  seq_++;
+
   // Create Work object
   auto work = initWork(device, rank_, optype, "nccl:coalesced");
   work->ncclComm_ = comm;
@@ -2316,12 +2319,12 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   syncStream(device, ncclEvents_[key], ncclStream);
 
   std::vector<at::Tensor> inputs{input};
+  std::vector<at::Tensor> outputs{output};
 
-  auto work = initWork(device, rank_, opType, profilingTitle, inputs, {});
+  auto work = initWork(device, rank_, opType, profilingTitle, inputs, outputs);
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
-  work->outputs_ = std::make_shared<std::vector<at::Tensor>>();
-  work->outputs_->push_back(output);
+  work->outputs_ = std::make_shared<std::vector<at::Tensor>>(std::move(outputs));
 
   if (avoidRecordStreams) {
     work->stashed_for_allocator_safety_ =
