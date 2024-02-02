@@ -89,7 +89,7 @@ def get_duration(
     test: TestRun,
     test_file_times: Dict[str, float],
     test_class_times: Dict[str, Dict[str, float]],
-):
+) -> Optional[float]:
     file_duration = test_file_times.get(test.test_file, None)
     if test.is_full_file():
         return file_duration
@@ -120,6 +120,8 @@ def get_duration(
     assert (
         excluded
     ), f"TestRun {test} is not full file but doesn't have included or excluded classes"
+    if file_duration is None:
+        return None
     return file_duration - excluded_classes_duration
 
 
@@ -190,10 +192,11 @@ def calculate_shards(
     parallel_tests = [test for test in tests if test not in serial_tests]
 
     serial_time = sum(
-        get_duration(test, test_file_times, test_class_times) or 0 for test in serial_tests
+        get_duration(test, test_file_times, test_class_times) or 0
+        for test in serial_tests
     )
     parallel_time = sum(
-        get_duration(test, test_file_times, test_class_times)
+        get_duration(test, test_file_times, test_class_times) or 0
         for test in parallel_tests
     )
     total_time = serial_time + parallel_time / NUM_PROCS_FOR_SHARDING_CALC

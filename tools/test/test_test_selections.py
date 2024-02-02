@@ -332,7 +332,6 @@ class TestCalculateShards(unittest.TestCase):
             }
             serial = [str(i) for i in range(num_tests) if random.randint(0, 1) == 0]
 
-
             shards = calculate_shards(
                 num_shards,
                 [TestRun(t) for t in random_times.keys()],
