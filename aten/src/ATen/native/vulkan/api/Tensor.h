@@ -317,6 +317,21 @@ class vTensor final {
   inline VkDeviceSize gpu_nbytes() const {
     return api::element_size(dtype()) * gpu_numel();
   }
+
+  /*
+   * Return the VmaAllocationCreateInfo of the underlying resource
+   */
+  VmaAllocationCreateInfo get_allocation_create_info() const;
+
+  /*
+   * Return the VkMemoryRequirements of the underlying resource
+   */
+  VkMemoryRequirements get_memory_requirements() const;
+
+  /*
+   * Binds the underlying resource to the given memory allocation
+   */
+  void bind_allocation(const api::MemoryAllocation& allocation);
 };
 
 void add_buffer_barrier(
