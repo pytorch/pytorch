@@ -200,6 +200,8 @@ class CutlassEVTEpilogueTypeFormatter:
 
         Initialize an instance of CutlassEVTEpilogueTypeFormatter.
 
+        DO NOT INSTANTIATE DIRECTLY. Use the static method CutlassEVTEpilogueTypeFormatter.ir_to_evt_string instead.
+
         Parameters:
         - accumulator_node_name (str): The name of the output Buffer for the GEMM operation in the original (unfused)
                                        IR graph.
@@ -355,6 +357,7 @@ class CutlassEVTEpilogueTypeFormatter:
             raise CUTLASSEVTOpNotImplementedError(name)
 
     def _aux_load_decl(self, name, index_expr):
+        # Helper method to create an auxiliary load descriptor for an input buffer
         graph = virtualized.V.graph
         node = graph.get_buffer(name)
         assert (
@@ -506,7 +509,6 @@ class CutlassEVTEpilogueArgumentFormatter:
             by calling CutlassEVTEpilogueArgumentFormatter.ir_to_evt_argument_string(...)
             which instantiates this class as an ops handler for virtualized.V.ops.[op-name]
         * Extend this with more _op_<whatever> nodes to add support for new pointwise operations.
-
 
     """
 
