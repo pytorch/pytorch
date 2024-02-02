@@ -74,9 +74,9 @@ def try_import_cutlass() -> bool:
                 os.symlink(cutlass_py_full_path, dst_link)
             sys.path.append(tmp_cutlass_py_full_path)
         try:
-            import cutlass_library.generator  # noqa: F401
-            import cutlass_library.library  # noqa: F401
-            import cutlass_library.manifest  # noqa: F401
+            import cutlass_library.generator  # type: ignore[import]  # noqa: F401
+            import cutlass_library.library  # type: ignore[import]  # noqa: F401
+            import cutlass_library.manifest  # type: ignore[import]  # noqa: F401
 
             return True
 
@@ -142,8 +142,9 @@ def _gen_ops_cached(arch, version) -> List[Any]:
 
     # Import cutlass python scripts.
     assert try_import_cutlass()
-    import cutlass_library.generator as cutlass_generator
-    import cutlass_library.manifest as cutlass_manifest
+    import cutlass_library.manifest as cutlass_manifest  # type: ignore[import]
+
+    import torch._inductor.codegen.cuda.cutlass_lib_extensions.generator_extended as cutlass_generator  # type: ignore[import]
 
     if arch is None or version is None:
         log.error(
@@ -159,8 +160,8 @@ def _gen_ops_cached(arch, version) -> List[Any]:
     manifest = cutlass_manifest.Manifest(args)
 
     if arch == "90":
-        cutlass_generator.GenerateSM90(manifest, args.cuda_version)
-        cutlass_generator.GenerateSM80(manifest, args.cuda_version)
+        cutlass_generator.GenerateSM90(manifest, args.cuda_version)  # type: ignore[attr-defined]
+        cutlass_generator.GenerateSM80(manifest, args.cuda_version)  # type: ignore[attr-defined]
     else:
         try:
             func = getattr(cutlass_generator, "GenerateSM" + arch)
@@ -204,7 +205,7 @@ def dtype_match(
 ) -> bool:
     # Import cutlass python scripts.
     assert try_import_cutlass()
-    import cutlass_library
+    import cutlass_library  # type: ignore[import]
 
     if torch_dtype == torch.float:
         return (
