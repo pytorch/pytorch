@@ -233,7 +233,7 @@ class FSDPParam:
 
     def _init_sharded_post_forward_param_metadata(self, param: torch.Tensor) -> None:
         mesh_info = self.post_forward_mesh_info
-        assert mesh_info is not None
+        assert mesh_info is not None  # mypy
         param_data = param._local_tensor if isinstance(param, DTensor) else param
         chunks = _chunk_with_empty(param_data, mesh_info.shard_mesh_size, dim=0)
         self.sharded_post_forward_size = _get_dim0_chunked_size(
@@ -294,12 +294,12 @@ class FSDPParam:
         self._assert_in_states(ShardedState.UNSHARDED)
         assert self.post_forward_mesh_info is not None  # mypy
         shard_world_size = self.post_forward_mesh_info.shard_mesh_size
-        shard_rank = self.post_forward_mesh_info.shard_mesh_rank
         if (numel := self.all_gather_output.numel()) % shard_world_size != 0:
             _raise_assert_with_print(
                 f"All-gather output size ({self.all_gather_output.numel()}) must "
                 f"be divisible by the shard world size ({shard_world_size})"
             )
+        shard_rank = self.post_forward_mesh_info.shard_mesh_rank
         sharded_numel = numel // shard_world_size
         self._sharded_post_forward_param_data = (
             self.all_gather_output.narrow(0, sharded_numel * shard_rank, sharded_numel)
@@ -322,20 +322,17 @@ class FSDPParam:
         set_requires_grad_if_needed(self.sharded_param, self._unsharded_param)
         self._setattr_on_modules(self._unsharded_param)
         if self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
-            # This data is allocated in the default stream via the post-forward
-            # reshard and needs to be kept alive until afer the next all-gather
-            # copy-in. Since this method is only called in the copy-out after
-            # waiting for the all-gather to finish, this data's lifetime is
-            # ensured without further synchronization.
+            # The data is allocated in the default stream via the post-forward
+            # reshard and must be kept alive for the next all-gather copy-in.
+            # Since we call this method after the copy-out, the data's lifetime
+            # is ensured without further synchronization.
             self._sharded_post_forward_param = None
             self._sharded_post_forward_param_data = None  # free
         self.sharded_state = ShardedState.UNSHARDED
 
     def _setattr_on_modules(self, tensor: torch.Tensor) -> None:
         unsafe_setattr_param(
-            self._module_info.module,
-            self._module_info.param_name,
-            tensor,
+            self._module_info.module, self._module_info.param_name, tensor
         )
         for shared_module, shared_param_name in zip(
             self._module_info.shared_modules, self._module_info.shared_param_names
@@ -365,11 +362,12 @@ class FSDPParam:
                 f"Expects size {self.sharded_post_forward_size} but got {tensor.shape}"
             )
         assert self.post_forward_mesh_info is not None  # mypy
-        # TODO: Prefer this DTensor to be read-only.
+        # TODO: Prefer this DTensor to be read-only and generalize the
+        # placement once we support TP.
         return _from_local_no_grad(
             tensor,
             self.post_forward_mesh_info.mesh,
-            (Shard(0),),  # TODO: generalize once we support TP
+            (Shard(0),),
             self._global_size,
             self._global_stride,
         )
