@@ -1,17 +1,21 @@
 import argparse
 import re
 
-from common import get_testcases, key, open_test_results, skipped_test
+from common import download_reports, get_testcases, key, open_test_results, skipped_test
 
 from passrate import compute_pass_rate
 
 
 """
-python failures_histogram.py eager_logs_for_py311/ dynamo_logs_for_py311/
+python failures_histogram.py commit_sha
 
 Analyzes skip reasons for Dynamo tests and prints a histogram with repro
-commands. You'll need to download the test reports for the Dynamo shards
-and put them under the specified directory; ditto for the eager shards.
+commands. You'll need to provide the commit_sha for a commit on the main branch,
+from which we will pull CI test results.
+
+This script requires the `gh` cli. You'll need to install it and then
+authenticate with it via `gh auth login` before using this script.
+https://docs.github.com/en/github-cli/github-cli/quickstart
 """
 
 
@@ -134,10 +138,13 @@ if __name__ == "__main__":
         prog="failures_histogram",
         description="See statistics about skipped Dynamo tests",
     )
-    # linux-focal-py3.11-clang10 (default) Test Reports (xml) directory
-    parser.add_argument("eager_dir")
-    # linux-focal-py3.11-clang10 (dynamo) Test Reports (xml) directory
-    parser.add_argument("dynamo_dir")
+    parser.add_argument(
+        "commit",
+        help=(
+            "The commit sha for the latest commit on a PR from which we will "
+            "pull CI test results, e.g. 7e5f597aeeba30c390c05f7d316829b3798064a5"
+        ),
+    )
     parser.add_argument(
         "-v", "--verbose", help="Prints all failing test names", action="store_true"
     )
@@ -153,4 +160,5 @@ if __name__ == "__main__":
     if args.format_issues:
         verbose = True
 
-    failures_histogram(args.eager_dir, args.dynamo_dir, verbose, args.format_issues)
+    dynamo38, dynamo311, eager311 = download_reports(args.commit)
+    failures_histogram(eager311, dynamo311, verbose, args.format_issues)
