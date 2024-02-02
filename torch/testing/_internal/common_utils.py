@@ -3909,6 +3909,14 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         return stderr.decode('ascii')
 
 
+class TestCaseBase(TestCase):
+    # Calls to super() in dynamically created classes are a bit odd.
+    # See https://github.com/pytorch/pytorch/pull/118586 for more info
+    # Subclassing this class and then calling super(TestCaseBase) will run
+    # TestCase's setUp, tearDown etc functions
+    pass
+
+
 def download_file(url, binary=True):
     from urllib.parse import urlsplit
     from urllib import request, error
