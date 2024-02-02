@@ -297,6 +297,7 @@ def mps_ops_modifier(ops):
         'slice',
         'split',
         'split_with_sizes',
+        'split_with_sizes_copy',
         'splitlist_args',
         'squeeze',
         'squeezemultiple',
@@ -6869,6 +6870,28 @@ class TestMPS(TestCaseMPS):
         gc.collect()
         torch.mps.empty_cache()
 
+    def test_mm_large(self):
+        """ Test that MM works for matrices with index larger than 32K """
+        x = torch.rand(10, 1, device="mps")
+        y = torch.rand(1, 32769, device="mps")
+        # This used to crash with:
+        # error: subRange.start (24576) is not less than length of dimension[0] (16384)
+        # See https://github.com/pytorch/pytorch/issues/116769#issuecomment-1888302095
+        self.assertNotEqual(torch.mm(x, y[:, 16384:32768]).abs().max().item(), 0.0)
+
+        def compare_mm(m, n, k):
+            x = torch.rand(m, n, device="mps")
+            y = torch.rand(n, k, device="mps")
+            z = torch.mm(x, y).cpu()
+            z_cpu = torch.mm(x.cpu(), y.cpu())
+            self.assertEqual(z, z_cpu)
+
+        # Used to produce incorrect results with MPS on M1 running MacOS 14.3, but correct with Metal
+        compare_mm(1024, 1, 32769)
+        # one more time, but with dimensions inverted
+        # see https://github.com/pytorch/pytorch/issues/116769#issuecomment-1920066984
+        compare_mm(32769, 1, 1025)
+
     # Test flip
     def test_flip(self):
         def helper(shape, dims):
@@ -11215,6 +11238,9 @@ class TestConsistency(TestCaseMPS):
         'nextafter',
         'native_layer_norm',
         'nn.functional.layer_norm',
+        'nn.functional.interpolate',
+        'nn.functional.upsample_bilinear',
+        'nn.functional.upsample_nearest',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',

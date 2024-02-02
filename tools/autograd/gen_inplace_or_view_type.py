@@ -71,6 +71,7 @@ VIEW_FUNCTIONS = {
     "permute": "self",
     "select": "self",
     "slice": "self",
+    "slice_inverse": "self",
     "split": "self",
     "split_with_sizes": "self",
     "squeeze": "self",
