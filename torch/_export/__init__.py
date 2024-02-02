@@ -21,7 +21,6 @@ import sympy
 import torch
 import torch._dynamo
 import torch.fx
-import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 
 from torch._decomp import core_aten_decompositions, get_decompositions
@@ -35,6 +34,7 @@ from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._subclasses.functional_tensor import FunctionalTensor
+from torch.export._tree_utils import reorder_kwargs
 from torch.export.exported_program import (
     ExportedProgram,
     ModuleCallEntry,
@@ -425,7 +425,7 @@ def aot_load(so_path: str, device: str) -> Callable:
         call_spec = runner.get_call_spec()  # type: ignore[attr-defined]
         in_spec = pytree.treespec_loads(call_spec[0])
         out_spec = pytree.treespec_loads(call_spec[1])
-        flat_inputs = fx_pytree.tree_flatten_spec((args, kwargs), in_spec)
+        flat_inputs = pytree.tree_flatten((args, reorder_kwargs(kwargs, in_spec)))[0]
         flat_outputs = runner.run(flat_inputs)  # type: ignore[attr-defined]
         return pytree.tree_unflatten(flat_outputs, out_spec)
 

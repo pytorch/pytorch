@@ -8,6 +8,7 @@ import math
 import operator
 import unittest
 from typing import List, Set
+from re import escape
 
 import torch
 from functorch.experimental.control_flow import cond
@@ -77,10 +78,10 @@ class TestPasses(TestCase):
         dim1_x = torch.export.Dim("dim1_x", min=2, max=6)
         ep = torch.export.export(M(), (x,), dynamic_shapes={"x": {1: dim1_x}})
 
-        with self.assertRaisesRegex(RuntimeError, r"Expected input l_x_.shape\[1\] to be <= 6, but got 7"):
-            ep(torch.zeros(2, 7, 3))
+        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[1] to be <= 6, but got 7")):
+            ep.module()(torch.zeros(2, 7, 3))
 
-        self.assertEqual(ep(torch.ones(2, 4, 3)), M().forward(torch.ones(2, 4, 3)))
+        self.assertEqual(ep.module()(torch.ones(2, 4, 3)), M().forward(torch.ones(2, 4, 3)))
 
     def test_runtime_assert_multiple_dims(self) -> None:
         class M(torch.nn.Module):
@@ -100,11 +101,11 @@ class TestPasses(TestCase):
             M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": {0: dim0_y}}
         )
 
-        with self.assertRaisesRegex(RuntimeError, r"Expected input l_x_.shape\[1\] to be <= 6, but got 7"):
-            ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
+        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[1] to be <= 6, but got 7")):
+            ep.module()(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
-        with self.assertRaisesRegex(RuntimeError, r"Expected input l_y_.shape\[0\] to be >= 3, but got 2"):
-            ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
+        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[1].shape[0] to be >= 3, but got 2")):
+            ep.module()(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
     def test_runtime_assert_some_dims_not_specified(self) -> None:
         class M(torch.nn.Module):
@@ -124,17 +125,17 @@ class TestPasses(TestCase):
             M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": None}
         )
 
-        with self.assertRaisesRegex(RuntimeError, r"Expected input l_x_.shape\[1\] to be <= 6, but got 7"):
-            ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
+        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[1] to be <= 6, but got 7")):
+            ep.module()(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
         with self.assertRaisesRegex(
-            RuntimeError, r"Expected input l_y_.shape\[0\] to be equal to 5, but got 2"
+            RuntimeError, escape("Expected input at *args[1].shape[0] to be equal to 5, but got 2")
         ):
-            ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
+            ep.module()(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
         # Since we didn't insert the constraint for x[1] >= 2, it should work for case where x[1] == 1
-        gm_result_for_1_size = ep(torch.ones(3, 1, 3), torch.ones(5, 5, 5))
+        gm_result_for_1_size = ep.module()(torch.ones(3, 1, 3), torch.ones(5, 5, 5))
         eager_result_for_1_size = M().forward(torch.ones(3, 1, 3), torch.ones(5, 5, 5))
 
         self.assertEqual(gm_result_for_1_size, eager_result_for_1_size)
@@ -153,17 +154,17 @@ class TestPasses(TestCase):
         dim1_y = torch.export.Dim("dim1_y", min=3, max=6)
         ep = torch.export.export(M(), (x, y), dynamic_shapes={"x": None, "y": {1: dim1_y}})
 
-        with self.assertRaisesRegex(RuntimeError, r"shape\[1\] to be equal to 2"):
-            ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
+        with self.assertRaisesRegex(RuntimeError, escape("shape[1] to be equal to 2")):
+            ep.module()(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
         with self.assertRaisesRegex(
-            RuntimeError, r"Expected input l_y_.shape\[0\] to be equal to 5, but got 2"
+            RuntimeError, escape("Expected input at *args[1].shape[0] to be equal to 5, but got 2")
         ):
-            ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
+            ep.module()(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
         # Since we didn't insert the constraint for x[1] >= 2, it should work for case where x[1] == 1
-        gm_result_for_1_size = ep(torch.zeros(4, 2, 3), torch.ones(5, 5, 5))
+        gm_result_for_1_size = ep.module()(torch.zeros(4, 2, 3), torch.ones(5, 5, 5))
         eager_result_for_1_size = M().forward(torch.zeros(4, 2, 3), torch.ones(5, 5, 5))
 
         self.assertEqual(gm_result_for_1_size, eager_result_for_1_size)
@@ -233,10 +234,10 @@ class TestPasses(TestCase):
         ep = export(mod, (x,))
 
         with self.assertRaisesRegex(RuntimeError, r"_local_scalar_dense is outside of inline constraint \[2, 5\]."):
-            ep(torch.tensor([6]))
+            ep.module()(torch.tensor([6]))
 
         new_inp = torch.tensor([5])
-        self.assertEqual(mod(new_inp), ep(new_inp))
+        self.assertEqual(mod(new_inp), ep.module()(new_inp))
 
     def test_runtime_assert_inline_constraints_for_nonzero(self) -> None:
         class M(torch.nn.Module):
@@ -265,15 +266,15 @@ class TestPasses(TestCase):
         with self.assertRaisesRegex(
             RuntimeError, r"nonzero.shape\[0\] is outside of inline constraint \[3, 5\]."
         ):
-            ep(torch.tensor([1, 1, 0, 0, 0]))
+            ep.module()(torch.tensor([1, 1, 0, 0, 0]))
 
         with self.assertRaisesRegex(
             RuntimeError, r"nonzero.shape\[0\] is outside of inline constraint \[3, 5\]."
         ):
-            ep(torch.ones(6))
+            ep.module()(torch.ones(6))
 
         new_inp = torch.tensor([1, 1, 1, 1])
-        self.assertEqual(mod(new_inp), ep(new_inp))
+        self.assertEqual(mod(new_inp), ep.module()(new_inp))
 
     def test_runtime_assert_inline_constraints_for_cond(self) -> None:
         class M(torch.nn.Module):
@@ -301,7 +302,7 @@ class TestPasses(TestCase):
 
 
         with self.assertRaisesRegex(RuntimeError, "is outside of inline constraint \\[2, 5\\]."):
-            ep(torch.tensor(False), torch.tensor([6]), torch.tensor([6]))
+            ep.module()(torch.tensor(False), torch.tensor([6]), torch.tensor([6]))
 
     def test_functionalize_inline_constraints(self) -> None:
         def f(x):
