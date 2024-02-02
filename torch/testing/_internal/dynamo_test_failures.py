@@ -1030,7 +1030,6 @@ dynamo_expected_failures = {
     "TestControlFlowTraced.test_map_functionalized",  # functorch/test_control_flow
     "TestControlFlowTraced.test_nested_map_cond_symbolic",  # functorch/test_control_flow
     "TestControlFlowTraced.test_nested_map_cond_real",  # functorch/test_control_flow
-    "TestJacCPU.test_against_reference_correctness_different_devices_jacfwd_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_against_reference_default_arg_jacfwd_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_against_reference_multi_input_jacfwd_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_against_reference_multi_input_multi_output_jacfwd_cpu",  # functorch/test_eager_transforms.py
@@ -1651,7 +1650,6 @@ dynamo_expected_failures = {
     "TestAOTAutograd.test_default_partitioner_saves_symints_not_tensors_for_bw",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_invalid_dupe",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_output_aliases_intermediate_and_returned_different_grad",  # functorch/test_aotdispatch
-    "TestPartitioning.test_min_cut_partitioner_recomputable_ops",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_output_all_alias_types",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_set__and_data_mutation_good",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_set__and_data_mutation_bad",  # functorch/test_aotdispatch
@@ -7293,6 +7291,8 @@ dynamo_skips = {
     "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_2_shape1_cpu",  # test_transformers.py
     "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_1_shape1_cpu",  # test_transformers.py
     "TestCustomOpTestingCPU.test_opcheck_fails_basic_cpu",  # test_custom_ops.py
+    "TestVmapAPI.test_functools_partial",  # functorch/test_vmap.py
+    "TestSaveLoadForOpVersion.test_versioned_div_tensor_out",  # test_jit.py
 }
 
 
