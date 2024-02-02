@@ -202,15 +202,17 @@ class TestIndexing(TestCase):
         assert_equal(b, 2)
 
     def test_ellipsis_index_2(self):
-        # This test spefically testing torch._numpy.array()
-        import torch._numpy as np
-        from torch._numpy.testing import assert_equal
-
         a = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
         assert_(a[...] is not a)
         assert_equal(a[...], a)
         # `a[...]` was `a` in numpy <1.9.
-        assert_(a[...].tensor._base is a.tensor)
+        if TEST_WITH_TORCHDYNAMO:
+            # numpy.array() is imported.
+            assert_(a[...].base is a)
+        else:
+            # torch_.numpy.array() is imported
+            assert_(a[...].tensor._base is a.tensor)
+
 
     def test_single_int_index(self):
         # Single integer index selects one row
