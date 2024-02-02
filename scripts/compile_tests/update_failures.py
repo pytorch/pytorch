@@ -183,7 +183,7 @@ def update(filename, py38_dir, py311_dir, also_remove_skips):
             py38_passing_skipped_tests, py311_passing_skipped_tests
         )
     else:
-        unexpected_skips = set()
+        unexpected_skips = {}
     all_skips = {**skips, **more_skips}
     print(
         f"Discovered {len(unexpected_successes)} new unexpected successes, "
