@@ -8636,6 +8636,22 @@ def sample_inputs_pixel_unshuffle(op_info, device, dtype, requires_grad, **kwarg
         ]
     )
 
+def sample_inputs_channel_shuffle(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    yield from (
+        SampleInput(make_arg((1, 9, 2, 2)), groups=groups)
+        for groups in (1, 3)
+    )
+    yield from (
+        SampleInput(make_arg(shape), groups=1)
+        for shape in [
+            (1, 1, 1, 1),
+            (1, 1, 0, 1),
+            (1, 1, 1, 0),
+        ]
+    )
+
+
 def sample_inputs_binary_cross_entropy(op_info, device, dtype, requires_grad, logits=False, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype)
     # Lower bounds must be greater than 'eps' defined in gradcheck.py::gradgradcheck() -> eps
@@ -19295,6 +19311,14 @@ op_db: List[OpInfo] = [
         ),
     ),
     OpInfo(
+        "nn.functional.channel_shuffle",
+        sample_inputs_func=sample_inputs_channel_shuffle,
+        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        supports_out=True,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+    ),
+    OpInfo(
         "nn.functional.kl_div",
         sample_inputs_func=sample_inputs_kl_div,
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
@@ -20616,6 +20640,11 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.celu",
         torch_opinfo_name="nn.functional.celu",
+        supports_out=True,
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.channel_shuffle",
+        torch_opinfo_name="nn.functional.channel_shuffle",
         supports_out=True,
     ),
     ElementwiseUnaryPythonRefInfo(
