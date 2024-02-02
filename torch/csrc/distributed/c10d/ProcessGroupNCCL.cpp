@@ -2602,9 +2602,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         "collectives.");
   }
 
-  // Bump sequence number, updated in collective() as well
-  seq_++;
-
   auto device = getDevice(tensor);
   std::string key;
   int p2pRank = 0, p2pTargetRank = 0;
@@ -2624,6 +2621,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     p2pRank = rank_ <= peer ? 0 : 1;
     isSendRecvSelf = rank_ == peer;
     p2pTargetRank = isSendRecvSelf ? 0 : 1 - p2pRank;
+    // Bump sequence number. Don't do so if it's a batch P2P, it will be bumped
+    // in `endCoalescing`.
+    seq_++;
   }
   auto ncclComm = getNCCLComm(key, device, opType, p2pRank, isSendRecvSelf);
 
