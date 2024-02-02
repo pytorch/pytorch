@@ -3567,7 +3567,7 @@ def multi_margin_loss(
     input: Tensor,
     target: Tensor,
     p: int = 1,
-    margin: float = 1.5,
+    margin: float = 2.0,
     weight: Optional[Tensor] = None,
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
