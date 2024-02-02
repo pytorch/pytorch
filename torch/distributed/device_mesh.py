@@ -370,10 +370,14 @@ else:
                 >>> # of cross-host(dim 0), and within-host (dim 1).
                 >>> mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1, 2, 3],[4, 5, 6, 7]])
             """
-            if self.mesh.ndim <= 1:
-                raise RuntimeError(
-                    f"Cannot slice a DeviceMesh with {self.mesh.ndim} dimension."
-                )
+            if self.mesh.ndim == 1:
+                if self.mesh_dim_names and mesh_dim_name == self.mesh_dim_names[0]:
+                    return self
+                else:
+                    raise RuntimeError(
+                        f"Invalid mesh_dim_name {mesh_dim_name} specified."
+                    )
+
             mesh_dim = _mesh_resources.get_mesh_dim_by_name(self, mesh_dim_name)
             submesh = _mesh_resources.create_child_mesh(self, mesh_dim, mesh_dim_name)
 

@@ -355,6 +355,17 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         dp_group_idx = self.rank % 4
         self.assertEqual(mesh_2d["DP"].mesh, pg_ranks_by_dim_name["DP"][dp_group_idx])
 
+    @with_comms
+    def test_get_item_1d(self):
+        mesh = init_device_mesh(self.device_type, (8,), mesh_dim_names=("dp",))
+        # Make sure slicing out 1D mesh from a 1D mesh works.
+        # We are just dummy return without the parent mesh here.
+        dp_mesh = mesh["dp"]
+        self.assertEqual(dp_mesh, mesh)
+
+        with self.assertRaisesRegex(RuntimeError, "Invalid mesh_dim_name"):
+            dp_mesh = mesh["dim0"]
+
 
 class TestMeshEnv(DTensorTestBase):
     @with_comms
