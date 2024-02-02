@@ -1,8 +1,8 @@
 import collections
 import logging
 import operator
-from collections import abc, OrderedDict
-from typing import Any, DefaultDict, Deque, Dict, Iterator, List, Optional, Set, Tuple
+from collections import OrderedDict
+from typing import Any, DefaultDict, Deque, Dict, Iterator, List, Optional, Set, Tuple, Iterable
 
 import torch
 from torch._dynamo.utils import counters
@@ -762,9 +762,9 @@ class _OrderedSet:
 
 
 def find_independent_subset_greedy(
-    node_list: abc.Iterable[torch.fx.Node],
+    node_list: Iterable[torch.fx.Node],
     graph_search_options: Dict[str, Any],
-) -> Iterator[abc.Iterable[torch.fx.Node]]:
+) -> Iterator[Iterable[torch.fx.Node]]:
     """
     Returns a list of subsets of `node_list` where no element in the subset
     depends on any other element in the subset. This results in a set of
