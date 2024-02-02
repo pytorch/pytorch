@@ -2756,7 +2756,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
             elif TEST_WITH_TORCHDYNAMO:  # noqa: F821
                 # TorchDynamo optimize annotation
-                super_run = torch._dynamo.optimize("eager", nopython=nopython)(super_run)
+                super_run = torch._dynamo.optimize("aot_eager_decomp_partition", nopython=nopython)(super_run)
                 key = f"{self.__class__.__name__}.{self._testMethodName}"
 
                 def expect_failure(f):
