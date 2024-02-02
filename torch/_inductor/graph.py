@@ -273,6 +273,13 @@ class GraphLowering(torch.fx.Interpreter):
         self.creation_time = time.time()
         self.name = "GraphLowering"
         self.cpp_wrapper = cpp_wrapper
+
+        # record multi_kernel choice for cpp_wrapper so the second pass knows
+        # which sub-kernel is picked. Copy cpp_wrapper to another variable
+        # since cpp_wrapper flag is set to false for the first pass of codegen.
+        self.record_multi_kernel_choice = cpp_wrapper
+        self.multi_kernel_to_choice: Dict[str, int] = {}
+
         self.aot_mode = aot_mode
         self.graph_id = graph_id
         self.scheduler: "torch._inductor.scheduler.Scheduler" = None  # type: ignore[assignment]
