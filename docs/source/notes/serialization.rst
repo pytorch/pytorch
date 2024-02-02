@@ -191,7 +191,7 @@ In this archive, the files are ordered as such
     checkpoint.pth
     ├── data.pkl
     ├── byteorder  # added in PyTorch 2.1.0
-    ├── data
+    ├── data/
     │   ├── 0
     │   ├── 1
     │   ├── 2
@@ -201,16 +201,18 @@ In this archive, the files are ordered as such
 The entries are as follows:
   * ``data.pkl`` is the result of pickling the object passed to ``torch.save``
     excluding ``torch.Storage`` objects that it contains
-  * ``byteorder`` records the ``sys.byteorder`` when saving (“little” or “big”)
+  * ``byteorder`` contains a string with the ``sys.byteorder`` when saving (“little” or “big”)
   * ``data/`` contains all the storages in the object, where each storage is a separate file
   * ``version`` contains a version number at save time that can be used at load time
 
-The local file header of each file is padded to an offset that is a multiple of 64 bytes,
-ensuring that the offset of each file is 64-byte aligned.
+When saving, PyTorch will ensure that the local file header of each file is padded
+to an offset that is a multiple of 64 bytes, ensuring that the offset of each file
+is 64-byte aligned.
 
 .. note::
-    Tensors on certain devices such as XLA do not have their storages serialized. In
-    these cases ``data/`` might not exist in the checkpoint.
+    Tensors on certain devices such as XLA are serialized as pickled numpy arrays. As
+    such, their storages are not serialized. In these cases ``data/`` might not exist
+    in the checkpoint.
 
 .. _serializing-python-modules:
 
