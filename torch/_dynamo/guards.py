@@ -984,6 +984,7 @@ class CheckFunctionManager:
             output_graph.global_scope,
             self,
         )
+
         # Break retain cycle. See test_release_scope_memory
         def cleanup_builder(weak_b):
             b = weak_b()
