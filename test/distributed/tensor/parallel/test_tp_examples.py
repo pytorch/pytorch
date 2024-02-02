@@ -336,6 +336,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         self.assertEqual(id(model.embedding.weight.grad), id(model.fc.weight.grad))
 
     @with_comms
+    @skip_unless_torch_gpu
     def test_loss_parallel(self):
         model = EmbeddingModule().to(self.device_type)
         local_model = deepcopy(model)

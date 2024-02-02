@@ -120,6 +120,7 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertEqual(dist_x.grad.full_tensor(), x.grad)
 
     @with_comms
+    @skip_unless_torch_gpu
     def test_nll_loss_fwd(self):
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
