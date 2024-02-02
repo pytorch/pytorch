@@ -2423,7 +2423,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertIn(
             """\
     triggered by the following guard failure(s):
-    - torch._C._functorch.maybe_current_level() is None             # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:399 in _flat_vmap""",
+    - torch._C._functorch.maybe_current_level() == 1                # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:399 in _flat_vmap""",
             record.getMessage(),
         )
 
@@ -3026,6 +3026,17 @@ class GraphModule(torch.nn.Module):
             {"torch.func.grad: kwargs arguments are currently unsupported.": 2},
         )
         self.assertEqual(actual, expected)
+
+    @config.patch(capture_func_transforms=True)
+    @config.patch(error_on_recompile=True)
+    def test_vmap_recompile(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            return torch.vmap(lambda x: x.sin())(x)
+
+        x = torch.zeros(3, 3, 4, 5)
+        y = torch.vmap(fn)(x)
+        y = torch.vmap(fn)(x)
 
     @config.patch(capture_func_transforms=True)
     def test_vmap_get_wrapped(self):
