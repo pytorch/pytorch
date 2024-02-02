@@ -1,6 +1,7 @@
 import argparse
 
 from common import (
+    download_reports,
     get_testcases,
     is_failure,
     is_unexpected_success,
@@ -9,19 +10,25 @@ from common import (
 )
 
 """
-Usage: update_failures.py dynamo_test_failures.py py38_test_reports_dir/ py311_test_reports_dir/
+Usage: update_failures.py /path/to/dynamo_test_failures.py commit_sha
 
 Best-effort updates the xfail and skip lists in dynamo_test_failures.py
 by parsing test reports.
 
-Each test report directory should have the pytest test reports for their
-respective configurations. You may find the test reports in the HUD:
-- click on a commit
-- find the desired job
-- click on "show artifacts"
-- get the "test report" zip
-- unzip it into the right place
+You'll need to provide the commit_sha for the latest commit on a PR
+from which we will pull CI test results.
 
+Instructions:
+- On your PR, add the "keep-going" label to ensure that all the tests are
+  failing (as opposed to CI stopping on the first failure). You may need to
+  restart your test jobs by force-pushing to your branch for CI to pick
+  up the "keep-going" label.
+- Wait for all the tests to finish running.
+- Find the full SHA of your commit and run this command.
+
+This script requires the `gh` cli. You'll need to install it and then
+authenticate with it via `gh auth login` before using this script.
+https://docs.github.com/en/github-cli/github-cli/quickstart
 """
 
 
@@ -125,7 +132,10 @@ def get_intersection_and_outside(a_dict, b_dict):
     def build_dict(keys):
         result = {}
         for k in keys:
-            result[k] = a_dict.get(k, b_dict[k])
+            if k in a_dict:
+                result[k] = a_dict[k]
+            else:
+                result[k] = b_dict[k]
         return result
 
     return build_dict(intersection), build_dict(outside)
@@ -164,9 +174,13 @@ if __name__ == "__main__":
     )
     # dynamo_test_failures path
     parser.add_argument("filename")
-    # linux-focal-py3.8-clang10 (dynamo) Test Reports (xml) directory
-    parser.add_argument("py38_test_reports_dir")
-    # linux-focal-py3.11-clang10 (dynamo) Test Reports (xml) directory
-    parser.add_argument("py311_test_reports_dir")
+    parser.add_argument(
+        "commit",
+        help=(
+            "The commit sha for the latest commit on a PR from which we will "
+            "pull CI test results, e.g. 7e5f597aeeba30c390c05f7d316829b3798064a5"
+        ),
+    )
     args = parser.parse_args()
-    update(args.filename, args.py38_test_reports_dir, args.py311_test_reports_dir)
+    dynamo38, dynamo311, eager311 = download_reports(args.commit)
+    update(args.filename, dynamo38, dynamo311)

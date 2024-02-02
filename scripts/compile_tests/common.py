@@ -1,6 +1,8 @@
 import os
 import xml.etree.ElementTree as ET
 
+from download_reports import download_reports
+
 
 def open_test_results(directory):
     xmls = []

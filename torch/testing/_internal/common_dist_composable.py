@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # Owner(s): ["oncall: distributed"]
 
 from typing import Tuple

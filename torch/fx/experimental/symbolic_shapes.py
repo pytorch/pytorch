@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import builtins
 import collections
 import functools
@@ -94,6 +96,8 @@ CURRENT_NODE_KEY = "current_node"
 def uninteresting_files():
     import torch._inductor.sizevars
     import torch._library.abstract_impl
+    import torch._subclasses.meta_utils
+    import torch._subclasses.fake_tensor
     mods = [
         sys.modules[__name__],
         torch.fx.experimental.recording,
@@ -102,6 +106,8 @@ def uninteresting_files():
         torch,
         torch._inductor.sizevars,
         torch._library.abstract_impl,
+        torch._subclasses.meta_utils,
+        torch._subclasses.fake_tensor,
     ]
     return {inspect.getfile(m) for m in mods}
 
@@ -1028,7 +1034,7 @@ def _lru_cache(fn, maxsize=None):
     fn_cache = lru_cache(maxsize)(fn)
     prior_version = 0
 
-    if config.validate_shape_env_verison_key:
+    if config.validate_shape_env_version_key:
         prior_key = None
 
         @functools.wraps(fn)
@@ -2373,10 +2379,13 @@ class ShapeEnv:
         symbol: sympy.Symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
-        self.var_to_range[symbol] = ValueRanges.unknown()
+        vr = self.var_to_range[symbol] = ValueRanges.unknown()
 
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self.create_fx_placeholder_and_z3var(symbol, float)
+
+        fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
+        log.info("create_unbacked_symfloat %s [%s, %s]%s (%s)", symbol, vr.lower, vr.upper, maybe_user_loc, format_frame(fsummary))
 
         return SymFloat(SymNode(symbol, self, float, None, fx_node=fx_node))
 
@@ -2391,7 +2400,7 @@ class ShapeEnv:
         fx_node = self.create_fx_placeholder_and_z3var(symbol, int)
 
         fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
-        log.info("create_unbacked_symbol %s [%s, %s]%s (%s)", symbol, vr.lower, vr.upper, maybe_user_loc, format_frame(fsummary))
+        log.info("create_unbacked_symint %s [%s, %s]%s (%s)", symbol, vr.lower, vr.upper, maybe_user_loc, format_frame(fsummary))
 
         return SymInt(SymNode(symbol, self, int, None, fx_node=fx_node))
 
@@ -2404,10 +2413,13 @@ class ShapeEnv:
         symbol: sympy.Symbol = sympy.Symbol(f"u{next(self.unbacked_symint_counter)}", integer=True)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
-        self.var_to_range[symbol] = ValueRanges(0, 1)
+        vr = self.var_to_range[symbol] = ValueRanges(0, 1)
 
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self.create_fx_placeholder_and_z3var(symbol, bool)
+
+        fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
+        log.info("create_unbacked_symbool %s [%s, %s]%s (%s)", symbol, vr.lower, vr.upper, maybe_user_loc, format_frame(fsummary))
 
         return SymBool(SymNode(sympy.Eq(symbol, 1), self, bool, None, fx_node=fx_node))
 
@@ -2538,7 +2550,14 @@ class ShapeEnv:
                 range_str = ""
 
             r = sympy_expr
-            self.log.info("create_symbol %s = %s for %s %s", sympy_expr, val, source.name(), range_str)
+
+            fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
+            self.log.info(
+                "create_symbol %s = %s for %s %s%s (%s)",
+                sympy_expr, val, source.name(), range_str,
+                maybe_user_loc, format_frame(fsummary)
+            )
+
             self.counter["create_symbol"] += 1
         else:
             # This implements duck-shaping: input sizes that match are assigned
@@ -3594,8 +3613,12 @@ class ShapeEnv:
         if self.log.isEnabledFor(logging.INFO):
             fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
 
+            str_g = str(g)
+
             # TODO: make this an artifact
             is_debug = False
+            if config.extended_debug_guard_added is not None and str_g == config.extended_debug_guard_added:
+                is_debug = True
             maybe_extra_debug = ""
             if is_debug and user_tb:
                 maybe_extra_debug = (
@@ -3603,10 +3626,13 @@ class ShapeEnv:
                     '  (snipped, see stack below for prefix)\n' +
                     ''.join(traceback.format_list(user_tb))
                 )
+            if is_debug:
+                cpp_stack = CapturedTraceback.extract(cpp=True)
+                maybe_extra_debug += "\nC++ stack trace:\n" + ''.join(cpp_stack.format())
             self.log.info(
                 "%s %s [guard added]%s (%s)%s",
                 prefix,
-                g,
+                str_g,
                 maybe_user_loc,
                 format_frame(fsummary),
                 maybe_extra_debug,
