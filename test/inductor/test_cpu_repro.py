@@ -1349,6 +1349,7 @@ class CPUReproTests(TestCase):
 
         diff = [
             "bessel_j0",
+            "bessel_j1",
             "constant",
             "index_expr",
             "signbit",

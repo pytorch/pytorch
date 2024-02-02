@@ -841,6 +841,10 @@ class TritonOverrides(OpOverrides):
     def bessel_j0(x):
         return f"tl.math.j0({x})"
 
+    @staticmethod
+    def bessel_j1(x):
+        return f"tl.math.j1({x})"
+
 
 # Use mypy to check protocol implemented correctly
 def _typecheck_TritonOverrides(h: TritonOverrides) -> OpsHandler[str]:
