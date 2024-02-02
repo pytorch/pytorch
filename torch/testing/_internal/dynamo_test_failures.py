@@ -31,7 +31,6 @@ FIXME_inductor_non_strict = {
 # This lists exists so we can more easily add large numbers of failing tests,
 dynamo_expected_failures = {
     "TestCppExtensionJIT.test_cpp_frontend_module_has_up_to_date_attribute",
-    "TestCppExtensionJIT.test_custom_compound_op_autograd",
     "TestCppExtensionJIT.test_cpp_frontend_module_has_up_to_date_attributes",
     "TestCppExtensionOpenRgistration.test_open_device_registration",
     "TestIndexingCPU.test_invalid_index_cpu",
@@ -503,7 +502,6 @@ dynamo_expected_failures = {
     "TestNNDeviceTypeCPU.test_CTCLoss_no_batch_dim_reduction_none_use_module_form_False_cpu",  # test_nn
     "TestNN.test_interpolate_buffer_overflow",  # test_nn
     "TestNNDeviceTypeCPU.test_CTCLoss_no_batch_dim_reduction_mean_use_module_form_False_cpu",  # test_nn
-    "TestNNDeviceTypeCPU.test_hardsigmoid_grad_cpu",  # test_nn
     "TestNN.test_batchnorm_raises_error_if_running_var_or_running_mean_have_forward_grad",  # test_nn
     "TestNNDeviceTypeCPU.test_nll_loss_byte_target_matches_long_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_module_to_empty_cpu_float32",  # test_nn
@@ -511,7 +509,6 @@ dynamo_expected_failures = {
     "TestNN.test_Sequential_extend",  # test_nn
     "TestNN.test_overwrite_module_params_on_conversion",  # test_nn
     "TestNN.test_ModuleList",  # test_nn
-    "TestNNDeviceTypeCPU.test_hardswish_grad_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_threshold_inplace_overlap_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_module_to_empty_cpu_float64",  # test_nn
     "TestNN.test_Sequential_imul",  # test_nn
@@ -521,7 +518,6 @@ dynamo_expected_failures = {
     "TestNNDeviceTypeCPU.test_nll_loss_empty_tensor_reduction_sum_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_False_memory_format0_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_False_memory_format1_cpu",  # test_nn
-    "TestNNDeviceTypeCPU.test_batchnorm_grad_cpu",  # test_nn
     "TestNN.test_interpolate",  # test_nn
     "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_True_memory_format0_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_True_memory_format1_cpu",  # test_nn
@@ -694,26 +690,19 @@ dynamo_expected_failures = {
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel2d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel2d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel1d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
-    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch1d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel2d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel3d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel1d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel2d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
-    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch3d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
-    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch1d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel3d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
-    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch1d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel3d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel3d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel1d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
-    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch3d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel3d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel2d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel1d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel2d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel3d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
-    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch2d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
-    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch1d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel2d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel3d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel3d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
@@ -726,7 +715,6 @@ dynamo_expected_failures = {
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel2d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel2d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel3d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
-    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch2d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel2d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel1d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel3d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
@@ -742,15 +730,10 @@ dynamo_expected_failures = {
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel1d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel2d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel3d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
-    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch1d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel2d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel1d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
-    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch3d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel3d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
-    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch3d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
-    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch1d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel2d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
-    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch2d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel1d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel1d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel2d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
@@ -760,18 +743,10 @@ dynamo_expected_failures = {
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel3d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel1d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel2d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
-    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch3d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel1d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel3d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel1d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel2d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
-    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch3d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
-    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch2d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
-    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch1d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
-    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch3d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
-    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch2d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
-    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch2d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
-    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch2d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel1d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel1d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel1d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
@@ -788,16 +763,13 @@ dynamo_expected_failures = {
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel3d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel1d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel1d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
-    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch3d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel3d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel1d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel2d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel3d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel1d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel1d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
-    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch1d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel1d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
-    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch2d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
     "TestDistributionShapes.test_mixture_same_family_shape",  # distributions/test_distributions
     "TestFunctors.test_cat_transform",  # distributions/test_distributions
     "TestFunctors.test_cat_transform_non_uniform",  # distributions/test_distributions
@@ -1677,7 +1649,6 @@ dynamo_expected_failures = {
     "TestTorchDeviceTypeCPU.test_deterministic_empty_cpu_uint64",  # test_torch
     "TestAutograd.test_checkpoint_detects_non_determinism",  # test_autograd
     "TestAutograd.test_gradcheck_backward_mul_by_grad_output",  # test_autograd
-    "TestAutogradForwardModeBatchedGrad.test_out_of_place_basic",  # test_autograd
     "TestAutogradLogging.test_logging",  # test_autograd
     "TestAutograd.test_custom_function_cycle",  # test_autograd
     "TestAutogradForwardMode.test_detach_view_tracking",  # test_autograd
@@ -1744,7 +1715,6 @@ dynamo_expected_failures = {
     "TestAutograd.test_hook_closure_cycle_use_custom_function_True_use_tensor_hook_False",  # test_autograd
     "TestAutograd.test_accumulate_grad_tensor_reference",  # test_autograd
     "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_inf_mode_inplace_op",  # test_autograd
-    "TestAutogradDeviceTypeCPU.test_scatter_index_reduce_prod_gradgrad_error_cpu",  # test_autograd
     "TestAutograd.test_nested_anomaly_detect_nan",  # test_autograd
     "TestAutograd.test_nested_anomaly_printstack_cleanup",  # test_autograd
     "TestAutograd.test_post_accumulate_grad_hook_gets_cleaned_up",  # test_autograd
@@ -2797,7 +2767,6 @@ dynamo_skips = {
     "TestSparseCSRCPU.test_dense_to_from_sparse_compressed_SparseBSC_NonBatched_NonHybrid_cpu",  # known py38 fail
     "TestSparseCompressedCPU.test_select_copy_SparseBSR_int32_cpu_int32",  # known py38 fail
     "TestSparseCompressedCPU.test_select_copy_SparseBSC_int32_cpu_bfloat16",  # known py38 fail
-    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseBSC_masked_fast_cpu",  # known py38 fail
     "TestSparseCPU.test_index_select_parallelization_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sparse_spdiags_cpu_uint8",  # known py38 fail
     "TestSparseCPU.test_sparse_to_numpy_cpu",  # known py38 fail
@@ -2827,13 +2796,10 @@ dynamo_skips = {
     "TestSparseCPU.test_sparse_mask_hybrid_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_factory_cpu_float32",  # known py38 fail
     "TestSparseAnyCPU.test_gradcheck_mm_SparseCOO_masked_fast_cpu_complex128",  # known py38 fail
-    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseCOO_nonmasked_slow_cpu",  # known py38 fail
     "TestSparseCPU.test_factory_type_inference_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sparse_dense_mul_cpu_int16",  # known py38 fail
     "TestSparseCPU.test_print_uncoalesced_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_index_select_empty_and_non_contiguous_index_cpu_float64",  # known py38 fail
-    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseBSC_masked_slow_cpu",  # known py38 fail
-    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseCSC_nonmasked_fast_cpu",  # known py38 fail
     "TestSparseAnyCPU.test_check_sparse_tensor_invariants_SparseBSR_cpu",  # known py38 fail
     "TestSparseCPU.test_resize_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_to_dense_with_gradcheck_masked_cpu_complex64",  # known py38 fail
@@ -2848,7 +2814,6 @@ dynamo_skips = {
     "TestSparseCPU.test_sparse_dense_mul_cpu_bool",  # known py38 fail
     "TestSparseCPU.test_sparse_dense_mul_cpu_float32",  # known py38 fail
     "TestSparseCPU.test_index_select_empty_and_non_contiguous_index_cpu_complex128",  # known py38 fail
-    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseBSR_masked_fast_cpu",  # known py38 fail
     "TestSparseAnyCPU.test_check_sparse_tensor_invariants_SparseCOO_cpu",  # known py38 fail
     "TestSparseCPU.test_mv_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_to_dense_with_gradcheck_sparse_cpu_complex128",  # known py38 fail
@@ -2859,7 +2824,6 @@ dynamo_skips = {
     "TestSparseCPU.test_to_dense_with_gradcheck_sparse_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_ctor_is_coalesced_with_gradcheck_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sparse_spdiags_cpu_int32",  # known py38 fail
-    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseCSR_masked_fast_cpu",  # known py38 fail
     "TestSparseCPU.test_neg_negative_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sum_cpu_complex64",  # known py38 fail
     "TestSparseCPU.test_sum_cpu_bool",  # known py38 fail
@@ -2875,16 +2839,13 @@ dynamo_skips = {
     "TestSparseCPU.test_log1p_cpu_uint8",  # known py38 fail
     "TestSparseCPU.test_log1p_cpu_int32",  # known py38 fail
     "TestSparseCPU.test_sparse_broadcast_to_cpu_complex128",  # known py38 fail
-    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseCSR_masked_slow_cpu",  # known py38 fail
     "TestSparseCPU.test_sparse_add_coalesce_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_to_dense_hybrid_sparse_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_asin_arcsin_cpu_uint8",  # known py38 fail
     "TestSparseCPU.test_sparse_sum_cpu_float64",  # known py38 fail
-    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseCOO_masked_slow_cpu",  # known py38 fail
     "TestSparseCPU.test_sparse_spdiags_cpu_int16",  # known py38 fail
     "TestSparseCPU.test_to_dense_with_gradcheck_sparse_cpu_float16",  # known py38 fail
     "TestSparseCPU.test_sum_cpu_float64",  # known py38 fail
-    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseCSR_nonmasked_slow_cpu",  # known py38 fail
     "TestSparseCPU.test_log1p_cpu_float32",  # known py38 fail
     "TestSparseAnyCPU.test_gradcheck_mm_SparseCOO_masked_fast_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_to_dense_with_gradcheck_sparse_cpu_bfloat16",  # known py38 fail
@@ -2920,9 +2881,7 @@ dynamo_skips = {
     "TestSparseCPU.test_index_select_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_select_no_type_promotion_cpu_int32",  # known py38 fail
     "TestSparseCPU.test_zeros_like_cpu_complex128",  # known py38 fail
-    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseBSR_nonmasked_slow_cpu",  # known py38 fail
     "TestSparseCPU.test_index_select_cpu_complex128",  # known py38 fail
-    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseCOO_masked_fast_cpu",  # known py38 fail
     "TestSparseCPU.test_log1p_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_saddmm_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_sparse_sparse_mul_cpu_int16",  # known py38 fail
@@ -2939,7 +2898,6 @@ dynamo_skips = {
     "TestSparseCPU.test_sparse_addmm_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_to_dense_hybrid_sparse_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_cat_cpu_float64",  # known py38 fail
-    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseBSC_nonmasked_slow_cpu",  # known py38 fail
     "TestSparseCPU.test_sparse_spdiags_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sparse_spdiags_cpu_complex128",  # known py38 fail
     "TestSparseAnyCPU.test_gradcheck_mm_SparseCOO_sparse_slow_cpu_float64",  # known py38 fail
@@ -2950,7 +2908,6 @@ dynamo_skips = {
     "TestSparseCPU.test_to_dense_with_gradcheck_masked_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_factory_type_inference_cpu_float32",  # known py38 fail
     "TestSparseCPU.test_index_select_exhaustive_index_small_cpu_float64",  # known py38 fail
-    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseCSR_nonmasked_fast_cpu",  # known py38 fail
     "TestSparseCPU.test_sum_cpu_int32",  # known py38 fail
     "TestSparseCPU.test_resize_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sparse_addmm_cpu_float64",  # known py38 fail
@@ -2966,19 +2923,14 @@ dynamo_skips = {
     "TestSparseCPU.test_sum_cpu_uint8",  # known py38 fail
     "TestSparseCPU.test_add_dense_sparse_mismatch_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_contig_hybrid_cpu_float64",  # known py38 fail
-    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseBSR_nonmasked_fast_cpu",  # known py38 fail
-    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseCSC_masked_slow_cpu",  # known py38 fail
     "TestSparseCPU.test_sparse_add_coalesce_cpu_complex64",  # known py38 fail
     "TestSparseCPU.test_log1p_cpu_int8",  # known py38 fail
     "TestSparseCPU.test_permute_masked_cpu_float64",  # known py38 fail
-    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseCSC_nonmasked_slow_cpu",  # known py38 fail
-    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseBSC_nonmasked_fast_cpu",  # known py38 fail
     "TestSparseCPU.test_to_dense_with_gradcheck_sparse_cpu_complex64",  # known py38 fail
     "TestSparseAnyCPU.test_check_sparse_tensor_invariants_SparseCSC_cpu",  # known py38 fail
     "TestSparseCPU.test_div_rounding_mode_cpu_float32",  # known py38 fail
     "TestSparseCPU.test_any_cpu",  # known py38 fail
     "TestSparseMeta.test_basic",  # known py38 fail
-    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseCSC_masked_fast_cpu",  # known py38 fail
     "TestSparseAnyCPU.test_constructor_autograd_SparseBSR_cpu",  # known py38 fail
     "TestSparseCPU.test_to_dense_with_gradcheck_masked_cpu_bfloat16",  # known py38 fail
     "TestSparseCPU.test_saddmm_cpu_float64",  # known py38 fail
@@ -3000,13 +2952,11 @@ dynamo_skips = {
     "TestSparseCPU.test_new_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_contig_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_empty_like_cpu_complex128",  # known py38 fail
-    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseCOO_nonmasked_fast_cpu",  # known py38 fail
     "TestSparseAnyCPU.test_check_sparse_tensor_invariants_SparseBSC_cpu",  # known py38 fail
     "TestSparseAnyCPU.test_gradcheck_mm_SparseCOO_masked_slow_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sparse_sparse_mul_cpu_uint8",  # known py38 fail
     "TestSparseCPU.test_sparse_sparse_mul_cpu_int64",  # known py38 fail
     "TestSparseCPU.test_select_no_type_promotion_cpu_int16",  # known py38 fail
-    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseBSR_masked_slow_cpu",  # known py38 fail
     "TestSparseCPU.test_select_no_type_promotion_cpu_int8",  # known py38 fail
     "TestSparseCPU.test_zeros_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_sparse_mask_cpu_complex128",  # known py38 fail
