@@ -1206,10 +1206,10 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         new_pg1 = c10d.new_group([0, 1])
         new_pg2 = c10d.new_group([0, 1])
         if self.rank == 0 or self.rank == 1:
-          t1 = torch.rand(10, 10, device=device)
-          t2 = torch.rand(10, 10, device=device)
-          new_pg1.allreduce(t1).wait()
-          new_pg2.allreduce(t2).wait()
+            t1 = torch.rand(10, 10, device=device)
+            t2 = torch.rand(10, 10, device=device)
+            new_pg1.allreduce(t1).wait()
+            new_pg2.allreduce(t2).wait()
         if self.rank == 0:
             dist.destroy_process_group(new_pg2)
             # force destruction of pg2 first
