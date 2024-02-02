@@ -16,6 +16,7 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.distributed.fsdp import CPUOffload, FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import TrainingState
 from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGIES
@@ -817,6 +818,32 @@ class MixtureOfExperts(NestedWrappedModule):
                 fsdp_model = fsdp_model.cuda()
             return fsdp_model
         raise ValueError(f"Unsupported FSDP init mode: {fsdp_init_mode}")
+
+
+class MLP(nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        device: torch.device = torch.device("cpu"),
+        with_buffer: bool = False,
+        dim_multiplier: int = 4,
+    ):
+        super().__init__()
+        self.in_proj = nn.Linear(dim, dim_multiplier * dim, device=device)
+        self.out_proj = nn.Linear(dim_multiplier * dim, dim, device=device)
+        if with_buffer:
+            self.register_buffer("buffer", torch.randn((dim,), device=device))
+        else:
+            self.buffer = None
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        z = self.in_proj(x)
+        z = F.relu(z)
+        z = self.out_proj(z)
+        z = F.relu(z)
+        if self.buffer:
+            z += self.buffer
+        return z
 
 
 def run_subtests(
