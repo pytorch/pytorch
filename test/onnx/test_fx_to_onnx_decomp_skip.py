@@ -31,6 +31,14 @@ class TestDynamoExportDecompSkip(pytorch_test_common.ExportTestCase):
         # If decomposition is skipped, the model will contain a Resize op instead of fine grained subgraph.
         assert_op_in_onnx_model(onnx_program.model_proto, "Resize")
 
+    def test_upsample_bilinear2d_output_size(self):
+        def func(x: torch.Tensor):
+            return torch.nn.functional.interpolate(x, size=(4, 4), mode="bilinear")
+
+        onnx_program = torch.onnx.dynamo_export(func, torch.randn(1, 1, 2, 2))
+        # If decomposition is skipped, the model will contain a Resize op instead of fine grained subgraph.
+        assert_op_in_onnx_model(onnx_program.model_proto, "Resize")
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
