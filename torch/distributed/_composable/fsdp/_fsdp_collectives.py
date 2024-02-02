@@ -8,7 +8,6 @@ from ._fsdp_common import (
     _raise_assert_with_print,
     _to_dtype_if_needed,
 )
-
 from ._fsdp_param import FSDPParam
 
 
@@ -17,12 +16,6 @@ class AllGatherResult(NamedTuple):
     all_gather_event: Optional[torch.cuda.Event]
     all_gather_work: Optional[dist.distributed_c10d.Work]
     all_gather_input_numels: List[int]
-
-
-class AllGatherState(NamedTuple):
-    # Keep a reference to the all-gather result to avoid reusing memory early
-    all_gather_result: AllGatherResult
-    event: torch.cuda.Event  # all-gather copy-out
 
 
 @torch.no_grad()
