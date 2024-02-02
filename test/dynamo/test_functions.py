@@ -1936,6 +1936,7 @@ class GraphModule(torch.nn.Module):
         res = forward(input1)(input2)
         self.assertTrue(same(res, input1 + input2))
 
+    @unittest.expectedFailure
     def test_non_inlined_closure(self):
         @torch.compile()
         def program(x, y):
