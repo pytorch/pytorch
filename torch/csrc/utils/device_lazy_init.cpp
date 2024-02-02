@@ -7,8 +7,7 @@
 namespace torch::utils {
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-bool is_initialized[at::COMPILE_TIME_MAX_DEVICE_TYPES] = {false};
+std::array<bool, at::COMPILE_TIME_MAX_DEVICE_TYPES> is_initialized{};
 
 } // anonymous namespace
 
