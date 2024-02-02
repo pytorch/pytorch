@@ -1630,6 +1630,28 @@ class AOTInductorTestsTemplate:
         expected = Model()(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @config.patch({"aot_inductor.abi_compatible": True})
+    def test_triton_kernel_unbacked_symint(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                maxlen = max(x.item(), 512)
+                x = torch.ones(maxlen).cuda()
+                y = torch.zeros(maxlen).cuda()
+                out = torch.zeros_like(x)
+                add_kernel[(maxlen,4,1)](x, y, out, maxlen, 32)
+                return out
+
+        example_inputs = (
+            torch.randint(high=1024, size=(1,), device="cuda"),
+        )
+        self.check_model(Model(), example_inputs)
+
     @skipIfRocm
     def test_scaled_dot_product_efficient_attention(self):
         if self.device != "cuda":
@@ -1757,6 +1779,7 @@ CPU_TEST_FAILURES = {
         is_skip=True
     ),
     "test_simple_dynamic": fail_with_and_without_stack_allocation(),
+    "test_triton_kernel_unbacked_symint": fail_with_and_without_stack_allocation(is_skip=True),
 }
 
 CUDA_TEST_FAILURES = {
