@@ -309,29 +309,29 @@ def nll_loss_forward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
 
         # make sure input is replicated along the channel dim
         input_src_spec = input_placement_strategy.output_spec
-        input_tgt_spec = DTensorSpec(
+        input_expected_spec = DTensorSpec(
             mesh=mesh,
             placements=replicate_reduction_dims(
                 input_src_spec.placements, [channel_dim]
             ),
             tensor_meta=input_src_spec.tensor_meta,
         )
-        op_args_target_specs.append(input_tgt_spec)
+        op_args_target_specs.append(input_expected_spec)
         redistribute_costs.append(
-            generate_redistribute_costs(input_strategy, input_tgt_spec)
+            generate_redistribute_costs(input_strategy, input_expected_spec)
         )
 
         # target doesn't have channel dim, and it follows input on other dims
         target_placement_strategy = target_strategy.strategies[idx]
         target_src_spec = target_placement_strategy.output_spec
-        target_tgt_spec = DTensorSpec(
+        target_expected_spec = DTensorSpec(
             mesh=mesh,
-            placements=_skip_dim(input_tgt_spec.placements, channel_dim),
+            placements=_skip_dim(input_expected_spec.placements, channel_dim),
             tensor_meta=target_src_spec.tensor_meta,
         )
-        op_args_target_specs.append(target_tgt_spec)
+        op_args_target_specs.append(target_expected_spec)
         redistribute_costs.append(
-            generate_redistribute_costs(target_strategy, target_tgt_spec)
+            generate_redistribute_costs(target_strategy, target_expected_spec)
         )
 
         # weight tensor, if given, has to be a Tensor of size input_shape[channel_dim]
@@ -339,23 +339,23 @@ def nll_loss_forward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
         if weight_strategy is not None:
             assert isinstance(weight_strategy, OpStrategy)
             weight_src_spec = weight_strategy.strategies[idx].output_spec
-            weight_tgt_spec = DTensorSpec(
+            weight_expected_spec = DTensorSpec(
                 mesh=mesh,
                 placements=_replicate_dims_start_at(weight_src_spec.placements),
                 tensor_meta=weight_src_spec.tensor_meta,
             )
-            op_args_target_specs.append(weight_tgt_spec)
+            op_args_target_specs.append(weight_expected_spec)
             redistribute_costs.append(
-                generate_redistribute_costs(weight_strategy, weight_tgt_spec)
+                generate_redistribute_costs(weight_strategy, weight_expected_spec)
             )
 
         if reduction == Reduction.NONE.value:
-            output_tgt_spec = target_tgt_spec
+            output_tgt_spec = target_expected_spec
         else:
             if reduction == Reduction.MEAN.value:
                 reduction_op = c10d.ReduceOp.AVG
                 if not is_tensor_evenly_shardable(
-                    target_tgt_spec.shape, target_tgt_spec
+                    target_expected_spec.shape, target_expected_spec
                 ):
                     raise ValueError(
                         "The intermediate results of nll_loss cannot be evenly sharded, \
@@ -363,12 +363,15 @@ def nll_loss_forward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
                     )
             else:  # reduction == Reduction.SUM.value:
                 reduction_op = c10d.ReduceOp.SUM
-            reduce_dims = list(range(target_tgt_spec.ndim))
+            reduce_dims = list(range(target_expected_spec.ndim))
             reduce_dims_map = _infer_reduce_dims_map(
-                reduce_dims, target_tgt_spec.ndim, keep_dim=False
+                reduce_dims, target_expected_spec.ndim, keep_dim=False
             )
             out_placements = map_placements_after_reduction(
-                target_tgt_spec.placements, reduce_dims, reduce_dims_map, reduction_op
+                target_expected_spec.placements,
+                reduce_dims,
+                reduce_dims_map,
+                reduction_op,
             )
             output_tgt_spec = DTensorSpec(
                 mesh=mesh,
