@@ -1017,7 +1017,7 @@ def safe_unflatten(tensor, dim, shape):
 
 
 @exposed_in("torch.func")
-def jacfwd(func: Callable, argnums: Optional[argnums_t] = 0, has_aux: bool = False, *, randomness: str = "error"):
+def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, randomness: str = "error"):
     """
     Computes the Jacobian of ``func`` with respect to the arg(s) at index
     ``argnum`` using forward-mode autodiff
@@ -1027,7 +1027,6 @@ def jacfwd(func: Callable, argnums: Optional[argnums_t] = 0, has_aux: bool = Fal
             one of which must be a Tensor, and returns one or more Tensors
         argnums (int or Tuple[int, ...]): Optional, integer or tuple of integers,
             saying which arguments to get the Jacobian with respect to.
-            If None, the Jacobian is computed with respect to all inputs.
             Default: 0.
         has_aux (bool): Flag indicating that ``func`` returns a
             ``(output, aux)`` tuple where the first element is the output of
@@ -1123,10 +1122,13 @@ def jacfwd(func: Callable, argnums: Optional[argnums_t] = 0, has_aux: bool = Fal
         >>> assert torch.allclose(jacobian[1], expectedY)
 
     """
+    if not isinstance(argnums, int) and not isinstance(argnums, tuple):
+        raise ValueError(f"jacrev: `argnums` should be int or Tuple[int, ...], got: {type(argnums)}")
+
     @wraps(func)
     def wrapper_fn(*args):
         error_if_complex("jacfwd", args, is_input=True)
-        primals = args if argnums is None else _slice_argnums(args, argnums)
+        primals = _slice_argnums(args, argnums)
         flat_primals, primals_spec = tree_flatten(primals)
         flat_primals_numels = tuple(p.numel() for p in flat_primals)
         flat_basis = _construct_standard_basis_for(flat_primals, flat_primals_numels)
