@@ -252,7 +252,7 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
   void SetUp() override {
     // Enable LOG(INFO) messages.
     c10::initLogging();
-    size_t numDevices = 1;  // One device per rank (thread)
+    size_t numDevices = 1; // One device per rank (thread)
     TemporaryFile file;
     store_ = c10::make_intrusive<::c10d::FileStore>(file.path, 1);
 

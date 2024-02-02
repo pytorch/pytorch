@@ -242,7 +242,11 @@ class AllreduceNCCLTest : public NCCLTest {
 
 class SparseAllreduceNCCLTest : public NCCLTest {
  public:
-  SparseAllreduceNCCLTest(const std::string& path, int rank, int worldSize, int inputDim)
+  SparseAllreduceNCCLTest(
+      const std::string& path,
+      int rank,
+      int worldSize,
+      int inputDim)
       : NCCLTest(
             path,
             rank,
@@ -670,9 +674,7 @@ void testReduceScatter(const std::string& path, int rank, int size) {
   }
 }
 
-void testSequenceNumInit(
-    const std::string& path,
-    int rank, int size) {
+void testSequenceNumInit(const std::string& path, int rank, int size) {
   NCCLTest test(path, rank, size);
   test.initialize(rank, size);
   test.getProcessGroup()->setSequenceNumberForGroup();
@@ -755,8 +757,7 @@ class ProcessGroupNCCLTest : public ::testing::Test {
     std::vector<std::thread> threads;
     threads.reserve(size_);
     for (const auto rank : c10::irange(size_)) {
-      threads.emplace_back(
-        std::thread(testFunc, file.path, rank, size_));
+      threads.emplace_back(std::thread(testFunc, file.path, rank, size_));
     }
     for (const auto rank : c10::irange(size_)) {
       threads[rank].join();
