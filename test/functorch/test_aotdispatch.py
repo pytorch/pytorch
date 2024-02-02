@@ -2734,6 +2734,45 @@ class TestMod(torch.nn.Module):
 
 class TestAOTExport(AOTTestCase):
 
+    def test_aot_export_ban_dropout_mut_pre_dispatch(self):
+        def fn(p, x):
+            y = torch.ops.aten.dropout.default(x, 0.1, train=False)
+            y.add_(1)
+            return (y,)
+
+        mod = TestMod(fn)
+        inp = torch.randn(2, 2)
+
+        with self.assertRaisesRegex(RuntimeError, "cannot mutate tensors with frozen storage"):
+            aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+
+        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=False)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    clone = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
+    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
+    return (add,)""")
+
+        fw_graph_cell = [None]
+        bw_graph_cell = [None]
+
+        compiled_outs = aot_function(
+            fn,
+            fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+            bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
+            partition_fn=default_partition,
+            decompositions=default_decompositions,
+            dynamic=True)(*inp)
+        fw_graph = fw_graph_cell[0]
+        bw_graph = bw_graph_cell[0]
+
+        self.assertExpectedInline(str(fw_graph.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    clone = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
+    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
+    return (add,)""")
+
+
     def test_aot_export_predispatch_func_simple(self):
         def fn(p, x):
             y = x + 2
@@ -4175,6 +4214,46 @@ class TestAOTModuleSimplified(AOTTestCase):
         res = compiled_f(*inputs)
         res[0].sum().backward()
 
+    def test_aot_module_simplified_preserves_stack_trace_from_mutation(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                x_view = x[0]
+                x_view.mul_(2)
+                return (x + x, )
+
+        tracer = torch.fx.Tracer()
+        tracer.record_stack_traces = True
+        graph = tracer.trace(MockModule())
+        mod = torch.fx.GraphModule(tracer.root, graph)
+
+        for node in mod.graph.nodes:
+            if node.op == 'output':
+                continue
+            self.assertTrue(node.stack_trace is not None)
+            assert 'test_aotdispatch.py' in node.stack_trace
+
+        def assert_compiler(gm: torch.fx.GraphModule, _):
+            assert torch.ops.aten.copy_.default in [x.target for x in gm.graph.nodes]
+            for node in gm.graph.nodes:
+                if node.target == torch.ops.aten.copy_.default:
+                    assert 'stack_trace' in node.meta
+                    assert 'x_view.mul_(2)' in node.meta['stack_trace']
+            return gm.forward  # return a python callable
+
+        x = torch.randn(128, 20)
+        inputs = [x]
+
+        aot_module_simplified(
+            mod,
+            inputs,
+            fw_compiler=assert_compiler,
+            bw_compiler=assert_compiler,
+            keep_inference_input_mutations=True,
+        )
+
     def test_aot_module_simplified_fake_tensor_gm_raises(self):
         fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
         real_x = torch.randn(4, requires_grad=True)
@@ -4260,8 +4339,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.interpolate', 'linear'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'trilinear'),  # Cannot call sizes() on tensor with symbolic sizes/st...
     xfail('nn.functional.nll_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.pixel_shuffle', ''),  # aten.pixel_shuffle.default - couldn't find symbolic meta fun...
-    xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta...
     xfail('_segment_reduce', 'lengths'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('special.i1', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition

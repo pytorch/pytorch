@@ -24,7 +24,6 @@ from torch._decomp.decompositions_for_rng import PhiloxStateTracker
 from torch._guards import detect_fake_mode
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses.functional_tensor import FunctionalTensorMode
-from torch.fx import Interpreter
 from torch.fx.experimental.symbolic_shapes import definitely_false, sym_eq
 from torch.nn.utils import stateless
 
@@ -587,6 +586,21 @@ def aot_dispatch_subclass(
     )
 
 
+class PropagateUnbackedSymInts(torch.fx.Interpreter):
+    def run_node(self, n: torch.fx.Node):
+        import sympy
+
+        result = super().run_node(n)
+        # TODO: handle Tensor returns
+        if "example_value" in n.meta:
+            if isinstance(result, torch.SymInt) and isinstance(
+                result.node.expr, sympy.Symbol
+            ):
+                torch._check(result == n.meta["example_value"])
+
+        return result
+
+
 def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
     # Redundant with dynamo, but worth having in case this gets invoked elsewhere.
     # https://github.com/pytorch/pytorch/issues/103569
@@ -601,7 +615,9 @@ def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
                         "ignore", "Anomaly Detection has been enabled."
                     )
                     with torch.autograd.detect_anomaly(check_nan=False):
-                        out = Interpreter(mod).run(*args[params_len:], **kwargs)
+                        out = PropagateUnbackedSymInts(mod).run(
+                            *args[params_len:], **kwargs
+                        )
             else:
                 out = mod(*args[params_len:], **kwargs)
 

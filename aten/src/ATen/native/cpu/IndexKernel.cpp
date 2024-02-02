@@ -744,11 +744,11 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
       // Special cases:
       // a) channels last hflip on (N, C, H, W) and outer_stride(=dtype_size * C) in [2, 16]
       // b) flip dim=-2 on (N, ..., M, C) and outer_stride(=dtype_size * C) in [2, 16]
-      auto output_strides = iter.strides(0);
-      auto input_strides = iter.strides(1);
-      auto c = -output_strides[1];
+      auto output_strides_2 = iter.strides(0);
+      auto input_strides_2 = iter.strides(1);
+      auto c = -output_strides_2[1];
       if (c >= 2 && c <= 16 &&
-          c == input_strides[1] &&
+          c == input_strides_2[1] &&
           c == iter.element_size(0) * iter.shape()[0]  // checks if dim=1 is contiguous as well
       ) {
         return cpu_hflip_channels_last_vec(iter);
