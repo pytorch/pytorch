@@ -1,10 +1,10 @@
 # Owner(s): ["module: c10d"]
-import os
 import unittest
 from typing import List
 
 import torch
 import torch.distributed as dist
+import torch.distributed._functional_collectives as funcol
 from torch._C import FileCheck
 from torch._dynamo.utils import same
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_triton_code
@@ -53,7 +53,7 @@ if not dist.is_available():
 class C10DFunctionalNativeTest(MultiProcessTestCase):
     def setUp(self) -> None:
         super().setUp()
-        os.environ["_USE_NATIVE_C10D_FUNCTIONAL"] = "1"
+        funcol.enable_native_funcol()
         self._spawn_processes()
 
     @property
