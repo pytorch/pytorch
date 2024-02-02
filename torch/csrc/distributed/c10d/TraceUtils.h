@@ -344,6 +344,12 @@ inline std::string pickle_str(const c10::IValue& v) {
 }
 
 inline std::string get_python_cpp_trace() {
+  // usage:
+  // LOG(INFO) << "stacktrace: "
+  //           << get_python_cpp_trace();
+  // warn: might be slow in getting cpp traces
+  // because of slow/broken addr2line
+  // in different system libs
   std::shared_ptr<torch::CapturedTraceback> tb =
       torch::CapturedTraceback::gather(
           /*python=*/true, /*script=*/true, /*cpp=*/true);
