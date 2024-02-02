@@ -30,7 +30,7 @@ from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
 
 from torch._inductor.codegen.multi_kernel import MultiKernelState
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
+from torch.fx.experimental.symbolic_shapes import SymTypes
 from torch.fx.node import _get_qualified_name
 from torch.utils._sympy.singleton_int import SingletonInt
 
@@ -2387,18 +2387,13 @@ class CppWrapperCodeGen(WrapperCodeGen):
             and V.graph.cpp_wrapper
             and config.aot_inductor.abi_compatible
         ):
-            # Make the fallback call ABI-compatible in the C++ wrapper file.
-            kernel = kernel.replace("at::", "aoti_torch_")
-            num_indices = str(
-                len(indices)
-            )  # num_indices for indexing into indices array
-            tensor_handle_array_var = (
-                f"tensor_handle_array_{next(self.kernel_callsite_id)}"
+            # See the comment in codegen_reinterpret_view about why having something like
+            # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the correponding
+            # tensor prematurely deallocated, thus this std:vector().data() trick here.
+            indices_str = (
+                f"std::vector<AtenTensorHandle>{{{', '.join(indices)}}}.data()"
             )
-            self.writeline(
-                f"AtenTensorHandle {tensor_handle_array_var}[] = {{{', '.join(indices)}}};"
-            )
-            args = [x, tensor_handle_array_var, num_indices, values, accumulate]
+            args = [x, indices_str, str(len(indices)), values, accumulate]
         else:
             indices_str = (
                 f"{self.open_bracket}{', '.join(indices)}{self.closed_bracket}"
@@ -3263,12 +3258,12 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         ), f"expected grid to be a list or tuple but got: {grid=}"
 
         grid = [V.graph.sizevars.simplify(item) for item in grid]
-        grid_has_unbacked_symbols = any(free_unbacked_symbols(item) for item in grid)
+        grid_uses_symbolic_shapes = any(item.free_symbols for item in grid)
         grid_args = [self.grid_expr_printer(item) for item in grid]
         grid_args_str = ", ".join(grid_args)
         self.writeline(f"Grid {grid_name} = Grid({grid_args_str});")
 
-        if grid_has_unbacked_symbols:
+        if grid_uses_symbolic_shapes:
             self.writeline(f"if ({grid_name}.is_non_zero()) {{")
         kernel_var_name = f"kernels.{name}" if V.graph.aot_mode else name
         self.writeline(
@@ -3283,5 +3278,5 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 stream,
             )
         )
-        if grid_has_unbacked_symbols:
+        if grid_uses_symbolic_shapes:
             self.writeline("}")

@@ -2540,6 +2540,28 @@ def forward(self, l_x_):
         self.assertEqual(inputs[0][0] * 2.0, inputs_model[0][0])
         self.assertEqual(inputs[0][0] * 2.0, inputs_export[0][0])
 
+    def test_export_input_mutation_bug(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x[:, :2, :] = x[:,:2,:] + 1
+                return x
+
+        inputs = (torch.ones(4,4,4),)
+        ep = torch.export.export(M(), inputs)
+        m = ep.module()
+
+        # Make the name conflict with a placeholder name that we get from
+        # aot_export
+        for i, node in enumerate(m.graph.nodes):
+            if node.op == "placeholder":
+                node.name = f"arg0_{i + 1}"
+        m.recompile()
+
+        ep = torch.export.export(m, inputs)
+
+        inputs = (torch.randn(4,4,4),)
+        self.assertEqual(ep.module()(*copy.deepcopy(inputs)), M()(*copy.deepcopy(inputs)))
+
     def test__scaled_dot_product_flash_attention(self):
         class Module(torch.nn.Module):
             def forward(self, q, k, v):
