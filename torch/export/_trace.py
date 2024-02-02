@@ -5,7 +5,7 @@ import logging
 import re
 import warnings
 from collections import OrderedDict
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import torch
@@ -71,6 +71,17 @@ class ExportDynamoConfig:
 
 
 DEFAULT_EXPORT_DYNAMO_CONFIG = ExportDynamoConfig()
+
+
+@contextmanager
+def _ignore_backend_decomps():
+    orig_mkldnn_flag = torch.backends.mkldnn.set_flags(False)
+    orig_nnpack_flag = torch.backends.nnpack.set_flags(False)
+    try:
+        yield
+    finally:
+        torch.backends.mkldnn.set_flags(*orig_mkldnn_flag)
+        torch.backends.nnpack.set_flags(*orig_nnpack_flag)
 
 
 def _convert_input_to_fake(gm, args, kwargs):
@@ -288,7 +299,9 @@ def _export_to_torch_ir(
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
         try:
             module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
-            with _wrap_submodules(f, preserve_module_call_signature, module_call_specs):
+            with _wrap_submodules(
+                f, preserve_module_call_signature, module_call_specs
+            ), _ignore_backend_decomps():
                 gm_torch_level, _ = torch._dynamo.export(
                     f,
                     constraints=constraints,
@@ -419,7 +432,7 @@ def _export_non_strict(
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
     with torch.nn.utils.stateless._reparametrize_module(
         mod, fake_params_buffers
-    ), grad_safe_guard:  # type: ignore[attr-defined]
+    ), grad_safe_guard, _ignore_backend_decomps():  # type: ignore[attr-defined]
         gm, graph_signature = transform(aot_export_module)(
             mod,
             (*fake_args, *fake_kwargs.values()),
