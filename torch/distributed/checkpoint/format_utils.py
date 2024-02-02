@@ -65,9 +65,11 @@ def dcp_to_torch_save(
     Args:
         dcp_checkpoint_dir: Directory containing the DCP checkpoint.
         torch_save_fn: Filename to store the converted Torch save file.
-        coordinator_rank: Rank that will perform the conversion.
+        coordinator_rank: Rank that will perform the conversion. Ignored
+            if dist is not available.
     """
-    if not dist.is_initialized() or dist.get_rank() == coordinator_rank:
+    is_dist = dist.is_available() and dist.is_initialized()
+    if is_dist or dist.get_rank() == coordinator_rank:
         sd = {}
         storage_reader = FileSystemReader(dcp_checkpoint_dir)
 
@@ -79,5 +81,5 @@ def dcp_to_torch_save(
         )
         torch.save(sd, torch_save_fn)
 
-    if dist.is_initialized():
+    if is_dist:
         dist.barrier()
