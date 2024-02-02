@@ -778,6 +778,15 @@ def bessel_j0(x):
     return make_pointwise(fn)(x)
 
 
+@register_lowering(
+    [aten.special_bessel_j1, prims.bessel_j1],
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def bessel_j1(x):
+    fn = ops_wrapper("bessel_j1")
+    return make_pointwise(fn)(x)
+
+
 @register_lowering(aten.expand, type_promotion_kind=None)
 def expand(x, sizes):
     (x,) = promote_constants([x])
@@ -2277,7 +2286,6 @@ make_fallback(aten.resize_as)
 make_fallback(aten.resize_as_)
 make_fallback(aten.searchsorted)
 make_fallback(aten.special_airy_ai)
-make_fallback(aten.special_bessel_j1, warn=False)
 make_fallback(aten.special_bessel_y0, warn=False)
 make_fallback(aten.special_bessel_y1)
 make_fallback(aten.special_chebyshev_polynomial_t)
