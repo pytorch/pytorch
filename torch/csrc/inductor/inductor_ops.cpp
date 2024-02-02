@@ -61,11 +61,15 @@ Tensor _reinterpret_tensor(
 static void accumulate_grad_(const Tensor& variable, const Tensor& new_grad) {
   at::Tensor& grad = variable.mutable_grad();
   if (new_grad.device() != kMeta) {
+    // Do not call into this codepath from C++ frontend, instead call directly
+    // into accumulateGrad with num_expected_refs set to 1 Here,
+    // num_expected_refs is set to 2 to steal the gradient when this is called
+    // from Python
     torch::autograd::AccumulateGrad::accumulateGrad(
         variable,
         grad,
         new_grad,
-        1 /* num_expected_refs */,
+        2 /* num_expected_refs */,
         [&grad](at::Tensor&& grad_update) { grad = std::move(grad_update); });
   } else {
     // no shape checking for `device="meta"` to workaround FSDP inplace mutation
