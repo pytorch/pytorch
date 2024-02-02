@@ -1,6 +1,8 @@
+from dataclasses import dataclass
+
 import torch
 from torch.fx.experimental.proxy_tensor import py_sym_types
-from dataclasses import dataclass
+
 
 @dataclass
 class _SymExprHash:
@@ -26,6 +28,7 @@ class _SymHashingDict:
     SymPy hash is not always reliable so optimistically hash sympy expression, and if those fail,
     fallback to symnodes.
     """
+
     def __init__(self):
         self.sym_hash_dict = {}
 
@@ -49,9 +52,9 @@ def dedupe_symints(graph: torch.fx.Graph):
     """
     Dedupes sym ints in the graph to nodes are resolvable to symint graph inputs.
 
-    We only dedupe from graph inputs to avoid adding a potential dependency in the forward 
-    from the backward.  
-    
+    We only dedupe from graph inputs to avoid adding a potential dependency in the forward
+    from the backward.
+
     """
 
     sym_dict = _SymHashingDict()
@@ -71,6 +74,3 @@ def dedupe_symints(graph: torch.fx.Graph):
         elif all(n in resolvable_from_input_symints for n in node.all_input_nodes):
             sym_dict[val] = node
             resolvable_from_input_symints.add(node)
-
-
-
