@@ -5,7 +5,7 @@ import io
 import os
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator, Optional, Union
+from typing import Generator, Optional, Union
 
 import fsspec
 from fsspec import AbstractFileSystem
@@ -28,10 +28,12 @@ class FileSystem(FileSystemBase):
         self.fs: Optional[AbstractFileSystem] = None
 
     @contextmanager
-    def create_stream(self, path: os.PathLike, mode: str) -> Iterator[io.IOBase]:
+    def create_stream(
+        self, path: Union[str, os.PathLike], mode: str
+    ) -> Generator[io.IOBase, None, None]:
         assert self.fs is not None
         with self.fs.transaction:
-            with fsspec.open(path, mode) as stream:
+            with fsspec.open(str(path), mode) as stream:
                 yield stream
 
     def concat_path(
@@ -39,25 +41,25 @@ class FileSystem(FileSystemBase):
     ) -> Union[str, os.PathLike]:
         return os.path.join(path, suffix)
 
-    def init_path(self, path: [str, os.PathLike]) -> Union[str, os.PathLike]:
+    def init_path(self, path: Union[str, os.PathLike]) -> Union[str, os.PathLike]:
         self.fs, _ = url_to_fs(path)
         return path
 
     def rename(
         self, path: Union[str, os.PathLike], new_path: Union[str, os.PathLike]
-    ) -> Union[str, os.PathLike]:
+    ) -> None:
         self.fs.rename(path, new_path)
 
     def mkdir(self, path: [str, os.PathLike]) -> None:
         self.fs.makedirs(path, exist_ok=True)
 
     @staticmethod
-    def check(path: Union[str, os.PathLike, None] = None) -> bool:
-        if isinstance(path, Path):
+    def check(checkpoint_id: Union[str, os.PathLike]) -> bool:
+        if isinstance(checkpoint_id, Path):
             return False
 
         try:
-            url_to_fs(path)
+            url_to_fs(checkpoint_id)
         except ValueError as e:
             return False
 
@@ -105,7 +107,7 @@ class FsspecWriter(FileSystemWriter):
         self.path = self.fs.init_path(path)
 
     @staticmethod
-    def check(checkpoint_id: Union[str, os.PathLike, None] = None) -> bool:
+    def check(checkpoint_id: Union[str, os.PathLike]) -> bool:
         return FileSystem.check(checkpoint_id)
 
 
@@ -116,5 +118,5 @@ class FsspecReader(FileSystemReader):
         self.path = self.fs.init_path(path)
 
     @staticmethod
-    def check(checkpoint_id: Union[str, os.PathLike, None] = None) -> bool:
+    def check(checkpoint_id: Union[str, os.PathLike]) -> bool:
         return FileSystem.check(checkpoint_id)

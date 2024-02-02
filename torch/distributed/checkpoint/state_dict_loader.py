@@ -5,10 +5,8 @@ from typing import Any, cast, Dict, Optional, Union
 import torch
 import torch.distributed as dist
 from torch.distributed.checkpoint.stateful import Stateful
-from ._fsspec_filesystem import FsspecReader
 
 from .default_planner import DefaultLoadPlanner
-from .filesystem import FileSystemReader
 from .planner import LoadPlanner
 from .storage import StorageReader
 from .storage_utils import _storage_setup

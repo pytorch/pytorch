@@ -1,18 +1,11 @@
 # Owner(s): ["oncall: distributed"]
 import os
-import shutil
-import tempfile
-from functools import wraps
-from typing import Any, Callable, Dict, Optional, Tuple
 from unittest.mock import patch
 
-import torch
-import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 from torch.distributed._tensor.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,

@@ -1,5 +1,5 @@
 import os
-from typing import Union
+from typing import List, Union
 
 from .filesystem import FileSystemReader, FileSystemWriter
 
@@ -7,8 +7,8 @@ from .storage import StorageReader, StorageWriter
 
 
 def _storage_setup(
-    storage: Union[None, StorageReader, StorageWriter],
-    checkpoint_id: Union[str, os.PathLike],
+    storage: Union[StorageReader, StorageWriter, None],
+    checkpoint_id: Union[str, os.PathLike, None],
     reader: bool = False,
 ) -> Union[None, StorageReader, StorageWriter]:
     if storage:
@@ -20,6 +20,7 @@ def _storage_setup(
             "storage_reader/storage_writer is None."
         )
 
+    targets: List[type[Union[StorageReader, StorageWriter]]] = []
     if reader:
         targets = [
             FileSystemReader,
@@ -37,7 +38,7 @@ def _storage_setup(
 
     for target in targets:
         if target.check(checkpoint_id):
-            storage = target(checkpoint_id)
+            storage = target(checkpoint_id)  # type: ignore[call-arg]
             storage.reset(checkpoint_id)
             return storage
 
