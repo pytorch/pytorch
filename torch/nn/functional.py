@@ -3318,6 +3318,8 @@ def l1_loss(
 
     See :class:`~torch.nn.L1Loss` for details.
     """
+    if reduction == "sum":
+        raise Exception("Not allowed to use sum")
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
             l1_loss, (input, target), input, target, size_average=size_average, reduce=reduce, reduction=reduction
@@ -3567,11 +3569,7 @@ def multi_margin_loss(
     input: Tensor,
     target: Tensor,
     p: int = 1,
-<<<<<<< HEAD
     margin: float = 2.0,
-=======
-    margin: float = 1.5,
->>>>>>> 6a0f3dddae5dd9576ee35bd0a914016d36947071
     weight: Optional[Tensor] = None,
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
