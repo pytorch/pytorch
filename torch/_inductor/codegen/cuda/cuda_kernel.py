@@ -160,8 +160,9 @@ class CUDATemplateKernel(CUDAKernel):
         # workspace_size should have already been retrieved prior to this call.
         call_args.append("None")
 
-        if node.get_workspace_size() > 0:
-            call_args.append(f"c_void_p({node.get_name()}_workspace.data_ptr())")
+        workspace_node = V.graph.get_workspace_buffer_for(node)
+        if workspace_node is not None:
+            call_args.append(f"c_void_p({workspace_node.get_name()}.data_ptr())")
         else:
             call_args.append("None")
 
@@ -363,6 +364,8 @@ class CUDATemplateCaller(ChoiceCaller):
             return {"backend": "CUDA", "op_type": "unknown"}
 
     def output_node(self) -> TensorBox:
+        # ensure workspace size is correct, even if timing is retrieved from cache
+        self.bmreq.update_workspace_size()
         return TensorBox.create(
             CUDATemplateBuffer(
                 layout=self.layout,
