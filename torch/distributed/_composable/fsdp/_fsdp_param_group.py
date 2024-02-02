@@ -32,9 +32,9 @@ For implicit forward prefetching, we want to overlap the next copy-in with the
 current all-gather. We do so using a separate copy-in stream. However, since
 we have the all-gather input as a view into the output, we must make sure to
 copy into different memory from the current all-gather's output. Thus, we keep
-a reference to the current all-gather's output and have the next FSDP state or
-parameter group free it after its copy-in. Finally, we have the last state or
-group free always to avoid holding onto the memory after forward.
+a reference to the current all-gather's output and have the next FSDP parameter
+group free it after its copy-in. Finally, we have the last FSDP state flush the
+reference to avoid holding onto memory after forward.
 """
 
 
