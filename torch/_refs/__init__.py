@@ -1666,8 +1666,7 @@ def remainder(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 def rsub(
     a: Union[TensorLikeType, NumberType],
     b: Union[TensorLikeType, NumberType],
-    *,
-    alpha: Optional[NumberType] = None,
+    alpha: NumberType = 1,
 ):
     if isinstance(a, Number):
         msg = "Received a Number for the first argument, but expected a Tensor"
