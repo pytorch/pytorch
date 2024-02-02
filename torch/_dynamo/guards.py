@@ -984,7 +984,6 @@ class CheckFunctionManager:
             output_graph.global_scope,
             self,
         )
-
         # Break retain cycle. See test_release_scope_memory
         def cleanup_builder(weak_b):
             b = weak_b()
@@ -1020,6 +1019,15 @@ class CheckFunctionManager:
         # queryable data structure such that this information is already present
         # in some form.
         self.check_fn.id_matched_objs = builder.id_matched_objs
+
+        # Builder is no longer required. Its scope dict holds a reference to the
+        # f_locals. Clear the scope dict to avoid memory leak. See
+        # test_release_input_memory.
+        # One might consider that we should stick this cleanup somewhere in the
+        # try ..  finally block to account for a graph break. But this is
+        # GuardBuilder, which is called only after instruction tx has finished,
+        # so we don't have to worry about graph breaks.
+        builder.scope.pop("L")
 
     def compile_check_fn(self, builder, guards_out, guard_fail_fn):
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
