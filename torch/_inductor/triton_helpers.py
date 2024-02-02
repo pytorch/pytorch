@@ -222,7 +222,6 @@ def exclusive_scan_decoupled_lookback(
     index,
     combine_fn,
     init,
-    DTYPE_VALUE: tl.constexpr,
     DTYPE_VALUE_AS_UINT: tl.constexpr,
     DTYPE_PACK: tl.constexpr,
 ):
@@ -235,12 +234,12 @@ def exclusive_scan_decoupled_lookback(
     index: Scalar index of this block relative to the current scan
     combine_fn: Function ``(value, value) -> value`` which is scanned over
     init: Scalar value equal to the identiy of combine_fn
-    DTYPE_VALUE: Equal to block_value.dtype
     DTYPE_VALUE_AS_UINT: A tl.uint{n} type equal in size to ``block_value``
     DTYPE_PACK: Unsigned type twice the width of block_value
 
     NOTE: This function is limited to values which are 32-bits or less.
     """
+    DTYPE_VALUE = block_value.dtype
     pack = pack_value_flag(
         block_value,
         tl.full(block_value.shape, 1, DTYPE_VALUE_AS_UINT),

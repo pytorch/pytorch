@@ -147,7 +147,6 @@ class TritonSplitScanKernel(TritonKernel):
                     {self.range_trees[-1].get_pid()},
                     {combine_helper_fn},
                     {init},
-                    DTYPE_VALUE={compute_type},
                     DTYPE_VALUE_AS_UINT={value_as_uint_dtype},
                     DTYPE_PACK={scratch_type},
                 )

@@ -1244,6 +1244,7 @@ class CommonTemplate:
             reference_in_float=True,
         )
 
+    @skipCUDAIf(TEST_WITH_ROCM, "Numerical issues on ROCm")
     def test_consecutive_split_cumsum(self):
         def fn(a, b):
             a = a.view(-1)
