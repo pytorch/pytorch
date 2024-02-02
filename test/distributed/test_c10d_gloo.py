@@ -690,6 +690,51 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertTrue(torch.allclose(output, expect))
 
     @requires_gloo()
+    def test_reduce_scatter_tensor(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+        torch.manual_seed(42)
+        out_shape = (20, 20)
+        in_shape = (out_shape[0] * self.world_size,) + out_shape[1:]
+
+        output = torch.empty(out_shape)
+        input = torch.rand(in_shape)
+        work = dist.reduce_scatter_tensor(output, input, async_op=True)
+        work.wait()
+
+        expect = input.view(self.world_size, *out_shape) \
+            .chunk(self.world_size)[self.rank] * self.world_size
+        self.assertTrue(torch.allclose(output, expect))
+
+    @requires_gloo()
+    def test_reduce_scatter_tensor_coalesced(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+        torch.manual_seed(42)
+        out_shapes = [(5, 5), (10, 10), (15, 15)]
+        in_shapes = [(s[0] * self.world_size,) + s[1:] for s in out_shapes]
+
+        outputs = [torch.empty(s) for s in out_shapes]
+        inputs = [torch.rand(s) for s in in_shapes]
+        work = dist.group.WORLD.reduce_scatter_tensor_coalesced(outputs, inputs)
+        work.wait()
+
+        for output, input in zip(outputs, inputs):
+            expect = input.view(self.world_size, *output.shape) \
+                .chunk(self.world_size)[self.rank] * self.world_size
+            self.assertTrue(torch.allclose(output, expect))
+
+    @requires_gloo()
     def test_scatter_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_gloo(
