@@ -334,7 +334,7 @@ class TuningProcessPool:
 tuning_pool = TuningProcessPool()
 
 
-LayoutOrBuffer = Union[ir.Layout, ir.Buffer]
+LayoutViewOrBuffer = Union[ir.Layout, ir.Buffer, ir.ReinterpretView]
 
 
 @dataclasses.dataclass
@@ -344,10 +344,11 @@ class TensorMeta:
     sizes: torch._prims_common.ShapeType
     strides: torch._prims_common.StrideType
     offset: int
+    name: Optional[str] = None
 
     @classmethod
     def from_irnodes(
-        cls, irnodes: Union[LayoutOrBuffer, Sequence[LayoutOrBuffer]]
+        cls, irnodes: Union[LayoutViewOrBuffer, Sequence[LayoutViewOrBuffer]]
     ) -> Union[TensorMeta, List[TensorMeta]]:
         if isinstance(irnodes, Sequence):
             result: List[Any] = [cls.from_irnodes(x) for x in irnodes]
@@ -360,7 +361,11 @@ class TensorMeta:
 
         dtype = node.get_dtype()
         assert dtype is not None
-
+        node_name = None
+        try:
+            node_name = node.get_name()
+        except Exception:
+            pass
         return TensorMeta(
             device=node.get_device(),
             dtype=dtype,
@@ -376,6 +381,7 @@ class TensorMeta:
                 node.get_layout().offset,
                 fallback=config.unbacked_symint_fallback,
             ),
+            name=node_name,
         )
 
     def to_tensor(self) -> torch.Tensor:
