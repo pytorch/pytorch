@@ -76,7 +76,7 @@ librosa>=0.6.2 ; python_version < "3.11"
 #Description: A testing library that allows you to replace parts of your
 #system under test with mock objects
 #Pinned versions:
-#test that import: test_module_init.py, test_modules.py, test_nn.py,
+#test that import: test_modules.py, test_nn.py,
 #test_testing.py
 
 #MonkeyType # breaks pytorch-xla-linux-bionic-py3.7-clang8

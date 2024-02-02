@@ -239,7 +239,6 @@ CI_SERIAL_LIST = [
     "test_utils",  # OOM
     "test_sort_and_select",  # OOM
     "test_backward_compatible_arguments",  # OOM
-    "test_module_init",  # OOM
     "test_autocast",  # OOM
     "test_native_mha",  # OOM
     "test_module_hooks",  # OOM
