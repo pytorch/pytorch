@@ -191,6 +191,24 @@ class AOTInductorTestsTemplate:
         self.assertTrue(actual_path == expected_path)
 
     @requires_cuda
+    def test_constant_folding(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w_pre = torch.randn(4, 4, device=device)
+                self.b = torch.randn(4, device=device)
+
+            def forward(self, x):
+                w_transpose = torch.transpose(self.w_pre, 0, 1)
+                w_relu = torch.nn.functional.relu(w_transpose)
+                w = w_relu + self.b
+                return torch.matmul(x, w)
+
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            self.check_model(Model(self.device), example_inputs)
+
+    @requires_cuda
     def test_multi_device(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -714,13 +732,42 @@ class AOTInductorTestsTemplate:
                 d = (b + c) @ y
                 return d.sum()
 
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires CUDA")
         example_inputs = (
             torch.tensor([1, 1, 1], device=self.device),
             torch.randn((1, 32), dtype=torch.float16, device=self.device),
         )
         self.check_model(Repro(), example_inputs)
+
+    def test_zero_grid_with_backed_symbols(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, b):
+                return x + b
+
+        example_inputs = (
+            x := torch.randn((3, 2), device=self.device),
+            torch.randn((1, 2), device=self.device),
+        )
+        torch._dynamo.mark_dynamic(x, index=0)  # Create dynamic symbol
+
+        # Compile & run model where dynamic dim size > 0.
+        so_path: str = AOTIRunnerUtil.compile(
+            Repro(),
+            example_inputs,
+        )
+        aot_inductor_module = AOTIRunnerUtil.load("cuda", so_path)
+        aot_inductor_module(*example_inputs)
+
+        # Re-run where dynamic dim size is 0.
+        example_inputs = (
+            torch.randn((0, 2), device=self.device),
+            torch.randn((1, 2), device=self.device),
+        )
+        actual = aot_inductor_module(*example_inputs)
+        expected = Repro()(*example_inputs)
+        torch.testing.assert_close(actual, expected)
 
     def test_repeat_interleave(self):
         class Repro(torch.nn.Module):
@@ -1761,6 +1808,7 @@ CPU_TEST_FAILURES = {
     "test_add_complex": fail_stack_allocation(is_skip=True),
     "test_addmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
     "test_bmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    "test_constant_folding": fail_with_and_without_stack_allocation(is_skip=True),
     "test_dup_unbacked_sym_decl": fail_with_and_without_stack_allocation(),
     "test_dynamic_cat": fail_with_and_without_stack_allocation(),
     "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
@@ -1791,6 +1839,12 @@ CPU_TEST_FAILURES = {
         is_skip=True
     ),
     "test_simple_dynamic": fail_with_and_without_stack_allocation(),
+    "test_zero_grid_with_unbacked_symbols": fail_with_and_without_stack_allocation(
+        is_skip=True
+    ),
+    "test_zero_grid_with_backed_symbols": fail_with_and_without_stack_allocation(
+        is_skip=True
+    ),
 }
 
 CUDA_TEST_FAILURES = {
@@ -1820,6 +1874,7 @@ if TEST_WITH_ROCM:
             "test_foreach_multiple_dynamic": fail_cuda(is_skip=True),
             "test_reuse_kernel": fail_cuda(is_skip=True),
             "test_zero_grid_with_unbacked_symbols": fail_cuda(is_skip=True),
+            "test_zero_grid_with_backed_symbols": fail_cuda(is_skip=True),
         }
     )
 
@@ -1945,6 +2000,7 @@ copy_tests(
     {
         "test_addmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",)),
         "test_bmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",)),
+        "test_constant_folding": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
         "test_dynamic_smem_above_default_limit": TestFailure(
             ("non_abi_compatible_cpu",)
         ),
