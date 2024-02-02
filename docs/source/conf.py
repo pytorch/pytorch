@@ -2792,6 +2792,7 @@ coverage_ignore_classes = [
     # torch.fx.experimental.symbolic_shapes
     "Constraint",
     "ConstraintViolationError",
+    "DynamicDimConstraintPrinter",
     "GuardOnDataDependentSymNode",
     "LoggingShapeGuardPrinter",
     "RelaxedUnspecConstraint",

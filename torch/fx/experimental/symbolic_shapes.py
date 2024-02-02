@@ -1889,6 +1889,8 @@ class ShapeEnv:
             self.name_to_node: Dict[str, torch.fx.Node] = {}
 
     def check_equal(self, other: "ShapeEnv") -> None:
+        """Compare another ShapeEnv for equivalence
+        """
         # ShapeEnv fields that are not relevant for the outcome of
         # ShapeEnv.produce_guards call:
         #   - Debugging variables
@@ -2075,7 +2077,7 @@ class ShapeEnv:
             self.name_to_node.pop(node.name)
             self.graph.erase_node(node)
 
-    def add_fx_node_metadata(self, node: torch.fx.Node) -> None:
+    def _add_fx_node_metadata(self, node: torch.fx.Node) -> None:
         from torch._dynamo.utils import get_current_node
 
         if self.should_record_events:
@@ -3147,20 +3149,22 @@ class ShapeEnv:
         return True
 
     def bind_symbols(self, placeholders, args):
-        # Given a paired list of placeholders (fake tensors with
-        # symbolic sizes) and concrete arguments (regular tensors
-        # with real sizes), returns a dictionary mapping each
-        # symbol to its real value.  So for example, if you
-        # have a placeholder with size (s0, s1), binding
-        # (2, 4) to it will give you {s0: 2, s1: 4}.  This is
-        # not guaranteed to bind ALL symbols in the ShapeEnv;
-        # we can't bind a symbol if it doesn't occur in any placeholder,
-        # and symbols that already have replacements won't get bindings.
+        """
+        Given a paired list of placeholders (fake tensors with
+        symbolic sizes) and concrete arguments (regular tensors
+        with real sizes), returns a dictionary mapping each
+        symbol to its real value.  So for example, if you
+        have a placeholder with size (s0, s1), binding
+        (2, 4) to it will give you {s0: 2, s1: 4}.  This is
+        not guaranteed to bind ALL symbols in the ShapeEnv;
+        we can't bind a symbol if it doesn't occur in any placeholder,
+        and symbols that already have replacements won't get bindings.
 
-        # This is a little duplicative with evaluate_guards but
-        # it's different enough that it seemed cleanest to make
-        # another copy.  This assumes the guards are already checked,
-        # though if it's cheap we'll check for shenanigans
+        This is a little duplicative with evaluate_guards but
+        it's different enough that it seemed cleanest to make
+        another copy.  This assumes the guards are already checked,
+        though if it's cheap we'll check for shenanigans
+        """
         bindings: Dict[sympy.Symbol, int] = {}
 
         def bind_symint(arg, val):
@@ -3690,7 +3694,7 @@ class ShapeEnv:
             # Reason: so that, given an assertion node, we can replay the ShapeEnv
             # events until the point where this assertion node was freshly created.
             if fresh:
-                self.add_fx_node_metadata(node)
+                self._add_fx_node_metadata(node)
 
         # After creating the FX node corresponding to orig_expr, we must make sure that
         # no error will be raised until the end of this function.
@@ -3782,9 +3786,12 @@ class ShapeEnv:
         return concrete_val
 
     def cleanup(self):
-        # Break reference cycles.
-        # This destroys the stacks. If you really want to keep them, we
-        # just need some way to break references on code objects.
+        """
+        Break reference cycles.
+
+        This destroys the stacks. If you really want to keep them, we
+        just need some way to break references on code objects.
+        """
         for g in self.guards:
             g.stack.cleanup()
         for s in self.var_to_stack.values():
@@ -3819,7 +3826,7 @@ class ShapeEnv:
             node, fresh = self.create_fx_call_function(torch._assert, (fx_node,))
             assert node is not None
             if fresh:
-                self.add_fx_node_metadata(node)
+                self._add_fx_node_metadata(node)
 
         self._check_frozen(expr, sympy.true)
 
