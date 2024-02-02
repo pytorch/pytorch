@@ -302,11 +302,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             ):
                 tx.mark_inconsistent_side_effects()
             return ConstantVariable.create(tracing_state_functions[self.value])
-        # elif self.value in (torch._functorch.eager_transforms.grad_impl,):
-        #     return TorchHigherOrderOperatorVariable.make(
-        #         self.value,
-        #         source=self.source,
-        #     ).call_function(tx, args, kwargs)
         elif self.value is torch.overrides.get_default_nowrap_functions:
             # [Note: __torch_function__] we return empty here because we restrict
             # the set of functions that we trace __torch_function__ on to
