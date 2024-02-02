@@ -4516,9 +4516,11 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_reduced_sum(self):
         return self._test_reduced_ops(op=torch.sum)
 
+    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_reduced_mean(self):
         return self._test_reduced_ops(op=torch.mean)
 
+    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_reduced_prod(self):
         return self._test_reduced_ops(op=torch.prod)
 
@@ -4535,6 +4537,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(NoDimModel(), input)
         self.run_test(DimModel(), input)
 
+    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_reduced_min_max(self):
         class ReducedMinMaxModule(torch.nn.Module):
             def forward(self, input):
@@ -4549,6 +4552,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 5, dtype=torch.float)
         self.run_test(ReducedMinMaxModule(), x)
 
+    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_reduce_log_sum_exp(self):
         class ReduceLogSumExpModel(torch.nn.Module):
             def forward(self, input):
@@ -13349,19 +13353,99 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(Module(False), x, rtol=1e-3, atol=1e-6)
         self.run_test(Module(True), x, rtol=1e-3, atol=1e-6)
 
-    class GridSampleModule(torch.nn.Module):
-        def __init__(self, mode, padding_mode, align_corners) -> None:
+    class AffineGridModule(torch.nn.Module):
+        def __init__(self, align_corners) -> None:
             super().__init__()
-            self.mode, self.padding_mode, self.align_corners = (
-                mode,
-                padding_mode,
-                align_corners,
+            self.align_corners = align_corners
+
+        def forward(self, theta, size):
+            return torch.nn.functional.affine_grid(
+                theta, size, self.align_corners
             )
 
-        def forward(self, input, grid):
-            return torch.nn.functional.grid_sample(
-                input, grid, self.mode, self.padding_mode, self.align_corners
+
+    @skipIfUnsupportedMinOpsetVersion(20)
+    @skipScriptTest()
+    @common_utils.parametrize(
+        "align_corners",
+        (True, False),
+    )
+    @common_utils.parametrize(
+        "theta_params",
+        (
+            (10, np.array([0.3, -0.5]), np.array([1.5, 0.5]), ),
+            (60, np.array([-0.5, -0.5]), np.array([3.0, 5.5]), )
+        ),
+    )
+    @common_utils.parametrize(
+        "size",
+        ([1, 1, 3, 2], [2, 10, 2, 3]),
+    )
+    def test_affine_grid_2d(self, align_corners, theta_params, size):
+        angle, translation, scale = theta_params
+        theta = np.array([], dtype=np.float32)
+        for _ in range(size[0]):
+            angle_radian = (angle / 180.0) * np.pi
+            theta = np.append(
+                theta,
+                [
+                    np.cos(angle_radian) * scale[0],
+                    -np.sin(angle_radian),
+                    translation[0],
+                    np.sin(angle_radian),
+                    np.cos(angle_radian) * scale[1],
+                    translation[1],
+                ],
             )
+        theta = theta.reshape(size[0], 2, 3)
+        theta = torch.Tensor(theta)
+        self.run_test(TestONNXRuntime.AffineGridModule(align_corners), (theta, size))
+
+    @skipIfUnsupportedMinOpsetVersion(20)
+    @skipScriptTest()
+    @common_utils.parametrize(
+        "align_corners",
+        (True, False),
+    )
+    @common_utils.parametrize(
+        "theta_params",
+        (
+            ([10, 20], np.array([0.3, -0.5, 1.8]), np.array([1.5, 2.0, 0.5]), ),
+            ([60, -30], np.array([-0.5, -0.5, 0.3]), np.array([0.3, 3.0, 5.5]), )
+        ),
+    )
+    @common_utils.parametrize(
+        "size",
+        ([1, 1, 3, 2, 2], [2, 10, 2, 2, 3]),
+    )
+    def test_affine_grid_3d(self, align_corners, theta_params, size):
+        angle, translation, scale = theta_params
+        theta = np.array([], dtype=np.float32)
+        for _ in range(size[0]):
+            angle_radian_x = (angle[0] / 180.0) * np.pi
+            angle_radian_y = (angle[1] / 180.0) * np.pi
+            rot_matrix_x = np.array(
+                [
+                    [1, 0, 0],
+                    [0, np.cos(angle_radian_x), -np.sin(angle_radian_x)],
+                    [0, np.sin(angle_radian_x), np.cos(angle_radian_x)],
+                ]
+            )
+            rot_matrix_y = np.array(
+                [
+                    [np.cos(angle_radian_y), 0, np.sin(angle_radian_y)],
+                    [0, 1, 0],
+                    [-np.sin(angle_radian_y), 0, np.cos(angle_radian_y)],
+                ]
+            )
+            rot_matrix = np.matmul(rot_matrix_x, rot_matrix_y)
+            rot_matrix = rot_matrix * scale.reshape(3, 1)
+            rot_matrix = np.append(rot_matrix, np.reshape(translation, (3, 1)), axis=1)
+            theta = np.append(theta, rot_matrix.flatten())
+
+        theta = theta.reshape(size[0], 3, 4)
+        theta = torch.Tensor(theta)
+        self.run_test(TestONNXRuntime.AffineGridModule(align_corners), (theta, size))
 
     @skipIfUnsupportedMinOpsetVersion(16)
     @common_utils.parametrize(
@@ -13387,8 +13471,23 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             else:
                 atol_rtol.update({"atol": 0.02, "rtol": 0.02})
         input, grid = torch.randn(n, c, h_in, w_in), torch.randn(n, h_out, w_out, 2)
+
+        class GridSampleModule(torch.nn.Module):
+            def __init__(self, mode, padding_mode, align_corners) -> None:
+                super().__init__()
+                self.mode, self.padding_mode, self.align_corners = (
+                    mode,
+                    padding_mode,
+                    align_corners,
+                )
+
+            def forward(self, input, grid):
+                return torch.nn.functional.grid_sample(
+                    input, grid, self.mode, self.padding_mode, self.align_corners
+                )
+
         self.run_test(
-            TestONNXRuntime.GridSampleModule(mode, padding_mode, align_corners),
+            GridSampleModule(mode, padding_mode, align_corners),
             (input, grid),
             **atol_rtol,
         )
@@ -13411,14 +13510,22 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 False,
             ),
         ):
-            with self.assertRaises(
-                torch.onnx.errors.OnnxExporterError,
-            ):
+            if self.opset_version < 20:
+                with self.assertRaises(
+                    torch.onnx.errors.OnnxExporterError,
+                ):
+                    self.run_test(
+                        GridSampleModule(mode, padding_mode, align_corners),
+                        (volumetric_input_tensor, volumetric_grid_tensor),
+                        **atol_rtol,
+                    )
+            else:
                 self.run_test(
-                    TestONNXRuntime.GridSampleModule(mode, padding_mode, align_corners),
+                    GridSampleModule(mode, padding_mode, align_corners),
                     (volumetric_input_tensor, volumetric_grid_tensor),
                     **atol_rtol,
                 )
+
 
     class IfNoneInput(torch.nn.Module):
         def forward(self, x) -> Optional[Tensor]:

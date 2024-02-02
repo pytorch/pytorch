@@ -50,7 +50,7 @@ def grid_sampler(
     )
 
 @_onnx_symbolic("aten::affine_grid_generator")
-@symbolic_helper.parse_args("v", "is", "b")
+@symbolic_helper.parse_args("v", "v", "b")
 @_beartype.beartype
 def affine_grid(
     g: jit_utils.GraphContext,

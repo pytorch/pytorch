@@ -482,13 +482,48 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
 
     def test_affine_grid(self):
         class MyModule(Module):
-            def forward(self, theta, size, align_corners):
+            def __init__(self, align_corners):
+                super(MyModule, self).__init__()
+                self.align_corners = align_corners
+
+            def forward(self, theta, size):
                 return torch.nn.functional.affine_grid(
-                    theta, size, align_corners
+                    theta, size, align_corners=self.align_corners
                 )
+                # return torch.affine_grid_generator(
+                #     theta, size, align_corners=self.align_corners
+                # )
 
         opset_version = 20
-        ops = {opset_version: [{"op_name": "AffineGrid"}]}
+        ops_2d = {opset_version:
+            [
+                {"op_name": "Constant"},
+                {"op_name": "Unsqueeze"},
+                {"op_name": "Constant"},
+                {"op_name": "Unsqueeze"},
+                {"op_name": "Constant"},
+                {"op_name": "Unsqueeze"},
+                {"op_name": "Constant"},
+                {"op_name": "Unsqueeze"},
+                {"op_name": "Concat"},
+                {"op_name": "AffineGrid"},
+                ]}
+
+        ops_3d = {opset_version:
+            [
+                {"op_name": "Constant"},
+                {"op_name": "Unsqueeze"},
+                {"op_name": "Constant"},
+                {"op_name": "Unsqueeze"},
+                {"op_name": "Constant"},
+                {"op_name": "Unsqueeze"},
+                {"op_name": "Constant"},
+                {"op_name": "Unsqueeze"},
+                {"op_name": "Constant"},
+                {"op_name": "Unsqueeze"},
+                {"op_name": "Concat"},
+                {"op_name": "AffineGrid"},
+                ]}
         # 2D affine
         theta_2d = torch.empty(1, 2, 3, dtype=torch.double)
         size_2d = torch.Size([1, 1, 2, 2])
@@ -497,20 +532,20 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
         size_3d = torch.Size([1, 1, 2, 2, 2])
 
         for inputs, align_corners in itertools.product(
-            ((theta_2d, size_2d), (theta_3d, size_3d)),
+            ((theta_2d, size_2d, ops_2d), (theta_3d, size_3d, ops_3d)),
             (True, False),
         ):
-            theta, size = inputs
-            args = (theta, size, align_corners,)
+            theta, size, ops = inputs
+            args = (theta, size, )
             check_onnx_opsets_operator(
-                MyModule(),
+                MyModule(align_corners=align_corners),
                 args,
                 ops,
                 opset_versions=[opset_version],
                 training=torch.onnx.TrainingMode.TRAINING,
             )
             check_onnx_opsets_operator(
-                MyModule(),
+                MyModule(align_corners=align_corners),
                 args,
                 ops,
                 opset_versions=[opset_version],
@@ -518,10 +553,20 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
             )
 
     def test_grid_sample(self):
-        class MyModule(Module):
-            def forward(self, x, grid, mode, padding_mode, align_corers):
+        class MyModule(torch.nn.Module):
+            def __init__(self, mode, padding_mode, align_corners):
+                super(MyModule, self).__init__()
+                self.mode = mode
+                self.padding_mode = padding_mode
+                self.align_corners = align_corners
+
+            def forward(self, x, grid):
                 return torch.nn.functional.grid_sample(
-                    x, grid, mode, padding_mode, align_corners
+                    x,
+                    grid,
+                    mode=self.mode,
+                    padding_mode=self.padding_mode,
+                    align_corners=self.align_corners
                 )
 
         from torch.onnx.symbolic_opset20 import convert_grid_sample_mode
@@ -530,49 +575,53 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
             ("zeros", "border", "reflection"),
             (True, False), (16, 20)
         ):
-            def test_eval_and_training(ops, opset_version, mode, padding_mode, align_corners, x_shape, grid):
+            def test_eval_and_training(
+                ops,
+                opset_version,
+                mode,
+                padding_mode,
+                align_corners,
+                x_shape,
+                grid):
                 args = (
                     torch.randn(*x_shape),  # x
                     torch.randn(grid),  # grid,
-                    mode,
-                    padding_mode,
-                    align_corners,
                 )
                 check_onnx_opsets_operator(
-                    MyModule(),
+                    MyModule(mode=mode, padding_mode=padding_mode, align_corners=align_corners),
                     args,
                     ops,
                     opset_versions=[opset_version],
                     training=torch.onnx.TrainingMode.TRAINING,
                 )
                 check_onnx_opsets_operator(
-                    MyModule(),
+                    MyModule(mode=mode, padding_mode=padding_mode, align_corners=align_corners),
                     args,
                     ops,
                     opset_versions=[opset_version],
                     training=torch.onnx.TrainingMode.EVAL,
                 )
 
-        ops = {opset_version: [{"op_name": "GridSample"}]}
-        # mode = convert_grid_sample_mode(mode) if opset_version == 20 else mode
-        n, c, d_in, h_in, w_in, d_out, h_out, w_out = 1, 1, 2, 3, 2, 3, 2, 4
-        test_eval_and_training(
-            ops,
-            opset_version,
-            mode,
-            padding_mode,
-            align_corners,
-            (n, c, h_in, w_in),
-            (n, h_out, w_out, 2))
-        if opset_version == 20 and mode != "bicubic":
+            ops = {opset_version: [{"op_name": "GridSample"}]}
+            # mode = convert_grid_sample_mode(mode) if opset_version == 20 else mode
+            n, c, d_in, h_in, w_in, d_out, h_out, w_out = 1, 1, 2, 3, 2, 3, 2, 4
             test_eval_and_training(
                 ops,
                 opset_version,
                 mode,
                 padding_mode,
                 align_corners,
-                (n, c, d_in, h_in, w_in),
-                (n, d_out, h_out, w_out, 3))
+                (n, c, h_in, w_in),
+                (n, h_out, w_out, 2))
+            if opset_version == 20 and mode != "bicubic":
+                test_eval_and_training(
+                    ops,
+                    opset_version,
+                    mode,
+                    padding_mode,
+                    align_corners,
+                    (n, c, d_in, h_in, w_in),
+                    (n, d_out, h_out, w_out, 3))
 
     def test_flatten(self):
         class MyModule(Module):
