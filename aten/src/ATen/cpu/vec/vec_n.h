@@ -4,6 +4,21 @@
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
 
+/**
+ * @brief A class template representing a vectorized type with
+ * `N * Vectorized<T>::size()` elements, aiming to support vectors of
+ * arbitrary size. A specific use case of it is to represent vectors
+ * converted from data types with different sizes but with the same
+ * number of vector elements, e.g., `VectorizedN<float, 2>` can be
+ * a vector converted from two `Vectorized<bfloat16>`, `VectorizedN<int64_t, 2>`
+ * can be a vector converted from two `Vectorized<int32_t>` etc.
+ * 
+ * It supports most of the operations of `Vectorized<T>`
+ * and the implementation delegates to `Vectorized<T>` with loops over `N`.
+ *
+ * @tparam T The underlying type of the vectorized elements.
+ * @tparam N The number of underlying `Vectorized<T>`.
+ */
 template <typename T, int N>
 class VectorizedN {
  public:

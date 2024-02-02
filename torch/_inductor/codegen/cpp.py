@@ -89,7 +89,9 @@ DTYPE_TO_ATEN = {
     torch.uint64: "at::kUInt64",
     torch.bool: "at::kBool",
     torch.bfloat16: "at::kBFloat16",
+    torch.complex32: "at::kComplexHalf",
     torch.complex64: "at::kComplexFloat",
+    torch.complex128: "at::kComplexDouble",
     torch.float8_e4m3fn: "at::kFloat8_e4m3fn",
     torch.float8_e5m2: "at::kFloat8_e5m2",
     torch.float8_e4m3fnuz: "at::kFloat8_e4m3fnuz",
@@ -929,6 +931,10 @@ class CppOverrides(OpOverrides):
         code.writeline(f"auto {result} = {left} - {right};")
         V.kernel.compute.splice(code)
         return result
+
+    @staticmethod
+    def bessel_j0(x):
+        return f"bessel_j0_forward({x})"
 
 
 class CppVecOverrides(CppOverrides):
@@ -2024,6 +2030,9 @@ class CppVecKernel(CppKernel):
         assert dtype == src_dtype
         assert dtype in [torch.float, torch.int64]
         assert isinstance(value, CppCSEVariable) and value.is_vec, value
+
+        if not value.is_vec:
+            value = self.broadcast(value)
 
         acc_type = reduction_acc_type(reduction_type, dtype)
         acc_type_vec = self.reduction_acc_type_vec(reduction_type, dtype)
