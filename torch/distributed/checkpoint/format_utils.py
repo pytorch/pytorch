@@ -69,7 +69,7 @@ def dcp_to_torch_save(
             if dist is not available.
     """
     is_dist = dist.is_available() and dist.is_initialized()
-    if is_dist or dist.get_rank() == coordinator_rank:
+    if not is_dist or dist.get_rank() == coordinator_rank:
         sd = {}
         storage_reader = FileSystemReader(dcp_checkpoint_dir)
 
