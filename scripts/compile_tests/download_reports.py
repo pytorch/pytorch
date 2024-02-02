@@ -45,7 +45,7 @@ def download_reports(commit_sha, configs=("dynamo38", "dynamo311", "eager311")):
         missing_configs.append(config)
     if len(missing_configs) == 0:
         print(
-            "All required logs appear to exist, not downloading again. rm the log dir if this is not the case"
+            f"All required logs appear to exist, not downloading again. Run `rm -rf {log_dir}` if this is not the case"
         )
         return subdir_paths
 
@@ -90,6 +90,10 @@ def download_reports(commit_sha, configs=("dynamo38", "dynamo311", "eager311")):
     if not os.path.exists(log_dir):
         os.mkdir(log_dir)
 
+    for config in set(configs) - set(missing_configs):
+        print(
+            f"Logs for {config} already exist, not downloading again. Run `rm -rf {subdir_path(config)}` if this is not the case."
+        )
     for config in missing_configs:
         subdir = subdir_path(config)
         os.mkdir(subdir)
