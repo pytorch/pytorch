@@ -1419,7 +1419,7 @@ def _convert_all_state_info(
                 )
                 gathered_state[name] = scalar_tensor_value
 
-    return dtype, state_buffers
+    return dtype, state_buffers  # type: ignore[possibly-undefined]
 
 
 def _unflatten_orig_param_states(
