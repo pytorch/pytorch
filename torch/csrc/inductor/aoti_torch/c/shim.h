@@ -92,11 +92,17 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float16();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float32();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float64();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_uint8();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_uint16();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_uint32();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_uint64();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int8();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int16();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int32();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int64();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_bool();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex32();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex64();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex128();
 
 // Functions for converting a single-element tensor to a scalar value
 AOTI_TORCH_EXPORT AOTITorchError
@@ -256,6 +262,22 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob(
     AtenTensorHandle* ret // returns new reference
 );
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__embedding_bag(
+    AtenTensorHandle weight,
+    AtenTensorHandle indices,
+    AtenTensorHandle offsets,
+    int32_t scale_grad_by_freq,
+    int32_t mode,
+    int32_t sparse,
+    AtenTensorHandle per_sample_weights, // optional argument
+    int32_t include_last_offset,
+    int32_t padding_idx,
+    AtenTensorHandle* ret0, // returns new reference
+    AtenTensorHandle* ret1, // returns new reference
+    AtenTensorHandle* ret2, // returns new reference
+    AtenTensorHandle* ret3 // returns new reference
+);
+
 // This version is deprecated. We will remove it later
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
     AtenTensorHandle query,
@@ -284,7 +306,7 @@ aoti_torch__scaled_dot_product_flash_attention_v2(
     double dropout_p,
     int is_causal,
     int return_debug_mask,
-    double* scale,
+    double* scale, // optional argument
     AtenTensorHandle* ret0, // returns new reference
     AtenTensorHandle* ret1, // returns new reference
     AtenTensorHandle* ret2, // returns new reference
@@ -414,6 +436,12 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_index_put_out(
     const uint32_t num_indices,
     const AtenTensorHandle values,
     bool accumulate);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_view_dtype(
+    AtenTensorHandle self,
+    int32_t dtype,
+    AtenTensorHandle* ret // returns new reference
+);
 
 #ifdef USE_CUDA
 
