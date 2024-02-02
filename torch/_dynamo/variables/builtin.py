@@ -24,7 +24,7 @@ from ..exc import (
 )
 from ..guards import GuardBuilder, install_guard
 from ..replay_record import DummyModule
-from ..source import AttrSource, GetItemSource, is_constant_source, TypeSource
+from ..source import AttrSource, is_constant_source, TypeSource
 from ..utils import (
     build_checkpoint_variable,
     check_constant_args,
@@ -1223,22 +1223,8 @@ class BuiltinVariable(VariableTracker):
             builder = SourcelessBuilder()
             source = None
 
-        if name == "__bases__":
-            try:
-                value = obj.as_python_constant()
-                if isinstance(value, type):
-                    bases = value.__bases__
-                    if source is not None:
-                        tuple_args = [
-                            VariableBuilder(tx, GetItemSource(source, i))(b)
-                            for i, b in enumerate(bases)
-                        ]
-                    else:
-                        tuple_args = [SourcelessBuilder()(tx, b) for b in bases]
-
-                    return variables.TupleVariable(tuple_args, **options)
-            except NotImplementedError:
-                pass
+        if obj.is_python_constant() and hasattr(obj.as_python_constant(), name):
+            return builder(getattr(obj.as_python_constant(), name))
 
         if isinstance(obj, variables.NNModuleVariable):
             return obj.var_getattr(tx, name)
@@ -1283,7 +1269,7 @@ class BuiltinVariable(VariableTracker):
                                 )
                             else:
                                 grapharg.example.grad = None
-                        return VariableBuilder(tx, source)(grapharg.example.grad)
+                        return builder(grapharg.example.grad)
 
                 return obj.dynamic_getattr(tx, name)
             else:
@@ -1291,14 +1277,10 @@ class BuiltinVariable(VariableTracker):
                 if example_value.grad is not None:
                     unimplemented("getattr on non-None grad - NYI")
                 return ConstantVariable(None)
-        elif obj.is_python_constant() and hasattr(obj.as_python_constant(), name):
-            return builder(getattr(obj.as_python_constant(), name))
         elif isinstance(
             obj,
             (
                 variables.TensorVariable,
-                variables.NamedTupleVariable,
-                variables.UserDefinedClassVariable,
                 variables.UserDefinedObjectVariable,
             ),
         ):
@@ -1321,12 +1303,8 @@ class BuiltinVariable(VariableTracker):
                 tx.exec_recorder.record_module_access(obj.value, name, member)
 
             if is_utils_checkpoint(member):
-                options["source"] = source
                 return build_checkpoint_variable(**options)
-            elif source is not None:
-                return VariableBuilder(tx, source)(member)
-            else:
-                return SourcelessBuilder()(tx, member)
+            return builder(member)
         elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):
             return ConstantVariable.create(getattr(obj.fn, name))
         else:
