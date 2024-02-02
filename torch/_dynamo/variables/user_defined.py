@@ -91,7 +91,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         from .. import trace_rules
         from . import ConstantVariable
-        from .builder import VariableBuilder
+        from .builder import SourcelessBuilder, VariableBuilder
 
         if name == "__name__":
             return ConstantVariable.create(self.value.__name__)
@@ -110,8 +110,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return variables.UserFunctionVariable(func, source=source)
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
-        elif source and inspect.ismemberdescriptor(obj):
-            return VariableBuilder(tx, source)(obj.__get__(self.value))
+        elif inspect.ismemberdescriptor(obj) or inspect.isdatadescriptor(obj):
+            builder = VariableBuilder(tx, source) if source else SourcelessBuilder
+            return builder(obj.__get__(self.value))
 
         # Special handling of collections.OrderedDict.fromkeys()
         # Wrap it as GetAttrVariable(collections.OrderedDict, "fromkeys") to make it consistent with

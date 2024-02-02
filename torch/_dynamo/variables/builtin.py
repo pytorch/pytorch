@@ -1218,7 +1218,9 @@ class BuiltinVariable(VariableTracker):
         if obj.source:
             source = AttrSource(obj.source, name)
             options["source"] = source
+            builder = VariableBuilder(tx, source)
         else:
+            builder = SourcelessBuilder()
             source = None
 
         if name == "__bases__":
@@ -1289,12 +1291,13 @@ class BuiltinVariable(VariableTracker):
                 if example_value.grad is not None:
                     unimplemented("getattr on non-None grad - NYI")
                 return ConstantVariable(None)
+        elif obj.is_python_constant() and hasattr(obj.as_python_constant(), name):
+            return builder(getattr(obj.as_python_constant(), name))
         elif isinstance(
             obj,
             (
                 variables.TensorVariable,
                 variables.NamedTupleVariable,
-                variables.ConstantVariable,
                 variables.UserDefinedClassVariable,
                 variables.UserDefinedObjectVariable,
             ),
