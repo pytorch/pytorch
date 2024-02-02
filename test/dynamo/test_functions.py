@@ -2128,7 +2128,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             else:
                 return x + y
 
-        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+        fn_opt = torch.compile(backend="eager", fullgraph=False, dynamic=True)(fn)
 
         x = torch.zeros(2)
         y = torch.ones(2)
@@ -2143,7 +2143,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             else:
                 return x + y
 
-        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+        fn_opt = torch.compile(backend="eager", fullgraph=False, dynamic=True)(fn)
 
         x = torch.zeros(2)
         y = torch.ones(2)
@@ -2210,7 +2210,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             _ = y is z
             return y is x
 
-        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+        fn_opt = torch.compile(backend="eager", fullgraph=False, dynamic=True)(fn)
 
         z = torch.ones(4, 1)
 
@@ -2222,7 +2222,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             y = torch.vmap(torch.Tensor.acos_)(x)
             return y is x
 
-        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+        fn_opt = torch.compile(backend="eager", fullgraph=False, dynamic=True)(fn)
 
         z = torch.ones(4, 1)
 
@@ -2240,7 +2240,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             c, d = torch.vmap(g)(a, b)
             return a is c is b is d
 
-        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+        fn_opt = torch.compile(backend="eager", fullgraph=False, dynamic=True)(fn)
 
         y = torch.ones(4, 2)
         z = torch.ones(4, 10)

@@ -1630,8 +1630,8 @@ class BuiltinVariable(VariableTracker):
                 elif id(extract_fake_example_value(left.as_proxy().node)) == id(
                     extract_fake_example_value(right.as_proxy().node)
                 ):
-                    # if is_match is false, result actual result can still be true.
-                    # but if is_match then its true.
+                    # if the above condition is false, result actual result can still be
+                    # true ex:
                     #  x = np.True_
                     #  z = x | x
                     #  assert(x is z) => should be true, would give false
