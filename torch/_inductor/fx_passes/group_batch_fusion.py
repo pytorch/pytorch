@@ -2,7 +2,18 @@ import collections
 import logging
 import operator
 from collections import OrderedDict
-from typing import Any, DefaultDict, Deque, Dict, Iterator, List, Optional, Set, Tuple, Iterable
+from typing import (
+    Any,
+    DefaultDict,
+    Deque,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Set,
+    Tuple,
+)
 
 import torch
 from torch._dynamo.utils import counters
