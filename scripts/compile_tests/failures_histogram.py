@@ -32,6 +32,12 @@ def skip_reason_normalized(testcase):
         result = re.sub(r"0x\w+", "0xDEADBEEF", result)
         result = re.sub(r"MagicMock id='\d+'", "MagicMock id='0000000000'", result)
         result = re.sub(r"issues/\d+", "issues/XXX", result)
+        result = re.sub(r"torch.Size\(\[.*\]\)", "torch.Size([...])", result)
+        result = re.sub(
+            r"Could not get qualified name for class '.*'",
+            "Could not get qualified name for class",
+            result,
+        )
         return result
     raise AssertionError("no message?")
 
@@ -60,7 +66,7 @@ def all_tests(testcase):
 
 
 # e.g. "17c5f69852/eager", "17c5f69852/dynamo"
-def failures_histogram(eager_dir, dynamo_dir, verbose=False):
+def failures_histogram(eager_dir, dynamo_dir, verbose=False, format_issues=False):
     fail_keys = compute_pass_rate(eager_dir, dynamo_dir)
     xmls = open_test_results(dynamo_dir)
 
@@ -89,8 +95,38 @@ def failures_histogram(eager_dir, dynamo_dir, verbose=False):
     print(header)
     sum_counts = sum([r[0] for r in result])
     for row in result:
-        print(row)
+        if format_issues:
+            print(as_issue(*row))
+        else:
+            print(row)
     print("[counts]", sum_counts)
+
+
+def as_issue(count, msg, repro, tests):
+    tests = "\n".join(tests)
+    result = f"""
+{'-' * 50}
+{count} Dynamo test are failing with \"{msg}\".
+
+## Repro
+
+`{repro}`
+
+You will need to remove the skip or expectedFailure before running the repro command.
+This may be just removing a line in
+[dynamo_test_failures.py](https://github.com/pytorch/pytorch/blob/main/torch/testing/_internal/dynamo_test_failures.py)
+
+## Failing tests
+
+Here's a comprehensive list of tests that fail (as of this issue) with the above message:
+<details>
+<summary>Click me</summary>
+```
+{tests}
+```
+</details>
+"""
+    return result
 
 
 if __name__ == "__main__":
@@ -105,5 +141,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "-v", "--verbose", help="Prints all failing test names", action="store_true"
     )
+    parser.add_argument(
+        "--format-issues",
+        help="Prints histogram in a way that they can be copy-pasted as a github issues",
+        action="store_true",
+    )
     args = parser.parse_args()
-    failures_histogram(args.eager_dir, args.dynamo_dir, args.verbose)
+
+    # args.format_issues implies verbose=True
+    verbose = args.verbose
+    if args.format_issues:
+        verbose = True
+
+    failures_histogram(args.eager_dir, args.dynamo_dir, verbose, args.format_issues)
