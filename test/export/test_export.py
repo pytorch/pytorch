@@ -1734,6 +1734,8 @@ def forward(self, arg_0):
                 1
             )
 
+    # map_fn references module outside the module hierarchy
+    @unittest.expectedFailure
     def test_map_buffers(self):
         class M1(torch.nn.Module):
             def __init__(self):
@@ -1907,8 +1909,8 @@ def forward(self, arg_0):
         ep = export(Foo(), (torch.tensor(1),))
 
         self.assertEqual(len(ep.graph_signature.input_specs), 4)
-        self.assertEqual(len(ep.state_dict), 1)
-        self.assertEqual(len(ep.constants), 2)
+        self.assertEqual(len(ep.state_dict), 0)
+        self.assertEqual(len(ep.constants), 3)
 
         inp = (torch.tensor(5),)
         self.assertTrue(torch.allclose(ep.module()(*inp), Foo()(*inp)))
@@ -2540,6 +2542,28 @@ def forward(self, l_x_):
         self.assertEqual(inputs[0][0] * 2.0, inputs_model[0][0])
         self.assertEqual(inputs[0][0] * 2.0, inputs_export[0][0])
 
+    def test_export_input_mutation_bug(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x[:, :2, :] = x[:,:2,:] + 1
+                return x
+
+        inputs = (torch.ones(4,4,4),)
+        ep = torch.export.export(M(), inputs)
+        m = ep.module()
+
+        # Make the name conflict with a placeholder name that we get from
+        # aot_export
+        for i, node in enumerate(m.graph.nodes):
+            if node.op == "placeholder":
+                node.name = f"arg0_{i + 1}"
+        m.recompile()
+
+        ep = torch.export.export(m, inputs)
+
+        inputs = (torch.randn(4,4,4),)
+        self.assertEqual(ep.module()(*copy.deepcopy(inputs)), M()(*copy.deepcopy(inputs)))
+
     def test__scaled_dot_product_flash_attention(self):
         class Module(torch.nn.Module):
             def forward(self, q, k, v):
@@ -2897,6 +2921,33 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         # this doesn't work today
         gm_unflat_strict = unflatten(ep)
+
+    def test_non_persistent_buffer(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("foo", torch.rand(2, 3), persistent=False)
+
+            def forward(self, x):
+                return self.foo + x
+
+        inp = torch.rand(2, 3)
+        m = MyModule()
+        ep = export(m, (inp,), {})
+
+        self.assertEqual(ep(inp), m(inp))
+        # Non-persistent buffers should not show up in the state dict
+        self.assertNotIn("foo", ep.state_dict)
+        named_buffers = {name: buffer for (name, buffer) in ep.named_buffers()}
+        # But they should show up in named_buffers()
+        self.assertIn("foo", named_buffers)
+
+        # Check the same properties of the unlifted module
+        mod = ep.module()
+        self.assertNotIn("foo", mod.state_dict())
+        mod_named_buffers = {name: buffer for (name, buffer) in mod.named_buffers()}
+        self.assertIn("foo", mod_named_buffers)
+        self.assertEqual(mod(inp), m(inp))
 
     def test_nonstrict_retrace_preserves_metadata(self):
         class MyModule(torch.nn.Module):
