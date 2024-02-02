@@ -393,6 +393,17 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         compl_fn = torch.compile(fn, dynamic=True, backend="eager", fullgraph=True)
         self.assertEqual(compl_fn(inputs, dim), fn(inputs, dim))
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_item_max(self):
+        def fn(x):
+            return torch.ones(max(x.item(), 1024))
+
+        x = torch.tensor([1000])
+        y = torch.tensor([2000])
+        compl_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), compl_fn(x))
+        self.assertEqual(fn(y), compl_fn(y))
+
     # https://github.com/pytorch/pytorch/issues/104812
     def test_argmin_coerces_symint_to_intlist_spec(self):
         def fn(x, dim):
