@@ -413,6 +413,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   c10::intrusive_ptr<Work> endCoalescing() override;
 
+  // For specifying a composite optype, such as ALLGATHER and REDUCE_SCATTER
+  c10::intrusive_ptr<Work> endCoalescing(OpType optype);
+
   c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = BroadcastOptions()) override;

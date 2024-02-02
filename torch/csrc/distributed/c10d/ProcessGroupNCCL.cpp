@@ -2210,7 +2210,9 @@ void ProcessGroupNCCL::startCoalescing() {
   groupStart();
 }
 
-c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
+// `optype` is for specifying a composite optype, such as ALLGATHER and
+// REDUCE_SCATTER
+c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   if (coalescedComms_.size() == 0) {
     // There is no actual work being coalesced, return here
     groupEnd();
@@ -2222,27 +2224,31 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   // `coalescedDevices_` should have same set of devices across collectives
   auto device = coalescedDevices_[0];
 
+  // `getKeyFromDevice` is how we get keys for both collectives and batch P2P
+  const auto key = getKeyFromDevice(device);
+  auto ncclStream = ncclStreams_.at(key);
+
+  // Create Work object
+  auto work = initWork(device, rank_, optype, "nccl:coalesced");
+  work->ncclComm_ = comm;
+  work->blockingWait_ = blockingWait_;
+  work->avoidRecordStreams_ = avoidRecordStreams_;
+  work->opTimeout_ = options_->timeout;
+  work->store_ = store_;
+  // Record start before ncclGroupEnd
+  if (work->timingEnabled_) {
+    work->ncclStartEvent_->record(ncclStream);
+  }
+
   if (nccl_use_nonblocking()) {
     groupEndNonblocking(comm);
   } else {
     groupEnd();
   }
 
-  // Create Work object
-  auto work = initWork(device, rank_, OpType::COALESCED, "nccl:coalesced");
-
-  // Record stream event
-  // `getKeyFromDevice` is how we get keys for both collectives and batch P2P
-  const auto key = getKeyFromDevice(device);
-  auto ncclStream = ncclStreams_.at(key);
+  // Record end after ncclGroupEnd
   // TODO(eqy): is this still necessary if avoidRecordStreams_ is set?
   work->ncclEndEvent_->record(ncclStream);
-  work->ncclComm_ = comm;
-  // Set appropriate work parameters.
-  work->blockingWait_ = blockingWait_;
-  work->avoidRecordStreams_ = avoidRecordStreams_;
-  work->opTimeout_ = options_->timeout;
-  work->store_ = store_;
 
   if (avoidRecordStreams_) {
     // other functions expect an initialized ptr if avoidRecordStreams_ is set
@@ -2266,8 +2272,12 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   }
 
   coalescing_state_ = 0;
-
   return work;
+}
+
+c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
+  // Default OpType to COALESCED if not specified
+  return endCoalescing(OpType::COALESCED);
 }
 
 template <typename Fn, typename PreProcess, typename PostProcess>
@@ -3132,6 +3142,25 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
   // @lint-ignore CLANGTIDY
   auto outputTensors_ = outputTensors.back();
 
+  RECORD_PARAM_COMMS_DATA(
+      static_cast<int>(
+          this->getSequenceNumberForGroup() +
+          1), // seq + 1 to match collective
+      this->getID(),
+      inputTensors, // inputTensors
+      outputTensors, // outputTensors
+      rank_, // rank
+      "all_gather", // colName
+      inputTensor.numel(), // inNelems
+      inputTensor.numel() * // outNelems
+          this->getSize(),
+      inputTensor.scalar_type(), // dType
+      std::vector<int64_t>(), // inSplitSizes
+      std::vector<int64_t>(), // outSplitSize
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
+      this->getSize()); // worldSize
+
   // TODO(kwen2501): re-enable old path
 #if 1
   if (false) {
@@ -3140,25 +3169,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
   if (same_size) {
     auto outputFlattened =
         flatten_for_scatter_gather(outputTensors, inputTensors, size_);
-
-    RECORD_PARAM_COMMS_DATA(
-        static_cast<int>(
-            this->getSequenceNumberForGroup() +
-            1), // seq + 1 to match collective
-        this->getID(),
-        inputTensors, // inputTensors
-        outputTensors, // outputTensors
-        rank_, // rank
-        "all_gather", // colName
-        tensor.numel(), // inNelems
-        tensor.numel() * // outNelems
-            this->getSize(),
-        tensor.scalar_type(), // dType
-        std::vector<int64_t>(), // inSplitSizes
-        std::vector<int64_t>(), // outSplitSize
-        globalRankStart, // globalRankStart
-        globalRankStride, // globalRankStride
-        this->getSize()); // worldSize
 
     return collective(
         inputTensors,
@@ -3220,7 +3230,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
           static_cast<int64_t>(i), static_cast<int64_t>(0), opts.timeout};
       _broadcast_oop(output, input, broadcastOpts);
     }
-    auto work = endCoalescing();
+    auto work = endCoalescing(OpType::ALLGATHER);
     return work;
   }
 }
@@ -3268,6 +3278,24 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
   // @lint-ignore CLANGTIDY
   auto inputTensors_ = inputTensors.back();
 
+  RECORD_PARAM_COMMS_DATA(
+      static_cast<int>(
+          this->getSequenceNumberForGroup() +
+          1), // seq + 1 to match collective
+      this->getID(),
+      inputTensors, // inputTensors
+      outputTensors, // outputTensors
+      rank_, // rank
+      "reduce_scatter", // colName
+      outputTensor.numel() * this->getSize(), // inNelems
+      outputTensor.numel(), // outNelems
+      outputTensor.scalar_type(), // dType
+      std::vector<int64_t>(), // inSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
+      this->getSize()); // worldSize
+
   // TODO(kwen2501): re-enable old path
 #if 1
   if (false) {
@@ -3280,24 +3308,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
     int dev_in_group{0};
     auto inputFlattened =
         flatten_for_scatter_gather(inputTensors, outputTensors, size_);
-
-    RECORD_PARAM_COMMS_DATA(
-        static_cast<int>(
-            this->getSequenceNumberForGroup() +
-            1), // seq + 1 to match collective
-        this->getID(),
-        inputTensors, // inputTensors
-        outputTensors, // outputTensors
-        rank_, // rank
-        "reduce_scatter", // colName
-        tensor.numel() * this->getSize(), // inNelems
-        tensor.numel(), // outNelems
-        tensor.scalar_type(), // dType
-        std::vector<int64_t>(), // inSplitSizes
-        std::vector<int64_t>(), // outSplitSizes
-        globalRankStart, // globalRankStart
-        globalRankStride, // globalRankStride
-        this->getSize()); // worldSize
 
     return collective(
         inputFlattened,
@@ -3371,7 +3381,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
           opts.timeout};
       _reduce_oop(output, input, reduceOpts);
     }
-    auto work = endCoalescing();
+    auto work = endCoalescing(OpType::REDUCE_SCATTER);
     return work;
   }
 }
