@@ -3234,6 +3234,8 @@ def smooth_l1_loss(
     reduction: str = "mean",
     beta: float = 1.0,
 ) -> Tensor:
+    if reduction != 'sum':
+        raise ValueError("smooth_l1_loss only supports reduction='sum'")
     r"""Compute the Smooth L1 loss.
 
     Function uses a squared term if the absolute
