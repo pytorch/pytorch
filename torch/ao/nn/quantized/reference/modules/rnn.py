@@ -435,7 +435,7 @@ class LSTM(RNNBase):
             hx = (h_zeros, c_zeros)
         else:
             if batch_sizes is None:  # If not PackedSequence input.
-                if is_batched:
+                if is_batched:  # type: ignore[possibly-undefined]
                     if (hx[0].dim() != 3 or hx[1].dim() != 3):
                         msg = ("For batched 3-D input, hx and cx should "
                                f"also be 3-D but got ({hx[0].dim()}-D, {hx[1].dim()}-D) tensors")
@@ -465,8 +465,8 @@ class LSTM(RNNBase):
             output_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
             return output_packed, self.permute_hidden(hidden, unsorted_indices)
         else:
-            if not is_batched:
-                output = output.squeeze(batch_dim)
+            if not is_batched:  # type: ignore[possibly-undefined]
+                output = output.squeeze(batch_dim)  # type: ignore[possibly-undefined]
                 hidden = (hidden[0].squeeze(1), hidden[1].squeeze(1))
             return output, self.permute_hidden(hidden, unsorted_indices)
 
@@ -589,8 +589,8 @@ class GRU(RNNBase):
             output_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
             return output_packed, self.permute_hidden(hidden, unsorted_indices)
         else:
-            if not is_batched:
-                output = output.squeeze(batch_dim)
+            if not is_batched:  # type: ignore[possibly-undefined]
+                output = output.squeeze(batch_dim)  # type: ignore[possibly-undefined]
                 hidden = hidden.squeeze(1)
 
             return output, self.permute_hidden(hidden, unsorted_indices)
