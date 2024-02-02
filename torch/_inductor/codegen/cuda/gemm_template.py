@@ -1440,7 +1440,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                             dtype=mbb_layout.dtype,
                             size=maybe_bias_size,  # type: ignore[arg-type]
                             stride=maybe_bias_stride,
-                            offset=maybe_bias_offset,
+                            offset=maybe_bias_offset,  # type: ignore[arg-type]
                         )
                         MaybeBiasNew = ir.ReinterpretView(
                             MaybeBias, reinterpret_mbb_layout

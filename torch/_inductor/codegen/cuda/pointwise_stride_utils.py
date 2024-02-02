@@ -51,7 +51,7 @@ def map_pointwise_index_to_read_strides(
         sym_idx_map[-1] = len(master_layout.stride) - 2
         sym_idx_map[-2] = len(master_layout.stride) - 1
     for i in range(len(free_symbols)):
-        sym_name = free_symbols[i].name
+        sym_name = free_symbols[i].name  # type: ignore[attr-defined]
         assert sym_name[0] == "i"
         sym_idx = sym_idx_map[int(sym_name[1:])]
         assert sym_idx >= 0 and sym_idx < len(
@@ -97,7 +97,7 @@ def index_to_stride_dict(index_expr: sympy.Expr) -> Dict[str, int]:
     """
     free_symbols = list(index_expr.free_symbols)
     subs = {sym: 0 for sym in free_symbols}
-    result = {sym.name: 0 for sym in free_symbols}
+    result = {sym.name: 0 for sym in free_symbols}  # type: ignore[attr-defined]
     offset = index_expr.evalf(subs=subs)
     assert (
         math.isfinite(offset) and offset >= 0.0
@@ -105,7 +105,7 @@ def index_to_stride_dict(index_expr: sympy.Expr) -> Dict[str, int]:
     offset = int(offset)
     result["offset"] = offset
     for i in range(len(free_symbols)):
-        sym_name = free_symbols[i].name
+        sym_name = free_symbols[i].name  # type: ignore[attr-defined]
         assert sym_name[0] == "i"
         if i > 0:
             subs[free_symbols[i - 1]] = 0
@@ -162,6 +162,8 @@ def extract_pointwise_load_strides(
     """
     if isinstance(node, ir.ComputedBuffer):
         pointwise_node = node.data
+    else:
+        pointwise_node = None
     reference_layout = reference_buffer.get_layout()
     assert isinstance(
         reference_layout, ir.FixedLayout
@@ -226,9 +228,9 @@ def extract_pointwise_load_strides(
                     f"Buffer {name} is being read with stride {stride} ( index name: {index_name} ) that has no corresponding existing dimension in reference buffer {reference_buffer.name}."  # noqa: B950
                 )
             buffer_strides[dim] = stride
-            buffer_sizes[dim] = reference_layout.size[
-                dim
-            ]  # we take the size from the reference layout, all broadcasted dimensions set to 1
+            buffer_sizes[dim] = int(
+                reference_layout.size[dim]  # type: ignore[call-overload]
+            )  # we take the size from the reference layout, all broadcasted dimensions set to 1
         result[name] = (buffer_strides, buffer_offset, buffer_sizes)
     return result
 
@@ -238,6 +240,8 @@ def extract_epilogue_storage_layout(
 ) -> Tuple[List[int], List[int]]:
     if isinstance(epilogue_node, ir.ComputedBuffer):
         pointwise_node = epilogue_node.data
+    else:
+        pointwise_node = None
     target_layout = epilogue_node.get_layout()
     reference_layout = gemm_node.get_layout()
     assert isinstance(
@@ -263,7 +267,7 @@ def extract_epilogue_storage_layout(
         raise RuntimeError("Reference buffer not loaded by pointwise op")
     reference_strides = index_to_stride_dict(reference_index_expr)
     gemm_output_strides = [0] * len(reference_layout.stride)
-    gemm_output_sizes = list(reference_layout.size)
+    gemm_output_sizes = [int(i) for i in reference_layout.size]
     for name, stride in reference_strides.items():
         if name == "offset":
             continue
