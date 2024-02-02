@@ -314,7 +314,7 @@ def should_pad_bench(
             size=[batchsize, m, n],
             stride=[n * m, n, 1],
         )
-        if use_cutlass_template(fake_layout):
+        if use_cutlass_template(fake_layout, m, n, k):
             # We cannot use I/O efficient Cutlass templates if the alignment doesn't meet TMA requirements
             return True
 

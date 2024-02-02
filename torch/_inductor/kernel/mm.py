@@ -5,11 +5,13 @@ from typing import Any, Dict, List, Optional
 import torch
 from torch._inductor.virtualized import V
 from .. import config as inductor_config
+from ..codegen.common import ChoiceCaller
 from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
 from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
+    NoValidChoicesError,
     TritonTemplate,
 )
 from ..utils import (
@@ -121,11 +123,11 @@ aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
 @register_lowering(aten.mm, type_promotion_kind=None)
 def tuned_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
+    from torch._inductor.ir import FixedLayout, FlexibleLayout
 
-    # options to tune from
-    choices = [aten_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
-
-    if m * n != 0 and use_triton_template(layout):
+    choices: List[ChoiceCaller] = []
+    static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
+    if is_nonzero and use_triton_template(layout):
         for config in mm_configs(m, n, k):
             mm_template.maybe_append_choice(
                 choices,
@@ -134,26 +136,66 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 **mm_options(config, m, n, k, layout),
             )
 
-    if m * n != 0 and use_cutlass_template(layout):
-        CUTLASSGemmTemplate.add_cutlass_gemm_choices(
-            choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
-        )
-
-    from torch._inductor.ir import FixedLayout, FlexibleLayout
-
-    if (
-        len(choices) == 1
-        and use_aten_gemm_kernels()
-        and isinstance(layout, FixedLayout)
-    ):
-        # If we are not autotuning, we can swap to a FlexibleLayout
-        # in order to get fusion optimizations to kick in, e.g. ConcatFusion
-        layout = FlexibleLayout(
+    if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
+        out_layout = FlexibleLayout(
             device=layout.device, dtype=layout.dtype, size=layout.size
         )
-        choices = [aten_mm.bind((mat1, mat2), layout)]
+        CUTLASSGemmTemplate.add_cutlass_gemm_choices(
+            choices, out_layout, [mat1, mat2], fuseable=True, non_fuseable=True
+        )
 
-    return autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
+    use_aten = use_aten_gemm_kernels()
+
+    if len(choices) == 0 and not use_aten:
+        log.warning("No choices for GEMM, using ATen backend as fallback")
+        use_aten = True
+
+    if use_aten:
+        choices.extend([aten_mm.bind((mat1, mat2), layout)])
+        if len(choices) == 1 and isinstance(layout, FixedLayout):
+            # If we are not autotuning, we can swap to a FlexibleLayout
+            # in order to get fusion optimizations to kick in, e.g. ConcatFusion
+            out_layout = FlexibleLayout(
+                device=layout.device, dtype=layout.dtype, size=layout.size
+            )
+            choices = [aten_mm.bind((mat1, mat2), out_layout)]
+    try:
+        return autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
+    except NoValidChoicesError:
+        log.warning("All choices for GEMM were invalid, using ATen backend as fallback")
+        choices = [aten_mm.bind((mat1, mat2), layout)]
+        if len(choices) == 1 and isinstance(layout, FixedLayout):
+            # If we are not autotuning, we can swap to a FlexibleLayout
+            # in order to get fusion optimizations to kick in, e.g. ConcatFusion
+            layout = FlexibleLayout(
+                device=layout.device, dtype=layout.dtype, size=layout.size
+            )
+            return aten_mm.bind((mat1, mat2), layout).output_node()
+
+
+def _is_static_problem(inputs_tensors, layout):
+    # checks whether all input tensors and the output layout
+    # have a static shape by attempting to convert the dimensions
+    # to int
+    static_shape = True
+    nonzero = True
+    for dim in layout.size:
+        try:
+            a = int(dim)
+            if a == 0:
+                nonzero = False
+        except TypeError:
+            static_shape = False
+        for mat in inputs_tensors:
+            if mat is not None:
+                for dim in mat.get_size():
+                    try:
+                        a = int(dim)
+                        if a == 0:
+                            nonzero = False
+                    except TypeError:
+                        static_shape = False
+    return static_shape, nonzero
 
 
 @register_lowering(aten._int_mm, type_promotion_kind=None)
@@ -180,9 +222,10 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 @register_lowering(aten.addmm, type_promotion_kind=None)
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
-
+    choices = []
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
-    if m * n == 0 or not use_max_autotune():
+    static_shape, is_nonzero = _is_static_problem([inp, mat1, mat2], layout)
+    if (not is_nonzero) or (not use_max_autotune()):
         choices = (
             [
                 aten_addmm.bind(
@@ -197,36 +240,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             else []
         )
         return autotune_select_algorithm("addmm", choices, [inp, mat1, mat2], layout)
-
-    choices = (
-        [
-            aten_addmm.bind(
-                (inp_expanded, mat1, mat2),
-                layout,
-                ordered_kwargs_for_cpp_kernel,
-                alpha=alpha,
-                beta=beta,
-            )
-        ]
-        if use_aten_gemm_kernels()
-        else []
-    )
-
-    if (
-        use_aten_gemm_kernels()
-        and inp_expanded.get_stride()[0] == 0
-        and inp_expanded.get_device().type == "cuda"
-        and inductor_config.triton.autotune_cublasLt
-    ):
-        # unexpand inp to make sure fused addmm from cublasLt is used
-        choices.insert(
-            0,
-            aten_bias_addmm.bind(
-                (inp_expanded, mat1, mat2), layout, alpha=alpha, beta=beta
-            ),
-        )
-
-    if use_triton_template(layout):
+    if is_nonzero and use_triton_template(layout):
         for config in mm_configs(m, n, k):
             mm_template.maybe_append_choice(
                 choices,
@@ -237,20 +251,64 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
             )
 
-    if use_cutlass_template(layout):
+    if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
+        # Note: Do not use FlexibleLayout for the output here, as it will
+        # lead to runtime errors if the output layout is made incompatible with
+        # the bias layout later.
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
             choices,
             layout,
             [mat1, mat2, inp_expanded],
             alpha=alpha,
             beta=beta,
-            input_reorder=[2, 0, 1],
-            fuseable=False,
+            fuseable=True,
+            non_fuseable=True,
         )
 
-    return autotune_select_algorithm(
-        "addmm", choices, [inp_expanded, mat1, mat2], layout
-    )
+    use_aten = use_aten_gemm_kernels()
+    if len(choices) == 0 and not use_aten:
+        log.warning("No choices for GEMM, using ATen backend as fallback")
+        use_aten = True
+
+    if use_aten:
+        choices.extend(
+            [
+                aten_addmm.bind(
+                    (inp_expanded, mat1, mat2),
+                    layout,
+                    ordered_kwargs_for_cpp_kernel,
+                    alpha=alpha,
+                    beta=beta,
+                )
+            ]
+        )
+
+        if (
+            inp_expanded.get_stride()[0] == 0
+            and inp_expanded.get_device().type == "cuda"
+            and inductor_config.triton.autotune_cublasLt
+        ):
+            # unexpand inp to make sure fused addmm from cublasLt is used
+            choices.insert(
+                0,
+                aten_bias_addmm.bind(
+                    (inp_expanded, mat1, mat2), layout, alpha=alpha, beta=beta
+                ),
+            )
+    try:
+        return autotune_select_algorithm(
+            "addmm", choices, [inp_expanded, mat1, mat2], layout
+        )
+    except NoValidChoicesError:
+        log.warning("All choices for GEMM were invalid, using ATen backend as fallback")
+        fallback_choice = aten_addmm.bind(
+            (inp, mat1, mat2),
+            layout,
+            ordered_kwargs_for_cpp_kernel,
+            alpha=alpha,
+            beta=beta,
+        )
+        return fallback_choice.output_node()
 
 
 def fallback_mixed_mm(mat1, mat2, *, out):
