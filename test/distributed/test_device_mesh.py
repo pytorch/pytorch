@@ -124,11 +124,11 @@ class DeviceMeshTest(DTensorTestBase):
             # tp pg
             if idx == 1:
                 # rank0 - mesh_2d._dim_group_infos is: [('ptd:3', [0, 2]), ('ptd:1', [0, 1])]
-                tp_group_ranks = mesh_2d._dim_group_infos[tp_dim][-1]
+                tp_group_ranks = mesh_2d._dim_group_infos[tp_dim][1]
                 self.assertEqual(get_process_group_ranks(group), tp_group_ranks)
             # dp pg
             if idx == 2:
-                dp_group_ranks = mesh_2d._dim_group_infos[dp_dim][-1]
+                dp_group_ranks = mesh_2d._dim_group_infos[dp_dim][1]
                 self.assertEqual(get_process_group_ranks(group), dp_group_ranks)
 
     @with_comms
