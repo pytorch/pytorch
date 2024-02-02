@@ -3500,8 +3500,6 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
-                   DecorateInfo(skipIfMps, 'TestModule',
-                                dtypes=complex_types_and(torch.chalf, torch.float64, torch.complex128)),
                    # Not implmented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
                                 dtypes=(torch.chalf,), device_type='cuda'),
@@ -3522,8 +3520,6 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
-                   DecorateInfo(skipIfMps, 'TestModule',
-                                dtypes=complex_types_and(torch.chalf, torch.float64, torch.complex128)),
                    # Fails on backward check because ViewAsRealBackward apply contiguous for grad
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format',
                                 dtypes=(torch.complex32, torch.complex64, torch.complex128)),
@@ -3926,7 +3922,6 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_GroupNorm,
                dtypes=get_all_fp_dtypes(include_bfloat16=True, include_half=True),
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64, torch.bfloat16]),
                    # Tracking at https://github.com/pytorch/pytorch/issues/98089
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_cpu_gpu_parity'),
                    DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
