@@ -8,14 +8,23 @@ import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast, Dict, List, Optional, Union
+from typing import (
+    Callable,
+    cast,
+    Dict,
+    IO,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Tuple,
+    Union,
+)
 
 import torch
-import torch.distributed as dist
 from torch import Tensor
 from torch._utils import _get_device_module
 from torch.distributed._shard._utils import narrow_tensor_by_index
-from torch.distributed.checkpoint._checkpointer import _Checkpointer
 from torch.futures import Future
 
 from .metadata import Metadata, MetadataIndex
@@ -52,40 +61,32 @@ class _StoragePrefix:
 DEFAULT_SUFFIX = ".distcp"
 
 
-def _result_from_write_item(
-    item: WriteItem, size_in_bytes, storage_data
-) -> WriteResult:
-    return WriteResult(
-        index=item.index, size_in_bytes=size_in_bytes, storage_data=storage_data
-    )
-
-
 class _TensorLoader(ABC):
     @abstractmethod
-    def add(self, size, obj):
+    def add(self, size: int, obj: object) -> None:
         pass
 
     @abstractmethod
-    def start_loading(self):
+    def start_loading(self) -> None:
         pass
 
     @abstractmethod
-    def values(self):
+    def values(self) -> Iterator[Tuple[torch.Tensor, object]]:
         pass
 
 
 class _SerialCpuLoader(_TensorLoader):
-    def __init__(self, resolve_fun):
+    def __init__(self, resolve_fun: Callable) -> None:
         self.resolve_fun = resolve_fun
-        self.items = []
+        self.items: List[Tuple[int, object]] = []
 
-    def add(self, size, obj):
+    def add(self, size: int, obj: object) -> None:
         self.items.append((size, obj))
 
-    def start_loading(self):
+    def start_loading(self) -> None:
         pass
 
-    def values(self):
+    def values(self) -> Iterator[Tuple[torch.Tensor, object]]:
         for _, obj in self.items:
             tensor = self.resolve_fun(obj).detach()
             tensor = tensor.cpu()
@@ -98,9 +99,14 @@ class _SerialCpuLoader(_TensorLoader):
 
 
 class _OverlappingCpuLoader(_TensorLoader):
-    def __init__(self, resolve_fun, stream=None, inflight_threshhold=1_000_000):
+    def __init__(
+        self,
+        resolve_fun: Callable,
+        stream: Optional[torch.Stream] = None,
+        inflight_threshhold: int = 1_000_000,
+    ) -> None:
         self.resolve_fun = resolve_fun
-        self.items = []
+        self.items: List[Tuple[int, object]] = []
         self.inflight_threshhold = inflight_threshhold
         self.in_flight_data = 0
         self.current_items: collections.deque = collections.deque()
@@ -108,15 +114,17 @@ class _OverlappingCpuLoader(_TensorLoader):
         self.started = False
         self.device_type = stream.device_type if stream else torch.device("cuda").type
         self.device_module = _get_device_module(self.device_type)
-        self.stream = stream or self.device_module.current_stream()
+        self.stream = cast(
+            torch.cuda.Stream, stream or self.device_module.current_stream()
+        )
         if self.stream != self.device_module.current_stream():
             self.stream.wait_stream(self.device_module.current_stream())
 
     @property
-    def _done(self):
+    def _done(self) -> bool:
         return self.idx >= len(self.items)
 
-    def _drain(self):
+    def _drain(self) -> List[Tuple[torch.Tensor, object]]:
         drained = []
         if self.in_flight_data >= self.inflight_threshhold:
             self.stream.synchronize()
@@ -126,7 +134,7 @@ class _OverlappingCpuLoader(_TensorLoader):
             drained.append(val)
         return drained
 
-    def _refill(self):
+    def _refill(self) -> None:
         with self.device_module.stream(self.stream):
             while not self._done and self.in_flight_data < self.inflight_threshhold:
                 _, obj = self.items[self.idx]
@@ -147,25 +155,25 @@ class _OverlappingCpuLoader(_TensorLoader):
                 )
                 self.in_flight_data += tensor.numel() * tensor.element_size()
 
-    def _finish(self):
+    def _finish(self) -> Iterable[Tuple[torch.Tensor, object]]:
         assert self._done
         if len(self.current_items) > 0:
             self.stream.synchronize()
         return self.current_items
 
-    def add(self, size, obj):
+    def add(self, size: int, obj: object) -> None:
         if self.started:
             raise RuntimeError("cannot add items after loading started")
         self.items.append((size, obj))
 
-    def start_loading(self):
+    def start_loading(self) -> None:
         if self.started:
             return
         self.started = True
         self.items.sort(key=lambda x: x[0])
         self._refill()
 
-    def values(self):
+    def values(self) -> Iterator[Tuple[torch.Tensor, object]]:
         self.start_loading()
         while not self._done:
             drained = self._drain()
@@ -186,7 +194,7 @@ def _item_size(item: WriteItem) -> int:
     return size * torch._utils._element_size(dtype)
 
 
-def _split_by_size_and_type(bins, items: List[WriteItem]) -> List[List[WriteItem]]:
+def _split_by_size_and_type(bins: int, items: List[WriteItem]) -> List[List[WriteItem]]:
     if bins == 1:
         return [items]
 
@@ -210,7 +218,12 @@ def _split_by_size_and_type(bins, items: List[WriteItem]) -> List[List[WriteItem
     return buckets
 
 
-def _write_item(stream, data, write_item, storage_key):
+def _write_item(
+    stream: io.IOBase,
+    data: Union[io.BytesIO, torch.Tensor],
+    write_item: WriteItem,
+    storage_key: str,
+) -> WriteResult:
     offset = stream.tell()
 
     if write_item.type == WriteItemType.BYTE_IO:
@@ -219,11 +232,13 @@ def _write_item(stream, data, write_item, storage_key):
     else:
         assert isinstance(data, torch.Tensor)
         assert data.device == torch.device("cpu")
-        torch.save(data, stream)
+        torch.save(data, cast(IO[bytes], stream))
     length = stream.tell() - offset
 
-    return _result_from_write_item(
-        write_item, length, _StorageInfo(storage_key, offset, length)
+    return WriteResult(
+        index=write_item.index,
+        size_in_bytes=length,
+        storage_data=_StorageInfo(storage_key, offset, length),
     )
 
 
@@ -233,13 +248,21 @@ def _write_files_from_queue(
     planner: SavePlanner,
     inflight_threshhold: int,
     use_fsync: bool,
-):
+    thread_count: int,
+) -> None:
     try:
         while True:
             file_name, storage_key, write_items = file_queue.get_nowait()
             loader: _TensorLoader
 
-            if torch.cuda.is_available() and inflight_threshhold > 0:
+            # TODO: Using the OverlappingCpuLoader with multiple threads creates significant
+            # performance degredation, observed as being related to cuda stream syncs. We
+            # should try to fix this and use _OverlappingCpuLoader for all threaded cases
+            if (
+                thread_count == 1
+                and torch.cuda.is_available()
+                and inflight_threshhold > 0
+            ):
                 loader = _OverlappingCpuLoader(
                     planner.resolve_data,
                     inflight_threshhold=inflight_threshhold,
@@ -312,13 +335,20 @@ class FileSystemWriter(StorageWriter):
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
         super().__init__()
-        if not isinstance(path, Path):
-            path = Path(path)
-        self.path = path
+        self._init_path(path)
         self.single_file_per_rank = single_file_per_rank
         self.sync_files = sync_files
         self.thread_count = thread_count
         self.per_thread_copy_ahead = per_thread_copy_ahead
+
+    def _init_path(self, path: Union[str, os.PathLike]) -> None:
+        if not isinstance(path, Path):
+            path = Path(path)
+        self.path = path
+
+    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+        if checkpoint_id:
+            self._init_path(checkpoint_id)
 
     def set_up_storage_writer(self, is_coordinator: bool) -> None:
         pass
@@ -370,6 +400,7 @@ class FileSystemWriter(StorageWriter):
                     planner,
                     self.per_thread_copy_ahead,
                     self.sync_files,
+                    self.thread_count,
                 ),
             )
             t.start()
@@ -381,6 +412,7 @@ class FileSystemWriter(StorageWriter):
             planner=planner,
             inflight_threshhold=self.per_thread_copy_ahead,
             use_fsync=self.sync_files,
+            thread_count=self.thread_count,
         )
 
         for t in threads:
@@ -413,13 +445,21 @@ class FileSystemWriter(StorageWriter):
 class FileSystemReader(StorageReader):
     def __init__(self, path: Union[str, os.PathLike]) -> None:
         super().__init__()
+        self._init_path(path)
+        self.storage_data: Dict[MetadataIndex, _StorageInfo] = dict()
+
+    def _init_path(self, path: Union[str, os.PathLike]) -> None:
         if not isinstance(path, Path):
             path = Path(path)
         self.path = path
-        self.storage_data: Dict[MetadataIndex, _StorageInfo] = dict()
 
-    def _slice_file(self, file, sinfo: _StorageInfo):
+    def _slice_file(self, file, sinfo: _StorageInfo) -> io.IOBase:
         return _create_file_view(file, sinfo.offset, sinfo.length)
+
+    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+        self.storage_data = dict()
+        if checkpoint_id:
+            self._init_path(checkpoint_id)
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         # group requests by file
@@ -436,12 +476,13 @@ class FileSystemReader(StorageReader):
                     item_md = self.storage_data[req.storage_index]
                     file_slice = self._slice_file(file, item_md)
                     if req.type == LoadItemType.BYTE_IO:
-                        bytes = io.BytesIO(file_slice.read(item_md.length))
-                        bytes.seek(0)
-                        planner.load_bytes(req, bytes)
+                        read_bytes = io.BytesIO(file_slice.read(item_md.length))
+                        read_bytes.seek(0)
+                        planner.load_bytes(req, read_bytes)
                     else:
                         tensor = cast(
-                            Tensor, torch.load(file_slice, map_location="cpu")
+                            Tensor,
+                            torch.load(cast(IO[bytes], file_slice), map_location="cpu"),
                         )
                         tensor = narrow_tensor_by_index(
                             tensor, req.storage_offsets, req.lengths
@@ -472,57 +513,3 @@ class FileSystemReader(StorageReader):
 
     def prepare_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
         return global_plan
-
-
-class _FileSystemCheckpointer(_Checkpointer):
-    """An implementation of :py:class:`torch.distributed.checkpoint.checkpointer.Checkpointer`
-    for the file system. Wraps the creation and usage of ``FileSystemWriter`` and ``FileSystemReader``.
-
-    .. warning::
-        This feature is experimental and subject to removal/change.
-
-    """
-
-    def __init__(
-        self,
-        path: Union[str, os.PathLike],
-        *,
-        single_file_per_rank: bool = True,
-        sync_files: bool = True,
-        thread_count: int = 1,
-        per_thread_copy_ahead: int = 10_000_000,
-        process_group: Optional[dist.ProcessGroup] = None,
-        coordinator_rank: int = 0,
-        no_dist: bool = False,
-        load_planner: Optional[LoadPlanner] = None,
-        save_planner: Optional[SavePlanner] = None,
-    ):
-        """Initializes Checkpointing defualts, including ``FileSystemWriter`` and ``FileSystemReader``
-
-        Args:
-            path: The directory to store/load checkpoints.
-            single_file_per_rank: Produce one file per rank instead of one file per tensor/blob. Default to True.
-            sync_files: force files to be synced to permanent storage. Default to True.
-            thread_count: Number of IO threads to use to write. Default to 1.
-            per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving then. Default 10Mb.
-            process_group: ProcessGroup to be used for cross-rank synchronization.
-            coordinator_rank: Rank to use to coordinate the checkpoint. rank0 is used by default.
-            no_dist: If ``True``, distributed checkpoint will not load in SPMD style. (Default: ``False``)
-            loader_planner: Instance of LoadPlanner to use when loading.
-            save_planner: Instance of SavePlanner to use when saving.
-        """
-
-        storage_writer = FileSystemWriter(
-            path, single_file_per_rank, sync_files, thread_count, per_thread_copy_ahead
-        )
-        storage_reader = FileSystemReader(path)
-
-        super().__init__(
-            storage_writer,
-            storage_reader,
-            process_group=process_group,
-            coordinator_rank=coordinator_rank,
-            no_dist=no_dist,
-            load_planner=load_planner,
-            save_planner=save_planner,
-        )
