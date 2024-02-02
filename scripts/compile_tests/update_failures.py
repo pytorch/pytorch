@@ -134,7 +134,10 @@ def get_intersection_and_outside(a_dict, b_dict):
     def build_dict(keys):
         result = {}
         for k in keys:
-            result[k] = a_dict.get(k, b_dict[k])
+            if k in a_dict:
+                result[k] = a_dict[k]
+            else:
+                result[k] = b_dict[k]
         return result
 
     return build_dict(intersection), build_dict(outside)
