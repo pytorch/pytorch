@@ -737,7 +737,7 @@ class trace:
     # Needs to be overriden based on specific environment needs
     upload_tar: Optional[Callable[[str], None]] = None
 
-    log_autotuning_results : bool = False
+    log_autotuning_results: bool = False
 
 
 _save_config_ignore = {
