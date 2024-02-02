@@ -7,6 +7,8 @@ import itertools
 import math
 import operator
 import sys
+import random
+
 import unittest
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, NamedTuple
@@ -1790,6 +1792,30 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         test(-1.1, 1.1)
         test(True, False)
         test(torch.ones(4, dtype=torch.float32), 1.1)
+
+    def test_rand_new(self):
+        @torch.compile(backend="eager", dynamic=True)
+        def core():
+            idx_size = [10]
+            # randVal1 =
+            # randVal2 =random.randint(1, 8)
+            # # x = randVal1+randVal2
+            # idx_size[randVal1] = randVal2
+            idx_size[random.randint(0, 0)] = random.randint(1, 8)
+
+            t= tuple(idx_size)
+
+            # If I remove this line  or the line after I get IndexError: list assignment index out of range
+            # instread of
+            src_size = [random.randint(1, 5) + s for s in idx_size]
+            idx = torch.empty(t)
+
+        print(core())
+        # import   os
+        # os.environ['TORCH_LOGS']='+dynamo'
+        # print("finished first calls\n\n\n\n")
+        # print(core())
+
 
     def test_truth(self):
         def fn(x, y):

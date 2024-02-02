@@ -343,7 +343,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self._current_tx: List[InstructionTranslatorBase] = []
         self.cleanups: List[CleanupHook] = []
         self.should_exit = False
-        self.random_values_var = None
+
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
         self.torch_function_enabled = torch._C._is_torch_function_enabled()
         # Tracks if the output graph has a user defined allowed function in the
@@ -371,6 +371,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # Tracks the original FQNs of the constant tensors from the original graph,
         # i.e. buffers and parameters.
         self.dynamo_flat_name_to_original_fqn: Dict[str, str] = {}
+
+        # Tracks all the random calls encountred in the graph, if any exists a call to  gen_rand_values_fn is added
+        # and each call is converted to a load to one of the outputs of gen_rand_values_fn
+        self.random_calls = []
+
+        # The name of the function gen_rand_values_fn used in this graph.
+        self.random_values_var = None
 
     # This gets its own helper function so guards DEBUG logs are more
     # informative
@@ -879,11 +886,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             stack_values.extend([v] * len(val_to_names[v]))
 
         # to handle random calls
-        if len(tx.random_calls) > 0:
+        if len(self.random_calls) > 0:
             append_prefix_insts()
             random_calls_instructions = []
             self.random_values_var = self.new_var("random_values")
-            rand_fn = disable(_get_gen_rand_values_fn(tx.random_calls))
+            rand_fn = disable(_get_gen_rand_values_fn(self.random_calls))
             rand_fn_name = self.install_global("__gen_rand_values", rand_fn)
             codegen = PyCodegen(tx, root)
             random_calls_instructions.extend(

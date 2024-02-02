@@ -794,7 +794,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                     e.exec_record = self.exec_recorder.get_record()  # type: ignore[attr-defined]
                 raise
             finally:
+                # When we see a return we pop the context and loose all the information about the the rand calls lol!!
+                # if not isinstance(self, InliningInstructionTranslator):
                 self.output.pop_tx()
+
                 # Cleanup the outputGraph to delete the held tensors. We perform the
                 # cleanup only for InstructionTranslator and not
                 # InliningInstructionTranslator. The InliningInstructionTranslator
@@ -1974,7 +1977,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.export = export
 
         self.current_speculation = None
-        self.random_calls = []
+        # self.random_calls = []
 
         self.strict_checks_enabled = False
 
