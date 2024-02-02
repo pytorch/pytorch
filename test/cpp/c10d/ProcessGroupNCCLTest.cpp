@@ -105,11 +105,9 @@ class NCCLTest : public NCCLTestBase {
     // and pass this along to the collective (since it uses the THC
     // getters to retrieve the current stream).
     //
-    streams_.reserve(numDevices_);
-    for (const auto i : c10::irange(numDevices_)) {
-      deviceGuard.set_index(rank_);
-      streams_.push_back(at::cuda::getStreamFromPool());
-    }
+    // 1 device only, hence 1 stream only
+    deviceGuard.set_index(rank_);
+    streams_.push_back(at::cuda::getStreamFromPool());
   }
 
   void wait(
