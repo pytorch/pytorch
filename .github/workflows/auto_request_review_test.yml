@@ -1,0 +1,34 @@
+name: Test Auto Request Review sync with CODEOWNERS
+
+on:
+  pull_request:
+    paths:
+      - CODEOWNERS
+      - .github/scripts/update_auto_review_from_codeowners.py
+      - .github/workflows/auto_request_review_test.yml
+
+jobs:
+  auto-request-review-sync-test:
+    # Don't run on forked repos
+    if: ${{ !github.event.pull_request.head.repo.fork }}
+    name: Auto Request Review Sync Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+      - name: setup python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.9
+      - name: Install dependencies
+        shell: bash
+        run: pip install requests==2.31.0 "ruamel.yaml==0.18.5"
+      - name: Run the script
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python .github/scripts/update_auto_review_from_codeowners.py
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
