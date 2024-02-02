@@ -1196,6 +1196,8 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         with self.assertRaises(dist.DistBackendError):
             pg.allreduce([t])
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_close_multi_pg_unordered(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())
