@@ -585,9 +585,7 @@ class BaseSchedulerNode:
 
         # Collective kernels
         if is_collective(self.node):
-            print("is_collective!")
-            # TODO: before land!!!
-            return estimate_nccl_collective_runtime(self)
+            return estimate_nccl_collective_runtime(self.node)
         elif is_wait(self.node):
             # ir.Wait is only used for collective ops.
             # The time needed for the collective op is already estimated and considered
@@ -2231,7 +2229,6 @@ class Scheduler:
                     node.get_estimated_runtime(),
                 )
             except Exception as e:
-                print(e)
                 log.debug(
                     "Generating code for node %s with estimated runtime 0.0",
                     node.get_name(),
