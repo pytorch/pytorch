@@ -26,6 +26,18 @@ from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
 _ModuleToHandleDict = Dict[nn.Module, RemovableHandle]  # for state dict
 
 
+"""
+[Note: Overlapping all-gather copy-in and all-gather]
+For implicit forward prefetching, we want to overlap the next copy-in with the
+current all-gather. We do so using a separate copy-in stream. However, since
+we have the all-gather input as a view into the output, we must make sure to
+copy into different memory from the current all-gather's output. Thus, we keep
+a reference to the current all-gather's output and have the next FSDP state or
+parameter group free it after its copy-in. Finally, we have the last state or
+group free always to avoid holding onto the memory after forward.
+"""
+
+
 class FSDPCommContext:
     """This has the communication state shared across FSDP states/parameter groups."""
 
@@ -58,18 +70,7 @@ class FSDPCommContext:
         return current_stream, current_stream
 
 
-"""
-[Note: Overlapping all-gather copy-in and all-gather]
-For implicit forward prefetching, we want to overlap the next copy-in with the
-current all-gather. We do so using a separate copy-in stream. However, since
-we have the all-gather input as a view into the output, we must make sure to
-copy into different memory from the current all-gather's output. Thus, we keep
-a reference to the current all-gather's output and have the next FSDP state or
-parameter group free it after its copy-in. Finally, we have the last state or
-group free always to avoid holding onto the memory after forward.
-"""
-
-
+# See [Note: Overlapping all-gather copy-in and all-gather]
 class AllGatherState(NamedTuple):
     all_gather_result: AllGatherResult
     event: torch.cuda.Event  # all-gather copy-out
