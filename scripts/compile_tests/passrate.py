@@ -8,8 +8,10 @@ from common import (
     open_test_results,
 )
 
+from download_reports import download_reports
+
 """
-Usage: passrate.py eager_test_reports_dir/ dynamo_test_reports_dir/
+Usage: passrate.py commit_sha
 
 Parses test reports to measure the passrate. The passrate is defined as:
 
@@ -18,14 +20,12 @@ CUDA, OpInfo, and ModuleInfo tests
 B) Of those tests, count the number of tests that pass under Dynamo
 C) Take B/A.
 
-Each directory should have the pytest test reports for their respective
-configurations. You may find the test reports in the HUD:
-- click on a commit
-- find the desired job
-- click on "show artifacts"
-- get the "test report" zip
-- unzip it into the right place
+You'll need to provide the commit_sha for a commit on the main branch,
+from which we will pull CI test results.
 
+This script requires the `gh` cli. You'll need to install it and then
+authenticate with it via `gh auth login` before using this script.
+https://docs.github.com/en/github-cli/github-cli/quickstart
 """
 
 
@@ -89,9 +89,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         prog="passrate", description="Computes the Dynamo unittest pass rate"
     )
-    # linux-focal-py3.11-clang10 (default) Test Reports (xml) directory
-    parser.add_argument("eager_dir")
-    # linux-focal-py3.11-clang10 (dynamo) Test Reports (xml) directory
-    parser.add_argument("dynamo_dir")
+    parser.add_argument(
+        "commit",
+        help=(
+            "The commit sha for the latest commit on a PR from which we will "
+            "pull CI test results, e.g. 7e5f597aeeba30c390c05f7d316829b3798064a5"
+        ),
+    )
     args = parser.parse_args()
-    compute_pass_rate(args.eager_dir, args.dynamo_dir)
+    dynamo38, dynamo311, eager311 = download_reports(args.commit)
+    compute_pass_rate(eager311, dynamo311)
