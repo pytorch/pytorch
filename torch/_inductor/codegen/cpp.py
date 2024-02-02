@@ -982,15 +982,6 @@ class CppOverrides(OpOverrides):
         V.kernel.compute.splice(code)
         return result
 
-    @staticmethod
-    def store_to_fp32_cache(var, name):
-        V.kernel.cse.store_cache[name] = var
-        return var
-
-    @staticmethod
-    def load_from_fp32_cache(name):
-        return V.kernel.cse.store_cache[name]
-
 
 class CppVecOverrides(CppOverrides):
     """Map element-wise ops to aten vectorization C++"""

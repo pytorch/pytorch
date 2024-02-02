@@ -1369,8 +1369,6 @@ class CPUReproTests(TestCase):
             "bitwise_or",
             "bitwise_xor",
             "to_dtype_bitcast",
-            "store_to_fp32_cache",
-            "load_from_fp32_cache",
         ]
         union = {*cpp_vec_op_list, *diff}
         self.assertTrue(
