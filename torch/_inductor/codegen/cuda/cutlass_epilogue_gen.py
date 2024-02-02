@@ -271,6 +271,7 @@ class CutlassEVTEpilogueTypeFormatter:
         with virtualized.V.set_ops_handler(formatter), patch.object(  # type: ignore[call-arg]
             FlexibleLayout, "allow_indexing", True
         ):
+            result = None
             if pre_fused_evt is not None:
                 result = formatter.pre_fused_expr(pre_fused_evt)
             for node in epilogue_nodes:
