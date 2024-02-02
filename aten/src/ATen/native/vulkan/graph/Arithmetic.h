@@ -23,7 +23,8 @@ ValueRef add_arithmetic_node(
     const ValueRef t1,
     const ValueRef t2,
     const float alpha,
-    const arithmetic::OpType optype);
+    const arithmetic::OpType optype,
+    const int64_t shared_object_idx = -1);
 
 class ArithmeticPrepack : public virtual OpNode {
  public:
