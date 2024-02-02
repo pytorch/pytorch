@@ -450,10 +450,7 @@ def speculate_subgraph(
         )
         log.warning(msg)
         log.exception(ex)
-        raise Unsupported(
-            f"{msg} Scroll up for the stack trace "
-            f"of the initial exception. The reason was: {ex.msg}"
-        ) from ex
+        raise ex
 
 
 def make_attr(tx, name):

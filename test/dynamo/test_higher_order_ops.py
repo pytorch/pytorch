@@ -203,8 +203,8 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3)
         with self.assertRaisesRegex(
-            RuntimeError,
-            "while introspecting wrap, we were unable to trace function `inner`",
+            torch._dynamo.exc.Unsupported,
+            r"HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)",
         ):
             f(x)
 
