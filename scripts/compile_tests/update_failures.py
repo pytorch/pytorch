@@ -149,7 +149,7 @@ def get_intersection_and_outside(a_dict, b_dict):
     return build_dict(intersection), build_dict(outside)
 
 
-def update(filename, py38_dir, py311_dir):
+def update(filename, py38_dir, py311_dir, also_remove_skips):
     def read_test_results(directory):
         xmls = open_test_results(directory)
         testcases = get_testcases(xmls)
@@ -178,9 +178,12 @@ def update(filename, py38_dir, py311_dir):
         py38_unexpected_successes, py311_unexpected_successes
     )
     xfails, more_skips = get_intersection_and_outside(py38_failures, py311_failures)
-    unexpected_skips, _ = get_intersection_and_outside(
-        py38_passing_skipped_tests, py311_passing_skipped_tests
-    )
+    if also_remove_skips:
+        unexpected_skips, _ = get_intersection_and_outside(
+            py38_passing_skipped_tests, py311_passing_skipped_tests
+        )
+    else:
+        unexpected_skips = set()
     all_skips = {**skips, **more_skips}
     print(
         f"Discovered {len(unexpected_successes)} new unexpected successes, "
@@ -205,6 +208,11 @@ if __name__ == "__main__":
             "pull CI test results, e.g. 7e5f597aeeba30c390c05f7d316829b3798064a5"
         ),
     )
+    parser.add_argument(
+        "--also-remove-skips",
+        help="Also attempt to remove skips. WARNING: does not guard against test flakiness",
+        action="store_true",
+    )
     args = parser.parse_args()
     dynamo38, dynamo311, eager311 = download_reports(args.commit)
-    update(args.filename, dynamo38, dynamo311)
+    update(args.filename, dynamo38, dynamo311, args.also_remove_skips)
