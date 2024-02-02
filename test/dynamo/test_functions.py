@@ -1848,6 +1848,37 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             fn(arr, np.s_[..., 1], np.array([3, 3])), np.array([[1, 3], [2, 3]])
         )
 
+    def test_is_with_tensor_arg(self):
+        # When the result of is or is not is determined statically we optimize the check away.
+        # testing those scenarios.
+
+        # One input is tensor and the other is not tensor.
+        @torch.compile(fullgraph=True, backend="eager")
+        def test1():
+            x = torch.ones(3)
+            y = 1
+            assert x is not y
+            assert y is not x
+
+        # Two inputs are tensor with same symbol.
+        @torch.compile(fullgraph=True, backend="eager")
+        def test2():
+            x = torch.ones(3)
+            y = x
+            assert x is y
+
+        test1()
+        test2()
+
+        # Result undecided, since is_ is not supported this will fail with fullgraph=True.
+        @torch.compile(fullgraph=True, backend="eager")
+        def test3():
+            x = np.True_
+            s = x | x
+            assert x is s
+
+        self.assertRaises(torch._dynamo.exc.Unsupported, test3)
+
 
 def udf_mul(x, y):
     return x * y
@@ -2126,7 +2157,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             else:
                 return x + y
 
-        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+        fn_opt = torch.compile(backend="eager", fullgraph=False, dynamic=True)(fn)
 
         x = torch.zeros(2)
         y = torch.ones(2)
@@ -2141,7 +2172,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             else:
                 return x + y
 
-        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+        fn_opt = torch.compile(backend="eager", fullgraph=False, dynamic=True)(fn)
 
         x = torch.zeros(2)
         y = torch.ones(2)
@@ -2208,7 +2239,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             _ = y is z
             return y is x
 
-        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+        fn_opt = torch.compile(backend="eager", fullgraph=False, dynamic=True)(fn)
 
         z = torch.ones(4, 1)
 
@@ -2220,7 +2251,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             y = torch.vmap(torch.Tensor.acos_)(x)
             return y is x
 
-        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+        fn_opt = torch.compile(backend="eager", fullgraph=False, dynamic=True)(fn)
 
         z = torch.ones(4, 1)
 
@@ -2238,7 +2269,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             c, d = torch.vmap(g)(a, b)
             return a is c is b is d
 
-        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+        fn_opt = torch.compile(backend="eager", fullgraph=False, dynamic=True)(fn)
 
         y = torch.ones(4, 2)
         z = torch.ones(4, 10)
