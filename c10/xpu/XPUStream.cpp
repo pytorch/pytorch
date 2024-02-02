@@ -128,12 +128,11 @@ void initXPUStreamsOnce() {
   // It will be initialized in initDeviceStreamState for the specified device.
   current_streams = std::make_unique<StreamId[]>(num_gpus);
   for (const auto i : c10::irange(num_gpus)) {
-    // Since we lack a `default stream` semantic with implicit synchronization,
-    // assigning the current stream to the last one in the pool is beneficial.
-    // This ensures that in sepecific scenarios, when users initialize their
-    // workload to perform computations with the current stream and utilize
-    // streams from the pool for communication, it allows for different streams
-    // to overlap in computation and communication.
+    // Assigning the current stream to the last one in the pool can be
+    // beneficial in certain scenarios, particularly when users initialize their
+    // workload to perform computations with the current stream (the last one)
+    // and utilize stream (the first one) from the pool for communication, it
+    // allows for different streams to overlap in computation and communication.
     current_streams[i] =
         makeStreamId(StreamIdType::NORMAL, kStreamsPerPool - 1);
   }
