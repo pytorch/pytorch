@@ -271,7 +271,7 @@ enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", ""
 max_fusion_size = 64
 
 # max number of inputs to generate cat as a pointwise op with masked laods
-max_pointwise_cat_inputs = 4
+max_pointwise_cat_inputs = 128
 
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
@@ -600,6 +600,9 @@ class aot_inductor:
 
     # Serialized tree spec for flattening outputs
     serialized_out_spec = ""
+
+    # flag to decide whether to create a submodule for constant graph.
+    use_runtime_constant_folding: bool = False
 
 
 class cuda:
