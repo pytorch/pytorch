@@ -256,8 +256,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 namespace="aten", op_name="add", overload="Tensor"
             )
         )
-        # TODO: Replace this example with a torch custom op when overload is supported
-        # Currently, torch only supports custom op with namespace and op_name
+
         aten_add_Tensor = registration.OpName.from_name_parts(
             namespace="aten", op_name="add", overload="Tensor"
         )

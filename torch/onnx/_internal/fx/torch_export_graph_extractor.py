@@ -88,7 +88,6 @@ class TorchExport(exporter.FXGraphExtractor):
             io_adapter.PrependParamsAndBuffersAotAutogradOutputStep()
         )
 
-        # TODO: https://github.com/pytorch/pytorch/issues/114628
         # run_decomposition generates a new graph module with decomposed ops.
         # Thus, we need to run this step after io_adapters.
         model = model.run_decompositions(options.decomposition_table)
