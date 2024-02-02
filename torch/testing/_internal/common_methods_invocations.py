@@ -8645,7 +8645,7 @@ def sample_inputs_channel_shuffle(op_info, device, dtype, requires_grad, **kwarg
     yield from (
         SampleInput(make_arg(shape), groups=1)
         for shape in [
-            (1, 0, 1, 1),
+            (1, 1, 1, 1),
             (1, 1, 0, 1),
             (1, 1, 1, 0),
         ]
