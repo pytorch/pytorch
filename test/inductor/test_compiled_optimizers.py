@@ -11,6 +11,7 @@ from typing import NamedTuple
 import torch
 
 import torch._inductor
+import torch._inductor.cudagraph_trees
 from torch._inductor import config
 
 # LBFGS, SparseAdam not supported
@@ -96,7 +97,10 @@ def build_compiled_opt_kwarg_db():
                         f"{'_foreach' if foreach else ''}"
                     )
 
-                    for key in optim_inputs.kwargs:
+                    if isinstance(kwargs.get("lr", None), torch.Tensor):
+                        kwargs["lr"] = kwargs["lr"].to(device)
+
+                    for key in kwargs:
                         if key == "lr":
                             continue
                         name += "_" + key
@@ -109,15 +113,6 @@ def build_compiled_opt_kwarg_db():
                         "test_asgd_maximize_capturable_cuda",
                         "test_asgd_weight_decay_capturable_cuda",
                         "test_asgd_weight_decay_maximize_capturable_cuda",
-                    ]:
-                        continue
-
-                    # Adam(W) capturable cudagraphs manager is unexpectedly None, #119026
-                    if name in [
-                        "test_adam_amsgrad_capturable_cuda",
-                        "test_adam_foreach_amsgrad_capturable_cuda",
-                        "test_adamw_amsgrad_capturable_cuda",
-                        "test_adamw_foreach_amsgrad_capturable_cuda",
                     ]:
                         continue
 
