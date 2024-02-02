@@ -1926,7 +1926,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
 #endif
 
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
-            << ncclComm->ncclComm_ << " on CUDA device: " << device.index();
+            << ncclComm->ncclComm_ << " on CUDA device: " << deviceIndex;
 
   // At this point NCCL should have been initialized, hence we can accurately
   // get the env value even if NCCL sets it by reading from nccl.conf file
