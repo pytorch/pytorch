@@ -371,30 +371,59 @@ class TestBoolScalar(TestCase):
         assert_((t and s) is s)
         assert_((f and s) is f)
 
-    def test_bitwise_or(self):
+    def test_bitwise_or_eq(self):
         f = np.False_
         t = np.True_
-        assert_((t | t) is t)
-        assert_((f | t) is t)
-        assert_((t | f) is t)
-        assert_((f | f) is f)
+        assert_((t | t) == t)
+        assert_((f | t) == t)
+        assert_((t | f) == t)
+        assert_((f | f) == f)
 
-    def test_bitwise_and(self):
+    @xpassIfTorchDynamo
+    def test_bitwise_or_is(self):
         f = np.False_
         t = np.True_
-        assert_((t & t) is t)
-        assert_((f & t) is f)
-        assert_((t & f) is f)
-        assert_((f & f) is f)
+        # This deviates from proper python where (t | t) is t
+        assert_((t | t) is not t)
+        assert_((f | t) is not t)
+        assert_((t | f) is not t)
+        assert_((f | f) is not f)
 
-    def test_bitwise_xor(self):
+    def test_bitwise_and_eq(self):
         f = np.False_
         t = np.True_
-        assert_((t ^ t) is f)
-        assert_((f ^ t) is t)
-        assert_((t ^ f) is t)
-        assert_((f ^ f) is f)
+        assert_((t & t) == t)
+        assert_((f & t) == f)
+        assert_((t & f) == f)
+        assert_((f & f) == f)
 
+    @xpassIfTorchDynamo
+    def test_bitwise_and_is(self):
+        f = np.False_
+        t = np.True_
+        # This deviates from proper python where (t & t) is t
+        assert_((t & t) is not t)
+        assert_((f & t) is not f)
+        assert_((t & f) is not f)
+        assert_((f & f) is not f)
+
+    def test_bitwise_xor_eq(self):
+        f = np.False_
+        t = np.True_
+        assert_((t ^ t) == f)
+        assert_((f ^ t) == t)
+        assert_((t ^ f) == t)
+        assert_((f ^ f) == f)
+
+    @xpassIfTorchDynamo
+    def test_bitwise_xor_is(self):
+        f = np.False_
+        t = np.True_
+        # This deviates from proper python where (t ^ t) is t
+        assert_((t ^ t) is not f)
+        assert_((f ^ t) is not t)
+        assert_((t ^ f) is not t)
+        assert_((f ^ f) is not f)
 
 class TestBoolArray(TestCase):
     def setUp(self):
