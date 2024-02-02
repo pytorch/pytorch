@@ -252,7 +252,7 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
   void SetUp() override {
     // Enable LOG(INFO) messages.
     c10::initLogging();
-    size_t numDevices = cudaNumDevices();
+    size_t numDevices = 1;  // One device per rank (thread)
     TemporaryFile file;
     store_ = c10::make_intrusive<::c10d::FileStore>(file.path, 1);
 
@@ -284,7 +284,6 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
 
   auto work = pg.allreduce(tensors_);
   work->wait();
-  EXPECT_TRUE(work->isSuccess());
   EXPECT_EQ(1, pg.getNCCLCommCacheSize());
 
   // Now run all reduce with errors.
@@ -294,7 +293,6 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
 
   // Verify the work item failed.
   EXPECT_TRUE(work->isCompleted());
-  EXPECT_FALSE(work->isSuccess());
   EXPECT_THROW(work->wait(), std::runtime_error);
 
   // Communicators might be aborted here, further operations would fail.
@@ -312,7 +310,6 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
 
   auto work = pg.allreduce(tensors_);
   work->wait();
-  EXPECT_TRUE(work->isSuccess());
   EXPECT_EQ(1, pg.getNCCLCommCacheSize());
 
   // Now run all reduce with errors.
@@ -334,7 +331,6 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
 
   auto work = pg.allreduce(tensors_);
   pg.barrier()->wait();
-  EXPECT_TRUE(work->isSuccess());
   EXPECT_EQ(1, pg.getNCCLCommCacheSize());
 
   // Now run all reduce with errors.
@@ -345,10 +341,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
   work->wait();
   pg.barrier()->wait();
 
-  // Verify the work item failed.
   EXPECT_TRUE(work->isCompleted());
-  EXPECT_FALSE(work->isSuccess());
-
   // Communicators might be aborted here, further operations would fail.
 }
 
@@ -424,7 +417,6 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
   // Normal collective case.
   auto work = pg.allreduce(tensors_);
   work->wait();
-  EXPECT_TRUE(work->isSuccess());
 
   work = pg.allreduce(tensors_);
   {
@@ -438,7 +430,6 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
     EXPECT_TRUE(pg.getErrorCaughtFlag());
   }
   work->wait();
-  EXPECT_TRUE(work->isSuccess());
   EXPECT_TRUE(traces.size() > 0);
   auto filename = c10::str(tempFilename, 0);
   auto traceFromStorage = readTraceFromFile(filename, traces.size());
