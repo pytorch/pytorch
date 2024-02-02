@@ -303,7 +303,6 @@ def nll_loss_forward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
     channel_dim = 1 if len(input_shape) >= 2 else 0
 
     output_strategy = OpStrategy([])
-    decomp_redist_cost = float("inf")
     for idx, input_placement_strategy in enumerate(input_strategy.strategies):
         op_args_target_specs = []
         redistribute_costs = []
