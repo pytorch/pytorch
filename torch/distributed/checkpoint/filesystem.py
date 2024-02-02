@@ -6,12 +6,14 @@ import pickle
 import queue
 import threading
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import (
     Callable,
     cast,
     Dict,
+    Generator,
     IO,
     Iterable,
     Iterator,
@@ -243,6 +245,7 @@ def _write_item(
 
 
 def _write_files_from_queue(
+    create_stream: Callable,
     file_queue: queue.Queue,
     result_queue: queue.Queue,
     planner: SavePlanner,
@@ -280,7 +283,7 @@ def _write_files_from_queue(
             bytes_w = [wi for wi in write_items if wi.type == WriteItemType.BYTE_IO]
             write_results = []
 
-            with file_name.open("wb") as stream:
+            with create_stream(file_name, "wb") as stream:
                 for write_item in bytes_w:
                     data = planner.resolve_data(write_item)
                     write_results.append(
@@ -298,6 +301,62 @@ def _write_files_from_queue(
             result_queue.put(write_results)
     except queue.Empty:
         pass
+
+
+class FileSystemBase(ABC):
+    @contextmanager
+    @abstractmethod
+    def create_stream(
+        self, path: Union[str, os.PathLike], mode: str
+    ) -> Generator[io.IOBase, None, None]:
+        ...
+
+    @abstractmethod
+    def concat_path(
+        self, path: Union[str, os.PathLike], suffix: str
+    ) -> Union[str, os.PathLike]:
+        ...
+
+    @abstractmethod
+    def rename(
+        self, path: Union[str, os.PathLike], new_path: Union[str, os.PathLike]
+    ) -> None:
+        ...
+
+    @abstractmethod
+    def init_path(self, path: Union[str, os.PathLike]) -> Union[str, os.PathLike]:
+        ...
+
+    @abstractmethod
+    def mkdir(self, path: Union[str, os.PathLike]) -> None:
+        ...
+
+
+class FileSystem(FileSystemBase):
+    @contextmanager
+    def create_stream(
+        self, path: Union[str, os.PathLike], mode: str
+    ) -> Generator[io.IOBase, None, None]:
+        with cast(Path, path).open(mode) as stream:
+            yield cast(io.IOBase, stream)
+
+    def concat_path(
+        self, path: Union[str, os.PathLike], suffix: str
+    ) -> Union[str, os.PathLike]:
+        return cast(Path, path) / suffix
+
+    def init_path(self, path: Union[str, os.PathLike]) -> Union[str, os.PathLike]:
+        if not isinstance(path, Path):
+            path = Path(path)
+        return path
+
+    def rename(
+        self, path: Union[str, os.PathLike], new_path: Union[str, os.PathLike]
+    ) -> None:
+        cast(Path, path).rename(cast(Path, new_path))
+
+    def mkdir(self, path: Union[str, os.PathLike]) -> None:
+        cast(Path, path).mkdir(parents=True, exist_ok=True)
 
 
 class FileSystemWriter(StorageWriter):
@@ -335,26 +394,22 @@ class FileSystemWriter(StorageWriter):
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
         super().__init__()
-        self._init_path(path)
+        self.fs = FileSystem()
+        self.path = self.fs.init_path(path)
         self.single_file_per_rank = single_file_per_rank
         self.sync_files = sync_files
         self.thread_count = thread_count
         self.per_thread_copy_ahead = per_thread_copy_ahead
 
-    def _init_path(self, path: Union[str, os.PathLike]) -> None:
-        if not isinstance(path, Path):
-            path = Path(path)
-        self.path = path
-
     def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
         if checkpoint_id:
-            self._init_path(checkpoint_id)
+            self.path = self.fs.init_path(checkpoint_id)
 
     def set_up_storage_writer(self, is_coordinator: bool) -> None:
         pass
 
     def prepare_local_plan(self, plan: SavePlan) -> SavePlan:
-        self.path.mkdir(parents=True, exist_ok=True)
+        self.fs.mkdir(self.path)
         return plan
 
     def prepare_global_plan(self, global_plan: List[SavePlan]) -> List[SavePlan]:
@@ -382,11 +437,13 @@ class FileSystemWriter(StorageWriter):
         if self.single_file_per_rank:
             for bucket in _split_by_size_and_type(self.thread_count, plan.items):
                 file_name = gen_file()
-                file_queue.put((self.path / file_name, file_name, bucket))
+                path = self.fs.concat_path(self.path, file_name)
+                file_queue.put((path, file_name, bucket))
         else:
             for item in plan.items:
                 file_name = gen_file()
-                file_queue.put((self.path / file_name, file_name, [item]))
+                path = self.fs.concat_path(self.path, file_name)
+                file_queue.put((path, file_name, [item]))
 
         result_queue: queue.Queue = queue.Queue()
 
@@ -395,6 +452,7 @@ class FileSystemWriter(StorageWriter):
             t = threading.Thread(
                 target=_write_files_from_queue,
                 args=(
+                    self.fs.create_stream,
                     file_queue,
                     result_queue,
                     planner,
@@ -407,6 +465,7 @@ class FileSystemWriter(StorageWriter):
             threads.append(t)
 
         _write_files_from_queue(
+            create_stream=self.fs.create_stream,
             file_queue=file_queue,
             result_queue=result_queue,
             planner=planner,
@@ -434,24 +493,22 @@ class FileSystemWriter(StorageWriter):
         for wr_list in results:
             storage_md.update({wr.index: wr.storage_data for wr in wr_list})
         metadata.storage_data = storage_md
-        with (self.path / ".metadata.tmp").open("wb") as metadata_file:
+        tmp_path = cast(Path, self.fs.concat_path(self.path, ".metadata.tmp"))
+        meta_path = cast(Path, self.fs.concat_path(self.path, ".metadata"))
+        with self.fs.create_stream(tmp_path, "wb") as metadata_file:
             pickle.dump(metadata, metadata_file)
             if self.sync_files:
                 os.fsync(metadata_file.fileno())
 
-        (self.path / ".metadata.tmp").rename(self.path / ".metadata")
+        self.fs.rename(tmp_path, meta_path)
 
 
 class FileSystemReader(StorageReader):
     def __init__(self, path: Union[str, os.PathLike]) -> None:
         super().__init__()
-        self._init_path(path)
+        self.fs = FileSystem()
+        self.path = self.fs.init_path(path)
         self.storage_data: Dict[MetadataIndex, _StorageInfo] = dict()
-
-    def _init_path(self, path: Union[str, os.PathLike]) -> None:
-        if not isinstance(path, Path):
-            path = Path(path)
-        self.path = path
 
     def _slice_file(self, file, sinfo: _StorageInfo) -> io.IOBase:
         return _create_file_view(file, sinfo.offset, sinfo.length)
@@ -459,7 +516,7 @@ class FileSystemReader(StorageReader):
     def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
         self.storage_data = dict()
         if checkpoint_id:
-            self._init_path(checkpoint_id)
+            self.path = self.fs.init_path(checkpoint_id)
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         # group requests by file
@@ -470,11 +527,12 @@ class FileSystemReader(StorageReader):
             per_file.setdefault(path, []).append(read_item)
 
         for relative_path, reqs in per_file.items():
-            with (self.path / relative_path).open("rb") as file:
+            new_path = self.fs.concat_path(self.path, relative_path)
+            with self.fs.create_stream(new_path, "rb") as stream:
                 # TODO sort by offset and cache the reading
                 for req in reqs:
                     item_md = self.storage_data[req.storage_index]
-                    file_slice = self._slice_file(file, item_md)
+                    file_slice = self._slice_file(stream, item_md)
                     if req.type == LoadItemType.BYTE_IO:
                         read_bytes = io.BytesIO(file_slice.read(item_md.length))
                         read_bytes.seek(0)
@@ -501,7 +559,8 @@ class FileSystemReader(StorageReader):
 
     # Implementing the abstract function in StorageReader
     def read_metadata(self) -> Metadata:
-        with (self.path / ".metadata").open("rb") as metadata_file:
+        path = self.fs.concat_path(self.path, ".metadata")
+        with self.fs.create_stream(path, "rb") as metadata_file:
             return pickle.load(metadata_file)
 
     def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
