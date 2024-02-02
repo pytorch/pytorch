@@ -3331,6 +3331,8 @@ def l1_loss(
         )
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
+    if reduction == 'sum':
+        raise ValueError("Reduction mode 'sum' is not supported for l1_loss.")
 
     expanded_input, expanded_target = torch.broadcast_tensors(input, target)
     return torch._C._nn.l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
@@ -3567,11 +3569,11 @@ def multi_margin_loss(
     input: Tensor,
     target: Tensor,
     p: int = 1,
-    margin: float = 1.0,
+    margin: float = 2,
     weight: Optional[Tensor] = None,
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
-    reduction: str = "mean",
+    reduction: str = "sum",
 ) -> Tensor:  # noqa: D400,D402
     r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None, reduce=None, reduction='mean') -> Tensor
 
