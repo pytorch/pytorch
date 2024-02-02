@@ -386,7 +386,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         fuseable: bool = True,
         non_fuseable: bool = True,
         **extra_kwargs,
-    ):
     ) -> None:
         non_fuseable = non_fuseable and (
             not inductor_cuda_config.cutlass_prefer_evt_capable_ops
@@ -1140,7 +1139,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         template_buffer_node: Optional[ir.CUDATemplateBuffer] = None,
         **kwargs,
     ) -> Tuple[Optional[Buffer], List[Buffer]]:
-        """
         X, W = self.input_nodes[:2]
         Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
         aux_input_nodes: List[ir.Buffer] = []
@@ -1203,7 +1201,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                             dtype=mbb_layout.dtype,
                             size=maybe_bias_size,  # type: ignore[arg-type]
                             stride=maybe_bias_stride,
-                            offset=maybe_bias_offset,
+                            offset=maybe_bias_offset,  # type: ignore[arg-type]
                         )
                         MaybeBiasNew = ir.ReinterpretView(
                             MaybeBias, reinterpret_mbb_layout
