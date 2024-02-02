@@ -59,12 +59,10 @@ dynamo_expected_failures = {
     "TestLinalgCPU.test_addmm_sizes_cpu_float64",
     "TestLinalgCPU.test_norm_dtype_cpu_float64",
     "TestLinalgCPU.test_addr_integral_cpu_int8",
-    "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_complex64",
     "TestLinalgCPU.test_pinv_cpu_float32",
     "TestLinalgCPU.test_addr_integral_cpu_uint8",
     "TestLinalgCPU.test_slogdet_errors_and_warnings_cpu_complex128",
     "TestLinalgCPU.test_addr_integral_cpu_int32",
-    "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_int64",
     "TestLinalgCPU.test_solve_cpu_complex64",
     "TestLinalgCPU.test_solve_cpu_float64",
     "TestLinalgCPU.test_addmm_sizes_cpu_float32",
@@ -73,7 +71,6 @@ dynamo_expected_failures = {
     "TestLinalgCPU.test_inverse_cpu_float64",
     "TestLinalgCPU.test_slogdet_errors_and_warnings_cpu_complex64",
     "TestLinalgCPU.test_pinv_cpu_complex64",
-    "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_float32",
     "TestLinalgCPU.test_geqrf_cpu_complex128",
     "TestLinalgCPU.test_geqrf_cpu_complex64",
     "TestLinalgCPU.test_slogdet_errors_and_warnings_cpu_float64",
@@ -1614,7 +1611,6 @@ dynamo_expected_failures = {
     "TestTorchTidyProfiler.test_tensorimpl_invalidation_full",  # profiler/test_profiler
     "TestProfiler.test_profiler_tracing",  # profiler/test_profiler
     "TestProfiler.test_is_profiler_enabled",  # profiler/test_profiler
-    "TestExperimentalUtils.test_utils_compute_idle_time",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_optimizer_parameters_sgd",  # profiler/test_profiler
     "TestExperimentalUtils.test_profiler_name_pattern",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_extra_fields",  # profiler/test_profiler
@@ -1642,13 +1638,11 @@ dynamo_expected_failures = {
     "TestTorchTidyProfiler.test_sparse_tensors",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_optimizer",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_tensorimpl_invalidation_keep_alive",  # profiler/test_profiler
-    "TestExperimentalUtils.test_utils_compute_queue_depth",  # profiler/test_profiler
     "TestExperimentalUtils.test_profiler_pattern_match_helper",  # profiler/test_profiler
     "TestProfiler.test_export_stacks",  # profiler/test_profiler
     "TestProfiler.test_source_multithreaded_basic_work_in_main_thread_True",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_mkldnn_tensors",  # profiler/test_profiler
     "TestRecordFunction.test_datapipe_with_record_function",  # profiler/test_profiler
-    "TestProfiler.test_memory_profiler",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_tensor_lists",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_pointers_and_ids",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_nnmodule_params",  # profiler/test_profiler
@@ -2400,8 +2394,6 @@ dynamo_expected_failures = {
     "TestAttnBiasCPU.test_is_causal_and_mask_fails_cpu",  # test_transformers.py
     "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape1_cpu",  # test_transformers.py
     "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape0_cpu",  # test_transformers.py
-    "TestArgmax.test_combinations_data61",  # torch_np/test_ndarray_methods.py
-    "TestArgmax.test_combinations_data58",  # torch_np/test_ndarray_methods.py
 }
 
 # see NOTE [dynamo_test_failures.py] for more details

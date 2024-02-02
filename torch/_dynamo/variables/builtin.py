@@ -57,7 +57,12 @@ from .lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
-from .tensor import FakeItemVariable, SymNodeVariable, UnspecializedPythonVariable
+from .tensor import (
+    FakeItemVariable,
+    SymNodeVariable,
+    TensorVariable,
+    UnspecializedPythonVariable,
+)
 from .user_defined import UserDefinedVariable
 
 log = logging.getLogger(__name__)
@@ -702,8 +707,11 @@ class BuiltinVariable(VariableTracker):
         # unnecessarily putting guards on objects which might not actually be used.
         has_constant_handler = self.has_constant_handler(args, kwargs)
         if has_constant_handler:
+            from .builder import SourcelessBuilder
+
             # constant fold
-            return variables.ConstantVariable.create(
+            return SourcelessBuilder()(
+                tx,
                 self.as_python_constant()(
                     *[x.as_python_constant() for x in args],
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
@@ -929,6 +937,10 @@ class BuiltinVariable(VariableTracker):
             arg, (variables.UserDefinedClassVariable, BaseUserFunctionVariable)
         ):
             return variables.ConstantVariable.create(True)
+        elif isinstance(arg, UserDefinedVariable):
+            return variables.ConstantVariable.create(callable(arg.value))
+        elif isinstance(arg, (ConstantVariable, SymNodeVariable, TensorVariable)):
+            return variables.ConstantVariable.create(False)
 
     def call_cast(self, _, *args, **kwargs):
         if len(args) == 2:
@@ -1611,13 +1623,17 @@ class BuiltinVariable(VariableTracker):
         if isinstance(left, TensorVariable) or isinstance(right, TensorVariable):
             from .builder import wrap_fx_proxy_cls
 
-            if op is operator.is_:
-                return ConstantVariable.create(
+            if op in [operator.is_, operator.is_not]:
+                is_result = (
                     isinstance(left, TensorVariable)
                     and isinstance(right, TensorVariable)
                     and id(extract_fake_example_value(left.as_proxy().node))
                     == id(extract_fake_example_value(right.as_proxy().node))
                 )
+                if op is operator.is_:
+                    return ConstantVariable.create(is_result)
+                else:
+                    return ConstantVariable.create(not is_result)
 
             if op not in supported_tensor_comparison_ops.values():
                 _unimplemented()
