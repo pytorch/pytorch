@@ -1819,6 +1819,35 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
                 opt_fn = torch._dynamo.optimize(nopython=True)(fn)
                 self.assertEqual(opt_fn(), fn())
 
+    def test_elipsis(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(a, ind, val):
+            a[ind] = val
+            return a
+
+        arr = np.zeros(4)
+        self.assertEqual(fn(arr, np.s_[...], np.ones(4)), np.ones(4))
+
+        arr = np.array([[1, 1], [2, 2]])
+        self.assertEqual(
+            fn(arr, np.s_[0, ...], np.zeros(2)), np.array([[0, 0], [2, 2]])
+        )
+
+        arr = np.array([[1, 1], [2, 2]])
+        self.assertEqual(
+            fn(arr, np.s_[1, ...], np.zeros(2)), np.array([[1, 1], [0, 0]])
+        )
+
+        arr = np.array([[1, 1], [2, 2]])
+        self.assertEqual(
+            fn(arr, np.s_[..., 0], np.array([3, 3])), np.array([[3, 1], [3, 2]])
+        )
+
+        arr = np.array([[1, 1], [2, 2]])
+        self.assertEqual(
+            fn(arr, np.s_[..., 1], np.array([3, 3])), np.array([[1, 3], [2, 3]])
+        )
+
     def test_is_with_tensor_arg(self):
         # When the result of is or is not is determined statically we optimize the check away.
         # testing those scenarios.
@@ -2290,6 +2319,26 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         # Test aliased
         self.assertEqual(opt_fn(param, param), fn(param, param))
         self.assertEqual(cnts.frame_count, 2)  # Recompiles
+
+    def test_reconstructed_name(self):
+        lst = []
+
+        @torch._dynamo.disable
+        def disallowed(g):
+            lst.append(g.__name__)
+
+        def f():
+            def g():
+                return ()
+
+            disallowed(g)
+
+        f_opt = torch._dynamo
+        opt_f = torch._dynamo.optimize(backend="eager")(f)
+        opt_f()
+        f()
+        self.assertEqual(len(lst), 2)
+        self.assertEqual(lst[0], lst[1])
 
     @unittest.skipIf(
         sys.version_info < (3, 10),

@@ -1062,7 +1062,12 @@ class BuiltinVariable(VariableTracker):
         return args[0].call_method(tx, "__getitem__", args[1:], kwargs)
 
     def call_isinstance(self, tx, arg, isinstance_type):
-        arg_type = arg.python_type()
+        try:
+            arg_type = arg.python_type()
+        except NotImplementedError:
+            unimplemented(
+                f"isinstance({arg}, {isinstance_type}): can't determine type of {arg}"
+            )
 
         isinstance_type = isinstance_type.as_python_constant()
 
