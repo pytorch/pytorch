@@ -4366,7 +4366,6 @@ def forward(self, x):
             with torch.inference_mode():
                 return fn(x, b, y)
 
-        # torch._dynamo.config.capture_dynamic_output_shape_ops = True
         x = torch.randn(4, requires_grad=True)
         b = torch.tensor([True, False, True, False])
         y = torch.randn(2, requires_grad=True)
