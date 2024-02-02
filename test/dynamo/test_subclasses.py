@@ -503,6 +503,25 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res_act = fn_opt(wrapped)
         self.assertEqual(res_exp, res_act)
 
+    def test_torch_dispatch_subclass_guard_recompile(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+        x = torch.ones(2, 2)
+        x_two = TwoTensor(x.clone(), x.clone())
+
+        def fn(w):
+            return torch.add(w, 1.0)
+
+        fn_opt = compile_full_eager(fn)
+
+        res_exp = fn(x_two)
+        res_act = fn_opt(x_two)
+        self.assertEqual(res_exp, res_act)
+
+        # recompile!
+        res_exp = fn(x)
+        res_act = fn_opt(x)
+        self.assertEqual(res_exp, res_act)
+
     def test_torch_function_wrapper_class_with_kwargs(self):
         x = torch.ones(2, 2)
         wrapped = WrapperSubclass(x)
@@ -556,6 +575,20 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         test_dynamic_dim(f, x, DimDynamic.DYNAMIC, 1, 1)
         test_dynamic_dim(f, x, DimDynamic.DUCK, 1, 1)
         test_dynamic_dim(f, x, DimDynamic.STATIC, 1, 1)
+
+    def test_torch_dispatch_subclass_guard_recompile(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+        x = torch.ones(2, 2)
+        x_two = TwoTensor(x.clone(), x.clone())
+
+        def fn(w):
+            return torch.add(w, 1.0)
+
+        fn_opt = compile_full_eager(fn)
+
+        res_exp = fn(x_two)
+        res_act = fn_opt(x_two)
+        self.assertEqual(res_exp, res_act)
 
     def test_compile_with_fake_tensor_automatic_dynamic(self):
         def f(x):
