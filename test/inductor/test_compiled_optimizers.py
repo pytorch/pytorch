@@ -97,9 +97,6 @@ def build_compiled_opt_kwarg_db():
                         f"{'_foreach' if foreach else ''}"
                     )
 
-                    if isinstance(kwargs.get("lr", None), torch.Tensor):
-                        kwargs["lr"] = kwargs["lr"].to(device)
-
                     for key in kwargs:
                         if key == "lr":
                             continue
@@ -202,6 +199,9 @@ def make_test(
             run_cudagraphs = device == "cuda" and optim_cls not in (Adagrad, SGD)
             if run_cudagraphs:
                 stack.enter_context(config.patch({"triton.cudagraphs": True}))
+
+            if isinstance(kwargs.get("lr", None), torch.Tensor):
+                kwargs["lr"] = kwargs["lr"].to(device)
 
             torch._dynamo.reset()
             torch._inductor.metrics.reset()
