@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
+    EmbeddingModule,
     MLPModule,
     ModelArgs,
     NUM_DEVICES,
@@ -31,6 +32,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     Transformer,
     with_comms,
 )
+import torch.nn.functional as F
+from torch.distributed._tensor import distribute_tensor
 
 
 class DistTensorParallelExampleTest(DTensorTestBase):
@@ -297,27 +300,17 @@ class DistTensorParallelExampleTest(DTensorTestBase):
 
     @with_comms
     def test_weight_tying(self):
-        class TestModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                # Initialize different weights for embedding and fc.
-                torch.manual_seed(1)
-                self.embedding = torch.nn.Embedding(16, 8)
-                torch.manual_seed(2)
-                self.fc = torch.nn.Linear(8, 16)
+        model = EmbeddingModule().to(self.device_type)
+        local_model = deepcopy(model)
 
-            def forward(self, x):
-                return self.fc(self.embedding(x))
-
-        model = TestModule().to(self.device_type)
         parallelize_plan = {
             "embedding": ColwiseParallel(),
-            "fc": RowwiseParallel(),
+            "fc": RowwiseParallel(output_layouts=Shard(1), use_local_output=False),
         }
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         parallelize_module(model, device_mesh, parallelize_plan)
 
-        input_size = [5]
+        input_size = [2]
         torch.manual_seed(0)
         inp = torch.randint(16, input_size, device=self.device_type)
 
@@ -342,6 +335,42 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         self.assertEqual(model.embedding.weight.grad, model.fc.weight.grad)
         self.assertEqual(id(model.embedding.weight.grad), id(model.fc.weight.grad))
 
+    @with_comms
+    def test_loss_parallel(self):
+        model = EmbeddingModule().to(self.device_type)
+        local_model = deepcopy(model)
+
+        parallelize_plan = {
+            "embedding": ColwiseParallel(output_layouts=Replicate()),
+            "fc": ColwiseParallel(output_layouts=Shard(1), use_local_output=False),
+        }
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        parallelize_module(model, device_mesh, parallelize_plan)
+
+        input_size = [2]
+        torch.manual_seed(0)
+        inp = torch.randint(16, input_size, device=self.device_type)
+
+        local_output = local_model(inp)
+        local_target = torch.randint(16, input_size, device=self.device_type)
+        local_loss = F.cross_entropy(local_output, local_target, reduction='mean')
+
+        output = model(inp)
+        target = distribute_tensor(local_target, device_mesh)
+
+        from torch.distributed._tensor.redistribute import Count
+        from torch.distributed._tensor.debug import CommDebugMode
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            loss = F.cross_entropy(output, target, reduction='mean')
+            self.assertEqual(loss.to_local(), local_loss)
+
+            # TODO: check funcol calls after CommDebugMode() is fixed
+            # self.assertTrue(comm_mode.get_total_counts(), 3)
+            # self.assertEqual(comm_mode.get_comm_counts()[funcol.all_reduce], 3)
+
+            # TODO: add support of nll_loss_backward
+            # loss.backward()
 
 instantiate_parametrized_tests(DistTensorParallelExampleTest)
 

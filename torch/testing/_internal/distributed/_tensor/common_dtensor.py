@@ -68,6 +68,19 @@ class MLPModule(nn.Module):
         self.net2.reset_parameters()
 
 
+class EmbeddingModule(nn.Module):
+    def __init__(self):
+        super().__init__()
+        # Initialize different weights for embedding and fc.
+        torch.manual_seed(1)
+        self.embedding = torch.nn.Embedding(16, 8)
+        torch.manual_seed(2)
+        self.fc = torch.nn.Linear(8, 16)
+
+    def forward(self, x):
+        return self.fc(self.embedding(x))
+
+
 @dataclass
 class ModelArgs:
     n_layers: int = 2

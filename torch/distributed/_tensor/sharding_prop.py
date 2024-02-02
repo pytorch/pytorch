@@ -8,6 +8,7 @@ from torch._subclasses import FakeTensorMode
 from torch.distributed._tensor._utils import try_find_mesh_from_args
 from torch.distributed._tensor.op_schema import (
     DTensorSpec,
+    OpDecomposeStrategy,
     OpInfo,
     OpSchema,
     OpStrategy,
@@ -215,6 +216,13 @@ class ShardingPropagator:
                 # single Op strategy
                 output_strategy = self._select_strategy(op_strategy)
 
+                if isinstance(output_strategy, OpDecomposeStrategy):
+                    return OutputSharding(
+                        output_spec=None,
+                        needs_op_decompose=True,
+                        op_decompose_fn=output_strategy.decompose_fn,
+                    )
+
                 # check if we need to redistribute the input
                 needs_redistribute = False
                 expected_input_specs = []
@@ -231,6 +239,8 @@ class ShardingPropagator:
                         if output_strategy.input_specs is None
                         else output_strategy.input_specs[idx]
                     )
+                    if not desired_spec.tensor_meta:
+                        desired_spec.tensor_meta = input_spec.tensor_meta
                     expected_input_specs.append(desired_spec)
                     if input_spec.placements != desired_spec.placements:
                         needs_redistribute = True
@@ -278,6 +288,7 @@ class ShardingPropagator:
                 for strategy in op_strategy.childs:
                     assert isinstance(strategy, OpStrategy)
                     output_strategy = self._select_strategy(strategy)
+                    assert isinstance(output_strategy, PlacementStrategy)
                     out_spec_list.append(output_strategy.output_spec)
 
                 needs_redistribute = False
@@ -377,8 +388,10 @@ class ShardingPropagator:
                 f"Operator {op_schema.op} does not have a sharding strategy registered."
             )
 
-    def _select_strategy(self, strategy: OpStrategy) -> PlacementStrategy:
-        if len(strategy.strategies) == 1:
+    def _select_strategy(
+        self, strategy: OpStrategy
+    ) -> Union[OpDecomposeStrategy, PlacementStrategy]:
+        if len(strategy.strategies) == 1 and not strategy.decomposition:
             # short cut with only one possible strategy
             return strategy.strategies[0]
 
@@ -390,5 +403,12 @@ class ShardingPropagator:
             redistribute_cost = sum(chain.from_iterable(strtg.redistribute_cost))
             strategy_costs.append(redistribute_cost)
 
+        min_strategy_cost = min(strategy_costs)
+        if (
+            strategy.decomposition
+            and strategy.decomposition.decompose_cost < min_strategy_cost
+        ):
+            return strategy.decomposition
+
         # for eager execution, we just select the one with the minimal redistribute cost
-        return strategy.strategies[strategy_costs.index(min(strategy_costs))]
+        return strategy.strategies[strategy_costs.index(min_strategy_cost)]

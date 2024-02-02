@@ -66,7 +66,6 @@ class DistMathOpsTest(DTensorTestBase):
         device_mesh = self.build_device_mesh()
 
         x = torch.rand(8, 12, 16, device=self.device_type)
-        dims = range(3)  # used to convert -1 to the actual dim
         softmax_dims = [-1, 0, 1, 2]
         shard_dims = [-1, 0, 1, 2]
         test_list = list(itertools.product(softmax_dims, shard_dims))
@@ -80,12 +79,9 @@ class DistMathOpsTest(DTensorTestBase):
                 dist_x, dim=softmax_dim, dtype=torch.float32
             )
             shard_dim = normalize_dim(shard_dim, dist_x.ndim)
-            if dims[shard_dim] == dims[softmax_dim]:
-                self.assertTrue(dist_y.placements[0].is_replicate())
-                self.assertEqual(dist_y.to_local(), local_y)
-            else:
-                self.assertTrue(dist_y.placements[0].is_shard(dim=shard_dim))
-                self.assertEqual(dist_y.full_tensor(), local_y)
+            # if softmax_dim == shard_dim, softmax will go through op decomposition
+            self.assertTrue(dist_y.placements[0].is_shard(dim=shard_dim))
+            self.assertEqual(dist_y.full_tensor(), local_y)
 
     # TODO: get test_softmax_with_bwd pass on CPU
     # DTensor's _softmax_backward_data produces wrong result on CPU on certain dimension.
@@ -95,7 +91,6 @@ class DistMathOpsTest(DTensorTestBase):
     def test_softmax_with_bwd(self):
         device_mesh = self.build_device_mesh()
 
-        dims = range(3)  # used to convert -1 to the actual dim
         softmax_dims = [-1, 0, 1, 2]
         shard_dims = [-1, 0, 1, 2]
         test_list = list(itertools.product(softmax_dims, shard_dims))
@@ -113,16 +108,11 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertTrue(dist_x.requires_grad)
             dist_softmax = dist_x.softmax(dim=softmax_dim)
             shard_dim = normalize_dim(shard_dim, dist_x.ndim)
-            if dims[softmax_dim] == dims[shard_dim]:
-                self.assertTrue(dist_softmax.placements[0].is_replicate())
-            else:
-                self.assertTrue(dist_softmax.placements[0].is_shard(dim=shard_dim))
+            # if softmax_dim == shard_dim, softmax will go through op decomposition
+            self.assertTrue(dist_softmax.placements[0].is_shard(dim=shard_dim))
             dist_y = dist_softmax.sum()
-            if dims[softmax_dim] == dims[shard_dim]:
-                self.assertTrue(dist_y.placements[0].is_replicate())
-            else:
-                self.assertTrue(dist_y.placements[0].is_partial())
-                dist_y = dist_y.redistribute(device_mesh, [Replicate()])
+            self.assertTrue(dist_y.placements[0].is_partial())
+            dist_y = dist_y.redistribute(device_mesh, [Replicate()])
             self.assertEqual(dist_y.to_local(), local_y)
             self.assertIsNone(dist_x.grad)
             dist_y.backward()
@@ -156,11 +146,11 @@ class DistMathOpsTest(DTensorTestBase):
                     if shard_dim == channel_dim:
                         # TODO: currently CommDebugMode cannot log communications within
                         # sharding prop; need to fix it before enabling this check.
-                        # self.assertEqual(comm_mode.get_total_counts(), 1)
-                        # self.assertEqual(
-                        #     comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
-                        #     1,
-                        # )
+                        # self.assertEqual(comm_mode.all_reduce(), 1)
+                        # self.assertEqual(comm_mode.get_comm_counts()[funcol.all_reduce], 1)
+                        # In this case the computation will go through decomposition, where
+                        # the intermediate _MaskPartial tensor is redistributed to Replicate
+                        # via an all_reduce.
                         self.assertTrue(dist_y.placements[0].is_replicate())
                         self.assertEqual(dist_y.to_local(), y)
                     else:

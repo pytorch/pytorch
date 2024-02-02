@@ -13,6 +13,7 @@ from torch.distributed._tensor.op_schema import (
     OutputSharding,
     RuntimeSchemaInfo,
 )
+from torch.distributed._tensor.ops.embedding_ops import _MaskPartial
 from torch.distributed._tensor.ops.utils import (
     normalize_dim,
     normalize_dims,
@@ -584,7 +585,9 @@ def propagate_shape_and_sharding(
             dim_map[in_dim.input_dim] = dim
 
     needs_reshard = any(
-        isinstance(placement, Shard) and not shardable_dims[placement.dim][mesh_dim]
+        isinstance(placement, Shard)
+        and not shardable_dims[placement.dim][mesh_dim]
+        or isinstance(placement, _MaskPartial)
         for mesh_dim, placement in enumerate(in_shard)
     )
 
@@ -666,7 +669,8 @@ def register_prop_rule_map(
             #        [Shard(0), Shard(0)]
             suggested_placements = [
                 p
-                if not isinstance(p, Shard) or shardable_dims[p.dim][mesh_dim]
+                if (not isinstance(p, Shard) or shardable_dims[p.dim][mesh_dim])
+                and not isinstance(p, _MaskPartial)
                 else Replicate()
                 for mesh_dim, p in enumerate(input_dtensor_spec.placements)
             ]

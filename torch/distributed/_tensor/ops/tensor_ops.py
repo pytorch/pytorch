@@ -69,7 +69,8 @@ register_op_strategy(
 )(default_strategy)
 
 register_op_strategy(
-    aten._to_copy.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["dtype"])
+    [aten._to_copy.default, aten.to.device],
+    schema_info=RuntimeSchemaInfo(static_kwargkey=["dtype"]),
 )(default_strategy)
 
 

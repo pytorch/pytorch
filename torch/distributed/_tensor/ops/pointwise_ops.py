@@ -383,6 +383,7 @@ pointwise_ops = [
     aten.trunc.default,
     aten.trunc.out,
     aten.trunc_.default,
+    aten.where.ScalarOther,
     aten.where.self,
     aten.where.self_out,
     aten.xlogy.OutScalar_Self,

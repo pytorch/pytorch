@@ -138,18 +138,7 @@ class _MaskPartial(_Partial):
         return shard_spec._reduce_shard_tensor(tensor, mesh, self.reduce_op, mesh_dim)
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, _MaskPartial):
-            return False
-
-        # if either data is not None, we invalidate the sharding cache, as this indicates
-        # the current MaskPartial placement is still in use and should not be used for cache hit.
-        if self.mask_buffer.data is not None or other.mask_buffer.data is not None:
-            return False
-
-        return (
-            self.reduce_op == other.reduce_op
-            and self.logical_dim_size == other.logical_dim_size
-        )
+        return id(self) == id(other)
 
     def __hash__(self) -> int:
         return 1 + hash(

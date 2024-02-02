@@ -4,15 +4,22 @@ from typing import cast, List, Optional, Sequence, Tuple
 import torch
 
 import torch.distributed.distributed_c10d as c10d
-from torch._decomp.decompositions import Reduction
+from torch._decomp.decompositions import (
+    _log_softmax,
+    _log_softmax_backward_data,
+    _softmax,
+    _softmax_backward_data,
+    nll_loss2d_forward,
+    nll_loss_forward,
+    Reduction,
+)
 from torch.distributed._tensor.op_schema import (
+    OpDecomposeStrategy,
     OpSchema,
     OpStrategy,
-    OutputSharding,
     PlacementStrategy,
     RuntimeSchemaInfo,
 )
-from torch.distributed._tensor.ops.common_rules import pointwise_rule
 from torch.distributed._tensor.ops.utils import (
     as_list,
     generate_redistribute_costs,
@@ -21,7 +28,6 @@ from torch.distributed._tensor.ops.utils import (
     normalize_dims,
     normalize_to_torch_size,
     register_op_strategy,
-    register_prop_rule,
 )
 from torch.distributed._tensor.placement_types import (
     _Partial,
@@ -173,6 +179,7 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.max.default: c10d.ReduceOp.MAX,
     aten.max.dim: c10d.ReduceOp.MAX,
     aten.max.out: c10d.ReduceOp.MAX,
+    aten.amax.default: c10d.ReduceOp.MAX,
     aten.min.default: c10d.ReduceOp.MIN,
     aten.min.dim: c10d.ReduceOp.MIN,
     aten.min.out: c10d.ReduceOp.MIN,
@@ -224,6 +231,20 @@ def var_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     )
 
 
+# This is a rough estimate of the communication cost in decopmosed softmax-related ops.
+# When input is sharded on softmax_dim, without decomp the redistribute_cost is from
+# a Shard -> Replicate all-gather; with decomp there will be a certain number of all-reduce
+# with the softmax_dim being size one, depending on the specific op decomposition.
+def _redistribute_cost_in_decomp(original_cost, spec, softmax_dim, num_all_reduce):
+    assert spec.tensor_meta is not None, "spec should have tensor meta defined!"
+    return (
+        original_cost  # the cost of one all-gather
+        * 2  # approximate ratio between the costs of all-reduce and all-gather
+        * num_all_reduce
+        / spec.tensor_meta.shape[softmax_dim]
+    )
+
+
 @register_op_strategy(
     [aten._log_softmax.default, aten._softmax.default], schema_info=RuntimeSchemaInfo(1)
 )
@@ -234,6 +255,7 @@ def softmax_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     softmax_dim = normalize_dim(softmax_dim, input_strategy.output_ndim)
 
     output_strategy = OpStrategy([])
+    decomp_redist_cost = float("inf")
     for idx, input_placement_strategy in enumerate(input_strategy.strategies):
         redistribute_costs = []
         input_src_spec = input_placement_strategy.output_spec
@@ -246,9 +268,10 @@ def softmax_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
             ),
             tensor_meta=input_src_spec.tensor_meta,
         )
-        redistribute_costs.append(
-            generate_redistribute_costs(input_strategy, input_target_spec)
+        redistribute_cost = generate_redistribute_costs(
+            input_strategy, input_target_spec
         )
+        redistribute_costs.append(redistribute_cost)
         output_target_spec = input_target_spec
         output_strategy.strategies.append(
             PlacementStrategy(
@@ -258,28 +281,85 @@ def softmax_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
             )
         )
 
+        dim_map = input_src_spec.dim_map
+        # consider op decomposition if input is sharded on the softmax dimension
+        if softmax_dim < len(dim_map) and dim_map[softmax_dim] >= 0:
+            decomp_redist_cost = min(
+                decomp_redist_cost,
+                _redistribute_cost_in_decomp(
+                    sum(redistribute_cost),
+                    input_src_spec,
+                    softmax_dim,
+                    num_all_reduce=2,
+                ),
+            )
+
+    decompose_fn = _softmax if op_schema.op == aten._softmax.default else _log_softmax
+    # TODO: figure out the right way to estimate the extra cost
+    decomp_extra_cost = 0
+    decompose_cost = decomp_redist_cost + decomp_extra_cost
+    output_strategy.decomposition = OpDecomposeStrategy(decompose_fn, decompose_cost)
+
     return output_strategy
 
 
-@register_prop_rule(
+@register_op_strategy(
     [
         aten._log_softmax_backward_data.default,
         aten._softmax_backward_data.default,
     ],
     schema_info=RuntimeSchemaInfo(2),
 )
-def softmax_bwd_rule(op_schema: OpSchema) -> OutputSharding:
-    grad_out_spec, out_spec, softmax_dim, _ = op_schema.args_schema
-    grad_out_spec = cast(DTensorSpec, grad_out_spec)
-    out_spec = cast(DTensorSpec, out_spec)
+def softmax_backward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+    grad_out_strategy, out_strategy, softmax_dim, _ = op_schema.args_schema
+    grad_out_strategy = cast(OpStrategy, grad_out_strategy)
+    out_strategy = cast(OpStrategy, out_strategy)
     softmax_dim = cast(int, softmax_dim)
-    grad_out_dim_map = grad_out_spec.dim_map
-    out_dim_map = out_spec.dim_map
-    if softmax_dim < len(grad_out_dim_map) and (
-        grad_out_dim_map[softmax_dim] >= 0 or out_dim_map[softmax_dim] >= 0
-    ):
-        raise RuntimeError("Cannot run _softmax_backward_data on sharding dimension!")
-    return pointwise_rule(op_schema)
+    softmax_dim = normalize_dim(softmax_dim, grad_out_strategy.output_ndim)
+
+    grad_in_strategy = OpStrategy([])
+    decomp_redist_cost = float("inf")
+    for out_placement_strat in out_strategy.strategies:
+        src_spec = out_placement_strat.output_spec
+
+        # make sure inputs are replicated along the softmax dim
+        tgt_spec = DTensorSpec(
+            mesh=mesh,
+            placements=replicate_reduction_dims(src_spec.placements, [softmax_dim]),
+            tensor_meta=src_spec.tensor_meta,
+        )
+        redist_grad_out_cost = generate_redistribute_costs(grad_out_strategy, tgt_spec)
+        redist_out_cost = generate_redistribute_costs(out_strategy, tgt_spec)
+        grad_in_strategy.strategies.append(
+            PlacementStrategy(
+                output_specs=tgt_spec,
+                redistribute_cost=[redist_grad_out_cost, redist_out_cost],
+            )
+        )
+
+        dim_map = src_spec.dim_map
+        # consider op decomposition if the out parameter is sharded on the softmax dimension
+        # NOTE: here we ignore the redistribute cost on grad_out
+        if softmax_dim < len(dim_map) and dim_map[softmax_dim] >= 0:
+            total_original_cost = sum(redist_out_cost)
+            decomp_redist_cost = min(
+                decomp_redist_cost,
+                _redistribute_cost_in_decomp(
+                    total_original_cost, src_spec, softmax_dim, num_all_reduce=1
+                ),
+            )
+
+    decompose_fn = (
+        _softmax_backward_data
+        if op_schema.op == aten._softmax_backward_data.default
+        else _log_softmax_backward_data
+    )
+    # TODO: figure out the right way to estimate the extra cost
+    decomp_extra_cost = 0
+    decompose_cost = decomp_redist_cost + decomp_extra_cost
+    grad_in_strategy.decomposition = OpDecomposeStrategy(decompose_fn, decompose_cost)
+
+    return grad_in_strategy
 
 
 @register_op_strategy(
@@ -303,6 +383,7 @@ def nll_loss_forward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
     channel_dim = 1 if len(input_shape) >= 2 else 0
 
     output_strategy = OpStrategy([])
+    decomp_redist_cost = float("inf")
     for idx, input_placement_strategy in enumerate(input_strategy.strategies):
         op_args_target_specs = []
         redistribute_costs = []
@@ -317,9 +398,8 @@ def nll_loss_forward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
             tensor_meta=input_src_spec.tensor_meta,
         )
         op_args_target_specs.append(input_tgt_spec)
-        redistribute_costs.append(
-            generate_redistribute_costs(input_strategy, input_tgt_spec)
-        )
+        redist_input_cost = generate_redistribute_costs(input_strategy, input_tgt_spec)
+        redistribute_costs.append(redist_input_cost)
 
         # target doesn't have channel dim, and it follows input on other dims
         target_placement_strategy = target_strategy.strategies[idx]
@@ -382,6 +462,26 @@ def nll_loss_forward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
                 redistribute_cost=redistribute_costs,
             )
         )
+
+        dim_map = input_src_spec.dim_map
+        # consider op decomposition if input is sharded on the channel dimension
+        # NOTE: here we ignore the redistribute cost not on input
+        if channel_dim < len(dim_map) and dim_map[channel_dim] >= 0:
+            decomp_redist_cost = min(
+                decomp_redist_cost,
+                _redistribute_cost_in_decomp(
+                    sum(redist_input_cost),
+                    input_src_spec,
+                    channel_dim,
+                    num_all_reduce=1,
+                ),
+            )
+
+    decompose_fn = nll_loss_forward if len(input_shape) <= 2 else nll_loss2d_forward
+    # TODO: figure out the right way to estimate the extra cost
+    decomp_extra_cost = 0
+    decompose_cost = decomp_redist_cost + decomp_extra_cost
+    output_strategy.decomposition = OpDecomposeStrategy(decompose_fn, decompose_cost)
 
     return output_strategy
 

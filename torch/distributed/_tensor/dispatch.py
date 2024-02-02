@@ -162,6 +162,10 @@ class OpDispatcher:
                             f"return type {ret_type} in DTensor op is not supported"
                         )
         else:
+            if output_sharding.needs_op_decompose:
+                assert output_sharding.op_decompose_fn is not None
+                return output_sharding.op_decompose_fn(*args, **kwargs)
+
             if output_sharding.needs_redistribute:
                 # compute locally with redistribute first if needed
                 assert output_sharding.schema_suggestions is not None

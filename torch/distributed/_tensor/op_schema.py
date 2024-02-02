@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch._ops import OpOverload
@@ -100,6 +100,16 @@ class PlacementStrategy:
         return f"{input_specs_str} -> {output_spec_str}"
 
 
+@dataclass
+class OpDecomposeStrategy:
+    # TODO: add documentation
+    decompose_fn: Callable
+    decompose_cost: float
+
+    def __str__(self) -> str:
+        return f"OpDecomposeStrategy({self.decompose_fn.__module__}.{self.decompose_fn.__name__})"
+
+
 class StrategyType:
     """
     Base class type for op strategy, We have two StrategyType:
@@ -117,11 +127,17 @@ class OpStrategy(StrategyType):
     def __init__(self, strategies: List[PlacementStrategy]) -> None:
         super().__init__()
         self.strategies: List[PlacementStrategy] = strategies
+        self.decomposition: Optional[OpDecomposeStrategy] = None
 
     def __str__(self) -> str:
         strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
         mesh_shape = self.output_mesh_shape
-        return f"OpStrategy:[{strategy_list_str}] @mesh: {mesh_shape}"
+        decomposition_str = (
+            "" if not self.decomposition else f" or {str(self.decomposition)}"
+        )
+        return (
+            f"OpStrategy:[{strategy_list_str}] @mesh: {mesh_shape}" + decomposition_str
+        )
 
     def max_num_shards(self) -> int:
         """
@@ -390,6 +406,8 @@ class OutputSharding:
     schema_suggestions: Optional[List[OpSchema]] = None
     failed_reason: Optional[str] = None
     needs_redistribute: bool = False
+    needs_op_decompose: bool = False
+    op_decompose_fn: Optional[Callable] = None
 
 
 @dataclass
