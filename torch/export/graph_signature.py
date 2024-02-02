@@ -127,11 +127,11 @@ def _sig_to_specs(
                     arg=o,
                     target=buffer_mutations[name],
                 )
-            elif name in user_input_mutations:
+            elif name in user_input_mutations.values():
                 return OutputSpec(
                     kind=OutputKind.USER_INPUT_MUTATION,
                     arg=o,
-                    target=user_input_mutations[name],
+                    target=name,
                 )
             else:
                 raise AssertionError(f"Unknown tensor mutation kind: {name}")

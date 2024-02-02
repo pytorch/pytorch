@@ -595,6 +595,8 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
                 return x
 
         m = M(self.conv_class, self.bn_class)
+        m = M(torch.nn.Conv2d, torch.nn.BatchNorm2d)
+        print("INPUTS", self.example_inputs[0].shape)
         self._verify_symmetric_xnnpack_qat_numerics(m, self.example_inputs)
 
     def test_qat_preserve_source_fn_stack(self):

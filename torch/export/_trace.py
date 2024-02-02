@@ -446,6 +446,8 @@ def _export_non_strict(
             # should have been handled already
             return ConstantArgument(value=val)
 
+    print(graph_signature.inputs_to_buffers, gm.graph)
+
     input_specs, output_specs = _sig_to_specs(
         user_inputs=set(graph_signature.user_inputs),
         inputs_to_parameters=graph_signature.inputs_to_parameters,  # type: ignore[arg-type]

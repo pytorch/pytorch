@@ -145,15 +145,15 @@ class FunctionalTensor(torch.Tensor):
         # In theory we don't have to do this - but if we want to service metadata requests here,
         # we need to carefully make sure all metadata is accurate (including metadata mutations)
         if func in FunctionalTensor.metadata_fns:
-
-            def unwrap(x):
-                return x.elem
-
-            assert len(args) == 1 and isinstance(args[0], FunctionalTensor)
-            assert len(kwargs) == 0
             # All metadata accesses should be plumbed to the inner tensor, that way we don't have to worry
             # about the problem of keeping metadata in sync between the wrapper and inner tensor.
             # This also alleviates us from having to manually handle metadata mutations on the wrapper.
+            assert len(kwargs) == 0
+            if func == torch.ops.aten.is_strides_like_format.default:
+                assert len(args) == 2 and isinstance(args[0], FunctionalTensor)
+                return func(args[0].elem, args[1])
+
+            assert len(args) == 1 and isinstance(args[0], FunctionalTensor)
             return func(args[0].elem)
         # Originally I tried to implement my subclass without giving it a torch_dispatch, but I gave up:
         # - _make_wrapper_subclass requires a __torch_dispatch__
