@@ -1609,8 +1609,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     # TODO: ceil_mode is not included in the test, because of
     # https://github.com/microsoft/onnxruntime/issues/16203
     # The ORT and PyTorch has different calculation for ceil_mode (the last value).
-    @skipIfUnsupportedMinOpsetVersion(19)
-    @skipIfUnsupportedMaxOpsetVersion(17)
+    # the issue requires fix in onnx(21) (https://github.com/onnx/onnx/issues/5711)
+    # a fix in ORT is planned. After the fixes in place, we can add ceil_mode to the test.
+    @skipIfUnsupportedMinOpsetVersion(21)
     def test_avgpool_3d_ceil(self):
         model = torch.nn.AvgPool3d(3, 2, ceil_mode=True)
         x = torch.randn(20, 16, 50, 44, 31)
