@@ -2391,7 +2391,7 @@ def _write_ninja_file(path,
     # 'Blocks' should be separated by newlines, for visual benefit.
     blocks = [config, flags, compile_rule]
     if with_cuda:
-        blocks.append(cuda_compile_rule)
+        blocks.append(cuda_compile_rule)  # type: ignore[possibly-undefined]
     blocks += [devlink_rule, link_rule, build, devlink, link, default]
     content = "\n\n".join("\n".join(b) for b in blocks)
     # Ninja requires a new lines at the end of the .ninja file
