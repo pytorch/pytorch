@@ -65,6 +65,7 @@ manual_torch_name_rule_map = {
     "torch.distributed.get_rank": TorchInGraphFunctionVariable,
     "torch.distributed.get_world_size": TorchInGraphFunctionVariable,
     "torch.distributed._tensor.DTensor#from_local": TorchInGraphFunctionVariable,
+    "torch.distributed.distributed_c10d._get_group_size_by_name": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d._get_group_tag": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d.get_process_group_ranks": TorchInGraphFunctionVariable,
     "torch._utils.is_compiling": TorchInGraphFunctionVariable,
@@ -154,9 +155,8 @@ manual_torch_name_rule_map = {
 
 
 # In graph functions (including constant folding) that are C bindings
-torch_c_binding_in_graph_functions = {
-    k: TorchInGraphFunctionVariable
-    for k in [
+torch_c_binding_in_graph_functions = dict.fromkeys(
+    [
         "math.acos",
         "math.acosh",
         "math.asin",
@@ -2033,8 +2033,9 @@ torch_c_binding_in_graph_functions = {
         "torch.xlogy",
         "torch.zero_",
         "torch.zeros",
-    ]
-}
+    ],
+    TorchInGraphFunctionVariable,
+)
 
 
 if sys.version_info >= (3, 9):
@@ -2045,9 +2046,8 @@ if sys.version_info >= (3, 11):
 
 
 # In graph functions (including constant folding) that are not C bindings
-torch_non_c_binding_in_graph_functions = {
-    k: TorchInGraphFunctionVariable
-    for k in [
+torch_non_c_binding_in_graph_functions = dict.fromkeys(
+    [
         "torch.__future__.get_overwrite_module_params_on_conversion",
         "torch.__future__.set_overwrite_module_params_on_conversion",
         "torch.__getattr__",
@@ -2716,8 +2716,9 @@ torch_non_c_binding_in_graph_functions = {
         "torch.typename",
         "torch.unique_consecutive",
         "torch.use_deterministic_algorithms",
-    ]
-}
+    ],
+    TorchInGraphFunctionVariable,
+)
 
 
 torch_name_rule_map = [
