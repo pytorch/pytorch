@@ -205,7 +205,7 @@ def capture_pre_autograd_graph(
             def _my_train(self, mode: bool = True):
                 ...
 
-            def _my_eval(self, mode: bool = True):
+            def _my_eval(self):
                 ...
 
             model.train = types.MethodType(_my_train, model)

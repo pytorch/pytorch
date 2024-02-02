@@ -153,9 +153,12 @@ def _allow_exported_model_train_eval_for_special_ops(model: torch.fx.GraphModule
     that have different train/eval behavior will also not be converted properly.
     """
     def _train(self, mode: bool = True):
-        _move_exported_model_to_train(self)
+        if mode:
+            _move_exported_model_to_train(self)
+        else:
+            _move_exported_model_to_eval(self)
 
-    def _eval(self, mode: bool = True):
+    def _eval(self):
         _move_exported_model_to_eval(self)
 
     model.train = types.MethodType(_train, model)  # type: ignore[method-assign]
