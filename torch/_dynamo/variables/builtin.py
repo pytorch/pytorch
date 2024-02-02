@@ -707,8 +707,11 @@ class BuiltinVariable(VariableTracker):
         # unnecessarily putting guards on objects which might not actually be used.
         has_constant_handler = self.has_constant_handler(args, kwargs)
         if has_constant_handler:
+            from .builder import SourcelessBuilder
+
             # constant fold
-            return variables.ConstantVariable.create(
+            return SourcelessBuilder()(
+                tx,
                 self.as_python_constant()(
                     *[x.as_python_constant() for x in args],
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
@@ -1062,7 +1065,12 @@ class BuiltinVariable(VariableTracker):
         return args[0].call_method(tx, "__getitem__", args[1:], kwargs)
 
     def call_isinstance(self, tx, arg, isinstance_type):
-        arg_type = arg.python_type()
+        try:
+            arg_type = arg.python_type()
+        except NotImplementedError:
+            unimplemented(
+                f"isinstance({arg}, {isinstance_type}): can't determine type of {arg}"
+            )
 
         isinstance_type = isinstance_type.as_python_constant()
 
