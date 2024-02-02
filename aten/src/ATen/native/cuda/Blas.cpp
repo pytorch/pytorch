@@ -177,16 +177,11 @@ static bool getDisableAddmmCudaLt() {
     if (env_value == nullptr) {
         env_value = std::getenv("DISABLE_ADDMM_HIP_LT");
     }
-    if (env_value != nullptr && strcmp(env_value, "0") == 0) {
-      return false;
-    }
-    return true;
-#else
+#endif
     if (env_value != nullptr && strcmp(env_value, "1") == 0) {
       return true;
     }
     return false;
-#endif
 }
 
 #ifdef USE_ROCM
