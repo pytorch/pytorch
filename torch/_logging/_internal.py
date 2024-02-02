@@ -831,7 +831,7 @@ def _init_logs(log_file_name=None):
 
         if log_file_name is not None:
             _setup_handlers(
-                lambda: logging.FileHandler(log_file_name),
+                lambda: logging.FileHandler(log_file_name, 'w+'),
                 log,
             )
 
