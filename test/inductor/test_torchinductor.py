@@ -681,21 +681,6 @@ class CommonTemplate:
 
         self.common(fn, (x, y, 2))
 
-    def test_add_complex2(self):
-        @torch.compile
-        def fn(a, b):
-            c = a + b
-            d = a + b
-            return c + d
-
-        x = torch.tensor([1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1])
-        y = torch.tensor([1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1])
-
-        _, code = run_and_get_code(fn, x, y)
-        self.assertEqual(
-            code[0].count("::view_dtype" if config.cpp_wrapper else "aten.view"), 3
-        )
-
     def test_add_complex3(self):
         # fix https://github.com/pytorch/pytorch/issues/115071
         @torch.compile
@@ -719,15 +704,21 @@ class CommonTemplate:
 
         for dtype in [torch.complex32, torch.complex64, torch.complex128]:
             x = torch.tensor(
-                [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1], dtype=dtype
+                [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1],
+                dtype=dtype,
+                device=self.device,
             )
             y = torch.tensor(
-                [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1], dtype=dtype
+                [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1],
+                dtype=dtype,
+                device=self.device,
             )
-
             _, code = run_and_get_code(fn, x, y)
             self.assertEqual(
-                code[0].count("::view_dtype" if config.cpp_wrapper else "aten.view"), 3
+                " ".join(code).count(
+                    "::view_dtype" if config.cpp_wrapper else "aten.view"
+                ),
+                3,
             )
 
     def test_concat_add_inplace(self):
