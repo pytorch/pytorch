@@ -2324,7 +2324,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   auto work = initWork(device, rank_, opType, profilingTitle, inputs, outputs);
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
-  work->outputs_ = std::make_shared<std::vector<at::Tensor>>(std::move(outputs));
+  work->outputs_ =
+      std::make_shared<std::vector<at::Tensor>>(std::move(outputs));
 
   if (avoidRecordStreams) {
     work->stashed_for_allocator_safety_ =
@@ -3147,8 +3148,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
 
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
-          this->getSequenceNumberForGroup() +
-          1), // seq + 1 to match collective
+          this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
       this->getID(),
       inputTensors, // inputTensors
       outputTensors, // outputTensors
@@ -3283,8 +3283,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
 
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
-          this->getSequenceNumberForGroup() +
-          1), // seq + 1 to match collective
+          this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
       this->getID(),
       inputTensors, // inputTensors
       outputTensors, // outputTensors
