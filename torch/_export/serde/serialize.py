@@ -412,8 +412,8 @@ class GraphModuleSerializer:
         elif isinstance(node.target, torch._ops.HigherOrderOperator):
             ex_node = Node(
                 target=self.serialize_operator(node.target),
-                inputs=self.serialize_arbitrary_inputs(node.args, node.kwargs),
-                outputs=self.serialize_arbitrary_outputs(node),
+                inputs=self.serialize_hoo_inputs(node.args, node.kwargs),
+                outputs=self.serialize_hoo_outputs(node),
                 metadata=self.serialize_metadata(node),
             )
         else:
@@ -508,7 +508,7 @@ class GraphModuleSerializer:
 
         return serialized_args
 
-    def serialize_arbitrary_inputs(self, args, kwargs) -> List[NamedArgument]:
+    def serialize_hoo_inputs(self, args, kwargs) -> List[NamedArgument]:
         """
         For serializing HOO inputs since HOOs do not have a schema.
         """
@@ -948,7 +948,7 @@ class GraphModuleSerializer:
 
         return output_arguments
 
-    def serialize_arbitrary_outputs(self, node: torch.fx.Node) -> List[Argument]:
+    def serialize_hoo_outputs(self, node: torch.fx.Node) -> List[Argument]:
         """
         For serializing HOO outputs since HOOs do not have a schema.
         """
@@ -987,6 +987,7 @@ class GraphModuleSerializer:
 
         arg_list = []
         for i, element_meta_val in enumerate(meta_val):
+            assert isinstance(meta_val, torch.Tensor), "Non-tensor outputs NYI"
             arg_list.append(
                 self.serialize_tensor_output(idx_to_name[i], element_meta_val)
             )
@@ -1297,7 +1298,7 @@ class GraphModuleDeserializer:
             self.deserialize_sym_op_outputs(serialized_node, fx_node)
 
         elif isinstance(target, torch._ops.HigherOrderOperator):
-            args, kwargs = self.deserialize_arbitrary_inputs(serialized_node.inputs)
+            args, kwargs = self.deserialize_hoo_inputs(serialized_node.inputs)
             fx_node = self.graph.create_node(
                 "call_function", target, args, kwargs, None
             )
@@ -1454,7 +1455,7 @@ class GraphModuleDeserializer:
                     kwargs[schema_arg.name] = actual_args[schema_arg.name]
         return tuple(args), kwargs
 
-    def deserialize_arbitrary_inputs(self, inputs: List[NamedArgument]):
+    def deserialize_hoo_inputs(self, inputs: List[NamedArgument]):
         """
         For deserializing HOO inputs since HOOs do not have a schema.
         """
