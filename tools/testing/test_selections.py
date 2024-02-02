@@ -199,6 +199,9 @@ def calculate_shards(
         get_duration(test, test_file_times, test_class_times) or 0
         for test in parallel_tests
     )
+    print(f"num serial tests: {len(serial_tests)}, num parallel tests: {len(parallel_tests)}")
+    print(f"num shards: {num_shards}")
+    print(f"Serial time: {serial_time}, Parallel time: {parallel_time}")
     total_time = serial_time + parallel_time / NUM_PROCS_FOR_SHARDING_CALC
     if total_time == 0:
         num_serial_shards = num_shards
