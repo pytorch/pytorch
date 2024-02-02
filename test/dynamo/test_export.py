@@ -4352,6 +4352,61 @@ def forward(self, x):
         out = gm(inp)
         self.assertEqual(out.requires_grad, False)
 
+    def test_export_masking_with_no_grad(self):
+        def fn(x, b, y):
+            x = x.clone()
+            x[b] = y
+            return x
+
+        def fn_no_grad(x, b, y):
+            with torch.no_grad():
+                return fn(x, b, y)
+
+        def fn_inference_mode(x, b, y):
+            with torch.inference_mode():
+                return fn(x, b, y)
+
+        x = torch.randn(4, requires_grad=True)
+        b = torch.tensor([True, False, True, False])
+        y = torch.randn(2, requires_grad=True)
+
+        gm, _ = torch._dynamo.export(fn_no_grad)(x, b, y)
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x, b, y):
+    arg0, arg1, arg2, = fx_pytree.tree_flatten_spec(([x, b, y], {}), self._in_spec)
+    l_x_ = arg0
+    l_b_ = arg1
+    l_y_ = arg2
+    _set_grad_enabled = torch._C._set_grad_enabled(False)
+    x = l_x_.clone();  l_x_ = None
+    x[l_b_] = l_y_;  setitem = x;  l_b_ = l_y_ = None
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
+    return pytree.tree_unflatten([x], self._out_spec)""",
+        )
+
+        gm, _ = torch._dynamo.export(fn_inference_mode)(x, b, y)
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x, b, y):
+    arg0, arg1, arg2, = fx_pytree.tree_flatten_spec(([x, b, y], {}), self._in_spec)
+    l_x_ = arg0
+    l_b_ = arg1
+    l_y_ = arg2
+    _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(True)
+    x = l_x_.clone();  l_x_ = None
+    x[l_b_] = l_y_;  setitem = x;  l_b_ = l_y_ = None
+    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = None
+    return pytree.tree_unflatten([x], self._out_spec)""",
+        )
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "boolean masking setitem backwards"
+        ):
+            gm, _ = torch._dynamo.export(fn)(x, b, y)
+
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 
