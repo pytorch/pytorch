@@ -19315,8 +19315,8 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_channel_shuffle,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         supports_out=True,
-        supports_forward_ad=False,
-        supports_fwgrad_bwgrad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
     ),
     OpInfo(
         "nn.functional.kl_div",
