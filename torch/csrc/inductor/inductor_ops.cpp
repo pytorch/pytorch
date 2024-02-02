@@ -58,7 +58,13 @@ Tensor _reinterpret_tensor(
   return self_;
 }
 
-static void accumulate_grad_(const Tensor& variable, const Tensor& new_grad) {
+static void accumulate_grad_(const Tensor& variable, c10::List<Tensor> new_grads) {
+  // new_grad is passed in as a list purely for reference stealing purposes
+  TORCH_INTERNAL_ASSERT(new_grads.size() == 1);
+  const Tensor& new_grad = new_grads[0];
+  new_grads.clear();
+
+
   at::Tensor& grad = variable.mutable_grad();
   if (new_grad.device() != kMeta) {
     torch::autograd::AccumulateGrad::accumulateGrad(
@@ -90,7 +96,7 @@ TORCH_LIBRARY_FRAGMENT(inductor, m) {
           c10::DispatchKey::CompositeExplicitAutograd, _reinterpret_tensor),
       {at::Tag::pt2_compliant_tag});
   m.def(
-      "accumulate_grad_(Tensor variable, Tensor new_grad) -> ()",
+      "accumulate_grad_(Tensor variable, Tensor[] new_grad) -> ()",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, accumulate_grad_),
       {at::Tag::pt2_compliant_tag});
 }

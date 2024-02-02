@@ -4238,9 +4238,10 @@ class AccumulateGrad(ExternKernel):
     """
 
     def codegen(self, wrapper):
-        (variable, new_grad) = (t.codegen_reference() for t in self.inputs)
+        variable = self.inputs[0].codegen_reference()
+        new_grads = self.inputs[1].codegen_reference()
         wrapper.writeline(
-            f"{self.get_kernel_name()}({variable}, {new_grad}){wrapper.ending}"
+            f"{self.get_kernel_name()}({variable}, {new_grads}){wrapper.ending}"
         )
 
     def should_allocate(self):
@@ -4252,11 +4253,11 @@ class AccumulateGrad(ExternKernel):
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
 
-    def __init__(self, variable, new_grad):
+    def __init__(self, variable, new_grads):
         super().__init__(
             None,
             NoneLayout(variable.get_device()),  # type: ignore[arg-type]
-            self.unwrap_storage([variable, new_grad]),
+            self.unwrap_storage([variable, new_grads]),
         )
         self.name = V.graph.register_buffer(self)
         self.python_kernel_name = "inductor_ops.accumulate_grad_"

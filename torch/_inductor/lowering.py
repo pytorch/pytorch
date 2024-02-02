@@ -5317,7 +5317,9 @@ def _realize(x):
 
 
 @register_lowering(torch.ops.inductor.accumulate_grad_)
-def accumulate_grad_(variable, new_grad):
+def accumulate_grad_(variable, new_grads):
+    assert len(new_grads) == 1
+    new_grad = new_grads[0]
     # TODO(jansel): decompose into `variable.grad += new_grad` when variable.grad is defined
     variable.realize()
     new_grad.realize()

@@ -822,6 +822,11 @@ class OpOverloadPacket:
         # is still callable from JIT
         # We save the function ptr as the `op` attribute on
         # OpOverloadPacket to access it here.
+        if 'accumulate_grad' in self_.op.__str__():
+            new_args = [arg for arg in args]
+            new_args[1] = [new_args[1]]
+            args = new_args
+
         return self_._op(*args, **(kwargs or {}))
 
     # TODO: use this to make a __dir__

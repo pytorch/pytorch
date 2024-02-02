@@ -92,8 +92,12 @@ variable_list AccumulateGrad::apply_with_saved(
   // op is intentionally static
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("inductor::accumulate_grad_", "")
-                       .typed<void(const at::Tensor&, const at::Tensor&)>();
-  op.call(variable_copy, grads[0]);
+                       .typed<void(const at::Tensor&, c10::List<at::Tensor>)>();
+  c10::List<at::Tensor> test;
+  for (auto grad : grads) {
+    test.emplace_back(grad);
+  }
+  op.call(variable_copy, std::move(test));
   auto& hook = tensor_post_acc_grad_hooks();
   if (hook != nullptr) {
     hook->apply_with_saved(variable_copy, saved);
