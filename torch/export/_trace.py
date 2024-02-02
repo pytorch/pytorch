@@ -1,3 +1,4 @@
+# I'm making a BC-breaking change in PyTorch, which will require coordinated changes in ExecuTorch; otherwise, ExecuTorch will break.
 import copy
 import dataclasses
 import functools
