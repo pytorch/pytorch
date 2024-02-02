@@ -195,8 +195,7 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
     auto feeds = self.numel() != 0 ? dictionaryFromPlaceholders(selfPlaceholder, otherPlaceholder) : nil;
-    auto results = dictionaryFromPlaceholders(outputPlaceholder);
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return output;
@@ -311,9 +310,7 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
 
     auto feeds = dictionaryFromPlaceholders(inputPlaceholder, batch1Placeholder, batch2Placeholder);
-    auto results = dictionaryFromPlaceholders(outputPlaceholder);
-
-    mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return result;
@@ -417,9 +414,7 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
 
     auto feeds = self.numel() != 0 ? dictionaryFromPlaceholders(selfPlaceholder, otherPlaceholder, biasPlaceholder)
                                    : dictionaryFromPlaceholders(biasPlaceholder);
-
-    auto results = dictionaryFromPlaceholders(outputPlaceholder);
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return output;
@@ -466,8 +461,7 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
 
     auto feeds = dictionaryFromPlaceholders(batch1Placeholder, batch2Placeholder);
-    auto results = dictionaryFromPlaceholders(outputPlaceholder);
-    mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return result;
@@ -683,8 +677,7 @@ Tensor& addr_out_mps(const Tensor& self,
     Placeholder resultPlaceholder = Placeholder(cachedGraph->resultTensor_, result);
 
     auto feeds = dictionaryFromPlaceholders(vec1Placeholder, vec2Placeholder, selfPlaceholder);
-    auto results = dictionaryFromPlaceholders(resultPlaceholder);
-    mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, resultPlaceholder);
   }
 
   return result;

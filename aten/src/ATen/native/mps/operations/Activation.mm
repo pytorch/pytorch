@@ -41,10 +41,6 @@
 #include <ATen/ops/threshold_native.h>
 #endif
 
-#ifdef __OBJC__
-#include <MetalPerformanceShaders/MetalPerformanceShaders.h>
-#endif
-
 using namespace at::mps;
 
 namespace at::native {
@@ -77,7 +73,7 @@ Tensor relu_mps(const Tensor& self) {
     // Create dictionary of inputs and outputs
     auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
     auto results = dictionaryFromPlaceholders(outputPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return output;
@@ -2176,8 +2172,7 @@ Tensor hardswish_backward_mps(const Tensor& grad_output, const Tensor& self) {
 
     // Create dictionary of inputs and outputs
     auto feeds = dictionaryFromPlaceholders(gradOutputPlaceholder, selfPlaceholder);
-    auto results = dictionaryFromPlaceholders(gradInputPlaceholder);
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, gradInputPlaceholder);
   }
   return grad_input;
 }

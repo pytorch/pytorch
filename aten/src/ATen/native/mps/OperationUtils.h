@@ -49,8 +49,7 @@ struct MPSScalar {
   } value {};
 };
 
-void runMPSGraph(
-    MPSStream* mpsStream,
+void runMPSGraph(MPSStream* mpsStream,
     MPSGraph* mpsGraph,
     NSDictionary* feeds,
     NSDictionary* results);
@@ -360,5 +359,9 @@ inline NSDictionary* dictionaryFromPlaceholders(Placeholder& p1, Placeholder& p2
                 p2.getMPSGraphTensor(): p2.getMPSGraphTensorData(),
                 p3.getMPSGraphTensor(): p3.getMPSGraphTensorData(),
          };
+}
+
+inline void runMPSGraph(MPSStream* stream, MPSGraph* graph, NSDictionary* feeds, Placeholder& result) {
+        runMPSGraph(stream, graph, feeds, dictionaryFromPlaceholders(result));
 }
 } // namespace at::native::mps
