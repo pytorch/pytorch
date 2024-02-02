@@ -41,7 +41,6 @@ import dataclasses
 import functools
 import gc
 import itertools
-import logging
 import operator
 import sys
 import threading
@@ -102,7 +101,8 @@ else:
         pass
 
 
-log = logging.getLogger(__name__)
+log = torch._logging.getArtifactLogger(__name__, "cudagraphs")
+
 
 from . import config
 
@@ -518,6 +518,8 @@ def _use_cuda_memory_pool_manager(device, mem_pool, stream):
             torch._C._cuda_endAllocateCurrentStreamToPool(device, mem_pool)
             torch._C._cuda_releasePool(device, mem_pool)
 
+    torch.cuda.current_stream().wait_stream(stream)
+
 
 def map_to_ref(t: Optional[Tensor]) -> Optional[StorageWeakRefWrapper]:
     if not isinstance(t, torch.Tensor):
@@ -609,9 +611,6 @@ class CUDAWarmupNode:
             self.device_index, self.cuda_graphs_pool, self.stream
         ), get_history_recording():
             out = self.wrapped_function.model(new_inputs)
-
-        # sync up stream used in `_use_cuda_memory_pool_manager` - TODO - wait stream instead ?
-        torch.cuda.synchronize()
 
         assert len(new_inputs) == 0
 

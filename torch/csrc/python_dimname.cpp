@@ -83,11 +83,10 @@ at::Dimname THPDimname_parse(PyObject* obj) {
     return at::Dimname::wildcard();
   }
 
-  if (!THPUtils_checkString(obj)) {
-    throw torch::TypeError(
-        "expected None or string for Dimname but got %s",
-        Py_TYPE(obj)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      THPUtils_checkString(obj),
+      "expected None or string for Dimname but got ",
+      Py_TYPE(obj)->tp_name);
 
   if (!THPUtils_isInterned(obj)) {
     // internStringInPlace decrefs obj and increfs the result. Because we're

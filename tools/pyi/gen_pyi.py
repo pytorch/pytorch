@@ -6,6 +6,7 @@ import sys
 from pprint import pformat
 from typing import Dict, List, Sequence
 from unittest.mock import Mock, patch
+from warnings import warn
 
 from torchgen.api.python import (
     PythonSignatureGroup,
@@ -604,10 +605,16 @@ def gather_docstrs() -> Dict[str, str]:
         sys.modules["torch"] = Mock(name="torch")
         sys.modules["torch._C"] = Mock(_add_docstr=mock_add_docstr)
 
-        # manually import torch._torch_docs and torch._tensor_docs to trigger
-        # the mocked _add_docstr and collect docstrings
-        sys.modules["torch._torch_docs"] = importlib.import_module("_torch_docs")
-        sys.modules["torch._tensor_docs"] = importlib.import_module("_tensor_docs")
+        try:
+            # manually import torch._torch_docs and torch._tensor_docs to trigger
+            # the mocked _add_docstr and collect docstrings
+            sys.modules["torch._torch_docs"] = importlib.import_module("_torch_docs")
+            sys.modules["torch._tensor_docs"] = importlib.import_module("_tensor_docs")
+        except ModuleNotFoundError:
+            # Gracefully fail if these modules are not importable
+            warn(
+                "Failed to import _torch_docs/_tensor_docs, skipping docstring in pyi files."
+            )
 
     return docstrs
 
@@ -703,7 +710,6 @@ def gen_pyi(
                             "dtype: _dtype",
                             "count: int = -1",
                             "offset: int = 0",
-                            "device: Optional[DeviceLikeType] = None",
                             "requires_grad: _bool = False",
                         ]
                     )
@@ -967,15 +973,20 @@ def gen_pyi(
             ],
         }
     )
-    for binop in ["mul", "true_divide", "floor_divide"]:
+    for binop in ["true_divide", "floor_divide"]:
         unsorted_function_hints[binop].append(
             f"def {binop}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
             "*, out: Optional[Tensor] = None) -> Tensor: ..."
         )
+    for binop in ["mul"]:
+        unsorted_function_hints[binop].append(
+            f"def {binop}(input: Union[Tensor, Number, _complex], other: Union[Tensor, Number, _complex], "
+            "*, out: Optional[Tensor] = None) -> Tensor: ..."
+        )
     for binop in ["add", "sub"]:
         unsorted_function_hints[binop].append(
-            f"def {binop}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
-            "*, alpha: Optional[Number] = 1, out: Optional[Tensor] = None) -> Tensor: ..."
+            f"def {binop}(input: Union[Tensor, Number, _complex], other: Union[Tensor, Number, _complex], "
+            "*, alpha: Optional[Union[Number, _complex]] = 1, out: Optional[Tensor] = None) -> Tensor: ..."
         )
 
     native_functions = parse_native_yaml(
@@ -1099,9 +1110,13 @@ def gen_pyi(
                             "self",
                             "device: Optional[Union[_device, _int, str]] = None",
                             "non_blocking: _bool = False",
+                            "memory_format: torch.memory_format = torch.preserve_format",
                         ]
                     )
                 )
+            ],
+            "cpu": [
+                "def cpu(self, memory_format: torch.memory_format = torch.preserve_format) -> Tensor: ..."
             ],
             "numpy": ["def numpy(self, *, force: _bool = False) -> Any: ..."],
             "apply_": ["def apply_(self, callable: Callable) -> Tensor: ..."],
@@ -1173,7 +1188,7 @@ def gen_pyi(
             ],
         }
     )
-    for binop in ["mul", "true_divide", "floor_divide"]:
+    for binop in ["true_divide", "floor_divide"]:
         for inplace in [False, True]:
             out_suffix = ", *, out: Optional[Tensor] = None"
             if inplace:
@@ -1183,6 +1198,16 @@ def gen_pyi(
                 f"def {binop}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat]{out_suffix})"
                 " -> Tensor: ..."
             )
+    for binop in ["mul"]:
+        for inplace in [False, True]:
+            out_suffix = ", *, out: Optional[Tensor] = None"
+            if inplace:
+                binop += "_"
+                out_suffix = ""
+            unsorted_tensor_method_hints[binop].append(
+                f"def {binop}(self, other: Union[Tensor, Number, _complex, torch.SymInt, torch.SymFloat]{out_suffix})"
+                " -> Tensor: ..."
+            )
     for binop in ["add", "sub"]:
         for inplace in [False, True]:
             out_suffix = ", out: Optional[Tensor] = None"
@@ -1190,14 +1215,13 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                f"def {binop}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat], "
-                f"*, alpha: Optional[Number] = 1{out_suffix})"
+                f"def {binop}(self, other: Union[Tensor, Number, _complex, torch.SymInt, torch.SymFloat], "
+                f"*, alpha: Optional[Union[Number, _complex]] = 1{out_suffix})"
                 " -> Tensor: ..."
             )
     simple_conversions = [
         "byte",
         "char",
-        "cpu",
         "double",
         "float",
         "half",
