@@ -201,18 +201,13 @@ class TestIndexing(TestCase):
         b[(Ellipsis,)] = 2
         assert_equal(b, 2)
 
+    @xpassIfTorchDynamo  # 'torch_.np.array() does not have base attribute.
     def test_ellipsis_index_2(self):
         a = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
         assert_(a[...] is not a)
         assert_equal(a[...], a)
         # `a[...]` was `a` in numpy <1.9.
-        if TEST_WITH_TORCHDYNAMO:
-            # numpy.array() is imported.
-            assert_(a[...].base is a)
-        else:
-            # torch_.numpy.array() is imported
-            assert_(a[...].tensor._base is a.tensor)
-
+        assert_(a[...].base is a)
 
     def test_single_int_index(self):
         # Single integer index selects one row
