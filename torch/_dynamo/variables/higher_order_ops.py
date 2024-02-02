@@ -395,9 +395,9 @@ def speculate_subgraph(
             with autograd_ctx:
                 output = f.call_function(tx, args, sub_kwargs)
 
-            new_side_effects = tx.output.side_effects.clone()
 
             if restore_side_effects:
+                new_side_effects = tx.output.side_effects.clone()
                 prev_side_effects.track_tensor_variables_from_runahead_side_effects(
                     new_side_effects
                 )
