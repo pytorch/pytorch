@@ -4,6 +4,7 @@ from common import (
     download_reports,
     get_testcases,
     is_failure,
+    is_passing_skipped_test,
     is_unexpected_success,
     key,
     open_test_results,
@@ -32,7 +33,7 @@ https://docs.github.com/en/github-cli/github-cli/quickstart
 """
 
 
-def patch_file(filename, unexpected_successes, new_xfails, new_skips):
+def patch_file(filename, unexpected_successes, new_xfails, new_skips, unexpected_skips):
     with open(filename, "r") as f:
         text = f.readlines()
 
@@ -54,6 +55,9 @@ def patch_file(filename, unexpected_successes, new_xfails, new_skips):
     formatted_unexpected_successes = {
         f"{format(test)}" for test in unexpected_successes.values()
     }
+    formatted_unexpected_skips = {
+        f"{format(test)}" for test in unexpected_skips.values()
+    }
     formatted_new_xfails = [
         f'    "{format(test)}",  # {test.attrib["file"]}\n'
         for test in new_xfails.values()
@@ -63,12 +67,12 @@ def patch_file(filename, unexpected_successes, new_xfails, new_skips):
         for test in new_skips.values()
     ]
 
-    def in_unexpected_successes(line):
+    def is_in(lst, line):
         splits = line.split('"')
         if len(splits) < 3:
             return None
         test_name = splits[1]
-        if test_name in formatted_unexpected_successes:
+        if test_name in lst:
             return test_name
         return None
 
@@ -77,7 +81,7 @@ def patch_file(filename, unexpected_successes, new_xfails, new_skips):
     # dynamo_expected_failures
     while True:
         line = text[i]
-        match = in_unexpected_successes(line)
+        match = is_in(formatted_unexpected_successes, line)
         if match is not None:
             covered_unexpected_successes.add(match)
             i += 1
@@ -104,6 +108,10 @@ def patch_file(filename, unexpected_successes, new_xfails, new_skips):
     # dynamo_skips
     while True:
         line = text[i]
+        match = is_in(formatted_unexpected_skips, line)
+        if match is not None:
+            i += 1
+            continue
         if line == "}\n":
             new_text.extend(formatted_new_skips)
             break
@@ -141,7 +149,7 @@ def get_intersection_and_outside(a_dict, b_dict):
     return build_dict(intersection), build_dict(outside)
 
 
-def update(filename, py38_dir, py311_dir):
+def update(filename, py38_dir, py311_dir, also_remove_skips):
     def read_test_results(directory):
         xmls = open_test_results(directory)
         testcases = get_testcases(xmls)
@@ -149,22 +157,41 @@ def update(filename, py38_dir, py311_dir):
             key(test): test for test in testcases if is_unexpected_success(test)
         }
         failures = {key(test): test for test in testcases if is_failure(test)}
-        return unexpected_successes, failures
+        passing_skipped_tests = {
+            key(test): test for test in testcases if is_passing_skipped_test(test)
+        }
+        return unexpected_successes, failures, passing_skipped_tests
 
-    py38_unexpected_successes, py38_failures = read_test_results(py38_dir)
-    py311_unexpected_successes, py311_failures = read_test_results(py311_dir)
+    (
+        py38_unexpected_successes,
+        py38_failures,
+        py38_passing_skipped_tests,
+    ) = read_test_results(py38_dir)
+    (
+        py311_unexpected_successes,
+        py311_failures,
+        py311_passing_skipped_tests,
+    ) = read_test_results(py311_dir)
 
     unexpected_successes = {**py38_unexpected_successes, **py311_unexpected_successes}
     _, skips = get_intersection_and_outside(
         py38_unexpected_successes, py311_unexpected_successes
     )
     xfails, more_skips = get_intersection_and_outside(py38_failures, py311_failures)
+    if also_remove_skips:
+        unexpected_skips, _ = get_intersection_and_outside(
+            py38_passing_skipped_tests, py311_passing_skipped_tests
+        )
+    else:
+        unexpected_skips = {}
     all_skips = {**skips, **more_skips}
     print(
         f"Discovered {len(unexpected_successes)} new unexpected successes, "
-        f"{len(xfails)} new xfails, {len(all_skips)} new skips"
+        f"{len(xfails)} new xfails, {len(all_skips)} new skips, {len(unexpected_skips)} new unexpected skips"
     )
-    return patch_file(filename, unexpected_successes, xfails, all_skips)
+    return patch_file(
+        filename, unexpected_successes, xfails, all_skips, unexpected_skips
+    )
 
 
 if __name__ == "__main__":
@@ -181,6 +208,11 @@ if __name__ == "__main__":
             "pull CI test results, e.g. 7e5f597aeeba30c390c05f7d316829b3798064a5"
         ),
     )
+    parser.add_argument(
+        "--also-remove-skips",
+        help="Also attempt to remove skips. WARNING: does not guard against test flakiness",
+        action="store_true",
+    )
     args = parser.parse_args()
     dynamo38, dynamo311, eager311 = download_reports(args.commit)
-    update(args.filename, dynamo38, dynamo311)
+    update(args.filename, dynamo38, dynamo311, args.also_remove_skips)
