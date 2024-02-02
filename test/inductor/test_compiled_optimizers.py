@@ -3,6 +3,7 @@
 import sys
 import unittest
 import weakref
+from contextlib import ExitStack
 
 from copy import deepcopy
 from typing import NamedTuple
@@ -10,8 +11,9 @@ from typing import NamedTuple
 import torch
 
 import torch._inductor
+from torch._inductor import config
 
-# The rest of the optimizers not yet imported: LBFGS, RAdam, SparseAdam
+# LBFGS, SparseAdam not supported
 from torch.optim import (
     Adadelta,
     Adagrad,
@@ -20,6 +22,7 @@ from torch.optim import (
     AdamW,
     ASGD,
     NAdam,
+    RAdam,
     RMSprop,
     Rprop,
     SGD,
@@ -69,6 +72,9 @@ KERNEL_COUNTS = {
     Adagrad: KernelCounts(multitensor=5, singletensor=8),
     ASGD: KernelCounts(multitensor=2, singletensor=12),
     SGD: KernelCounts(multitensor=2, singletensor=8),
+    RAdam: KernelCounts(
+        multitensor=2, singletensor=None
+    ),  # Single tensor eager needs to be refactored to enable tracing
     Adamax: KernelCounts(
         multitensor=2, singletensor=None
     ),  # Single tensor eager needs to be refactored to enable tracing
@@ -183,55 +189,68 @@ def make_test(
     **kwargs,
 ):
     def test_fn(self):
-        torch._dynamo.reset()
-        torch._inductor.metrics.reset()
-        input = torch.ones([10, 10], device=device)
-        model_eager = torch.nn.Sequential(
-            *[torch.nn.Linear(10, 10, device=device) for _ in range(2)]
-        )
-        model_eager(input).sum().backward()
+        stack = ExitStack()
+        try:
+            # https://github.com/pytorch/pytorch/issues/118715 for capturable Adagrad support
+            # https://github.com/pytorch/pytorch/issues/118018 for capturable SGD support
+            run_cudagraphs = device == "cuda" and optim_cls not in (Adagrad, SGD)
+            if run_cudagraphs:
+                stack.enter_context(config.patch({"triton.cudagraphs": True}))
 
-        input = torch.ones([10, 10], device=device)
-        model_compiled = deepcopy(model_eager)
-        model_compiled(input).sum().backward()
-
-        opt_eager = optim_cls(model_eager.parameters(), **kwargs)
-        opt_compiled = optim_cls(model_compiled.parameters(), **kwargs)
-        compiled_step = compile_opt(opt_compiled, closure=closure)
-
-        with torch.set_grad_enabled(False):
-            compiled_step()
-            compiled_step()
-            opt_eager.step()
-            opt_eager.step()
-
-        self.assertEqual(
-            list(model_eager.parameters()),
-            list(model_compiled.parameters()),
-            atol=atol,
-            rtol=rtol,
-        )
-
-        # currently we don't mutate step properly until we resolve
-        # https://github.com/pytorch/pytorch/issues/115679
-        if optim_cls not in (Adadelta, Rprop, RMSprop):
-            for p_eager, p_compiled in zip(
-                model_eager.parameters(), model_compiled.parameters()
-            ):
-                self.assertEqual(
-                    opt_eager.state[p_eager],
-                    opt_compiled.state[p_compiled],
-                    atol=atol,
-                    rtol=rtol,
-                )
-
-        if self.check_kernel_count:
-            # currently, we compile the step and the rest of the computation
-            # separately because the step is a single element tensor
-            # hence, the usual kernel count is 2
-            self.assertEqual(
-                torch._inductor.metrics.generated_kernel_count, kernel_count
+            torch._dynamo.reset()
+            torch._inductor.metrics.reset()
+            input = torch.ones([10, 10], device=device)
+            model_eager = torch.nn.Sequential(
+                *[torch.nn.Linear(10, 10, device=device) for _ in range(2)]
             )
+            model_eager(input).sum().backward()
+
+            input = torch.ones([10, 10], device=device)
+            model_compiled = deepcopy(model_eager)
+            model_compiled(input).sum().backward()
+
+            opt_eager = optim_cls(model_eager.parameters(), **kwargs)
+            opt_compiled = optim_cls(model_compiled.parameters(), **kwargs)
+            compiled_step = compile_opt(opt_compiled, closure=closure)
+
+            with torch.set_grad_enabled(False):
+                compiled_step()
+                compiled_step()
+                opt_eager.step()
+                opt_eager.step()
+
+            self.assertEqual(
+                list(model_eager.parameters()),
+                list(model_compiled.parameters()),
+                atol=atol,
+                rtol=rtol,
+            )
+
+            # currently we don't mutate step properly until we resolve
+            # https://github.com/pytorch/pytorch/issues/115679
+            if optim_cls not in (Adadelta, Rprop, RMSprop):
+                for p_eager, p_compiled in zip(
+                    model_eager.parameters(), model_compiled.parameters()
+                ):
+                    self.assertEqual(
+                        opt_eager.state[p_eager],
+                        opt_compiled.state[p_compiled],
+                        atol=atol,
+                        rtol=rtol,
+                    )
+
+            if run_cudagraphs:
+                self.check_cudagraphs_ran()
+
+            if self.check_kernel_count:
+                # currently, we compile the step and the rest of the computation
+                # separately because the step is a single element tensor
+                # hence, the usual kernel count is 2
+                self.assertEqual(
+                    torch._inductor.metrics.generated_kernel_count, kernel_count
+                )
+        finally:
+            stack.close()
 
     if device == "cuda":
         test_fn = requires_cuda(test_fn)
@@ -241,6 +260,7 @@ def make_test(
 
 def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
     @requires_cuda
+    @config.patch({"fx_graph_cache": False})
     def test_fn(self):
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
@@ -294,16 +314,23 @@ class CompiledOptimizerTests(TestCase):
 
     def setUp(self):
         super().setUp()
+        torch._dynamo.reset()
         torch._inductor.metrics.reset()
 
     def tearDown(self):
         super().tearDown()
+        torch._dynamo.reset()
         torch._inductor.metrics.reset()
+
+    def check_cudagraphs_ran(self):
+        # We run the zeroth device currently
+        manager = torch._inductor.cudagraph_trees.get_container(0).tree_manager
+        self.assertIsNotNone(manager)
+        self.assertEqual(manager.new_graph_id().id, 1)
 
     test_adam_recompile = make_recompile_test(Adam, lr=0.01)
     test_adamw_recompile = make_recompile_test(AdamW, lr=0.01)
-    # Need an impl which does not use python scalars
-    # test_adamax_recompile = make_recompile_test(Adamax, lr=0.01)
+    test_adamax_recompile = make_recompile_test(Adamax, lr=0.01)
     test_nadam_recompile = make_recompile_test(NAdam, lr=0.01)
     test_rprop_recompile = make_recompile_test(Rprop, kernel_count=1, lr=0.01)
     test_rmsprop_recompile = make_recompile_test(RMSprop, kernel_count=1, lr=0.01)

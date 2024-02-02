@@ -95,7 +95,7 @@ LOCK_TIMEOUT = 600
 
 # timing metrics for time spent in the compilation
 _cumulative_compile_time = 0.0
-_t0 = None
+_t0: Optional[float] = None
 
 
 def _compile_start() -> None:
@@ -419,6 +419,12 @@ def _reduce_tensor(t):
     """
     See FxGraphCachePickler. Custom reducer to pickle Tensors.
     """
+    if t.is_mkldnn:
+        # TODO: These tensors don't currently pickle, so we can't cache a
+        # compiled graph containing them. Just fail now. If mkldnn tensors
+        # get pickling support, we can remove this.
+        raise BypassFxGraphCache()
+
     # If we see tensors, we know they're constants stored as attributes on
     # the GraphModule. See tensor lowering; small constants are inlined. If
     # we see a small tensor, therefore, no reference will ultimately remain
@@ -505,6 +511,14 @@ class OrderedSetHolder:
     items: List[Any]
 
 
+class BypassFxGraphCache(Exception):
+    """
+    Exception to indicate that the FxGraphCache should be bypassed.
+    """
+
+    pass
+
+
 class FxGraphHashDetails:
     """
     Object to capture all the details for a compiled FX graph relevant to computing
@@ -539,8 +553,15 @@ class FxGraphHashDetails:
         self.torch_version = torch.__version__
         self.system_info = CacheBase.get_system()
 
-        self.inductor_config = config.save_config()
         self.inductor_code_hash = get_inductor_code_hash()
+
+        try:
+            self.inductor_config = config.save_config()
+        except TypeError as e:
+            # Some configs options are callables, e.g., post_grad_custom_pre_pass,
+            # and may not pickle.
+            log.debug("Can't pickle inductor config: %s", e)
+            raise BypassFxGraphCache() from e
 
     def debug_str(self) -> str:
         """
@@ -663,6 +684,9 @@ class FxGraphCache:
         if not os.path.exists(subdir):
             return None
 
+        shape_env = FxGraphCache._get_shape_env()
+        assert shape_env is not None
+
         # Iterate over any entries in the subdir for this key and evaluate
         # their guards to determine whether there's a hit.
         for path in sorted(os.listdir(subdir)):
@@ -675,8 +699,6 @@ class FxGraphCache:
                 return graph
 
             # Evaluate the guard expression in the current context.
-            shape_env = FxGraphCache._get_shape_env()
-            assert shape_env is not None
             symints = FxGraphCache._filter_symints(example_inputs)
 
             # If there's not a cache hit, we don't want the evaluation to
@@ -744,6 +766,22 @@ class FxGraphCache:
         write_atomic(path, content)
 
     @staticmethod
+    def _check_can_cache():
+        """
+        Check some conditions that would preclude caching and raise BypassFxGraphCache
+        to bypass in case caching is not possible.
+        """
+        if config.freezing:
+            # Freezing can embed constants that wouldn't be static across runs.
+            raise BypassFxGraphCache()
+
+        if FxGraphCache._get_shape_env() is None:
+            # The treatment of guards in the caching implementation requires that
+            # we have a shape env.
+            log.debug("fx graph cache no shape env")
+            raise BypassFxGraphCache()
+
+    @staticmethod
     def load(
         compile_fx_fn: Callable[..., Any],
         gm: torch.fx.GraphModule,
@@ -754,30 +792,31 @@ class FxGraphCache:
         Load a compiled graph from the cache. If a cached entry does not exist,
         compile the graph and save it to the cache.
         """
-        if FxGraphCache._get_shape_env() is None:
-            # The caching impl requires that we have a shape env.
-            log.debug("fx graph cache no shape env")
-            counters["inductor"]["fxgraph_cache_bypass"] += 1
-            return compile_fx_fn(gm, example_inputs, **fx_kwargs)
-
         from filelock import FileLock
 
-        key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs)
+        compiled_graph = None
+        try:
+            FxGraphCache._check_can_cache()
+            key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs)
 
-        lock_dir = get_lock_dir()
-        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
-        with lock:
-            compiled_graph = FxGraphCache._lookup_graph(key, example_inputs)
-            if compiled_graph is None:
-                log.debug("fx graph cache miss for key %s", key)
-                counters["inductor"]["fxgraph_cache_miss"] += 1
-                compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
-                FxGraphCache._save_graph(key, compiled_graph, example_inputs)
-            else:
-                log.debug("fx graph cache hit for key %s", key)
-                counters["inductor"]["fxgraph_cache_hit"] += 1
+            lock_path = os.path.join(get_lock_dir(), key + ".lock")
+            with FileLock(lock_path, timeout=LOCK_TIMEOUT):
+                compiled_graph = FxGraphCache._lookup_graph(key, example_inputs)
+                if compiled_graph is None:
+                    log.debug("fx graph cache miss for key %s", key)
+                    counters["inductor"]["fxgraph_cache_miss"] += 1
+                    compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
+                    FxGraphCache._save_graph(key, compiled_graph, example_inputs)
+                else:
+                    log.debug("fx graph cache hit for key %s", key)
+                    counters["inductor"]["fxgraph_cache_hit"] += 1
+        except BypassFxGraphCache:
+            counters["inductor"]["fxgraph_cache_bypass"] += 1
 
-            return compiled_graph
+        if not compiled_graph:
+            compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
+
+        return compiled_graph
 
     @staticmethod
     def clear():
@@ -1530,6 +1569,10 @@ class CudaKernelParamCache:
     def get(cls, key: str) -> Optional[Dict[str, str]]:
         return cls.cache.get(key, None)
 
+    @classmethod
+    def get_keys(cls):
+        return cls.cache.keys()
+
 
 class AotCodeCompiler:
     @classmethod
@@ -1711,7 +1754,9 @@ class AotCodeCompiler:
                 return bytes(raw_array.contents)
 
             aot_constants = b"".join(
-                _to_bytes(tensor) for tensor in graph.constants.values()
+                _to_bytes(tensor)
+                for name, tensor in graph.constants.items()
+                if name not in graph.folded_constants
             )
             consts_o = {
                 "linux": _compile_consts_linux,
