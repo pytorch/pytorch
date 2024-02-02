@@ -1330,6 +1330,7 @@ def get_selected_tests(options) -> List[str]:
     if (sys.version_info >= (3, 12)):
         options.exclude.extend(["functorch/test_dims",
                                 "functorch/test_rearrange",
+                                "functorch/test_parsing",
                                 "dynamo/test_subclasses",
                                 "torch_np/numpy_tests/core/test_multiarray"
                                 ])
