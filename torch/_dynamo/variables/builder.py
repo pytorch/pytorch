@@ -1851,7 +1851,7 @@ class SourcelessBuilder:
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
-            return trace_rules.lookup(value)(value)
+            return trace_rules.lookup_callable(value)(value)
         elif is_function_or_wrapper(value):
             return trace_rules.lookup(value)(value)
         elif isinstance(value, types.FunctionType):
