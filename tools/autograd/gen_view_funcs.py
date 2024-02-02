@@ -41,10 +41,17 @@ struct TORCH_API ${op} : public ${superclass} {
   {};
   virtual ~${op}() override {};
   virtual std::vector<c10::SymInt> get_symints() const override;
-  virtual void set_symints(const std::vector<c10::SymInt>&) override;
   virtual std::vector<at::Tensor> get_tensors() const override;
+  virtual at::Tensor operator()(
+      const at::Tensor&,
+      const std::optional<std::vector<c10::SymInt>>& = c10::nullopt,
+      const std::optional<std::vector<at::Tensor>>& = c10::nullopt) const override;
+
+protected:
+  virtual void set_symints(const std::vector<c10::SymInt>&) override;
   virtual void set_tensors(const std::vector<at::Tensor>&) override;
-  virtual at::Tensor operator()(const at::Tensor&) override;
+
+private:
   ${state}
 };
 """
@@ -68,7 +75,12 @@ void ${op}::set_tensors(const std::vector<at::Tensor>& ${tensors_vec}) {
   ${set_tensors}
 }
 
-at::Tensor ${op}::operator()(const at::Tensor& ${call_input_name}) {
+at::Tensor ${op}::operator()(
+    const at::Tensor& ${call_input_name},
+    const std::optional<std::vector<c10::SymInt>>& ${symints_vec},
+    const std::optional<std::vector<at::Tensor>>& ${tensors_vec}) const {
+  torch::autograd::ViewFuncSavedStateGuard guard(
+      const_cast<${op}&>(*this), ${symints_vec}, ${tensors_vec});
   return ${op_call};
 }
 
