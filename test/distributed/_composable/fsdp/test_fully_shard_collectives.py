@@ -166,6 +166,7 @@ class TestFullyShardCollectives(FSDPTestMultiThread):
         orig_params = self._init_params(param_sizes)
         fsdp_param_group = self._init_fsdp_param_group(orig_params)
         fsdp_params = fsdp_param_group.fsdp_params
+        fsdp_param_group.comm_ctx.init()
 
         # - Run one unshard to initialize metadata
         fsdp_param_group.unshard()

@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 
 from torch._prims_common import make_contiguous_strides_for
+from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed._tensor import DTensor, Placement, Replicate, Shard
 from torch.distributed._tensor.device_mesh import _mesh_resources
 from torch.distributed._tensor.placement_types import DTensorSpec
@@ -285,6 +286,24 @@ class FSDPParam:
         if self.sharded_state == ShardedState.SHARDED:
             return self._sharded_param_data
         return torch.empty(0)  # mypy
+
+    @property
+    def unsharded_param(self) -> nn.Parameter:  # ND
+        self._assert_in_states(ShardedState.UNSHARDED)
+        return self._unsharded_param
+
+    @property
+    def unsharded_grad_data(self) -> torch.Tensor:
+        grad = self.unsharded_param.grad
+        assert grad is not None, "Expects unsharded_param.grad to not be None"
+        return self._get_grad_inner_tensor(grad)
+
+    def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:
+        if self.is_dtensor:
+            if isinstance(grad, AsyncCollectiveTensor):
+                grad = grad.wait()
+            grad = cast(DTensor, grad)._local_tensor
+        return grad
 
     def _assert_in_states(self, *states: ShardedState) -> None:
         if self.sharded_state not in states:
