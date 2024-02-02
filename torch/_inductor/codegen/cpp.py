@@ -2029,7 +2029,7 @@ class CppVecKernel(CppKernel):
         }
         assert dtype == src_dtype
         assert dtype in [torch.float, torch.int64]
-        assert isinstance(value, CppCSEVariable) and value.is_vec, value
+        assert isinstance(value, CppCSEVariable), value
 
         if not value.is_vec:
             value = self.broadcast(value)
