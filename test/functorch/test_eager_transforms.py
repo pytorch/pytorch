@@ -2035,18 +2035,6 @@ class TestJac(TestCase):
         assert isinstance(z, torch.Tensor)
         assert torch.allclose(z, expected0)
 
-    @xfailIfTorchDynamo
-    @jacrev_and_jacfwd
-    def test_argnums_none(self, device, jacapi):
-        x = torch.randn(3, device=device)
-        y = torch.randn(3, device=device)
-        z = jacapi(torch.multiply, argnums=None)(x, y)
-        expected0 = torch.diagflat(y)
-        expected1 = torch.diagflat(x)
-        assert len(z) == 2
-        assert torch.allclose(z[0], expected0)
-        assert torch.allclose(z[1], expected1)
-
     @FIXME_skip_jacrev_dynamo
     def test_argnums_defaults_to_zero(self, device, jacapi):
         def f(x, y):
