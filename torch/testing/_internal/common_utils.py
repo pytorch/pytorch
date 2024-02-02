@@ -2782,7 +2782,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                         except BaseException as e:
                             self.skipTest(e)
                         method = getattr(self, self._testMethodName)
-                        if method.__unittest_expecting_failure__:
+                        if getattr(method, "__unittest_expecting_failure__", False)
                             self.skipTest("unexpected success")
                         else:
                             self.skipTest("This test passed, maybe we can remove the skip from dynamo_test_failures.py")
