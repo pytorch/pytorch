@@ -764,9 +764,8 @@ def clone_inputs(example_inputs):
 
 def skip_frame_if_in_functorch_mode(val: torch.Tensor):
     try:
-        # TODO(jansel): is there a better way to detect functorch custom modes?
-        val.data_ptr()
-    except RuntimeError:
+        val.data_ptr()  # will throw for functorch tensors
+    except RuntimeError as e:
         from .exc import SkipFrame
 
         # This will be GradTrackingTensor/BatchedTensor/etc
