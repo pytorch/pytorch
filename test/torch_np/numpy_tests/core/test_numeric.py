@@ -425,6 +425,7 @@ class TestBoolScalar(TestCase):
         assert_((t ^ f) is not t)
         assert_((f ^ f) is not f)
 
+
 class TestBoolArray(TestCase):
     def setUp(self):
         super().setUp()
