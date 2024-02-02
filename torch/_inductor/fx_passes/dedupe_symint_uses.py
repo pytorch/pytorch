@@ -1,7 +1,8 @@
 from dataclasses import dataclass
+from typing import Union
 
 import torch
-from torch.fx.experimental.proxy_tensor import py_sym_types
+from torch.fx.experimental.proxy_tensor import py_sym_types, SymBool, SymFloat, SymInt
 
 
 @dataclass
@@ -10,13 +11,14 @@ class _SymExprHash:
     Hash for a py_sym_types that will use the underlying sympy expression
     """
 
-    sym_obj: py_sym_types
+    sym_obj: Union[SymInt, SymFloat, SymBool]
 
     def __hash__(self) -> int:
         return hash((type(self.sym_obj), self.sym_obj.node.expr))
 
-    def __eq__(self, value: "_SymExprHash") -> bool:
-        assert isinstance(value, _SymExprHash)
+    def __eq__(self, value) -> bool:
+        if not isinstance(value, _SymExprHash):
+            return False
         return self.sym_obj.node.expr == value.sym_obj.node.expr
 
 
