@@ -208,7 +208,7 @@ class NumBytesMetricTests(TestCase):
             return torch.cat((a + 1, b + 2, c + 3, d + 4, e + 5)) + 10
 
         inp = [T(10, 10) for _ in range(5)]
-        self.assertExpectedInline(count_numel(f, *inp), """2000""")
+        self.assertExpectedInline(count_numel(f, *inp), """1000""")
 
         def f(a, b):
             return torch.cat([a.sum(dim=0), b.sum(dim=0)]) + 10
@@ -229,6 +229,32 @@ class NumBytesMetricTests(TestCase):
         # potentially beneficial to fuse but we exclude reductions from pointwise cat
         inp = (T(10, 10), T(10, 10))
         self.assertExpectedInline(count_numel(f, *inp), """800""")
+
+    @patch.object(config, "split_cat_fx_passes", False)
+    def test_cat_pointwise_many_complex_inputs(self):
+        def f(*inputs):
+            input = [torch.nn.functional.gelu(val) for val in inputs]
+            return torch.cat(input) + 10
+
+        inp = (T(10, 10) for _ in range(16))
+        self.assertExpectedInline(count_numel(f, *inp), """6400""")
+
+    @patch.object(config, "split_cat_fx_passes", False)
+    def test_cat_pointwise_many_simple_inputs(self):
+        def f(*inputs):
+            input = [torch.nn.functional.relu(val) for val in inputs]
+            return torch.cat(input) + 10
+
+        inp = (T(10, 10) for _ in range(16))
+        self.assertExpectedInline(count_numel(f, *inp), """3200""")
+
+    @patch.object(config, "max_pointwise_cat_inputs", 0)
+    def test_cat_pointwise_config_option(self):
+        def f(a, b):
+            return torch.cat([a + 1, b + 2]) + 3
+
+        inp = (T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """400""")
 
     def test_index(self):
         def f(a, b):
