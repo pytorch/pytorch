@@ -4048,10 +4048,10 @@ class TestDistributionShapes(DistributionsTestCase):
         self.assertRaises(ValueError, continuous_bernoulli.log_prob, self.tensor_sample_2)
         self.assertEqual(continuous_bernoulli.log_prob(torch.ones(3, 1, 1)).size(), torch.Size((3, 3, 2)))
 
-    def test_mixture_same_family_shape(self):
+    def test_mixture_same_family_mean_shape(self):
         mix_distribution = Categorical(torch.ones([3,1,3]))
-        component_distribution = torch.distributions.Normal(torch.zeros([3,3,3]), torch.ones([3,3,3]))
-        gmm = MixtureSameFamilyFixed(mix, comp)
+        component_distribution = Normal(torch.zeros([3,3,3]), torch.ones([3,3,3]))
+        gmm = MixtureSameFamilyFixed(mix_distribution, component_distribution)
         self.assertEqual( len(gmm.mean.shape), 2)
 
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
