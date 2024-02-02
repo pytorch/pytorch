@@ -350,7 +350,7 @@ def nll_loss_forward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
             )
 
         if reduction == Reduction.NONE.value:
-            output_tgt_spec = target_expected_spec
+            output_expected_spec = target_expected_spec
         else:
             if reduction == Reduction.MEAN.value:
                 reduction_op = c10d.ReduceOp.AVG
@@ -373,14 +373,14 @@ def nll_loss_forward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
                 reduce_dims_map,
                 reduction_op,
             )
-            output_tgt_spec = DTensorSpec(
+            output_expected_spec = DTensorSpec(
                 mesh=mesh,
                 placements=out_placements,
             )
 
         output_strategy.strategies.append(
             PlacementStrategy(
-                output_specs=output_tgt_spec,
+                output_specs=output_expected_spec,
                 input_specs=op_args_target_specs,
                 redistribute_cost=redistribute_costs,
             )
