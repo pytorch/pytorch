@@ -4266,9 +4266,7 @@ class InplaceCopyFallback(ExternKernel):
             constant_args,
             python_kernel_name="aten.copy_",
             cpp_kernel_name=(
-                "aoti_torch_copy_"
-                if config.aot_inductor.abi_compatible
-                else "at::_ops::copy_::call"
+                "aoti_torch_copy_" if config.abi_compatible else "at::_ops::copy_::call"
             ),
         )
         self.name = V.graph.register_buffer(self)
