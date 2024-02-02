@@ -200,7 +200,10 @@ def calculate_shards(
         for test in parallel_tests
     )
     total_time = serial_time + parallel_time / NUM_PROCS_FOR_SHARDING_CALC
-    num_serial_shards = math.ceil(serial_time / total_time * num_shards)
+    if total_time == 0:
+        num_serial_shards = num_shards
+    else:
+        num_serial_shards = math.ceil(serial_time / total_time * num_shards)
     print(
         f"Putting serial tests in first {num_serial_shards} shards out of {num_shards}"
     )
