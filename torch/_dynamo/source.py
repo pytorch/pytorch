@@ -500,3 +500,13 @@ def is_from_local_source(source: Source, *, allow_cell_or_freevar=True):
     if not allow_cell_or_freevar and source.cell_or_freevar:
         return False
     return True
+
+
+# TODO: can probably write a generic "test this on everything in the chain"
+# helper
+def is_from_defaults(source: Source):
+    if isinstance(source, DefaultsSource):
+        return True
+    if isinstance(source, ChainedSource):
+        return is_from_defaults(source.base)
+    return False
