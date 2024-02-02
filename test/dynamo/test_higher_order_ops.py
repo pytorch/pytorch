@@ -3043,13 +3043,6 @@ class GraphModule(torch.nn.Module):
         actual = wrapper_fn(x)
         expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
         self.assertEqual(len(counters["graph_break"]), 0)
-        # assert_dict_matches_regex(
-        #     self,
-        #     dict(counters["graph_break"]),
-        #     {
-        #         r".*HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)": 2
-        #     },
-        # )
         self.assertEqual(actual, expected)
 
     @config.patch(capture_func_transforms=True)
