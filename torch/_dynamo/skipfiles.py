@@ -145,11 +145,19 @@ THIRDPARTY_SKIPLIST = (
 
 
 def _strip_init_py(s):
-    return re.sub(r"__init__.py$", "", s)
+    # TODO: Once we require py3.9 use removesuffix instead.
+    suffix = "__init__.py"
+    if s.endswith(suffix):
+        return s[: -len(suffix)]
+    else:
+        return s
 
 
 def _module_dir(m: types.ModuleType):
-    return _strip_init_py(m.__file__)
+    # Protect against a module not exporting __file__ - this can happen for
+    # frozen modules, for example.
+    file = getattr(m, "__file__", None)
+    return file and _strip_init_py(file)
 
 
 # TODO: Add a decoractor for easily adding functions to FUNC_INLINELIST
@@ -264,7 +272,8 @@ SKIP_DIRS = [
     "<frozen importlib",
     "<__array_function__ internals>",
     _config_module.__file__,
-] + [_module_dir(m) for m in BUILTIN_SKIPLIST]
+]
+SKIP_DIRS.extend(filter(None, (_module_dir(m) for m in BUILTIN_SKIPLIST)))
 
 SKIP_DIRS_RE = re.compile(r"match nothing^")
 
