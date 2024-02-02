@@ -112,6 +112,15 @@ def build_compiled_opt_kwarg_db():
                     ]:
                         continue
 
+                    # Adam(W) capturable cudagraphs manager is unexpectedly None, #119026
+                    if name in [
+                        "test_adam_amsgrad_capturable_cuda",
+                        "test_adam_foreach_amsgrad_capturable_cuda",
+                        "test_adamw_amsgrad_capturable_cuda",
+                        "test_adamw_foreach_amsgrad_capturable_cuda",
+                    ]:
+                        continue
+
                     kwargs["foreach"] = foreach
                     kwargs["device"] = device
                     if name in KERNEL_COUNT_OVERRIDES:
