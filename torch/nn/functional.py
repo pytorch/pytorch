@@ -3935,7 +3935,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             antialias=antialias
         )
 
-    if mode in ("bicubic", "area", "nearest-exact"):
+    if mode in ("bilinear", "area", "nearest-exact"):
         if align_corners is not None:
             raise ValueError(
                 "align_corners option can only be set with the "
