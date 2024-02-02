@@ -362,7 +362,7 @@ def nll_loss_forward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
                         "The intermediate results of nll_loss cannot be evenly sharded, \
                         resulting in biased mean result."
                     )
-            elif reduction == Reduction.SUM.value:
+            else:  # reduction == Reduction.SUM.value:
                 reduction_op = c10d.ReduceOp.SUM
             reduce_dims = list(range(target_tgt_spec.ndim))
             reduce_dims_map = _infer_reduce_dims_map(
