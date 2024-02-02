@@ -79,7 +79,7 @@ device_codegens: Dict[str, DeviceCodegen] = {}
 #
 # Intel has developed a new backend on top of Triton to support Intel GPUs, leveraging these interfaces.
 # This backend can be used as a reference:
-# https://github.com/intel/intel-extension-for-pytorch/blob/5dcc9d57e5422cf295e1a1ee97896d6b6a554a85/intel_extension_for_pytorch/_inductor/__init__.py#L9
+# https://github.com/intel/intel-extension-for-pytorch/blob/5dcc9d57e5422cf295e1a1ee97896d6b6a554a85/intel_extension_for_pytorch/_inductor/__init__.py#L9  # noqa: B950
 def register_backend_for_device(
     device: str, device_scheduling: type, device_wrapper_codegen: type
 ):
