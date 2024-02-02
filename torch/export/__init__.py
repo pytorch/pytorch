@@ -78,7 +78,7 @@ def export(
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     constraints: Optional[List[Constraint]] = None,
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
     strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
@@ -138,7 +138,8 @@ def export(
          range of shapes. See :func:`dynamic_dim` docstring for examples on
          how to use it.
 
-        dynamic_shapes: Should either be:
+        dynamic_shapes:
+         An optional argument where the type should either be:
          1) a dict from argument names of ``f`` to their dynamic shape specifications,
          2) a tuple that specifies dynamic shape specifications for each input in original order.
          If you are specifying dynamism on keyword args, you will need to pass them in the order that
@@ -176,29 +177,18 @@ def export(
 
     """
     from ._trace import _export
-    from .dynamic_shapes import _process_dynamic_shapes
 
     if not isinstance(mod, torch.nn.Module):
         raise ValueError(
             f"Expected `mod` to be an instance of `torch.nn.Module`, got {type(mod)}."
         )
 
-    if constraints is not None:
-        warnings.warn(
-            "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
-            "and will not be supported in the future. "
-            "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-    else:
-        constraints = _process_dynamic_shapes(mod, args, kwargs, dynamic_shapes)
-
     return _export(
         mod,
         args,
         kwargs,
         constraints,
+        dynamic_shapes,
         strict=strict,
         preserve_module_call_signature=preserve_module_call_signature,
     )
