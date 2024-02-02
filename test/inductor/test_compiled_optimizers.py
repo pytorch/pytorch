@@ -88,28 +88,28 @@ def build_opt_kwarg_dbs():
     for optim_info in optim_db:
         for optim_inputs in optim_info.optim_inputs_func():
             for device in ["cpu", "cuda"]:
+                kwargs = dict(optim_inputs.kwargs)
                 # handle disabled optimizers
                 if optim_info.optim_cls not in KERNEL_COUNTS:
-                    optim_inputs.kwargs["device"] = device
+                    kwargs["device"] = device
                     disabled_opt_db.append(
                         (
                             optim_info.optim_cls,
                             f"test_{optim_info.optim_cls.__name__.lower()}_disabled",
-                            optim_inputs.kwargs,
+                            kwargs,
                         )
                     )
                 else:
                     for foreach in [True, False]:
-                        if device == "cpu" and "capturable" in optim_inputs.kwargs:
+                        if device == "cpu" and "capturable" in kwargs:
                             continue
 
-                        kwargs = dict(optim_inputs.kwargs)
                         name = (
                             f"test_{optim_info.optim_cls.__name__.lower()}"
                             f"{'_foreach' if foreach else ''}"
                         )
 
-                        for key in optim_inputs.kwargs:
+                        for key in kwargs:
                             if key == "lr":
                                 continue
                             name += "_" + key
@@ -189,11 +189,10 @@ def compile_opt(opt_compiled, closure=None):
     return torch.compile(fn, backend="inductor", fullgraph=True)
 
 
-def make_disabled_test(optim_cls, **kwargs):
+def make_disabled_test(optim_cls, device="cuda", **kwargs):
     def test_fn(self):
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
-        device = kwargs.pop("device")
         input = torch.ones([10, 10], device=device)
         model = torch.nn.Sequential(
             *[torch.nn.Linear(10, 10, device=device) for _ in range(2)]
@@ -227,6 +226,9 @@ def make_disabled_test(optim_cls, **kwargs):
         fn()
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+
+    if device == "cuda":
+        test_fn = requires_cuda(test_fn)
 
     return test_fn
 
