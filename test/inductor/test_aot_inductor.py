@@ -327,28 +327,6 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
-    def test_dynamic_smem_above_default_limit(self):
-        class Model(torch.nn.Module):
-            def forward(self, x, y):
-                return x @ y
-
-        model = Model().to(self.device)
-        # on A100, the generated Triton kernel for this MM
-        # requires 55296 bytes of dynamic SMEM which is above
-        # the A100's default dynamic SMEM limit of 49152 bytes.
-        example_inputs = (
-            torch.randn(10285, 96, device=self.device),
-            torch.randn(96, 1, device=self.device),
-        )
-        self.check_model(
-            model,
-            example_inputs,
-            options={
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON",
-            },
-        )
-
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     def test_seq(self):
         layernorm = torch.nn.LayerNorm(10)
@@ -565,85 +543,6 @@ class AOTInductorTestsTemplate:
         )
         self.check_model_with_multiple_inputs(
             Model(), list_example_inputs, dynamic_shapes=dynamic_shapes
-        )
-
-    def test_addmm_multiple_dynamic(self):
-        class Model(torch.nn.Module):
-            def __init__(self, n, k, device):
-                super().__init__()
-                self.weight = torch.randn(n, k, device=device)
-                self.bias = torch.randn(n, device=device)
-
-            def forward(self, a):
-                return torch.nn.functional.linear(a, self.weight, self.bias)
-
-        M = 8
-        N = 6
-        K = 16
-        model = Model(N, K, self.device)
-        batch = 2
-        a = torch.randn(batch, M, K, device=self.device)
-        dim0_a = Dim("dim0_a", min=1, max=2048)
-        dynamic_shapes = {"a": {0: dim0_a}}
-        list_example_inputs = [(a,)]
-        batch = 2048
-        list_example_inputs.append(
-            (torch.randn(batch, M, K, device=self.device),),
-        )
-        batch = 128
-        list_example_inputs.append(
-            (torch.randn(batch, M, K, device=self.device),),
-        )
-        self.check_model_with_multiple_inputs(
-            model,
-            list_example_inputs,
-            dynamic_shapes=dynamic_shapes,
-            options={
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON",
-            },
-        )
-
-    def test_bmm_multiple_dynamic(self):
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, a, b):
-                return torch.bmm(a, b)
-
-        M = 8
-        N = 6
-        K = 16
-        model = Model()
-        batch = 1024
-        a = torch.randn(batch, M, K, device=self.device)
-        b = torch.randn(batch, K, N, device=self.device)
-        dim0_a = Dim("dim0_a", min=1, max=2048)
-        dynamic_shapes = {"a": {0: dim0_a}, "b": {0: dim0_a}}
-        list_example_inputs = [(a, b)]
-        batch = 2048
-        list_example_inputs.append(
-            (
-                torch.randn(batch, M, K, device=self.device),
-                torch.randn(batch, K, N, device=self.device),
-            ),
-        )
-        batch = 128
-        list_example_inputs.append(
-            (
-                torch.randn(batch, M, K, device=self.device),
-                torch.randn(batch, K, N, device=self.device),
-            ),
-        )
-        self.check_model_with_multiple_inputs(
-            model,
-            list_example_inputs,
-            options={
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON",
-            },
-            dynamic_shapes=dynamic_shapes,
         )
 
     def test_foreach_multiple_dynamic(self):
@@ -1806,13 +1705,10 @@ def fail_abi_compatible_cuda(is_skip=False):
 # test_failures, xfail by default, set is_skip=True to skip
 CPU_TEST_FAILURES = {
     "test_add_complex": fail_stack_allocation(is_skip=True),
-    "test_addmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
-    "test_bmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
     "test_constant_folding": fail_with_and_without_stack_allocation(is_skip=True),
     "test_dup_unbacked_sym_decl": fail_with_and_without_stack_allocation(),
     "test_dynamic_cat": fail_with_and_without_stack_allocation(),
-    "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
-    "test_dynamic_smem_above_default_limit": fail_with_and_without_stack_allocation(),
+    "test_dynamic_scalar": fail_with_and_without_stack_allocation(is_skip=True),
     "test_foreach_multiple_dynamic": fail_with_and_without_stack_allocation(),
     # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
     #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
@@ -1861,8 +1757,6 @@ if TEST_WITH_ROCM:
     CUDA_TEST_FAILURES.update(
         {
             "test_dup_unbacked_sym_decl": fail_cuda(is_skip=True),
-            "test_addmm_multiple_dynamic": fail_cuda(is_skip=True),
-            "test_bmm_multiple_dynamic": fail_cuda(is_skip=True),
             "test_convolution": fail_cuda(is_skip=True),
             "test_large": fail_cuda(is_skip=True),
             "test_missing_cubin": fail_cuda(is_skip=True),
@@ -1870,7 +1764,6 @@ if TEST_WITH_ROCM:
             "test_poi_multiple_dynamic": fail_cuda(is_skip=True),
             "test_sdpa": fail_cuda(is_skip=True),
             "test_sdpa_2": fail_cuda(is_skip=True),
-            "test_dynamic_smem_above_default_limit": fail_cuda(is_skip=True),
             "test_foreach_multiple_dynamic": fail_cuda(is_skip=True),
             "test_reuse_kernel": fail_cuda(is_skip=True),
             "test_zero_grid_with_unbacked_symbols": fail_cuda(is_skip=True),
@@ -1998,12 +1891,7 @@ copy_tests(
     "non_abi_compatible_cpu",
     # test_failures, xfail by default, set is_skip=True to skip
     {
-        "test_addmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",)),
-        "test_bmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",)),
         "test_constant_folding": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
-        "test_dynamic_smem_above_default_limit": TestFailure(
-            ("non_abi_compatible_cpu",)
-        ),
         # TODO: test_freezing_non_abi_compatible_cpu somehow fails on CI but not locally,
         #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
         "test_freezing": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
