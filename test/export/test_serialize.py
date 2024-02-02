@@ -2,6 +2,8 @@
 PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_sym_bool)
 """
+import copy
+
 # Owner(s): ["oncall: export"]
 import io
 import pathlib
@@ -23,8 +25,7 @@ from torch._export.serde.serialize import (
     SerializeError,
 )
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.export import Dim, export, load, save
-from torch.export import WrapperModule
+from torch.export import Dim, export, load, save, WrapperModule
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 from torch.testing._internal.common_utils import (
     find_library_location,
@@ -213,7 +214,7 @@ class TestSerialize(TestCase):
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestDeserialize(TestCase):
-    def check_graph(self, fn, inputs, dynamic_shapes=None, _check_meta=True) -> None:
+    def check_graph(self, fn, inputs, dynamic_shapes=None, _check_meta=True, inputs_mutated = False) -> None:
         """Export a graph, serialize it, deserialize it, and compare the results."""
         # TODO(angelayi): test better with some sort of wrapper
         ep = torch.export.export(fn, inputs, {}, dynamic_shapes=dynamic_shapes)
@@ -223,8 +224,14 @@ class TestDeserialize(TestCase):
         deserialized_ep = deserialize(serialized_artifact, expected_opset_version={"aten": 0})
         deserialized_ep.graph.eliminate_dead_code()
 
-        orig_outputs = ep.module()(*inputs)
-        loaded_outputs = deserialized_ep.module()(*inputs)
+
+        inputs_1 = inputs
+        # Create a copy of the inputs if inputs_mutated is true so that we're
+        # not testing on the mutated inputs.
+        inputs_2 = copy.deepcopy(inputs) if inputs_mutated else inputs
+
+        orig_outputs = ep.module()(*inputs_1)
+        loaded_outputs = deserialized_ep.module()(*inputs_2)
 
         flat_orig_outputs = pytree.tree_leaves(orig_outputs)
         flat_loaded_outputs = pytree.tree_leaves(loaded_outputs)
@@ -539,6 +546,19 @@ class TestDeserialize(TestCase):
         model = MyModule().eval().cuda()
         self.check_graph(model, (inp,))
 
+    def test_buffer_mutation(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                x[:, :2, :] = x[:,:2,:] + 1
+                return x
+
+        inp = torch.randn((3, 3, 3))
+        model = MyModule().eval()
+        self.check_graph(model, (inp,), inputs_mutated = True)
+
 
 instantiate_parametrized_tests(TestDeserialize)
 
@@ -590,12 +610,6 @@ unittest.expectedFailure(
 unittest.expectedFailure(
     TestDeserialize.test_exportdb_supported_case_scalar_output
 )
-
-# TODO(zhxchen17) Support serializing user inputs mutation.
-unittest.expectedFailure(
-    TestDeserialize.test_exportdb_supported_case_user_input_mutation
-)
-
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSaveLoad(TestCase):
