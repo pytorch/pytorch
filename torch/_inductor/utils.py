@@ -1225,3 +1225,15 @@ class Placeholder(enum.Enum):
     # The descriptive name of the triton kernel; when unique_kernel_names = False, this
     # placeholder will be replaced with a string with more information.
     DESCRIPTIVE_NAME = "DESCRIPTIVE_NAME"
+
+
+def is_collective(node):
+    from . import ir
+
+    return isinstance(node, ir.CollectiveKernel) or type(node) == ir._CollectiveKernel
+
+
+def is_wait(node):
+    from . import ir
+
+    return isinstance(node, ir.Wait) or type(node) == ir._WaitKernel

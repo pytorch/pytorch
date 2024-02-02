@@ -708,7 +708,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         work.wait()
 
         expect = input.view(self.world_size, *out_shape) \
-                .chunk(self.world_size)[self.rank] * self.world_size
+            .chunk(self.world_size)[self.rank] * self.world_size
         self.assertTrue(torch.allclose(output, expect))
 
     @requires_gloo()
@@ -731,7 +731,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         for output, input in zip(outputs, inputs):
             expect = input.view(self.world_size, *output.shape) \
-                    .chunk(self.world_size)[self.rank] * self.world_size
+                .chunk(self.world_size)[self.rank] * self.world_size
             self.assertTrue(torch.allclose(output, expect))
 
     @requires_gloo()
