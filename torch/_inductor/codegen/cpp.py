@@ -270,6 +270,16 @@ def reduction_project(reduction_type, acc):
     return acc
 
 
+def is_to_lowp_dtype(expr):
+    to_exprs = ["cvt_fp32_to_lowp_fp", "c10::convert"]
+    if any(to_expr in expr for to_expr in to_exprs):
+        if "half" in expr:
+            return torch.half
+        if "bfloat16" in expr:
+            return torch.bfloat16
+    return None
+
+
 index_value_name_counter = 1
 
 
@@ -1335,6 +1345,10 @@ class CppVecOverrides(CppOverrides):
         ], f"{__name__} does not support {dtype}"
         node: torch.fx.Node = V.interpreter.current_node
         assert node and isinstance(node, torch.fx.Node)
+        if node.target == "store":
+            assert dtype == torch.float
+            assert src_dtype in DTYPE_LOWP_FP
+            return f"cvt_lowp_fp_to_fp32<{DTYPE_TO_CPP[src_dtype]}>({x})"
         opt_ctx_x = get_opt_ctx(node.args[1])
         assert opt_ctx_x
         if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype == torch.bool:
@@ -1492,6 +1506,32 @@ class CppKernel(Kernel):
         finally:
             self._load_mask = prior
 
+    def cache_fp32_cse_var_before_store(self, var_to_store):
+        def find_fp32_var(var, cache):
+            fp32_cse_var = None
+            fp32_cse_var_name = None
+            lowp_dtype = None
+            for expr, cse_var in cache.items():
+                if cse_var == var:
+                    lowp_dtype = is_to_lowp_dtype(expr)
+                    if lowp_dtype:
+                        m = re.search(r"tmp\d+", expr)
+                        assert m
+                        fp32_cse_var_name = m.group()
+            if fp32_cse_var_name:
+                for cse_var in cache.values():
+                    if cse_var.name == fp32_cse_var_name:
+                        fp32_cse_var = cse_var
+                        break
+                assert fp32_cse_var is not None
+            return fp32_cse_var, lowp_dtype
+
+        fp32_var, lowp_dtype = find_fp32_var(var_to_store, self.cse.cache)
+        if fp32_var:
+            self.cse.cache[
+                self.overrides.to_dtype(var_to_store, torch.float32, lowp_dtype)
+            ] = fp32_var
+
     def scale_index_with_offset(
         self, index: sympy.Expr, scale=1, itervar_idx=-1, offset=0
     ):
@@ -1536,6 +1576,7 @@ class CppKernel(Kernel):
     def store(self, name, index, value, mode=None):
         assert "buf" in name
         var = self.args.output(name)
+        self.cache_fp32_cse_var_before_store(value)
         index = self.rename_indexing(index)
         if mode is None:
             line = f"{var}[{cexpr_index(index)}] = {value};"
@@ -2022,6 +2063,7 @@ class CppVecKernel(CppKernel):
             value = self.broadcast(value)
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.output(name)
+        self.cache_fp32_cse_var_before_store(value)
         index = self.rename_indexing(index)
         self.stores.writeline(
             DeferredLine(
@@ -3047,125 +3089,6 @@ class CppKernelProxy(CppKernel):
             for sub_block in sub_blocks:
                 add_to_dtype(sub_block.graph)
 
-        def create_fp32_store_cache(nodes):
-            def belong_to_same_fused_schedular_nodes(nodes):
-                if len(nodes) >= 2:
-                    name = nodes[0].node.name
-                    fused_schedular_node = nodes[0].scheduler.name_to_fused_node[name]
-                    assert all(
-                        n.scheduler.name_to_fused_node[n.node.name]
-                        is fused_schedular_node
-                        for n in nodes
-                    )
-                    return True
-                return False
-
-            def match_to_store(graphs):
-                r"""
-                find the buffer stored after a "to_dtype(lowp)" node
-                -----------  -----------  ---------  --------------------------------------------  -------
-                    call_method  to_dtype_3   to_dtype   (ops, mul, torch.float16)                     {}
-                    call_method  store        store      (ops, 'buf5', get_index_3, to_dtype_3, None)  {}
-                """
-                result: Dict[str, torch.fx.Node] = {}
-                for g in graphs:
-                    for _node in g.nodes:
-                        if _node.target == "store":
-                            node_to_be_stored = _node.args[3]
-                            if (
-                                node_to_be_stored.target == "to_dtype"
-                                and node_to_be_stored.args[2] in DTYPE_LOWP_FP
-                            ):
-                                buf = _node.args[1]
-                                # only stored once for one buf
-                                assert buf not in result
-                                result[buf] = _node
-                return result
-
-            def match_load_to(graphs):
-                r"""
-                find the buffer loaded and only used by a "to_dtype(float32)" node
-                -----------  -----------  ---------  --------------------------------------------  -------
-                    call_method  load         load       (ops, 'buf5', get_index)                        {}
-                    call_method  to_dtype     to_dtype   (ops, load, torch.float32)                      {}
-                """
-                result: Dict[str, List[torch.fx.Node]] = {}
-
-                def _only_used_by_to_float(node: torch.fx.Node):
-                    return all(
-                        usr.target == "to_dtype" and usr.args[2] == torch.float32
-                        for usr in node.users
-                    )
-
-                for g in graphs:
-                    for _node in g.nodes:
-                        if _node.target == "load" and _only_used_by_to_float(_node):
-                            buf = _node.args[1]
-                            if buf in result:
-                                result[buf].append(_node)
-                            else:
-                                result[buf] = [_node]
-                return result
-
-            def store_float_buf_to_cache(buf, _node):
-                r"""
-                insert a store_to_fp32_cache node before to_dtype
-                -----------  -----------  ---------  --------------------------------------------  -------
-                call_method  mul                  mul             (ops, to_dtype, maximum)                      {}
-                call_method  store_to_fp32_cache  store_to_fp32_cache  (ops, mul, 'fp32_buf5')                  {} --> new node
-                call_method  to_dtype_3           to_dtype        (ops, mul, torch.float16)                     {}
-                call_method  store                store           (ops, 'buf5', get_index_3, to_dtype_3, None)  {}
-                """
-                graph = _node.graph
-                to_dtype_node = _node.args[3]
-                fp32_node = to_dtype_node.args[1]
-                with graph.inserting_after(fp32_node):
-                    store_to_fp32_cache = graph.call_method(
-                        "store_to_fp32_cache",
-                        args=(_node.args[0], fp32_node, f"fp32_{buf}"),
-                    )
-
-            def load_float_buf_from_cache(buf, _node):
-                r"""
-                replace to_dtype node with load_from_fp32_cache node
-                -----------  -----------  ---------  --------------------------------------------  -------
-                call_method  load         load       (ops, 'buf5', get_index)                      {}
-                call_method  to_dtype     to_dtype   (ops, load, torch.float32)                    {}
-                call_method  tan          tan        (ops, to_dtype)                               {}
-                -->
-                -----------  -----------  ---------  --------------------------------------------  -------
-                call_method  load                  load             (ops, 'buf5', get_index)                           {}
-                call_method  load_from_fp32_cache  load_from_fp32_cache  (ops, 'fp32_buf5')                            {}
-                call_method  tan                   tan              (ops, load_from_fp32_cache)                        {}
-                """
-                graph = _node.graph
-                assert len(_node.users) == 1
-                with graph.inserting_after(_node):
-                    load_from_fp32_cache = graph.call_method(
-                        "load_from_fp32_cache", args=(_node.args[0], f"fp32_{buf}")
-                    )
-                    to_dtype_node = next(iter(_node.users.keys()))
-                    to_dtype_node.replace_all_uses_with(load_from_fp32_cache)
-                    graph.erase_node(to_dtype_node)
-                    metrics.cpp_to_dtype_count -= 1
-
-            if not belong_to_same_fused_schedular_nodes(nodes):
-                return
-
-            graphs = []
-            for _node in nodes:
-                body: ir.LoopBody = _node._body
-                blocks = [body.root_block] + list(body.subblocks.values())
-                graphs += [block.graph for block in blocks]
-
-            stores = match_to_store(graphs)
-            loads = match_load_to(graphs)
-            for buf, store_graph in stores.items():
-                if buf in loads:
-                    store_float_buf_to_cache(buf, store_graph)
-                    for load_graph in loads[buf]:
-                        load_float_buf_from_cache(buf, load_graph)
-
         if all(
             isinstance(_node, SchedulerNode) and self.is_lowp_fp_scheduler(_node)
             for _node in nodes
@@ -3203,8 +3126,6 @@ class CppKernelProxy(CppKernel):
             if should_legalize:
                 body: ir.LoopBody = node._body
                 _legalize_lowp_fp(body)
-
-        create_fp32_store_cache(nodes)
 
     def codegen_nodes(self, nodes):
         # Legalize BF16 node by adding to_dtype explicitly

@@ -2972,7 +2972,6 @@ class CPUReproTests(TestCase):
                 torch.tensor(4.39, dtype=torch.float16),
             ),
         )
-        assert metrics.cpp_to_dtype_count == 5
 
 
 if __name__ == "__main__":
