@@ -334,10 +334,7 @@ struct TORCH_API ViewInfo {
   /// If view_fn has value, we use it to recover views in backward.
   /// NB: This is a shared_ptr because it may be copied into a CopySlices node
   /// for view + in-place rebase handling.
-  /// NB: This is mutable to maintain conceptual const-ness for view_fn() while
-  /// allowing the ViewFunc state to be temporarily modified during
-  /// fake-ification.
-  mutable std::shared_ptr<ViewFunc> view_fn_;
+  std::shared_ptr<ViewFunc> view_fn_;
 
   /// Analogue of view_fn but in reverse: given a view -> produce the base by
   /// applying the inverse view.
@@ -349,7 +346,7 @@ struct TORCH_API ViewInfo {
     return view_fn_ != nullptr;
   }
 
-  std::shared_ptr<ViewFunc>& view_fn() const {
+  const std::shared_ptr<ViewFunc>& view_fn() const {
     TORCH_CHECK(
         has_view_fn(), "Can only access the view function if it exists.");
     return view_fn_;
