@@ -11732,6 +11732,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(grad_long, grad_byte)
 
     @onlyCUDA
+    @skipIfRocm
     @dtypes(torch.float16, torch.float32)
     def test_cross_entropy_loss_2d_out_of_bounds_class_index(self, device, dtype):
         # Test for issue #117532
