@@ -287,6 +287,17 @@ class SideEffects:
         assert isinstance(ctx, variables.AutogradFunctionContextVariable)
         self.save_for_backward.append((ctx, args))
 
+    def track_tensor_variables_from_runahead_side_effects(self, other):
+        # In higher order ops we want to keep track of tensors seen in the
+        # speculate_subgraph so that we don't lift them again as a new input in
+        # other speculate_subgraph or in the root tracer.
+        for item in other.keepalive:
+            other_id = id(item)
+            if other_id not in self.id_to_variable and isinstance(
+                other.id_to_variable[other_id], variables.TensorVariable
+            ):
+                self.track_object_existing(item, other.id_to_variable[other_id])
+
     def prune_dead_object_new(self, tx):
         live_new_objects = set()
         skip_obj = None
