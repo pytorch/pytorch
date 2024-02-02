@@ -1,6 +1,7 @@
 import enum
 import json
 import os
+import pprint
 import re
 import subprocess
 
@@ -54,6 +55,8 @@ def download_reports(commit_sha, configs=("dynamo38", "dynamo311", "eager311")):
     workflow_run_id = str(json.loads(output)[0]["databaseId"])
     output = subprocess.check_output(["gh", "run", "view", workflow_run_id])
     workflow_jobs = parse_workflow_jobs(output)
+    print("found the following workflow jobs:")
+    pprint.pprint(workflow_jobs)
 
     # Figure out which jobs we need to download logs for
     required_jobs = []
@@ -62,7 +65,7 @@ def download_reports(commit_sha, configs=("dynamo38", "dynamo311", "eager311")):
     for job in required_jobs:
         assert (
             job in workflow_jobs
-        ), f"{job} not found, is the commit_sha correct? has the job finished running?"
+        ), f"{job} not found, is the commit_sha correct? has the job finished running? The GitHub API may take a couple minutes to update."
 
     # This page lists all artifacts.
     listings = requests.get(
