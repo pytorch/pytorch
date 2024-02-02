@@ -565,6 +565,20 @@ class CUDABenchmarkRequest(BenchmarkRequest):
         self.hash_key: str = ""
         self.source_file: str = ""
         self.hash_key, self.source_file = CUDACodeCache.write(self.source_code, "so")
+        self.unique_input_tensor_meta = self._create_unique_tensor_meta(
+            input_tensor_meta
+        )
+
+    def _create_unique_tensor_meta(self, input_tensor_meta):
+        unique_input_tensor_meta: List[TensorMeta] = []
+        seen = set()
+        for tm in input_tensor_meta:
+            if tm.name is None:
+                unique_input_tensor_meta.append(tm)
+            elif tm.name not in seen:
+                unique_input_tensor_meta.append(tm)
+                seen.add(tm.name)
+        return unique_input_tensor_meta
 
     def precompile(self):
         # Prepopulate CUDACodeCache
