@@ -214,5 +214,5 @@ if __name__ == "__main__":
         action="store_true",
     )
     args = parser.parse_args()
-    dynamo38, dynamo311, eager311 = download_reports(args.commit)
+    dynamo38, dynamo311 = download_reports(args.commit, ("dynamo38", "dynamo311"))
     update(args.filename, dynamo38, dynamo311, args.also_remove_skips)
