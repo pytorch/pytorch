@@ -28,7 +28,7 @@ _NEW_OP_NAMESPACE: str = "onnx_export"
 """The namespace for the custom operator."""
 
 
-class DecompSkip:
+class DecompSkip(abc.ABC):
     op_callable: Callable
     """The original operator callable to skip decomposition."""
     onnxscript_function: Callable
@@ -112,7 +112,11 @@ class UpsampleBilinear2DDecompSkip(DecompSkip):
         osize = decompositions.upsample_compute_output_size(
             input.size(), output_size, scale_factors
         )
-        return torch.empty(osize, dtype=input.dtype, device=input.device)
+        return torch.empty(
+            (input.size(0), input.size(1), *osize),
+            dtype=input.dtype,
+            device=input.device,
+        )
 
 
 _DEFAULT_SKIP_LIST = [
