@@ -1629,6 +1629,36 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="Logic not implemented for size 0 inputs in op.Reshape",
         matcher=lambda sample: any(dim == 0 for dim in sample.input.shape),
     ),
+    xfail(
+        "signal.windows.hamming",
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        reason="does not match node name",
+    ),
+    xfail(
+        "signal.windows.general_hamming",
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        reason="does not match node name",
+    ),
+    xfail(
+        "signal.windows.blackman",
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        reason="does not match node name",
+    ),
+    xfail(
+        "signal.windows.general_cosine",
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        reason="does not match node name",
+    ),
+    xfail(
+        "signal.windows.hann",
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        reason="does not match node name",
+    ),
+    xfail(
+        "signal.windows.nuttall",
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        reason="does not match node name",
+    ),
 )
 
 OPS_DB = copy.deepcopy(common_methods_invocations.op_db)
