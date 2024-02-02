@@ -82,64 +82,73 @@ KERNEL_COUNTS = {
 }
 
 
-def build_compiled_opt_kwarg_db():
+def build_opt_kwarg_dbs():
     compiled_opt_db = []
+    disabled_opt_db = []
     for optim_info in optim_db:
-        if optim_info.optim_cls not in KERNEL_COUNTS:
-            continue
-
         for optim_inputs in optim_info.optim_inputs_func():
             for device in ["cpu", "cuda"]:
-                for foreach in [True, False]:
-                    if device == "cpu" and "capturable" in optim_inputs.kwargs:
-                        continue
-
-                    kwargs = dict(optim_inputs.kwargs)
-                    name = (
-                        f"test_{optim_info.optim_cls.__name__.lower()}"
-                        f"{'_foreach' if foreach else ''}"
+                # handle disabled optimizers
+                if optim_info.optim_cls not in KERNEL_COUNTS:
+                    optim_inputs.kwargs["device"] = device
+                    disabled_opt_db.append(
+                        (
+                            optim_info.optim_cls,
+                            f"test_{optim_info.optim_cls.__name__.lower()}_disabled",
+                            optim_inputs.kwargs,
+                        )
                     )
-
-                    for key in optim_inputs.kwargs:
-                        if key == "lr":
+                else:
+                    for foreach in [True, False]:
+                        if device == "cpu" and "capturable" in optim_inputs.kwargs:
                             continue
-                        name += "_" + key
 
-                    name += f"_{device}"
-
-                    # Eager for-loop impl doesn't support capturable ASGD
-                    if name == "test_asgd_capturable_cuda":
-                        continue
-
-                    kwargs["foreach"] = foreach
-                    kwargs["device"] = device
-                    if name in KERNEL_COUNT_OVERRIDES:
-                        kwargs["kernel_count"] = KERNEL_COUNT_OVERRIDES[name]
-                    else:
-                        kwargs["kernel_count"] = (
-                            KERNEL_COUNTS[optim_info.optim_cls].multitensor
-                            if foreach and device == "cuda"
-                            else KERNEL_COUNTS[optim_info.optim_cls].singletensor
+                        kwargs = dict(optim_inputs.kwargs)
+                        name = (
+                            f"test_{optim_info.optim_cls.__name__.lower()}"
+                            f"{'_foreach' if foreach else ''}"
                         )
 
-                    if kwargs["kernel_count"] is None:
-                        continue
+                        for key in optim_inputs.kwargs:
+                            if key == "lr":
+                                continue
+                            name += "_" + key
 
-                    # Note on tolerances:
-                    # test_adadelta_foreach_rho_weight_decay_cuda
-                    # Mismatched elements: 1 / 100 (1.0%)
-                    # Greatest absolute difference: 2.0936131477355957e-05 at index (2, 7) (up to 2e-05 allowed)
-                    # Greatest relative difference: 8.520411211065948e-05 at index (2, 7) (up to 1e-06 allowed)
-                    if optim_info.optim_cls is Adadelta:
-                        kwargs["rtol"] = 2e-5
-                        kwargs["atol"] = 2e-5
+                        name += f"_{device}"
 
-                    compiled_opt_db.append((optim_info.optim_cls, name, kwargs))
+                        # Eager for-loop impl doesn't support capturable ASGD
+                        if name == "test_asgd_capturable_cuda":
+                            continue
 
-    return compiled_opt_db
+                        kwargs["foreach"] = foreach
+                        kwargs["device"] = device
+                        if name in KERNEL_COUNT_OVERRIDES:
+                            kwargs["kernel_count"] = KERNEL_COUNT_OVERRIDES[name]
+                        else:
+                            kwargs["kernel_count"] = (
+                                KERNEL_COUNTS[optim_info.optim_cls].multitensor
+                                if foreach and device == "cuda"
+                                else KERNEL_COUNTS[optim_info.optim_cls].singletensor
+                            )
+
+                        if kwargs["kernel_count"] is None:
+                            continue
+
+                        # Note on tolerances:
+                        # test_adadelta_foreach_rho_weight_decay_cuda
+                        # Mismatched elements: 1 / 100 (1.0%)
+                        # Greatest absolute difference: 2.0936131477355957e-05 at index (2, 7) (up to 2e-05 allowed)
+                        # Greatest relative difference: 8.520411211065948e-05 at index (2, 7) (up to 1e-06 allowed)
+                        if optim_info.optim_cls is Adadelta:
+                            kwargs["rtol"] = 2e-5
+                            kwargs["atol"] = 2e-5
+
+                        compiled_opt_db.append((optim_info.optim_cls, name, kwargs))
+
+    return compiled_opt_db, disabled_opt_db
 
 
-COMPILED_OPT_KWARG_DB = build_compiled_opt_kwarg_db()
+COMPILED_OPT_KWARG_DB, DISABLED_OPT_KWARG_DB = build_opt_kwarg_dbs()
 
 aten = torch.ops.aten
 
@@ -178,6 +187,48 @@ def compile_opt(opt_compiled, closure=None):
             step_fn(opt_compiled)
 
     return torch.compile(fn, backend="inductor", fullgraph=True)
+
+
+def make_disabled_test(optim_cls, **kwargs):
+    def test_fn(self):
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        device = kwargs.pop("device")
+        input = torch.ones([10, 10], device=device)
+        model = torch.nn.Sequential(
+            *[torch.nn.Linear(10, 10, device=device) for _ in range(2)]
+        )
+        model(input).sum().backward()
+
+        if optim_cls is SparseAdam:
+            for param in model.parameters():
+                param.grad = param.grad.to_sparse()
+
+        opt = optim_cls(model.parameters(), **kwargs)
+
+        if optim_cls is LBFGS:
+
+            @torch.compile()
+            def fn():
+                def closure():
+                    loss = model(input).sum()
+                    loss.backward()
+                    return loss
+
+                opt.step(closure)
+
+        else:
+
+            @torch.compile()
+            def fn():
+                opt.step()
+
+        fn()
+        fn()
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+
+    return test_fn
 
 
 def make_test(
@@ -380,52 +431,12 @@ class CompiledOptimizerTests(TestCase):
         self.assertTrue(p_ref() is None)
         gc.enable()
 
-    @requires_cuda
-    def test_disabled_lbfgs(self):
-        torch._dynamo.reset()
-        torch._inductor.metrics.reset()
-        input = torch.ones([10, 10], device="cuda")
-        model = torch.nn.Sequential(
-            *[torch.nn.Linear(10, 10, device="cuda") for _ in range(2)]
-        )
-        model(input).sum().backward()
-        opt = LBFGS(model.parameters(), lr=0.1)
-
-        @torch.compile()
-        def fn():
-            opt.step(closure=lambda: model(input).sum())
-
-        fn()
-        fn()
-
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
-
-    @requires_cuda
-    def test_disabled_sparseadam(self):
-        torch._dynamo.reset()
-        torch._inductor.metrics.reset()
-        input = torch.ones([2, 2], device="cuda")
-        model = torch.nn.Sequential(
-            *[torch.nn.Linear(2, 2, device="cuda", bias=False) for _ in range(2)]
-        )
-
-        for param in model.parameters():
-            param.grad = torch.tensor([[0, 2.0], [3, 0]], device="cuda").to_sparse()
-
-        opt = SparseAdam(model.parameters(), lr=0.1)
-
-        @torch.compile()
-        def fn():
-            opt.step(closure=lambda: model(input).sum())
-
-        fn()
-        fn()
-
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
-
 
 for optim_cls, name, kwargs in COMPILED_OPT_KWARG_DB:
     setattr(CompiledOptimizerTests, name, make_test(optim_cls, **kwargs))
+
+for optim_cls, name, kwargs in DISABLED_OPT_KWARG_DB:
+    setattr(CompiledOptimizerTests, name, make_disabled_test(optim_cls, **kwargs))
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
