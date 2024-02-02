@@ -15,9 +15,254 @@ reviewers:
     Chillee:
       - ezyang
 
+# Use .github/scripts/update_auto_review_from_codeowners.py
+# to update this list from CODEOWNERS
 files:
-  # none yet, TODO: migrate CODEOWNERS here
-
+  torch/utils/cpp_extension.py:
+    - fmassa
+    - soumith
+    - ezyang
+  torch/csrc/autograd/**:
+    - albanD
+    - soulitzer
+  torch/autograd/**:
+    - albanD
+    - soulitzer
+  tools/autograd/**:
+    - albanD
+    - soulitzer
+  torch/nn/**:
+    - albanD
+    - jbschlosser
+    - mikaylagawarecki
+  torch/optim/**:
+    - albanD
+    - janeyx99
+  test/test_public_bindings.py:
+    - albanD
+  test/allowlist_for_publicAPI.json:
+    - albanD
+  docs/source/conf.py:
+    - albanD
+  aten/src/ATen/native/tags.yaml:
+    - ezyang
+  aten/src/ATen/native/ao_sparse:
+    - salilsdesai
+    - kimishpatel
+    - digantdesai
+    - jianyuh
+  aten/src/ATen/native/quantized:
+    - jerryzh168
+    - salilsdesai
+    - kimishpatel
+    - digantdesai
+    - jianyuh
+  aten/src/ATen/native/quantized/cpu:
+    - jerryzh168
+    - salilsdesai
+    - kimishpatel
+    - digantdesai
+    - jianyuh
+  aten/src/ATen/native/quantized/cuda:
+    - jerryzh168
+  aten/src/ATen/native/quantized/cudnn:
+    - jerryzh168
+  test/test_quantization.py:
+    - jerryzh168
+  test/ao/**:
+    - jerryzh168
+    - hdcharles
+  test/quantization/**:
+    - jerryzh168
+  torch/quantization/**:
+    - jerryzh168
+  '**/ao/sparisty/**':
+    - hdcharles
+  '**/ao/quantization/**':
+    - jerryzh168
+  '**/nn/intrinsic/**':
+    - jerryzh168
+  '**/nn/quantized/**':
+    - jerryzh168
+  '**/nn/quantizable/**':
+    - jerryzh168
+  '**/nn/qat/**':
+    - jerryzh168
+  torch/csrc/distributed/rpc/tensorpipe_agent.cpp:
+    - jiayisuse
+    - osalpekar
+    - lw
+  torch/csrc/distributed/rpc/tensorpipe_agent.h:
+    - jiayisuse
+    - osalpekar
+    - lw
+  torch/_dynamo/backends/onnxrt.py:
+    - bowenbao
+    - abock
+    - thiagocrepaldi
+    - wschin
+  torch/csrc/jit/passes/onnx.h:
+    - bowenbao
+    - abock
+    - thiagocrepaldi
+  torch/csrc/jit/passes/onnx.cpp:
+    - bowenbao
+    - abock
+    - thiagocrepaldi
+  torch/csrc/jit/passes/onnx/**:
+    - bowenbao
+    - abock
+    - thiagocrepaldi
+  torch/onnx/**:
+    - bowenbao
+    - abock
+    - thiagocrepaldi
+    - wschin
+  test/onnx/**:
+    - bowenbao
+    - abock
+    - thiagocrepaldi
+    - wschin
+  .ci/**:
+    - pytorch-dev-infra
+  .ci/docker/**:
+    - jeffdaily
+  .ci/docker/ci_commit_pins/triton.txt:
+    - desertfire
+    - Chillee
+    - eellison
+    - shunting314
+    - bertmaher
+    - jeffdaily
+    - jataylo
+    - jithunnair-amd
+    - pruthvistony
+  .ci/docker/ci_commit_pins/triton-rocm.txt:
+    - jeffdaily
+    - jataylo
+    - jithunnair-amd
+    - pruthvistony
+  .github/**:
+    - pytorch-dev-infra
+  test/run_test.py:
+    - pytorch-dev-infra
+  torch/testing/_internal/common_device_type.py:
+    - mruberry
+  torch/testing/_internal/common_utils.py:
+    - pytorch-dev-infra
+  torch/nn/utils/parametriz*.py:
+    - lezcano
+  torch/linalg/**:
+    - lezcano
+    - IvanYashchuk
+  aten/src/ATen/native/**/*LinearAlgebra*:
+    - lezcano
+    - nikitaved
+    - IvanYashchuk
+  test/test_linalg.py:
+    - lezcano
+    - nikitaved
+    - IvanYashchuk
+  torch/testing/_internal/common_methods_invocations.py:
+    - mruberry
+  '**/test/test_ops.py':
+    - mruberry
+  '**/test/test_ops_gradients.py':
+    - mruberry
+    - soulitzer
+  '**/test/test_ops_fwd_gradients.py':
+    - mruberry
+    - soulitzer
+  '**/test/test_unary_ufuncs.py':
+    - mruberry
+  '**/test/test_binary_ufuncs.py':
+    - mruberry
+  '**/test/test_reductions.py':
+    - mruberry
+  '**/test/test_type_promotion.py':
+    - mruberry
+  '**/test/functorch/test_ops.py':
+    - zou3519
+    - chillee
+    - kshitij12345
+  '**/test/functorch/test_vmap.py':
+    - zou3519
+    - chillee
+    - kshitij12345
+  '**/test/test_mps.py':
+    - kulinseth
+    - malfet
+  '**/aten/src/ATen/mps/**':
+    - kulinseth
+    - malfet
+  '**/aten/src/ATen/native/mps/**':
+    - kulinseth
+    - malfet
+  '**/torch/csrc/autograd/profiler*':
+    - aaronenyeshi
+  '**/torch/autograd/profiler*':
+    - aaronenyeshi
+  '**/torch/csrc/profiler/**':
+    - aaronenyeshi
+  '**/torch/profiler/**':
+    - aaronenyeshi
+  '**/test/functorch/test_aotdispatch.py':
+    - ezyang
+    - Chillee
+  '**/torch/utils/data/**':
+    - ejguan
+  '**/torch/utils/hipify/**':
+    - jeffdaily
+    - jithunnair-amd
+  '**/tools/amd_build/**':
+    - jeffdaily
+    - jithunnair-amd
+  '**/aten/src/ATen/hip/**':
+    - jeffdaily
+    - jithunnair-amd
+  '**/aten/src/ATen/miopen/**':
+    - jeffdaily
+    - jithunnair-amd
+  '**/aten/src/ATen/native/miopen/**':
+    - jeffdaily
+    - jithunnair-amd
+  '**/c10/hip':
+    - jeffdaily
+    - jithunnair-amd
+  '**/caffe2/core/hip':
+    - jeffdaily
+    - jithunnair-amd
+  '**/caffe2/operators/hip':
+    - jeffdaily
+    - jithunnair-amd
+  '**/caffe2/operators/rnn/hip':
+    - jeffdaily
+    - jithunnair-amd
+  '**/caffe2/utils/hip':
+    - jeffdaily
+    - jithunnair-amd
+  torch/export/**:
+    - avikchaudhuri
+    - gmagogsfm
+    - tugsbayasgalan
+    - zhxchen17
+  torch/_export/**:
+    - avikchaudhuri
+    - gmagogsfm
+    - tugsbayasgalan
+    - zhxchen17
+  aten/src/ATen/MapAllocator*:
+    - mikaylagawarecki
+  caffe2/serialize/**:
+    - mikaylagawarecki
+  torch/serialization.py:
+    - mikaylagawarecki
+  torch/storage.py:
+    - mikaylagawarecki
+  torch/csrc/Storage*:
+    - mikaylagawarecki
+  torch/csrc/jit/python/init.cpp:
+    - mikaylagawarecki
 options:
   ignore_draft: true
   ignored_keywords:
