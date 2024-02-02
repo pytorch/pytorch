@@ -2153,6 +2153,21 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allgather_coalesced(
   return work;
 }
 
+c10::intrusive_ptr<Work> ProcessGroupGloo::allgather_into_tensor_coalesced(
+    std::vector<at::Tensor>& outputs,
+    std::vector<at::Tensor>& inputs,
+    const AllgatherOptions& opts) {
+  TORCH_CHECK_EQ(outputs.size(), inputs.size());
+  std::vector<std::vector<at::Tensor>> output_lists(getSize());
+  for (auto& output : outputs) {
+    auto chunks = output.chunk(getSize());
+    for (const auto i : c10::irange(output_lists.size())) {
+      output_lists[i].push_back(std::move(chunks[i]));
+    }
+  }
+  return allgather_coalesced(output_lists, inputs, opts);
+}
+
 namespace {
 
 class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
