@@ -2395,8 +2395,6 @@ dynamo_expected_failures = {
     "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape1_cpu",  # test_transformers.py
     "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape0_cpu",  # test_transformers.py
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_float32",  # test_linalg.py
-    "TestArgmax.test_combinations_data61",  # torch_np/test_ndarray_methods.py
-    "TestArgmax.test_combinations_data58",  # torch_np/test_ndarray_methods.py
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_int64",  # test_linalg.py
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_complex64",  # test_linalg.py
 }
@@ -6743,6 +6741,8 @@ dynamo_skips = {
     "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_1_shape1_cpu",  # test_transformers.py
     "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_Q_operation0",
     "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_Q_operation1",
+    "TestArgmax.test_combinations_data61",  # torch_np/test_ndarray_methods.py
+    "TestArgmax.test_combinations_data58",  # torch_np/test_ndarray_methods.py
 }
 
 
