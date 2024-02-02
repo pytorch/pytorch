@@ -588,7 +588,7 @@ def main() -> None:
         labels=labels,
         test_matrix=filtered_test_matrix,
         job_name=args.job_name,
-        pr_body=pr_body,
+        pr_body=pr_body if pr_body else "",
     )
 
     # Set the filtered test matrix as the output
