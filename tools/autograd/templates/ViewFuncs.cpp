@@ -13,11 +13,11 @@ ChainedViewFunc::ChainedViewFunc(
   const std::shared_ptr<ViewFunc>& first_,
   const std::shared_ptr<ViewFunc>& second_)
   : first(first_),
-    num_first_symints(-1),
-    num_first_tensors(-1),
+    num_first_symints(0),
+    num_first_tensors(0),
     second(second_),
-    num_second_symints(-1),
-    num_second_tensors(-1) {}
+    num_second_symints(0),
+    num_second_tensors(0) {}
 
 std::vector<c10::SymInt> ChainedViewFunc::get_symints() const {
   auto symints = first->get_symints();
@@ -27,15 +27,6 @@ std::vector<c10::SymInt> ChainedViewFunc::get_symints() const {
   symints.reserve(symints.size() + num_second_symints);
   symints.insert(symints.end(), second_symints.begin(), second_symints.end());
   return symints;
-}
-
-void ChainedViewFunc::set_symints(const std::vector<c10::SymInt>& symints) {
-  TORCH_INTERNAL_ASSERT(num_first_symints > -1);
-  TORCH_INTERNAL_ASSERT(num_second_symints > -1);
-  std::vector<c10::SymInt> first_symints(symints.begin(), symints.begin() + num_first_symints);
-  first->set_symints(first_symints);
-  std::vector<c10::SymInt> second_symints(symints.begin() + num_first_symints, symints.end());
-  second->set_symints(second_symints);
 }
 
 std::vector<at::Tensor> ChainedViewFunc::get_tensors() const {
@@ -48,17 +39,29 @@ std::vector<at::Tensor> ChainedViewFunc::get_tensors() const {
   return tensors;
 }
 
-void ChainedViewFunc::set_tensors(const std::vector<at::Tensor>& tensors) {
-  TORCH_INTERNAL_ASSERT(num_first_tensors > -1);
-  TORCH_INTERNAL_ASSERT(num_second_tensors > -1);
-  std::vector<at::Tensor> first_tensors(tensors.begin(), tensors.begin() + num_first_tensors);
-  first->set_tensors(first_tensors);
-  std::vector<at::Tensor> second_tensors(tensors.begin() + num_first_tensors, tensors.end());
-  second->set_tensors(second_tensors);
-}
+at::Tensor ChainedViewFunc::operator()(
+    const at::Tensor& input_base,
+    const std::optional<std::vector<c10::SymInt>>& symints,
+    const std::optional<std::vector<at::Tensor>>& tensors) const {
+  std::optional<std::vector<c10::SymInt>> first_symints;
+  std::optional<std::vector<c10::SymInt>> second_symints;
+  if (symints.has_value()) {
+    TORCH_INTERNAL_ASSERT(symints->size() == num_first_symints + num_second_symints);
+    first_symints = std::vector<c10::SymInt>(symints->begin(), symints->begin() + num_first_symints);
+    second_symints = std::vector<c10::SymInt>(symints->begin() + num_first_symints, symints->end());
+  }
 
-at::Tensor ChainedViewFunc::operator()(const at::Tensor& input_base) {
-  return (*second)((*first)(input_base));
+  std::optional<std::vector<at::Tensor>> first_tensors;
+  std::optional<std::vector<at::Tensor>> second_tensors;
+  if (tensors.has_value()) {
+    TORCH_INTERNAL_ASSERT(tensors->size() == num_first_tensors + num_second_tensors);
+    first_tensors = std::vector<at::Tensor>(tensors->begin(), tensors->begin() + num_first_tensors);
+    second_tensors = std::vector<at::Tensor>(tensors->begin() + num_first_tensors, tensors->end());
+  }
+
+  // NB: guarding is done below
+  auto first_output = (*first)(input_base, first_symints, first_tensors);
+  return (*second)(first_output, second_symints, second_tensors);
 }
 
 namespace generated {
