@@ -25,6 +25,7 @@ from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter
 from torch.utils._pytree import tree_map
 from torch import nn
 import re
+import math
 
 import functools
 import itertools
@@ -1721,6 +1722,44 @@ L['a'].size()[0] < 20""")
     def _assert_no_guards(self, fx_g, free_symbols):
         assert _get_free_symbols(fx_g.shape_env) == free_symbols, fx_g.shape_env.var_to_val
         assert len(fx_g.shape_env.get_nontrivial_guards()) == 0, fx_g.shape_env.format_guards()
+
+    def test_unbacked_float_guard(self):
+        def f(inp):
+            u0 = math.floor(inp.item())
+            torch._check_is_size(u0)
+            return torch.full((u0,), 5)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.tensor(12.5)).code).strip()
+        self.assertExpectedInline(
+            r, """\
+def forward(self, inp_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(inp_1);  inp_1 = None
+    floor = math_floor(_local_scalar_dense);  _local_scalar_dense = None
+    full = torch.ops.aten.full.default([floor], 5, device = device(type='cpu'), pin_memory = False);  floor = None
+    return full"""
+        )
+
+    def test_unbacked_complex_replacement(self):
+        def f(x):
+            y = x.item()
+            z1 = torch.ones(y)
+            z2 = torch.ones(y - 2)
+            z3 = torch.ones(y - 2)
+            return z1, z2 + z3
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.tensor(12)).code).strip()
+        self.assertExpectedInline(
+            r, """\
+def forward(self, x_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
+    ones = torch.ops.aten.ones.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False)
+    sub = _local_scalar_dense - 2
+    ones_1 = torch.ops.aten.ones.default([sub], device = device(type='cpu'), pin_memory = False);  sub = None
+    sub_1 = _local_scalar_dense - 2;  _local_scalar_dense = None
+    ones_2 = torch.ops.aten.ones.default([sub_1], device = device(type='cpu'), pin_memory = False);  sub_1 = None
+    add = torch.ops.aten.add.Tensor(ones_1, ones_2);  ones_1 = ones_2 = None
+    return (ones, add)"""
+        )
 
     def test_guards_equal(self):
         def f(a, b):
