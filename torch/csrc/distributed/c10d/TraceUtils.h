@@ -343,6 +343,28 @@ inline std::string pickle_str(const c10::IValue& v) {
   return std::string(result.begin(), result.end());
 }
 
+inline std::string get_python_cpp_trace() {
+  // usage:
+  // LOG(INFO) << "stacktrace: "
+  //           << get_python_cpp_trace();
+  // warn: might be slow in getting cpp traces
+  // because of slow/broken addr2line
+  // in different system libs
+  std::shared_ptr<torch::CapturedTraceback> tb =
+      torch::CapturedTraceback::gather(
+          /*python=*/true, /*script=*/true, /*cpp=*/true);
+  torch::SymbolizedTracebacks s_tbs = torch::symbolize({tb.get()});
+  const auto& s_tb = s_tbs.tracebacks.at(0);
+  std::stringstream oss;
+  for (auto idx : c10::irange(s_tb.size())) {
+    auto frame_id = s_tb[idx];
+    const auto& frame = s_tbs.all_frames.at(frame_id);
+    oss << "#" << idx << " " << frame.funcname << " from " << frame.filename
+        << ":" << frame.lineno << std::endl;
+  }
+  return oss.str();
+}
+
 inline c10::Dict<c10::IValue, c10::IValue> new_dict() {
   return c10::Dict<c10::IValue, c10::IValue>(
       c10::AnyType::get(), c10::AnyType::get());
