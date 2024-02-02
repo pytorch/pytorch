@@ -159,9 +159,9 @@ class Guard:
     obj_weakref: Optional[object] = None
     guarded_class_weakref: Optional[type] = None
 
-    stack = None
-    user_stack = None
-    _hash = None
+    stack: Optional[CapturedTraceback] = None
+    user_stack: Optional[traceback.StackSummary] = None
+    _hash: Optional[int] = None
 
     def __hash__(self):
         if self._hash is None:
@@ -765,6 +765,9 @@ def tracing(context: Optional[TracingContext]):
 # TODO(voz): Consider a toplevel torch/_source.py
 @dataclasses.dataclass(frozen=True)
 class Source:
+    def is_dict_key(self):
+        return False
+
     def reconstruct(self, codegen):
         raise NotImplementedError()
 
@@ -787,6 +790,10 @@ class Source:
 @dataclasses.dataclass(frozen=True)
 class ChainedSource(Source):
     base: Source
+
+    def is_dict_key(self):
+        # Recurse until you either hit a ConstDictKey or a Source
+        return self.base.is_dict_key()
 
 
 def detect_fake_mode(inputs: Any = None):
