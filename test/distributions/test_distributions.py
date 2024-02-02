@@ -4052,7 +4052,7 @@ class TestDistributionShapes(DistributionsTestCase):
         mix_distribution = Categorical(torch.ones([3,1,3]))
         component_distribution = Normal(torch.zeros([3,3,3]), torch.ones([3,3,3]))
         gmm = MixtureSameFamily(mix_distribution, component_distribution)
-        self.assertEqual( len(gmm.mean.shape), 2)
+        self.assertEqual(len(gmm.mean.shape), 2)
 
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestKL(DistributionsTestCase):
