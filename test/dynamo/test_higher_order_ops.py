@@ -3070,11 +3070,6 @@ class GraphModule(torch.nn.Module):
             (x1, x2)
         )
         self.assertEqual(len(counters["graph_break"]), 0)
-        # assert_dict_matches_regex(
-        #     self,
-        #     dict(counters["graph_break"]),
-        #     {".*torch.func.grad with body that accepts non-Tensors as input": 2},
-        # )
         self.assertEqual(actual, expected)
 
     @config.patch(capture_func_transforms=True)
@@ -3172,10 +3167,6 @@ class GraphModule(torch.nn.Module):
         actual = wrapper_fn(x, y)
         expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x, y)
         self.assertEqual(len(counters["graph_break"]), 0)
-        # self.assertEqual(
-        #     dict(counters["graph_break"]),
-        #     {"torch.func.grad: kwargs arguments are currently unsupported.": 2},
-        # )
         self.assertEqual(actual, expected)
 
     @config.patch(capture_func_transforms=True)
