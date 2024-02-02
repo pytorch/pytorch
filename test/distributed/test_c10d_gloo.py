@@ -668,6 +668,28 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual([tensors], outputs)
 
     @requires_gloo()
+    def test_allgather_into_tensor_coalesced(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+        torch.manual_seed(42)
+        in_shapes = [(5, 5), (10, 10), (15, 15)]
+        out_shapes = [(s[0] * self.world_size,) + s[1:] for s in in_shapes]
+
+        outputs = [torch.empty(s) for s in out_shapes]
+        inputs = [torch.rand(s) for s in in_shapes]
+        work = dist.group.WORLD.allgather_into_tensor_coalesced(outputs, inputs)
+        work.wait()
+
+        for output, input in zip(outputs, inputs):
+            expect = torch.cat([input] * self.world_size)
+            self.assertTrue(torch.allclose(output, expect))
+
+    @requires_gloo()
     def test_scatter_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_gloo(
