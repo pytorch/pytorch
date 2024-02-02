@@ -596,7 +596,7 @@ def register_pointwise(
     use_libdevice_for_f64=False,
 ):
     """A pointwise function that maps ops.{name} to inputs"""
-    name = name or aten_fn.__name__.removeprefix('special_')
+    name = name or aten_fn.__name__
     fn = ops_wrapper(name)
     if use_libdevice_for_f64:
         fn_libdevice = ops_wrapper("libdevice_" + name)
@@ -766,24 +766,6 @@ def trunc(x):
     if is_integer_type(x):
         return clone(x)
     fn = ops_wrapper("trunc")
-    return make_pointwise(fn)(x)
-
-
-@register_lowering(
-    [aten.special_bessel_j0, prims.bessel_j0],
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
-def bessel_j0(x):
-    fn = ops_wrapper("bessel_j0")
-    return make_pointwise(fn)(x)
-
-
-@register_lowering(
-    [aten.special_bessel_j1, prims.bessel_j1],
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
-def bessel_j1(x):
-    fn = ops_wrapper("bessel_j1")
     return make_pointwise(fn)(x)
 
 
@@ -1044,17 +1026,14 @@ def pointwise_cat(inputs, dim=0):
                 ),
             )
 
-        def get_masked_val(i):
-            if i != len(inputs) - 1:
-                return ops.where(
-                    masks[i],
-                    masked_loads[i],
-                    get_masked_val(i + 1),
-                )
-            else:
-                return masked_loads[-1]
-
-        return get_masked_val(0)
+        next_val = masked_loads[-1]
+        for i in range((len(inputs)) - 2, -1, -1):
+            next_val = ops.where(
+                masks[i],
+                masked_loads[i],
+                next_val,
+            )
+        return next_val
 
     new_size = list(inputs[0].get_size())
     new_size[dim] = inputs_ranges[-1][-1]
@@ -1120,7 +1099,6 @@ def cat(inputs, dim=0):
     def can_fuse_reduction(t):
         if isinstance(t, (TensorBox, ir.StorageBox)):
             return can_fuse_reduction(unwrap_tensor(t))
-
         return (
             is_reduction(t)
             or isinstance(t, ir.Pointwise)
@@ -1135,10 +1113,33 @@ def cat(inputs, dim=0):
 
     # TODO: We observed negative performance impact of pointwise_cat optimization on CPU so disabled it.
     #             We will revisit this later after enabling vectorization on index_expr.
-    if (
-        len(inputs) <= config.max_pointwise_cat_inputs
-        and inputs[0].get_device().type != "cpu"
-        and not fusable_reduction
+    if inputs[0].get_device().type == "cpu" or fusable_reduction:
+        return TensorBox(ir.ConcatKernel.create(inputs, dim))
+
+    def op_count(x):
+        if isinstance(x, (TensorBox, ir.StorageBox)):
+            return op_count(unwrap_tensor(x))
+
+        # this will correspond to a direct memory read
+        if not isinstance(x, ir.Pointwise):
+            return 0
+
+        count = x.inner_fn_opcount()
+        for read in x.get_read_names():
+            count += op_count(V.graph.get_buffer(read))
+
+        return count
+
+    # as of inputs increase, possibility for register spilling also increases
+    # past a certain threshold of inputs we only fuse if the if the input kernels
+    # are simple
+    # not sure if we want to expose to users via config since logic may change in future
+    MAX_COMPLEX_POINTWISE_CAT = 8
+    MAX_SIMPLE_OP_COUNT = 2
+
+    if len(inputs) <= MAX_COMPLEX_POINTWISE_CAT or (
+        (len(inputs) <= config.max_pointwise_cat_inputs)
+        and all(op_count(t) <= MAX_SIMPLE_OP_COUNT for t in inputs)
     ):
         pointwise_uses = all(is_pointwise_use(use) for use in V.current_node.users)
         all_pointwise_inputs = all(should_lower_cat_input(inp) for inp in inputs)
@@ -5082,9 +5083,11 @@ add = register_pointwise(
 )
 
 
-def register_pointwise_numeric(op):
+def register_pointwise_numeric(op, name=None):
     return register_pointwise(
-        op, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+        op,
+        name=name,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     )
 
 
@@ -5185,7 +5188,12 @@ register_pointwise_numeric(aten.erfinv)
 register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
-register_pointwise_numeric(aten.special_modified_bessel_i0)
+
+register_pointwise_numeric(aten.special_bessel_j0, name="bessel_j0")
+register_pointwise_numeric(prims.bessel_j0, name="bessel_j0")
+register_pointwise_numeric(aten.special_bessel_j1, name="bessel_j1")
+register_pointwise_numeric(prims.bessel_j1, name="bessel_j1")
+register_pointwise_numeric(aten.special_modified_bessel_i0, name="modified_bessel_i0")
 
 foreach_add_list = register_foreach_pointwise(
     aten._foreach_add.List, add, allow_alpha=True
