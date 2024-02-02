@@ -140,7 +140,7 @@ def _move_exported_model_to_train(model: torch.fx.GraphModule):
     _replace_batchnorm(model, train_to_eval=False)
     return model
 
-def _allow_exported_model_train_eval_for_special_ops(model: torch.fx.GraphModule):
+def _allow_exported_model_train_eval(model: torch.fx.GraphModule):
     """
     Allow users to call `model.train()` and `model.eval()` on an exported model,
     but with the effect of changing behavior between the two modes limited to special

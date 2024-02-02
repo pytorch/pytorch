@@ -1625,7 +1625,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         with self.assertRaises(NotImplementedError):
             m.train()
 
-    def test_allow_exported_model_train_eval_for_special_ops(self):
+    def test_allow_exported_model_train_eval(self):
 
         class M(torch.nn.Module):
             def __init__(self):
@@ -1662,7 +1662,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             m.train()
 
         # After wrapping: does not error and swaps the ops accordingly
-        torch.ao.quantization.allow_exported_model_train_eval_for_special_ops(m)
+        torch.ao.quantization.allow_exported_model_train_eval(m)
         m.eval()
         _assert_ops_are_correct(m, train=False)
         m.train()
@@ -1677,7 +1677,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             m.train()
 
         # After prepare and after wrapping: does not error and swaps the ops accordingly
-        torch.ao.quantization.allow_exported_model_train_eval_for_special_ops(m)
+        torch.ao.quantization.allow_exported_model_train_eval(m)
         m.eval()
         _assert_ops_are_correct(m, train=False)
         m.train()
@@ -1691,7 +1691,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             m.train()
 
         # After convert and after wrapping: does not error and swaps the ops accordingly
-        torch.ao.quantization.allow_exported_model_train_eval_for_special_ops(m)
+        torch.ao.quantization.allow_exported_model_train_eval(m)
         m.eval()
         _assert_ops_are_correct(m, train=False)
         m.train()
