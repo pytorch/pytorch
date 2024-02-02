@@ -4399,7 +4399,11 @@ class IndexPutFallback(ExternKernel):
         )
         self.name = V.graph.register_buffer(self)
         self.python_kernel_name = "aten.index_put_"
-        self.cpp_kernel_name = "at::index_put_out"
+        self.cpp_kernel_name = (
+            "aoti_torch_index_put_out"
+            if config.aot_inductor.abi_compatible
+            else "at::index_put_out"
+        )
         mark_node_as_mutating(self, x)
 
 

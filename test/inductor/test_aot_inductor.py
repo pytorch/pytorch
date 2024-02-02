@@ -1712,13 +1712,16 @@ class AOTInductorTestsTemplate:
             class Model(torch.nn.Module):
                 def forward(self, x, i1, i2, y):
                     return torch.ops.aten.index_put(
-                        x, (None, None, i1, i2), y, accumulate=True
+                        x,
+                        (None, None, i1, i2.transpose(0, 1)),
+                        y,
+                        accumulate=True,
                     )
 
             example_inputs = (
                 torch.rand(8, 192, 30, 30, device=self.device),
                 torch.zeros(3, 14, 1, 1, dtype=torch.int64, device=self.device),
-                torch.ones(3, 14, dtype=torch.int64, device=self.device),
+                torch.ones(14, 3, dtype=torch.int64, device=self.device),
                 torch.randn(8, 192, 3, 14, 3, 14, device=self.device),
             )
             self.check_model(Model(), example_inputs)
