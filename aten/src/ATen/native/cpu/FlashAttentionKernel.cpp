@@ -310,9 +310,8 @@ void cpu_flash_attention(
           }
         }
         // Update coefficients with Softmax
-        accum_t tmp_max = 0, tmp_sum = 0, sum_old = 0, exp_tmp = 0;
+        accum_t tmp_max = 0, tmp_sum = 0, exp_tmp = 0;
         for (int64_t row = 0; row < qBlockSize; ++row) {
-          sum_old = qk_sum_data[row];
           if (has_attn_mask) {
             // max per row
             tmp_max = at::vec::reduce_all<accum_t>(
