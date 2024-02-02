@@ -11,6 +11,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.distributed_c10d import _rank_not_in_group
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
@@ -284,6 +285,7 @@ class TestFSDPHybridShard(FSDPTest):
                     ShardingStrategyMode.MIXED_HYBRID_FULL_SHARD,
                 ],
                 "use_orig_params": [False, True],
+                "use_device_mesh": [False, True],
             },
             self._test_fsdp_hybrid_shard_basic_setup,
         )
@@ -293,9 +295,17 @@ class TestFSDPHybridShard(FSDPTest):
         hsdp_sharding_strategy: ShardingStrategy,
         sharding_strategy_mode: ShardingStrategyMode,
         use_orig_params: bool,
+        use_device_mesh: bool,
     ):
+        if use_device_mesh:
+            device_mesh = init_device_mesh("cuda", (1, self.world_size))
+        else:
+            device_mesh = None
         hsdp_model = self._init_hsdp_model(
-            hsdp_sharding_strategy, sharding_strategy_mode, use_orig_params
+            hsdp_sharding_strategy,
+            sharding_strategy_mode,
+            use_orig_params,
+            hsdp_device_mesh=device_mesh,
         )
         # All FSDP modules should have state.process_group as the process group over which to
         # shard (default process group), and state._inter_node_pg (process group containing only
@@ -428,7 +438,9 @@ class TestFSDPHybridShard(FSDPTest):
         hsdp_process_groups: Optional[
             Tuple[dist.ProcessGroup, dist.ProcessGroup]
         ] = None,
+        hsdp_device_mesh: Optional = None,
     ):
+        assert hsdp_process_groups is None or hsdp_device_mesh is None
         auto_wrap_policy = ModuleWrapPolicy(
             {TransformerEncoderLayer, TransformerDecoderLayer},
         )
@@ -437,6 +449,7 @@ class TestFSDPHybridShard(FSDPTest):
             "auto_wrap_policy": auto_wrap_policy,
             "sharding_strategy": hsdp_sharding_strategy,
             "use_orig_params": use_orig_params,
+            "device_mesh": hsdp_device_mesh,
         }
         if sharding_strategy_mode == ShardingStrategyMode.ALL_HYBRID_SHARD:
             hsdp_model = TransformerWithSharedParams.init(
