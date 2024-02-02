@@ -67,46 +67,14 @@ def get_with_pytest_shard(
 ) -> List[ShardedTest]:
     sharded_tests: List[ShardedTest] = []
 
-    def get_duration_for_classes(
-        test_file: str, test_classes: Set[str]
-    ) -> Optional[float]:
-        duration: float = 0
-        if not test_class_times:
-            return None
-
-        for test_class in test_classes:
-            class_duration = test_class_times.get(test_file, {}).get(test_class, None)
-            if class_duration is None:
-                return None
-            if class_duration:
-                duration += class_duration
-        return duration
-
     for test in tests:
-        file_duration = test_file_times.get(test.test_file, None)
-        included = test.included()
-        excluded = test.excluded()
-        included_classes_duration = get_duration_for_classes(test.test_file, included)
-        excluded_classes_duration = get_duration_for_classes(test.test_file, excluded)
+        duration = get_duration(test, test_file_times, test_class_times or {})
 
-        if included:
-            # If we don't have the time for all included classes, our upper bound is the file duration
-            duration = (
-                included_classes_duration
-                if included_classes_duration is not None
-                else file_duration
-            )
-        elif excluded:
-            # If we don't have the time for all excluded classes, our upper bound is file duration
-            duration = (
-                file_duration - excluded_classes_duration
-                if excluded_classes_duration is not None and file_duration is not None
-                else file_duration
-            )
-        else:
-            duration = file_duration
+        assert (
+            duration is not None
+        ), f"Attempt to get pytest shard info for test {test} but test has unknown duration"
 
-        if duration and duration > THRESHOLD:
+        if duration > THRESHOLD:
             num_shards = math.ceil(duration / THRESHOLD)
             for i in range(num_shards):
                 sharded_tests.append(
@@ -115,6 +83,92 @@ def get_with_pytest_shard(
         else:
             sharded_tests.append(ShardedTest(test, 1, 1, duration))
     return sharded_tests
+
+
+def get_duration(
+    test: TestRun,
+    test_file_times: Dict[str, float],
+    test_class_times: Dict[str, Dict[str, float]],
+):
+    file_duration = test_file_times.get(test.test_file, None)
+    if test.is_full_file():
+        return file_duration
+
+    def get_duration_for_classes(
+        test_file: str, test_classes: Set[str]
+    ) -> Optional[float]:
+        duration: float = 0
+
+        for test_class in test_classes:
+            class_duration = test_class_times.get(test_file, {}).get(test_class, None)
+            if class_duration is None:
+                return None
+            duration += class_duration
+        return duration
+
+    included = test.included()
+    excluded = test.excluded()
+    included_classes_duration = get_duration_for_classes(test.test_file, included)
+    excluded_classes_duration = get_duration_for_classes(test.test_file, excluded)
+
+    if included_classes_duration is None or excluded_classes_duration is None:
+        # Didn't get the time for all classes, so time is unknown
+        return None
+
+    if included:
+        return included_classes_duration
+    assert (
+        excluded
+    ), f"TestRun {test} is not full file but doesn't have included or excluded classes"
+    return file_duration - excluded_classes_duration
+
+
+def shard(
+    sharded_jobs: List[ShardJob],
+    tests: Sequence[TestRun],
+    test_file_times: Dict[str, float],
+    test_class_times: Dict[str, Dict[str, float]],
+    sort_by_time: bool = True,
+    serial: bool = False,
+) -> None:
+    if len(sharded_jobs) == 0:
+        assert len(tests) == 0, "No shards but tests to shard"
+        return
+    # Modifies sharded_jobs in place
+    known_tests = tests
+    unknown_tests = []
+    if sort_by_time:
+        known_tests = [
+            x
+            for x in tests
+            if get_duration(x, test_file_times, test_class_times) is not None
+        ]
+        unknown_tests = [x for x in tests if x not in known_tests]
+
+        assert (
+            unknown_tests == [] or serial
+        ), f"Attmempting to parallelize unknown tests {unknown_tests}"
+
+    known_tests = get_with_pytest_shard(known_tests, test_file_times, test_class_times)
+
+    if sort_by_time:
+        known_tests = sorted(known_tests, key=lambda j: j.get_time(), reverse=True)
+
+    for test in known_tests:
+        min_sharded_job = min(sharded_jobs, key=lambda j: j.get_total_time())
+        if serial:
+            min_sharded_job.serial.append(test)
+        else:
+            min_sharded_job.parallel.append(test)
+
+    # Round robin the unknown jobs starting with the smallest shard
+    num_shards = len(sharded_jobs)
+    index = min(range(num_shards), key=lambda i: sharded_jobs[i].get_total_time())
+    for unknown_test in unknown_tests:
+        sharded_jobs[index].serial.append(ShardedTest(unknown_test, 1, 1, None))
+        index = (index + 1) % num_shards
+
+    return
 
 
 def calculate_shards(
@@ -126,38 +180,46 @@ def calculate_shards(
     sort_by_time: bool = True,
 ) -> List[Tuple[float, List[ShardedTest]]]:
     must_serial = must_serial or (lambda x: True)
+    test_class_times = test_class_times or {}
+    serial_tests = [
+        test
+        for test in tests
+        if get_duration(test, test_file_times, test_class_times) is None
+        or must_serial(test.test_file)
+    ]
+    parallel_tests = [test for test in tests if test not in serial_tests]
 
-    known_tests: Sequence[TestRun] = tests
-    unknown_tests: Sequence[TestRun] = []
+    serial_time = sum(
+        get_duration(test, test_file_times, test_class_times) or 0 for test in serial_tests
+    )
+    parallel_time = sum(
+        get_duration(test, test_file_times, test_class_times)
+        for test in parallel_tests
+    )
+    total_time = serial_time + parallel_time / NUM_PROCS_FOR_SHARDING_CALC
+    num_serial_shards = math.ceil(serial_time / total_time * num_shards)
+    print(
+        f"Putting serial tests in first {num_serial_shards} shards out of {num_shards}"
+    )
 
-    if sort_by_time:
-        known_tests = [
-            x
-            for x in tests
-            if x.test_file in test_file_times
-            or (test_class_times and x.test_file in test_class_times)
-        ]
-        unknown_tests = [x for x in tests if x not in known_tests]
+    sharded_jobs = [ShardJob() for _ in range(num_shards)]
+    shard(
+        sharded_jobs[:num_serial_shards],
+        serial_tests,
+        test_file_times,
+        test_class_times,
+        sort_by_time,
+        True,
+    )
+    shard(
+        sharded_jobs,
+        parallel_tests,
+        test_file_times,
+        test_class_times,
+        sort_by_time,
+        False,
+    )
 
-    known_tests = get_with_pytest_shard(known_tests, test_file_times, test_class_times)
-
-    if sort_by_time:
-        known_tests = sorted(known_tests, key=lambda j: j.get_time(), reverse=True)
-
-    sharded_jobs: List[ShardJob] = [ShardJob() for _ in range(num_shards)]
-    for test in known_tests:
-        if must_serial(test.name):
-            min_sharded_job = min(sharded_jobs, key=lambda j: j.get_total_time())
-            min_sharded_job.serial.append(test)
-        else:
-            min_sharded_job = min(sharded_jobs, key=lambda j: j.get_total_time())
-            min_sharded_job.parallel.append(test)
-
-    # Round robin the unknown jobs starting with the smallest shard
-    index = min(range(num_shards), key=lambda i: sharded_jobs[i].get_total_time())
-    for unknown_test in unknown_tests:
-        sharded_jobs[index].serial.append(ShardedTest(unknown_test, 1, 1, None))
-        index = (index + 1) % num_shards
     return [job.convert_to_tuple() for job in sharded_jobs]
 
 

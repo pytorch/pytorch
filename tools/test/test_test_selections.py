@@ -330,27 +330,33 @@ class TestCalculateShards(unittest.TestCase):
             random_times: Dict[str, float] = {
                 str(i): random.randint(0, THRESHOLD * 10) for i in range(num_tests)
             }
+            serial = [str(i) for i in range(num_tests) if random.randint(0, 1) == 0]
+
 
             shards = calculate_shards(
                 num_shards,
                 [TestRun(t) for t in random_times.keys()],
                 random_times,
-                gen_class_times(random_times),
+                None,
+                must_serial=lambda x: x in serial,
+                sort_by_time=random.randint(0, 1) == 0,
             )
 
             times = [x[0] for x in shards]
             max_diff = max(times) - min(times)
             self.assertTrue(max_diff <= THRESHOLD)
 
-            all_sharded_tests = defaultdict(list)
-            for time, sharded_tests in shards:
-                self.assertEqual(time, sum(x.time for x in sharded_tests))
+            all_sharded_tests: Dict[str, List[ShardedTest]] = defaultdict(list)
+            for _, sharded_tests in shards:
                 for sharded_test in sharded_tests:
                     all_sharded_tests[sharded_test.name].append(sharded_test)
 
+            # Check that all test files are represented in the shards
             self.assertListEqual(
                 sorted(random_times.keys()), sorted(all_sharded_tests.keys())
             )
+            # Check that for each test file, the pytest shards' times adds up to
+            # original and all shards are present
             for test, sharded_tests in all_sharded_tests.items():
                 self.assertAlmostEqual(
                     random_times[test], sum(x.time or 0 for x in sharded_tests)
