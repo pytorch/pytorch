@@ -448,8 +448,8 @@ def speculate_subgraph(
             f"that Dynamo was unable to prove safety for this API and will "
             f"fall back to eager-mode PyTorch, which could lead to a slowdown."
         )
-        log.warning(msg)
-        log.exception(ex)
+        log.info(msg)
+        log.info(ex)
         raise Unsupported(
             f"{msg} Scroll up for the stack trace "
             f"of the initial exception. The reason was: {ex.msg}"
