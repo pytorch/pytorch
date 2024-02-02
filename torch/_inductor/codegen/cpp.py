@@ -978,6 +978,10 @@ class CppOverrides(OpOverrides):
     def bessel_j0(x):
         return f"bessel_j0_forward({x})"
 
+    @staticmethod
+    def bessel_j1(x):
+        return f"bessel_j1_forward({x})"
+
 
 class CppVecOverrides(CppOverrides):
     """Map element-wise ops to aten vectorization C++"""
