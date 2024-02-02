@@ -540,36 +540,6 @@ static std::vector<T> map_py_func(
   return new_items;
 }
 
-// RAII guard for modifying and restoring saved SymInt / tensor state in a
-// ViewFunc.
-struct ViewFuncSavedStateGuard {
-  ViewFuncSavedStateGuard(
-      const std::shared_ptr<ViewFunc>& view_func,
-      const std::optional<std::vector<c10::SymInt>>& new_symints,
-      const std::optional<std::vector<at::Tensor>>& new_tensors)
-      : view_func(view_func) {
-    // save old state and set new state
-    old_symints = view_func->get_symints();
-    old_tensors = view_func->get_tensors();
-    if (new_symints.has_value()) {
-      view_func->set_symints(*new_symints);
-    }
-    if (new_tensors.has_value()) {
-      view_func->set_tensors(*new_tensors);
-    }
-  }
-
-  ~ViewFuncSavedStateGuard() {
-    // restore previous state
-    view_func->set_symints(old_symints);
-    view_func->set_tensors(old_tensors);
-  }
-
-  std::shared_ptr<ViewFunc> view_func;
-  std::vector<c10::SymInt> old_symints;
-  std::vector<at::Tensor> old_tensors;
-};
-
 static PyObject* view_func_impl(
     PyObject* _self,
     PyObject* args,
@@ -616,8 +586,7 @@ static PyObject* view_func_impl(
         }
 
         // call view func
-        ViewFuncSavedStateGuard guard(view_func, new_symints, new_tensors);
-        out = (*view_func)(new_base);
+        out = (*view_func)(new_base, new_symints, new_tensors);
       } else {
         out = new_base.as_strided(
             self.sizes(), self.strides(), self.storage_offset());
