@@ -87,17 +87,17 @@ class TunableOp {
     }
 
   private:
-    static void WarmUp(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, size_t num_iter) {
+    static void WarmUp(Callable<ParamsT> *op, ParamsT* param, size_t num_iter) {
       for (size_t i = 0; i < num_iter; i++) {
-        TORCH_CHECK(op->Call(param[i%param.size()]) == OK);
+        TORCH_CHECK(op->Call(param) == OK);
       }
     }
 
-    static double Profile(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, size_t num_iter) {
+    static double Profile(Callable<ParamsT> *op, ParamsT* param, size_t num_iter) {
       TimerT timer{};
       timer.Start();
       for (size_t i = 0; i < num_iter; i++) {
-        TORCH_CHECK(op->Call(param[i%param.size()]) == OK);
+        TORCH_CHECK(op->Call(param) == OK);
       }
       timer.End();
       return timer.Duration() / num_iter;
@@ -125,14 +125,11 @@ class TunableOp {
       TORCH_CHECK(ops_[ResultEntry::Default()]->Call(reference_params) == OK);
 
       // need a copy of params to reuse
-      std::vector<ParamsT*> reusable_params(ctx->GetBufferRotationCount());
-      for (size_t i = 0; i < reusable_params.size(); i++) {
-          reusable_params[i] = params->DeepCopy();
-      }
+      ParamsT* reusable_params = params->DeepCopy();
 
       for (size_t i = 0; i < op_names_.size(); i++) {
         auto* candidate = ops_[op_names_[i]].get(); // borrow pointer
-        auto status = candidate->Call(reusable_params[0]);
+        auto status = candidate->Call(reusable_params);
         if (status != OK) {
           TUNABLE_LOG("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
           continue;
@@ -140,9 +137,7 @@ class TunableOp {
 
         if (IsNumericsCheckEnabled()) {
           ParamsT* numerical_params = params->DeepCopy();
-          std::vector<ParamsT*> numerical_params_as_vector(1);
-          numerical_params_as_vector[0] = numerical_params;
-          WarmUp(candidate, numerical_params_as_vector, 1);
+          WarmUp(candidate, numerical_params, 1);
           status = reference_params->NumericalCheck(numerical_params);
           numerical_params->Delete();
           if (status != OK) {
@@ -210,10 +205,7 @@ class TunableOp {
         }
       }
 
-      // done with reusable_params and reference_params
-      for (size_t i = 0; i < reusable_params.size(); i++) {
-        reusable_params[i]->Delete();
-      }
+      reusable_params->Delete();
       reference_params->Delete();
 
       TUNABLE_LOG("└──found fastest for ", op_sig, '(', params_sig, ") ", id_name);
