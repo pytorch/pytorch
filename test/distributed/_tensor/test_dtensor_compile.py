@@ -336,13 +336,17 @@ class TestDTensorCompileWithNativeFunCol(TestDTensorCompile):
         # NOTE(yifu): I'm not sure whether the original test is expecting
         # reordering or the lack of it. Anyway with native funcol, the
         # generated code exhibits consistent behavior.
-        FileCheck() \
-            .check("buf0 = torch.ops._c10d_functional.all_gather_into_tensor.default(primals_9") \
-            .check("buf1 = torch.ops._c10d_functional.wait_tensor.default(buf0") \
-            .check("extern_kernels.mm(buf0,") \
-            .check("extern_kernels.mm(buf0,") \
-            .check("extern_kernels.mm(buf0,") \
-            .run(code)
+        FileCheck().check(
+            "buf0 = torch.ops._c10d_functional.all_gather_into_tensor.default(primals_9"
+        ).check("buf1 = torch.ops._c10d_functional.wait_tensor.default(buf0").check(
+            "extern_kernels.mm(buf0,"
+        ).check(
+            "extern_kernels.mm(buf0,"
+        ).check(
+            "extern_kernels.mm(buf0,"
+        ).run(
+            code
+        )
 
 
 class TestDTensorCompileE2E(DTensorTestBase):
