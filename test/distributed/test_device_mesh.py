@@ -737,5 +737,29 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 self.assertEqual(output_tensor, expected_tensor)
 
 
+class DeviceMeshTestWithNativeFunCol(DeviceMeshTest):
+    def setUp(self) -> None:
+        self._prev_native_funcol_enabled = funcol.native_funcol_enabled()
+        funcol.enable_native_funcol()
+        super().setUp()
+
+    def tearDown(self) -> None:
+        super().tearDown()
+        if not self._prev_native_funcol_enabled:
+            funcol.disable_native_funcol()
+
+
+class DeviceMeshCollectiveTestWithNativeFunCol(DeviceMeshCollectiveTest):
+    def setUp(self) -> None:
+        self._prev_native_funcol_enabled = funcol.native_funcol_enabled()
+        funcol.enable_native_funcol()
+        super().setUp()
+
+    def tearDown(self) -> None:
+        super().tearDown()
+        if not self._prev_native_funcol_enabled:
+            funcol.disable_native_funcol()
+
+
 if __name__ == "__main__":
     run_tests()
