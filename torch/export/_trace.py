@@ -368,7 +368,9 @@ def _lift_buffers_to_user_inputs(
         i: b for i, b in graph_signature.inputs_to_buffers.items() if b not in names
     }
     user_inputs_to_mutate = {
-        o: b for o, b in graph_signature.buffers_to_mutate.items() if b in names
+        o: new_node_names[b]
+        for o, b in graph_signature.buffers_to_mutate.items()
+        if b in names
     }
     graph_signature.buffers_to_mutate = {
         o: b for o, b in graph_signature.buffers_to_mutate.items() if b not in names
