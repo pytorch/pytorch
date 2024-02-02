@@ -4,7 +4,7 @@
 import io
 import os
 from contextlib import contextmanager
-from typing import Iterator, Optional, Union
+from typing import Generator, Optional, Union
 
 import fsspec
 from fsspec import AbstractFileSystem
@@ -27,10 +27,12 @@ class FileSystem(FileSystemBase):
         self.fs: Optional[AbstractFileSystem] = None
 
     @contextmanager
-    def create_stream(self, path: os.PathLike, mode: str) -> Iterator[io.IOBase]:
+    def create_stream(
+        self, path: Union[str, os.PathLike], mode: str
+    ) -> Generator[io.IOBase, None, None]:
         assert self.fs is not None
         with self.fs.transaction:
-            with fsspec.open(path, mode) as stream:
+            with fsspec.open(str(path), mode) as stream:
                 yield stream
 
     def concat_path(
@@ -38,13 +40,13 @@ class FileSystem(FileSystemBase):
     ) -> Union[str, os.PathLike]:
         return os.path.join(path, suffix)
 
-    def init_path(self, path: [str, os.PathLike]) -> Union[str, os.PathLike]:
+    def init_path(self, path: Union[str, os.PathLike]) -> Union[str, os.PathLike]:
         self.fs, _ = url_to_fs(path)
         return path
 
     def rename(
         self, path: Union[str, os.PathLike], new_path: Union[str, os.PathLike]
-    ) -> Union[str, os.PathLike]:
+    ) -> None:
         self.fs.rename(path, new_path)
 
     def mkdir(self, path: [str, os.PathLike]) -> None:

@@ -13,6 +13,7 @@ from typing import (
     Callable,
     cast,
     Dict,
+    Generator,
     IO,
     Iterable,
     Iterator,
@@ -303,8 +304,11 @@ def _write_files_from_queue(
 
 
 class FileSystemBase(ABC):
+    @contextmanager
     @abstractmethod
-    def create_stream(self, path: os.PathLike, mode: str) -> Iterator[io.IOBase]:
+    def create_stream(
+        self, path: Union[str, os.PathLike], mode: str
+    ) -> Generator[io.IOBase, None, None]:
         ...
 
     @abstractmethod
@@ -316,41 +320,43 @@ class FileSystemBase(ABC):
     @abstractmethod
     def rename(
         self, path: Union[str, os.PathLike], new_path: Union[str, os.PathLike]
-    ) -> Union[str, os.PathLike]:
+    ) -> None:
         ...
 
     @abstractmethod
-    def init_path(self, path: [str, os.PathLike]) -> Union[str, os.PathLike]:
+    def init_path(self, path: Union[str, os.PathLike]) -> Union[str, os.PathLike]:
         ...
 
     @abstractmethod
-    def mkdir(self, path: [str, os.PathLike]) -> None:
+    def mkdir(self, path: Union[str, os.PathLike]) -> None:
         ...
 
 
 class FileSystem(FileSystemBase):
     @contextmanager
-    def create_stream(self, path: os.PathLike, mode: str) -> Iterator[io.IOBase]:
-        with path.open(mode) as stream:
-            yield stream
+    def create_stream(
+        self, path: Union[str, os.PathLike], mode: str
+    ) -> Generator[io.IOBase, None, None]:
+        with cast(Path, path).open(mode) as stream:
+            yield cast(io.IOBase, stream)
 
     def concat_path(
         self, path: Union[str, os.PathLike], suffix: str
     ) -> Union[str, os.PathLike]:
-        return cast(os.PathLike, path) / suffix
+        return cast(Path, path) / suffix
 
-    def init_path(self, path: [str, os.PathLike]) -> Union[str, os.PathLike]:
+    def init_path(self, path: Union[str, os.PathLike]) -> Union[str, os.PathLike]:
         if not isinstance(path, Path):
             path = Path(path)
         return path
 
     def rename(
         self, path: Union[str, os.PathLike], new_path: Union[str, os.PathLike]
-    ) -> Union[str, os.PathLike]:
-        cast(os.PathLike, path).rename(new_path)
+    ) -> None:
+        cast(Path, path).rename(cast(Path, new_path))
 
-    def mkdir(self, path: [str, os.PathLike]) -> None:
-        cast(os.PathLike, path).mkdir(parents=True, exist_ok=True)
+    def mkdir(self, path: Union[str, os.PathLike]) -> None:
+        cast(Path, path).mkdir(parents=True, exist_ok=True)
 
 
 class FileSystemWriter(StorageWriter):
@@ -487,8 +493,8 @@ class FileSystemWriter(StorageWriter):
         for wr_list in results:
             storage_md.update({wr.index: wr.storage_data for wr in wr_list})
         metadata.storage_data = storage_md
-        tmp_path = self.fs.concat_path(self.path, ".metadata.tmp")
-        meta_path = self.fs.concat_path(self.path, ".metadata")
+        tmp_path = cast(Path, self.fs.concat_path(self.path, ".metadata.tmp"))
+        meta_path = cast(Path, self.fs.concat_path(self.path, ".metadata"))
         with self.fs.create_stream(tmp_path, "wb") as metadata_file:
             pickle.dump(metadata, metadata_file)
             if self.sync_files:
@@ -521,8 +527,8 @@ class FileSystemReader(StorageReader):
             per_file.setdefault(path, []).append(read_item)
 
         for relative_path, reqs in per_file.items():
-            path = self.fs.concat_path(self.path, relative_path)
-            with self.fs.create_stream(path, "rb") as stream:
+            new_path = self.fs.concat_path(self.path, relative_path)
+            with self.fs.create_stream(new_path, "rb") as stream:
                 # TODO sort by offset and cache the reading
                 for req in reqs:
                     item_md = self.storage_data[req.storage_index]
