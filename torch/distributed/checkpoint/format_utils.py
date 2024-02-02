@@ -16,7 +16,19 @@ from torch.distributed.checkpoint.state_dict_loader import _load_state_dict
 __all__ = ["dcp_to_torch_save"]
 
 
-class _DCPToTorchLoadPlanner(DefaultLoadPlanner):
+class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
+    """
+    Load Planner which rebuilds state_dict from the saved metadata. Useful
+    for loading in state_dict without first initializing a model, such as
+    when converting a DCP checkpoint into a Torch save file.
+
+    . N.B. `state_dict` must be an empty dictionary when used with this LoadPlanner
+
+    .. warning::
+        Because the entire state dict is initialized, It's recommended to only utilize
+        this LoadPlanner on a single rank or process to avoid OOM.
+
+    """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -26,6 +38,8 @@ class _DCPToTorchLoadPlanner(DefaultLoadPlanner):
         metadata: Metadata,
         is_coordinator: bool,
     ) -> None:
+        assert not state_dict
+
         # rebuild the state dict from the metadata
         for k, v in metadata.state_dict_metadata.items():
             if isinstance(v, TensorStorageMetadata):
@@ -36,6 +50,7 @@ class _DCPToTorchLoadPlanner(DefaultLoadPlanner):
                 state_dict[k] = v
 
         super().set_up_planner(state_dict, metadata, is_coordinator)
+
 
 
 def dcp_to_torch_save(
@@ -59,7 +74,7 @@ def dcp_to_torch_save(
         _load_state_dict(
             sd,
             storage_reader=storage_reader,
-            planner=_DCPToTorchLoadPlanner(),
+            planner=_EmptyStateDictLoadPlanner(),
             no_dist=True,
         )
         torch.save(sd, torch_save_fn)
