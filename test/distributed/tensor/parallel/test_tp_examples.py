@@ -358,7 +358,6 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         output = model(inp)
         target = distribute_tensor(local_target, device_mesh)
 
-        from torch.distributed._tensor.redistribute import Count
         from torch.distributed._tensor.debug import CommDebugMode
         comm_mode = CommDebugMode()
         with comm_mode:
