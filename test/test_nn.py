@@ -9871,7 +9871,12 @@ class TestNNDeviceType(NNTestCase):
 
         torch.manual_seed(0)
 
-        input_ui8 = torch.randint(0, 256, size=(batch_size, num_channels, 400, 400), dtype=torch.uint8, device=device)
+        # - input range is set to [30, 220] for bicubic mode, because the bicubic kernel may create
+        #   [intermediate] values outside of the [0, 255] range, which need
+        #   to be clipped in uint8 path, but not in float path. This isn't
+        #   an issue with bilinear kernel.
+        input_range = (30, 220) if mode == "bicubic" else (0, 256)
+        input_ui8 = torch.randint(*input_range, size=(batch_size, num_channels, 400, 400), dtype=torch.uint8, device=device)
         input_ui8 = input_ui8.contiguous(memory_format=memory_format)
 
         if non_contig == "sliced":
@@ -9905,37 +9910,21 @@ class TestNNDeviceType(NNTestCase):
             self.assertTrue(output_ui8.is_contiguous(memory_format=memory_format))
             self.assertTrue(output_f32.is_contiguous(memory_format=memory_format))
 
-        diff = (output_f32 - output_ui8.float()).abs()
         if mode == "bilinear":
             torch.testing.assert_close(output_f32, output_ui8.float(), rtol=0, atol=1)
         else:
-            # - tolerances for bicubic mode are in general higher than for
-            #   bilinear mode, because the bicubic kernel may create
-            #   [intermediate] values outside of the [0, 255] range, which need
-            #   to be clipped in uint8 path, but not in float path. This isn't
-            #   an issue with bilinear kernel.
-            # - Also in bicubic mode, when antialias=False, we have to use
-            #   bigger tolerances than when antialias=True. This is partially
-            #   due to the fact that when False, the float path uses the -0.75
-            #   constant while the uint8 path uses the -0.5 constant in the
-            #   bicubic kernel (when True, they both use -0.5). This difference
-            #   in constants exists for historical reasons. Should both paths
-            #   use the -0.5 constant, we would have closer results and we would
-            #   be able to lower the tolerances.
-
-            max_diff = 30 if antialias else 44
-            assert diff.max() < max_diff
+            diff = (output_f32 - output_ui8.float()).abs()
+            self.assertLess(diff.max(), 15)
 
             threshold = 2
-            percent = 3 if antialias else 40
-            assert (diff > threshold).float().mean() < (percent / 100)
+            percent = 3
+            self.assertLess((diff > threshold).float().mean(), percent / 100)
 
             threshold = 5
-            percent = 1 if antialias else 20
-            assert (diff > threshold).float().mean() < (percent / 100)
+            percent = 1
+            self.assertLess((diff > threshold).float().mean(), percent / 100)
 
-            mae = .4 if antialias else 3
-            assert diff.mean() < mae
+            self.assertLess(diff.mean(), 0.4)
 
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("align_corners", [True, False])
