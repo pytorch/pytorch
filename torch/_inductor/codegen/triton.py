@@ -15,6 +15,7 @@ from typing import (
     Any,
     Callable,
     Counter,
+    DefaultDict,
     Dict,
     Iterable,
     List,
@@ -37,7 +38,7 @@ from torch.utils._triton import has_triton_package
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import code_hash, get_path, PyCodeCache
-from ..dependencies import MemoryDep, StarDep
+from ..dependencies import Dep, MemoryDep, StarDep
 from ..ir import IRNode, ReductionHint, TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..scheduler import BaseScheduling, WhyNoFuse
@@ -45,6 +46,7 @@ from ..triton_heuristics import AutotuneHint
 from ..utils import (
     cache_on_self,
     do_bench,
+    get_dtype_size,
     get_fused_kernel_name,
     get_kernel_metadata,
     green_text,
@@ -197,10 +199,10 @@ class BlockPtrOptions:
         for i in range(len(self.shape)):
             if (
                 self.block_shape[i] != "1"
-                and not V.graph.sizevars.statically_known_equals(self.strides[i], 0)
+                and not V.graph.sizevars.statically_known_equals(self.strides[i], 0)  # type: ignore[arg-type]
                 and not V.graph.sizevars.statically_known_multiple_of(
                     self.shape[i],
-                    config.triton.max_block[self.block_shape[i][0]],
+                    config.triton.max_block[self.block_shape[i][0]],  # type: ignore[arg-type]
                 )
                 and not (V.kernel.no_x_dim and self.block_shape[i] == "XBLOCK")
             ):
@@ -835,6 +837,14 @@ class TritonOverrides(OpOverrides):
     def ceil(x):
         return f"tl.math.ceil({x})"
 
+    @staticmethod
+    def bessel_j0(x):
+        return f"tl.math.j0({x})"
+
+    @staticmethod
+    def bessel_j1(x):
+        return f"tl.math.j1({x})"
+
 
 # Use mypy to check protocol implemented correctly
 def _typecheck_TritonOverrides(h: TritonOverrides) -> OpsHandler[str]:
@@ -1217,6 +1227,8 @@ class TritonKernel(Kernel):
         self.min_elem_per_thread = min_elem_per_thread
         self.last_usage: Set[str] = set()
         self.block_ptr_id = itertools.count()
+        # buffer accesses in the kernel
+        self.buf_accesses: DefaultDict[str, List[Dep]] = collections.defaultdict(list)
 
         self.persistent_reduction: bool = (
             not disable_persistent_reduction
@@ -1280,7 +1292,7 @@ class TritonKernel(Kernel):
         if hint > threshold:
             return False
         # will need to recompile if we cross a larger power of 2 boundary
-        V.graph.sizevars.guard_leq(self.numels[-1], next_power_of_2(hint))
+        V.graph.sizevars.guard_leq(self.numels[-1], next_power_of_2(hint))  # type: ignore[arg-type]
         return True
 
     def set_last_usage(self, nodes):
@@ -1370,7 +1382,7 @@ class TritonKernel(Kernel):
         for length_group in lengths:
             return_getters = []
             for size in length_group:
-                if sv.statically_known_equals(size, 1):
+                if sv.statically_known_equals(size, 1):  # type: ignore[arg-type]
                     return_getters.append(lambda _: sympy.Integer(0))
                     continue
 
@@ -1461,7 +1473,7 @@ class TritonKernel(Kernel):
             if symbol not in self.range_tree_nodes:
                 # Non-iterated variables, e.g. strides
                 continue
-            entry = self.range_tree_nodes[symbol]
+            entry = self.range_tree_nodes[symbol]  # type: ignore[index]
             assert isinstance(entry.parent, IterationRangesRoot)
             index_numels[entry.parent.index] *= entry.length
 
@@ -1469,7 +1481,7 @@ class TritonKernel(Kernel):
         # numels, then it must be broadcasted.
         simplify = V.graph.sizevars.simplify
         return any(
-            simplify(idx_range) != simplify(iter_range)
+            simplify(idx_range) != simplify(iter_range)  # type: ignore[arg-type]
             for idx_range, iter_range in zip(index_numels, self.numels)
         )
 
@@ -1603,7 +1615,7 @@ class TritonKernel(Kernel):
                     [m[s] for s in strides],
                     m[offset],
                     range_trees,
-                    mask_vars,
+                    mask_vars,  # type: ignore[arg-type]
                 )
 
         expand_str = None
@@ -1630,7 +1642,7 @@ class TritonKernel(Kernel):
         self.filter_masks(mask_vars)
 
         mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
-        return IndexingOptions(index_str, mask_vars, mask_str, expand_str, has_rindex)
+        return IndexingOptions(index_str, mask_vars, mask_str, expand_str, has_rindex)  # type: ignore[arg-type]
 
     def active_range_trees(self, reorder=False):
         trees = [
@@ -1647,7 +1659,7 @@ class TritonKernel(Kernel):
     def filter_masks(self, mask_vars):
         for tree in self.range_trees:
             # Masks are superfluous if we only have one element
-            if V.graph.sizevars.statically_known_equals(tree.numel, 1):
+            if V.graph.sizevars.statically_known_equals(tree.numel, 1):  # type: ignore[arg-type]
                 mask_vars.discard(f"{tree.prefix}mask")
                 continue
             # Masks are superfluous if numel is a multiple of BLOCK
@@ -1659,7 +1671,7 @@ class TritonKernel(Kernel):
             # never need to do a masked load to handle stragglers at the end.
             # It's faster to avoid masking at all.  But it is sound to always
             # mask.
-            if V.graph.sizevars.statically_known_multiple_of(tree.numel, max_block):
+            if V.graph.sizevars.statically_known_multiple_of(tree.numel, max_block):  # type: ignore[arg-type]
                 mask_vars.discard(f"{tree.prefix}mask")
 
     def var_ranges(self):
@@ -1676,13 +1688,13 @@ class TritonKernel(Kernel):
                 # if indexing expression is complicated, we precompute it on the host side
                 # and send the result as a kernel argument
                 replacements = {}
-                for ps in self.range_tree_nodes[sym].precomputed_args():
+                for ps in self.range_tree_nodes[sym].precomputed_args():  # type: ignore[index]
                     replacements[ps] = V.graph.sizevars.lookup_precomputed_size(ps)
                 if len(replacements) > 0:
-                    self.range_tree_nodes[sym].expr = sympy_subs(
-                        self.range_tree_nodes[sym].expr, replacements
+                    self.range_tree_nodes[sym].expr = sympy_subs(  # type: ignore[index]
+                        self.range_tree_nodes[sym].expr, replacements  # type: ignore[index]
                     )
-                self.range_tree_nodes[sym].codegen()
+                self.range_tree_nodes[sym].codegen()  # type: ignore[index]
         return expr
 
     @contextlib.contextmanager
@@ -1735,7 +1747,7 @@ class TritonKernel(Kernel):
         {xindex: 512, rindex: 1024}
         """
         index_to_tile_indexes = {k: v.expr for k, v in self.range_tree_nodes.items()}
-        index_in_tile_vars = sympy_subs(index, index_to_tile_indexes)
+        index_in_tile_vars = sympy_subs(index, index_to_tile_indexes)  # type: ignore[arg-type]
         strides = {}
         for range_tree in self.range_trees:
             s = sympy_index_symbol(range_tree.name)
@@ -1883,7 +1895,7 @@ class TritonKernel(Kernel):
 
         result_var = self.cse.generate(load_buffer, line)
         assert isinstance(result_var, TritonCSEVariable)
-        result_var.mask_vars = indexing.mask_vars
+        result_var.mask_vars = indexing.mask_vars  # type: ignore[assignment]
 
         if append_broadcast:
             line = f"tl.broadcast_to({result_var}, {append_broadcast})"
@@ -2296,7 +2308,7 @@ class TritonKernel(Kernel):
             self.compute, f"tl.broadcast_to({value}, {self.dense_size_str()})"
         )
 
-        default = init
+        default = triton_constant(init)
         default_tensor = self.cse.generate(
             self.body,
             f"tl.full({[1] * self.triton_tensor_ndim()}, {default}, {triton_compute_type(dtype)})",
@@ -2391,7 +2403,7 @@ class TritonKernel(Kernel):
         self.stores.clear()
         self.suffix.clear()
 
-    def codegen_kernel_benchmark(self, grid=None):
+    def codegen_kernel_benchmark(self, num_gb, grid=None):
         result = IndentedBuffer()
         argdefs, call_args, signature = self.args.python_argdefs()
 
@@ -2410,7 +2422,7 @@ class TritonKernel(Kernel):
                     # note that random seed is put in V.graph.constants
                     const_tensor = V.graph.constants[arg_name]
                     result.writeline(
-                        f"{var_name} = rand_strided({V.graph.sizevars.size_hints(const_tensor.size())}, {V.graph.sizevars.size_hints(const_tensor.stride())}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({V.graph.sizevars.size_hints(const_tensor.size())}, {V.graph.sizevars.size_hints(const_tensor.stride())}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
                     )
                 elif isinstance(arg_sig, SizeArg):
                     symval_hint = V.graph.sizevars.size_hint(arg_sig.expr)
@@ -2470,10 +2482,8 @@ class TritonKernel(Kernel):
                     f"return {str(Placeholder.KERNEL_NAME)}.benchmark_all_configs(*args, {grid_arg})"
                 )
 
-        ninplace_args = len(unique(self.args.inplace_buffers.values()))
         result.writelines(["\n", "\n", "if __name__ == '__main__':"])
         with result.indent():
-            result.writeline("from torch._inductor.utils import get_num_bytes")
             result.writeline("from triton.testing import do_bench")
             result.writeline("")
 
@@ -2481,9 +2491,7 @@ class TritonKernel(Kernel):
             result.writeline(
                 "ms = do_bench(lambda: call(args), rep=40, fast_flush=True)"
             )
-            result.writeline(
-                f"num_gb = get_num_bytes(*args, num_in_out_args={ninplace_args}) / 1e9"
-            )
+            result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
             result.writeline(
                 'print(f"{ms:.3f}ms    {num_gb:.3f}GB    {gb_per_s:.2f}GB/s")'
@@ -2516,6 +2524,63 @@ class TritonKernel(Kernel):
             return "from triton.compiler.compiler import AttrsDescriptor"
         else:
             return ""
+
+    def estimate_kernel_num_bytes(self):
+        """
+        Try the best to estimate the total size (in bytes) of the
+        kernel's inputs and outputs, which is used for estimating the memory
+        throughput of this kernel. This information is used for checking how
+        far we are from the peak memory bandwidth. It's important that
+        we want to avoid overestimating the sizes of the inputs and outputs,
+        because it can wrongfully give us a very large memory traffic value,
+        which may be even larger than the theoretical bandwidth and thus
+        become very misleading. This is particularly problematic for cases
+        where we slice some inputs. In those cases, we should only count
+        the size of the "slices" instead of the original inputs, because
+        only the slices contribute to the real memory traffic.
+        """
+        nbytes = []
+        ninplace_args = len(unique(self.args.inplace_buffers.values()))
+        _, call_args, _ = self.args.python_argdefs()
+
+        # For pointwise and reduction kernels, this is the upper-bound numels
+        # for the output buffer.
+        # FIXME: This is not exactly right for cases like below:
+        #    def foo(tensor0, tensor1):
+        #        x0 = narrow(tensor0)
+        #        return cat(x0, tensor1)
+        # For this example, we will end up overestimate the size for the
+        # slice s0. Potentially, we could have precise inputs information
+        # if we maintained the original inputs of the Pointwise kernel created
+        # for the "cat". However, I think it might be a bit overwhelming that
+        # we add such complexity only for handling some particular cases for
+        # benchmarking.
+        out_numel = V.graph.sizevars.size_hint(sympy_product(self.numels))
+        for i, arg in enumerate(call_args):
+            # "buf" may be narrowed. In this case, the number of memory accesses
+            # should be estimated based on the reinterpreted layout.
+            # On the other hand, buf may be broadcasted. In this case,
+            # counting the size of the underline storage would give us
+            # a better estimation in terms of memory accesses.
+            if arg not in self.buf_accesses:
+                nbytes.append(0)
+                continue
+            arg_numel = V.graph.get_numel(arg)
+            buf_size = V.graph.sizevars.size_hint(arg_numel)
+            if buf_size > out_numel:
+                # This arg points to a buf that has been sliced.
+                # We need to count each individual slice to have
+                # a better estimation.
+                indices = set()
+                for dep in self.buf_accesses[arg]:
+                    indices.add(dep.index)
+                numel = len(indices) * out_numel
+            else:
+                numel = buf_size
+            dtype = V.graph.get_dtype(arg)
+            dtype_size = get_dtype_size(dtype)
+            nbytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
+        return sum(nbytes)
 
     def codegen_kernel(self, name=None):
         from triton import next_power_of_2
@@ -2609,6 +2674,10 @@ class TritonKernel(Kernel):
             "mutated_arg_names": mutated_args,
             "no_x_dim": self.no_x_dim,
         }
+        num_gb = None
+        if config.benchmark_kernel or config.profile_bandwidth:
+            num_gb = self.estimate_kernel_num_bytes() / 1e9
+            inductor_meta["kernel_num_gb"] = num_gb
 
         for tree in self.active_range_trees():
             sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
@@ -2680,7 +2749,7 @@ class TritonKernel(Kernel):
             code.splice(self.body)
 
         if config.benchmark_kernel:
-            code.splice(self.codegen_kernel_benchmark())
+            code.splice(self.codegen_kernel_benchmark(num_gb))
 
         return code.getvalue()
 
@@ -3080,10 +3149,14 @@ class TritonScheduling(BaseScheduling):
         _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
 
         node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
+        buf_accesses = collections.defaultdict(list)
+        for node in nodes:
+            for access in node.read_writes.reads | node.read_writes.writes:
+                buf_accesses[access.name].append(access)
 
         schedule_log.debug("Schedule:\n %s", node_schedule)
 
-        return self.codegen_node_schedule(node_schedule, numel, rnumel)
+        return self.codegen_node_schedule(node_schedule, buf_accesses, numel, rnumel)
 
     @staticmethod
     def reduction_hint(node):
@@ -3128,9 +3201,9 @@ class TritonScheduling(BaseScheduling):
 
         # Only install guards for 32-bit indexing as there is no correctness
         # issue with using 64-bit for everything
-        V.graph.sizevars.guard_leq(numel, int_max)
+        V.graph.sizevars.guard_leq(numel, int_max)  # type: ignore[arg-type]
         for size in buf_sizes:
-            V.graph.sizevars.guard_leq(size, int_max)
+            V.graph.sizevars.guard_leq(size, int_max)  # type: ignore[arg-type]
         return True
 
     @staticmethod
@@ -3223,7 +3296,9 @@ class TritonScheduling(BaseScheduling):
                     f"{wrapper.comment} Fused node name list: {', '.join(node_names)}"
                 )
 
-    def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
+    def codegen_node_schedule(
+        self, node_schedule, buf_accesses, numel, reduction_numel
+    ):
         tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
         reduction_hint_val, mutations, index_dtype = self.get_kernel_args(
             node_schedule, numel, reduction_numel
@@ -3239,6 +3314,7 @@ class TritonScheduling(BaseScheduling):
             *kernel_args,
             **kernel_kwargs,
         )
+        kernel.buf_accesses = buf_accesses
 
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 
@@ -3396,13 +3472,14 @@ class TritonScheduling(BaseScheduling):
             node_schedule = [template_node, *epilogue_nodes]
 
             if config.benchmark_kernel:
+                num_gb = kernel.estimate_kernel_num_bytes() / 1e9
                 grid_args = V.graph.sizevars.size_hints(kernel.call_sizes)
                 assert kernel.meta is not None, "meta is None"
                 grid = kernel.grid_fn(*grid_args, kernel.meta)
                 src_code = (
                     f"{kernel.imports_for_benchmark_kernel()}\n"
                     f"{src_code}\n"
-                    f"{kernel.codegen_kernel_benchmark(grid).getvalue()}"
+                    f"{kernel.codegen_kernel_benchmark(num_gb, grid).getvalue()}"
                 )
 
             kernel_name = self.define_kernel(src_code, node_schedule)

@@ -14,7 +14,7 @@ from ._utils import _import_dotted_name
 from torch._sources import get_source_lines_and_file
 from torch.types import Storage
 from torch.storage import _get_dtype_from_pickle_storage_type
-from typing import Any, BinaryIO, Callable, cast, Dict, Optional, Type, Tuple, Union, IO
+from typing import Any, BinaryIO, Callable, cast, Dict, Optional, Type, Tuple, Union, IO, List
 from typing_extensions import TypeAlias, TypeGuard  # Python 3.10+
 import copyreg
 import pickle
@@ -67,7 +67,7 @@ def mkdtemp():
         shutil.rmtree(path)
 
 
-_package_registry = []
+_package_registry: List[Tuple[int, Callable[[STORAGE], Optional[str]], Callable[[STORAGE, str], Optional[STORAGE]]]] = []
 
 class LoadEndianness(Enum):
     NATIVE = 1
@@ -1395,6 +1395,9 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall
         assert typename == 'storage', \
             f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
         storage_type, key, location, numel = data
+        if torch._guards.detect_fake_mode(None) is not None:
+            location = 'meta'
+
         if storage_type is torch.UntypedStorage:
             dtype = torch.uint8
         else:
