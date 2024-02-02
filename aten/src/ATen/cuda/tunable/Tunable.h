@@ -173,8 +173,8 @@ class TuningContext {
     std::string GetFilename() const;
 
   protected:
-    void ReadFile(const std::string& filename);
-    void WriteFile(const std::string& filename);
+    bool ReadFile(const std::string& filename);
+    bool WriteFile(const std::string& filename);
 
   private:
     bool enable_;

@@ -320,7 +320,9 @@ TuningContext::~TuningContext() {
       else {
         TUNABLE_LOG("writing file ", filename);
       }
-      WriteFile(filename);
+      if (!WriteFile(filename)) {
+        TUNABLE_LOG("failed to write file ", filename);
+      }
     }
   }
 }
@@ -436,8 +438,14 @@ void TuningContext::DisableTunableOpAndTuning() {
 TuningResultsManager& TuningContext::GetTuningResultsManager() {
   c10::call_once(manager_init_once_, [this]() {
     manager_initialized_ = true;
-    if (!GetFilename().empty()) {
-      ReadFile(GetFilename());
+    auto filename = GetFilename();
+    if (!filename.empty()) {
+      ReadFile(filename);
+      // attempt immediately to open file for writing to catch errors early
+      std::ofstream file(filename, std::ios::out | std::ios::app);
+      if (!file.good()) {
+        TORCH_WARN("failed to open file '", filename, "' for writing; your tuning results will not be saved");
+      }
     }
   });
   return manager_;
@@ -503,13 +511,20 @@ std::string TuningContext::GetFilename() const {
   return filename;
 }
 
-void TuningContext::ReadFile(const std::string& filename) {
+bool TuningContext::ReadFile(const std::string& filename) {
   TUNABLE_LOG("reading tuning results from ", filename);
   ResultsMap results;
   std::unordered_map<std::string, std::string> validators;
   std::string line;
   std::ifstream file(filename);
+  if (!file) {
+    TUNABLE_LOG("could not open ", filename, " for reading tuning results");
+    return false;
+  }
   while (std::getline(file, line)) {
+    if (line.empty()) {
+      continue;
+    }
     std::string part;
     std::vector<std::string> parts;
     std::stringstream line_as_stream(line);
@@ -527,6 +542,9 @@ void TuningContext::ReadFile(const std::string& filename) {
       // the timestamp from the file is optional
       results[parts[0]].emplace(parts[1], ResultEntry(parts[2], 0));
     }
+    else {
+      TUNABLE_LOG("could not parse line: ", line);
+    }
   }
   if (GetTuningResultsValidator().ValidateAll(validators) != FAIL) {
     manager_.Load(results);
@@ -534,12 +552,17 @@ void TuningContext::ReadFile(const std::string& filename) {
   }
   else {
     TUNABLE_LOG("results validator check failed");
+    return false;
   }
+  return true;
 }
 
-void TuningContext::WriteFile(const std::string& filename) {
+bool TuningContext::WriteFile(const std::string& filename) {
   std::ofstream file(filename, std::ios::out | std::ios::trunc);
-  TORCH_CHECK(file.good(), "error opening tuning results file for writing ", filename);
+  if (!file.good()) {
+    TUNABLE_LOG("error opening tuning results file for writing ", filename);
+    return false;
+  }
   auto validators = GetTuningResultsValidator().GetAllValidators();
   for (const auto& [key, val] : validators) {
     file << "Validator," << key << "," << val << std::endl;
@@ -551,6 +574,7 @@ void TuningContext::WriteFile(const std::string& filename) {
     }
   }
   file.close();
+  return true;
 }
 
 } // namespace at::cuda::tunable
