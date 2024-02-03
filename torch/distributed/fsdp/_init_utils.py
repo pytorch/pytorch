@@ -204,6 +204,12 @@ def _is_valid_hybrid_shard_pg_type(process_group: Any) -> bool:
 
 @no_type_check
 def _is_valid_hybrid_shard_device_mesh(device_mesh: DeviceMesh) -> bool:
+    parent_mesh = _mesh_resources.get_parent_mesh(device_mesh)
+    if parent_mesh is not None:
+        raise RuntimeError(
+            f"Found device_mesh {device_mesh} passed in has a parent device_mesh {parent_mesh}.",
+            "Hybrid sharding + TP is not supported yet.",
+        )
     return isinstance(device_mesh, DeviceMesh) and device_mesh.ndim == 2
 
 
