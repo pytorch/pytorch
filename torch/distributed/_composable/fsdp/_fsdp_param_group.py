@@ -82,7 +82,6 @@ class FSDPParamGroup:
 
     _orig_dtype: torch.dtype
     _reduce_dtype: Optional[torch.dtype]
-    _param_dtype: torch.dtype
 
     def __init__(
         self,
@@ -151,9 +150,6 @@ class FSDPParamGroup:
                 f"FSDP expects uniform reduce dtype but got {reduce_dtypes}"
             )
         self._reduce_dtype = next(iter(reduce_dtypes))
-        param_dtypes = {fsdp_param.param_dtype for fsdp_param in self.fsdp_params}
-        assert len(param_dtypes) == 1, "FSDPParam.param_dtype is not set correctly"
-        self._param_dtype = next(iter(param_dtypes)) or self._orig_dtype
 
     def _init_grad_divide_factors(self):
         """
@@ -196,7 +192,6 @@ class FSDPParamGroup:
             async_op,
             *self.comm_ctx.get_all_gather_streams(self._training_state),
             self.device,
-            self._param_dtype,
         )
 
     def wait_for_unshard(self):
