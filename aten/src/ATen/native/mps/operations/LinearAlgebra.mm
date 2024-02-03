@@ -151,7 +151,8 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
   static bool always_use_metal = std::getenv("PYTORCH_MPS_PREFER_METAL") != nullptr;
   constexpr auto max_stride_size = 32768;
   return always_use_metal || self.stride(0) > max_stride_size || self.stride(1) > max_stride_size ||
-      other.stride(0) > max_stride_size || other.stride(1) > max_stride_size;
+      self.size(0) > max_stride_size || self.size(1) > max_stride_size || other.stride(0) > max_stride_size ||
+      other.stride(1) > max_stride_size || other.size(0) > max_stride_size || other.size(1) > max_stride_size;
 }
 
 } // anonymous namespace
@@ -174,10 +175,10 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
     return output;
   }
 
-  // MPS matmul returns silently incorrect results if one of the matrix dimentions is greater than 2**15
-  // And crashes if its a view of matrix with dimentions larger than 2**15
+  // MPS matmul returns silently incorrect results if one of the matrix dimensions is greater than 2**15
+  // And crashes if its a view of matrix with dimensions larger than 2**15
   // See https://github.com/pytorch/pytorch/issues/116769#issuecomment-1888302095
-  // In such cases, fallback to navie but accurate metal shader
+  // In such cases, fallback to naive but accurate metal shader
   if (use_metal_mm(self, other, output)) {
     return do_metal_mm(self, other, output);
   }

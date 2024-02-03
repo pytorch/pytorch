@@ -239,7 +239,6 @@ CI_SERIAL_LIST = [
     "test_utils",  # OOM
     "test_sort_and_select",  # OOM
     "test_backward_compatible_arguments",  # OOM
-    "test_module_init",  # OOM
     "test_autocast",  # OOM
     "test_native_mha",  # OOM
     "test_module_hooks",  # OOM
@@ -593,10 +592,17 @@ def run_test_retries(
         print_to_file(f"Got exit code {ret_code}{signal_name}")
 
         # Read what just failed
-        with open(
-            REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key
-        ) as f:
-            current_failure = f.read()
+        try:
+            with open(
+                REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key
+            ) as f:
+                current_failure = f.read()
+        except FileNotFoundError:
+            print_to_file(
+                "No stepcurrent file found. Either pytest didn't get to run (e.g. import error)"
+                + " or file got deleted (contact dev infra)"
+            )
+            break
 
         num_failures[current_failure] += 1
         if num_failures[current_failure] >= 3:
@@ -619,7 +625,7 @@ def run_test_retries(
     if len(consistent_failures) > 0:
         print_to_file(f"The following tests failed consistently: {consistent_failures}")
         return 1, True
-    return 0, any(x > 0 for x in num_failures.values())
+    return ret_code, any(x > 0 for x in num_failures.values())
 
 
 def run_test_with_subprocess(test_module, test_directory, options):
@@ -1606,7 +1612,7 @@ def main():
     )
 
     with open(
-        REPO_ROOT / "test" / "test-reports" / "td_heuristic_rankings.log", "w"
+        REPO_ROOT / "test" / "test-reports" / "td_heuristic_rankings.log", "a"
     ) as f:
         if IS_CI:
             # downloading test cases configuration to local environment

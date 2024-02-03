@@ -40,6 +40,7 @@ from torch._C._distributed_c10d import (
     _unregister_all_process_groups,
     _unregister_process_group,
 )
+from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
 from .constants import default_pg_timeout, default_pg_nccl_timeout
 from .c10d_logger import _exception_logger, _time_logger
 from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
@@ -295,9 +296,7 @@ class BackendConfig:
             # e.g. "nccl", "gloo", "ucc", "mpi"
             supported_devices = Backend.backend_capability[backend.lower()]
             backend_val = Backend(backend)
-            self.device_backend_map = {
-                device : backend_val for device in supported_devices
-            }
+            self.device_backend_map = dict.fromkeys(supported_devices, backend_val)
         elif ":" in backend.lower():
             # Backend specified in "device:backend" format
             # make sure the backend string is in the correct format
@@ -1191,6 +1190,8 @@ def init_process_group(
         "cpu:gloo,cuda:custom_backend".
 
     """
+    set_pytorch_distributed_envs_from_justknobs()
+
     global _world
 
     global _backend
@@ -1700,7 +1701,7 @@ def isend(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, 
 
     Args:
         tensor (Tensor): Tensor to send.
-        dst (int): Destination rank.
+        dst (int): Destination rank on global process group (regardless of ``group`` argument)
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match send with remote recv
@@ -1732,8 +1733,8 @@ def irecv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proce
 
     Args:
         tensor (Tensor): Tensor to fill with received data.
-        src (int, optional): Source rank. Will receive from any
-            process if unspecified.
+        src (int, optional): Source rank on global process group (regardless of ``group`` argument).
+            Will receive from any process if unspecified.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match recv with remote send
@@ -1769,8 +1770,8 @@ def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, t
 
     Args:
         tensor (Tensor): Tensor to send.
-        dst (int): Destination rank. Destination rank should not be the same
-            as the rank of the current process.
+        dst (int): Destination rank on global process group (regardless of ``group`` argument).
+            Destination rank should not be the same as the rank of the current process.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match send with remote recv
@@ -1801,8 +1802,8 @@ def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proces
 
     Args:
         tensor (Tensor): Tensor to fill with received data.
-        src (int, optional): Source rank. Will receive from any
-            process if unspecified.
+        src (int, optional): Source rank on global process group (regardless of ``group`` argument).
+            Will receive from any process if unspecified.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match recv with remote send
@@ -2017,7 +2018,7 @@ def broadcast(tensor, src, group=None, async_op=False):
     Args:
         tensor (Tensor): Data to be sent if ``src`` is the rank of current
             process, and tensor to be used to save received data otherwise.
-        src (int): Source rank.
+        src (int): Source rank on global process group (regardless of ``group`` argument).
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
@@ -2076,25 +2077,26 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
         >>> # xdoctest: +SKIP("no rank")
         >>> # All tensors below are of torch.int64 type.
         >>> # We have 2 process groups, 2 ranks.
-        >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
+        >>> device = torch.device(f'cuda:{rank}')
+        >>> tensor = torch.arange(2, dtype=torch.int64, device=device) + 1 + 2 * rank
         >>> tensor
-        tensor([1, 2]) # Rank 0
-        tensor([3, 4]) # Rank 1
+        tensor([1, 2], device='cuda:0') # Rank 0
+        tensor([3, 4], device='cuda:1') # Rank 1
         >>> dist.all_reduce(tensor, op=ReduceOp.SUM)
         >>> tensor
-        tensor([4, 6]) # Rank 0
-        tensor([4, 6]) # Rank 1
+        tensor([4, 6], device='cuda:0') # Rank 0
+        tensor([4, 6], device='cuda:1') # Rank 1
 
         >>> # All tensors below are of torch.cfloat type.
         >>> # We have 2 process groups, 2 ranks.
-        >>> tensor = torch.tensor([1+1j, 2+2j], dtype=torch.cfloat) + 2 * rank * (1+1j)
+        >>> tensor = torch.tensor([1+1j, 2+2j], dtype=torch.cfloat, device=device) + 2 * rank * (1+1j)
         >>> tensor
-        tensor([1.+1.j, 2.+2.j]) # Rank 0
-        tensor([3.+3.j, 4.+4.j]) # Rank 1
+        tensor([1.+1.j, 2.+2.j], device='cuda:0') # Rank 0
+        tensor([3.+3.j, 4.+4.j], device='cuda:1') # Rank 1
         >>> dist.all_reduce(tensor, op=ReduceOp.SUM)
         >>> tensor
-        tensor([4.+4.j, 6.+6.j]) # Rank 0
-        tensor([4.+4.j, 6.+6.j]) # Rank 1
+        tensor([4.+4.j, 6.+6.j], device='cuda:0') # Rank 0
+        tensor([4.+4.j, 6.+6.j], device='cuda:1') # Rank 1
 
     """
     _check_single_tensor(tensor, "tensor")
@@ -2204,7 +2206,7 @@ def reduce(tensor, dst, op=ReduceOp.SUM, group=None, async_op=False):
     Args:
         tensor (Tensor): Input and output of the collective. The function
             operates in-place.
-        dst (int): Destination rank
+        dst (int): Destination rank on global process group (regardless of ``group`` argument)
         op (optional): One of the values from
             ``torch.distributed.ReduceOp``
             enum.  Specifies an operation used for element-wise reductions.
@@ -2372,7 +2374,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
             should be correctly sized as the size of the group for this
             collective and will contain the output. Must be ``None`` on non-dst
             ranks. (default is ``None``)
-        dst (int, optional): Destination rank on global process group (regardless of 'group' argument). (default is 0)
+        dst (int, optional): Destination rank on global process group (regardless of ``group`` argument). (default is 0)
         group: (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used. Default is ``None``.
 
@@ -2483,6 +2485,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
             Each object must be picklable. Only objects on the ``src`` rank will
             be broadcast, but each rank must provide lists of equal sizes.
         src (int): Source rank from which to broadcast ``object_list``.
+            Source rank is based on global process group (regardless of ``group`` argument)
         group: (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used. Default is ``None``.
         device (``torch.device``, optional): If not None, the objects are
@@ -2596,8 +2599,8 @@ def scatter_object_list(
         scatter_object_input_list (List[Any]): List of input objects to scatter.
             Each object must be picklable. Only objects on the ``src`` rank will
             be scattered, and the argument can be ``None`` for non-src ranks.
-        src (int): Source rank from which to scatter
-            ``scatter_object_input_list``.
+        src (int): Source rank from which to scatter ``scatter_object_input_list``.
+            Source rank is based on global process group (regardless of ``group`` argument).
         group: (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used. Default is ``None``.
 
@@ -2711,31 +2714,34 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
         >>> # xdoctest: +SKIP("need process group init")
         >>> # All tensors below are of torch.int64 dtype.
         >>> # We have 2 process groups, 2 ranks.
-        >>> tensor_list = [torch.zeros(2, dtype=torch.int64) for _ in range(2)]
+        >>> device = torch.device(f'cuda:{rank}')
+        >>> tensor_list = [torch.zeros(2, dtype=torch.int64, device=device) for _ in range(2)]
         >>> tensor_list
-        [tensor([0, 0]), tensor([0, 0])] # Rank 0 and 1
-        >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
+        [tensor([0, 0], device='cuda:0'), tensor([0, 0], device='cuda:0')] # Rank 0
+        [tensor([0, 0], device='cuda:0'), tensor([0, 0], device='cuda:1')] # Rank 1
+        >>> tensor = torch.arange(2, dtype=torch.int64, device=device) + 1 + 2 * rank
         >>> tensor
-        tensor([1, 2]) # Rank 0
-        tensor([3, 4]) # Rank 1
+        tensor([1, 2], device='cuda:0') # Rank 0
+        tensor([3, 4], device='cuda:1') # Rank 1
         >>> dist.all_gather(tensor_list, tensor)
         >>> tensor_list
-        [tensor([1, 2]), tensor([3, 4])] # Rank 0
-        [tensor([1, 2]), tensor([3, 4])] # Rank 1
+        [tensor([1, 2], device='cuda:0'), tensor([3, 4], device='cuda:0')] # Rank 0
+        [tensor([1, 2], device='cuda:1'), tensor([3, 4], device='cuda:1')] # Rank 1
 
         >>> # All tensors below are of torch.cfloat dtype.
         >>> # We have 2 process groups, 2 ranks.
-        >>> tensor_list = [torch.zeros(2, dtype=torch.cfloat) for _ in range(2)]
+        >>> tensor_list = [torch.zeros(2, dtype=torch.cfloat, device=device) for _ in range(2)]
         >>> tensor_list
-        [tensor([0.+0.j, 0.+0.j]), tensor([0.+0.j, 0.+0.j])] # Rank 0 and 1
-        >>> tensor = torch.tensor([1+1j, 2+2j], dtype=torch.cfloat) + 2 * rank * (1+1j)
+        [tensor([0.+0.j, 0.+0.j], device='cuda:0'), tensor([0.+0.j, 0.+0.j], device='cuda:0')] # Rank 0
+        [tensor([0.+0.j, 0.+0.j], device='cuda:1'), tensor([0.+0.j, 0.+0.j], device='cuda:1')] # Rank 1
+        >>> tensor = torch.tensor([1+1j, 2+2j], dtype=torch.cfloat, device=device) + 2 * rank * (1+1j)
         >>> tensor
-        tensor([1.+1.j, 2.+2.j]) # Rank 0
-        tensor([3.+3.j, 4.+4.j]) # Rank 1
+        tensor([1.+1.j, 2.+2.j], device='cuda:0') # Rank 0
+        tensor([3.+3.j, 4.+4.j], device='cuda:1') # Rank 1
         >>> dist.all_gather(tensor_list, tensor)
         >>> tensor_list
-        [tensor([1.+1.j, 2.+2.j]), tensor([3.+3.j, 4.+4.j])] # Rank 0
-        [tensor([1.+1.j, 2.+2.j]), tensor([3.+3.j, 4.+4.j])] # Rank 1
+        [tensor([1.+1.j, 2.+2.j], device='cuda:0'), tensor([3.+3.j, 4.+4.j], device='cuda:0')] # Rank 0
+        [tensor([1.+1.j, 2.+2.j], device='cuda:1'), tensor([3.+3.j, 4.+4.j], device='cuda:1')] # Rank 1
 
     """
     _check_tensor_list(tensor_list, "tensor_list")
@@ -2994,7 +3000,7 @@ def gather(tensor, gather_list=None, dst=0, group=None, async_op=False):
         gather_list (list[Tensor], optional): List of appropriately-sized
             tensors to use for gathered data (default is None, must be specified
             on the destination rank)
-        dst (int, optional): Destination rank on global process group (regardless of 'group' argument). (default is 0)
+        dst (int, optional): Destination rank on global process group (regardless of ``group`` argument). (default is 0)
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
@@ -3053,7 +3059,8 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
         tensor (Tensor): Output tensor.
         scatter_list (list[Tensor]): List of tensors to scatter (default is
             None, must be specified on the source rank)
-        src (int): Source rank (default is 0)
+        src (int): Source rank on global process group (regardless of ``group`` argument).
+            Default is 0
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
