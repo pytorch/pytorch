@@ -32,6 +32,7 @@ from typing import (
     Union,
     TYPE_CHECKING
 )
+from typing_extensions import TypeAlias
 
 import torch
 import torch.fx
@@ -167,7 +168,10 @@ def is_concrete_int(a: Union[int, SymInt]) -> bool:
 
     return False
 
-SympyBoolean = sympy.logic.boolalg.Boolean
+# In obscure Meta only situations, sympy.logic.boolalg doesn't exist at runtime.
+# So make sure only type checker evaluates this alias.
+# Xref: https://www.internalfb.com/diff/D53324783
+SympyBoolean: TypeAlias = "sympy.logic.boolalg.Boolean"
 
 def canonicalize_bool_expr(expr: SympyBoolean) -> SympyBoolean:
     r""" Canonicalize a boolean expression by transforming it into a lt / le
@@ -1040,7 +1044,7 @@ def _lru_cache(fn, maxsize=None):
     fn_cache = lru_cache(maxsize)(fn)
     prior_version = 0
 
-    if config.validate_shape_env_verison_key:
+    if config.validate_shape_env_version_key:
         prior_key = None
 
         @functools.wraps(fn)
@@ -3619,8 +3623,12 @@ class ShapeEnv:
         if self.log.isEnabledFor(logging.INFO):
             fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
 
+            str_g = str(g)
+
             # TODO: make this an artifact
             is_debug = False
+            if config.extended_debug_guard_added is not None and str_g == config.extended_debug_guard_added:
+                is_debug = True
             maybe_extra_debug = ""
             if is_debug and user_tb:
                 maybe_extra_debug = (
@@ -3628,10 +3636,13 @@ class ShapeEnv:
                     '  (snipped, see stack below for prefix)\n' +
                     ''.join(traceback.format_list(user_tb))
                 )
+            if is_debug:
+                cpp_stack = CapturedTraceback.extract(cpp=True)
+                maybe_extra_debug += "\nC++ stack trace:\n" + ''.join(cpp_stack.format())
             self.log.info(
                 "%s %s [guard added]%s (%s)%s",
                 prefix,
-                g,
+                str_g,
                 maybe_user_loc,
                 format_frame(fsummary),
                 maybe_extra_debug,
