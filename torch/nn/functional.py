@@ -4965,7 +4965,7 @@ scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, i
 
 Computes scaled dot product attention on query, key and value tensors, using
 an optional attention mask if passed, and applying dropout if a probability
-greater than 0.0 is specified.
+greater than 0.0 is specified. The optional scale argument can only be specified as a keyword argument.
 
 .. code-block:: python
 
@@ -5039,7 +5039,7 @@ Args:
     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
     is_causal (bool): If true, assumes upper left causal attention masking and errors if both attn_mask and is_causal
         are set.
-    scale (optional float): Scaling factor applied prior to softmax. If None, the default value is set
+    scale (optional float, keyword-only): Scaling factor applied prior to softmax. If None, the default value is set
         to :math:`\frac{1}{\sqrt{E}}`.
 
 
