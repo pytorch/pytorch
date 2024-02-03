@@ -735,7 +735,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ).call_function(tx, [self], {})
         elif isinstance(subobj, staticmethod):
             func = subobj.__get__(self.value)
-            if trace_rules.lookup(func) is not None:
+            if source is not None and trace_rules.lookup(func) is not None:
                 return trace_rules.lookup(func).create_with_source(func, source=source)
             else:
                 return variables.UserFunctionVariable(func, source=source)
