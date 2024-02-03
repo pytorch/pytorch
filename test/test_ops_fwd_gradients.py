@@ -7,16 +7,10 @@ import torch
 
 from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
-    TestGradients, run_tests, skipIfTorchInductor, IS_MACOS, TestCase)
+    TestGradients, run_tests, skipIfTorchInductor, TestCase)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, OpDTypes)
-
-# TODO: mitigate flaky issue on macOS https://github.com/pytorch/pytorch/issues/66033
-# AFAIK, c10::ThreadPool looks correct in the way it uses condition_variable wait. The
-# issue seems to point to macOS itself https://github.com/graphia-app/graphia/issues/33
-if IS_MACOS:
-    torch.set_num_threads(1)
 
 # gradcheck requires double precision
 _gradcheck_ops = partial(ops, dtypes=OpDTypes.supported,
