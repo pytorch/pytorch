@@ -64,14 +64,14 @@ class TestFullyShardCollectives(FSDPTestMultiThread):
     ):
         module = nn.ParameterList([param.detach().clone() for param in params])
         mesh_info = FSDPMeshInfo(_init_default_fully_shard_mesh(), shard_mesh_dim=0)
-        post_forwrad_mesh_info = _get_post_forward_mesh_info(
+        post_forward_mesh_info = _get_post_forward_mesh_info(
             reshard_after_forward, mesh_info
         )
         fsdp_param_group = FSDPParamGroup(
             list(module.parameters()),
             module,
             mesh_info,
-            post_forwrad_mesh_info,
+            post_forward_mesh_info,
             self.device,
             MixedPrecisionPolicy(),
         )
@@ -100,7 +100,6 @@ class TestFullyShardCollectives(FSDPTestMultiThread):
                 async_op=async_op,
                 all_gather_copy_in_stream=all_gather_copy_in_stream,
                 all_gather_stream=all_gather_stream,
-                all_gather_dtype=torch.float32,
             )
 
     def _test_all_gather(
@@ -110,7 +109,6 @@ class TestFullyShardCollectives(FSDPTestMultiThread):
         async_op: bool,
         all_gather_copy_in_stream: torch.cuda.Stream,
         all_gather_stream: torch.cuda.Stream,
-        all_gather_dtype: torch.dtype,
     ):
         def all_gather(fsdp_param_group: FSDPParamGroup, group: dist.ProcessGroup):
             all_gather_result = foreach_all_gather(
@@ -120,7 +118,6 @@ class TestFullyShardCollectives(FSDPTestMultiThread):
                 all_gather_copy_in_stream=all_gather_copy_in_stream,
                 all_gather_stream=all_gather_stream,
                 device=self.device,
-                dtype=all_gather_dtype,
             )
             foreach_all_gather_copy_out(all_gather_result, fsdp_params, group)
             # Transition to unsharded state to register unsharded parameters
