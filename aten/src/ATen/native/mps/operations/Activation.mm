@@ -72,7 +72,6 @@ Tensor relu_mps(const Tensor& self) {
 
     // Create dictionary of inputs and outputs
     auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
-    auto results = dictionaryFromPlaceholders(outputPlaceholder);
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
@@ -110,8 +109,7 @@ Tensor& relu_mps_(Tensor& self) {
 
     // Create dictionary of inputs and outputs
     auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
-    auto results = dictionaryFromPlaceholders(outputPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
     if (executeGatherOp) {
       output.copy_(out);
     }
@@ -151,8 +149,7 @@ TORCH_IMPL_FUNC(leaky_relu_out_mps)(const Tensor& self, const Scalar& negative_s
 
     // Create dictionary of inputs and outputs
     auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
-    auto results = dictionaryFromPlaceholders(outputPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 
@@ -201,8 +198,7 @@ TORCH_IMPL_FUNC(leaky_relu_backward_out_mps)
 
     // Create dictionary of inputs and outputs
     auto feeds = dictionaryFromPlaceholders(gradOutputPlaceholder, selfPlaceholder);
-    auto results = dictionaryFromPlaceholders(outputPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 
@@ -245,8 +241,7 @@ TORCH_IMPL_FUNC(log_softmax_mps_out)
 
     // Create dictionary of inputs and outputs
     auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
-    auto results = dictionaryFromPlaceholders(outputPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 
@@ -287,8 +282,7 @@ TORCH_IMPL_FUNC(log_softmax_backward_mps_out)
 
     // Create dictionary of inputs and outputs
     auto feeds = dictionaryFromPlaceholders(gradPlaceholder, outputPlaceholder);
-    auto results = dictionaryFromPlaceholders(resultPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, resultPlaceholder);
   }
 }
 
@@ -331,13 +325,8 @@ std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_mps(const Tensor& self, Ten
         Placeholder(cachedGraph->outputTensor_, executeGatherOp ? output_ : output, nil, false);
 
     // Create dictionary of inputs and outputs
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
-        @{selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()};
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   if (executeGatherOp) {
@@ -415,15 +404,8 @@ Tensor& log_sigmoid_backward_mps_out(const Tensor& grad_output,
         Placeholder(cachedGraph->gradInputTensor_, executeGatherOp ? grad_input_ : grad_input, nil, false);
 
     // Create dictionary of inputs and outputs
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      gradOutputPlaceholder.getMPSGraphTensor() : gradOutputPlaceholder.getMPSGraphTensorData(),
-      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(gradOutputPlaceholder, selfPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   if (executeGatherOp) {
@@ -475,16 +457,8 @@ TORCH_IMPL_FUNC(sigmoid_backward_out_mps)(const Tensor& grad_output, const Tenso
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
     Placeholder gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input);
 
-    // Create dictionary of inputs and outputs
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      gradOutputPlaceholder.getMPSGraphTensor() : gradOutputPlaceholder.getMPSGraphTensorData(),
-      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{gradInputPlaceholder.getMPSGraphTensor() : gradInputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(gradOutputPlaceholder, outputPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, gradInputPlaceholder);
   }
 }
 
@@ -523,16 +497,8 @@ TORCH_IMPL_FUNC(tanh_backward_out_mps)(const Tensor& grad_output, const Tensor& 
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
     Placeholder gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input);
 
-    // Create dictionary of inputs and outputs
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      gradOutputPlaceholder.getMPSGraphTensor() : gradOutputPlaceholder.getMPSGraphTensorData(),
-      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{gradInputPlaceholder.getMPSGraphTensor() : gradInputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(gradOutputPlaceholder, outputPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, gradInputPlaceholder);
   }
 }
 
@@ -577,14 +543,8 @@ TORCH_IMPL_FUNC(threshold_out_mps)
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
 
-    // Create dictionary of inputs and outputs
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
-        @{selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()};
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 
@@ -631,16 +591,8 @@ TORCH_IMPL_FUNC(threshold_backward_out_mps)
     Placeholder gradPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, gradInput);
 
-    // Create dictionary of inputs and outputs
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      gradPlaceholder.getMPSGraphTensor() : gradPlaceholder.getMPSGraphTensorData(),
-      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(gradPlaceholder, selfPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 
@@ -715,13 +667,8 @@ TORCH_IMPL_FUNC(gelu_out_mps)(const Tensor& self, c10::string_view approximate, 
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
-    // Create dictionary of inputs and outputs
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
-        @{selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()};
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 
@@ -808,15 +755,8 @@ TORCH_IMPL_FUNC(gelu_backward_out_mps)
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input);
 
-    // Create dictionary of inputs and outputs
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      gradPlaceholder.getMPSGraphTensor() : gradPlaceholder.getMPSGraphTensorData(),
-      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(gradPlaceholder, selfPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 
@@ -891,18 +831,10 @@ static void elu_variants_out_mps(const Tensor& self,
       newCachedGraph->outputTensor_ = outputTensor;
     });
 
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self, nil, executeGatherOp);
-    Placeholder outputPlaceholder =
-        Placeholder(cachedGraph->outputTensor_, out.has_storage() ? out : result, nil, false);
-
-    // Create dictionary of inputs and outputs
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
-        @{selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()};
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self, nil, executeGatherOp);
+    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out.has_storage() ? out : result, nil, false);
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
     if (out.has_storage()) {
       result.copy_(out);
     }
@@ -1008,15 +940,8 @@ TORCH_IMPL_FUNC(elu_backward_out_mps)
     Placeholder gradInputPlaceholder =
         Placeholder(cachedGraph->gradInputTensor_, out.has_storage() ? out : grad_input, nil, false);
 
-    // Create dictionary of inputs and outputs
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      gradOutputPlaceholder.getMPSGraphTensor() : gradOutputPlaceholder.getMPSGraphTensorData(),
-      selfOrResultPlaceholder.getMPSGraphTensor() : selfOrResultPlaceholder.getMPSGraphTensorData()
-    };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{gradInputPlaceholder.getMPSGraphTensor() : gradInputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(gradOutputPlaceholder, selfOrResultPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, gradInputPlaceholder);
     if (out.has_storage()) {
       grad_input.copy_(out);
     }
@@ -1063,13 +988,8 @@ TORCH_IMPL_FUNC(glu_out_mps)(const Tensor& self, const int64_t dim, const Tensor
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
-    // Create dictionary of inputs and outputs
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
-        @{selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()};
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 
@@ -1135,16 +1055,8 @@ Tensor& glu_backward_mps_out(const Tensor& grad_output, const Tensor& self, cons
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
     Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output);
 
-    // Create dictionary of inputs and outputs
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
-      gradOutputPlaceholder.getMPSGraphTensor() : gradOutputPlaceholder.getMPSGraphTensorData()
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      gradInputPlaceholder.getMPSGraphTensor() : gradInputPlaceholder.getMPSGraphTensorData(),
-    };
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder, gradOutputPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, gradInputPlaceholder);
   }
   return grad_input;
 }
