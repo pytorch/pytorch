@@ -49,6 +49,10 @@ Tensor relu_mps(const Tensor& self) {
   using namespace mps;
   using CachedGraph = MPSUnaryCachedGraph;
 
+  if (self.numel() == 0) {
+    return self;
+  }
+
   MPSStream* stream = getCurrentMPSStream();
 
   bool executeGatherOp =
@@ -81,6 +85,10 @@ Tensor relu_mps(const Tensor& self) {
 Tensor& relu_mps_(Tensor& self) {
   using namespace mps;
   using CachedGraph = MPSUnaryCachedGraph;
+
+  if (self.numel() == 0) {
+    return self;
+  }
   // Inplace relu
   Tensor& output = self;
   bool executeGatherOp =
