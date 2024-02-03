@@ -928,6 +928,10 @@ class GraphModule(torch.nn.Module):
         res = fn_opt(x_two)
         self.assertEqual(ref, res)
 
+        # ensure no recompilation on same input type
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            fn_opt(TwoTensor(x + 1, x + 2))
+
         # recompile!
         ref = fn(x)
         res = fn_opt(x)
