@@ -215,7 +215,7 @@ def set_logs(
     A component is a set of related features in PyTorch. All of the log
     messages emitted from a given component have their own log levels. If the
     log level of a particular message has priority greater than or equal to its
-    component's log level setting, it is emitted. Otherwise, it is supressed.
+    component's log level setting, it is emitted. Otherwise, it is suppressed.
     This allows you to, for instance, silence large groups of log messages that
     are not relevant to you and increase verbosity of logs for components that
     are relevant. The expected log level values, ordered from highest to lowest
