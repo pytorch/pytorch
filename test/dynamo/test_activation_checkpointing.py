@@ -959,7 +959,8 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4, 4).cuda()
         opt_fn = torch.compile(fn, fullgraph=True)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "skip function graph_break in file"
+            RuntimeError,
+            "while introspecting torch.utils.checkpoint.checkpoint, we were unable to trace function `NNModuleVariable`",
         ):
             opt_fn(x)
 

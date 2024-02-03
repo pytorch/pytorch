@@ -1133,7 +1133,6 @@ class WrapperCodeGen(CodeGen):
         device_index=None,
         cuda=True,
         triton=True,
-        arg_types=None,
     ):
         """
         Generates kernel call code.
@@ -1433,7 +1432,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
         device_index=None,
         cuda=True,
         triton=True,
-        arg_types=None,
     ):
         """
         Generates kernel call code.
@@ -1446,24 +1444,19 @@ class CppWrapperCodeGen(WrapperCodeGen):
         """
         if cuda:
             return super().generate_kernel_call(
-                name, call_args, grid, device_index, cuda, triton, arg_types
+                name, call_args, grid, device_index, cuda, triton
             )
         else:
             if V.graph.aot_mode and config.aot_inductor.abi_compatible:
-                assert arg_types is not None and len(call_args) == len(
-                    arg_types
-                ), "Mismatch call_args and arg_types in generate_kernel_call"
+                from .cpp import DTYPE_TO_CPP
+
                 new_args = []
-                for idx, arg in enumerate(call_args):
-                    if "*" in arg_types[idx]:
-                        var_name = f"var_{next(self.arg_var_id)}"
-                        self.writeline(
-                            f"auto* {var_name} = get_data_ptr_wrapper({arg});"
-                        )
-                        new_args.append(f"({arg_types[idx]})({var_name})")
-                    else:
-                        # arg is a scalar
-                        new_args.append(arg)
+                for arg in call_args:
+                    var_name = f"var_{next(self.arg_var_id)}"
+                    self.writeline(f"auto* {var_name} = get_data_ptr_wrapper({arg});")
+                    dtype = V.graph.get_dtype(arg)
+                    cpp_dtype = DTYPE_TO_CPP[dtype]
+                    new_args.append(f"({cpp_dtype}*)({var_name})")
                 self.writeline(self.wrap_kernel_call(name, new_args))
             else:
                 self.writeline(self.wrap_kernel_call(name, call_args))
@@ -2442,8 +2435,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
             dtype_str = str(dtype).split(".")[-1]
             self.writeline(f"{DTYPE_TO_CPP[dtype]} {node.sym};")
             self.writeline(f"aoti_torch_item_{dtype_str}({data}, &{node.sym});")
-            # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
-            self.unbacked_symbol_decls.add(str(node.sym))
         else:
             if node.is_bool:
                 self.writeline(f"bool {node.sym} = {data}.item() ? 1 : 0;")
@@ -3233,19 +3224,12 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         return grid_fn(block_cfg)
 
     def generate_kernel_call(
-        self,
-        name,
-        call_args,
-        grid=None,
-        device_index=None,
-        cuda=True,
-        triton=True,
-        arg_types=None,
+        self, name, call_args, grid=None, device_index=None, cuda=True, triton=True
     ):
         if not cuda:
             # Even in CudaWrapperCodeGen, we may see cpp kernels
             return super().generate_kernel_call(
-                name, call_args, grid, device_index, cuda, triton, arg_types
+                name, call_args, grid, device_index, cuda, triton
             )
 
         params = CudaKernelParamCache.get(name)
