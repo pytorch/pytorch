@@ -278,6 +278,15 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch__embedding_bag(
     AtenTensorHandle* ret3 // returns new reference
 );
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__fft_c2c(
+    AtenTensorHandle self,
+    const int64_t* dim_ptr,
+    int64_t dim_size,
+    int64_t normalization,
+    int32_t forward,
+    AtenTensorHandle* ret // returns new reference
+);
+
 // This version is deprecated. We will remove it later
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
     AtenTensorHandle query,
@@ -368,6 +377,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_convolution(
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_new_uninitialized_tensor(AtenTensorHandle* ret);
 
+// WARNING: This will be deprecated. Use aoti_torch_copy_ instead.
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_tensor_copy_(AtenTensorHandle src, AtenTensorHandle dst);
 
@@ -396,6 +406,11 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_bmm_out(
     AtenTensorHandle out,
     AtenTensorHandle self,
     AtenTensorHandle mat2);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_copy_(
+    AtenTensorHandle self,
+    AtenTensorHandle src,
+    int32_t non_blocking);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mm_out(
     AtenTensorHandle out,
@@ -436,6 +451,11 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_index_put_out(
     const uint32_t num_indices,
     const AtenTensorHandle values,
     bool accumulate);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_view_as_real(
+    AtenTensorHandle self,
+    AtenTensorHandle* ret // returns new reference
+);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_view_dtype(
     AtenTensorHandle self,
