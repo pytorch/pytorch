@@ -309,7 +309,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     // That requires some fixing some internal build dependencies though.
     return at::mul_out(
         result,
-        self,
+        self.expand(result.sizes()),
         at::native::scalar_tensor(
             beta,
             self.scalar_type(),
