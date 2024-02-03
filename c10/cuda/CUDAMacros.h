@@ -41,7 +41,8 @@
 /**
  * The maximum number of GPUs that we recognizes. Increasing this beyond the
  * initial limit of 16 broke Caffe2 testing, hence the ifdef guards.
- */
+ * This value cannot be more than 255 because our DeviceIndex is a uint8_t.
+o */
 #ifdef FBCODE_CAFFE2
 // fbcode depends on this value being 16
 #define C10_COMPILE_TIME_MAX_GPUS 16
