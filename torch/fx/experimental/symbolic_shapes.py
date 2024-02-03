@@ -32,6 +32,7 @@ from typing import (
     Union,
     TYPE_CHECKING
 )
+from typing_extensions import TypeAlias
 
 import torch
 import torch.fx
@@ -167,7 +168,10 @@ def is_concrete_int(a: Union[int, SymInt]) -> bool:
 
     return False
 
-SympyBoolean = sympy.logic.boolalg.Boolean
+# In obscure Meta only situations, sympy.logic.boolalg doesn't exist at runtime.
+# So make sure only type checker evaluates this alias.
+# Xref: https://www.internalfb.com/diff/D53324783
+SympyBoolean: TypeAlias = "sympy.logic.boolalg.Boolean"
 
 def canonicalize_bool_expr(expr: SympyBoolean) -> SympyBoolean:
     r""" Canonicalize a boolean expression by transforming it into a lt / le

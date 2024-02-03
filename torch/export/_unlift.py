@@ -273,7 +273,7 @@ def _create_stateful_graph_module(
 
 
 def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Module:
-    new_gm = copy.deepcopy(ep.graph_module)
+    new_gm = torch.fx.GraphModule(ep.graph_module, copy.deepcopy(ep.graph))
     _register_attrs_to_new_gm(new_gm, ep.graph_signature, ep.state_dict, ep.constants)
 
     lifted_inputs: List[Optional[str]] = [
