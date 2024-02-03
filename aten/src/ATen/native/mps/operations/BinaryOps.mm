@@ -184,9 +184,7 @@ static void binaryOpTensor(const Tensor& self,
     }
 
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, needsCopyToOutput ? output : output_);
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-    runMPSGraph(mpsStream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(mpsStream, cachedGraph->graph(), feeds, outputPlaceholder);
 
     if (needsCopyToOutput) {
       output_.copy_(output);

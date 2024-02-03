@@ -41,16 +41,8 @@ TORCH_IMPL_FUNC(lerp_Tensor_mps)(const Tensor& self, const Tensor& end, const Te
     auto endPlaceholder = Placeholder(cachedGraph->endTensor_, end);
     auto weightPlaceholder = Placeholder(cachedGraph->weightTensor_, weight);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out);
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
-      endPlaceholder.getMPSGraphTensor() : endPlaceholder.getMPSGraphTensorData(),
-      weightPlaceholder.getMPSGraphTensor() : weightPlaceholder.getMPSGraphTensorData(),
-    };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData(),
-    };
-
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder, endPlaceholder, weightPlaceholder);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 

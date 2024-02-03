@@ -91,7 +91,7 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
     MPSGraphTensorData* outputTensorData = [[[MPSGraphTensorData alloc] initWithMTLBuffer:outputBuffer
                                                                                     shape:outputShape
                                                                                  dataType:outputType] autorelease];
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{cachedGraph->outputTensor : outputTensorData};
+    auto results = @{cachedGraph->outputTensor : outputTensorData};
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
   return output;

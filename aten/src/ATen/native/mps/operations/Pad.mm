@@ -317,9 +317,7 @@ static Tensor& pad_out_template(Tensor& output,
     if (is_backward_pass) {
       feeds[gradOutputPlaceholder.getMPSGraphTensor()] = gradOutputPlaceholder.getMPSGraphTensorData();
     }
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
   }
   return output;
 }

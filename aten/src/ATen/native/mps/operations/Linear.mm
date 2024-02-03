@@ -107,10 +107,7 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const c10::opt
       biasPlaceholder = Placeholder(cachedGraph->biasTensor_, bias);
       feeds[biasPlaceholder.getMPSGraphTensor()] = biasPlaceholder.getMPSGraphTensorData();
     }
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   // Shave off '1' present at the end of the shape
@@ -178,15 +175,8 @@ static Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& g
     Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      weightPlaceholder.getMPSGraphTensor() : weightPlaceholder.getMPSGraphTensorData(),
-      gradOutputPlaceholder.getMPSGraphTensor() : gradOutputPlaceholder.getMPSGraphTensorData()
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(weightPlaceholder, gradOutputPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
 
     return output;
   }
@@ -276,17 +266,9 @@ static std::tuple<Tensor, Tensor> _mps_linear_backward_weights(const Tensor& gra
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
     Placeholder biasPlaceholder = Placeholder(cachedGraph->biasTensor_, bias);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      gradOutputPlaceholder.getMPSGraphTensor() : gradOutputPlaceholder.getMPSGraphTensorData(),
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-      weightPlaceholder.getMPSGraphTensor() : weightPlaceholder.getMPSGraphTensorData()
-    };
-
-    NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = [NSMutableDictionary dictionary];
-    results[outputPlaceholder.getMPSGraphTensor()] = outputPlaceholder.getMPSGraphTensorData();
-    if (bias_defined)
-      results[biasPlaceholder.getMPSGraphTensor()] = biasPlaceholder.getMPSGraphTensorData();
-
+    auto feeds = dictionaryFromPlaceholders(gradOutputPlaceholder, inputPlaceholder, weightPlaceholder);
+    auto results = bias_defined ? dictionaryFromPlaceholders(outputPlaceholder, biasPlaceholder)
+                                : dictionaryFromPlaceholders(outputPlaceholder);
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
 
     return std::tuple<Tensor, Tensor>{output, bias};
