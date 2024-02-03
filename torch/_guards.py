@@ -340,6 +340,7 @@ class GuardsCheckpointState:
     """
     The GuardCheckpointState - it is the T of Checkpointable[T] for GuardsContext
     """
+
     dynamo_guards: Set[Guard] = set()
 
     def __init__(self, dynamo_guards):
@@ -348,7 +349,7 @@ class GuardsCheckpointState:
     def diff(self, other):
         """
         Produces a delta against another GuardsCheckpointState.
-    
+
         Returns None if no delta is found, otherwise, return a set() of mismatched
         Guard type objects.
         """
@@ -370,7 +371,7 @@ class ModuleContextCheckpointState:
     def diff(self, other):
         """
         Produces a delta against another ModuleContextCheckpointState.
-    
+
         Returns None if no delta is found, otherwise, return a set() of mismatched
         module key names.
         """
@@ -404,7 +405,7 @@ class GlobalContextCheckpointState:
     def diff(self, other):
         """
         Produces a delta against another GlobalContextCheckpointState.
-    
+
         Returns None if no delta is found, otherwise, return a set() of mismatched
         global key names.
         """
