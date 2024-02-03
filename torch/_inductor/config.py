@@ -606,7 +606,10 @@ class aot_inductor:
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
 
     # Wether to codegen abi compatible model.so
-    abi_compatible = is_fbcode()
+    abi_compatible = (
+        os.environ.get("AOT_INDUCTOR_ABI_COMPATIBLE", "1" if is_fbcode() else "0")
+        == "1"
+    )
 
     # Serialized tree spec for flattening inputs
     serialized_in_spec = ""
