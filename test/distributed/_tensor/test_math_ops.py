@@ -18,6 +18,9 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
+funcol = torch.ops.c10d_functional
+
+
 class DistMathOpsTest(DTensorTestBase):
     def linear_op_reductions(self, op_str):
         device_mesh = self.build_device_mesh()
@@ -125,6 +128,54 @@ class DistMathOpsTest(DTensorTestBase):
             dist_y.backward()
             self.assertIsNotNone(dist_x.grad)
             self.assertEqual(dist_x.grad.full_tensor(), x.grad)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_nll_loss_fwd(self):
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        channel_size, channel_dim = 16, 1
+        test_setup = [
+            (2, (8, channel_size), (8,)),  # calling aten.nll_loss_forward
+            (3, (8, channel_size, 12), (8, 12)),  # calling aten.nll_loss2d_forward
+        ]
+        for input_ndim, input_size, target_size in test_setup:
+            x = torch.rand(*input_size, device=self.device_type)
+            target = torch.randint(channel_size, target_size, device=self.device_type)
+            dist_target = distribute_tensor(target, device_mesh, [Replicate()])
+
+            shard_dims = list(range(input_ndim))
+            reductions = ["none", "mean", "sum"]
+            for shard_dim, reduction in itertools.product(shard_dims, reductions):
+                y = torch.nn.functional.nll_loss(x, target, reduction=reduction)
+                dist_x = distribute_tensor(x, device_mesh, [Shard(shard_dim)])
+                with comm_mode:
+                    dist_y = torch.nn.functional.nll_loss(
+                        dist_x, dist_target, reduction=reduction
+                    )
+                    if shard_dim == channel_dim:
+                        # TODO: currently CommDebugMode cannot log communications within
+                        # sharding prop; need to fix it before enabling this check.
+                        # self.assertEqual(comm_mode.get_total_counts(), 1)
+                        # self.assertEqual(
+                        #     comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
+                        #     1,
+                        # )
+                        self.assertTrue(dist_y.placements[0].is_replicate())
+                        self.assertEqual(dist_y.to_local(), y)
+                    else:
+                        self.assertEqual(comm_mode.get_total_counts(), 0)
+                        if reduction == "none":
+                            output_shard_dim = (
+                                shard_dim if shard_dim < channel_dim else shard_dim - 1
+                            )
+                            self.assertTrue(
+                                dist_y.placements[0].is_shard(dim=output_shard_dim)
+                            )
+                        else:
+                            self.assertTrue(dist_y.placements[0].is_partial())
+                        self.assertEqual(dist_y.full_tensor(), y)
 
     @with_comms
     def test_full_shard_math_ops(self):
