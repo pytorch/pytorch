@@ -1368,7 +1368,7 @@ class GraphModuleDeserializer:
 
         module_call_graph = self.deserialize_module_call_graph(serialized_graph_module.module_call_graph)
         return GraphModuleDeserializer.Result(
-            graph_module=torch._export.exported_program._create_graph_module_for_export(self.module, self.graph),
+            graph_module=ep._create_graph_module_for_export(self.module, self.graph),
             signature=self.signature,
             module_call_graph=module_call_graph,
             names_to_symbols=self.symbol_name_to_symbol,
@@ -1419,7 +1419,7 @@ class GraphModuleDeserializer:
             assert isinstance(value, GraphArgument)
             with self.save_graph_module():
                 self.deserialize_graph(value.graph)
-                submodule = torch._export.exported_program._create_graph_module_for_export(self.module, self.graph)
+                submodule = ep._create_graph_module_for_export(self.module, self.graph)
             self.module.register_module(value.name, submodule)
             return self.graph.create_node(
                 "get_attr",
@@ -2188,7 +2188,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
                     pass
                 else:
                     raise AssertionError(f"Unknown sym_int type: {s}")
-            elif arg.type in ("as_none", "as_int", "as_float", "as_string"):
+            elif arg.type in ("as_none", "as_int", "as_float", "as_string", "as_custom_obj"):
                 return
             else:
                 raise AssertionError(f"Unknown input type: {arg}")

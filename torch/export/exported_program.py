@@ -2,6 +2,7 @@ import copy
 import dataclasses
 import functools
 import types
+import warnings
 from typing import (
     Any,
     Callable,
@@ -15,6 +16,8 @@ from typing import (
     Union,
 )
 
+from torch.fx.immutable_collections import immutable_dict, immutable_list
+
 if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
     # such as auto-completion in tools like pylance, even when these modules are not explicitly
@@ -26,7 +29,7 @@ if TYPE_CHECKING:
 
 import torch
 import torch.utils._pytree as pytree
-from torch.export._tree_utils import reorder_kwargs
+from torch.export._tree_utils import is_equivalent, reorder_kwargs
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
 
@@ -81,6 +84,31 @@ def _disable_prexisiting_fake_mode(fn):
     return wrapper
 
 
+def _fx_collection_equivalence_fn(
+    spec1_type: Optional[type],
+    spec1_context: pytree.Context,
+    spec2_type: Optional[type],
+    spec2_context: pytree.Context,
+) -> bool:
+    """Treat containers and their immutable variants as the same type. Otherwise
+    compare as normal.
+    """
+    if spec1_type is None or spec2_type is None:
+        return spec1_type is spec2_type and spec1_context == spec2_context
+
+    if issubclass(spec1_type, (dict, immutable_dict)) and issubclass(
+        spec2_type, (dict, immutable_dict)
+    ):
+        return spec1_context == spec2_context
+
+    if issubclass(spec1_type, (list, immutable_list)) and issubclass(
+        spec2_type, (list, immutable_list)
+    ):
+        return spec1_context == spec2_context
+
+    return spec1_type is spec2_type and spec1_context == spec2_context
+
+
 class ExportedProgram:
     """
     Package of a program from :func:`export`. It contains
@@ -114,8 +142,6 @@ class ExportedProgram:
             Dict[str, Union[torch.Tensor, torch._C.ScriptObject]]
         ] = None,
     ):
-        from torch._export.exported_program import _create_graph_module_for_export
-
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
         self._graph_module = _create_graph_module_for_export(root, graph)
@@ -254,7 +280,9 @@ class ExportedProgram:
             (args, kwargs)
         )  # type: ignore[possibly-undefined]
 
-        if in_spec is not None and received_spec != in_spec:
+        if in_spec is not None and not is_equivalent(
+            received_spec, in_spec, _fx_collection_equivalence_fn
+        ):
             raise ValueError(
                 "Trying to flatten user inputs with exported input tree spec: \n"
                 f"{in_spec}\n"
@@ -635,3 +663,24 @@ def _get_updated_range_constraints(
         if k not in shape_env.replacements:
             range_constraints[k] = v
     return range_constraints
+
+
+def _create_graph_module_for_export(root, graph):
+    try:
+        gm = torch.fx.GraphModule(root, graph)
+    except SyntaxError:
+        # If custom objects stored in memory are being used in the graph,
+        # the generated python code will result in a syntax error on the custom
+        # object, since it is unable to parse the in-memory object. However
+        # we can still run the graph eagerly through torch.fx.Interpreter,
+        # so we will bypass this error.
+        warnings.warn(
+            "Unable to execute the generated python source code from "
+            "the graph. The graph module will no longer be directly callable, "
+            "but you can still run the ExportedProgram, and if needed, you can "
+            "run the graph module eagerly using torch.fx.Interpreter."
+        )
+        gm = torch.fx.GraphModule(root, torch.fx.Graph())
+        gm._graph = graph
+
+    return gm
