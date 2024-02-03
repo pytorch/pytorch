@@ -710,8 +710,9 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return TorchCtxManagerClassVariable(value, source=self.source)
         elif is_function_or_wrapper(value):
+            value = unwrap_if_wrapper(value)
             return trace_rules.lookup(value).create_with_source(
-                unwrap_if_wrapper(value), source=self.source
+                value, source=self.source
             )
         # Don't use istype, since some python modules are not subclasses of types.ModuleType directly.
         # E.g, type(torch.ops) -> <class 'torch._ops._Ops'>,

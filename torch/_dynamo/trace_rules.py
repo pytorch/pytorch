@@ -2770,8 +2770,7 @@ def load_object(name):
         else:
             assert len(x) == 1, f"Invalid obj name {name}"
             val = _load_obj_from_str(x[0])
-        if hasattr(val, "__wrapped__"):
-            val = val.__wrapped__
+        val = unwrap_if_wrapper(val)
     except (AttributeError, ImportError):
         val = None
     return val
@@ -2993,8 +2992,6 @@ E.g, the lookup result of `torch.sin` is `TorchInGraphFunctionVariable`.
 
 
 def lookup(obj, filename=None, is_direct_call=True):
-    # Unwrap if it's a functools.lru_cache wrapper
-    obj = unwrap_if_wrapper(obj)
     if not hashable(obj):
         return None
     if obj is not None:
