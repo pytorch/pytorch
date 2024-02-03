@@ -311,7 +311,6 @@ dtensor_fails = {
     xfail("nn.functional.conv_transpose2d"),
     xfail("nn.functional.conv_transpose3d"),
     xfail("nn.functional.cosine_similarity"),
-    xfail("nn.functional.cross_entropy"),
     xfail("nn.functional.ctc_loss"),
     xfail("nn.functional.dropout"),
     xfail("nn.functional.dropout2d"),
