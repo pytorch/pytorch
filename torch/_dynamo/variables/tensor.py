@@ -649,10 +649,10 @@ class TensorVariable(VariableTracker):
             unimplemented("Tensor.set_.source_Tensor_storage_offset")
 
     def method_add_(self, other, *, alpha=None):
-        from ..symbolic_convert import InstructionTranslator
-
-        tx = InstructionTranslator.current_tx()
         if alpha is not None:
+            from ..symbolic_convert import InstructionTranslator
+
+            tx = InstructionTranslator.current_tx()
             result = variables.TorchInGraphFunctionVariable(torch.mul).call_function(
                 tx, [other, alpha], {}
             )
@@ -813,25 +813,23 @@ class TensorVariable(VariableTracker):
         tx.output.side_effects.register_hook(self, fn_var, handle_variable, name)
         return handle_variable
 
-    def method_requires_grad_(self, requires_grad=None):
-        if requires_grad is None:
-            requires_grad = True
-        else:
+    def method_requires_grad_(self, requires_grad=True):
+        if requires_grad is not True:
             requires_grad = requires_grad.as_python_constant()
 
         if self.as_proxy().node.meta["example_value"].requires_grad != requires_grad:
             unimplemented("Tensor.requires_grad_")
         else:
-            return variables.ConstantVariable.create(None)
+            return self
 
-    def method_new(self, *args):
+    def method_new(self, *args, **kwargs):
         # Convert x.new(torch.Size) into x.new_empty(torch.Size),
         # as Tensor.new acts differently with a Size input versus a tuple input.
         if len(args) == 1 and isinstance(args[0], SizeVariable):
             from ..symbolic_convert import InstructionTranslator
 
             return self.call_method(
-                InstructionTranslator.current_tx(), "new_empty", args, {}
+                InstructionTranslator.current_tx(), "new_empty", args, kwargs
             )
 
     def rename(self, tx, name):
