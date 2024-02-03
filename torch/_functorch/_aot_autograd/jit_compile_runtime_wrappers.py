@@ -182,6 +182,19 @@ def aot_dispatch_autograd(
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
+
+            # Compiled autograd will run the bw_module in the backward pass,
+            # so recompilation need happen anyway if the backward pass is ever
+            # called.
+            #
+            # The reason we do the GraphModule recompilation here is because
+            # the lazy recompilation will cause issue in the backward pass
+            # with compiled autograd.
+            if torch._dynamo.compiled_autograd.compiled_autograd_enabled_count:
+                from torch.fx._lazy_graph_module import _LazyGraphModule
+
+                _LazyGraphModule.force_recompile(bw_module)
+
             fw_outs = next(n for n in fw_module.graph.nodes if n.op == "output").args[0]
             # we only need to bookkeep the symints that are saved for bw, not any symints
             # the user forward might have returned in its own output
