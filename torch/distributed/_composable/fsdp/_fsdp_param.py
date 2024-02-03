@@ -17,6 +17,7 @@ from ._fsdp_common import (
     _get_dim0_chunked_size,
     _get_dim0_padded_size,
     _raise_assert_with_print,
+    _to_dtype_if_needed,
     FSDPMeshInfo,
 )
 
@@ -382,9 +383,12 @@ class FSDPParam:
     def all_gather_input(self) -> torch.Tensor:  # 1D
         self._assert_in_states(ShardedState.SHARDED, ShardedState.SHARDED_POST_FORWARD)
         if self.sharded_state == ShardedState.SHARDED:
-            return self._sharded_param_data
+            return _to_dtype_if_needed(self._sharded_param_data, self.param_dtype)
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
-            return cast(torch.Tensor, self._sharded_post_forward_param_data)
+            return _to_dtype_if_needed(
+                cast(torch.Tensor, self._sharded_post_forward_param_data),
+                self.param_dtype,
+            )
         return torch.empty(0)  # mypy
 
     @property
