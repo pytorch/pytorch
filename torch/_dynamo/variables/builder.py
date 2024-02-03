@@ -1046,22 +1046,25 @@ class VariableBuilder:
             **options,
         )
 
-        self.install_guards(
-            functools.partial(
-                GuardBuilder.TENSOR_MATCH,
-                value=value
-                if isinstance(source, NumpyTensorSource)
-                else TensorWeakRef(value),
-            )
-        )
-
-        # install guards for subclass inner tensors
+        # We install TYPE_MATCH guards for traceable wrapper subclass object,
+        # and recursively install corresponding guard for each inner attribute.
         if is_traceable_wrapper_subclass(value):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
             attrs, _ = value.__tensor_flatten__()
             for attr in attrs:
                 inner_value = getattr(value, attr)
                 inner_source = AttrSource(self.source, attr)
                 VariableBuilder(self.tx, inner_source)(inner_value).recursive_realize()
+        # Otherwise, install TENSOR_MATCH guards for regular tensors.
+        else:
+            self.install_guards(
+                functools.partial(
+                    GuardBuilder.TENSOR_MATCH,
+                    value=value
+                    if isinstance(source, NumpyTensorSource)
+                    else TensorWeakRef(value),
+                )
+            )
 
         self.tx.output.input_source_to_var[source] = tensor_variable
         assert "tensor_dict" not in tensor_proxy.node.meta
