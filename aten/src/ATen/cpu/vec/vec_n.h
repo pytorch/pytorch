@@ -12,7 +12,7 @@ inline namespace CPU_CAPABILITY {
  * number of vector elements, e.g., `VectorizedN<float, 2>` can be
  * a vector converted from two `Vectorized<bfloat16>`, `VectorizedN<int64_t, 2>`
  * can be a vector converted from two `Vectorized<int32_t>` etc.
- * 
+ *
  * It supports most of the operations of `Vectorized<T>`
  * and the implementation delegates to `Vectorized<T>` with loops over `N`.
  *
@@ -327,11 +327,11 @@ VECTORIZEDN_DEFINE_BINARY_OP_INPLACE_GLOBAL(operator>>=)
 #undef VECTORIZEDN_DEFINE_BINARY_OP_GLOBAL
 #undef VECTORIZEDN_DEFINE_BINARY_OP_INPLACE_GLOBAL
 
-template <typename T, int N, typename Op>
-inline T vec_reduce_all(const Op& vec_fun, VectorizedN<T, N> acc_vec) {
-  T result = 0;
-  for (int i = 0; i < N; i++) {
-    result += vec_reduce_all(vec_fun, acc_vec[i]);
+template <typename T, int N, typename OpVec, typename OpScalar>
+inline T vec_reduce_all(const OpVec& vec_fun, const OpScalar& scalar_fun, VectorizedN<T, N> acc_vec) {
+  T result = vec_reduce_all(vec_fun, acc_vec[0]);
+  for (int i = 1; i < N; i++) {
+    result = scalar_fun(result, vec_reduce_all(vec_fun, acc_vec[i]));
   }
   return result;
 }

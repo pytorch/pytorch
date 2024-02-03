@@ -2768,8 +2768,7 @@ class CPUReproTests(TestCase):
             with torch.no_grad():
                 metrics.reset()
                 self.common(fn, (x, y, mode))
-                # TODO(jgong5): change to 1 with vectorized int64 load
-                assert metrics.generated_cpp_vec_kernel_count == 0
+                assert metrics.generated_cpp_vec_kernel_count == 1
 
     def test_uint8_add(self):
         # https://github.com/pytorch/pytorch/issues/113016
@@ -3001,8 +3000,7 @@ class CPUReproTests(TestCase):
         x = torch.randint(0, 100, (32, 32), dtype=torch.int64)
         metrics.reset()
         self.common(fn, (x,))
-        # TODO(jgong5): change to 1 with vectorized int64 load
-        assert metrics.generated_cpp_vec_kernel_count == 0
+        assert metrics.generated_cpp_vec_kernel_count == 1
 
     def test_int64_reduction_vec(self):
         def fn(x):
@@ -3011,8 +3009,7 @@ class CPUReproTests(TestCase):
         x = torch.randint(0, 100, (32, 32), dtype=torch.int64)
         metrics.reset()
         self.common(fn, (x,))
-        # TODO(jgong5): change to 1 with vectorized int64 load
-        assert metrics.generated_cpp_vec_kernel_count == 0
+        assert metrics.generated_cpp_vec_kernel_count == 1
 
     def test_uint64_pointwise_vec(self):
         def fn(x):
@@ -3050,8 +3047,7 @@ class CPUReproTests(TestCase):
         x = torch.randint(0, 100, (32, 32), dtype=torch.int64)
         metrics.reset()
         self.common(fn, (x,))
-        # TODO(jgong5): change to 1 with vectorized int64 load
-        assert metrics.generated_cpp_vec_kernel_count == 0
+        assert metrics.generated_cpp_vec_kernel_count == 1
 
     def test_convert_fp32_to_int64_vec(self):
         def fn(x):
@@ -3069,8 +3065,7 @@ class CPUReproTests(TestCase):
         x = torch.randint(0, 100, (32, 32), dtype=torch.int64)
         metrics.reset()
         self.common(fn, (x,))
-        # TODO(jgong5): change to 1 with vectorized int64 load
-        assert metrics.generated_cpp_vec_kernel_count == 0
+        assert metrics.generated_cpp_vec_kernel_count == 1
 
 
 if __name__ == "__main__":
