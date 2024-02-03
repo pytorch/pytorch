@@ -582,6 +582,11 @@ def _run_and_assert_no_indirect_indexing(test_case, func, *args, **kwargs):
 
 
 def assertGeneratedKernelCountEqual(self: TestCase, expected: int):
+    if config.triton.multi_kernel:
+        # when multi_kernel is enabled, we generated both persistent reduction
+        # and non-persistent reduction kernels for the same node schedule.
+        # That will mess up with the kernel count. Just don't check it.
+        return
     if config.cpp_wrapper:
         expected *= 2
     self.assertEqual(torch._inductor.metrics.generated_kernel_count, expected)
@@ -1191,7 +1196,20 @@ class CommonTemplate:
             z = x * y
             return z.sum((0, 1))
 
-        self.common(fn, (torch.randn(2, 197, 256), torch.randn(2, 1, 256)))
+        atol = None
+        rtol = None
+
+        # By default, inductor generate non-persistent reduction kernels in this
+        # case. But when multi-kernel is enabled, inductor will pick the faster
+        # of persistent reduction and non-persistent-reduction kernel.
+        # In this case, inductor picked the persistent-reduction kernel.
+        # The persistent reduction kernel happens to need looser tolerance.
+        if config.triton.multi_kernel:
+            atol = 1e-5
+            rtol = 1e-5
+        self.common(
+            fn, (torch.randn(2, 197, 256), torch.randn(2, 1, 256)), atol=atol, rtol=rtol
+        )
 
     def test_min_max_reduction(self):
         def fn(a, b):
@@ -8597,7 +8615,13 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
                 return torch.sum(a)
 
             kernels = self.get_kernels(fn, [torch.randn([256, 256], device=GPU_TYPE)])
-            self.assertTrue(len(kernels) == 2, "SUM should result in two kernels")
+            if config.triton.multi_kernel:
+                self.assertTrue(
+                    len(kernels) == 4,
+                    "SUM should result in four kernels when multi-kernel is enabled",
+                )
+            else:
+                self.assertTrue(len(kernels) == 2, "SUM should result in two kernels")
 
             # kernel0 reduces from 256 to (xnumel=8, rnumel=8192), which means it reduces 256 by 256 into an array of
             # size 8 by accumulating 8192 elements at once note that rnumel is equal to 512 * 16, so rnumel which is
@@ -8608,8 +8632,11 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel0, (0, 1, 3))
 
             # kernel1 reduces from 8 elements to a single scalar.
+            # Since multi-kernel generate 2 variants for each kernel. The second
+            # persistent-reduction has index 2.
+            kernel1_index = 2 if config.triton.multi_kernel else 1
             arguments_that_are_divisible_by_16_in_kernel1 = (
-                kernels[1].triton_meta["configs"][0].divisible_by_16
+                kernels[kernel1_index].triton_meta["configs"][0].divisible_by_16
             )
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
             torch._dynamo.reset()
@@ -8805,7 +8832,9 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
                 torch.randn(1, N, K, device=GPU_TYPE),
             ]
             code = run_and_get_triton_code(fn_opt, *inps)
-            self.assertEqual(code.count("tl.store"), 1)
+            self.assertEqual(
+                code.count("tl.store"), 2 if config.triton.multi_kernel else 1
+            )
             self.assertTrue("out_ptr1" in code)
             self.assertFalse("out_ptr0" in code)
             self.assertEqual(fn_opt(*inps), fn(*inps))
@@ -8933,12 +8962,24 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             )
             code = run_and_get_triton_code(f, *inps)
             lines = [line for line in code.split("\n") if "tl.load" in line]
-            self.assertExpectedInline(
-                "\n".join(lines),
-                """\
+            if config.triton.multi_kernel:
+                # the first 2 lines are generated for the persistent reduction
+                # variant.
+                self.assertExpectedInline(
+                    "\n".join(lines),
+                    """\
+    tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
+    tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, other=0.0)
         tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
         tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, eviction_policy='evict_first', other=0.0)""",
-            )
+                )
+            else:
+                self.assertExpectedInline(
+                    "\n".join(lines),
+                    """\
+        tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
+        tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, eviction_policy='evict_first', other=0.0)""",
+                )
 
         @skipIfRocm
         @config.patch("triton.use_block_ptr", True)
@@ -8954,12 +8995,25 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             )
             code = run_and_get_triton_code(f, *inps)
             lines = [line for line in code.split("\n") if "tl.load" in line]
-            self.assertExpectedInline(
-                "\n".join(lines),
-                """\
+
+            if config.triton.multi_kernel:
+                # the first 2 lines are generated for the persistent reduction
+                # variant.
+                self.assertExpectedInline(
+                    "\n".join(lines),
+                    """\
+    tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
+    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[262144, 512], strides=[1, 262144], block_shape=[XBLOCK, RBLOCK], order=[0, 1], offsets=[xoffset, roffset]), boundary_check=[1], padding_option='zero')
+        tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
+        tmp1 = tl.load(block_ptr0, boundary_check=[1], padding_option='zero', eviction_policy='evict_first')""",  # noqa: B950 line too long
+                )
+            else:
+                self.assertExpectedInline(
+                    "\n".join(lines),
+                    """\
         tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
         tmp1 = tl.load(block_ptr0, boundary_check=[1], padding_option='zero', eviction_policy='evict_first')""",
-            )
+                )
 
         # Disable index propagation, so the indirect indexing isn't optimized away
         @patch.object(config, "constant_and_index_propagation", False)
