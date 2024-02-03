@@ -1429,7 +1429,7 @@ class DimConstraints:
 
         # solve linear congruences
         # NOTE(avik): We do not need to solve them for symbols that have already been specialized.
-        reduced_congruences = self.reduce_congruences()
+        reduced_congruences = self._reduce_congruences()
         for s, congruences in reduced_congruences.items():
             for congruence in congruences:
                 # any congruence that cannot be checked becomes a dynamic constraint as well
