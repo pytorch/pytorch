@@ -934,13 +934,22 @@ class Modularize(_pass.Transform):
                 name,
                 attr_kind=fx_type_utils._AttrKind.PARAMETER,
             )
+
+        non_persistent_buffers = set(self.graph_signature.non_persistent_buffers)
         for name in self.graph_signature.buffers:
-            cloned = self.state_dict[name].clone()
+            if name in non_persistent_buffers:
+                persistent = False
+                cloned = self.exported_program.constants[name].clone()
+            else:
+                persistent = True
+                cloned = self.state_dict[name].clone()
+
             _assign_attr(
                 cloned,
                 graph_module,
                 name,
                 attr_kind=fx_type_utils._AttrKind.BUFFER,
+                persistent=persistent,
             )
 
         for fqn in itertools.chain(

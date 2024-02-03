@@ -231,9 +231,7 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
         # Finalize the graph editing.
         graph_module.recompile()
 
-        updated_model_args = self.input_adapter.apply(
-            *model_args, model=model, **model_kwargs
-        )
+        updated_model_args = self.input_adapter.apply(*model_args, **model_kwargs)
 
         return self.pre_export_passes(options, model, graph_module, updated_model_args)  # type: ignore[return-value]
 

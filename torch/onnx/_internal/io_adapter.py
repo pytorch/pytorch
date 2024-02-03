@@ -41,9 +41,8 @@ class InputAdaptStep(Protocol):
         self,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
+        model: Optional[torch_export.ExportedProgram] = None,
+        onnx_input_names: Optional[Sequence[str]] = None,
     ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
         ...
 
@@ -67,9 +66,8 @@ class InputAdapter:
     def apply(
         self,
         *model_args,
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
+        model: Optional[torch_export.ExportedProgram] = None,
+        onnx_input_names: Optional[Sequence[str]] = None,
         **model_kwargs,
     ) -> Sequence[Union[int, float, bool, str, "torch.Tensor", None]]:
         """Converts the PyTorch model inputs to exported ONNX model inputs format.
@@ -78,13 +76,16 @@ class InputAdapter:
             model_args: The PyTorch model inputs.
             model: The PyTorch model.
             model_kwargs: The PyTorch model keyword inputs.
+            onnx_input_names: The ONNX input names.
         Returns:
             A sequence of tensors converted from PyTorch model inputs.
         """
         args: Sequence[Any] = model_args
         kwargs: Mapping[str, Any] = model_kwargs
         for step in self._steps:
-            args, kwargs = step.apply(args, kwargs, model=model)
+            args, kwargs = step.apply(
+                args, kwargs, model=model, onnx_input_names=onnx_input_names
+            )
         assert not kwargs
         return args
 
@@ -105,9 +106,6 @@ class OutputAdaptStep(Protocol):
     def apply(
         self,
         model_outputs: Any,
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
     ) -> Any:
         ...
 
@@ -131,21 +129,18 @@ class OutputAdapter:
     def apply(
         self,
         model_outputs: Any,
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
+        model: Optional[torch_export.ExportedProgram] = None,
     ) -> Sequence[Union["torch.Tensor", int, float, bool, str]]:
         """Converts the PyTorch model outputs to exported ONNX model outputs format.
 
         Args:
             model_outputs: The PyTorch model outputs.
-            model: The PyTorch model.
 
         Returns:
             PyTorch model outputs in exported ONNX model outputs format.
         """
         for step in self._steps:
-            model_outputs = step.apply(model_outputs, model=model)
+            model_outputs = step.apply(model_outputs)
         return model_outputs
 
 
@@ -203,9 +198,8 @@ class BindInputStep(InputAdaptStep):
         self,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
+        model: Optional[torch_export.ExportedProgram] = None,
+        onnx_input_names: Optional[Sequence[str]] = None,
     ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
         """Bind the input arguments to the model signature.
 
@@ -216,6 +210,7 @@ class BindInputStep(InputAdaptStep):
             model_args: The model args.
             model_kwargs: The model kwargs.
             model: The PyTorch model.
+            onnx_input_names: The ONNX input names.
 
         Returns:
             A tuple of the model args and kwargs. args is always empty.
@@ -242,9 +237,8 @@ class MergeKwargsIntoArgsInputStep(InputAdaptStep):
         self,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
+        model: Optional[torch_export.ExportedProgram] = None,
+        onnx_input_names: Optional[Sequence[str]] = None,
     ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
         """Merge the input kwargs into the input args.
 
@@ -252,6 +246,7 @@ class MergeKwargsIntoArgsInputStep(InputAdaptStep):
             model_args: The model args.
             model_kwargs: The model kwargs.
             model: The PyTorch model.
+            onnx_input_names: The ONNX input names.
 
         Returns:
             A tuple of the model args and kwargs. kwargs is always empty.
@@ -269,9 +264,8 @@ class LiftParametersAndBuffersIntoArgsInputStep(InputAdaptStep):
         self,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
+        model: Optional[torch_export.ExportedProgram] = None,
+        onnx_input_names: Optional[Sequence[str]] = None,
     ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
         """Append model's parameters and buffers into its input.
 
@@ -279,6 +273,7 @@ class LiftParametersAndBuffersIntoArgsInputStep(InputAdaptStep):
             model_args: The model args.
             model_kwargs: The model kwargs.
             model: The PyTorch model.
+            onnx_input_names: The ONNX input names.
 
         Returns:
             A tuple of the model args + appended inputs and kwargs.
@@ -299,9 +294,8 @@ class ConvertComplexToRealRepresentationInputStep(InputAdaptStep):
         self,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
+        model: Optional[torch_export.ExportedProgram] = None,
+        onnx_input_names: Optional[Sequence[str]] = None,
     ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
         """Convert complex tensors to float tensors.
 
@@ -309,6 +303,7 @@ class ConvertComplexToRealRepresentationInputStep(InputAdaptStep):
             model_args: The model args.
             model_kwargs: The model kwargs.
             model: The PyTorch model.
+            onnx_input_names: The ONNX input names.
 
         Returns:
             A tuple of the model args and kwargs.
@@ -335,9 +330,8 @@ class RemoveNoneInputStep(InputAdaptStep):
         self,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
+        model: Optional[torch_export.ExportedProgram] = None,
+        onnx_input_names: Optional[Sequence[str]] = None,
     ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
         """Remove `None` from arguments.
 
@@ -345,6 +339,7 @@ class RemoveNoneInputStep(InputAdaptStep):
             model_args: The model args.
             model_kwargs: The model kwargs.
             model: The PyTorch model.
+            onnx_input_names: The ONNX input names.
 
         Returns:
             A tuple of the model args and kwargs.
@@ -396,9 +391,8 @@ class RemoveNonTensorInputStep(InputAdaptStep):
         self,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
+        model: Optional[torch_export.ExportedProgram] = None,
+        onnx_input_names: Optional[Sequence[str]] = None,
     ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
         """Remove Constant from arguments.
 
@@ -406,6 +400,7 @@ class RemoveNonTensorInputStep(InputAdaptStep):
             model_args: The model args.
             model_kwargs: The model kwargs.
             model: The PyTorch model.
+            onnx_input_names: The ONNX input names.
 
         Returns:
             A tuple of the model args and kwargs.
@@ -440,9 +435,8 @@ class FlattenInputWithTreeSpecValidationInputStep(InputAdaptStep):
         self,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
+        model: Optional[torch_export.ExportedProgram] = None,
+        onnx_input_names: Optional[Sequence[str]] = None,
     ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
         """Flatten the model args and kwargs and validate the `SpecTree` output.
 
@@ -450,6 +444,7 @@ class FlattenInputWithTreeSpecValidationInputStep(InputAdaptStep):
             model_args: The model args.
             model_kwargs: The model kwargs.
             model: The PyTorch model.
+            onnx_input_names: The ONNX input names.
 
         Returns:
             A tuple of the flattened model args and kwargs. The kwargs is empty, because
@@ -460,6 +455,7 @@ class FlattenInputWithTreeSpecValidationInputStep(InputAdaptStep):
                 is not identical to the `SpecTree` output produced from the first
                 `model_outputs` that was passed to this method.
         """
+
         flattened_args, spec = pytree.tree_flatten((model_args, model_kwargs))
         if self._spec is None:
             self._spec = spec
@@ -489,15 +485,11 @@ class FlattenOutputStep(OutputAdaptStep):
     def apply(
         self,
         model_outputs: Any,
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
     ) -> Sequence[Any]:
         """Flatten the model outputs.
 
         Args:
             model_outputs: The model outputs to flatten.
-            model: The PyTorch model.
 
         Returns:
             A tuple of the flattened model outputs.
@@ -517,15 +509,11 @@ class ConvertComplexToRealRepresentationOutputStep(OutputAdaptStep):
     def apply(
         self,
         model_outputs: Any,
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
     ) -> Any:
         """Convert float tensors to complex tensors.
 
         Args:
             model_output: The model output.
-            model: The PyTorch model.
 
         Returns:
             A tuple of the model output.
@@ -550,15 +538,11 @@ class FlattenOutputWithTreeSpecValidationOutputStep(OutputAdaptStep):
     def apply(
         self,
         model_outputs: Any,
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
     ) -> Sequence[Any]:
         """Flatten the model outputs and validate the `SpecTree` output.
 
         Args:
             model_outputs: The model outputs to flatten.
-            model: The PyTorch model.
 
         Returns:
             flattened_outputs: The flattened model outputs.
@@ -580,7 +564,7 @@ class FlattenOutputWithTreeSpecValidationOutputStep(OutputAdaptStep):
         return flattened_outputs
 
 
-class AppendLiftedConstantInputStep(InputAdaptStep):
+class AppendLiftedConstantNonPersistentBufferInputStep(InputAdaptStep):
     """Prepend model lifted constants to the user input.
 
     :func:`torch.export.export` lifts model constants as model input, and
@@ -595,9 +579,8 @@ class AppendLiftedConstantInputStep(InputAdaptStep):
         self,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
+        model: Optional[torch_export.ExportedProgram] = None,
+        onnx_input_names: Optional[Sequence[str]] = None,
     ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
         """Prepend model's lifted constants to the user input.
 
@@ -605,21 +588,28 @@ class AppendLiftedConstantInputStep(InputAdaptStep):
             model_args: The model args.
             model_kwargs: The model kwargs.
             model: The PyTorch model.
+            onnx_input_names: The ONNX input names.
 
         Returns:
             A tuple of the model args and kwargs.
         """
+        # This case means that the model has no lifted constants and no non-persistent.
+        if model is None:
+            return model_args, model_kwargs
+        # NOTE: model constants contains non-persistent buffers and lifted tensor constants, which
+        # are not accessible with state_dict().
+        if onnx_input_names is not None:
+            ordered_constant_tensors = tuple(
+                [
+                    model.constants[name]
+                    for name in onnx_input_names
+                    if name in model.constants
+                ]
+            )
+        else:
+            # take all constants if onnx_input_names is not provided
+            ordered_constant_tensors = tuple(model.constants.values())
 
-        non_persistent_buffers = set(model.graph_signature.non_persistent_buffers)  # type: ignore[union-attr]
-        ordered_buffers = []
-        for name in model.graph_signature.buffers:  # type: ignore[union-attr]
-            if name in non_persistent_buffers:
-                ordered_buffers.append(model.constants[name])  # type: ignore[union-attr]
-            else:
-                ordered_buffers.append(model.state_dict[name])  # type: ignore[union-attr,index]
-        ordered_constant_tensors = tuple(
-            model.constants[fqn] for fqn in model.graph_signature.lifted_tensor_constants  # type: ignore[union-attr,index]
-        )
         # NOTE: calling convention is first params, then buffers, then args as user supplied them.
         # See: torch/_functorch/aot_autograd.py#L1034
         updated_args = (
@@ -628,46 +618,9 @@ class AppendLiftedConstantInputStep(InputAdaptStep):
         )
         if model_kwargs:
             return MergeKwargsIntoArgsInputStep().apply(
-                updated_args, model_kwargs, model=model
+                updated_args,
+                model_kwargs,
+                model=model,
+                onnx_input_names=onnx_input_names,
             )
         return updated_args, {}
-
-
-class PrependParamsAndBuffersAotAutogradOutputStep(OutputAdaptStep):
-    """Prepend model's mutated buffers to the user output.
-
-    :func:`torch.export.export` lifts model's mutated buffers as outputs, thus, they
-    must be added to the user output after the model is executed.
-
-    Args:
-        model: The PyTorch model with mutated buffers.
-    """
-
-    def apply(
-        self,
-        model_outputs: Any,
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
-    ) -> Sequence[Any]:
-        """Flatten the model outputs and validate the `SpecTree` output.
-
-        Args:
-            model_outputs: The model outputs to flatten.
-            model: The PyTorch model.
-
-        Returns:
-            flattened_outputs: The flattened model outputs.
-        """
-
-        assert isinstance(
-            model, torch_export.ExportedProgram
-        ), "'model' must be torch_export.ExportedProgram"
-        ordered_buffers = tuple(
-            model.state_dict[name]
-            for name in model.graph_signature.buffers_to_mutate.values()
-        )
-
-        # NOTE: calling convention is first mutated buffers, then outputs args as model returned them.
-        updated_outputs = (*ordered_buffers, *model_outputs)
-        return updated_outputs

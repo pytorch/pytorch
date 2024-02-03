@@ -309,6 +309,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 f"test_report_{self._testMethodName}"
                 f"_op_level_debug_{self.op_level_debug}"
                 f"_dynamic_axes_{self.dynamic_shapes}"
+                f"_model_type_{self.model_type}"
                 ".sarif"
             )
 
@@ -353,6 +354,36 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
 
 
 @_beartype.beartype
+def get_ort_input_names_and_session(
+    onnx_model: Union[str, torch.onnx.ONNXProgram]
+) -> Tuple[List[str], onnxruntime.InferenceSession]:
+    """Get the input names and ort session of the given ONNX model
+
+    Args:
+        onnx_model (Union[str, torch.onnx.ONNXProgram]): Converter ONNX model
+
+    Returns:
+        List[str]: The input names of the given ONNX model
+    """
+    if isinstance(onnx_model, torch.onnx.ONNXProgram):
+        buffer = io.BytesIO()
+        onnx_model.save(buffer)
+        ort_model = buffer.getvalue()
+    else:
+        ort_model = onnx_model
+
+    # Suppress floods of warnings from ONNX Runtime
+    session_options = onnxruntime.SessionOptions()
+    session_options.log_severity_level = 3  # Error
+    session = onnxruntime.InferenceSession(
+        ort_model, providers=["CPUExecutionProvider"], sess_options=session_options
+    )
+    input_names = [ort_input.name for ort_input in session.get_inputs()]
+
+    return input_names, session
+
+
+@_beartype.beartype
 def run_ort(
     onnx_model: Union[str, torch.onnx.ONNXProgram],
     pytorch_inputs: Sequence[_InputArgsType],
@@ -371,20 +402,7 @@ def run_ort(
     Returns:
         _OutputsType: ONNX model predictions
     """
-    if isinstance(onnx_model, torch.onnx.ONNXProgram):
-        buffer = io.BytesIO()
-        onnx_model.save(buffer)
-        ort_model = buffer.getvalue()
-    else:
-        ort_model = onnx_model
-
-    # Suppress floods of warnings from ONNX Runtime
-    session_options = onnxruntime.SessionOptions()
-    session_options.log_severity_level = 3  # Error
-    session = onnxruntime.InferenceSession(
-        ort_model, providers=["CPUExecutionProvider"], sess_options=session_options
-    )
-    input_names = [ort_input.name for ort_input in session.get_inputs()]
+    input_names, session = get_ort_input_names_and_session(onnx_model)
 
     if len(input_names) != len(pytorch_inputs):
         raise AssertionError(
@@ -438,7 +456,6 @@ def _compare_pytorch_onnx_with_ort(
     # NOTE: ONNXProgram holds a reference (not copy) to the original ref_model, including its state_dict.
     # Thus, ONNXProgram() must run before ref_model() to prevent ref_model.forward() from changing the state_dict.
     # Otherwise, the ref_model can change buffers on state_dict which would be used by ONNXProgram.__call__()
-    # NOTE: `model_with_state_dict=ref_model` is specified to cover runs with FakeTensor support
     ort_outputs = onnx_program(*input_args, **input_kwargs)
     ref_outputs = ref_model(*ref_input_args, **ref_input_kwargs)
     ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(ref_outputs)

@@ -61,6 +61,10 @@ class TorchExport(exporter.FXGraphExtractor):
             io_adapter.RemoveNonTensorInputStep()
         )
 
+        options.fx_tracer.input_adapter.append_step(
+            io_adapter.AppendLiftedConstantNonPersistentBufferInputStep()
+        )
+
         # ONNX does not support complex inputs. During graph building, all complex inputs
         # are converted to real representation inputs. Here we register this step to
         # input/output adapter.
