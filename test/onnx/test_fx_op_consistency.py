@@ -5,12 +5,12 @@ and torch operators given the same inputs.
 
 Usage:
 
-    pytest test/onnx/test_fx_registry_op_consistency.py
+    pytest test/onnx/test_fx_op_consistency.py
 
     To run tests on a specific operator (e.g. torch.ceil):
 
-    pytest test/onnx/test_fx_registry_op_consistency.py -k ceil
-    pytest test/onnx/test_fx_registry_op_consistency.py -k nn_functional_scaled_dot_product_attention
+    pytest test/onnx/test_fx_op_consistency.py -k ceil
+    pytest test/onnx/test_fx_op_consistency.py -k nn_functional_scaled_dot_product_attention
 
     Read more on Running and writing tests:
         https://github.com/pytorch/pytorch/wiki/Running-and-writing-tests
@@ -40,6 +40,7 @@ import pytorch_test_common
 
 import torch
 from onnx_test_common import skip, skip_slow, xfail
+
 from torch.onnx._internal.diagnostics import _rules
 from torch.testing._internal import (
     common_device_type,
@@ -1919,7 +1920,11 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "nn.functional.hinge_embedding_loss": [4e-1, 3e-3],
         "nn.functional.kl_div": [2e-3, 2e-4],
         "nn.functional.poisson_nll_loss": [3e-2, 1e-3],
-        "nn.functional.multilabel_soft_margin_loss": [1e-3, 5e-3],
+        # when running with onnxruntime 1.17.0 this test fails with the following error::
+        # Expected -19.03125 but got -19.0625.
+        # Absolute difference: 0.03125 (up to 0.005 allowed)
+        # Relative difference: 0.0016420361247947454 (up to 0.001 allowed)
+        # "nn.functional.multilabel_soft_margin_loss": [1e-3, 5e-3],
         "native_batch_norm": [3e-2, 1e-3],
         "dot": [3e-2, 1e-3],
         "logit": [3e-2, 1e-3],

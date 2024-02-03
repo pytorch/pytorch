@@ -7656,6 +7656,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipIfUnsupportedMaxOpsetVersion(17)
     @unittest.skip(
         "This test is broken with ONNXRuntime(17): "
+        "when running with onnxruntime 1.17.0 this test fails with the following error:"
         "FAIL : Non-zero status code returned while running If node. "
         "Name:'/If' Status Message: if.cc:253 Compute "
         "If nodes condition input must have exactly one element")
