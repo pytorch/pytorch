@@ -336,25 +336,23 @@ class Checkpointable(ABC, Generic[T]):
         ...
 
 
-"""
-The GuardCheckpointState - it is the T of Checkpointable[T] for GuardsContext
-"""
-
-
 class GuardsCheckpointState:
+    """
+    The GuardCheckpointState - it is the T of Checkpointable[T] for GuardsContext
+    """
+
     dynamo_guards: Set[Guard] = set()
 
     def __init__(self, dynamo_guards):
         self.dynamo_guards = dynamo_guards
 
-    """
-    Produces a delta against another GuardsCheckpointState.
-
-    Returns None if no delta is found, otherwise, return a set() of mismatched
-    Guard type objects.
-    """
-
     def diff(self, other):
+        """
+        Produces a delta against another GuardsCheckpointState.
+
+        Returns None if no delta is found, otherwise, return a set() of mismatched
+        Guard type objects.
+        """
         r = self.dynamo_guards.difference(other.dynamo_guards)
         if len(r) == 0:
             return None
@@ -370,14 +368,13 @@ class ModuleContextCheckpointState:
     def __init__(self, nn_modules):
         self.nn_modules = nn_modules
 
-    """
-    Produces a delta against another ModuleContextCheckpointState.
-
-    Returns None if no delta is found, otherwise, return a set() of mismatched
-    module key names.
-    """
-
     def diff(self, other):
+        """
+        Produces a delta against another ModuleContextCheckpointState.
+
+        Returns None if no delta is found, otherwise, return a set() of mismatched
+        module key names.
+        """
         r = set(self.nn_modules.keys()).difference(set(other.nn_modules.keys()))
         if len(r) == 0:
             return None
@@ -405,14 +402,13 @@ class GlobalContextCheckpointState:
     def __init__(self, global_states):
         self.global_state = global_states
 
-    """
-    Produces a delta against another GlobalContextCheckpointState.
-
-    Returns None if no delta is found, otherwise, return a set() of mismatched
-    global key names.
-    """
-
     def diff(self, other):
+        """
+        Produces a delta against another GlobalContextCheckpointState.
+
+        Returns None if no delta is found, otherwise, return a set() of mismatched
+        global key names.
+        """
         r = set(self.global_state.keys()).difference(set(other.global_state.keys()))
         if len(r) == 0:
             return None
