@@ -4,7 +4,6 @@
 
 #ifdef __cplusplus
 
-#include <torch/csrc/utils/pybind.h>
 #include <pybind11/pybind11.h>
 #include <list>
 
