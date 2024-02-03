@@ -237,10 +237,10 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
                 return fn(*args, **kwargs)
 
             # Otherwise, start recording and call the function.
-            with self.recording():
+            with self._recording():
                 # Take a snapshot of the current tracked_fakes.
                 tracked_fakes = (
-                    self.snapshot_tracked_fakes() if save_tracked_fakes else None
+                    self._snapshot_tracked_fakes() if save_tracked_fakes else None
                 )
                 # Record the event for 'fn'.
                 event = ShapeEnvEvent(
