@@ -1381,17 +1381,34 @@ class MPSReluTest(TestCaseMPS):
                 np.array([[-9, 7, -5, 3, -1], [1, -3, 5, -7, 9]]).astype(t),
                 device="mps")
 
+
 class MatmulTest(TestCaseMPS):
-    def _helper(self, shape_tensor_1, shape_tensor_2, expand_tensor_1_shape=None, expand_tensor_2_shape=None):
+    def _helper(
+        self,
+        shape_tensor_1,
+        shape_tensor_2,
+        expand_tensor_1_shape=None,
+        expand_tensor_2_shape=None,
+        dtype_tensor_1=torch.float,
+        dtype_tensor_2=torch.float,
+    ):
         if expand_tensor_1_shape:
-            tensor1_mps = torch.randn(shape_tensor_1, device="mps").expand(expand_tensor_1_shape)
+            tensor1_mps = torch.randn(
+                shape_tensor_1, device="mps", dtype=dtype_tensor_1
+            ).expand(expand_tensor_1_shape)
         else:
-            tensor1_mps = torch.randn(shape_tensor_1, device="mps")
+            tensor1_mps = torch.randn(
+                shape_tensor_1, device="mps", dtype=dtype_tensor_1
+            )
 
         if expand_tensor_2_shape:
-            tensor2_mps = torch.randn(shape_tensor_2, device="mps").expand(expand_tensor_2_shape)
+            tensor2_mps = torch.randn(
+                shape_tensor_2, device="mps", dtype=dtype_tensor_2
+            ).expand(expand_tensor_2_shape)
         else:
-            tensor2_mps = torch.randn(shape_tensor_2, device="mps")
+            tensor2_mps = torch.randn(
+                shape_tensor_2, device="mps", dtype=dtype_tensor_2
+            )
 
         tensor1_cpu = tensor1_mps.to("cpu")
         tensor2_cpu = tensor2_mps.to("cpu")
@@ -1404,20 +1421,25 @@ class MatmulTest(TestCaseMPS):
     def test_vector_x_vector(self):
         # uses `dot`
         self._helper(3, 3)
+        self._helper(3, 3, None, None, torch.float, torch.cfloat)
 
     def test_matrix_x_vector(self):
         # uses `addmv`
         self._helper((3, 4), 4)
+        self._helper((3, 4), 4, None, None, torch.float, torch.cfloat)
 
     def test_batched_matrix_x_broadcasted_vector(self):
         self._helper((10, 3, 4), 4)
+        self._helper((10, 3, 4), 4, None, None, torch.float, torch.cfloat)
 
     def test_batched_matrix_x_batched_matrix(self):
         # uses `bmm.out`
         self._helper((10, 3, 4), (10, 4, 5))
+        self._helper((10, 3, 4), (10, 4, 5), None, None, torch.float, torch.cfloat)
 
     def test_batched_matrix_x_broadcasted_matrix(self):
         self._helper((10, 3, 4), (4, 5))
+        self._helper((10, 3, 4), (4, 5), None, None, torch.float, torch.cfloat)
 
 
 class MPSLeakyReluTest(TestCaseMPS):

@@ -323,7 +323,7 @@ static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_nam
 }
 
 void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& output) {
-  TORCH_INTERNAL_ASSERT(c10::isComplexType(input.scalar_type()) && c10::isComplexType(other.scalar_type()));
+  TORCH_INTERNAL_ASSERT(c10::isComplexType(input.scalar_type()) || c10::isComplexType(other.scalar_type()));
   auto new_size = at::infer_size(input.sizes(), other.sizes());
   if (!output.sizes().equals(new_size)) {
     output.resize_(new_size);
