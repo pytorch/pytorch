@@ -63,14 +63,14 @@ class TestFullyShardCollectives(FSDPTestMultiThread):
     ):
         module = nn.ParameterList([param.detach().clone() for param in params])
         mesh_info = FSDPMeshInfo(_init_default_fully_shard_mesh(), shard_mesh_dim=0)
-        post_forwrad_mesh_info = _get_post_forward_mesh_info(
+        post_forward_mesh_info = _get_post_forward_mesh_info(
             reshard_after_forward, mesh_info
         )
         fsdp_param_group = FSDPParamGroup(
             list(module.parameters()),
             module,
             mesh_info,
-            post_forwrad_mesh_info,
+            post_forward_mesh_info,
             self.device,
         )
         return fsdp_param_group
