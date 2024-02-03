@@ -768,7 +768,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             elif inspect.isfunction(dynamic_subobj):
                 if is_utils_checkpoint(func):
                     return build_checkpoint_variable(source=source)
-                elif trace_rules.lookup(func) is not None:
+                elif source is not None and trace_rules.lookup(func) is not None:
                     return trace_rules.lookup(func).create_with_source(
                         func, source=source
                     )
