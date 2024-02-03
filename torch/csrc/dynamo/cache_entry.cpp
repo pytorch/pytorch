@@ -8,6 +8,12 @@ CacheEntry::CacheEntry(const py::handle& guarded_code) {
   this->code = guarded_code.attr("code");
 }
 
+CacheEntry::~CacheEntry() {
+  // prevent check_fn from use-after-free when invalidating
+  this->check_fn.attr("cache_entry") = py::none();
+  this->check_fn.attr("extra_state") = py::none();
+}
+
 py::object CacheEntry::next() {
   NULL_CHECK(this->_owner);
   auto it = this->_owner_loc;
