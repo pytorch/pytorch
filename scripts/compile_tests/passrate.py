@@ -97,5 +97,5 @@ if __name__ == "__main__":
         ),
     )
     args = parser.parse_args()
-    dynamo38, dynamo311, eager311 = download_reports(args.commit)
+    dynamo311, eager311 = download_reports(args.commit, ("dynamo311", "eager311"))
     compute_pass_rate(eager311, dynamo311)
