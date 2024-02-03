@@ -1019,15 +1019,6 @@ class CheckFunctionManager:
         # in some form.
         self.check_fn.id_matched_objs = builder.id_matched_objs
 
-        # Builder is no longer required. Its scope dict holds a reference to the
-        # f_locals. Clear the scope dict to avoid memory leak. See
-        # test_release_input_memory.
-        # One might consider that we should stick this cleanup somewhere in the
-        # try ..  finally block to account for a graph break. But this is
-        # GuardBuilder, which is called only after instruction tx has finished,
-        # so we don't have to worry about graph breaks.
-        builder.scope.pop("L")
-
     def compile_check_fn(self, builder, guards_out, guard_fail_fn):
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
         largs = builder.argnames
@@ -1186,8 +1177,13 @@ class CheckFunctionManager:
             print("GUARDS\n", guard_body)
 
         out: Dict[str, Any] = dict()
+
+        # We don't put builder.scope as the globals in exec call because
+        # guard_fn.__globals__ becomes equal to builder.scope. This causes
+        # guard_fn to hold a referece to f_locals sitting in builder.scope["L"]
+        globals_for_guard_fn = {"G": builder.scope["G"]}
         try:
-            exec(pycode, builder.scope, out)
+            exec(pycode, globals_for_guard_fn, out)
         except SyntaxError as ex:
             log.exception("Failed to exec guard at line %s.\n%s", ex.lineno, pycode)
             raise
@@ -1198,9 +1194,7 @@ class CheckFunctionManager:
         guard_fn.code_parts = code_parts
         guard_fn.verbose_code_parts = verbose_code_parts
         # Grab only G, but preserve "G" because guards access it as "G"
-        guard_fn.global_scope = {
-            "G": builder.scope["G"],
-        }
+        guard_fn.global_scope = globals_for_guard_fn
         guard_fn.guard_fail_fn = guard_fail_fn
         return guard_fn
 
