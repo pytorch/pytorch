@@ -6,6 +6,7 @@
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
+
 #include <torch/csrc/utils/pybind.h>
 
 static struct PyModuleDef _module =
@@ -41,7 +42,6 @@ void initDynamoBindings(PyObject* torch) {
   auto m = py::handle(eval_frame).cast<py::module>();
 
   py::class_<CacheEntry>(m, "_CacheEntry")
-      .def(py::init<const py::handle&>())
       .def_readonly("check_fn", &CacheEntry::check_fn)
       .def_readonly("code", &CacheEntry::code)
       .def_property_readonly("next", &CacheEntry::next);

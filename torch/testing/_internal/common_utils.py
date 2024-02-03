@@ -2780,7 +2780,11 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                             f(*args, **kwargs)
                         except BaseException as e:
                             self.skipTest(e)
-                        self.skipTest("This test passed, maybe we can remove the skip from dynamo_test_failures.py")
+                        method = getattr(self, self._testMethodName)
+                        if getattr(method, "__unittest_expecting_failure__", False):
+                            self.skipTest("unexpected success")
+                        else:
+                            self.skipTest("This test passed, maybe we can remove the skip from dynamo_test_failures.py")
                     return wrapper
 
                 if key in dynamo_skips:
@@ -3907,6 +3911,14 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
             del env["CI"]
         (stdout, stderr) = TestCase.run_process_no_exception(code, env=env)
         return stderr.decode('ascii')
+
+
+class TestCaseBase(TestCase):
+    # Calls to super() in dynamically created classes are a bit odd.
+    # See https://github.com/pytorch/pytorch/pull/118586 for more info
+    # Subclassing this class and then calling super(TestCaseBase) will run
+    # TestCase's setUp, tearDown etc functions
+    pass
 
 
 def download_file(url, binary=True):

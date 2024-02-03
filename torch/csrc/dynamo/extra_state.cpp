@@ -75,7 +75,7 @@ PyObject* lookup(ExtraState* extra_state, PyObject* f_locals) {
     py::object valid = py::none();
     try {
       valid = cache_entry.check_fn(locals);
-    } catch (...) {
+    } catch (py::error_already_set& e) {
       if (guard_error_hook) {
         py::handle guard_error_hook_handle(guard_error_hook);
         guard_error_hook_handle(

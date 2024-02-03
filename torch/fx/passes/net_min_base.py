@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 import torch.fx
+
 from torch.fx._compatibility import compatibility
 from torch.fx.node import map_arg
 
@@ -495,6 +496,27 @@ class _MinimizerBase:
 
         return culprits
 
+    def _defined_traverse(self, nodes: NodeList) -> NodeSet:
+        """
+        run user defined `nodes` and determine if it is a culprit.
+        """
+        culprits: NodeSet = set()
+
+        first_node_name = nodes[0].name
+        output_node_name = nodes[-1].name
+        report = [f"Defined graph from {first_node_name} to {output_node_name}"]
+        cur_nodes: NodeSet = set(nodes)
+        try:
+            split_module, submod_name = self._build_submodule(cur_nodes)
+            self._run_and_compare(split_module, submod_name, [output_node_name])
+            self.print_report(report)
+        except (FxNetMinimizerResultMismatchError, FxNetMinimizerRunFuncError):
+            report.append(f"Found culprit {cur_nodes}")
+            self.print_report(report)
+            return culprits
+
+        return culprits
+
     def _accumulate_traverse(self, nodes: NodeList) -> NodeSet:
         culprits: NodeSet = set()
         nodes_to_run: NodeSet = set()
@@ -702,5 +724,8 @@ class _MinimizerBase:
             if (skip_nodes is None):
                 raise RuntimeError("'skip_nodes' can't be None when 'traverse_method' is 'skip'.")
             return self._skip_traverse(nodes, skip_nodes)
+
+        if self.settings.traverse_method == "defined":
+            return self._defined_traverse(nodes)
 
         raise RuntimeError(f"Unknown traverse method {self.settings.traverse_method}!")

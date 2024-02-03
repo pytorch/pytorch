@@ -1,10 +1,10 @@
 #pragma once
 
-#include <torch/csrc/utils/python_compat.h>
+#include <Python.h>
 
 #ifdef __cplusplus
 
-#include <torch/csrc/utils/pybind.h>
+#include <pybind11/pybind11.h>
 #include <list>
 
 namespace py = pybind11;
@@ -32,8 +32,6 @@ typedef struct CacheEntry CacheEntry;
 
 #ifdef __cplusplus
 
-#pragma GCC visibility push(hidden)
-
 typedef struct ExtraState {
   // List of cache entries for compiled code objects
   std::list<CacheEntry> cache_entry_list;
@@ -43,8 +41,6 @@ typedef struct ExtraState {
   CacheEntry* get_first_entry();
   void move_to_front(CacheEntry* cache_entry);
 } ExtraState;
-
-#pragma GCC visibility pop
 
 #else
 

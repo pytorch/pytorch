@@ -26,6 +26,5 @@ PyObject* CacheEntry_to_obj(CacheEntry* e) {
   if (!e) {
     return py::none().release().ptr();
   }
-  py::object o = py::cast(e);
-  return o.release().ptr();
+  return py::cast(e, py::return_value_policy::reference).release().ptr();
 }
