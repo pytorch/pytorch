@@ -355,7 +355,6 @@ dtensor_fails = {
     xfail("nn.functional.multi_head_attention_forward"),
     xfail("nn.functional.multilabel_margin_loss"),
     xfail("nn.functional.multilabel_soft_margin_loss"),
-    xfail("nn.functional.nll_loss"),
     xfail("nn.functional.normalize"),
     xfail("nn.functional.pad", "constant"),
     xfail("nn.functional.pad", "reflect"),
