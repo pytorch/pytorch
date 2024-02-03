@@ -55,13 +55,14 @@ def user_can_review(repo: str, user: str) -> bool:
         f"https://api.github.com/repos/{repo}/collaborators/{user}/permission",
         headers=headers,
     )
+    result = False
     if response.status_code == 200:
         # true if user has triage or greater permission
         required_perms = ["admin", "maintain", "write", "triage"]
         permissions = response.json()["user"]["permissions"]
-        print(f"{user} {repo} {permissions}")
         for perm in required_perms:
             if permissions.get(perm):
+                print(f"{user} is a valid reviewer for {repo}.")
                 user_permissions_cache[cache_key] = True
                 return True
         print(f"WARN: `{user}` does not have triage or greater permission in {repo}")
@@ -107,7 +108,7 @@ def filter_owners(files_with_owners: Dict[str, List[str]]) -> Dict[str, List[str
         team = team.removeprefix("pytorch/")  # type: ignore[attr-defined]
         return known_teams.get(team)
 
-    print(known_teams)
+    print(f"Known teams: {list(known_teams.keys())}")
 
     filtered_files_with_owners = {}
     for file, owners in files_with_owners.items():
