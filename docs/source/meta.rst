@@ -43,7 +43,7 @@ the :func:`torch.device` context manager::
 
     >>> with torch.device('meta'):
     ...     print(torch.randn(30, 30))
-    ... 
+    ...
     tensor(..., device='meta', size=(30, 30))
 
 This is especially helpful NN module construction, where you often are not
@@ -52,7 +52,7 @@ able to explicitly pass in a device for initialization::
     >>> from torch.nn.modules import Linear
     >>> with torch.device('meta'):
     ...     print(Linear(20, 30))
-    ... 
+    ...
     Linear(in_features=20, out_features=30, bias=True)
 
 You cannot convert a meta tensor directly to a CPU/CUDA tensor, because the
