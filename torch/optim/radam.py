@@ -346,30 +346,33 @@ def _single_tensor_radam(
         # compute the length of the approximated SMA
         rho_t = rho_inf - 2 * step * (beta2 ** step) / bias_correction2
 
-        def rho_t_above_5():
-            # Compute the variance rectification term and update parameters accordingly
-            rect = (
-                (rho_t - 4)
-                * (rho_t - 2)
-                * rho_inf
-                / ((rho_inf - 4) * (rho_inf - 2) * rho_t)
-            ) ** 0.5
-            exp_avg_sq_sqrt = exp_avg_sq.sqrt()
-            if differentiable:
-                exp_avg_sq_sqrt = exp_avg_sq_sqrt.add(eps)
-            else:
-                exp_avg_sq_sqrt = exp_avg_sq_sqrt.add_(eps)
+        # Compute the variance rectification term and update parameters accordingly
+        rect = (
+            (rho_t - 4)
+            * (rho_t - 2)
+            * rho_inf
+            / ((rho_inf - 4) * (rho_inf - 2) * rho_t)
+        ) ** 0.5
 
-            if capturable:
-                adaptive_lr = bias_correction2.sqrt() / exp_avg_sq_sqrt
-            else:
-                adaptive_lr = math.sqrt(bias_correction2) / exp_avg_sq_sqrt
-            param.add_(bias_corrected_exp_avg * lr * adaptive_lr * rect, alpha=-1.0)
-        
-        def rho_t_less_5() :
-            param.add_(bias_corrected_exp_avg * lr, alpha=-1.0)
-        
-        torch.cond(rho_t > 5, rho_t_above_5, rho_t_less_5)
+        if capturable:
+            rect = torch.where(rho_t > 5.0, rect, 0.0)
+        else:
+            rect = rect if rho_t > 5.0 else 0.0
+
+        exp_avg_sq_sqrt = exp_avg_sq.sqrt()
+        if differentiable:
+            exp_avg_sq_sqrt = exp_avg_sq_sqrt.add(eps)
+        else:
+            exp_avg_sq_sqrt = exp_avg_sq_sqrt.add_(eps)
+
+        adaptive_lr = (bias_correction2 ** 0.5) / exp_avg_sq_sqrt
+
+        if capturable:
+            update = torch.where(rect > 0, adaptive_lr * rect, 1.0)
+        else:
+            update = adaptive_lr * rect if rect > 0 else 1.0
+
+        param.add_(bias_corrected_exp_avg * lr * update, alpha=-1.0)
 
 
 def _multi_tensor_radam(
