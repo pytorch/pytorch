@@ -2741,7 +2741,7 @@ class CppVecKernelChecker(CppVecKernel):
                     supported_dtypes = [
                         torch.float32,
                         torch.int32,
-                        # TODO: torch.int64,
+                        torch.int64,
                         torch.bfloat16,
                         torch.float16,
                         torch.bool,

@@ -583,4 +583,8 @@ inline at::vec::VectorizedN<int64_t,2> mask_convert_to_int64(at::vec::Vectorized
   return cvt_fp32_to_int64(mask_convert_to_float(src));
 }
 
+inline at::vec::Vectorized<float> to_float_mask(at::vec::VectorizedN<int64_t,2> src) {
+  return to_float_mask(cvt_int64_to_int32(src));
+}
+
 #endif
