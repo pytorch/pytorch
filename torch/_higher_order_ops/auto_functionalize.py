@@ -34,7 +34,7 @@ from torch.fx.experimental.proxy_tensor import (
 
 
 class AutoFunctionalized(HigherOrderOperator):
-    """auto_functionalized(_mutable_op, _mutated_args_names, **kwargs)
+    """auto_functionalized(_mutable_op, **kwargs)
 
     This HOP runs a "functional" version of _mutable_op.
 
@@ -47,7 +47,7 @@ class AutoFunctionalized(HigherOrderOperator):
     See `can_auto_functionalize` for the restrictions. We can likely lift
     many of these if users request it.
 
-    The reason why _mutable_op and _mutated_args_names are prefixed with an
+    The reason why _mutable_op is prefixed with an
     underscore is to prevent collisions with kwarg names in **kwargs.
     """
 
@@ -57,13 +57,11 @@ class AutoFunctionalized(HigherOrderOperator):
     def __call__(
         self,
         _mutable_op: torch._ops.OpOverload,
-        _mutated_args_names: List[str],
         **kwargs: Dict[str, Any],
     ) -> Tuple[Any, Tuple[Tensor, ...]]:
         assert can_auto_functionalize(_mutable_op)
-        assert isinstance(_mutated_args_names, list)
         assert isinstance(kwargs, dict)
-        return super().__call__(_mutable_op, _mutated_args_names, **kwargs)
+        return super().__call__(_mutable_op, **kwargs)
 
 
 auto_functionalized = AutoFunctionalized()
@@ -110,12 +108,13 @@ def can_auto_functionalize(op: torch._ops.OperatorBase) -> bool:
 @auto_functionalized.py_impl(DispatchKey.CompositeExplicitAutograd)
 def auto_functionalized_dense(
     _mutable_op: torch._ops.OpOverload,
-    _mutated_args_names: List[str],
     **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     new_kwargs = dict(**kwargs)
     result = []
-    for name in _mutated_args_names:
+
+    _mutable_args_names = get_mutable_arg_names(_mutable_op)
+    for name in _mutable_args_names:
         new_kwargs[name] = (
             clone_preserve_strides(kwargs[name]) if kwargs[name] is not None else None
         )
@@ -132,11 +131,10 @@ def auto_functionalized_dense(
 def auto_functionalized_fake(
     mode,
     _mutable_op: torch._ops.OpOverload,
-    _mutated_args_names: List[str],
     **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     with mode:
-        result = auto_functionalized_dense(_mutable_op, _mutated_args_names, **kwargs)
+        result = auto_functionalized_dense(_mutable_op, **kwargs)
         return result
 
 
@@ -144,20 +142,19 @@ def auto_functionalized_fake(
 def auto_functionalized_proxy(
     mode,
     _mutable_op: torch._ops.OpOverload,
-    _mutated_args_names: List[str],
     **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     if not mode.enable_tracing:
-        return auto_functionalized(_mutable_op, _mutated_args_names, **kwargs)
+        return auto_functionalized(_mutable_op, **kwargs)
 
     with disable_proxy_modes_tracing():
-        out = auto_functionalized(_mutable_op, _mutated_args_names, **kwargs)
+        out = auto_functionalized(_mutable_op, **kwargs)
 
     proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
     out_proxy = mode.tracer.create_proxy(
         "call_function",
         auto_functionalized,
-        (_mutable_op, _mutated_args_names),
+        (_mutable_op,),
         proxy_kwargs,
     )
     result = track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
@@ -166,6 +163,19 @@ def auto_functionalized_proxy(
 
 auto_functionalized.fallthrough(DispatchKey.AutogradCPU)
 auto_functionalized.fallthrough(DispatchKey.AutogradCUDA)
+
+
+def get_mutable_arg_names(op: torch._ops.OpOverload) -> List[str]:
+    """
+    Returns the list of argument names that get mutated according to the
+    schema.
+    """
+    mutable_args_names = [
+        arg.name
+        for arg in op._schema.arguments
+        if arg.alias_info is not None and arg.alias_info.is_write
+    ]
+    return mutable_args_names
 
 
 def do_auto_functionalize(
@@ -182,15 +192,11 @@ def do_auto_functionalize(
 
     ctx = PythonFunctionalizeAPI()
 
-    # List of the name of args that get mutated (according to the schema)
-    mutable_args_names = []
     # All of the (args, kwargs), but all as kwargs. The names for the
     # args come from the schema. This makes it easier for us to work with them.
     normalized_kwargs = {}
     schema = op._schema
     for idx, arg in enumerate(schema.arguments):
-        if arg.alias_info is not None and arg.alias_info.is_write:
-            mutable_args_names.append(arg.name)
         # NB: torch_dispatch kwargs are the args defined as kwarg-only in the schema
         if arg.name in kwargs:
             normalized_kwargs[arg.name] = kwargs[arg.name]
@@ -205,8 +211,12 @@ def do_auto_functionalize(
     unwrapped_kwargs = ctx.unwrap_tensors(normalized_kwargs)  # type: ignore[arg-type]
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized(
-            op, mutable_args_names, **unwrapped_kwargs  # type: ignore[arg-type]
+            op, **unwrapped_kwargs  # type: ignore[arg-type]
         )
+
+    # List of the name of args that get mutated (according to the schema)
+    mutable_args_names = get_mutable_arg_names(op)
+
     unwrapped_actual_out: Union[Any, Tuple[Any]] = unwrapped_outs[
         : -len(mutable_args_names)
     ]
