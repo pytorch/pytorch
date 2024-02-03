@@ -1960,7 +1960,7 @@ struct MatmulAutotuneCacheKeyWrapper : ParamsWrapper<MatmulAutotuneCacheKey> {
     std::copy(tensor2.sizes().begin(), tensor2.sizes().end(), this->pod.tensor2_dim);
     std::copy(tensor2.strides().begin(), tensor2.strides().end(), this->pod.tensor2_stride);
     this->pod.should_fold = should_fold;
-    this->pod.is_cuda = tensor1.device().type() == at::kCUDA; 
+    this->pod.is_cuda = tensor1.device().type() == at::kCUDA;
     this->pod.dtype = tensor1.scalar_type();
     this->pod.device = at::detail::getCUDAHooks().current_device();
   }
@@ -2239,7 +2239,7 @@ static Tensor _matmul_impl(
     } else {
       auto output_shape = infer_size_dimvector(batch_tensor1, batch_tensor2);
       const int64_t expand_batch_product = c10::multiply_integers(output_shape);
-  
+
       // flatten expanded batches
       const auto tensor1_expand_size = [&output_shape, n, m1]{ DimVector ret(output_shape);
                                                                ret.append({n, m1});
@@ -2264,14 +2264,14 @@ static Tensor _matmul_impl(
       } else {
         tensor2_expanded = tensor2_expanded.reshape({expand_batch_product, m2, p});
       }
-  
+
       if (dim_tensor1 > 1) {
         output_shape.push_back(n);
       }
       if (dim_tensor2 > 1) {
         output_shape.push_back(p);
       }
-  
+
       if (!has_out) {
         if (vector_rhs) {
           output_tensor = at::_unsafe_view(tensor1_expanded.bmm(tensor2_expanded).squeeze(-1), output_shape);
