@@ -46,8 +46,6 @@ class FSDPState(_State):
         self._pre_forward_hook_handle: Optional[RemovableHandle] = None
         self._post_forward_hook_handle: Optional[RemovableHandle] = None
         self._pre_backward_hook_handles: List[RemovableHandle] = []
-        # Shared post-forward order for explicit backward prefetching
-        self._post_forward_order: List[FSDPParamGroup] = []  # will cause ref cycles
 
     # Define a separate init since `__init__` is called in the contract
     def init(

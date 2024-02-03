@@ -59,7 +59,7 @@ class FSDPCommContext:
         # backward logic like pre/post-gradient division and reduce-scatter
         self.reduce_scatter_stream = torch.cuda.Stream(priority=high_priority)
         # Post-forward order for explicit backward prefetching
-        self.post_forward_order: List[FSDPParamGroup] = []
+        self.post_forward_order: List[FSDPParamGroup] = []  # will cause ref cycles
 
     def get_all_gather_streams(
         self, training_state: TrainingState
@@ -116,6 +116,7 @@ class FSDPParamGroup:
 
         # - Communication and communication/computation overlap
         self.comm_ctx = FSDPCommContext()
+        # Group's indices in the communication context's post-forward order
         self._post_forward_indices: List[int] = []
         # Used to avoid mistargeted backward prefetches in the case that some
         # module is used in forward but not in backward
@@ -324,8 +325,8 @@ class FSDPParamGroup:
     def _prefetch_unshard(self):
         if self._training_state == TrainingState.PRE_BACKWARD:
             if not self._post_forward_indices:
-                msg = "Unexpected backward prefetching without running forward"
-                _raise_assert_with_print(msg)
+                msg = "Unexpected backward prefetch without running forward for "
+                _raise_assert_with_print(f"{msg} {self._module_fqn}")
             curr_index = self._post_forward_indices.pop()
             if (target_index := curr_index - 1) < 0:
                 return
