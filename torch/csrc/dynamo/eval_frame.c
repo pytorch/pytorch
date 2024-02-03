@@ -850,15 +850,6 @@ inline static PyObject* eval_custom_code_impl(
   return result;
 }
 
-inline static void cleanup_flocals(THP_EVAL_API_FRAME_OBJECT* frame) {
-  // The frame->f_locals starts as null. To simplify the implementation of
-  // lookup etc, we use PyFrame_FastToLocalsWithError to get a dictionary from
-  // the fast representation. After we are done with call_callback, we can set
-  // it back to null.
-  Py_XDECREF(frame->f_locals);
-  frame->f_locals = NULL;
-}
-
 // This wrapper function adds a profiler event
 inline static PyObject* eval_custom_code(
     PyThreadState* tstate,
@@ -1027,8 +1018,6 @@ static PyObject* _custom_eval_frame(
     // reference seems wrong. Therefore, we directly access the
     // extra->cache_entry. extra wont be NULL here.
     extra->cache_entry = create_cache_entry(extra->cache_entry, result);
-
-    cleanup_flocals(frame);
     Py_DECREF(result);
     // Update the existing cache_entry on the extra object. This extra object is
     // sitting on the extra scratch space, we are just changing the cache_entry
@@ -1039,7 +1028,6 @@ static PyObject* _custom_eval_frame(
     return eval_custom_code(tstate, frame, extra->cache_entry->code, throw_flag);
   } else {
     DEBUG_TRACE("create skip %s", get_frame_name(frame));
-    cleanup_flocals(frame);
     Py_DECREF(result);
     set_extra_state(frame->f_code, SKIP_CODE);
     // Re-enable custom behavior
