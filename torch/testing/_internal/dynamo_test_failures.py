@@ -594,7 +594,6 @@ dynamo_expected_failures = {
     "PackedSequenceTest.test_total_length",  # nn/test_packed_sequence
     "TestModuleHooks.test_forward_pre_hooks_named_tuple_True",  # nn/test_module_hooks
     "TestModuleHooks.test_full_backward_pre_hooks_named_tuple_True",  # nn/test_module_hooks
-    "TestModuleHooks.test_forward_hooks_named_tuple_False",  # nn/test_module_hooks
     "TestModuleHooks.test_full_backward_hooks_named_tuple_False",  # nn/test_module_hooks
     "TestModuleHooks.test_forward_hooks_named_tuple_True",  # nn/test_module_hooks
     "TestModuleHookNN.test_hook_inplace",  # nn/test_module_hooks
@@ -2252,7 +2251,6 @@ dynamo_expected_failures = {
     "TestJvpCPU.test_simple_cpu",  # functorch/test_eager_transforms.py
     "TestJvpCPU.test_inputs_are_tuples_of_tensors_cpu",  # functorch/test_eager_transforms.py
     "TestJvpCPU.test_disable_fwd_grad_outside_cpu",  # functorch/test_eager_transforms.py
-    "TestPartitioning.test_min_cut_partitioner_recomputable_ops",  # functorch/test_aotdispatch.py
 }
 
 # see NOTE [dynamo_test_failures.py] for more details
