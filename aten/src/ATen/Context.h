@@ -268,11 +268,13 @@ class TORCH_API Context {
   void alertCuBLASConfigNotDeterministic() const;
 
   void setFloat32MatmulPrecision(const std::string& s);
+  void setMatmulAutotune(bool);
   bool allowTF32CuDNN() const;
   void setAllowTF32CuDNN(bool);
   bool allowTF32CuBLAS() const;
   void setAllowTF32CuBLAS(bool);
   Float32MatmulPrecision float32MatmulPrecision() const;
+  bool matmulAutotune();
   void setFloat32MatmulPrecision(Float32MatmulPrecision p);
   bool allowFP16ReductionCuBLAS() const;
   void setAllowFP16ReductionCuBLAS(bool);
@@ -328,6 +330,7 @@ class TORCH_API Context {
       c10::utils::check_env("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE") == true
       ? at::Float32MatmulPrecision::HIGH
       : at::Float32MatmulPrecision::HIGHEST;
+  bool matmul_autotune = false;
   int benchmark_limit_cudnn = 10;
   bool allow_tf32_cudnn = true;
   bool allow_fp16_reduction_cublas = true;

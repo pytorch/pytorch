@@ -674,6 +674,31 @@ PyObject* THPModule_float32MatmulPrecision(
   }
   return THPUtils_packString(s);
 }
+
+PyObject* THPModule_setMatmulAutotune(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_matmul_autotune expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setMatmulAutotune(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_matmulAutotune(
+    PyObject* _unused,
+    PyObject* noargs) {
+  if (at::globalContext().matmulAutotune()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+}
+
 PyObject* THPModule_setSDPUseFlash(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -1326,6 +1351,14 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      nullptr},
     {"_set_float32_matmul_precision",
      THPModule_setFloat32MatmulPrecision,
+     METH_O,
+     nullptr},
+    {"_get_matmul_autotune",
+     THPModule_matmulAutotune,
+     METH_NOARGS,
+     nullptr},
+    {"_set_matmul_autotune",
+     THPModule_setMatmulAutotune,
      METH_O,
      nullptr},
     {"_get_cublas_allow_fp16_reduced_precision_reduction",

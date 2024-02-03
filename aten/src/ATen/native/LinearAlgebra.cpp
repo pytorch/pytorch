@@ -11,6 +11,7 @@
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/cuda/detail/CUDAHooks.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
@@ -18,10 +19,12 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mkldnn/Matmul.h>
+#include <ATen/native/utils/ParamsHash.h>
 #include <c10/core/GradMode.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <variant>
+#include <iostream>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -1930,7 +1933,84 @@ Tensor& vdot_out(const Tensor& self, const Tensor& other, Tensor& result) {
   return result.fill_(self.vdot(other));
 }
 
-static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_out) {
+#define AUTOTUNE_MAX_DIM 4
+
+struct MatmulAutotuneCacheKey {
+  int tensor1_dim[AUTOTUNE_MAX_DIM];
+  int tensor1_stride[AUTOTUNE_MAX_DIM];
+  int tensor2_dim[AUTOTUNE_MAX_DIM];
+  int tensor2_stride[AUTOTUNE_MAX_DIM];
+  bool should_fold;
+  ScalarType dtype;
+  bool is_cuda;
+  int device;
+};
+
+struct MatmulAutotuneCacheKeyWrapper : ParamsWrapper<MatmulAutotuneCacheKey> {
+  MatmulAutotuneCacheKeyWrapper() = default;
+
+  MatmulAutotuneCacheKeyWrapper(
+    const Tensor& tensor1,
+    const Tensor& tensor2,
+    bool should_fold) {
+    TORCH_INTERNAL_ASSERT(tensor1.sizes().size() <= AUTOTUNE_MAX_DIM);
+    TORCH_INTERNAL_ASSERT(tensor2.sizes().size() <= AUTOTUNE_MAX_DIM);
+    std::copy(tensor1.sizes().begin(), tensor1.sizes().end(), this->pod.tensor1_dim);
+    std::copy(tensor1.strides().begin(), tensor1.strides().end(), this->pod.tensor1_stride);
+    std::copy(tensor2.sizes().begin(), tensor2.sizes().end(), this->pod.tensor2_dim);
+    std::copy(tensor2.strides().begin(), tensor2.strides().end(), this->pod.tensor2_stride);
+    this->pod.should_fold = should_fold;
+    this->pod.is_cuda = tensor1.device().type() == at::kCUDA; 
+    this->pod.dtype = tensor1.scalar_type();
+    this->pod.device = at::detail::getCUDAHooks().current_device();
+  }
+};
+
+template <typename T, typename KeyType>
+struct MatmulAutotuneCache {
+std::unordered_map<KeyType, T, ParamsWrapperHash<KeyType>> engine_cache;
+
+T* find(const KeyType& key) {
+  auto it = engine_cache.find(key);
+  if (it == engine_cache.end()) {
+    return nullptr;
+  }
+  return &(it->second);
+}
+
+void update(const KeyType& key, T& results) {
+  engine_cache.erase(key);
+  engine_cache.emplace(key, std::move(results));
+}
+
+};
+
+MatmulAutotuneCache<float, MatmulAutotuneCacheKeyWrapper> matmul_autotune_cache;
+
+static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, MatmulAutotuneCacheKeyWrapper & key, bool& need_profiling, const bool autotune) {
+  if (autotune) {
+    need_profiling = true;
+    key = MatmulAutotuneCacheKeyWrapper(tensor1, tensor2, true);
+    const auto true_value = matmul_autotune_cache.find(key);
+    // don't have data for the true case, run it
+    if (!true_value) {
+      return true;
+    }
+    key = MatmulAutotuneCacheKeyWrapper(tensor1, tensor2, false);
+    const auto false_value = matmul_autotune_cache.find(key);
+    // don't have data for the false case, run it
+    if (!false_value) {
+      return false;
+    }
+    need_profiling = false;
+    if (*false_value < *true_value) {
+      return false;
+    }
+    // key will not be set correctly in this case
+    // but that is OK as we are not doing profiling in this case
+    return true;
+  }
+
   // We check that we can fold the larger tensor into a matrix and dispatch to mm or mv rather than
   // to bmm. We want to make sure we can do so without incurring in any extra copy
   const auto tensor1_larger = tensor1.dim() >= tensor2.dim();
@@ -2010,6 +2090,9 @@ static Tensor _matmul_impl(
   NoNamesGuard guard;
   const auto dim_tensor1 = tensor1.dim();
   const auto dim_tensor2 = tensor2.dim();
+  bool autotune = at::globalContext().matmulAutotune();
+  bool need_profiling = false;
+  MatmulAutotuneCacheKeyWrapper key;
 
   // This is checked up here to simplify the logic below
   // Note that the strings are just evaluated on failure, so almost always we just evaluate
@@ -2039,7 +2122,15 @@ static Tensor _matmul_impl(
                    : tensor1.unsqueeze(0).mm(tensor2).squeeze_(0);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
     return has_out ? at::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
-  } else if (should_fold(tensor1, tensor2, has_out)) {
+  } else if (should_fold(tensor1, tensor2, key, need_profiling, autotune)) {
+    std::chrono::time_point<std::chrono::high_resolution_clock> start;
+    std::chrono::time_point<std::chrono::high_resolution_clock> stop;
+    if (need_profiling) {
+        if (key.pod.is_cuda) {
+          at::detail::getCUDAHooks().deviceSynchronize(at::detail::getCUDAHooks().current_device());
+        }
+        start = std::chrono::high_resolution_clock::now();
+    }
     // dim_tensor1 >=3 && (dim_tensor2 == 1 || dim_tensor2 == 2) ||
     // dim_tensor2 >=3 && (dim_tensor1 == 1 || dim_tensor1 == 2)
     // and at least one of the following two conditions hold
@@ -2064,6 +2155,7 @@ static Tensor _matmul_impl(
     const auto sizes_1 = t1->sizes();
     auto output_shape = DimVector(sizes_1.begin(), sizes_1.end() - 1);
     const auto folded_dim1 = c10::multiply_integers(output_shape);
+    Tensor output_tensor;
 
     // Readjust output_shape if we are multiplying by a matrix
     const auto t2_is_matrix = t2->dim() == 2;
@@ -2080,9 +2172,9 @@ static Tensor _matmul_impl(
         // See should_fold for why.
         // If mm_out were differentiable, we could use it here, and pass a result with the
         // correct strides to avoid this unnecessary copy.
-        return transpose ? output.mT().contiguous() : output;
+        output_tensor = transpose ? output.mT().contiguous() : output;
       } else {
-        return at::_unsafe_view(t1_folded.mv(*t2), output_shape);
+        output_tensor = at::_unsafe_view(t1_folded.mv(*t2), output_shape);
       }
     } else {
       // See the !has_out branch for an explanation
@@ -2103,9 +2195,28 @@ static Tensor _matmul_impl(
       if (!reshaped_out.is_alias_of(out)) {
         out.copy_(reshaped_out);
       }
-      return out;
+      output_tensor = out;
     }
+    if (need_profiling) {
+        if (key.pod.is_cuda) {
+          at::detail::getCUDAHooks().deviceSynchronize(at::detail::getCUDAHooks().current_device());
+        }
+        stop = std::chrono::high_resolution_clock::now();
+        auto dur = stop - start;
+        float time = dur.count();
+        matmul_autotune_cache.update(key, time);
+    }
+    return output_tensor;
   } else {
+    std::chrono::time_point<std::chrono::high_resolution_clock> start;
+    std::chrono::time_point<std::chrono::high_resolution_clock> stop;
+    if (need_profiling) {
+        if (key.pod.is_cuda) {
+          at::detail::getCUDAHooks().deviceSynchronize(at::detail::getCUDAHooks().current_device());
+        }
+        start = std::chrono::high_resolution_clock::now();
+    }
+
     // dim_tensor1 >= 3 || dim_tensor2 >= 3
     // We track m1 vs m2 separately even though they must match for nicer error messages
     const int64_t n = dim_tensor1 > 1 ? tensor1.sizes().cend()[-2] : 1LL;
@@ -2115,71 +2226,81 @@ static Tensor _matmul_impl(
     const int64_t p = dim_tensor2 > 1 ? tensor2.sizes().back() : 1LL;
     const IntArrayRef batch_tensor2(tensor2.sizes().data(),
                                     std::max<int64_t>(dim_tensor2 - 2, 0LL));
-
+    Tensor output_tensor;
     // Same optimization for the gradients as that in should_fold
     // If we're going to broadcast we force it to go through the should_fold branch
     if (dim_tensor1 == 3 && dim_tensor2 == 3 && batch_tensor1[0] != batch_tensor2[0]) {
       if (batch_tensor1[0] == 1 && (tensor1.requires_grad() || isTensorSubclassLike(tensor1))) {
-        return _matmul_impl(out, tensor1.squeeze(0), tensor2);
+        output_tensor =  _matmul_impl(out, tensor1.squeeze(0), tensor2);
       }
       if (batch_tensor2[0] == 1 && (tensor2.requires_grad() || isTensorSubclassLike(tensor2))) {
-        return _matmul_impl(out, tensor1, tensor2.squeeze(0));
-      }
-    }
-
-    auto output_shape = infer_size_dimvector(batch_tensor1, batch_tensor2);
-    const int64_t expand_batch_product = c10::multiply_integers(output_shape);
-
-    // flatten expanded batches
-    const auto tensor1_expand_size = [&output_shape, n, m1]{ DimVector ret(output_shape);
-                                                             ret.append({n, m1});
-                                                             return ret; }();
-    const auto tensor1_expanded = tensor1.expand(tensor1_expand_size)
-                                         .reshape({expand_batch_product, n, m1});
-    // We need to treat the dim_tensor2 == 1 case separately as broadcasting would not convert
-    // a vector of shape (n,) into a batch of matrices of shape (*, n, 1)
-    auto vector_rhs = dim_tensor2 == 1;
-    const auto tensor2_expand_size = [&output_shape, m2, p, vector_rhs]{
-      DimVector ret(output_shape);
-      if (vector_rhs) {
-        ret.push_back(m2);
-      } else {
-        ret.append({m2, p});
-      }
-      return ret;
-    }();
-    auto tensor2_expanded = tensor2.expand(tensor2_expand_size);
-    if (vector_rhs) {
-      tensor2_expanded = tensor2_expanded.reshape({expand_batch_product, m2}).unsqueeze(2);
-    } else {
-      tensor2_expanded = tensor2_expanded.reshape({expand_batch_product, m2, p});
-    }
-
-    if (dim_tensor1 > 1) {
-      output_shape.push_back(n);
-    }
-    if (dim_tensor2 > 1) {
-      output_shape.push_back(p);
-    }
-
-    if (!has_out) {
-      if (vector_rhs) {
-        return at::_unsafe_view(tensor1_expanded.bmm(tensor2_expanded).squeeze(-1), output_shape);
-      } else {
-        return at::_unsafe_view(tensor1_expanded.bmm(tensor2_expanded), output_shape);
+        output_tensor =  _matmul_impl(out, tensor1, tensor2.squeeze(0));
       }
     } else {
-      at::native::resize_output(out, output_shape);
-      auto reshaped_out = out.reshape({expand_batch_product, n, p});
-      at::bmm_out(reshaped_out, tensor1_expanded, tensor2_expanded);
+      auto output_shape = infer_size_dimvector(batch_tensor1, batch_tensor2);
+      const int64_t expand_batch_product = c10::multiply_integers(output_shape);
+  
+      // flatten expanded batches
+      const auto tensor1_expand_size = [&output_shape, n, m1]{ DimVector ret(output_shape);
+                                                               ret.append({n, m1});
+                                                               return ret; }();
+      const auto tensor1_expanded = tensor1.expand(tensor1_expand_size)
+                                           .reshape({expand_batch_product, n, m1});
+      // We need to treat the dim_tensor2 == 1 case separately as broadcasting would not convert
+      // a vector of shape (n,) into a batch of matrices of shape (*, n, 1)
+      auto vector_rhs = dim_tensor2 == 1;
+      const auto tensor2_expand_size = [&output_shape, m2, p, vector_rhs]{
+        DimVector ret(output_shape);
+        if (vector_rhs) {
+          ret.push_back(m2);
+        } else {
+          ret.append({m2, p});
+        }
+        return ret;
+      }();
+      auto tensor2_expanded = tensor2.expand(tensor2_expand_size);
       if (vector_rhs) {
-        reshaped_out = reshaped_out.squeeze(-1);
+        tensor2_expanded = tensor2_expanded.reshape({expand_batch_product, m2}).unsqueeze(2);
+      } else {
+        tensor2_expanded = tensor2_expanded.reshape({expand_batch_product, m2, p});
       }
-      if (!reshaped_out.is_alias_of(out)) {
-        out.copy_(reshaped_out.view_as(out));
+  
+      if (dim_tensor1 > 1) {
+        output_shape.push_back(n);
       }
-      return out;
+      if (dim_tensor2 > 1) {
+        output_shape.push_back(p);
+      }
+  
+      if (!has_out) {
+        if (vector_rhs) {
+          output_tensor = at::_unsafe_view(tensor1_expanded.bmm(tensor2_expanded).squeeze(-1), output_shape);
+        } else {
+          output_tensor = at::_unsafe_view(tensor1_expanded.bmm(tensor2_expanded), output_shape);
+        }
+      } else {
+        at::native::resize_output(out, output_shape);
+        auto reshaped_out = out.reshape({expand_batch_product, n, p});
+        at::bmm_out(reshaped_out, tensor1_expanded, tensor2_expanded);
+        if (vector_rhs) {
+          reshaped_out = reshaped_out.squeeze(-1);
+        }
+        if (!reshaped_out.is_alias_of(out)) {
+          out.copy_(reshaped_out.view_as(out));
+        }
+        output_tensor = out;
+      }
     }
+    if (need_profiling) {
+        if (key.pod.is_cuda) {
+          at::detail::getCUDAHooks().deviceSynchronize(at::detail::getCUDAHooks().current_device());
+        }
+        stop = std::chrono::high_resolution_clock::now();
+        auto dur = stop - start;
+        float time = dur.count();
+        matmul_autotune_cache.update(key, time);
+    }
+    return output_tensor;
   }
 }
 

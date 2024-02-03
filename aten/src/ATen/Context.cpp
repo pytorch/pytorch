@@ -231,6 +231,14 @@ void Context::setFloat32MatmulPrecision(const std::string &s) {
     "setFloat32MatmulPrecision call has no effect.");
 }
 
+void Context::setMatmulAutotune(bool b) {
+  matmul_autotune = b;
+}
+
+bool Context::matmulAutotune() {
+  return matmul_autotune;
+}
+
 at::LinalgBackend Context::linalgPreferredBackend() const {
   return linalg_preferred_backend;
 }

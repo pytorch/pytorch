@@ -54,6 +54,7 @@ __all__ = [
     'is_deterministic_algorithms_warn_only_enabled',
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
+    'set_matmul_autotune', 'get_matmul_autotune',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
     'SymBool', 'sym_not', 'unravel_index',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'sym_ite', 'compile', 'vmap',
@@ -1070,6 +1071,22 @@ def set_float32_matmul_precision(precision: str) -> None:
 
     """
     _C._set_float32_matmul_precision(precision)
+
+def get_matmul_autotune() -> builtins.bool:
+    r"""Returns the current value of the matrix multiplication autotuning flag. Refer to
+    :func:`torch.set_matmul_autotune` documentation for more details.
+    """
+    return _C._get_matmul_autotune()
+
+def set_matmul_autotune(enabled: bool) -> None:
+    r"""Sets the autotuning flag for matrix multiplications.
+
+    Certain matmuls can be folded into bmm (batched matrix multiply), and by default the decision
+    on whether to fold or not is hardcoded via manual heuristics. Setting this flag to true
+    enables autotuning of this folding. Note that at least two warmup runs are needed for each
+    workload to populate the autotuning cache for that workload.
+    """
+    _C._set_matmul_autotune(enabled)
 
 def set_warn_always(b: builtins.bool) -> None:
     r"""When this flag is False (default) then some PyTorch warnings may only
