@@ -750,12 +750,6 @@ def min_cut_rematerialization_partition(
         print("Ops banned from rematerialization: ", ops_ignored)
         print()
 
-    # `AGGRESSIVE_RECOMPUTATION` is a mode that recomputes everything except
-    # random ops and compute-intensive ops.
-    # It's an internal-only debug mode and is not related to user-facing
-    # (selective) activation checkpointing.
-    AGGRESSIVE_RECOMPUTATION = False
-
     def is_materialized_backwards(node):
         cur_nodes = {node}
         while len(cur_nodes) > 0:
@@ -771,7 +765,7 @@ def min_cut_rematerialization_partition(
     def ban_recomputation(node):
         if "recompute" in node.meta:
             return node.meta["recompute"] == 0
-        elif AGGRESSIVE_RECOMPUTATION:
+        elif config.aggressive_recomputation:
             ignored_ops = random_ops + compute_intensive_ops
             return (node.op == 'call_function' and get_aten_target(node) in ignored_ops)
         else:
