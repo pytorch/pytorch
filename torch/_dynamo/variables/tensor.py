@@ -617,6 +617,7 @@ class TensorVariable(VariableTracker):
             has_bool_key(key)
             and isinstance(value, TensorVariable)
             and value.requires_grad
+            and torch.is_grad_enabled()
         ):
             unimplemented(
                 "boolean masking setitem backwards, see https://github.com/pytorch/pytorch/issues/114123"
@@ -823,14 +824,14 @@ class TensorVariable(VariableTracker):
         else:
             return variables.ConstantVariable.create(None)
 
-    def method_new(self, size):
+    def method_new(self, *args):
         # Convert x.new(torch.Size) into x.new_empty(torch.Size),
         # as Tensor.new acts differently with a Size input versus a tuple input.
-        if isinstance(size, SizeVariable):
+        if len(args) == 1 and isinstance(args[0], SizeVariable):
             from ..symbolic_convert import InstructionTranslator
 
             return self.call_method(
-                InstructionTranslator.current_tx(), "new_empty", [size], {}
+                InstructionTranslator.current_tx(), "new_empty", args, {}
             )
 
     def rename(self, tx, name):
