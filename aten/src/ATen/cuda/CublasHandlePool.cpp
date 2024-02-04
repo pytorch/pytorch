@@ -122,7 +122,7 @@ at::DataPtr getNewWorkspace() {
 }
 
 cublasHandle_t getCurrentCUDABlasHandle() {
-  int device;
+  c10::DeviceIndex device = 0;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
 
   // Thread local PoolWindows are lazily-initialized
@@ -180,7 +180,7 @@ cublasHandle_t getCurrentCUDABlasHandle() {
 #if (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
 cublasLtHandle_t getCurrentCUDABlasLtHandle() {
 #ifdef USE_ROCM
-  int device;
+  c10::DeviceIndex device = 0;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
 
   // Thread local PoolWindows are lazily-initialized

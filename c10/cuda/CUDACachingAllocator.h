@@ -274,7 +274,9 @@ class CUDAAllocator : public Allocator {
   // callback.
   virtual void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) = 0;
 
-  virtual void enablePeerAccess(int dev, int dev_to_access) = 0;
+  virtual void enablePeerAccess(
+      c10::DeviceIndex dev,
+      c10::DeviceIndex dev_to_access) = 0;
 
   // memory not allocated from cudaMalloc cannot be copied
   // across devices using cudaMemcpyAsync if peer to peer access is disabled.
@@ -445,7 +447,9 @@ inline cudaError_t memcpyAsync(
       dst, dstDevice, src, srcDevice, count, stream, p2p_enabled);
 }
 
-inline void enablePeerAccess(int dev, int dev_to_access) {
+inline void enablePeerAccess(
+    c10::DeviceIndex dev,
+    c10::DeviceIndex dev_to_access) {
   return get()->enablePeerAccess(dev, dev_to_access);
 }
 

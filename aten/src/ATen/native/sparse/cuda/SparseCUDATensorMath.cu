@@ -313,7 +313,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
     // TODO benchmark to decide whether to remove this special case
     const dim3 block = cuda::getApplyBlock();
     dim3 grid;
-    int curDevice = -1;
+    c10::DeviceIndex curDevice = -1;
     c10::cuda::GetDevice(&curDevice);
     cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
     if (sparse.dense_dim() == 0) {
@@ -610,7 +610,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
       grad_input_values = grad_values_expand;
     }
     else {
-      int curDevice = -1;
+      c10::DeviceIndex curDevice = -1;
       c10::cuda::GetDevice(&curDevice);
       cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
       at::cuda::ThrustAllocator allocator;
@@ -715,7 +715,7 @@ __global__ void search_end_matrix_indices_cuda_kernel(
 // Search through a 1D tensor of sorted sparse matrix
 // indices to find the end index for each matrix
 void search_end_matrix_indices(int64_t* mat_el_end_indices, int64_t num_matrices, const Tensor& indices_1D) {
-  int curDevice = -1;
+  c10::DeviceIndex curDevice = -1;
   c10::cuda::GetDevice(&curDevice);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
 

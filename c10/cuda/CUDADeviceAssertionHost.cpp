@@ -35,7 +35,7 @@ namespace {
 /// We need our own implementation of this function to prevent
 /// an infinite initialization loop for CUDAKernelLaunchRegistry
 int dsa_get_device_id() {
-  int device = -1;
+  c10::DeviceIndex device = -1;
   C10_CUDA_CHECK_WO_DSA(c10::cuda::GetDevice(&device));
   return device;
 }
