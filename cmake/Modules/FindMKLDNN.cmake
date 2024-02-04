@@ -24,7 +24,7 @@ IF(NOT MKLDNN_FOUND)
       set(DNNL_HOST_COMPILER "g++")
       # g++ is soft linked to /usr/bin/cxx, oneDNN would not treat it as an absolute path
     else()
-      set(DNNL_HOST_COMPILER DEFAULT)
+      message(FATAL_ERROR "oneDNN library currently only supports GUN g++ compiler for XPU backend")
     endif()
 
     set(DNNL_MAKE_COMMAND "cmake" "--build" ".")
