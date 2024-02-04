@@ -433,7 +433,8 @@ def run_test(
         unittest_args.extend(test_module.get_pytest_args())
         unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
 
-    # TODO: These features are not available for C++ test yet
+    # NB: These features are not available for C++ tests, but there is little incentive
+    # to implement it because we have never seen a flaky C++ test before.
     if IS_CI and not is_cpp_test:
         ci_args = ["--import-slow-tests", "--import-disabled-tests"]
         if RERUN_DISABLED_TESTS:
