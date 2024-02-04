@@ -1725,7 +1725,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
             x = torch.randn(B0, 0, 3)
             vmap(lambda x: x.as_strided([3], [1]))(x)
 
-    @xfailIfTorchDynamo
     def test_nll_loss(self):
         test = self._vmap_test
         op = F.nll_loss
@@ -3173,7 +3172,6 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._test_arithmetic(torch.div, device)
         self._test_arithmetic(lambda x, y: x / y, device)
 
-    @xfailIfTorchDynamo
     def test_binary_cross_entropy(self, device):
         x = F.sigmoid(torch.randn(3, 2, device=device, requires_grad=True))
         target = torch.rand(3, 2, device=device)
@@ -3183,7 +3181,6 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._batched_grad_test(op, (x,), {})
         self._batched_grad_grad_test(op, (x,), {})
 
-    @xfailIfTorchDynamo
     def test_log_softmax(self, device):
         op = functools.partial(torch.log_softmax, dim=-1)
         x = torch.randn(3, 2, device=device, requires_grad=True)
