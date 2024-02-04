@@ -32,17 +32,18 @@ class TestMemoryPlanning(TestCase):
         Generate a simple test case that has multiple simultaneously-live intermediate tensors.
         """
 
-        def f(x, y, z):
-            t0 = x.matmul(y)
-            t1 = x.matmul(z)
-            t0 = x.transpose(0, 1).matmul(t1)
-            t1 = x.matmul(t0)
-            return t0.sum() + t1.sum()
+        class Foo(torch.nn.Module):
+            def forward(self, x, y, z):
+                t0 = x.matmul(y)
+                t1 = x.matmul(z)
+                t0 = x.transpose(0, 1).matmul(t1)
+                t1 = x.matmul(t0)
+                return t0.sum() + t1.sum()
 
         x = torch.randn((3, 2), device=device)
         y = torch.randn((2, 4), device=device)
         z = torch.randn((2, 3), device=device)
-        return (f, (x, y, z))
+        return (Foo(), (x, y, z))
 
     def test_python_wrapper(self):
         f, args = self._generate(device="cuda")
