@@ -25,7 +25,7 @@ TEST(XpuGeneratorTest, testDefaultGenerator) {
   auto bar = at::xpu::detail::getDefaultXPUGenerator();
   ASSERT_EQ(foo, bar);
 
-  auto offset = foo.get_offset() + 1;
+  auto offset = foo.get_offset() << 1;
   foo.set_offset(offset);
   ASSERT_EQ(foo.get_offset(), offset);
 
