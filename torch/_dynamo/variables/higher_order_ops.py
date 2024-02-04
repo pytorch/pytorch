@@ -497,6 +497,57 @@ def add_subgraph(tx, source, name, gm):
     return next_name
 
 
+class TorchHigherOrderOperatorVariableFactory:
+    """
+    Handles the dispatch to a method-specific handler defined below.
+    """
+    def create(self, value, source=None, **kwargs):
+        method_name = f"create_{value.__name__}"
+        if hasattr(self, method_name):
+            create_method = getattr(self, method_name)
+            return create_method(value, source, **kwargs)
+        unimplemented(f"HigherOrderOperator {value.__name__}")
+    
+   def create_cond(self, value, source=None, **kwargs):
+        return CondHigherOrderVariable(value, source, **kwargs)
+
+    def create_while_loop(self, value, source=None, **kwargs):
+        return WhileLoopHigherOrderVariable(value, source, **kwargs)
+
+    def create_map(self, value, source=None, **kwargs):
+        return MapHigherOrderVariable(value, source, **kwargs)
+
+    def create_map_impl(self, value, source=None, **kwargs):
+        return MapHigherOrderVariable(value, source, **kwargs)
+
+    def create_executorch_call_delegate(self, value, source=None, **kwargs):
+        return ExecutorchCallDelegateHigherOrderVariable(value, source, **kwargs)
+
+    def create_out_dtype(self, value, source=None, **kwargs):
+        return OutDtypeHigherOrderVariable(value, source, **kwargs)
+
+    def create_functorch_eager_transforms_grad_impl(self, value, source=None, **kwargs):
+        return FunctorchGradHigherOrderVariable(value, source, **kwargs)
+
+    def create_wrap(self, value, source=None, **kwargs):
+        return WrapHigherOrderVariable(value, source, **kwargs)
+
+    def create_wrap_activation_checkpoint(self, value, source=None, **kwargs):
+        return CheckpointHigherOrderVariable(value, source, **kwargs)
+
+    def create_tag_activation_checkpoint(self, value, source=None, **kwargs):
+        return CheckpointHigherOrderVariable(value, source, **kwargs)
+
+    def create_export_tracepoint(self, value, source=None, **kwargs):
+        return ExportTracepointHigherOrderVariable(value, source, **kwargs)
+
+    def create_trace_wrapped(self, value, source=None, **kwargs):
+        return TraceWrappedHigherOrderOperatorVariable(value, source, **kwargs)
+
+    def create_strict_mode(self, value, source=None, **kwargs):
+        return StrictModeHigherOrderVariable(value, source, **kwargs)
+    
+
 class TorchHigherOrderOperatorVariable(VariableTracker):
     def __init__(self, value, source: Optional[Source] = None, **kwargs):
         super().__init__(**kwargs)
@@ -505,33 +556,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
 
     @staticmethod
     def make(value, source=None, **kwargs):
-        if value.__name__ == "cond":
-            return CondHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "while_loop":
-            return WhileLoopHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ in ("map", "map_impl"):
-            return MapHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "executorch_call_delegate":
-            return ExecutorchCallDelegateHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "out_dtype":
-            return OutDtypeHigherOrderVariable(value, source, **kwargs)
-        elif value is torch._functorch.eager_transforms.grad_impl:
-            return FunctorchGradHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "wrap":
-            return WrapHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ in (
-            "wrap_activation_checkpoint",
-            "tag_activation_checkpoint",
-        ):
-            return CheckpointHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "_export_tracepoint":
-            return ExportTracepointHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "trace_wrapped":
-            return TraceWrappedHigherOrderOperatorVariable(value, source, **kwargs)
-        elif value.__name__ == "strict_mode":
-            return StrictModeHigherOrderVariable(value, source, **kwargs)
-        else:
-            unimplemented(f"HigherOrderOperator {value.__name__}")
+        factory = TorchHigherOrderOperatorVariableFactory()
+        return factory.create(value, source, **kwargs)
 
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
