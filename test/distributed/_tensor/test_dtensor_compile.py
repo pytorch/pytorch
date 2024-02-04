@@ -331,6 +331,10 @@ class TestDTensorCompileWithNativeFunCol(TestDTensorCompile):
         if not self._prev_native_funcol_enabled:
             funcol.disable_native_funcol()
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(1)
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
     def test_tp_compile_comm_reordering(self):
         code = self._test_tp_compile_comm_reordering_helper()
         # NOTE(yifu): I'm not sure whether the original test is expecting
