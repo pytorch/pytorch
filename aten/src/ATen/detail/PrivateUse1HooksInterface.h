@@ -3,6 +3,7 @@
 #include <ATen/core/Generator.h>
 #include <c10/core/Allocator.h>
 #include <c10/core/Device.h>
+#include <c10/core/Storage.h>
 #include <c10/util/Exception.h>
 namespace at {
 
@@ -34,6 +35,7 @@ struct TORCH_API PrivateUse1HooksInterface {
   }
 
   virtual void initPrivateUse1() const {}
+  virtual void resizePrivateUse1Bytes(const c10::Storage &storage, size_t newsize) const {};
 };
 
 struct TORCH_API PrivateUse1HooksArgs {};
