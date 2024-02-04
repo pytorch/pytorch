@@ -280,6 +280,14 @@ def is_to_lowp_dtype(expr):
     return None
 
 
+def to_fp32_expr(lowp_var, src_dtype, kernel):
+    if isinstance(kernel, CppVecKernel):
+        return f"cvt_lowp_fp_to_fp32<{DTYPE_TO_CPP[src_dtype]}>({lowp_var})"
+    else:
+        assert isinstance(kernel, CppKernel)
+        return f"c10::convert<float>({lowp_var})"
+
+
 index_value_name_counter = 1
 
 
@@ -979,6 +987,7 @@ class CppOverrides(OpOverrides):
         code.writeline(f"auto {left} = {x} > 0 ? {scalar_one} : {scalar_zero};")
         code.writeline(f"auto {right} = {x} < 0 ? {scalar_one} : {scalar_zero};")
         code.writeline(f"auto {result} = {left} - {right};")
+        V.kernel.cse.cache[f"auto {result} = {left} - {right};"] = result
         V.kernel.compute.splice(code)
         return result
 
@@ -1321,6 +1330,7 @@ class CppVecOverrides(CppOverrides):
         code.writeline(f"auto {right} = {blendv};")
         result = V.kernel.cse.newvar()
         code.writeline(f"auto {result} = {left} - {right};")
+        V.kernel.cse.cache[f"auto {result} = {left} - {right};"] = result
         V.kernel.compute.splice(code)
         return result
 
@@ -1336,10 +1346,6 @@ class CppVecOverrides(CppOverrides):
         ], f"{__name__} does not support {dtype}"
         node: torch.fx.Node = V.interpreter.current_node
         assert node and isinstance(node, torch.fx.Node)
-        if node.target == "store":
-            assert dtype == torch.float
-            assert src_dtype in DTYPE_LOWP_FP
-            return f"cvt_lowp_fp_to_fp32<{DTYPE_TO_CPP[src_dtype]}>({x})"
         opt_ctx_x = get_opt_ctx(node.args[1])
         assert opt_ctx_x
         if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype == torch.bool:
@@ -1498,6 +1504,15 @@ class CppKernel(Kernel):
             self._load_mask = prior
 
     def cache_fp32_cse_var_before_store(self, var_to_store):
+        """
+        https://github.com/pytorch/pytorch/issues/115260
+        For FusedSchedulerNode[node1, node2], the node2 might need to load node1's result
+        the node1's result might be lowp data type and node2 might need to cast node1's lowp dtype
+        to fp32 to do following computes. Thus we add a pair
+        {to_fp32_expr, node1's fp32 store cse var} in cse cache here to avoid the "to_dtype"
+        after node2's "load".
+        """
+
         def find_fp32_var(var, cache):
             fp32_cse_var = None
             fp32_cse_var_name = None
@@ -1519,9 +1534,7 @@ class CppKernel(Kernel):
 
         fp32_var, lowp_dtype = find_fp32_var(var_to_store, self.cse.cache)
         if fp32_var:
-            self.cse.cache[
-                self.overrides.to_dtype(var_to_store, torch.float32, lowp_dtype)
-            ] = fp32_var
+            self.cse.cache[to_fp32_expr(var_to_store, lowp_dtype, self)] = fp32_var
 
     def scale_index_with_offset(
         self, index: sympy.Expr, scale=1, itervar_idx=-1, offset=0
