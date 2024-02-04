@@ -2078,9 +2078,9 @@ class TestJac(TestCase):
     @jacrev_and_jacfwd
     def test_float_argnums(self, device, jacapi):
         x = torch.randn(3, device=device)
-        with self.assertRaisesRegex(RuntimeError, "must be int or Tuple"):
+        with self.assertRaisesRegex(RuntimeError, f"{jacapi.__name__}: `argnums` should be int or Tuple[int, ...], got: <class \'float\'>"):
             jacapi(torch.sin, argnums=0.0)(x)
-        with self.assertRaisesRegex(RuntimeError, "must be int"):
+        with self.assertRaisesRegex(RuntimeError, f"{jacapi.__name__}: `argnums` should be int or Tuple[int, ...], got: Tuple[<class 'int'>, <class 'float'>]"):
             jacapi(torch.multiply, argnums=(1, 0.0))(x, x)
 
     def test_hessian_simple(self, device):

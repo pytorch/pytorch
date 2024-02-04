@@ -363,6 +363,15 @@ def error_if_complex(func_name, args, is_input):
                        f"to be real but received complex tensor at flattened input idx: {idx}")
             raise RuntimeError(err_msg)
 
+
+def _error_if_not_argnum_t(caller: str, arg_name: str, value: Any) -> None:
+    if not isinstance(value, int) and not isinstance(value, tuple):
+        raise ValueError(f"{caller}: `{arg_name}` should be int or Tuple[int, ...], got: {type(value)}")
+    elif isinstance(value, tuple) and not all(isinstance(element, int) for element in value):
+        types = ', '.join([str(type(element)) for element in value])
+        raise ValueError(f"{caller}: `{arg_name}` should be int or Tuple[int, ...], got: Tuple[{types}]")
+
+
 @exposed_in("torch.func")
 def jacrev(func: Callable, argnums: argnums_t = 0, *, has_aux=False,
            chunk_size: Optional[int] = None,
@@ -496,8 +505,7 @@ def jacrev(func: Callable, argnums: argnums_t = 0, *, has_aux=False,
     if not (chunk_size is None or chunk_size > 0):
         raise ValueError("jacrev: `chunk_size` should be greater than 0.")
 
-    if not isinstance(argnums, int) and not isinstance(argnums, tuple):
-        raise ValueError(f"jacrev: `argnums` should be int or Tuple[int, ...], got: {type(argnums)}")
+    _error_if_not_argnum_t("jarev", "argnums", argnums)
 
     @wraps(func)
     def wrapper_fn(*args):
@@ -1122,8 +1130,7 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
         >>> assert torch.allclose(jacobian[1], expectedY)
 
     """
-    if not isinstance(argnums, int) and not isinstance(argnums, tuple):
-        raise ValueError(f"jacrev: `argnums` should be int or Tuple[int, ...], got: {type(argnums)}")
+    _error_if_not_argnum_t("jafwd", "argnums", argnums)
 
     @wraps(func)
     def wrapper_fn(*args):
