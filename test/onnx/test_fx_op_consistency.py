@@ -138,8 +138,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         dtypes=(torch.float16,),
         reason="fixme: Assertion error: result mismatch and type error",
     ),
-    skip(
+    xfail(
         "_softmax_backward_data",
+        dtypes=(torch.float16,),
+        model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
         reason=onnx_test_common.reason_dynamo_does_not_support("assert all(isinstance(a, KNOWN_TYPES) for a in flat_args)")
     ),
     xfail(
@@ -192,7 +194,7 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     ),
     xfail(
         "all",
-        reason=onnx_test_common.reason_onnx_does_not_support(
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
             "Op (ReduceXXX) [ShapeInferenceError] axis must be in [-rank, rank-1]. input rank was 0")
     ),
     xfail(
@@ -736,7 +738,7 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "native_batch_norm",
         dtypes=(torch.float16,),
-        reason="fixme: ORT optimizer error: https://github.com/microsoft/onnxruntime/issues/16438",
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Type Error: Type (tensor(float16)) of output arg (_native_batch_norm_legit_functional_1) of node (_aten__native_batch_norm_training_functional_onnx_1) does not match expected type (tensor(float))."),
     ),
     xfail(
         "native_layer_norm",
@@ -779,7 +781,7 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "nn.functional.batch_norm",
         dtypes=(torch.float16,),
-        reason=onnx_test_common.reason_onnx_does_not_support("Conv1d", "int64"),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("FAIL : Type Error: Type (tensor(float16)) of output arg (_native_batch_norm_legit_functional_1) of node (_aten__native_batch_norm_training_functional_onnx_1) does not match expected type (tensor(float))."),
     ),
     xfail(
         "nn.functional.conv_transpose1d",
@@ -889,6 +891,18 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "nn.functional.instance_norm",
         model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
         reason="Functionalize pass failed",
+    ),
+    xfail(
+        "nn.functional.interpolate",
+        variant_name="linear",
+        dtypes=(torch.float16, torch.float32,),
+        reason="Mismatched elements with high difference",
+    ),
+    xfail(
+        "nn.functional.interpolate",
+        variant_name="trilinear",
+        dtypes=(torch.float16, torch.float32),
+        reason="Mismatched elements with high difference",
     ),
     xfail(
         "nn.functional.local_response_norm",
@@ -1138,7 +1152,7 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "squeeze",
         variant_name="multiple",
-        reason="fixme: The values for attribute 'shape' do not match",
+        reason="fixme: https://github.com/microsoft/onnxscript/issues/1264",
     ),
     xfail(
         "svd_lowrank",
@@ -1172,8 +1186,11 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "tensor_split",
         reason=onnx_test_common.reason_dynamo_does_not_support("data-dependent"),
     ),
-    skip(
+    xfail(
         "to",
+        dtypes=(torch.int32, torch.int64, torch.float16, torch.float32, torch.bool, torch.complex64),
+        # model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
         reason="This op requires torch.dtype as input, which is not supported currently.",
     ),
     xfail(
@@ -1337,6 +1354,13 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="https://github.com/pytorch/pytorch/issues/115106",
     ),
     xfail(
+        "_softmax_backward_data",
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        reason=onnx_test_common.reason_onnx_does_not_support(
+            "assert all(isinstance(a, KNOWN_TYPES) for a in flat_args)"
+        ),
+    ),
+    xfail(
         "addmm",  # xfail can't only use dtypes to catch all cases
         matcher=lambda sample: sample.input.dtype
         in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
@@ -1422,17 +1446,6 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         "linalg.multi_dot",
         matcher=lambda sample: sum([torch.numel(input) for input in sample.input]) == 0,
         reason="fixme: Undefined",
-    ),
-    xfail(
-        "linalg.vecdot",
-        matcher=lambda sample: torch.numel(sample.input) == 0
-        and len(sample.input.shape) > 1
-        and (
-            (sample.input.shape[0] == 0 and sample.kwargs.get("dim") == 0)
-            or (sample.input.shape[1] == 0 and sample.kwargs.get("dim") == 1)
-            or (sample.input.shape[1] == 0 and sample.kwargs.get("dim") is None)
-        ),
-        reason=onnx_test_common.reason_onnx_script_does_not_support("Sum"),
     ),
     skip(
         "log_softmax",
@@ -1555,19 +1568,7 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
             "Reshape", "empty tensor"
         ),
     ),
-    skip(
-        "nn.functional.interpolate",
-        variant_name="linear",
-        matcher=lambda sample: sample.input.dtype in (torch.float16, torch.float32),
-        reason="Mismatched elements with high difference",
-    ),
-    skip(
-        "nn.functional.interpolate",
-        variant_name="trilinear",
-        matcher=lambda sample: sample.input.dtype in (torch.float16, torch.float32),
-        reason="Mismatched elements with high difference",
-    ),
-    skip(
+    xfail(
         "nn.functional.max_pool3d",
         matcher=lambda sample: sample.kwargs.get("ceil_mode") is True
         and sample.kwargs.get("padding") == 1,
