@@ -1727,55 +1727,46 @@ class CppKernel(Kernel):
                 if hasattr(kernel, "codegen_inner_loops"):
                     code.splice(kernel.poststores)
 
-            def get_reduction_code_buffer(loops, is_suffix=True):
+            def get_reduction_code_buffer(loops, buffer="prefix"):
+                assert buffer in ("prefix", "suffix", "local")
                 for loop in loops:
                     for kernel in loop.get_kernels():
-                        if is_suffix:
-                            suffix = (
-                                (
-                                    kernel.parallel_reduction_suffix
-                                    + kernel.reduction_suffix,
-                                    None,
-                                    None,
-                                )
-                                if loop.parallel
-                                else (kernel.reduction_suffix, None, None)
+                        if buffer == "local":
+                            return (
+                                kernel.local_reduction_init,
+                                kernel.local_reduction_stores,
                             )
+                        elif buffer == "suffix":
+                            suffix = kernel.reduction_suffix
+                            if loop.parallel:
+                                suffix = kernel.parallel_reduction_suffix + suffix
                             return suffix
                         else:
-                            prefix = (
-                                (
-                                    kernel.reduction_prefix
-                                    + kernel.parallel_reduction_prefix,
-                                    kernel.local_reduction_init,
-                                    kernel.local_reduction_stores,
-                                )
-                                if loop.parallel
-                                else (kernel.reduction_prefix, None, None)
-                            )
+                            prefix = kernel.reduction_prefix
+                            if loop.parallel:
+                                prefix = prefix + kernel.parallel_reduction_prefix
                             return prefix
 
             def gen_loops(loops: List[LoopLevel], in_reduction=False):
                 with contextlib.ExitStack() as stack_outer:
+                    local_reduction_init, local_reduction_stores = None, None
                     if loops:
                         loop = loops[0]
                         if loop.is_reduction and not in_reduction:
                             (
-                                reduction_prefix,
-                                ws_init,
-                                ws_tores,
-                            ) = get_reduction_code_buffer(loops, is_suffix=False)
-                            if ws_init:
-                                assert ws_tores
-                                # worksharing.reduction_init = ws_init
-                                # worksharing.reduction_stores = ws_tores
+                                local_reduction_init,
+                                local_reduction_stores,
+                            ) = get_reduction_code_buffer(loops, "local")
+                            reduction_prefix = get_reduction_code_buffer(loops)
+                            if local_reduction_init:
+                                assert local_reduction_stores
                             if reduction_prefix:
                                 stack_outer.enter_context(code.indent())
                             code.splice(reduction_prefix)
                         if loop_nest.is_reduction_only() and loop.parallel:
                             worksharing.parallel(threads)
-                            if ws_init:
-                                code.splice(ws_init)
+                            if local_reduction_init:
+                                code.splice(local_reduction_init)
 
                     for loop in loops:
                         gen_loop(loop, in_reduction)
@@ -1783,15 +1774,18 @@ class CppKernel(Kernel):
                     if loops:
                         loop = loops[0]
                         if loop_nest.is_reduction_only() and loop.parallel:
-                            if ws_tores:
-                                code.splice(ws_tores)
+                            if local_reduction_stores:
+                                code.splice(local_reduction_stores)
                             worksharing.close()
                         if loop.is_reduction and not in_reduction:
-                            code.splice(
-                                get_reduction_code_buffer(loops, is_suffix=True)[0]
-                            )
+                            code.splice(get_reduction_code_buffer(loops, "suffix"))
 
             def gen_loop(loop: LoopLevel, in_reduction=False):
+                def is_parallel_reduction(loop):
+                    while loop.parent:
+                        loop = loop.parent
+                    return loop.is_reduction and loop.parallel
+
                 with contextlib.ExitStack() as stack:
                     loop_lines = loop.lines()
                     if loop_lines is None:
@@ -1804,7 +1798,7 @@ class CppKernel(Kernel):
                     else:
                         kernels = loop.get_kernels()
                         assert len(kernels) == 1
-                        if (in_reduction or loop.is_reduction) and loop.parallel:
+                        if is_parallel_reduction(loop):
                             kernels[0].update_stores_with_parallel_reduction()
                         gen_kernel(kernels[0])
 
@@ -3533,8 +3527,6 @@ class WorkSharing:
             self.code.writeline(
                 "int tid = omp_get_thread_num();",
             )
-            # self.code.splice(self.reduction_init)
-            # self.reduction_init = IndentedBuffer()
 
     def single(self):
         if self.in_parallel:
@@ -3542,8 +3534,6 @@ class WorkSharing:
         return self.in_parallel
 
     def close(self):
-        # self.code.splice(self.reduction_stores)
-        # self.reduction_stores = IndentedBuffer()
         self.stack.close()
         self.in_parallel = False
 
