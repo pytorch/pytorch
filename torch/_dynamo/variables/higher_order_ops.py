@@ -1577,7 +1577,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         else:
             unimplemented("non-function or method")
 
-        with tx.output.subtracer(fwd_fn, fwd_tracer):
+        with tx.output.subtracer(fwd_fn, fwd_tracer), tx.strict_translation_mode():
             (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
                 tx,
                 bwd_fn,
