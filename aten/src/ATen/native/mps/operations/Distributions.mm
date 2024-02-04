@@ -133,11 +133,7 @@ Tensor& random_mps_impl(Tensor& self,
     }
 
     Placeholder outputPlaceholder = Placeholder(cachedGraph->resultTensor, self);
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData(),
-    };
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return self;
@@ -575,10 +571,7 @@ static Tensor& multinomial_with_replacement_mps_kernel(const Tensor& self,
       cachedGraph->stateTensor : stateTensorData,
       probPlaceholder.getMPSGraphTensor() : probPlaceholder.getMPSGraphTensorData()
     };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return result;
