@@ -73,6 +73,9 @@ def sdpa_kernel(backends: Union[List[SDPBackend], SDPBackend]):
         backends, (list, SDPBackend)
     ), "Backend must be an instance of SDPBackend or a list of SDPBackend instances"
 
+    if isinstance(backends, SDPBackend):
+        backends = [backends]
+
     backends = set(backends)
     previous_flash: bool = flash_sdp_enabled()
     previous_mem_efficient: bool = mem_efficient_sdp_enabled()
