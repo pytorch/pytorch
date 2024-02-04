@@ -2259,8 +2259,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     @staticmethod
     def check_inlineable(func):
-        if isinstance(func, SkipFilesVariable):
-            unimplemented("inline with functions in skip files")
         if func.has_self():
             unimplemented("inline with __self__")
 
@@ -2293,9 +2291,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def inline_call_(
         parent, func: VariableTracker, args: List[VariableTracker], kwargs
     ):
+        if isinstance(func, SkipFilesVariable):
+            unimplemented("inline with functions in skip files")
         assert isinstance(
             func,
-            (UserFunctionVariable, NestedUserFunctionVariable, SkipFilesVariable),
+            (UserFunctionVariable, NestedUserFunctionVariable),
         )
         result = InliningInstructionTranslator.check_inlineable(func)
         assert result.skipped is False
