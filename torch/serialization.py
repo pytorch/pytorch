@@ -1058,6 +1058,8 @@ copyreg.pickle(torch.layout, lambda obj: (_get_layout, (str(obj),)))
 
 def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
     deserialized_objects: Dict[int, Any] = {}
+    if torch._guards.detect_fake_mode(None) is not None:
+        map_location = None
 
     restore_location = _get_restore_location(map_location)
 
@@ -1131,6 +1133,8 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                 for i in range(num_storages):
                     args = pickle_module.load(f, **pickle_load_args)
                     key, location, storage_type = args
+                    if torch._guards.detect_fake_mode(None) is not None:
+                        location = 'meta'
                     dtype = storage_type._dtype
                     obj = cast(Storage, torch.UntypedStorage)._new_with_file(f, torch._utils._element_size(dtype))
                     obj = restore_location(obj, location)
@@ -1166,7 +1170,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                     numel = struct.unpack(f'<{ndim}q', f.read(8 * ndim))
                     stride = struct.unpack(f'<{ndim}q', f.read(8 * ndim))
                     storage_offset, = struct.unpack('<q', f.read(8))
-                    tensor = torch.tensor([], dtype=storage.dtype).set_(
+                    tensor = torch.empty((), dtype=storage.dtype).set_(
                         storage._untyped_storage, storage_offset, numel, stride)
                     deserialized_objects[key] = tensor
 
@@ -1190,6 +1194,8 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
             return data[0]
         elif typename == 'storage':
             storage_type, root_key, location, numel, view_metadata = data
+            if torch._guards.detect_fake_mode(None) is not None:
+                location = 'meta'
             location = _maybe_decode_ascii(location)
             dtype = storage_type.dtype
 

@@ -221,8 +221,8 @@ def _rebuild_tensor_v3(
     dtype,
     metadata=None,
 ):
-    t = torch.tensor(
-        [],
+    t = torch.empty(
+        (),
         dtype=dtype,
         device=storage._untyped_storage.device,
         requires_grad=requires_grad,
