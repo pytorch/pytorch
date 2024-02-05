@@ -1237,7 +1237,11 @@ def _broadcast_in_dim_meta(
 
     # shape must be broadcastable to
     for idx, new_idx in enumerate(broadcast_dimensions):
-        assert guard_size_oblivious(a.shape[idx] == 1) or a.shape[idx] == shape[new_idx]
+        if not guard_size_oblivious(a.shape[idx] == 1):
+            torch._check(
+                a.shape[idx] == shape[new_idx],
+                lambda: f"{a.shape[idx]} must be broadcastable to {shape[new_idx]}",
+            )
 
     new_strides = []
     original_idx = 0
