@@ -636,6 +636,7 @@ pointwise_overrides_data: Dict[str, Dict[str, str]] = dict(
         # triton=None,  # libdevice/triton do not provide spherical_bessel_j0 function
         aten="special_spherical_bessel_j0",
     ),
+    # softmax
     zeta=dict(
         cpp="calc_zeta",
         # triton=None,  # libdevice/triton do not provide zeta function
