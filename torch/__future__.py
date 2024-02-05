@@ -34,6 +34,10 @@ def set_swap_module_params_on_conversion(value: bool) -> None:
     Sets whether to use :func:`~torch.utils.swap_tensors` instead of setting ``.data`` to
     change the existing parameters in-place when converting an ``nn.Module``.
 
+    .. note::
+        If :func:`~torch.__future__.get_overwrite_module_params_on_conversion` returns ``True``,
+        no swapping will occur.
+
     When enabled, the following methods will swap the existing parameters in-place:
 
     #. ``module.{device}()`` (e.g. ``module.cuda()``) for moving a module between devices
