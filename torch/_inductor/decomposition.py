@@ -521,7 +521,7 @@ def quantize_per_channel_default_decomp_impl(
         input = input.to(torch.float32)
     input, permute_axis_list = quant_decomposed._permute_to_axis_zero(input, axis)
     original_input_size = input.size()
-    input = torch.flatten(input, start_dim=1)
+    input = input.view((original_input_size[0], -1))
     res = torch.clamp(
         torch.round(input * (1.0 / scales).unsqueeze(1)) + zero_points.unsqueeze(1),
         quant_min,
