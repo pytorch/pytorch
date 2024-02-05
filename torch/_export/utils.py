@@ -147,7 +147,7 @@ def register_dataclass_as_pytree_node(
 
     def default_unflatten_fn(values: Iterable[Any], context: Context) -> Any:
         typ, flat_names, none_names = context
-        return typ(**dict(zip(flat_names, values)), **{k: None for k in none_names})
+        return typ(**dict(zip(flat_names, values)), **dict.fromkeys(none_names))
 
     def default_to_dumpable_context(context: Context) -> DumpableContext:
         return (serialized_type, context[1], context[2])
@@ -232,6 +232,9 @@ def get_buffer(
 
     if is_buffer(program, node):
         buffer_name = program.graph_signature.inputs_to_buffers[node.name]
-        return program.state_dict[buffer_name]
+        if buffer_name in program.graph_signature.non_persistent_buffers:
+            return program.constants[buffer_name]
+        else:
+            return program.state_dict[buffer_name]
 
     return None

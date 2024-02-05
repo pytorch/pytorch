@@ -283,7 +283,7 @@ if torch._C._has_mkldnn:
                     L[aten.mul](out, negative_slope),
                 )
                 if lowp_dtype:
-                    out = L[prims.convert_element_type.default](out, dtype=dtype2)
+                    out = L[prims.convert_element_type.default](out, dtype=dtype2)  # type: ignore[possibly-undefined]
                 return out
 
         return fn
@@ -324,7 +324,7 @@ if torch._C._has_mkldnn:
                     out = L[prims.convert_element_type.default](out, dtype=torch.float)
                 out = L[aten.clamp_max](L[aten.clamp_min](out, min_value), max_value)
                 if lowp_dtype:
-                    out = L[prims.convert_element_type.default](out, dtype=dtype2)
+                    out = L[prims.convert_element_type.default](out, dtype=dtype2)  # type: ignore[possibly-undefined]
                 return out
 
         return fn
@@ -340,15 +340,15 @@ if torch._C._has_mkldnn:
         binary_nodes = filter_nodes(match.nodes, fn)
         if len(binary_nodes) < 1:
             return False
-
-        def get_meta_value(argument: torch.fx.Argument):
-            if not hasattr(argument, "meta"):
-                return None
-            return argument.meta.get("val", None)
-
         if any(
-            not isinstance(get_meta_value(n.args[0]), torch.Tensor)
-            or not isinstance(get_meta_value(n.args[1]), torch.Tensor)
+            not (
+                hasattr(n.args[0], "meta")
+                and isinstance(n.args[0].meta.get("val", None), torch.Tensor)  # type: ignore[union-attr]
+            )
+            or not (
+                hasattr(n.args[1], "meta")
+                and isinstance(n.args[1].meta.get("val", None), torch.Tensor)  # type: ignore[union-attr]
+            )
             for n in binary_nodes
         ):
             return False
@@ -360,9 +360,9 @@ if torch._C._has_mkldnn:
         ):
             return False
         if any(
-            get_meta_value(n.args[0]).size() != get_meta_value(n.args[1]).size()
-            or get_meta_value(n.args[0]).device != get_meta_value(n.args[1]).device
-            or get_meta_value(n.args[0]).dtype != get_meta_value(n.args[1]).dtype
+            n.args[0].meta["val"].size() != n.args[1].meta["val"].size()  # type: ignore[union-attr]
+            or n.args[0].meta["val"].device != n.args[1].meta["val"].device  # type: ignore[union-attr]
+            or n.args[0].meta["val"].dtype != n.args[1].meta["val"].dtype  # type: ignore[union-attr]
             for n in binary_nodes
         ):
             return False
