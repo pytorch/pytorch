@@ -149,11 +149,9 @@ class FSDP:
         Reshards the module's parameters by freeing unsharded parameters if
         needed. This method is *not* recursive.
         """
-        if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None or (
-            (fsdp_param_group := state._fsdp_param_group) is None
-        ):
-            return  # no-op
-        fsdp_param_group.reshard()
+        state = self._get_fsdp_state()
+        if fsdp_param_group := state._fsdp_param_group:
+            fsdp_param_group.reshard()
 
     def set_is_last_backward(self, is_last_backward: bool) -> None:
         """
@@ -161,6 +159,10 @@ class FSDP:
         should wait for gradient reduction to finish and clear internal data
         structures used for explicit prefetching.
         """
-        if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None:
-            return  # no-op
+        state = self._get_fsdp_state()
         state._state_ctx.is_last_backward = is_last_backward
+
+    def _get_fsdp_state(self) -> FSDPState:
+        if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None:
+            raise AssertionError(f"No FSDP state found on {self}")
+        return state
