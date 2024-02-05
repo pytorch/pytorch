@@ -1044,6 +1044,12 @@ class CPUReproTests(TestCase):
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
+    def test_dequant_maxpool2d_lowering_int8(self):
+        self._test_dequant_maxpool2d_lowering_helper(torch.int8)
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
     @patch("torch.cuda.is_available", lambda: False)
     def test_tile2d_load_decomposed_dequant_add_relu_quant(self):
         def fn(

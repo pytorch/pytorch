@@ -2419,9 +2419,9 @@ class CppVecKernelChecker(CppVecKernel):
         load_type = V.graph.get_dtype(name)
         if load_type == torch.bool:
             return all(user.target in ("where", "masked") for user in users.keys())
-        elif load_type == torch.uint8:
+        elif load_type in [torch.uint8, torch.int8]:
             """
-            If the load value is torch.uint8, then we only support the loaded
+            If the load value is torch.int8/uint8, then we only support the loaded
             value is as the mask.
             """
             if not all(
