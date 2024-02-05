@@ -339,14 +339,10 @@ class MetaConverter:
                             bdim = maybe_get_bdim(t)
                             r = _add_batch_dim(ft, bdim, lvl)
                         elif is_gradtrackingtensor(t):
-                            r = self.meta_tensor(
-                                get_unwrapped(t),
-                                shape_env=shape_env,
-                                callback=callback,
-                                source=source,
-                                symbolic_context=symbolic_context,
-                            )
-                            assert is_gradtrackingtensor(r) is False, r
+                            ft = _to_fake_tensor(get_unwrapped(t))
+                            assert is_gradtrackingtensor(ft) is False, ft
+                            lvl = torch._C._functorch.maybe_get_level(t)
+                            r = torch._C._functorch._wrap_for_grad(ft, lvl)
 
                             is_leaf = safe_is_leaf(t)
                             if t.requires_grad and safe_is_leaf(r):
@@ -355,16 +351,12 @@ class MetaConverter:
                                 with torch.enable_grad():
                                     r = r.clone()
                         else:
-                            # regular tensor
-                            sizes = t.size()
-                            strides = t.stride()
-                            r = callback(
-                                lambda: torch.empty_strided(
-                                    sizes,
-                                    strides,
-                                    dtype=t.dtype,
-                                    device="meta",
-                                )
+                            r = self.meta_tensor(
+                                t,
+                                shape_env=shape_env,
+                                callback=callback,
+                                source=source,
+                                symbolic_context=symbolic_context,
                             )
                         return r
 
