@@ -11,6 +11,7 @@ from typing import NamedTuple
 import torch
 
 import torch._inductor
+import torch._inductor.cudagraph_trees
 from torch._inductor import config
 
 # LBFGS, SparseAdam not supported
@@ -96,7 +97,7 @@ def build_compiled_opt_kwarg_db():
                         f"{'_foreach' if foreach else ''}"
                     )
 
-                    for key in optim_inputs.kwargs:
+                    for key in kwargs:
                         if key == "lr":
                             continue
                         name += "_" + key
@@ -109,15 +110,6 @@ def build_compiled_opt_kwarg_db():
                         "test_asgd_maximize_capturable_cuda",
                         "test_asgd_weight_decay_capturable_cuda",
                         "test_asgd_weight_decay_maximize_capturable_cuda",
-                    ]:
-                        continue
-
-                    # Adam(W) capturable cudagraphs manager is unexpectedly None, #119026
-                    if name in [
-                        "test_adam_amsgrad_capturable_cuda",
-                        "test_adam_foreach_amsgrad_capturable_cuda",
-                        "test_adamw_amsgrad_capturable_cuda",
-                        "test_adamw_foreach_amsgrad_capturable_cuda",
                     ]:
                         continue
 
@@ -170,22 +162,15 @@ def compile_opt(opt_compiled, closure=None):
     # run the patcher so that step has the expected structure
     torch._dynamo.eval_frame.TorchPatcher.patch()
 
-    # unwrap step TWICE to avoid a deliberate graph break due to
-    # a limitation of functionalization/no_grad detection
-    # see the [Note on graph break] in optimizer.py
-    # This ignores the outer _use_grad_if_differentiable wrapper
-    # and instead manually disables grad before calling step, which is fine
-    # for now as dynamo does not support differentiable optimizers anyway
-    step_fn = opt_compiled.step.__wrapped__.__wrapped__
     if closure is not None:
 
         def fn():
-            step_fn(opt_compiled, closure)
+            opt_compiled.step(closure)
 
     else:
 
         def fn():
-            step_fn(opt_compiled)
+            opt_compiled.step()
 
     return torch.compile(fn, backend="inductor", fullgraph=True)
 
@@ -207,6 +192,9 @@ def make_test(
             run_cudagraphs = device == "cuda" and optim_cls not in (Adagrad, SGD)
             if run_cudagraphs:
                 stack.enter_context(config.patch({"triton.cudagraphs": True}))
+
+            if isinstance(kwargs.get("lr", None), torch.Tensor):
+                kwargs["lr"] = kwargs["lr"].to(device)
 
             torch._dynamo.reset()
             torch._inductor.metrics.reset()
