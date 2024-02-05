@@ -252,6 +252,12 @@ class TestFullyShardBackwardPrefetch(FSDPTest):
     def _test_backward_prefetch_unused_in_backward(
         self, reshard_after_forward: Union[bool, int]
     ):
+        """
+        Test a model with a linear module then a split into two linear modules,
+        where we run backward through one path first before the other, meaning
+        that (1) onlyh one linear of the two split is used per backward and (2)
+        the initial shared linear is used in both backwards.
+        """
         dim = 8
         model = nn.Sequential(nn.Linear(dim, dim), DoubleLinear(dim))
         fully_shard(model[0], reshard_after_forward=reshard_after_forward)
