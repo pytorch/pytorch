@@ -22,7 +22,7 @@ namespace detail {
 
 // We have an implementation of std in ATen/detail/MemoryAccessUtils.h for
 // sharing in different kernel languages.
-// Leave thrust related codes in CUDA file. The reason to use `thrust::tuple` is
+// Leave thrust version in CUDA file. The reason to use `thrust::tuple` is
 // `std::tuple` does not support `operator=` on device code which makes
 // the implementation complicated.
 template <int current>

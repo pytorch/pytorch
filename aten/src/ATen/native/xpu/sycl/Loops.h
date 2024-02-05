@@ -422,7 +422,8 @@ static inline bool can_vectorize_for_non_contigouous(
     auto strides = iter.strides(i);
     for (int dim = 1; dim < strides.size(); dim++) {
       int64_t base_of_row = strides[dim];
-      while (base_of_row % vec_size) {
+      int64_t vec_size_in_bytes = strides[0] * vec_size;
+      while (base_of_row % vec_size_in_bytes) {
         vec_size >>= 1;
         if (vec_size <= 1)
           return false;

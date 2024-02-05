@@ -69,13 +69,13 @@ struct unroll_load_helper {
 
 template <int current>
 struct multi_outputs_store_helper {
-  template <int ntensors, int num_outputs, typename... Args>
-  static void apply(
+  template <int ntensors, int num_outputs, typename ...Args>
+  static C10_HOST_DEVICE void apply(
       at::detail::Array<char*, ntensors> data,
       at::detail::Array<uint32_t, num_outputs> offsets,
       std::tuple<Args...> ret) {
     using T = typename std::tuple_element<current, std::tuple<Args...>>::type;
-    T* to = reinterpret_cast<T*>(data[current]) + offsets[current];
+    T *to = reinterpret_cast<T *>(data[current]) + offsets[current];
     *to = std::get<current>(ret);
   }
 };
