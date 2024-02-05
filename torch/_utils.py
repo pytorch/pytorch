@@ -177,7 +177,19 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
 # be a TypedStorage
 def _rebuild_tensor(storage, storage_offset, size, stride):
     # first construct a tensor with the correct dtype/device
-    t = torch.empty((), dtype=storage.dtype, device=storage._untyped_storage.device)
+    dtype = storage.dtype
+    device = storage._untyped_storage.device
+    if torch._guards.detect_fake_mode(None) is not None:
+        from torch.serialization import _get_restore_location
+
+        location = "meta"
+        restore_location = _get_restore_location(location)
+        storage = torch.storage.TypedStorage(
+            wrap_storage=restore_location(storage, location),
+            dtype=dtype,
+            _internal=True,
+        )
+    t = torch.empty((), dtype=dtype, device=device)
     return t.set_(storage._untyped_storage, storage_offset, size, stride)
 
 
