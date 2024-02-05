@@ -1075,7 +1075,7 @@ def _permute_to_axis_zero(x, axis):
 
 
 @register_lowering(quantized_decomposed.quantize_per_channel)
-def quantize_per_channel_default_decomp_impl(
+def quantized_decomposed_quantize_per_channel(
     input: TensorBox,
     scales: TensorBox,
     zero_points: TensorBox,
@@ -1105,7 +1105,7 @@ def quantize_per_channel_default_decomp_impl(
 
 
 @register_lowering(quantized_decomposed.dequantize_per_channel)
-def dequantize_per_channel_default_decomp_impl(
+def quantized_decomposed_dequantize_per_channel(
     input: TensorBox,
     scales: TensorBox,
     zero_points: TensorBox,
