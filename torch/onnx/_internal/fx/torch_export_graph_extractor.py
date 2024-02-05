@@ -85,10 +85,6 @@ class TorchExport(exporter.FXGraphExtractor):
             io_adapter.ConvertComplexToRealRepresentationOutputStep()
         )
 
-        options.fx_tracer.output_adapter.append_step(
-            io_adapter.PrependParamsAndBuffersAotAutogradOutputStep()
-        )
-
         # run_decomposition generates a new graph module with decomposed ops.
         # Thus, we need to run this step after io_adapters.
         model = model.run_decompositions(options.decomposition_table)
