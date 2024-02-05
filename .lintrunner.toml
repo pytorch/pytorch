@@ -463,7 +463,6 @@ include_patterns = [
 ]
 exclude_patterns = [
     'torch/csrc/utils/pybind.h',
-    'torch/csrc/dynamo/**/*',
     'torch/utils/benchmark/utils/valgrind_wrapper/compat_bindings.cpp',
     'caffe2/**/*',
 ]
