@@ -2140,9 +2140,9 @@ def build_checkpoint_variable(**options):
 
 
 def is_compile_supported(device_type):
-    from .eval_frame import is_dynamo_supported
+    from . import is_win32
 
-    compile_supported = is_dynamo_supported()
+    compile_supported = not is_win32()
     if device_type == "cpu":
         pass
     elif device_type == "cuda" and compile_supported:
