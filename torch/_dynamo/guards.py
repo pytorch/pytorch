@@ -349,11 +349,11 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, [code], provided_guarded_object=self.get(base))
 
     def FUNCTORCH_CURRENT_LEVEL_MATCH(self, guard: Guard):
-        # Invalidate the graph if a call to vmap has been made prior to this
-        # This is super conservative as the interpreter stack may not contain
-        # vmap
+        # Invalidate functorch code if current level is different than
+        # the one when FX graph was generated
+        level = torch._C._functorch.maybe_current_level()
         code = [
-            "torch._C._functorch.maybe_current_level() is None",
+            f"torch._C._functorch.maybe_current_level() == {level}",
         ]
         self._produce_guard_code(guard, code)
 
@@ -1175,8 +1175,13 @@ class CheckFunctionManager:
             print("GUARDS\n", guard_body)
 
         out: Dict[str, Any] = dict()
+
+        # We don't put builder.scope as the globals in exec call because
+        # guard_fn.__globals__ becomes equal to builder.scope. This causes
+        # guard_fn to hold a referece to f_locals sitting in builder.scope["L"]
+        globals_for_guard_fn = {"G": builder.scope["G"]}
         try:
-            exec(pycode, builder.scope, out)
+            exec(pycode, globals_for_guard_fn, out)
         except SyntaxError as ex:
             log.exception("Failed to exec guard at line %s.\n%s", ex.lineno, pycode)
             raise
@@ -1187,9 +1192,7 @@ class CheckFunctionManager:
         guard_fn.code_parts = code_parts
         guard_fn.verbose_code_parts = verbose_code_parts
         # Grab only G, but preserve "G" because guards access it as "G"
-        guard_fn.global_scope = {
-            "G": builder.scope["G"],
-        }
+        guard_fn.global_scope = globals_for_guard_fn
         guard_fn.guard_fail_fn = guard_fail_fn
         return guard_fn
 
