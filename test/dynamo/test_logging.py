@@ -713,6 +713,7 @@ exclusions = {
     "onnx_diagnostics",
     "guards",
     "verbose_guards",
+    "sym_node",
     "export",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
