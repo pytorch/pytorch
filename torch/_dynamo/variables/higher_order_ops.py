@@ -501,13 +501,14 @@ class TorchHigherOrderOperatorVariableFactory:
     """
     Handles the dispatch to a method-specific handler defined below.
     """
+
     def create(self, value, source=None, **kwargs):
         method_name = f"create_{value.__name__}"
         if hasattr(self, method_name):
             create_method = getattr(self, method_name)
             return create_method(value, source, **kwargs)
         unimplemented(f"HigherOrderOperator {value.__name__}")
-    
+
     def create_cond(self, value, source=None, **kwargs):
         return CondHigherOrderVariable(value, source, **kwargs)
 
@@ -546,7 +547,7 @@ class TorchHigherOrderOperatorVariableFactory:
 
     def create_strict_mode(self, value, source=None, **kwargs):
         return StrictModeHigherOrderVariable(value, source, **kwargs)
-    
+
 
 class TorchHigherOrderOperatorVariable(VariableTracker):
     def __init__(self, value, source: Optional[Source] = None, **kwargs):
