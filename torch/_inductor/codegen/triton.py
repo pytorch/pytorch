@@ -425,7 +425,7 @@ def triton_constant(value):
 
 
 class TritonCSEVariable(CSEVariable):
-    def __init__(self, name, bounds: ValueRanges):
+    def __init__(self, name, bounds: ValueRanges[Any]):
         super().__init__(name, bounds)
         # We'll use this to track which masks the variable needs when used for indirect indexing
         self.mask_vars: Set[str] = set()
@@ -840,6 +840,10 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def bessel_j0(x):
         return f"tl.math.j0({x})"
+
+    @staticmethod
+    def bessel_j1(x):
+        return f"tl.math.j1({x})"
 
 
 # Use mypy to check protocol implemented correctly
@@ -3190,7 +3194,7 @@ class TritonScheduling(BaseScheduling):
 
         return node_schedule
 
-    def codegen_nodes(self, nodes):
+    def codegen_nodes(self, nodes: List[scheduler.SchedulerNode]):
         """
         Given a set of pre-fused nodes, generate a Triton kernel.
         """
