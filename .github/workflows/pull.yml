@@ -233,7 +233,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-jammy-py3-clang12-mobile-build
-      docker-image-name: pytorch-linux-jammy-py3-clang12-asan
+      docker-image-name: pytorch-linux-jammy-py3-clang15-asan
       build-generates-artifacts: false
       test-matrix: |
         { include: [
