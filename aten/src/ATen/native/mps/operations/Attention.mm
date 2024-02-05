@@ -25,7 +25,7 @@ int64_t _fused_sdp_choice_mps(const Tensor& query,
                               double dropout_p,
                               bool is_causal,
                               std::optional<double> scale) {
-  if (attn_mask.has_value() || dropout_p != 0.0 || query.is_contiguous() || !key.is_contiguous() ||
+  if (attn_mask.has_value() || dropout_p != 0.0 || !query.is_contiguous() || !key.is_contiguous() ||
       !value.is_contiguous()) {
     return static_cast<int64_t>(sdp::SDPBackend::math);
   }
