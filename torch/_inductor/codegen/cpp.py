@@ -280,7 +280,7 @@ def is_to_lowp_dtype(expr):
     return None
 
 
-def to_fp32_expr(lowp_var, src_dtype, kernel):
+def get_lowp_to_fp32_expr(lowp_var, src_dtype, kernel):
     if isinstance(kernel, CppVecKernel):
         return f"cvt_lowp_fp_to_fp32<{DTYPE_TO_CPP[src_dtype]}>({lowp_var})"
     else:
@@ -987,7 +987,7 @@ class CppOverrides(OpOverrides):
         code.writeline(f"auto {left} = {x} > 0 ? {scalar_one} : {scalar_zero};")
         code.writeline(f"auto {right} = {x} < 0 ? {scalar_one} : {scalar_zero};")
         code.writeline(f"auto {result} = {left} - {right};")
-        V.kernel.cse.cache[f"auto {result} = {left} - {right};"] = result
+        # V.kernel.cse.cache[f"auto {result} = {left} - {right};"] = result
         V.kernel.compute.splice(code)
         return result
 
@@ -1330,7 +1330,7 @@ class CppVecOverrides(CppOverrides):
         code.writeline(f"auto {right} = {blendv};")
         result = V.kernel.cse.newvar()
         code.writeline(f"auto {result} = {left} - {right};")
-        V.kernel.cse.cache[f"auto {result} = {left} - {right};"] = result
+        # V.kernel.cse.cache[f"auto {result} = {left} - {right};"] = result
         V.kernel.compute.splice(code)
         return result
 
@@ -1513,6 +1513,10 @@ class CppKernel(Kernel):
         after node2's "load".
         """
 
+        if var_to_store.dtype not in DTYPE_LOWP_FP:
+            # only need to cache fp32 cse var while var_to_store is lowp data
+            return
+
         def find_fp32_var(var, cache):
             fp32_cse_var = None
             fp32_cse_var_name = None
@@ -1534,7 +1538,9 @@ class CppKernel(Kernel):
 
         fp32_var, lowp_dtype = find_fp32_var(var_to_store, self.cse.cache)
         if fp32_var:
-            self.cse.cache[to_fp32_expr(var_to_store, lowp_dtype, self)] = fp32_var
+            self.cse.cache[
+                get_lowp_to_fp32_expr(var_to_store, lowp_dtype, self)
+            ] = fp32_var
 
     def scale_index_with_offset(
         self, index: sympy.Expr, scale=1, itervar_idx=-1, offset=0
