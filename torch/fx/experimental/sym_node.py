@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 log = logging.getLogger(__name__)
+sym_node_log = torch._logging.getArtifactLogger(__name__, "sym_node")
 
 
 __all__ = ["SymNode", "method_to_operator", "magic_methods"]
@@ -217,6 +218,9 @@ class SymNode:
     # here so we get good stack traces
     def abs(self) -> "SymNode":
         return self._abs()  # type: ignore[attr-defined]
+
+    def pos(self) -> "SymNode":
+        return self._pos()  # type: ignore[attr-defined]
 
     def round(self, ndigits=None) -> "SymNode":
         return self._round(ndigits)  # type: ignore[attr-defined]
@@ -407,6 +411,7 @@ class SymNode:
 
 # TODO: this probably needs the sizes-strides eval functions
 METHOD_TO_OPERATOR = {
+    "pos": operator.pos,
     "abs": operator.abs,
     "add": operator.add,
     "and": operator.and_,
@@ -444,6 +449,7 @@ unary_magic_methods = {
     "floor",
     "neg",
     "sym_not",
+    "pos",
 }
 
 
@@ -689,7 +695,7 @@ for name in math_op_names:
     fn.__qualname__ = fn.__name__ = priv_sympy_name
     setattr(current_module, priv_sympy_name, fn)
 
-del fn, name, priv_sympy_name
+del fn, name, priv_sympy_name  # type: ignore[possibly-undefined]
 
 
 def _sympy_abs(a):
@@ -724,6 +730,7 @@ def _sympy_is_integer(a):
 magic_methods = {
     **reflectable_magic_methods,
     "sym_not": operator.invert,
+    "pos": operator.pos,
     "eq": _sympy_eq,
     "ne": _sympy_ne,
     "gt": _sympy_gt,
@@ -747,7 +754,7 @@ for name in math_op_names:
     sym_name = f"sym_{name}"
     magic_methods[sym_name] = getattr(current_module, f"_sympy_{name}")
 
-del name, sym_name, math_op_names, current_module
+del name, sym_name, math_op_names, current_module  # type: ignore[possibly-undefined]
 
 
 def sympy_is_contiguous(sizes, strides):
@@ -922,6 +929,7 @@ def _make_node_magic(method, func):
             log.warning("failed to eval %s(%s, %s)", method, self.expr, other.expr)
             raise
         out = safe_expand(out)
+        sym_node_log.debug("%s %s %s -> %s", func, self.expr, other.expr, out)
         pytype: Type
         # This is not strictly correct. In Python, a**b may return complex when
         # a < 0 and b is a float: (-1)**2.1. Same for sympy.sqrt(-3.14). This
@@ -969,7 +977,7 @@ def _make_node_magic(method, func):
         except Exception:
             log.warning("failed to eval %s(%s)", method, expr)
             raise
-
+        sym_node_log.debug("%s %s -> %s", func, expr, out)
         out_hint = None
         if self.hint is not None:
             out_hint = op(self.hint)
@@ -1211,6 +1219,7 @@ def _make_user_magic(method, user_type):
         return wrap_node(getattr(self.node, method_attr)())
 
     def binary_magic_impl(self, other):
+        sym_node_log.debug("MAGIC %s %s %s", method, self, other)
         self = promote(self)
         other = promote(other)
         if is_constant(self):

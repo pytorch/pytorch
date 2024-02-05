@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -632,7 +634,7 @@ def dispatch_trace(
 ) -> GraphModule:
     graph = tracer.trace(root, concrete_args)
     name = root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
-    return GraphModule(tracer.root, graph, name)
+    return fx._lazy_graph_module._make_graph_module(tracer.root, graph, name)
 
 
 @contextlib.contextmanager

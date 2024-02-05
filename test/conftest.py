@@ -129,6 +129,24 @@ class _NodeReporterReruns(_NodeReporter):
         tag.text = bin_xml_escape(content)
         self.append(tag)
 
+    def append_skipped(self, report: TestReport) -> None:
+        # Referenced from the below
+        # https://github.com/pytest-dev/pytest/blob/2178ee86d7c1ee93748cfb46540a6e40b4761f2d/src/_pytest/junitxml.py#L236C6-L236C6
+        # Modified to escape characters not supported by xml in the skip reason.  Everything else should be the same.
+        if hasattr(report, "wasxfail"):
+            # Super here instead of the actual code so we can reduce possible divergence
+            super().append_skipped(report)
+        else:
+            assert isinstance(report.longrepr, tuple)
+            filename, lineno, skipreason = report.longrepr
+            if skipreason.startswith("Skipped: "):
+                skipreason = skipreason[9:]
+            details = f"{filename}:{lineno}: {skipreason}"
+
+            skipped = ET.Element("skipped", type="pytest.skip", message=bin_xml_escape(skipreason))
+            skipped.text = bin_xml_escape(details)
+            self.append(skipped)
+            self.write_captured_output(report)
 
 class LogXMLReruns(LogXML):
     def __init__(self, *args, **kwargs):
