@@ -152,8 +152,8 @@ manual_torch_name_rule_map = {
     "torch._functorch.vmap.unwrap_batched": UserFunctionVariable,
     "torch._functorch.vmap.vmap_impl": FunctorchVmapHigherOrderVariable,
     "torch._functorch.vmap.wrap_batched": UserFunctionVariable,
-    # "torch._constrain_as_size": UserFunctionVariable,
-    # "torch._constrain_as_value": UserFunctionVariable,
+    "torch._constrain_as_size": UserFunctionVariable,
+    "torch._constrain_as_value": UserFunctionVariable,
     "torch._tensor._convert": UserFunctionVariable,
     "torch.jit._unwrap_optional": UserFunctionVariable,
 }
@@ -2067,8 +2067,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._check_with",
         "torch._check",
         "torch._compile._disable_dynamo",
-        "torch._constrain_as_size",
-        "torch._constrain_as_value",
         "torch._functorch.apis.chunk_vmap",
         "torch._functorch.autograd_function.custom_function_call_functionalize",
         "torch._functorch.autograd_function.custom_function_call_grad",
@@ -2973,10 +2971,15 @@ def is_numpy(obj) -> bool:
     return isinstance(obj, (np.ndarray, np.generic)) or id(obj) in _numpy_function_ids
 
 
+"""
+Main entry point for looking up the trace rule (the Dynamo variable) for a given callable object.
+"""
+
+
 def lookup_callable(obj):
     if not hashable(obj):
         return None
-    # Custom allow/disallow in graph takes precedence over the `torch_name_rule_map`.
+    # Custom allow/disallow in graph takes precedence over the general lookup.
     if is_callable_disallowed(obj):
         return SkipFilesVariable
     if is_callable_allowed(obj):
@@ -2991,7 +2994,15 @@ E.g, the lookup result of `torch.sin` is `TorchInGraphFunctionVariable`.
 """
 
 
-def lookup(obj, filename=None, is_direct_call=True):
+def lookup(obj):
+    return lookup_inner(obj)
+
+
+def lookup_inner(obj, name=None, filename=None, is_direct_call=True):
+    # Step 1: lookup obj's tracing rule in `torch_name_rule_map`.
+    # The rules defined in `torch_name_rule_map` mainly includes two parts:
+    # - Manually defined rules for any functions.
+    # - The list of torch in graph functions.
     if not hashable(obj):
         return None
     if obj is not None:
@@ -3001,6 +3012,14 @@ def lookup(obj, filename=None, is_direct_call=True):
         if rule is not None:
             return rule
 
+    # Step 2: lookup obj's tracing rule by function name.
+    if is_direct_call:
+        if name == "patched_init":
+            return SkipFilesVariable
+        elif name == "__torch_function__":
+            return UserFunctionVariable
+
+    # Step 3: lookup obj's tracing rule by filename.
     if filename is None:
         filename = getfile(obj)
 

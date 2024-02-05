@@ -381,14 +381,10 @@ def check_verbose(obj, is_inlined_call=False):
     else:
         fi = FunctionInfo(obj, None, getfile(obj), None)
 
-    if is_inlined_call:
-        if fi.name == "patched_init":
-            return SkipResult(True, "patched init cannot be inlined.")
-        elif fi.name == "__torch_function__":
-            return SkipResult(False, "allow inlining __torch_function__")
-
-    # Go through function based skip/inline rules.
-    rule = torch._dynamo.trace_rules.lookup(fi.py_obj, fi.filename, is_inlined_call)
+    # Consulte the central trace rules defined in torch._dynamo.trace_rules.
+    rule = torch._dynamo.trace_rules.lookup_inner(
+        fi.py_obj, fi.name, fi.filename, is_inlined_call
+    )
     if rule in [UserFunctionVariable, FunctorchVmapHigherOrderVariable]:
         return SkipResult(
             False,
