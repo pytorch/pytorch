@@ -816,7 +816,7 @@ class Module:
             else:
                 return False
 
-        should_use_swap_tensors = torch.nn.utils.get_swap_module_params_on_conversion()
+        should_use_swap_tensors = torch.__future__.get_swap_module_params_on_conversion()
 
         for key, param in self._parameters.items():
             if param is None:
@@ -830,15 +830,17 @@ class Module:
             param_grad = param.grad
             if p_should_use_set_data:
                 if should_use_swap_tensors:
-                    if param_grad is not None:
-                        # Accessing param.grad makes its use_count 2, which will prevent swapping.
-                        # Decrement use count of the gradient by setting to None
-                        param.grad = None
-                    param_applied = torch.nn.Parameter(param_applied, requires_grad=param.requires_grad)
                     try:
+                        if param_grad is not None:
+                            # Accessing param.grad makes its at::Tensor's use_count 2, which will prevent swapping.
+                            # Decrement use count of the gradient by setting to None
+                            param.grad = None
+                        param_applied = torch.nn.Parameter(param_applied, requires_grad=param.requires_grad)
                         torch.utils.swap_tensors(param, param_applied)
                     except Exception as e:
-                        raise RuntimeError(f"Couldn't swap {key}") from e
+                        if param_grad is not None:
+                            param.grad = param_grad
+                        raise RuntimeError(f"_apply(): Couldn't swap {self._get_name()}.{key}") from e
                     out_param = param
                 else:
                     param.data = param_applied
@@ -859,7 +861,7 @@ class Module:
                         try:
                             torch.utils.swap_tensors(param_grad, grad_applied)
                         except Exception as e:
-                            raise RuntimeError(f"Couldn't swap {key}.grad") from e
+                            raise RuntimeError(f"_apply(): Couldn't swap {self._get_name()}.{key}.grad") from e
                         out_param.grad = param_grad
                     else:
                         assert out_param.grad is not None
@@ -1628,9 +1630,9 @@ class Module:
             # For now only forward hooks have the always_call option but perhaps
             # this functionality should be added to full backward hooks as well.
             for hook_id, hook in _global_forward_hooks.items():
-                if hook_id in _global_forward_hooks_always_called and hook_id not in called_always_called_hooks:
+                if hook_id in _global_forward_hooks_always_called and hook_id not in called_always_called_hooks:  # type: ignore[possibly-undefined]
                     try:
-                        hook_result = hook(self, args, result)
+                        hook_result = hook(self, args, result)  # type: ignore[possibly-undefined]
                         if hook_result is not None:
                             result = hook_result
                     except Exception as e:
@@ -1639,12 +1641,12 @@ class Module:
                         continue
 
             for hook_id, hook in self._forward_hooks.items():
-                if hook_id in self._forward_hooks_always_called and hook_id not in called_always_called_hooks:
+                if hook_id in self._forward_hooks_always_called and hook_id not in called_always_called_hooks:  # type: ignore[possibly-undefined]
                     try:
                         if hook_id in self._forward_hooks_with_kwargs:
-                            hook_result = hook(self, args, kwargs, result)
+                            hook_result = hook(self, args, kwargs, result)  # type: ignore[possibly-undefined]
                         else:
-                            hook_result = hook(self, args, result)
+                            hook_result = hook(self, args, result)  # type: ignore[possibly-undefined]
                         if hook_result is not None:
                             result = hook_result
                     except Exception as e:
@@ -1795,7 +1797,7 @@ class Module:
         return handle
 
     def register_state_dict_pre_hook(self, hook):
-        r"""Register a pre-hook for the :meth:`~torch.nn.Module.load_state_dict` method.
+        r"""Register a pre-hook for the :meth:`~torch.nn.Module.state_dict` method.
 
         These hooks will be called with arguments: ``self``, ``prefix``,
         and ``keep_vars`` before calling ``state_dict`` on ``self``. The registered
