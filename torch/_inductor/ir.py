@@ -1836,8 +1836,12 @@ class BaseView(IRNode):
 
         return loader
 
-    def get_dtype(self):
+    @property
+    def dtype(self):
         return self.data.get_dtype()
+
+    def get_dtype(self):
+        return self.dtype
 
     def get_layout(self):
         return self.data.get_layout()
@@ -2262,8 +2266,12 @@ class ReinterpretView(BaseView):
     def get_origin_node(self):
         return None
 
-    def get_dtype(self):
+    @property
+    def dtype(self):
         return self.layout.dtype
+
+    def get_dtype(self):
+        return self.dtype
 
     def get_size(self):
         return list(self.layout.size)
@@ -2844,8 +2852,12 @@ class Buffer(IRNode):
     def get_origin_node(self):
         return self.origin_node
 
-    def get_dtype(self):
+    @property
+    def dtype(self):
         return getattr(self.layout, "dtype", None)
+
+    def get_dtype(self):
+        return self.dtype
 
     def get_size(self):
         return list(self.layout.size)
