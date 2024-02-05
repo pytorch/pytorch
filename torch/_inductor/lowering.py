@@ -531,6 +531,17 @@ def to_dtype(x: TensorBox, dtype: torch.dtype, copy=False):
 
 @register_lowering(prims.convert_element_type, type_promotion_kind=None)
 def _convert_element_type(x: TensorBox, dtype: torch.dtype):
+    if dtype.is_complex or x.get_dtype().is_complex:
+        if x.get_size():
+            # Decompose since aa aten fallback is more friendly for c++ codegen.
+            # This decompostion doesn't work for empty tensor, which needs more investigation.
+            dst = empty_like(x, dtype=dtype)
+            ir.InplaceCopyFallback.create(dst, x)
+            return dst
+        else:
+            return fallback_handler(
+                prims.convert_element_type.default, add_to_fallback_set=False
+            )(x, dtype)
     return to_dtype(x, dtype, copy=True)
 
 
@@ -1712,7 +1723,10 @@ def unsupported_input_tensor(t: torch._subclasses.FakeTensor, parent=None):
     "Do not support reading or writing to this tensor"
     if t.is_complex():
         # Complex views are supported with IR ComplexView
-        if parent and parent.target == torch.ops.aten.view.dtype:
+        if parent and parent.target in (
+            torch.ops.aten.view.dtype,
+            torch.ops.prims.convert_element_type.default,
+        ):
             return False
         _warn_complex_not_supported()
         return True
