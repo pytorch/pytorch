@@ -1680,12 +1680,7 @@ class BuiltinVariable(VariableTracker):
         if isinstance(left, (StreamVariable, EventVariable)) or isinstance(
             right, (StreamVariable, EventVariable)
         ):
-            if (
-                (isinstance(left, StreamVariable) and isinstance(right, StreamVariable))
-                or (
-                    isinstance(left, EventVariable) and isinstance(right, EventVariable)
-                )
-            ) and op is operator.eq:
+            if type(left) == type(right) and op is operator.eq:
                 return ConstantVariable(op(left.value, right.value))
 
             if isinstance(right, ConstantVariable) or isinstance(
