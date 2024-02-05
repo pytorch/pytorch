@@ -223,6 +223,10 @@ def main() -> None:
     )
 
 
-if __name__ == "__main__":
+def invoke_main() -> None:
     set_simple_logging(escape_newlines=False)
     main()
+
+
+if __name__ == "__main__":
+    invoke_main()  # pragma: no cover
