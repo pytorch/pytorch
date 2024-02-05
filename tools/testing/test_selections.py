@@ -70,11 +70,7 @@ def get_with_pytest_shard(
     for test in tests:
         duration = get_duration(test, test_file_times, test_class_times or {})
 
-        assert (
-            duration is not None
-        ), f"Attempt to get pytest shard info for test {test} but test has unknown duration"
-
-        if duration > THRESHOLD:
+        if duration and duration > THRESHOLD:
             num_shards = math.ceil(duration / THRESHOLD)
             for i in range(num_shards):
                 sharded_tests.append(
@@ -134,7 +130,7 @@ def shard(
     serial: bool = False,
 ) -> None:
     if len(sharded_jobs) == 0:
-        assert len(tests) == 0, "No shards but tests to shard"
+        assert len(tests) == 0, "No shards provided but there are tests to shard"
         return
     # Modifies sharded_jobs in place
     known_tests = tests
@@ -199,7 +195,9 @@ def calculate_shards(
         get_duration(test, test_file_times, test_class_times) or 0
         for test in parallel_tests
     )
-    print(f"num serial tests: {len(serial_tests)}, num parallel tests: {len(parallel_tests)}")
+    print(
+        f"num serial tests: {len(serial_tests)}, num parallel tests: {len(parallel_tests)}"
+    )
     print(f"num shards: {num_shards}")
     print(f"Serial time: {serial_time}, Parallel time: {parallel_time}")
     total_time = serial_time + parallel_time / NUM_PROCS_FOR_SHARDING_CALC
