@@ -1656,6 +1656,7 @@ class AOTInductorTestsTemplate:
                 super().__init__()
 
             def forward(self, x, y):
+                x = x.clone()  # Avoid flagging forward input as mutated.
                 out = torch.zeros_like(x)
                 yy = y * y
                 # reshape creates a ReinterpretView
