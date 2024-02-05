@@ -288,6 +288,24 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.op_count, 21)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_stream_is_not_none(self):
+        def fn(x):
+            x = torch.mul(x, 1)
+            x = torch.add(x, 2)
+
+            cur_stream = torch.cuda.current_stream()
+            if cur_stream is not None:
+                return x + 1
+            return x - 1
+
+        x = torch.randn((2, 2), device="cuda")
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_event_method(self):
         def fn(x):
             x = torch.mul(x, 1)
