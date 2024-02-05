@@ -1122,9 +1122,9 @@ utils_device.CURRENT_DEVICE == None""".split(
         f(torch.tensor([4]))
         self.assertEqual(cnts.frame_count, 1)
 
-    # The exception type is different
-    @expectedFailureDynamic
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    # Translation validation changes the exception type, don't run with it
+    @torch.fx.experimental._config.patch(translation_validation=False)
     def test_torch_check_is_size(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
