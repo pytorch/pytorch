@@ -139,7 +139,7 @@ def delete_branches() -> None:
     # * associated PR is open, closed but updated recently, or contains the magic string
     # * no associated PR and branch was updated in last 1.5 years
     # * is protected
-    # Setinng different values of PR_WINDOW will change how branches with open
+    # Setting different values of PR_WINDOW will change how branches with open
     # PRs are treated depending on how old the branch is.  The default value of
     # 90 will allow branches with open PRs to be deleted if the PR hasn't been
     # updated in 90 days and the branch hasn't been updated in 1.5 years
@@ -174,8 +174,7 @@ def delete_branches() -> None:
 
     print(f"To delete ({len(delete)}):")
     for branch in delete:
-        print(branch)
-    for branch in delete:
+        print(f"About to delete branch {branch}")
         delete_branch(git_repo, branch)
 
 
