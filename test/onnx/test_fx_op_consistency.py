@@ -1471,6 +1471,11 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         matcher=lambda sample: len(sample.input.shape) == 0,
         reason="fixme: https://github.com/onnx/onnx/issues/4986",
     ),
+    skip(
+        "mm",
+        matcher=lambda sample: torch.numel(sample.input) == 0,
+        reason="values of matmul of [m, 0] and [0, n] matrices are undefined",
+    ),
     xfail(
         "native_batch_norm",
         matcher=lambda sample: sample.args[-3] is True
@@ -1614,19 +1619,6 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="fixme: LogSoftMax does not support empty tensor as input",
     ),
     xfail(
-        "split",
-        variant_name="list_args",
-        matcher=lambda sample: isinstance(sample.args[0], torch.Size),
-        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
-        reason=onnx_test_common.reason_dynamo_does_not_support("pytree flatten error"),
-    ),
-    xfail(
-        "split_with_sizes",
-        matcher=lambda sample: isinstance(sample.args[0], torch.Size),
-        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
-        reason=onnx_test_common.reason_dynamo_does_not_support("pytree flatten error"),
-    ),
-    xfail(
         "t",
         matcher=lambda sample: isinstance(sample.input, torch.Tensor)
         and len(sample.input.shape) < 2,
@@ -1636,6 +1628,36 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         "unflatten",
         reason="Logic not implemented for size 0 inputs in op.Reshape",
         matcher=lambda sample: any(dim == 0 for dim in sample.input.shape),
+    ),
+    xfail(
+        "signal.windows.hamming",
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        reason="does not match node name",
+    ),
+    xfail(
+        "signal.windows.general_hamming",
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        reason="does not match node name",
+    ),
+    xfail(
+        "signal.windows.blackman",
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        reason="does not match node name",
+    ),
+    xfail(
+        "signal.windows.general_cosine",
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        reason="does not match node name",
+    ),
+    xfail(
+        "signal.windows.hann",
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        reason="does not match node name",
+    ),
+    xfail(
+        "signal.windows.nuttall",
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        reason="does not match node name",
     ),
 )
 
@@ -1799,7 +1821,7 @@ def _run_test_output_match(
                     try:
                         model = torch.export.export(model, inputs)
                     except AssertionError as e:
-                        # TODO: avoid fake_mode detection bug in torch.export.export
+                        # NOTE: avoid fake_mode detection bug in torch.export.export
                         pytest.xfail(
                             onnx_test_common.reason_dynamo_does_not_support(str(e))
                         )
@@ -1927,7 +1949,6 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
 
     @common_device_type.ops(
         [op for op in OPS_DB if op.name in ALL_OPS_IN_DB],
-        # TODO: Add back complex64
         allowed_dtypes=onnx_test_common.TESTED_DTYPES,
     )
     def test_output_match(self, device: str, dtype: torch.dtype, op):

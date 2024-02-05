@@ -119,9 +119,10 @@ class CUTLASSArgs:
     generator_target = ""
     kernels = "all"
     ignore_kernels = ""
-    kernel_filter_file = None
-    selected_kernel_list = None
-    interface_dir = None
+    # TODO: these three look dead?
+    kernel_filter_file: None = None
+    selected_kernel_list: None = None
+    interface_dir: None = None
     filter_by_cc = True
     disable_full_archs_compilation = False
 

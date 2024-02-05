@@ -4,8 +4,8 @@
 #include <c10/util/Exception.h>
 #include <dlfcn.h>
 #include <iostream>
-namespace c10 {
-namespace cuda {
+
+namespace c10::cuda {
 
 namespace {
 
@@ -42,7 +42,6 @@ C10_EXPORT DriverAPI* DriverAPI::get() {
   return &singleton;
 }
 
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda
 
 #endif
