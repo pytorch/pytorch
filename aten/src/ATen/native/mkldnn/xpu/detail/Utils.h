@@ -258,12 +258,7 @@ static inline bool is_onednn_matmul_strides(
 
   if (!onednn_strides_check(tensor))
     return false;
-
   return true;
-}
-
-static bool is_wrapped_number(const at::Tensor& t) {
-  return t.unsafeGetTensorImpl()->is_wrapped_number();
 }
 
 static inline bool is_broadcast_from_other_to_self(
@@ -314,7 +309,7 @@ static inline bool binary_valid(
     return false;
 
   // 2. self or other should not be scalar (wrapped tensor).
-  if (is_wrapped_number(self) || is_wrapped_number(other))
+  if (self.unsafeGetTensorImpl()->is_wrapped_number() || other.unsafeGetTensorImpl()->is_wrapped_number())
     return false;
 
   // 3. dim of self and other should be equal and must be larger than 0 and
