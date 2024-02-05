@@ -242,11 +242,9 @@ class ConstDictVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
             return self.items.pop(Hashable(args[0]))
         elif name == "clear":
-            assert len(args) == 0
-            assert len(kwargs) == 0
-            keys_vt = [key.vt for key in self.items]
-            for key_vt in keys_vt:
-                self.call_method(tx, "pop", [key_vt], {})
+            tx.output.side_effects.mutation(self)
+            self.items.clear()
+            return ConstantVariable(None)
         elif (
             name == "update"
             and len(args) == 1
