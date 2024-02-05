@@ -203,8 +203,8 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3)
         with self.assertRaisesRegex(
-            RuntimeError,
-            "while introspecting wrap, we were unable to trace function `inner`",
+            torch._dynamo.exc.Unsupported,
+            r"HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)",
         ):
             f(x)
 
@@ -2473,7 +2473,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertIn(
             """\
     triggered by the following guard failure(s):
-    - torch._C._functorch.maybe_current_level() is None             # with vmap_increment_nesting(batch_size, randomness) as vmap_level:""",
+    - torch._C._functorch.maybe_current_level() == 1                # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:399 in _flat_vmap""",
             record.getMessage(),
         )
 
@@ -3213,6 +3213,17 @@ class GraphModule(torch.nn.Module):
         expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x, y)
         self.assertEqual(len(counters["graph_break"]), 0)
         self.assertEqual(actual, expected)
+
+    @config.patch(capture_func_transforms=True)
+    @config.patch(error_on_recompile=True)
+    def test_vmap_recompile(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            return torch.vmap(lambda x: x.sin())(x)
+
+        x = torch.zeros(3, 3, 4, 5)
+        y = torch.vmap(fn)(x)
+        y = torch.vmap(fn)(x)
 
     @config.patch(capture_func_transforms=True)
     def test_vmap_get_wrapped(self):
