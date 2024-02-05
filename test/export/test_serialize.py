@@ -3,6 +3,7 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_sym_bool)
 """
 # Owner(s): ["oncall: export"]
+import copy
 import io
 import pathlib
 import tempfile
@@ -46,6 +47,16 @@ def get_filtered_export_db_tests():
         for name, case in all_examples().items()
         if case.support_level == SupportLevel.SUPPORTED
     ]
+
+
+def cleanup_op(opname):
+    ns, name = opname.split("::")
+    if not hasattr(torch.ops, ns):
+        return
+    actual_ns = getattr(torch.ops, ns)
+    if not hasattr(actual_ns, name):
+        return
+    delattr(actual_ns, name)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
@@ -216,15 +227,15 @@ class TestDeserialize(TestCase):
     def check_graph(self, fn, inputs, dynamic_shapes=None, _check_meta=True) -> None:
         """Export a graph, serialize it, deserialize it, and compare the results."""
         # TODO(angelayi): test better with some sort of wrapper
-        ep = torch.export.export(fn, inputs, {}, dynamic_shapes=dynamic_shapes)
+        ep = torch.export.export(fn, copy.deepcopy(inputs), {}, dynamic_shapes=dynamic_shapes)
         ep.graph.eliminate_dead_code()
 
         serialized_artifact = serialize(ep, opset_version={"aten": 0})
         deserialized_ep = deserialize(serialized_artifact, expected_opset_version={"aten": 0})
         deserialized_ep.graph.eliminate_dead_code()
 
-        orig_outputs = ep.module()(*inputs)
-        loaded_outputs = deserialized_ep.module()(*inputs)
+        orig_outputs = ep.module()(*copy.deepcopy(inputs))
+        loaded_outputs = deserialized_ep.module()(*copy.deepcopy(inputs))
 
         flat_orig_outputs = pytree.tree_leaves(orig_outputs)
         flat_loaded_outputs = pytree.tree_leaves(loaded_outputs)
@@ -312,6 +323,53 @@ class TestDeserialize(TestCase):
                     )
 
         _check_graph_nodes(ep.graph_module, deserialized_ep.graph_module, _check_meta)
+
+    def test_auto_functionalize(self):
+        try:
+            lib = torch.library.Library("mylib", "FRAGMENT")
+            torch.library.define(
+                "mylib::foo1",
+                "(Tensor(a!) x, Tensor[] y, Tensor(b!) z, SymInt w, Tensor n) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+            torch.library.define(
+                "mylib::foo2",
+                "(Tensor(a!) x, Tensor[] y, Tensor(b!) z, SymInt w, Tensor n) -> (Tensor, Tensor)",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo1", "cpu", lib=lib)
+            @torch.library.impl_abstract("mylib::foo1")
+            def foo1_impl(x, y, z, w, n):
+                x.add_(y[0] + w)
+                z.add_(y[1] + n)
+                return n + n
+
+            @torch.library.impl("mylib::foo2", "cpu", lib=lib)
+            @torch.library.impl_abstract("mylib::foo2")
+            def foo2_impl(x, y, z, w, n):
+                x.add_(y[0] + w)
+                z.add_(y[1] + n)
+                return (n + n, n * n)
+
+            class M(torch.nn.Module):
+                def forward(self, x, y, z, n):
+                    n = torch.ops.mylib.foo1(x, y, z, 2, n)
+                    return torch.ops.mylib.foo2(x, y, z, 2, n)
+
+            x = torch.randn(3)
+            y = (torch.randn(3), torch.randn(3))
+            z = torch.randn(3)
+            n = torch.randn(3)
+            orig_args = (x, y, z, n)
+
+            self.check_graph(M(), orig_args)
+
+        finally:
+            cleanup_op("mylib::foo")
+            del lib
 
     def test_multi_return(self) -> None:
         """
@@ -448,24 +506,29 @@ class TestDeserialize(TestCase):
         self.check_graph(WrapperModule(g), inputs, _check_meta=False)
 
     def test_tensor_tensor_list(self):
-        from torch.library import Library
-        lib = Library("_export", "FRAGMENT")
-        lib.define(
-            "_test_tensor_tensor_list_output(Tensor x, Tensor y) -> (Tensor, Tensor[])",
-            tags=torch.Tag.pt2_compliant_tag)
+        try:
+            from torch.library import Library
+            lib = Library("_export", "FRAGMENT")
+            lib.define(
+                "_test_tensor_tensor_list_output(Tensor x, Tensor y) -> (Tensor, Tensor[])",
+                tags=torch.Tag.pt2_compliant_tag)
 
-        def _test_tensor_tensor_list_output(x, y):
-            return y, [x]
+            def _test_tensor_tensor_list_output(x, y):
+                return y, [x]
 
-        lib.impl("_test_tensor_tensor_list_output", _test_tensor_tensor_list_output, "CPU")
-        lib.impl("_test_tensor_tensor_list_output", _test_tensor_tensor_list_output, "Meta")
+            lib.impl("_test_tensor_tensor_list_output", _test_tensor_tensor_list_output, "CPU")
+            lib.impl("_test_tensor_tensor_list_output", _test_tensor_tensor_list_output, "Meta")
 
-        class M(torch.nn.Module):
-            def forward(self, x, y):
-                a, b = torch.ops._export._test_tensor_tensor_list_output.default(x, y)
-                return a + b[0]
+            class M(torch.nn.Module):
+                def forward(self, x, y):
+                    a, b = torch.ops._export._test_tensor_tensor_list_output.default(x, y)
+                    return a + b[0]
 
-        self.check_graph(M(), (torch.rand(3, 2), torch.rand(3, 2)))
+            self.check_graph(M(), (torch.rand(3, 2), torch.rand(3, 2)))
+
+        finally:
+            cleanup_op("_export::_test_tensor_tensor_list_output")
+            del lib
 
     def test_list_of_optional_tensors(self) -> None:
         class MyModule(torch.nn.Module):
@@ -589,11 +652,6 @@ unittest.expectedFailure(
 # Failed to produce a graph during tracing. Tracing through 'f' must produce a single graph.
 unittest.expectedFailure(
     TestDeserialize.test_exportdb_supported_case_scalar_output
-)
-
-# TODO(zhxchen17) Support serializing user inputs mutation.
-unittest.expectedFailure(
-    TestDeserialize.test_exportdb_supported_case_user_input_mutation
 )
 
 
