@@ -3142,7 +3142,7 @@ class TritonScheduling(BaseScheduling):
 
         return node_schedule
 
-    def codegen_nodes(self, nodes):
+    def codegen_nodes(self, nodes: List[scheduler.SchedulerNode]):
         """
         Given a set of pre-fused nodes, generate a Triton kernel.
         """

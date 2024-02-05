@@ -2343,7 +2343,7 @@ class BaseScheduling:
         """
         raise NotImplementedError()
 
-    def codegen_nodes(self, nodes: List[BaseSchedulerNode]):
+    def codegen_nodes(self, nodes: List[SchedulerNode]):
         """
         Generate a kernel given a list of pre-fused nodes.
         """
