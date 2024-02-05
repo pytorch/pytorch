@@ -15,6 +15,7 @@
 // in model.so, and should not refer to any aten/c10 headers except the stable
 // C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
+#include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_runtime/device_utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
@@ -76,6 +77,35 @@ AOTI_NOINLINE static void throw_exception(
   if ((call) != AOTI_TORCH_SUCCESS) {           \
     throw_exception(#call, __FILE__, __LINE__); \
   }
+
+AOTI_NOINLINE static void __aoti_check(
+    bool cond,
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* msg) {
+  if (C10_UNLIKELY_OR_CONST(!cond)) {
+    ::c10::detail::torchCheckFail(func, file, line, msg);
+  }
+}
+
+#ifdef STRIP_ERROR_MESSAGES
+#define AOTI_CHECK(cond, ...)          \
+  __aoti_check(                        \
+      cond,                            \
+      __func__,                        \
+      __FILE__,                        \
+      static_cast<uint32_t>(__LINE__), \
+      TORCH_CHECK_MSG(cond, "", __VA_ARGS__));
+#else
+#define AOTI_CHECK(cond, ...)          \
+  __aoti_check(                        \
+      cond,                            \
+      __func__,                        \
+      __FILE__,                        \
+      static_cast<uint32_t>(__LINE__), \
+      TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__));
+#endif
 
 using DeleterFnPtr = void (*)(void*);
 
