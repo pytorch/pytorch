@@ -7,6 +7,16 @@ import torch
 @dataclass(frozen=True)
 class MixedPrecisionPolicy:
     """
+    This configures FSDP's mixed precision. Unlike autocast, this applies mixed
+    precision at the module level, not op level, which means low-precision
+    activations are saved for backward and high-to-low-precision casts are
+    incurred only at module boundaries.
+
+    FSDP works well with module-level mixed precision since it keeps the
+    high-precision sharded parameters in memory anyway. In other words, FSDP
+    does not require any extra memory to keep a high-precision copy of the
+    parameters for the optimizer step.
+
     Attributes:
         param_dtype (Optional[torch.dtype]): This specifies the dtype for
             the unsharded parameter and hence the dtype for forward/backward
