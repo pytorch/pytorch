@@ -26,6 +26,7 @@ from ..pattern_matcher import (
     _return_true,
     Arg,
     CallFunction,
+    CallFunctionVarArgs,
     filter_nodes,
     get_arg_value,
     Ignored,
@@ -37,7 +38,6 @@ from ..pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
     stable_topological_sort,
-    CallFunctionVarArgs,
 )
 from ..utils import decode_device, is_pointwise_use
 from ..virtualized import V

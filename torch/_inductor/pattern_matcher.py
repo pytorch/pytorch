@@ -125,7 +125,9 @@ class Match:
         assert self.ctx
         if trace_fn is None:
             trace_fn = functools.partial(fwd_only, run_dce=run_dce)
-        replacement = trace_fn(replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"]))
+        replacement = trace_fn(
+            replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])
+        )
         ReplacementPatternEntry.replace_with_graph(
             self,
             self.ctx.graph,
