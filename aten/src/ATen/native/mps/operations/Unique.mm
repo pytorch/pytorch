@@ -206,9 +206,7 @@ static void runUniqueGraph(UniqueCachedGraph* uniqueGraph,
                            bool return_inverse,
                            bool return_counts) {
   Placeholder inputPlaceholder = Placeholder(uniqueGraph->inputTensor_, input);
-  NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-    inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-  };
+  auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
 
   NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = [NSMutableDictionary dictionary];
   Placeholder outputPlaceholder = Placeholder(uniqueGraph->outputTensor_, output);
