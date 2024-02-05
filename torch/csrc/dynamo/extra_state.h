@@ -4,7 +4,7 @@
 
 #ifdef __cplusplus
 
-#include <pybind11/pybind11.h>
+#include <torch/csrc/utils/pybind.h>
 #include <list>
 
 namespace py = pybind11;

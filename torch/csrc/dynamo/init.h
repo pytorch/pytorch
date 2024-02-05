@@ -1,8 +1,8 @@
 #pragma once
 
 // C2039 MSVC
+#include <torch/csrc/utils/pybind.h>
 #include <pybind11/complex.h>
-#include <pybind11/pybind11.h>
 
 #include <Python.h>
 
