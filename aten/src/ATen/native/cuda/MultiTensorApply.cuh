@@ -438,12 +438,14 @@ void multi_tensor_apply(
   tl.block_to_chunk = static_cast<uint32_t*>(dev_ptrs[depth + 2]);
   tl.start_tensor_this_launch = 0;
 
-  multi_tensor_apply_kernel<<<
-      block_to_tensor.size(),
-      kBlockSize,
-      0,
-      at::cuda::getCurrentCUDAStream()>>>(tl, callable, args...);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  if (block_to_tensor.size() > 0) {
+    multi_tensor_apply_kernel<<<
+        block_to_tensor.size(),
+        kBlockSize,
+        0,
+        at::cuda::getCurrentCUDAStream()>>>(tl, callable, args...);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  }
 }
 
 template <int depth, typename T, typename... ArgTypes>
