@@ -162,15 +162,22 @@ def compile_opt(opt_compiled, closure=None):
     # run the patcher so that step has the expected structure
     torch._dynamo.eval_frame.TorchPatcher.patch()
 
+    # unwrap step TWICE to avoid a deliberate graph break due to
+    # a limitation of functionalization/no_grad detection
+    # see the [Note on graph break] in optimizer.py
+    # This ignores the outer _use_grad_if_differentiable wrapper
+    # and instead manually disables grad before calling step, which is fine
+    # for now as dynamo does not support differentiable optimizers anyway
+    step_fn = opt_compiled.step.__wrapped__.__wrapped__
     if closure is not None:
 
         def fn():
-            opt_compiled.step(closure)
+            step_fn(opt_compiled, closure)
 
     else:
 
         def fn():
-            opt_compiled.step()
+            step_fn(opt_compiled)
 
     return torch.compile(fn, backend="inductor", fullgraph=True)
 
