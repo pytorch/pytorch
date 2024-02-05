@@ -12742,7 +12742,7 @@ class TestFusionUtils(TestCase):
             self.assertEqual(weight.requires_grad, w_rg)
             self.assertEqual(bias.requires_grad, b_rg)
 
-class TestConsumePrefix(TestCase):
+class TestUtils(TestCase):
     # pr-117464 fixes issue-106942
     def test_consume_prefix_in_state_dict_if_present(self):
         # 0. Case non-DDP model empty state_dict
