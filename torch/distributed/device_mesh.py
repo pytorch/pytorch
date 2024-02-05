@@ -285,16 +285,12 @@ else:
                     # for each dim and append the groups
                     for dim_mesh in pg_ranks_by_dim:
                         subgroup_ranks = dim_mesh.tolist()
-                        # if dim_group exists for given subgroup_ranks, we re-use it.
-                        # "" is the default tag for user PGs, and it contains all pgs for a given rank.
-                        dim_group = _find_pg_by_ranks_and_tag(
-                            tag="", ranks=subgroup_ranks
-                        )
-                        if not dim_group:
-                            # call new_group regardless of the current rank in the
-                            # pg or not, it's required that all ranks participate
-                            # in subgroup construction
-                            dim_group = new_group(ranks=subgroup_ranks)
+
+                        # We temporarily revert the re-use subgroup, since it breaks two internal tests.
+                        # Temporarily reverting to resolve test timeout while root-causing.
+                        # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
+                        dim_group = new_group(ranks=subgroup_ranks)
+
                         # only add to dim_groups if the current rank in the subgroup
                         if self.get_rank() in subgroup_ranks:
                             if len(dim_group_infos) > dim:
@@ -306,7 +302,7 @@ else:
                                 (
                                     _get_group_tag(not_none(dim_group)),
                                     subgroup_ranks,
-                                    not_none(dim_group).group_name,
+                                    dim_group.group_name,
                                 )
                             )
             self._dim_group_infos = dim_group_infos
