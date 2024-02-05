@@ -71,7 +71,7 @@ except ImportError:
 from torch.export import export
 
 
-@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+@unittest.skipIf(not torchdynamo.is_win32(), "not supported for windows")
 class TestDynamismExpression(TestCase):
     def test_export_inline_constraints(self):
         def f(x):
@@ -133,7 +133,7 @@ class TestDynamismExpression(TestCase):
         export(WrapperModule(branch_on_shape), inp)
 
 
-@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+@unittest.skipIf(not torchdynamo.is_win32(), "not supported for windows")
 class TestExport(TestCase):
     def _test_export_same_as_eager(self, f, args, kwargs=None):
         kwargs = kwargs or {}
@@ -3032,7 +3032,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             ep = torch.export.export(m, (inp,))
 
 
-@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+@unittest.skipIf(not torchdynamo.is_win32(), "not supported for windows")
 class TestOneOffModelExportResult(TestCase):
     def test_scaled_dot_product_attention_cpu(self):
         """
@@ -3178,7 +3178,7 @@ def forward(self, l_q_, l_k_, l_v_):
         self.assertEqual(res[0], torch.tensor(16))
         self.assertEqual(res[1], None)
 
-@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+@unittest.skipIf(not torchdynamo.is_win32(), "not supported for windows")
 class TestExportCustomClass(TorchTestCase):
     def setUp(self):
         if IS_FBCODE:

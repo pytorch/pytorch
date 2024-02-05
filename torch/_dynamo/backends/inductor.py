@@ -1,13 +1,11 @@
 # mypy: ignore-errors
 
-import sys
-
-from torch._dynamo import register_backend
+from torch._dynamo import register_backend, is_win32
 
 
 @register_backend
 def inductor(*args, **kwargs):
-    if sys.platform == "win32":
+    if is_win32():
         raise RuntimeError("Windows not yet supported for inductor")
 
     # do import here to avoid loading inductor into memory when it is not used
