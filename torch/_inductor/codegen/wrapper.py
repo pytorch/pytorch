@@ -619,8 +619,37 @@ class WrapperCodeGen(CodeGen):
             args.append(f"out={codegen_reference}")
         self.writeline(f"{kernel}({', '.join(args)})")
 
+    def user_defined_kernel_grid_fn_code(
+        self, name: str, configs: List["triton.Config"], grids: List[TritonGrid]
+    ) -> Tuple[str, str]:
+        output = IndentedBuffer()
+
+        fn_name = f"grid_wrapper_for_{name}"
+        output.writeline(f"def {fn_name}(meta):")
+        with output.indent():
+            if len(grids) == 1:
+                grid = self.codegen_shape_tuple(grids[0])
+                output.writeline(f"return {grid}")
+            else:
+                assert len(grids) > 1
+                assert len(grids) == len(configs)
+                seen = set()
+                for grid, c in zip(grids, configs):
+                    guards = [
+                        f"meta['{name}'] == {val}" for name, val in c.kwargs.items()
+                    ]
+                    guards = " and ".join(guards)
+                    grid = self.codegen_shape_tuple(grid)
+                    statement = f"if {guards}: return {grid}"
+                    if statement in seen:
+                        continue
+                    seen.add(statement)
+                    output.writeline(statement)
+
+        return fn_name, output.getvalue()
+
     def generate_user_defined_triton_kernel(self, kernel_name, grid, configs, args):
-        grid, code = user_defined_kernel_grid_fn_code(kernel_name, configs, grid)
+        grid, code = self.user_defined_kernel_grid_fn_code(kernel_name, configs, grid)
         # Must happen after free symbols are already codegened
         with self.prefix.indent():
             self.prefix.splice(code)
