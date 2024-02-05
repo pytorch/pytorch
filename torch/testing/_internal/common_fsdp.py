@@ -912,12 +912,12 @@ def patch_unshard(new_unshard: Callable):
 @no_type_check
 @contextlib.contextmanager
 def patch_post_backward(new_post_backward: Callable):
-    orig_post_backward = FSDPParamGroup._post_backward
-    FSDPParamGroup._post_backward = new_post_backward
+    orig_post_backward = FSDPParamGroup.post_backward
+    FSDPParamGroup.post_backward = new_post_backward
     try:
         yield
     finally:
-        FSDPParamGroup._post_backward = orig_post_backward
+        FSDPParamGroup.post_backward = orig_post_backward
 
 
 @no_type_check

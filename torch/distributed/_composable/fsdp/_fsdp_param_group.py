@@ -16,12 +16,7 @@ from ._fsdp_collectives import (
     foreach_all_gather_copy_out,
     foreach_reduce_scatter,
 )
-from ._fsdp_common import (
-    _raise_assert_with_print,
-    FSDPMeshInfo,
-    HSDPMeshInfo,
-    TrainingState,
-)
+from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo, TrainingState
 from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
 
 _ModuleToHandleDict = Dict[nn.Module, RemovableHandle]  # for state dict
@@ -116,11 +111,13 @@ class FSDPParamGroup:
 
         # - Communication and communication/computation overlap
         self.comm_ctx = FSDPCommContext()
-        # Group's indices in the communication context's post-forward order
+        # Group's indices in the shared post-forward order
         self._post_forward_indices: List[int] = []
-        # Used to avoid mistargeted backward prefetches in the case that some
-        # module is used in forward but not in backward
-        self.expected_backward_unshard_count: int = 0
+        # Used to avoid mistargeted backward prefetches when the module is used
+        # in forward but not in backward: for each forward, we record a tuple
+        # of the output's grad fns and later query the autograd engine whether
+        # any grad fn will execute in the current backward to know to prefetch.
+        self.all_forward_grad_fns: Set[Tuple[Any, ...]] = set()
         # Whether to reduce-scatter or all-reduce gradients, respectively
         # (can be set to false to save communication during gradient
         # accumulation); all-reducing without reduce-scatter is disallowed
@@ -186,7 +183,7 @@ class FSDPParamGroup:
     def unshard(self, async_op: bool = False):
         if self._all_gather_result is not None:  # already called, pending wait
             return
-        if self._sharded_state == ShardedState.UNSHARDED:
+        if self.is_unsharded:
             return  # no-op
         if self._reshard_after_forward_event is not None:
             # Resharded parameter data is allocated in the default stream and
@@ -271,15 +268,16 @@ class FSDPParamGroup:
         self.comm_ctx.post_forward_order.append(self)
         self._post_forward_indices.append(post_forward_index)
 
-    def pre_backward(self, *unused: Any):
+    def pre_backward(self, forward_grad_fns: Tuple[Any, ...], *unused: Any):
         with torch.profiler.record_function("FSDP::pre_backward"):
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard()  # no-op if prefetched
             self.wait_for_unshard()
-            self.expected_backward_unshard_count -= 1
+            # Can be already removed if running backward >1 time
+            self.all_forward_grad_fns.discard(forward_grad_fns)
             self._prefetch_unshard()
 
-    def _post_backward(self, *unused: Any):
+    def post_backward(self, *unused: Any):
         self._training_state = TrainingState.POST_BACKWARD
         with torch.profiler.record_function("FSDP::post_backward_reshard"):
             if not self.reduce_scatter_grads:
@@ -311,27 +309,28 @@ class FSDPParamGroup:
             )
 
     def finalize_backward(self):
-        if self._sharded_state == ShardedState.UNSHARDED:
-            # Run post-backward here since the forward inputs did not require
-            # gradient, so the post-backward hook did not run
-            self._post_backward()
         if self._reduce_scatter_view_out_event is not None:
             torch.cuda.current_stream().wait_event(self._reduce_scatter_view_out_event)
             self._reduce_scatter_view_out_event = None
         self._training_state = TrainingState.IDLE
         self._post_forward_indices.clear()
-        self.expected_backward_unshard_count = 0
+        self.all_forward_grad_fns.clear()
 
     def _prefetch_unshard(self):
         if self._training_state == TrainingState.PRE_BACKWARD:
             if not self._post_forward_indices:
-                msg = "Unexpected backward prefetch without running forward for "
-                _raise_assert_with_print(f"{msg} {self._module_fqn}")
+                # Can happen if running backward >1 time through this module
+                # (with `retain_graph=True`)
+                return
             curr_index = self._post_forward_indices.pop()
             if (target_index := curr_index - 1) < 0:
                 return
             target_fsdp_param_group = self.comm_ctx.post_forward_order[target_index]
-            if target_fsdp_param_group.expected_backward_unshard_count > 0:
+            if any(
+                torch._C._will_engine_execute_node(grad_fn)  # type: ignore[attr-defined]
+                for forward_grad_fns in target_fsdp_param_group.all_forward_grad_fns
+                for grad_fn in forward_grad_fns
+            ):
                 with torch.profiler.record_function(
                     "FSDP::backward_prefetch"
                 ), target_fsdp_param_group.use_training_state(
@@ -341,22 +340,34 @@ class FSDPParamGroup:
 
     # Utilities #
     def _to_sharded(self):
-        if self._sharded_state != ShardedState.SHARDED:
+        if not self.is_sharded:
             for fsdp_param in self.fsdp_params:
                 fsdp_param.to_sharded()
             self._sharded_state = ShardedState.SHARDED
 
     def _to_sharded_post_forward(self):
-        if self._sharded_state != ShardedState.SHARDED_POST_FORWARD:
+        if not self.is_sharded_post_forward:
             for fsdp_param in self.fsdp_params:
                 fsdp_param.to_sharded_post_forward()
             self._sharded_state = ShardedState.SHARDED_POST_FORWARD
 
     def _to_unsharded(self):
-        if self._sharded_state != ShardedState.UNSHARDED:
+        if not self.is_unsharded:
             for fsdp_param in self.fsdp_params:
                 fsdp_param.to_unsharded()
             self._sharded_state = ShardedState.UNSHARDED
+
+    @property
+    def is_sharded(self) -> bool:
+        return self._sharded_state == ShardedState.SHARDED
+
+    @property
+    def is_sharded_post_forward(self) -> bool:
+        return self._sharded_state == ShardedState.SHARDED_POST_FORWARD
+
+    @property
+    def is_unsharded(self) -> bool:
+        return self._sharded_state == ShardedState.UNSHARDED
 
     @contextlib.contextmanager
     def use_training_state(self, training_state: TrainingState):
@@ -454,7 +465,7 @@ class FSDPParamGroup:
     def _all_gather_process_group(self) -> dist.ProcessGroup:
         mesh_info = (
             cast(FSDPMeshInfo, self.post_forward_mesh_info)
-            if self._sharded_state == ShardedState.SHARDED_POST_FORWARD
+            if self.is_sharded_post_forward
             else self.mesh_info
         )
         assert isinstance(mesh_info, FSDPMeshInfo)
@@ -502,5 +513,5 @@ class RegisterPostBackwardFunction(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, *grads: torch.Tensor):
-        ctx.param_group._post_backward()
+        ctx.param_group.post_backward()
         return (None,) + grads

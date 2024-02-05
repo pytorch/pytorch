@@ -297,6 +297,7 @@ def mps_ops_modifier(ops):
         'slice',
         'split',
         'split_with_sizes',
+        'split_with_sizes_copy',
         'splitlist_args',
         'squeeze',
         'squeezemultiple',
@@ -1379,6 +1380,8 @@ class MPSReluTest(TestCaseMPS):
             self._testReluInPlace(
                 np.array([[-9, 7, -5, 3, -1], [1, -3, 5, -7, 9]]).astype(t),
                 device="mps")
+            self._testRelu(np.array([]).astype(t), device="mps")
+            self._testReluInPlace(np.array([]).astype(t), device="mps")
 
 class MatmulTest(TestCaseMPS):
     def _helper(self, shape_tensor_1, shape_tensor_2, expand_tensor_1_shape=None, expand_tensor_2_shape=None):
@@ -6877,13 +6880,19 @@ class TestMPS(TestCaseMPS):
         # error: subRange.start (24576) is not less than length of dimension[0] (16384)
         # See https://github.com/pytorch/pytorch/issues/116769#issuecomment-1888302095
         self.assertNotEqual(torch.mm(x, y[:, 16384:32768]).abs().max().item(), 0.0)
-        # And below used to produce incorrect results
-        m, n, k = 1024, 1, 32769
-        x = torch.rand(m, n, device="mps")
-        y = torch.rand(n, k, device="mps")
-        z = torch.mm(x, y).to("cpu")
-        z_cpu = torch.mm(x.to("cpu"), y.to("cpu"))
-        self.assertEqual(z, z_cpu)
+
+        def compare_mm(m, n, k):
+            x = torch.rand(m, n, device="mps")
+            y = torch.rand(n, k, device="mps")
+            z = torch.mm(x, y).cpu()
+            z_cpu = torch.mm(x.cpu(), y.cpu())
+            self.assertEqual(z, z_cpu)
+
+        # Used to produce incorrect results with MPS on M1 running MacOS 14.3, but correct with Metal
+        compare_mm(1024, 1, 32769)
+        # one more time, but with dimensions inverted
+        # see https://github.com/pytorch/pytorch/issues/116769#issuecomment-1920066984
+        compare_mm(32769, 1, 1025)
 
     # Test flip
     def test_flip(self):
