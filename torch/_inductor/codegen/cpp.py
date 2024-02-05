@@ -987,7 +987,7 @@ class CppOverrides(OpOverrides):
         code.writeline(f"auto {left} = {x} > 0 ? {scalar_one} : {scalar_zero};")
         code.writeline(f"auto {right} = {x} < 0 ? {scalar_one} : {scalar_zero};")
         code.writeline(f"auto {result} = {left} - {right};")
-        # V.kernel.cse.cache[f"auto {result} = {left} - {right};"] = result
+        V.kernel.cse.cache[f"auto {result} = {left} - {right};"] = result
         V.kernel.compute.splice(code)
         return result
 
@@ -1330,7 +1330,7 @@ class CppVecOverrides(CppOverrides):
         code.writeline(f"auto {right} = {blendv};")
         result = V.kernel.cse.newvar()
         code.writeline(f"auto {result} = {left} - {right};")
-        # V.kernel.cse.cache[f"auto {result} = {left} - {right};"] = result
+        V.kernel.cse.cache[f"auto {result} = {left} - {right};"] = result
         V.kernel.compute.splice(code)
         return result
 
