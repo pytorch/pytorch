@@ -1395,7 +1395,7 @@ if(NOT INTERN_BUILD_MOBILE)
 endif()
 
 if($ENV{TH_BINARY_BUILD})
-  if(NOT MSVC AND USE_CUDA AND NOT APPLE)
+  if(NOT MSVC AND USE_CUDA AND NOT APPLE AND USE_MAGMA)
     # Note [Extra MKL symbols for MAGMA in torch_cpu]
     #
     # When we build CUDA libraries and link against MAGMA, MAGMA makes use of
@@ -1424,6 +1424,26 @@ if($ENV{TH_BINARY_BUILD})
 endif()
 
 target_link_libraries(torch_cpu PUBLIC c10)
+if(USE_MAGMA)
+  target_link_libraries(torch_cpu PUBLIC ${BLAS_LIBRARIES})
+else()
+  foreach(BLAS_LIB IN LISTS BLAS_LIBRARIES)
+    if(USE_STATIC_MKL)
+      if(APPLE)
+        target_link_libraries(torch_cpu PRIVATE -Wl,-force_load,\"${BLAS_LIB}\")
+      elseif(MSVC)
+        # In MSVC, we will add whole archive in default.
+        target_link_options(torch_cpu PRIVATE "-WHOLEARCHIVE:${BLAS_LIB}")
+      else()
+        # Assume everything else is like gcc
+        target_link_libraries(torch_cpu PRIVATE
+          "-Wl,--whole-archive,\"${BLAS_LIB}\" -Wl,--no-whole-archive")
+      endif()
+    else()
+      target_link_libraries(torch_cpu PRIVATE ${BLAS_LIB})
+    endif()
+  endforeach()
+endif()
 target_link_libraries(torch_cpu PUBLIC ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
 target_link_libraries(torch_cpu PRIVATE ${Caffe2_DEPENDENCY_LIBS})
 target_link_libraries(torch_cpu PRIVATE ${Caffe2_DEPENDENCY_WHOLE_LINK_LIBS})
