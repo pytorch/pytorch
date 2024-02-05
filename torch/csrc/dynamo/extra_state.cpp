@@ -85,7 +85,10 @@ PyObject* lookup(ExtraState* extra_state, PyObject* f_locals) {
             index,
             index == extra_state->cache_entry_list.size() - 1);
       }
-      throw;
+      // this function is called from C, so we cannot repropagate
+      // the exception
+      e.restore();
+      return NULL;
     }
     if (valid.cast<bool>()) {
       found = &cache_entry;
