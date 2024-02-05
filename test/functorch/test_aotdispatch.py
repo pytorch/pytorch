@@ -3262,7 +3262,7 @@ class <lambda>(torch.nn.Module):
             aot_export_module(mod, [inp], trace_joint=True, output_loss_index=1)
 
     @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "Cond needs dynamo to run")
-    @unittest.skipIf(not torch._dynamo.is_win32(), "Cond not supported on windows")
+    @unittest.skipIf(torch._dynamo.is_win32(), "Cond not supported on windows")
     def test_aot_export_with_torch_cond(self):
         class M(torch.nn.Module):
             def __init__(self):
