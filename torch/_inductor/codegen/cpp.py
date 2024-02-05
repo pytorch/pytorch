@@ -974,17 +974,8 @@ class CppOverrides(OpOverrides):
         V.kernel.compute.splice(code)
         return result
 
-    @staticmethod
-    def bessel_j0(x):
-        return f"bessel_j0_forward({x})"
 
-    @staticmethod
-    def bessel_j1(x):
-        return f"bessel_j1_forward({x})"
-
-    @staticmethod
-    def modified_bessel_i0(x):
-        return f"modified_bessel_i0_forward({x})"
+CppOverrides._initialize_pointwise_overrides("cpp")
 
 
 class CppVecOverrides(CppOverrides):

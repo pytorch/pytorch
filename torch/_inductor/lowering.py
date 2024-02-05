@@ -2233,7 +2233,7 @@ make_fallback(aten.avg_pool3d)
 make_fallback(aten._cdist_forward)
 make_fallback(aten.cummax)
 make_fallback(aten.cummin)
-make_fallback(aten.digamma, warn=False)
+make_fallback(aten.digamma, warn=False)  # triton/libdevice do not provide digamma
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
 make_fallback(aten._efficientzerotensor)
@@ -2243,7 +2243,6 @@ make_fallback(aten.fractional_max_pool3d)
 make_fallback(aten.frexp)
 make_fallback(aten.geqrf)
 make_fallback(aten.histc)
-make_fallback(aten.i0)
 make_fallback(aten.igamma, warn=False)
 make_fallback(aten.igammac, warn=False)
 make_fallback(aten.isin)
@@ -2274,33 +2273,52 @@ make_fallback(aten.mode)
 make_fallback(aten.nanmedian)
 make_fallback(aten.ormqr)
 make_fallback(aten._pdist_forward)
-make_fallback(aten.polygamma)
+make_fallback(aten.polygamma)  # triton/libdevice do not provide polygamma
 make_fallback(aten.put)
 make_fallback(aten.resize)
 make_fallback(aten.resize_)
 make_fallback(aten.resize_as)
 make_fallback(aten.resize_as_)
 make_fallback(aten.searchsorted)
-make_fallback(aten.special_airy_ai)
-make_fallback(aten.special_bessel_y0, warn=False)
-make_fallback(aten.special_bessel_y1)
-make_fallback(aten.special_chebyshev_polynomial_t)
-make_fallback(aten.special_chebyshev_polynomial_u)
-make_fallback(aten.special_erfcx, warn=False)
-make_fallback(aten.special_hermite_polynomial_h)
-make_fallback(aten.special_hermite_polynomial_he)
-make_fallback(aten.special_i0e, warn=False)
-make_fallback(aten.special_i1, warn=False)
-make_fallback(aten.special_i1e, warn=False)
+make_fallback(aten.special_airy_ai)  # triton/libdevice do not provide airy_ai
+make_fallback(
+    aten.special_chebyshev_polynomial_t
+)  # triton/libdevice do not provide chebyshev_polynomial_t
+make_fallback(
+    aten.special_chebyshev_polynomial_u
+)  # triton/libdevice do not provide chebyshev_polynomial_u
+make_fallback(
+    aten.special_hermite_polynomial_h
+)  # triton/libdevice do not provide hermite_polynomial_h
+make_fallback(
+    aten.special_hermite_polynomial_he
+)  # triton/libdevice do not provide hermite_polynomial_he
+make_fallback(
+    aten.special_i0e, warn=False
+)  # todo: impl as triton decomp, use calc_i0e for cpp
+make_fallback(
+    aten.special_i1e, warn=False
+)  # todo: impl as triton decomp, use calc_i1e for cpp
 make_fallback(aten.special_laguerre_polynomial_l)
-make_fallback(aten.special_modified_bessel_i1)
-make_fallback(aten.special_modified_bessel_k0)
-make_fallback(aten.special_modified_bessel_k1)
-make_fallback(aten.special_ndtri, warn=False)
-make_fallback(aten.special_scaled_modified_bessel_k0)
-make_fallback(aten.special_scaled_modified_bessel_k1)
-make_fallback(aten.special_spherical_bessel_j0, warn=False)
-make_fallback(aten.special_zeta, warn=False)
+make_fallback(
+    aten.special_modified_bessel_k0
+)  # triton/libdevice do not provide modified_bessel_k0
+make_fallback(
+    aten.special_modified_bessel_k1
+)  # triton/libdevice do not provide modified_bessel_k1
+make_fallback(
+    aten.special_ndtri, warn=False
+)  # todo: impl as triton decomp, use calc_ndtri for cpp
+make_fallback(
+    aten.special_scaled_modified_bessel_k0
+)  # triton/libdevice do not provide scaled_modified_bessel_k0
+make_fallback(
+    aten.special_scaled_modified_bessel_k1
+)  # triton/libdevice do not provide scaled_modified_bessel_k1
+make_fallback(
+    aten.special_spherical_bessel_j0, warn=False
+)  # triton/libdevice do not provide spherical_bessel_k1
+make_fallback(aten.special_zeta, warn=False)  # triton/libdevice do not provide zeta
 make_fallback(aten._trilinear)
 make_fallback(aten.uniform, warn=False)
 make_fallback(aten._adaptive_avg_pool3d_backward)
@@ -5203,11 +5221,12 @@ register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
 
-register_pointwise_numeric(aten.special_bessel_j0, name="bessel_j0")
-register_pointwise_numeric(prims.bessel_j0, name="bessel_j0")
-register_pointwise_numeric(aten.special_bessel_j1, name="bessel_j1")
-register_pointwise_numeric(prims.bessel_j1, name="bessel_j1")
-register_pointwise_numeric(aten.special_modified_bessel_i0, name="modified_bessel_i0")
+from .codegen.common import pointwise_overrides_data
+
+for name, impls in pointwise_overrides_data.items():
+    register_pointwise_numeric(getattr(aten, impls["aten"]), name=name)
+    if hasattr(prims, name):
+        register_pointwise_numeric(getattr(prims, name))
 
 foreach_add_list = register_foreach_pointwise(
     aten._foreach_add.List, add, allow_alpha=True

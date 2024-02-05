@@ -60,12 +60,15 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
+    instantiate_parametrized_tests,
     IS_CI,
     IS_FBCODE,
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
+    parametrize,
     skipIfRocm,
+    subtest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
@@ -632,6 +635,7 @@ class SweepInputs2:
                 cls.gen_template(name1, name2)
 
 
+@instantiate_parametrized_tests
 class CommonTemplate:
     def test_bool(self):
         def fn(a, b):
@@ -8470,23 +8474,87 @@ class CommonTemplate:
             # should_pad_bench always returns False if has_triton returns False
             self.assertFalse(should_pad)
 
-    def test_bessel_j0(self):
-        def fn(x):
-            return torch.special.bessel_j0(x)
+    @parametrize(
+        "name, op",
+        [
+            subtest((name, getattr(torch.special, name)), name=name)
+            for name in torch.special.__all__
+            if "_polynomial_" not in name
+        ],
+    )
+    def test_pointwise(self, name, op):
+        dtype = torch.float32
 
-        self.common(fn, (torch.randn(8, 8),))
+        if self.device == "cuda" and name in {
+            "airy_ai",
+            "bessel_y0",
+            "bessel_y1",
+            "erfcx",
+            "gammainc",
+            "gammaincc",
+            "i1",
+            "i1e",
+            "modified_bessel_i1",
+            "modified_bessel_k0",
+            "modified_bessel_k1",
+            "ndtri",
+            "scaled_modified_bessel_k0",
+            "scaled_modified_bessel_k1",
+            "spherical_bessel_j0",
+            "zeta",
+        }:
+            # <func>_cuda not implemented for Half
+            dtype = torch.float64
 
-    def test_bessel_j1(self):
-        def fn(x):
-            return torch.special.bessel_j1(x)
+        if name in {"gammainc", "gammaincc"}:
+            args = (
+                torch.randn(8, 8, dtype=dtype, device=self.device),
+                torch.empty(8, 8, dtype=dtype, device=self.device).uniform_(1, 2),
+            )
 
-        self.common(fn, (torch.randn(8, 8),))
+            def fn(x, y):
+                return op(x, y)
 
-    def test_modified_bessel_i0(self):
-        def fn(x):
-            return torch.special.modified_bessel_i0(x)
+        elif name in {"log_softmax", "logsumexp", "softmax"}:
+            args = (torch.randn(8, 8, dtype=dtype, device=self.device), 0)
 
-        self.common(fn, (torch.randn(8, 8),))
+            def fn(x, dim):
+                return op(x, dim)
+
+        elif name in {"xlog1py", "xlogy", "zeta"}:
+            args = (
+                torch.randn(8, 8, dtype=dtype, device=self.device),
+                torch.empty(8, 8, dtype=dtype, device=self.device).uniform_(1, 2),
+            )
+
+            def fn(x, y):
+                return op(x, y)
+
+        elif name == "multigammaln":
+            args = (
+                torch.empty(8, 8, dtype=dtype, device=self.device).uniform_(1, 2),
+                2,
+            )
+
+            def fn(x, p):
+                return op(x, p)
+
+        elif name == "polygamma":
+            args = (
+                1,
+                torch.randn(8, 8, dtype=dtype, device=self.device),
+            )
+
+            def fn(n, x):
+                return op(n, x)
+
+        else:
+            args = (torch.randn(8, 8, dtype=dtype, device=self.device),)
+
+            def fn(x):
+                return op(x)
+
+        self.common(fn, args)
 
 
 @dataclasses.dataclass
