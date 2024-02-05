@@ -6,7 +6,6 @@ import torch.nn as nn
 
 from torch.distributed._composable import contract
 from torch.distributed._tensor import DeviceMesh
-
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
 from ._fsdp_init import (
     _get_device_from_mesh,
@@ -34,7 +33,7 @@ def fully_shard(
             (i.e. FSDP). If this is a 2D mesh, then this shards across the 0th
             dimension and replicates across the 1st dimension (i.e. HSDP).
             FSDP/HSDP uses the device given by the mesh's device type. For CUDA
-            or CUDA-like devices, FSDP expects uses the current device.
+            or CUDA-like devices, FSDP uses the current device.
     """
     if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
         raise ValueError(
