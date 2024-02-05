@@ -1,3 +1,4 @@
+#include "fmt/core.h"
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <iostream>
 #include <optional>
@@ -17,13 +18,17 @@
 #endif
 
 namespace at::native {
-int64_t _fused_sdp_choice_mps(const Tensor& query_,
+int64_t _fused_sdp_choice_mps(const Tensor& query,
                               const Tensor& key,
                               const Tensor& value,
-                              const std::optional<Tensor>& attn_mask_,
+                              const std::optional<Tensor>& attn_mask,
                               double dropout_p,
                               bool is_causal,
                               std::optional<double> scale) {
+  if (attn_mask.has_value() || dropout_p != 0.0 || query.is_contiguous() || !key.is_contiguous() ||
+      !value.is_contiguous()) {
+    return static_cast<int64_t>(sdp::SDPBackend::math);
+  }
   return static_cast<int64_t>(sdp::SDPBackend::flash_attention);
 }
 
