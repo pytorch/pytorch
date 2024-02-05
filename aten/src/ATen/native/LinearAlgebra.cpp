@@ -1329,9 +1329,16 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
             kBFloat16, kHalf, kFloat8_e5m2, kFloat8_e4m3fn, kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, \
             TYPE, NAME, __VA_ARGS__)
 #else
+// Include half dtype in ADDMM. Used to build ExecuTorch in xplat.
+#if defined(C10_MOBILE_HALF)
+#define _AT_DISPATCH_ADDMM_TYPES(TYPE, NAME, ...)        \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, \
+            TYPE, NAME, __VA_ARGS__)
+#else
 #define _AT_DISPATCH_ADDMM_TYPES(TYPE, NAME, ...)        \
         AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, \
             TYPE, NAME, __VA_ARGS__)
+#endif
 #endif
 
 
