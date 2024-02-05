@@ -2377,6 +2377,58 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
 class HigherOrderOpVmapGuardTests(LoggingTestCase):
     @config.patch(capture_func_transforms=True)
     @make_logging_test(recompiles=True)
+    def test_vmap_grad_guard_ok(self, records):
+        vmap = torch.vmap
+        grad = torch.func.grad
+
+        def g(x):
+            return vmap(grad(torch.sin))(x)
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            return vmap(g)(x)
+
+        x = torch.randn(4, 5)
+        y = fn(x)
+        # sanity check
+        self.assertEqual(len(records), 0)
+        self.assertEqual(x.cos(), y)
+
+        # Calling the same function again won't have any effect on guards
+        fn(x)
+        self.assertEqual(len(records), 0)
+
+    @xfailIfTorchDynamo
+    @config.patch(capture_func_transforms=True)
+    @make_logging_test(recompiles=True)
+    def test_grad_guard_fail(self, records):
+        grad = torch.func.grad
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            return grad(torch.sin)(x)
+
+        x = torch.randn([])
+        fn(x)
+        self.assertEqual(len(records), 0)
+
+        # call grad should retrigger compilation
+        grad(fn)(x)
+        self.assertGreater(len(records), 0)
+        record = self.getRecord(records, "maybe_current_level()")
+        self.assertIn(
+            """\
+    triggered by the following guard failure(s):
+    - torch._C._functorch.maybe_current_level() is None             # with grad_increment_nesting() as level:  # _functorch/eager_transforms.py:1232 in grad_and_value_impl""",
+            record.getMessage(),
+        )
+
+        # calling again should not invalidate the graph
+        grad(fn)(x)
+        self.assertEqual(len(records), 0)
+
+    @config.patch(capture_func_transforms=True)
+    @make_logging_test(recompiles=True)
     def test_vmap_guard_ok(self, records):
         @torch.compile(backend="eager")
         def fn(x):

@@ -330,7 +330,8 @@ class MetaConverter:
                         with torch.enable_grad():
                             r = r.clone()
                 elif is_functorch_wrapped_tensor(t):
-                    # Wraps a BatchedTensor in a FakeTensor
+                    # Wraps a functorch tensor class (BatchedTensor, GradTrackingTensor)
+                    # in a FakeTensor
                     def _to_fake_tensor(t):
                         if is_batchedtensor(t):
                             ft = _to_fake_tensor(get_unwrapped(t))

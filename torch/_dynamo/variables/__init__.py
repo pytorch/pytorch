@@ -24,6 +24,7 @@ from .dicts import (
     SetVariable,
 )
 from .functions import (
+    FunctoolsPartialVariable,
     NestedUserFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
@@ -67,6 +68,7 @@ from .misc import (
     SkipFilesVariable,
     StringFormatVariable,
     SuperVariable,
+    TypingVariable,
     UnknownVariable,
 )
 from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable

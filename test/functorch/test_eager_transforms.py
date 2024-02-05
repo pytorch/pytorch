@@ -4831,16 +4831,14 @@ class TestCompileTransforms(TestCase):
         actual = wrapper_fn(x, y)
         expected = torch.compile(wrapper_fn, backend='eager', fullgraph=True)(x, y)
         fn = torch.compile(wrapper_fn, backend='eager', fullgraph=True)
-        import dis
-        print(dis.dis(fn))
-        # self.assertEqual(actual, expected)
+        self.assertEqual(actual, expected)
 
-        # def wrapper_fn(x, y):
-        #     return functorch.grad(torch.mul, argnums=(0, 1))(x, y)
+        def wrapper_fn(x, y):
+            return functorch.grad(torch.mul, argnums=(0, 1))(x, y)
 
-        # actual = wrapper_fn(x, y)
-        # expected = torch.compile(wrapper_fn, backend='eager', fullgraph=True)(x, y)
-        # self.assertEqual(actual, expected)
+        actual = wrapper_fn(x, y)
+        expected = torch.compile(wrapper_fn, backend='eager', fullgraph=True)(x, y)
+        self.assertEqual(actual, expected)
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(

@@ -2111,8 +2111,9 @@ class InstructionTranslator(InstructionTranslatorBase):
             torch._C._functorch.TransformType.Grad,
         )
         if ci is not None and ci.key() in forbidden_keys and compiler_fn is not eager:
-            # if it reaches here, it means Dynamo failed to inline vmap
-            msg = "torch.vmap(fn) requires the function to be inlined by dynamo"
+            # if it reaches here, it means Dynamo failed to inline a functorch function
+            name = ci.key().name.lower()
+            msg = f"torch.func.{name}(fn) requires the function to be inlined by dynamo"
             unimplemented(msg)
 
     def get_example_value(self, source: Source):
@@ -2272,13 +2273,14 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
             # _origin marks this as coming from an internal dynamo known function that is safe to
             # trace through.
-            if hasattr(func.fn, "_origin") and func.fn._origin in [
+            if hasattr(getattr(func, "fn", None), "_origin") and func.fn._origin in [
                 produce_trampoline_autograd_apply,
             ]:
                 # Known sound
                 return skipfiles.SkipResult(False, "allowlist in dynamo known function")
+            fn_qualname = func.fn.__qualname__ if hasattr(func, "fn") else ""
             unimplemented(
-                f"'inline in skipfiles: {func.fn.__qualname__} | {func.get_name()} {func.get_filename()}, {result.reason}'"
+                f"'inline in skipfiles: {fn_qualname} | {func.get_name()} {func.get_filename()}, {result.reason}'"
             )
 
         if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
