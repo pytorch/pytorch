@@ -160,19 +160,36 @@ def get_cpp_op_schema(kernel: torch._ops.OpOverload) -> str:
 
 # TODO: Move to a well known place
 TritonMetaParams = Dict[str, int]
-TritonGrid = Union[Tuple[int, ...], Callable[[TritonMetaParams], Tuple[int, ...]]]
+TritonGrid = Union[
+    Tuple[Union[int, sympy.Expr], ...], Callable[[TritonMetaParams], Tuple[int, ...]]
+]
 
 
 def user_defined_kernel_grid_fn_code(
-    name: str, configs: List["triton.Config"], grids: List[TritonGrid]
+    name: str,
+    configs: List["triton.Config"],
+    grids: List[TritonGrid],
+    wrapper: Optional["WrapperCodeGen"] = None,
 ) -> Tuple[str, str]:
     output = IndentedBuffer()
+
+    def _convert_to_sympy_expr(item: Union[int, sympy.Expr]) -> sympy.Expr:
+        return item if isinstance(item, sympy.Expr) else sympy.Integer(item)
+
+    def determine_grid(grid: TritonGrid):
+        if wrapper is None or callable(grid):
+            # return as-is when used in eager mode or when grid is callable
+            return grid
+        # Grid contains ints/Expr, so utilize wrapper's expr printer for codegen
+        sympy_grid = tuple(_convert_to_sympy_expr(g) for g in grid)
+        return wrapper.codegen_shape_tuple(sympy_grid)
 
     fn_name = f"grid_wrapper_for_{name}"
     output.writeline(f"def {fn_name}(meta):")
     with output.indent():
         if len(grids) == 1:
-            output.writeline(f"return {grids[0]}")
+            grid = determine_grid(grids[0])
+            output.writeline(f"return {grid}")
         else:
             assert len(grids) > 1
             assert len(grids) == len(configs)
@@ -180,6 +197,7 @@ def user_defined_kernel_grid_fn_code(
             for grid, c in zip(grids, configs):
                 guards = [f"meta['{name}'] == {val}" for name, val in c.kwargs.items()]
                 guards = " and ".join(guards)
+                grid = determine_grid(grid)
                 statement = f"if {guards}: return {grid}"
                 if statement in seen:
                     continue
@@ -620,7 +638,9 @@ class WrapperCodeGen(CodeGen):
         self.writeline(f"{kernel}({', '.join(args)})")
 
     def generate_user_defined_triton_kernel(self, kernel_name, grid, configs, args):
-        grid, code = user_defined_kernel_grid_fn_code(kernel_name, configs, grid)
+        grid, code = user_defined_kernel_grid_fn_code(
+            kernel_name, configs, grid, wrapper=self
+        )
         # Must happen after free symbols are already codegened
         with self.prefix.indent():
             self.prefix.splice(code)
