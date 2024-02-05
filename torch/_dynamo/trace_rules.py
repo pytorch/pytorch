@@ -17,7 +17,7 @@ except ModuleNotFoundError:
 
 import torch
 
-from .utils import hashable, is_function, NP_SUPPORTED_MODULES
+from .utils import hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
 
 from .variables import (
     FunctorchVmapHigherOrderVariable,
@@ -65,13 +65,13 @@ manual_torch_name_rule_map = {
     "torch.distributed.get_rank": TorchInGraphFunctionVariable,
     "torch.distributed.get_world_size": TorchInGraphFunctionVariable,
     "torch.distributed._tensor.DTensor#from_local": TorchInGraphFunctionVariable,
+    "torch.distributed.distributed_c10d._get_group_size_by_name": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d._get_group_tag": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d.get_process_group_ranks": TorchInGraphFunctionVariable,
     "torch._utils.is_compiling": TorchInGraphFunctionVariable,
     "torch.overrides.get_default_nowrap_functions": TorchInGraphFunctionVariable,
     "torch.fx._symbolic_trace.is_fx_tracing": TorchInGraphFunctionVariable,
     "torch._dynamo.external_utils.is_compiling": TorchInGraphFunctionVariable,
-    "torch.autograd.graph.disable_saved_tensors_hooks": TorchInGraphFunctionVariable,
     "torch.autograd._profiler_enabled": SkipFilesVariable,
     # We graph break on RNG state setters or getters like
     # `torch.get_rng_state` or `torch.set_rng_state`. These functions
@@ -155,9 +155,8 @@ manual_torch_name_rule_map = {
 
 
 # In graph functions (including constant folding) that are C bindings
-torch_c_binding_in_graph_functions = {
-    k: TorchInGraphFunctionVariable
-    for k in [
+torch_c_binding_in_graph_functions = dict.fromkeys(
+    [
         "math.acos",
         "math.acosh",
         "math.asin",
@@ -2034,8 +2033,9 @@ torch_c_binding_in_graph_functions = {
         "torch.xlogy",
         "torch.zero_",
         "torch.zeros",
-    ]
-}
+    ],
+    TorchInGraphFunctionVariable,
+)
 
 
 if sys.version_info >= (3, 9):
@@ -2046,9 +2046,8 @@ if sys.version_info >= (3, 11):
 
 
 # In graph functions (including constant folding) that are not C bindings
-torch_non_c_binding_in_graph_functions = {
-    k: TorchInGraphFunctionVariable
-    for k in [
+torch_non_c_binding_in_graph_functions = dict.fromkeys(
+    [
         "torch.__future__.get_overwrite_module_params_on_conversion",
         "torch.__future__.set_overwrite_module_params_on_conversion",
         "torch.__getattr__",
@@ -2255,8 +2254,6 @@ torch_non_c_binding_in_graph_functions = {
         "torch.autograd.functional.vjp",
         "torch.autograd.grad_mode._enter_inference_mode",
         "torch.autograd.grad_mode._exit_inference_mode",
-        "torch.autograd.gradcheck",
-        "torch.autograd.gradgradcheck",
         "torch.autograd.graph._get_sid",
         "torch.autograd.graph._get_tid",
         "torch.autograd.graph.allow_mutation_on_saved_tensors",
@@ -2702,7 +2699,6 @@ torch_non_c_binding_in_graph_functions = {
         "torch.signal.windows.windows.merge_dicts",
         "torch.signal.windows.windows.nuttall",
         "torch.signal.windows.windows.parse_kwargs",
-        "torch.sparse.as_sparse_gradcheck",
         "torch.sparse.semi_structured.to_sparse_semi_structured",
         "torch.sparse.sum",
         "torch.split",
@@ -2717,8 +2713,9 @@ torch_non_c_binding_in_graph_functions = {
         "torch.typename",
         "torch.unique_consecutive",
         "torch.use_deterministic_algorithms",
-    ]
-}
+    ],
+    TorchInGraphFunctionVariable,
+)
 
 
 torch_name_rule_map = [
@@ -2737,7 +2734,7 @@ Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
 def get_torch_obj_rule_map():
     d: Dict[Any, VariableTracker] = dict()
     for m in torch_name_rule_map:
-        for k, v in m.items():
+        for k, v in m.items():  # type: ignore[attr-defined]
             obj = load_object(k)
             if obj is not None:
                 if obj in d and d[obj] != v:
@@ -2979,6 +2976,8 @@ E.g, the lookup result of `torch.sin` is `TorchInGraphFunctionVariable`.
 
 
 def lookup(obj):
+    # Unwrap if it's a functools.lru_cache wrapper
+    obj = unwrap_if_wrapper(obj)
     if not hashable(obj):
         return None
     # Custom allow/disallow in graph takes precedence over the `torch_name_rule_map`.
@@ -2986,18 +2985,7 @@ def lookup(obj):
         return SkipFilesVariable
     if callable(obj) and is_callable_allowed(obj):
         return TorchInGraphFunctionVariable
-    # Unwrap if the function is wrapped by functools.lru_cache or functools.wraps.
-    if isinstance(obj, functools._lru_cache_wrapper) or (
-        is_function(obj) and hasattr(obj, "__wrapped__")
-    ):
-        # TODO: Weird case, should not unwrap if it's wrapped as _VariableFunctionsClass.
-        if not (
-            hasattr(obj, "__qualname__")
-            and str(obj.__qualname__).startswith("_VariableFunctionsClass")
-        ):
-            obj = obj.__wrapped__
-    rule = get_torch_obj_rule_map().get(obj, None)
-    if rule is None and is_aten_op_or_tensor_method(obj):
+    if is_aten_op_or_tensor_method(obj):
         return TorchInGraphFunctionVariable
-    else:
-        return rule
+    rule = get_torch_obj_rule_map().get(obj, None)
+    return rule

@@ -1,6 +1,7 @@
 #include <torch/csrc/inductor/aoti_runtime/arrayref_tensor.h>
 #include <torch/csrc/inductor/aoti_runtime/interface.h>
 #include <torch/csrc/inductor/aoti_runtime/model_container.h>
+#include <torch/csrc/inductor/aoti_runtime/scalar_to_tensor.h>
 
 #include <iostream>
 #include <sstream>
@@ -181,6 +182,22 @@ AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
           constant_map_handle,
           /*use_inactive*/ true,
           /*validate_full_update*/ true);
+}
+
+AOTIRuntimeError AOTInductorModelContainerRunConstantFolding(
+    AOTInductorModelContainerHandle container_handle,
+    bool use_inactive,
+    AOTInductorStreamHandle stream_handle,
+    AOTIProxyExecutorHandle proxy_executor_handle) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  auto stream =
+      reinterpret_cast<torch::aot_inductor::DeviceStreamType>(stream_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    AOTINoGradGuard guard;
+    container->run_const_fold(use_inactive, stream, proxy_executor_handle);
+  })
 }
 
 AOTIRuntimeError AOTInductorModelContainerSwapConstantBuffer(
