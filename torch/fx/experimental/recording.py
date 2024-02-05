@@ -156,7 +156,7 @@ class ShapeEnvEvent:
         return f"event: {name} ({self.args}, {self.kwargs})"
 
     def is_create_fx_call_function(self) -> bool:
-        return self.name == "create_fx_call_function"
+        return self.name == "_create_fx_call_function"
 
     def is_evaluate_expr(self) -> bool:
         return self.name == "evaluate_expr"
