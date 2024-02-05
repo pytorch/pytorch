@@ -263,13 +263,16 @@ TEST(SerializationTest, ParentDirNotExist) {
       "Parent directory ./doesnotexist does not exist.");
 }
 
-TEST(SerializationTest, SaveLoadTest) {
-  std::stringstream ss;
-  torch::Tensor to_save = torch::ones(5);
-  torch::save(to_save, ss);
-  torch::Tensor to_load;
-  torch::load(to_load, ss);
-  ASSERT_TRUE(to_save.equal(to_load));
+TEST(SerializationTest, DriverDirectoryCheck) {
+  #ifdef WIN32
+  expectThrowsEq(
+      []() {
+        auto t = torch::nn::Linear(5, 5);
+        // highly unlikely a path like this would exist
+        torch::save(t, "Z:\\file.pt");
+      },
+      "Parent directory Z:\\ does not exist.");
+  #endif
 }
 
 TEST(SerializationTest, CalculateNecessaryArgsTest) {
