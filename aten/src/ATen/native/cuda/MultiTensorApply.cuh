@@ -6,6 +6,12 @@
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <vector>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
+
 namespace at::native {
 
 namespace {
@@ -39,11 +45,20 @@ __device__ __forceinline__ void load_store(
 }
 
 template <int n>
-struct TensorListMetadata {
+struct TensorListMetadataStatic {
   const void* addresses[n][depth_to_max_tensors[n - 1]];
   int64_t numel_for_tensor[depth_to_max_tensors[n - 1]];
   unsigned char block_to_tensor[depth_to_max_blocks[n - 1]];
   int block_to_chunk[depth_to_max_blocks[n - 1]];
+  int start_tensor_this_launch;
+};
+
+template <int n>
+struct TensorListMetadata {
+  const void** addresses[n];
+  int64_t* numel_for_tensor;
+  uint32_t* block_to_tensor;
+  uint32_t* block_to_chunk;
   int start_tensor_this_launch;
 };
 
@@ -93,6 +108,70 @@ struct FusedOptimizerTensorListMetadata {
   unsigned char block_to_tensor[depth_to_max_blocks[n - 1]];
   int block_to_chunk[depth_to_max_blocks[n - 1]];
   int start_tensor_this_launch;
+};
+
+bool can_use_static_tensor_list_meta(
+    std::vector<std::vector<at::Tensor>>& tensor_lists,
+    int depth) {
+  const int64_t n_tensors = tensor_lists[0].size();
+  if (n_tensors > depth_to_max_tensors[depth - 1]) {
+    return false;
+  }
+  int64_t num_blocks = 0;
+  for (const auto t : c10::irange(n_tensors)) {
+    const auto numel = tensor_lists[0][t].numel();
+    const auto chunks = numel / kChunkSize + (numel % kChunkSize != 0);
+    num_blocks += chunks;
+    if (num_blocks > depth_to_max_blocks[depth - 1]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Helper for transfering multiple std::vector<T> onto device with a single
+// page-locked cudaMemcpyAsync.
+struct VecPacker {
+  template <typename T>
+  // Add a vector to be copied to device
+  // NOTE: VecPacker doesn't make copies of the added vectors. They have to be
+  // kept alive by the caller until .pack() is called.
+  void add(const std::vector<T>& vec) {
+    ptrs.push_back(vec.data());
+    const auto vec_bytes = sizeof(T) * vec.size();
+    const auto vec_bytes_aligned = (vec_bytes + 16 - 1) / 16 * 16;
+    sizes.push_back(vec_bytes);
+    offsets.push_back(packed_numel);
+    packed_numel += vec_bytes_aligned;
+  }
+
+  // Copy all previously added vectors onto device and return their device
+  // pointers in the order they are added. We leverage the stream awareness of
+  // CUDACachingAllocator to manage the lifetime of the device arguments - the
+  // device memory is guaranteed to be alive as long as VecPacker is destoryed
+  // after the kernel that consumes it.
+  std::vector<void*> pack(const at::Device& device) {
+    packed = at::empty(
+        {packed_numel},
+        at::TensorOptions().dtype(at::kByte).pinned_memory(true));
+    for (const auto i : c10::irange(ptrs.size())) {
+      memcpy(packed.data_ptr<uint8_t>() + offsets[i], ptrs[i], sizes[i]);
+    }
+    packed = packed.to(device, /*non_blocking=*/true);
+
+    std::vector<void*> dev_ptrs;
+    dev_ptrs.reserve(ptrs.size());
+    for (const auto offset : offsets) {
+      dev_ptrs.push_back(packed.data_ptr<uint8_t>() + offset);
+    }
+    return dev_ptrs;
+  }
+
+  std::vector<const void*> ptrs;
+  std::vector<size_t> sizes;
+  std::vector<size_t> offsets;
+  int64_t packed_numel = 0;
+  at::Tensor packed;
 };
 
 template <typename T, typename U, typename... ArgTypes>
@@ -215,7 +294,7 @@ void multi_tensor_apply(
 }
 
 template <int depth, typename T, typename... ArgTypes>
-void multi_tensor_apply(
+void multi_tensor_apply_static(
     std::vector<std::vector<at::Tensor>>& tensor_lists,
     T callable,
     ArgTypes... args) {
@@ -223,7 +302,7 @@ void multi_tensor_apply(
       tensor_lists.size() == depth,
       "Number of tensor lists has to match the depth.");
   const size_t n_tensors = tensor_lists[0].size();
-  TensorListMetadata<depth> tensorListMeta;
+  TensorListMetadataStatic<depth> tensorListMeta;
   tensorListMeta.start_tensor_this_launch = 0;
 
   int loc_block_info = 0;
@@ -241,49 +320,17 @@ void multi_tensor_apply(
     }
     loc_tensor_info++;
 
-    // see note: [chunking territory].
     const auto numel = tensor_lists[0][t].numel();
     const auto chunks = numel / kChunkSize + (numel % kChunkSize != 0);
     for (auto chunk = 0; chunk < chunks; chunk++) {
       tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1;
       tensorListMeta.block_to_chunk[loc_block_info] = chunk;
       loc_block_info++;
-
-      const bool tensors_full =
-          (loc_tensor_info == depth_to_max_tensors[depth - 1] &&
-           chunk == chunks - 1);
-      const bool blocks_full =
-          (loc_block_info == depth_to_max_blocks[depth - 1]);
-
-      if (tensors_full || blocks_full) {
-        multi_tensor_apply_kernel<<<
-            loc_block_info,
-            kBlockSize,
-            0,
-            at::cuda::getCurrentCUDAStream()>>>(
-            tensorListMeta, callable, args...);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-        // Reset.
-        loc_block_info = 0;
-        if (chunk == chunks - 1) {
-          loc_tensor_info = 0;
-          tensorListMeta.start_tensor_this_launch = t + 1;
-        } else {
-          tensorListMeta.numel_for_tensor[0] =
-              tensorListMeta.numel_for_tensor[loc_tensor_info - 1];
-          for (int d = 0; d < depth; d++) {
-            tensorListMeta.addresses[d][0] =
-                tensorListMeta.addresses[d][loc_tensor_info - 1];
-          }
-          loc_tensor_info = 1;
-          tensorListMeta.start_tensor_this_launch = t;
-        }
-      }
     }
   }
+  TORCH_CHECK(loc_tensor_info < depth_to_max_tensors[depth - 1]);
+  TORCH_CHECK(loc_block_info < depth_to_max_blocks[depth - 1]);
 
-  // see note: [finishing what we started]
   if (loc_block_info != 0) {
     multi_tensor_apply_kernel<<<
         loc_block_info,
@@ -292,6 +339,111 @@ void multi_tensor_apply(
         at::cuda::getCurrentCUDAStream()>>>(tensorListMeta, callable, args...);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
+}
+
+template <int depth, typename T, typename... ArgTypes>
+void multi_tensor_apply(
+    std::vector<std::vector<at::Tensor>>& tensor_lists,
+    T callable,
+    ArgTypes... args) {
+  // Note: [static arg vs. dynamic arg]
+  // Due to the dynamic nature of the workload, the kernel arguments aren't
+  // guaranteed to fit in the static 4kb kernel argument memory. Previously
+  // with the apex implementation, we overcame this limitation by dividing a
+  // multi_tensor_apply workload into multiple kernel launches. However, this
+  // led to low sustained occupancy, affecting the performance of memory bound
+  // ops.
+  //
+  // Based on the observation that the kernel argument memory limitation
+  // doesn't correlate well with available SM resources, we have adopted a
+  // different approach. When the kernel arguments fit into the static kernel
+  // argument memory, we use this memory to transfer the arguments. Conversely,
+  // when the kernel arguments don't fit into the static kernel argument
+  // memory, instead of sacrificing sustained occupancy, we use a page-locked
+  // cudaMemcpyAsync to transfer the arguments, then perform the entire
+  // workload in a single kernel.
+  if (can_use_static_tensor_list_meta(tensor_lists, depth)) {
+    multi_tensor_apply_static<depth, T, ArgTypes...>(
+        tensor_lists, callable, args...);
+    return;
+  }
+
+  TORCH_CHECK(
+      tensor_lists.size() == depth,
+      "Number of tensor lists has to match the depth.");
+  const size_t n_tensors = tensor_lists[0].size();
+
+  TORCH_CHECK(
+      n_tensors < static_cast<size_t>(std::numeric_limits<int>::max()),
+      "multi_tensor_apply: exceeded the maximum supported number of tensors: ",
+      n_tensors,
+      " > ",
+      std::numeric_limits<int>::max());
+
+  std::vector<const void*> addresses[depth];
+  std::vector<int64_t> numel_for_tensor;
+  std::vector<uint32_t> block_to_tensor;
+  std::vector<uint32_t> block_to_chunk;
+
+  for (int d = 0; d < depth; ++d) {
+    addresses[d].reserve(n_tensors);
+  }
+  numel_for_tensor.reserve(n_tensors);
+  block_to_tensor.reserve(n_tensors); // reserve for lowerbound
+  block_to_chunk.reserve(n_tensors); // reserve for lowerbound
+
+  for (size_t t = 0; t < n_tensors; t++) {
+    // short-circuit to avoid adding empty tensors to tensorListMeta
+    if (tensor_lists[0][t].numel() == 0) {
+      continue;
+    }
+    numel_for_tensor.push_back(tensor_lists[0][t].numel());
+    for (int d = 0; d < depth; d++) {
+      addresses[d].push_back(tensor_lists[d][t].const_data_ptr());
+    }
+
+    const auto numel = tensor_lists[0][t].numel();
+    const auto chunks = numel / kChunkSize + (numel % kChunkSize != 0);
+    // Using float32 as example, hitting this limit requires rougly 2^32 *
+    // 65536 * 4 bytes == 1 petabyte of data. Practically speaking we won't hit
+    // it anytime soon.
+    TORCH_CHECK(
+        block_to_tensor.size() <
+            static_cast<size_t>(std::numeric_limits<uint32_t>::max() - chunks),
+        "multi_tensor_apply: exceeded the maximum supported number of chunks: ",
+        std::numeric_limits<int>::max());
+
+    block_to_tensor.insert(block_to_tensor.end(), chunks, t);
+    block_to_chunk.resize(block_to_chunk.size() + chunks);
+    std::iota(block_to_chunk.end() - chunks, block_to_chunk.end(), 0);
+  }
+
+  VecPacker packer;
+  for (auto d = 0; d < depth; ++d) {
+    packer.add(addresses[d]);
+  }
+  packer.add(numel_for_tensor);
+  packer.add(block_to_tensor);
+  packer.add(block_to_chunk);
+
+  auto device = tensor_lists[0][0].device();
+  auto dev_ptrs = packer.pack(device);
+
+  TensorListMetadata<depth> tl;
+  for (auto d = 0; d < depth; ++d) {
+    tl.addresses[d] = static_cast<const void**>(dev_ptrs[d]);
+  }
+  tl.numel_for_tensor = static_cast<int64_t*>(dev_ptrs[depth]);
+  tl.block_to_tensor = static_cast<uint32_t*>(dev_ptrs[depth + 1]);
+  tl.block_to_chunk = static_cast<uint32_t*>(dev_ptrs[depth + 2]);
+  tl.start_tensor_this_launch = 0;
+
+  multi_tensor_apply_kernel<<<
+      block_to_tensor.size(),
+      kBlockSize,
+      0,
+      at::cuda::getCurrentCUDAStream()>>>(tl, callable, args...);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <int depth, typename T, typename... ArgTypes>
