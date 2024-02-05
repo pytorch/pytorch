@@ -10,7 +10,6 @@ to avoid having to load SymPy at import time, as doing so is *very* slow.
 
 import builtins
 import itertools
-import logging
 import math
 import operator
 import sys
@@ -39,8 +38,7 @@ from torch.fx.experimental._sym_dispatch_mode import (
 if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-log = logging.getLogger(__name__)
-
+sym_node_log = torch._logging.getArtifactLogger(__name__, "sym_node")
 
 __all__ = ["SymNode", "method_to_operator", "magic_methods"]
 
@@ -344,7 +342,7 @@ class SymNode:
         try:
             return int(r)
         except Exception:
-            log.warning("Failed to convert to int: %s", r)
+            sym_node_log.warning("Failed to convert to int: %s", r)
             raise
 
     def guard_float(self, file, line):
@@ -356,7 +354,7 @@ class SymNode:
         try:
             return float(r)
         except Exception:
-            log.warning("Failed to convert to float: %s", r)
+            sym_node_log.warning("Failed to convert to float: %s", r)
             raise
 
     def guard_bool(self, file, line):
@@ -366,7 +364,7 @@ class SymNode:
         try:
             return bool(r)
         except Exception:
-            log.warning("Failed to convert to bool: %s", r)
+            sym_node_log.warning("Failed to convert to bool: %s", r)
             raise
 
     def expect_true(self, file, line):
@@ -925,9 +923,10 @@ def _make_node_magic(method, func):
         try:
             out = func(self.expr, other.expr)
         except Exception:
-            log.warning("failed to eval %s(%s, %s)", method, self.expr, other.expr)
+            sym_node_log.warning("failed to eval %s(%s, %s)", method, self.expr, other.expr)
             raise
         out = safe_expand(out)
+        sym_node_log.debug("%s %s %s -> %s", func, self.expr, other.expr, out)
         pytype: Type
         # This is not strictly correct. In Python, a**b may return complex when
         # a < 0 and b is a float: (-1)**2.1. Same for sympy.sqrt(-3.14). This
@@ -973,9 +972,9 @@ def _make_node_magic(method, func):
         try:
             out = func(expr)
         except Exception:
-            log.warning("failed to eval %s(%s)", method, expr)
+            sym_node_log.warning("failed to eval %s(%s)", method, expr)
             raise
-
+        sym_node_log.debug("%s %s -> %s", func, expr, out)
         out_hint = None
         if self.hint is not None:
             out_hint = op(self.hint)
@@ -1018,7 +1017,7 @@ def _make_node_magic(method, func):
             try:
                 out = func(pred_node.expr, then_node.expr, else_node.expr)
             except Exception:
-                log.warning(
+                sym_node_log.warning(
                     "failed to eval %s(%s, %s, %s)",
                     method,
                     pred_node.expr,
@@ -1051,7 +1050,7 @@ def _make_node_magic(method, func):
             try:
                 out = func(expr, ndigits)
             except Exception:
-                log.warning("failed to eval %s(%s, ndigits=%s)", method, expr, ndigits)
+                sym_node_log.warning("failed to eval %s(%s, ndigits=%s)", method, expr, ndigits)
                 raise
             out = safe_expand(out)
 
@@ -1097,7 +1096,7 @@ def _make_node_sizes_strides(method, func):
         try:
             out = func(size_exprs, stride_exprs)
         except Exception:
-            log.warning("failed to eval %s(%s, %s)", method, size_exprs, stride_exprs)
+            sym_node_log.warning("failed to eval %s(%s, %s)", method, size_exprs, stride_exprs)
             raise
         # bool is never expandable
 
@@ -1217,6 +1216,7 @@ def _make_user_magic(method, user_type):
         return wrap_node(getattr(self.node, method_attr)())
 
     def binary_magic_impl(self, other):
+        sym_node_log.debug("MAGIC %s %s %s", method, self, other)
         self = promote(self)
         other = promote(other)
         if is_constant(self):
