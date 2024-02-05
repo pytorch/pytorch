@@ -39,6 +39,7 @@ from github_utils import (
     gh_fetch_json_list,
     gh_fetch_merge_base,
     gh_fetch_url,
+    gh_graphql,
     gh_post_commit_comment,
     gh_post_pr_comment,
     gh_update_pr_state,
@@ -458,19 +459,6 @@ HAS_NO_CONNECTED_DIFF_TITLE = (
 # This could be set to -1 to ignore all flaky and broken trunk failures. On the
 # other hand, using a large value like 10 here might be useful in sev situation
 IGNORABLE_FAILED_CHECKS_THESHOLD = 10
-
-
-def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
-    rc = gh_fetch_url(
-        "https://api.github.com/graphql",
-        data={"query": query, "variables": kwargs},
-        reader=json.load,
-    )
-    if "errors" in rc:
-        raise RuntimeError(
-            f"GraphQL query {query}, args {kwargs} failed: {rc['errors']}"
-        )
-    return cast(Dict[str, Any], rc)
 
 
 def gh_get_pr_info(org: str, proj: str, pr_no: int) -> Any:
