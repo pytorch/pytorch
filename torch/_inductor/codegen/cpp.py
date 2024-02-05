@@ -2334,7 +2334,7 @@ class CppTile2DKernel(CppVecKernel):
             storebuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
             if V.graph.get_dtype(name) in DTYPE_LOWP_FP:
                 line = f"{value}.store({storebuf}, {self.tiling_factor});"
-            elif V.graph.get_dtype(name) in [torch.uint8]:
+            elif V.graph.get_dtype(name) in [torch.uint8, torch.int8]:
                 line = f"{value}.store({storebuf}, {self.tiling_factor});"
             else:
                 line = f"{value}.store({storebuf});"
