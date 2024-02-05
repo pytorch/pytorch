@@ -5,8 +5,6 @@
 #include <ATen/core/Array.h>
 #include <ATen/native/TensorIterator.h>
 
-#include <thrust/tuple.h>
-
 namespace at { namespace native { namespace memory {
 
 namespace detail {
@@ -52,7 +50,7 @@ struct vectorized_load_helper {
     using arg_t = std::tuple_element_t<arg_index, args_t>;
     // `data` hold the data_ptr for tensors [output, input0, input1, ...], so we
     // need a +1 offset to get the input
-    auto ptr = reinterpret_cast<arg_t *>(self.data[arg_index + 1]) + offset;
+    auto ptr = reinterpret_cast<arg_t *>(self.data[arg_index + 1]) + self.get_offset(offset, arg_index);
     auto args_accessor = [&args] C10_DEVICE (int thread_unroll_idx) -> arg_t & { return std::get<arg_index>(args[thread_unroll_idx]); };
     self.load_single_arg(args_accessor, ptr);
   }
@@ -71,14 +69,14 @@ struct unroll_load_helper {
 
 template <int current>
 struct multi_outputs_store_helper {
-  template<int ntensors, int num_outputs, typename ...Args>
-  C10_HOST_DEVICE static void apply(
+  template <int ntensors, int num_outputs, typename... Args>
+  static void apply(
       at::detail::Array<char*, ntensors> data,
       at::detail::Array<uint32_t, num_outputs> offsets,
-      thrust::tuple<Args...> ret) {
-    using T = typename thrust::tuple_element<current, thrust::tuple<Args...>>::type;
-    T *to = reinterpret_cast<T *>(data[current]) + offsets[current];
-    *to = thrust::get<current>(ret);
+      std::tuple<Args...> ret) {
+    using T = typename std::tuple_element<current, std::tuple<Args...>>::type;
+    T* to = reinterpret_cast<T*>(data[current]) + offsets[current];
+    *to = std::get<current>(ret);
   }
 };
 
@@ -146,7 +144,7 @@ struct StoreWithCast {
   }
 };
 
-// aligned vector generates vectorized load/store on CUDA
+// aligned vector generates vectorized load/store
 template<typename scalar_t, int vec_size>
 struct alignas(sizeof(scalar_t) * vec_size) aligned_vector {
   scalar_t val[vec_size];

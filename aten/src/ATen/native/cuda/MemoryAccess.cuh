@@ -18,6 +18,28 @@
 // https://devblogs.nvidia.com/cuda-pro-tip-increase-performance-with-vectorized-memory-access/
 
 namespace at { namespace native { namespace memory {
+namespace detail {
+
+// We have an implementation of std in ATen/detail/MemoryAccessUtils.h for
+// sharing in different kernel languages.
+// Leave thrust related codes in CUDA file. The reason to use `thrust::tuple` is
+// `std::tuple` does not support `operator=` on device code which makes
+// the implementation complicated.
+template <int current>
+struct multi_outputs_store_helper_thrust {
+  template<int ntensors, int num_outputs, typename ...Args>
+  C10_HOST_DEVICE static void apply(
+      at::detail::Array<char*, ntensors> data,
+      at::detail::Array<uint32_t, num_outputs> offsets,
+      thrust::tuple<Args...> ret) {
+    using T = typename thrust::tuple_element<current, thrust::tuple<Args...>>::type;
+    T *to = reinterpret_cast<T *>(data[current]) + offsets[current];
+    *to = thrust::get<current>(ret);
+  }
+};
+
+} // namespace detail
+
 namespace policies {
 
 // Assumption:
@@ -105,6 +127,10 @@ struct vectorized {
     }
   }
 
+  __device__ inline int get_offset(int offset, int arg_index) {
+    return offset;
+  }
+
   template<typename args_t>
   __device__ inline void load(args_t *args, int idx) {
     constexpr int arity = std::tuple_size<args_t>::value;
@@ -174,7 +200,7 @@ struct multi_outputs_unroll {
       }
       int linear_idx = thread_idx + block_work_size() * idx;
       auto offsets = this->output_offset_calculator.get(linear_idx);
-      memory::detail::static_unroll<detail::multi_outputs_store_helper, num_outputs>::with_args(this->data, offsets, from[i]);
+      memory::detail::static_unroll<detail::multi_outputs_store_helper_thrust, num_outputs>::with_args(this->data, offsets, from[i]);
       thread_idx += num_threads();
     }
   }
