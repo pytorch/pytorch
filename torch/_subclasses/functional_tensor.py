@@ -169,6 +169,11 @@ class FunctionalTensor(torch.Tensor):
     def __repr__(self):
         return f"FunctionalTensor({repr(self.elem)})"
 
+    # Adding .tolist() to enable direct conversion of FunctionalTensor to a Python list,
+    def tolist(self):
+        self.sync()
+        return self.elem.tolist()
+
     @staticmethod
     def to_functional(x):
         # We will do the wrapping for the user.
