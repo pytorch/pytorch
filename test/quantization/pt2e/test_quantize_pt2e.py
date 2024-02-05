@@ -1625,6 +1625,78 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         with self.assertRaises(NotImplementedError):
             m.train()
 
+    def test_allow_exported_model_train_eval(self):
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bn = torch.nn.BatchNorm2d(3)
+                self.dropout = torch.nn.Dropout(0.5)
+
+            def forward(self, x):
+                x = self.bn(x)
+                x = self.dropout(x)
+                return x
+
+        example_inputs = (torch.randn(1, 3, 3, 3),)
+        m = M().train()
+        m = capture_pre_autograd_graph(m, example_inputs)
+
+        def _assert_ops_are_correct(m: torch.fx.GraphModule, train: bool):
+            targets = [n.target for n in m.graph.nodes]
+            bn_train_target = torch.ops.aten._native_batch_norm_legit.default
+            bn_eval_target = torch.ops.aten._native_batch_norm_legit_no_training.default
+            if train:
+                self.assertTrue(bn_train_target in targets)
+                self.assertTrue(bn_eval_target not in targets)
+            else:
+                self.assertTrue(bn_eval_target in targets)
+                self.assertTrue(bn_train_target not in targets)
+            dropout_node = self._get_node(m, torch.ops.aten.dropout.default)
+            self.assertTrue(dropout_node.args[2] == train)
+
+        # Before wrapping: this is not OK
+        with self.assertRaises(NotImplementedError):
+            m.eval()
+        with self.assertRaises(NotImplementedError):
+            m.train()
+
+        # After wrapping: does not error and swaps the ops accordingly
+        torch.ao.quantization.allow_exported_model_train_eval(m)
+        m.eval()
+        _assert_ops_are_correct(m, train=False)
+        m.train()
+        _assert_ops_are_correct(m, train=True)
+
+        # After prepare but before wrapping: this is not OK
+        quantizer = XNNPACKQuantizer()
+        m = prepare_qat_pt2e(m, quantizer)
+        with self.assertRaises(NotImplementedError):
+            m.eval()
+        with self.assertRaises(NotImplementedError):
+            m.train()
+
+        # After prepare and after wrapping: does not error and swaps the ops accordingly
+        torch.ao.quantization.allow_exported_model_train_eval(m)
+        m.eval()
+        _assert_ops_are_correct(m, train=False)
+        m.train()
+        _assert_ops_are_correct(m, train=True)
+
+        # After convert but before wrapping: this is not OK
+        m = convert_pt2e(m, fold_quantize=True)
+        with self.assertRaises(NotImplementedError):
+            m.eval()
+        with self.assertRaises(NotImplementedError):
+            m.train()
+
+        # After convert and after wrapping: does not error and swaps the ops accordingly
+        torch.ao.quantization.allow_exported_model_train_eval(m)
+        m.eval()
+        _assert_ops_are_correct(m, train=False)
+        m.train()
+        _assert_ops_are_correct(m, train=True)
+
     def test_reentrant(self):
         """Test we can safely call quantization apis multiple times"""
         m = TestHelperModules.ConvBnReLU2dAndLinearReLU()
