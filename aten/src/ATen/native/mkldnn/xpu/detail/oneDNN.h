@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <Runtime.h>
+#include <oneDNNContext.h>
 #include <Attr.h>
 #include <Utils.h>
 
