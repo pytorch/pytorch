@@ -377,7 +377,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.random_calls = []
         self.random_values_var = None
 
-    # informative
+    # This gets its own helper function so guards DEBUG logs are more informative
     def init_ambient_guards(self):
         # Register a SHAPE_ENV guard to make sure we setup shape guards
         # that show up in ShapeEnv
