@@ -1672,11 +1672,16 @@ class BuiltinVariable(VariableTracker):
         ):
             return ConstantVariable.create(op(left.value, right.value))
 
-        if (
-            (isinstance(left, StreamVariable) and isinstance(right, StreamVariable))
-            or (isinstance(left, EventVariable) and isinstance(right, EventVariable))
-        ) and op is operator.eq:
-            return ConstantVariable(op(left.value, right.value))
+        if isinstance(left, (StreamVariable, EventVariable)) or isinstance(
+            right, (StreamVariable, EventVariable)
+        ):
+            if type(left) == type(right) and op is operator.eq:
+                return ConstantVariable(op(left.value, right.value))
+
+            if isinstance(right, ConstantVariable) or isinstance(
+                left, ConstantVariable
+            ):
+                return ConstantVariable(op(left.value, right.value))
 
         if op.__name__ == "is_":
             # If the two objects are of different type, we can safely return False
