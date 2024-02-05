@@ -3,8 +3,10 @@ from typing import TYPE_CHECKING
 import torch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from . import trace_rules, variables
+from .comptime import comptime
 from .eval_frame import DisableContext, innermost_fn, RunOnlyContext
 from .exc import IncorrectUsage
+from .external_utils import is_compiling
 
 if TYPE_CHECKING:
     from torch._C._dynamo.eval_frame import (  # noqa: F401
@@ -240,7 +242,6 @@ def maybe_mark_dynamic(t, index):
         maybe_mark_dynamic(t, i)
 
 
-@forbid_in_graph
 def mark_static(t, index=None):
     """
     Mark a tensor as having a static dim.
@@ -249,7 +250,18 @@ def mark_static(t, index=None):
     when dynamic=True; this can improve trace-time performance.
 
     This has lower precedence than mark_dynamic.
+
+    Unlike mark_dynamic, this can be done inside a graph, in which case it
+    induces specialization on the tensor.
     """
+    if is_compiling():
+        if index is None:
+            for s in t.size():
+                comptime.force_static(s)
+        else:
+            comptime.force_static(t.size(index))
+        return
+
     if is_traceable_wrapper_subclass(t):
         # default behavior: mirror mark_static() on all inner tensors with same dim as t
         # TODO: Make this configurable via a supported public API

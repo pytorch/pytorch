@@ -85,13 +85,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         remove_noop_ops(gm.graph)
         print_graph(gm.graph, "Before split cat in post grad pass.")
         for patterns in pass_patterns:
-            patterns.apply(gm.graph)
+            patterns.apply(gm.graph)  # type: ignore[arg-type]
             print_graph(
                 gm.graph,
                 "Apply split cat pattern matcher PatternMatcherPass in post grad.",
             )
         if is_inference:
-            inference_patterns.apply(gm.graph)
+            inference_patterns.apply(gm.graph)  # type: ignore[arg-type]
 
     if config.post_grad_custom_post_pass is not None:
         config.post_grad_custom_post_pass(gm.graph)
@@ -171,12 +171,30 @@ def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
 ################################################################################
 
 
+def is_valid_mm_plus_mm(match: Match):
+    *b1, m1, k1 = match.kwargs["mat1"].meta.get("tensor_meta").shape
+    *b2, k2, n1 = match.kwargs["mat2"].meta.get("tensor_meta").shape
+    if k1 != k2:
+        return False
+
+    *b1, m2, k3 = match.kwargs["mat3"].meta.get("tensor_meta").shape
+    *b2, k4, n2 = match.kwargs["mat4"].meta.get("tensor_meta").shape
+    if k3 != k4:
+        return False
+
+    if m1 != m2 or n1 != n2:
+        return False
+
+    return True
+
+
 @register_lowering_pattern(
     CallFunction(
         aten.add,
-        CallFunction(aten.mm, Arg(), Arg()),
-        CallFunction(aten.mm, Arg(), Arg()),
-    )
+        CallFunction(aten.mm, KeywordArg("mat1"), KeywordArg("mat2")),
+        CallFunction(aten.mm, KeywordArg("mat3"), KeywordArg("mat4")),
+    ),
+    extra_check=is_valid_mm_plus_mm,
 )
 def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
@@ -368,7 +386,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
         if new_size is None:
             new_size = shape
         else:
-            new_size[notdim] = V.graph.sizevars.guard_equals(
+            new_size[notdim] = V.graph.sizevars.guard_equals(  # type: ignore[call-overload]
                 shape[notdim], new_size[notdim]
             )
             new_size[dim] += shape[dim]

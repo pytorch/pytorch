@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 from inspect import getattr_static
 
 from ..bytecode_transformation import create_call_function
