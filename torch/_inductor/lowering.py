@@ -650,6 +650,9 @@ def register_frexp():
     return fn
 
 
+register_frexp()
+
+
 def register_foreach_pointwise(
     aten_fn,
     pointwise_lowering_fn,
@@ -5201,8 +5204,6 @@ register_pointwise_numeric(aten.erfinv)
 register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
-
-register_frexp()
 
 foreach_add_list = register_foreach_pointwise(
     aten._foreach_add.List, add, allow_alpha=True
