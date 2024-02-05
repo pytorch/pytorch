@@ -559,6 +559,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="fixme: Assertion error: result mismatch",
     ),
     xfail(
+        "linalg.vecdot",
+        reason="fixme: Assertion error: result shape mismatch",
+    ),
+    xfail(
         "linspace",
         dtypes=(torch.int64, torch.int32,),
         reason="fixme: Results do not match with PyTorch. https://github.com/microsoft/onnxscript/issues/854",
@@ -738,7 +742,7 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "native_batch_norm",
         dtypes=(torch.float16,),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Type Error: Type (tensor(float16)) of output arg (_native_batch_norm_legit_functional_1) of node (_aten__native_batch_norm_training_functional_onnx_1) does not match expected type (tensor(float))."),
+        reason="fixme: https://github.com/microsoft/onnxscript/issues/1269",
     ),
     xfail(
         "native_layer_norm",
@@ -781,7 +785,7 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "nn.functional.batch_norm",
         dtypes=(torch.float16,),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("FAIL : Type Error: Type (tensor(float16)) of output arg (_native_batch_norm_legit_functional_1) of node (_aten__native_batch_norm_training_functional_onnx_1) does not match expected type (tensor(float))."),
+        reason="fixme: https://github.com/microsoft/onnxscript/issues/1270",
     ),
     xfail(
         "nn.functional.conv_transpose1d",
