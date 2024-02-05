@@ -378,8 +378,9 @@ class RNN(RNNBase):
     the input at time `t`, and :math:`h_{(t-1)}` is the hidden state of the
     previous layer at time `t-1` or the initial hidden state at time `0`.
     If :attr:`nonlinearity` is ``'relu'``, then :math:`\text{ReLU}` is used instead of :math:`\tanh`.
+
     .. code-block:: python
-    
+
         # Efficient implementation equivalent to the following with bidirectional=False
         def forward(x, h_0=None):
             if batch_first:
@@ -404,7 +405,7 @@ class RNN(RNNBase):
             if batch_first:
                 output = output.transpose(0, 1)
             return output, h_t
-    
+
     Args:
         input_size: The number of expected features in the input `x`
         hidden_size: The number of features in the hidden state `h`
