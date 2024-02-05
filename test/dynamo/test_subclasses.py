@@ -29,6 +29,7 @@ from torch.testing._internal.common_utils import (
     subtest,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.two_tensor import TwoTensor
 
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
@@ -913,6 +914,28 @@ class GraphModule(torch.nn.Module):
         torch._dynamo.mark_dynamic(sub1, 1)
         sub2 = ScaledTensor(torch.randn(2, 4), torch.randn(5))
         self.assertTrue(_recompiles_for_inputs(func, (sub1,), (sub2,), dynamic=False))
+
+    def test_torch_dispatch_subclass_guard_recompile(self):
+        x = torch.ones(2, 2)
+        x_two = TwoTensor(x.clone(), x.clone())
+
+        def fn(w):
+            return torch.add(w, 1.0)
+
+        fn_opt = torch.compile(backend="eager")(fn)
+
+        ref = fn(x_two)
+        res = fn_opt(x_two)
+        self.assertEqual(ref, res)
+
+        # ensure no recompilation on same input type
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            fn_opt(TwoTensor(x + 1, x + 2))
+
+        # recompile!
+        ref = fn(x)
+        res = fn_opt(x)
+        self.assertEqual(ref, res)
 
     def test_recompile_with_symbool_inputs(self):
         def f(pred: bool):
