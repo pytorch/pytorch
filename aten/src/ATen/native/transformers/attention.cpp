@@ -71,9 +71,7 @@
 #endif
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
-namespace at {
-
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(_fused_sdp_choice_stub);
 
@@ -648,7 +646,7 @@ Tensor scaled_dot_product_attention(
     std::optional<double> scale) {
   validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
-  if (_fused_sdp_choice_stub.is_device_supported(query_.device().type())) {
+  if (_fused_sdp_choice_stub.is_device_supported(query_.device().type()) || query_.device().type() == DeviceType::MPS) {
     choice_int = _fused_sdp_choice_stub(query_.device().type(),
           query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   }
@@ -984,5 +982,5 @@ Tensor triton_multi_head_attention(
 #endif
   return proj;
 }
-} // namespace native
-} // namespace at
+
+} // namespace at::native
