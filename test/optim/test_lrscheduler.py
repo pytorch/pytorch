@@ -1720,7 +1720,7 @@ class TestLRScheduler(TestCase):
         self.assertIsNotNone(restored_scheduler.anneal_func)
         self.assertIsNotNone(scheduler.anneal_func)
         self.assertEqual(restored_scheduler.anneal_strategy, scheduler.anneal_strategy)
-        self.assertEqual(restored_scheduler.anneal_stragety, 'cos')
+        self.assertEqual(restored_scheduler.anneal_strategy, 'cos')
 
         # case 2: linear annealing
         scheduler = OneCycleLR(adam_opt, max_lr=5, total_steps=200, anneal_strategy='linear')
@@ -1729,7 +1729,7 @@ class TestLRScheduler(TestCase):
         self.assertIsNotNone(restored_scheduler.anneal_func)
         self.assertIsNotNone(scheduler.anneal_func)
         self.assertEqual(restored_scheduler.anneal_strategy, scheduler.anneal_strategy)
-        self.assertEqual(restored_scheduler.anneal_stragety, 'linear')
+        self.assertEqual(restored_scheduler.anneal_strategy, 'linear')
 
     def test_lambda_lr(self):
         epochs = 10
