@@ -4074,6 +4074,49 @@ def fn():
         res2 = opt_f2()
         self.assertTrue(same(res1, res2))
 
+    def test_inline_local_dict_clear(self):
+        def f(d):
+            d.clear()
+            return d
+
+        inp = {"a": torch.randn(2, 2), "b": torch.randn(2, 2)}
+        out = torch.compile(f, backend="eager", fullgraph=True)(inp)
+        self.assertEqual(len(out), 0)
+        self.assertEqual(len(inp), 0)
+
+    def test_inline_module_attr_dict_clear(self):
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = {"a": torch.randn(2, 2), "b": torch.randn(2, 2)}
+
+            def forward(self):
+                self.a.clear()
+                return self.a
+
+        m = MyMod()
+        out = torch.compile(m, backend="eager", fullgraph=True)()
+        self.assertEqual(len(out), 0)
+        self.assertEqual(len(m.a), 0)
+
+    def test_inline_user_defined_dict_attr_clear(self):
+        class MyMod:
+            def __init__(self):
+                self.a = {"a": torch.randn(2, 2), "b": torch.randn(2, 2)}
+
+        def f(obj, inp):
+            ret = len(obj.a) + inp
+            obj.a.clear()
+            return obj.a, ret
+
+        m = MyMod()
+        before_len = len(m.a)
+        t_inp = torch.ones(1)
+        d, ret = torch.compile(f, backend="eager", fullgraph=True)(m, t_inp)
+        self.assertEqual(len(m.a), 0)
+        self.assertEqual(len(d), 0)
+        self.assertEqual(ret, t_inp + before_len)
+
     def test_recursive_inline_list_mutation(self):
         def f1(x, y):
             x.append(torch.tensor([1.1]))
