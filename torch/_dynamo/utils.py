@@ -2140,12 +2140,13 @@ def build_checkpoint_variable(**options):
 
 
 def is_compile_supported(device_type):
+    from .eval_frame import is_dynamo_supported
     from . import is_win32
 
-    compile_supported = not is_win32()
+    compile_supported = is_dynamo_supported()
     if device_type == "cpu":
         pass
-    elif device_type == "cuda" and compile_supported:
+    elif device_type == "cuda" and compile_supported and not is_win32():
         from torch.utils._triton import has_triton
 
         compile_supported = has_triton()
