@@ -1,5 +1,13 @@
 # mypy: ignore-errors
 
+"""
+``torch.fx.experimental.symbolic_shapes`` provides interfaces for interacting with
+our symbolic shapes reasoning system that is used heavily in torch.compile.  Although
+this is not generally considered public API, when writing framework code in PyTorch
+as well as extensions to PyTorch (e.g., in custom operator implementations), you may
+need to make use of these APIs to setup dynamic shapes support appropriately.
+"""
+
 import builtins
 import collections
 import functools
@@ -176,6 +184,7 @@ def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
     if isinstance(expr, torch.SymBool):
         return expr.node.guard_size_oblivious("", 0)
     else:
+        assert isinstance(expr, bool)
         return expr
 
 def canonicalize_bool_expr(expr: sympy.Expr):
@@ -427,18 +436,11 @@ def guard_scalar(a):
 
 @record_shapeenv_event()
 def _constrain_symbol_range(shape_env, s: sympy.Symbol, compiler_min: int, compiler_max: int):
-    changed = False
-    if r := shape_env.var_to_range.get(s, None):
-        ret = shape_env.var_to_range[s] = ValueRanges(
-            builtins.max(r.lower, compiler_min), builtins.min(r.upper, compiler_max)
-        )
-        if compiler_min > r.lower or compiler_max < r.upper:
-            changed = True
-    else:
-        changed = True
-        ret = shape_env.var_to_range[s] = ValueRanges(compiler_min, compiler_max)
-    if changed:
-        log.info("_constrain_symbol_range %s [%s, %s]", s, ret.lower, ret.upper)
+    upd_vr = ValueRanges(compiler_min, compiler_max)
+    old_vr = shape_env.var_to_range.get(s, ValueRanges.unknown())
+    new_vr = shape_env.var_to_range[s] = old_vr & upd_vr
+    if new_vr != old_vr:
+        log.info("_constrain_symbol_range %s [%s, %s]", s, new_vr.lower, new_vr.upper)
 
 
 def _advise_is_size(a):
@@ -3249,19 +3251,19 @@ class ShapeEnv:
                 # for jagged layout NestedTensors today
                 continue
             vr = self.var_to_range[k]
-            # Don't do anything if we don't have a nontrivial lower bound
-            # Also don't do anything if we asked only to simplify unbacked
-            # SymInt
-            if (
-                vr.lower < (-sys.maxsize - 1) // 2 or
-                (unbacked_only and k in self.var_to_val)
-            ):
-                new_range_env[k] = vr
-                continue
             if size_oblivious and k in self.size_like:
                 lower = max(2, vr.lower)
             else:
                 lower = vr.lower
+            # Don't do anything if we don't have a nontrivial lower bound
+            # Also don't do anything if we asked only to simplify unbacked
+            # SymInt
+            if (
+                lower < (-sys.maxsize - 1) // 2 or
+                (unbacked_only and k in self.var_to_val)
+            ):
+                new_range_env[k] = vr
+                continue
             # Positive means >= 1
             # Positive - 1 means >= 0
             # Positive + lower - 1 means >= lower
@@ -3634,15 +3636,12 @@ class ShapeEnv:
         Given an expression, evaluates it, adding guards if necessary
         """
 
-        concrete_val = None
-
+        @lru_cache(None)
         def compute_concrete_val():
-            nonlocal concrete_val
-            if concrete_val is None:
-                if hint is None:
-                    concrete_val = self.size_hint(orig_expr)
-                else:
-                    concrete_val = sympy.sympify(hint)
+            if hint is None:
+                return self.size_hint(orig_expr)
+            else:
+                return sympy.sympify(hint)
 
         # Check if:
         #   1. 'translation_validation' is set
@@ -3659,7 +3658,7 @@ class ShapeEnv:
                 and not self._suppress_guards_tls()
                 and not size_oblivious
         ):
-            compute_concrete_val()
+            concrete_val = compute_concrete_val()
             if concrete_val is sympy.true:
                 node, fresh = self.create_fx_call_function(torch._assert, (fx_node,))
             elif concrete_val is sympy.false:
@@ -3715,7 +3714,7 @@ class ShapeEnv:
                     raise self._make_data_dependent_error(expr.xreplace(self.var_to_val), expr)
                 expr = new_expr
 
-            compute_concrete_val()
+            concrete_val = compute_concrete_val()
             self._check_frozen(expr, concrete_val)
 
             if (
