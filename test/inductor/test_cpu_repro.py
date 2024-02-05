@@ -1194,9 +1194,6 @@ class CPUReproTests(TestCase):
     def test_per_tensor_fake_quant_int8(self):
         self._test_per_tensor_fake_quant_helper(torch.int8)
 
-    @unittest.skipIf(
-        not codecache.valid_vec_isa_list(), "Does not support vectorization"
-    )
     def _test_per_channel_fake_quant_helper(self, dtype):
         def fn(input, scales, zero_points, axis, quant_min, quant_max, dtype):
             input = torch.ops.quantized_decomposed.quantize_per_channel(
