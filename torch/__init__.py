@@ -279,6 +279,12 @@ class SymInt:
     def __ge__(self, other) -> builtins.bool:
         raise AssertionError("type stub not overridden")
 
+    def __add__(self, other) -> "SymInt":
+        raise AssertionError("type stub not overridden")
+
+    def __mul__(self, other) -> "SymInt":
+        raise AssertionError("type stub not overridden")
+
     def __sym_max__(self, other):
         raise AssertionError("type stub not overridden")
 
@@ -1554,6 +1560,7 @@ def _assert(condition, message):
 from torch import cuda as cuda
 from torch import cpu as cpu
 from torch import mps as mps
+from torch import xpu as xpu
 from torch import autograd as autograd
 from torch.autograd import (
     no_grad as no_grad,

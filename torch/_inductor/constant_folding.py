@@ -6,22 +6,31 @@ import torch.utils._pytree as pytree
 
 aten = torch.ops.aten
 
+# We would like to split modules into two subgraphs for runtime weight updates to work correctly.
+# The use case and more information could be found at:
+# https://docs.google.com/document/d/1inZC-8KarJ6gKB7G9egmYLx1V_dKX_apxon0w4zPC0Q/edit?usp=sharing
+META_TAG = "MODULE_TYPE"
+MODULE_TAG = "_MAIN_MODULE"
+CONST_MODULE_TAG = "_CONST_MODULE"
 
-def replace_node_with_constant(gm, node, constant):
+
+def replace_node_with_constant(gm, node, constant, name=None):
     g = gm.graph
 
-    if not hasattr(gm, "_frozen_param_count"):
-        gm._frozen_param_count = 0
+    if name:
+        qualname = name
+    else:
+        if not hasattr(gm, "_frozen_param_count"):
+            gm._frozen_param_count = 0
+        i = gm._frozen_param_count
 
-    i = gm._frozen_param_count
+        while True:
+            qualname = f"_frozen_param{i}"
+            if not hasattr(gm, qualname):
+                break
+            i += 1
 
-    while True:
-        qualname = f"_frozen_param{i}"
-        if not hasattr(gm, qualname):
-            break
-        i += 1
-
-    gm._frozen_param_count = i + 1
+        gm._frozen_param_count = i + 1
 
     with g.inserting_before(node):
         new_input_node = g.create_node("get_attr", qualname, (), {})
@@ -195,3 +204,61 @@ def constant_fold(gm, constraint_fn: Optional[Callable[[torch.fx.Node], bool]] =
     gm.graph.eliminate_dead_code()
     gm.graph.lint()
     gm.recompile()
+
+
+@torch.utils._python_dispatch._disable_current_modes()
+def constant_graph_tag(gm: torch.fx.GraphModule):
+    cf = ConstantFolder(gm, skip_constructors=True)
+    cf.run()
+
+    for node in gm.graph.nodes:
+        if (
+            node.op == "get_attr"
+            or node in cf.node_replacements
+            or node in cf.replaced_uses
+        ):
+            node.meta[META_TAG] = CONST_MODULE_TAG
+        else:
+            node.meta[META_TAG] = MODULE_TAG
+
+
+def run_and_get_constant_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    """
+    Construct a GraphModule which corresponds to the part which could be
+    constant folded in provided gm.
+    """
+
+    constant_graph_tag(gm)
+    # We rewrite the tags, if it's a constant being directly consumed, without
+    # any folding opportunity, we keep it in main gm.
+    for node in gm.graph.nodes:
+        if node.op == "get_attr":
+            used_to_fold = False
+            for u in node.users:
+                if u.meta[META_TAG] == CONST_MODULE_TAG:
+                    used_to_fold = True
+                    break
+            if not used_to_fold:
+                node.meta[META_TAG] = MODULE_TAG
+
+    new_graph = torch.fx.Graph()
+
+    node_remapping: Dict[torch.fx.Node, torch.fx.Node] = {}
+    output_nodes = []
+    for node in gm.graph.nodes:
+        if node.meta[META_TAG] == MODULE_TAG:
+            continue
+
+        new_node = new_graph.node_copy(node, lambda x: node_remapping[x])
+        node_remapping[node] = new_node
+
+        for user in node.users:
+            if user.meta[META_TAG] == MODULE_TAG:
+                output_nodes.append(new_node)
+                break
+
+    new_graph.output(tuple(output_nodes))
+    new_graph.lint()
+    new_gm = torch.fx.GraphModule(gm, new_graph)
+
+    return new_gm
