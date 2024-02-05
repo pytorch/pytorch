@@ -21,11 +21,6 @@ inline void _store(at::BFloat16* dst, at::vec::Vectorized<float> src) {
   res.store(dst, at::vec::Vectorized<float>::size());
 }
 
-inline void _store(at::Half* dst, at::vec::Vectorized<float> src) {
-  auto res = at::vec::convert_float_half(src, src);
-  res.store(dst, at::vec::Vectorized<float>::size());
-}
-
 inline namespace CPU_CAPABILITY {
 
 template <typename T>
