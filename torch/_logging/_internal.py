@@ -201,6 +201,7 @@ def set_logs(
     export: Optional[int] = None,
     modules: Optional[Dict[str, Union[int, bool]]] = None,
     cudagraphs: bool = False,
+    sym_node: bool = False,
 ):
     """
     Sets the log level for individual components and toggles individual log
@@ -215,7 +216,7 @@ def set_logs(
     A component is a set of related features in PyTorch. All of the log
     messages emitted from a given component have their own log levels. If the
     log level of a particular message has priority greater than or equal to its
-    component's log level setting, it is emitted. Otherwise, it is supressed.
+    component's log level setting, it is emitted. Otherwise, it is suppressed.
     This allows you to, for instance, silence large groups of log messages that
     are not relevant to you and increase verbosity of logs for components that
     are relevant. The expected log level values, ordered from highest to lowest
@@ -347,6 +348,9 @@ def set_logs(
         overlap (:class:`bool`):
             Whether to emit detailed Inductor compute/comm overlap decisions. Default: ``False``
 
+        sym_node (:class:`bool`):
+            Whether to emit debug info for various SymNode opterations. Default: ``False``
+
         export (:class:`Optional[int]`):
             The log level for export. Default: ``logging.WARN``
 
@@ -448,6 +452,7 @@ def set_logs(
         onnx_diagnostics=onnx_diagnostics,
         fusion=fusion,
         overlap=overlap,
+        sym_node=sym_node,
         export=export,
         cudagraphs=cudagraphs,
     )

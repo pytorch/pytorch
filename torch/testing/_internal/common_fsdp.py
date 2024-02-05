@@ -848,6 +848,27 @@ class MLP(nn.Module):
         return z
 
 
+class DoubleLinear(nn.Module):
+    """
+    This can be used for returning multiple outputs from a module
+    (``use_second_linear=True``) or for having an unused module (``False``).
+    """
+
+    def __init__(self, dim: int, use_second_linear: bool = True):
+        super().__init__()
+        self.lin1 = nn.Linear(dim, dim)
+        self.lin2 = nn.Linear(dim, dim)
+        self.relu = nn.ReLU()
+        self.use_second_linear = use_second_linear
+
+    def forward(
+        self, x: torch.Tensor
+    ) -> Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
+        if self.use_second_linear:
+            return self.relu(self.lin1(x)), self.relu(self.lin2(x))
+        return self.relu(self.lin1(x))
+
+
 @contextlib.contextmanager
 def patch_all_gather(new_all_gather_into_tensor: Callable):
     orig_all_gather = dist.all_gather_into_tensor
@@ -880,12 +901,12 @@ def patch_unshard(new_unshard: Callable):
 
 @contextlib.contextmanager
 def patch_post_backward(new_post_backward: Callable):
-    orig_post_backward = FSDPParamGroup._post_backward
-    FSDPParamGroup._post_backward = new_post_backward
+    orig_post_backward = FSDPParamGroup.post_backward
+    FSDPParamGroup.post_backward = new_post_backward
     try:
         yield
     finally:
-        FSDPParamGroup._post_backward = orig_post_backward
+        FSDPParamGroup.post_backward = orig_post_backward
 
 
 def run_subtests(

@@ -29,13 +29,39 @@ def fully_shard(
     reshard_after_forward: Union[bool, int] = True,
 ):
     """
+    Shard module parameters across data parallel workers.
+
+    This function applies fully sharded data parallelism (FSDP) or a variant to
+    ``module``, a technique for memory savings at the cost of communication.
+    Parameters are sharded across ``mesh``, and in turn, so are their gradients
+    and optimizer states.
+
+    The sharded parameters are all-gathered to construct the unsharded
+    parameters for forward or backward computation. The unsharded parameters
+    are freed after computation to save memory. The gradients are reduced
+    across the mesh and divided by the mesh size for data parallelism. The
+    optimizer step runs on the sharded parameters.
+
+    Each call to ``fully_shard`` constructs one communication group that
+    includes the parameters in ``module.parameters()`` except those already
+    assigned to a group from a nested call. Each group's parameters and its
+    gradients are communicated together in one collective, respectively.
+    Constructing multiple groups across the model (e.g. "layer by layer")
+    allows for peak memory savings and communication/computation overlap.
+
+    Implementation-wise, the sharded parameters are represented as
+    :class:`DTensor` s, sharded on dim-0, and the unsharded parameters are
+    represented as :class:`Tensor` s. A module forward pre-hook all-gathers the
+    parameters, and a module forward hook frees them. Similar backward hooks
+    gather parameters and later free parameters/reduce gradients.
+
     Args:
-        mesh (Optional[DeviceMesh]): This mesh defines the sharding and device.
-            If this is a 1D mesh, then this fully shards across the 1D mesh
-            (i.e. FSDP). If this is a 2D mesh, then this shards across the 0th
-            dimension and replicates across the 1st dimension (i.e. HSDP).
-            FSDP/HSDP uses the device given by the mesh's device type. For CUDA
-            or CUDA-like devices, FSDP uses the current device.
+        mesh (Optional[DeviceMesh]): This data parallel mesh defines the
+            sharding and device. If 1D, then parameters are fully sharded
+            across the 1D mesh (FSDP). If 2D, then parameters are sharded
+            across the 0th dim and replicated across the 1st dim (HSDP). The
+            mesh's device type gives the device type used for communication;
+            if a CUDA or CUDA-like device type, then we use the current device.
         reshard_after_forward (Union[bool, int]): This controls the parameter
             behavior after forward and can trade off memory and communication:
             - If ``True``, then this reshards parameters after forward and
@@ -44,11 +70,20 @@ def fully_shard(
             after forward and avoids the all-gather in backward.
             - If an ``int``, then this represents the world size to reshard to
             after forward. It should be a number between 1 and the ``mesh``
-            shard dimension size exclusive. A common choice may be the
-            intra-node size (i.e. ``torch.cuda.device_count()``).
+            shard dimension size, exclusive. A common choice may be the
+            intra-node size (e.g. ``torch.cuda.device_count()``). This allows
+            the all-gather in backward to be over a smaller world size at the
+            cost of higher memory usage than setting to ``True``.
             - The root FSDP state has its value specially set to ``False`` as a
             heuristic since its parameters would typically be immediately
             all-gathered for backward.
+            - After forward, the parameters registered to the module depend on
+            to this: The registered parameters are the sharded parameters if
+            ``True``; unsharded parameters if ``False``; and the paramters
+            resharded to the smaller mesh otherwise. To modify the parameters
+            between forward and backward, the registered parameters must be the
+            sharded parameters. For ``False`` or an ``int``, this can be done
+            by manually resharding via :meth:`reshard`.
     """
     if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
         raise ValueError(
@@ -114,3 +149,13 @@ class FSDP:
         ):
             return  # no-op
         fsdp_param_group.reshard()
+
+    def set_is_last_backward(self, is_last_backward: bool) -> None:
+        """
+        Sets whether the next backward is the last one, meaning that FSDP
+        should wait for gradient reduction to finish and clear internal data
+        structures used for explicit prefetching.
+        """
+        if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None:
+            return  # no-op
+        state._state_ctx.is_last_backward = is_last_backward
