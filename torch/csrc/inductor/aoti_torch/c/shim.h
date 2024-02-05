@@ -92,11 +92,17 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float16();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float32();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float64();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_uint8();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_uint16();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_uint32();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_uint64();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int8();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int16();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int32();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int64();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_bool();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex32();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex64();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex128();
 
 // Functions for converting a single-element tensor to a scalar value
 AOTI_TORCH_EXPORT AOTITorchError
@@ -121,6 +127,40 @@ AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_int64(AtenTensorHandle tensor, int64_t* ret_value);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_bool(AtenTensorHandle tensor, bool* ret_value);
+
+// Functions for wrapping a scalar value to a single-element tensor
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_float32(
+    float value,
+    AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_float64(
+    double value,
+    AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_uint8(
+    uint8_t value,
+    AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_uint16(
+    uint16_t value,
+    AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_uint32(
+    uint32_t value,
+    AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_uint64(
+    uint64_t value,
+    AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_int8(
+    int8_t value,
+    AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_int16(
+    int16_t value,
+    AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_int32(
+    int32_t value,
+    AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_int64(
+    int64_t value,
+    AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_scalar_to_tensor_bool(bool value, AtenTensorHandle* ret_new_tensor);
 
 AOTI_TORCH_EXPORT bool aoti_torch_grad_mode_is_enabled();
 AOTI_TORCH_EXPORT void aoti_torch_grad_mode_set_enabled(bool enabled);
@@ -222,6 +262,31 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob(
     AtenTensorHandle* ret // returns new reference
 );
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__embedding_bag(
+    AtenTensorHandle weight,
+    AtenTensorHandle indices,
+    AtenTensorHandle offsets,
+    int32_t scale_grad_by_freq,
+    int32_t mode,
+    int32_t sparse,
+    AtenTensorHandle per_sample_weights, // optional argument
+    int32_t include_last_offset,
+    int32_t padding_idx,
+    AtenTensorHandle* ret0, // returns new reference
+    AtenTensorHandle* ret1, // returns new reference
+    AtenTensorHandle* ret2, // returns new reference
+    AtenTensorHandle* ret3 // returns new reference
+);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__fft_c2c(
+    AtenTensorHandle self,
+    const int64_t* dim_ptr,
+    int64_t dim_size,
+    int64_t normalization,
+    int32_t forward,
+    AtenTensorHandle* ret // returns new reference
+);
+
 // This version is deprecated. We will remove it later
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
     AtenTensorHandle query,
@@ -250,7 +315,7 @@ aoti_torch__scaled_dot_product_flash_attention_v2(
     double dropout_p,
     int is_causal,
     int return_debug_mask,
-    double* scale,
+    double* scale, // optional argument
     AtenTensorHandle* ret0, // returns new reference
     AtenTensorHandle* ret1, // returns new reference
     AtenTensorHandle* ret2, // returns new reference
@@ -312,6 +377,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_convolution(
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_new_uninitialized_tensor(AtenTensorHandle* ret);
 
+// WARNING: This will be deprecated. Use aoti_torch_copy_ instead.
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_tensor_copy_(AtenTensorHandle src, AtenTensorHandle dst);
 
@@ -340,6 +406,11 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_bmm_out(
     AtenTensorHandle out,
     AtenTensorHandle self,
     AtenTensorHandle mat2);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_copy_(
+    AtenTensorHandle self,
+    AtenTensorHandle src,
+    int32_t non_blocking);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mm_out(
     AtenTensorHandle out,
@@ -380,6 +451,17 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_index_put_out(
     const uint32_t num_indices,
     const AtenTensorHandle values,
     bool accumulate);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_view_as_real(
+    AtenTensorHandle self,
+    AtenTensorHandle* ret // returns new reference
+);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_view_dtype(
+    AtenTensorHandle self,
+    int32_t dtype,
+    AtenTensorHandle* ret // returns new reference
+);
 
 #ifdef USE_CUDA
 
