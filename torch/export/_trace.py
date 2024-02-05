@@ -585,7 +585,7 @@ def _export(
     operations inside and produce a ExportedProgram.
 
     Args:
-        m: the `nn.Module` or callable to trace.
+        f: the `nn.Module` to trace.
 
         args: example positional inputs.
 
@@ -791,7 +791,7 @@ def _export(
 
     # First, we want to pass through the graph to try populating
     # val field for getattr if there is anything missing.
-    # THis can happen when quantization adds extra params and forgets
+    # This can happen when quantization adds extra params and forgets
     # to update "val"
     for node in gm_torch_level.graph.nodes:
         if node.op == "get_attr" and "val" not in node.meta:
