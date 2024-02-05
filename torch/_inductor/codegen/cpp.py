@@ -825,6 +825,25 @@ class CppOverrides(OpOverrides):
         return f"std::copysign({x}, {y})"
 
     @staticmethod
+    def frexp0(x):
+        code = BracesBuffer()
+        exponent = V.kernel.cse.newvar()
+        code.writeline(f"int32_t {exponent};")
+        code.writeline(f"std::frexp({x}, &{exponent});")
+        V.kernel.compute.splice(code)
+        return exponent
+
+    @staticmethod
+    def frexp1(x):
+        code = BracesBuffer()
+        exponent = V.kernel.cse.newvar()
+        mantissa = V.kernel.cse.newvar()
+        code.writeline(f"int32_t {exponent};")
+        code.writeline(f"auto {mantissa} = std::frexp({x}, &{exponent});")
+        V.kernel.compute.splice(code)
+        return mantissa
+
+    @staticmethod
     def hypot(x, y):
         return f"std::hypot({x}, {y})"
 

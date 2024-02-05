@@ -626,6 +626,30 @@ def register_pointwise(
     return fn
 
 
+def register_frexp():
+    """A pointwise function that maps ops.frexp to inputs"""
+    name = "frexp"
+
+    pw_fns = [
+        make_pointwise(ops_wrapper("frexp0"), override_return_dtype=torch.int32),
+        make_pointwise(ops_wrapper("frexp1")),
+    ]
+
+    def fn(*args, **kwargs):
+        return pw_fns[0](*args, **kwargs), pw_fns[1](*args, **kwargs)
+
+    fn = register_lowering(
+        aten.frexp,
+    )(fn)
+
+    if hasattr(prims, name):
+        register_lowering(
+            getattr(prims, name),
+            type_promotion_kind=None,
+        )(fn)
+    return fn
+
+
 def register_foreach_pointwise(
     aten_fn,
     pointwise_lowering_fn,
@@ -5178,6 +5202,8 @@ register_pointwise_numeric(aten.erfinv)
 register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
+
+register_frexp()
 
 foreach_add_list = register_foreach_pointwise(
     aten._foreach_add.List, add, allow_alpha=True

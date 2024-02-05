@@ -1366,6 +1366,11 @@ def fmod(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.fmod(a, b)
 
 
+@register_decomposition(aten.frexp)
+def frexp(self: TensorLikeType) -> Tuple[TensorLikeType, TensorLikeType]:
+    return torch.return_types.frexp(prims.frexp(self))
+
+
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     supports_lhs_python_scalar=False,

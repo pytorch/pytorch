@@ -661,6 +661,14 @@ class TritonOverrides(OpOverrides):
         return f"tl.math.atanh({x})"
 
     @staticmethod
+    def frexp0(x):
+        return f"tl.math.ilogb({x})"
+
+    @staticmethod
+    def frexp1(x):
+        return f"tl.math.ldexp({x}, -tl.math.ilogb({x}))"
+
+    @staticmethod
     def copysign(x, y):
         return f"tl.math.copysign({x}, {y})"
 

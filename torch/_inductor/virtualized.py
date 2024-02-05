@@ -497,6 +497,9 @@ class OpsHandler(Protocol[T]):
     def erfinv(self, x0: T) -> T:
         ...
 
+    def frexp(self, x0: T) -> Tuple[T, T]:
+        ...
+
     def hypot(self, x0: T, x1: T) -> T:
         ...
 
