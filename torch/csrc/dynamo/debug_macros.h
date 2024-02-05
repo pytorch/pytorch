@@ -16,6 +16,8 @@
   } else {                                                      \
   }
 
+// CHECK might be previously declared
+#undef CHECK
 #define CHECK(cond)                                                     \
   if (unlikely(!(cond))) {                                              \
     fprintf(stderr, "DEBUG CHECK FAILED: %s:%d\n", __FILE__, __LINE__); \
