@@ -1981,7 +1981,7 @@ class ShapeEnv:
 
         return [maybe_transform_fake(fake) for fake in self.tracked_fakes]
 
-    def last_event_index(self) -> int:
+    def _last_event_index(self) -> int:
         return len(self.events) - 1
 
     @contextmanager
@@ -2087,7 +2087,7 @@ class ShapeEnv:
         from torch._dynamo.utils import get_current_node
 
         if self.should_record_events:
-            node.meta[SHAPEENV_EVENT_KEY] = self.last_event_index()
+            node.meta[SHAPEENV_EVENT_KEY] = self._last_event_index()
             node.meta[CURRENT_NODE_KEY] = get_current_node()
 
     def _suppress_guards_tls(self):
@@ -3173,6 +3173,8 @@ class ShapeEnv:
         return eval(code, SYMPY_INTERP, {"L": dict(zip(arg_names, args))})
 
     def evaluate_guards_for_args(self, placeholders, args, *, ignore_static=True):
+        """Generate guards for a graph's placeholder values and evaluate the guards with args
+        """
         code = self.produce_guards_expression(placeholders, ignore_static=ignore_static)
         if code:
             return self.evaluate_guards_expression(code, args)
@@ -3228,9 +3230,11 @@ class ShapeEnv:
         return bindings
 
     def get_nontrivial_guards(self):
+        """Returns a list of guard expressions that aren't statically known (i.e. not trivial)"""
         return [self.simplify(guard.expr) for guard in self.guards if self._maybe_evaluate_static(guard.expr) is None]
 
     def format_guards(self, verbose=False):
+        """Format this shape env's guard expressions with optional traceback info if verbose"""
         def format_tb(tb):
             if not verbose:
                 return ""
@@ -3239,6 +3243,7 @@ class ShapeEnv:
         return '\n'.join(f" - {guard.expr}{format_tb(guard.stack)}" for guard in self.guards)
 
     def get_shape_groups(self):
+        """Returns lists of symbols grouped by the expression they are equivalent to"""
         shape_groups = collections.defaultdict(list)
         for k, v in self.replacements.items():
             shape_groups[v].append(k)
@@ -3836,6 +3841,15 @@ class ShapeEnv:
 
     @record_shapeenv_event(save_tracked_fakes=True)
     def defer_runtime_assert(self, orig_expr: "sympy.Expr", msg, fx_node=None):
+        """Create an assert that is checked at runtime
+
+        Args:
+            orig_expr (sympy.Expr): Boolean expression to assert is true
+            msg (str): Message to display on assertion failure
+            fx_node (Optional, torch.fx.Node): node in ``self.graph`` corresponding
+                to the expression, if applicable
+
+        """
         expr = orig_expr
 
         static_expr = self._maybe_evaluate_static(expr)
