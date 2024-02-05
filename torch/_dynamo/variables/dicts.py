@@ -244,7 +244,7 @@ class ConstDictVariable(VariableTracker):
         elif name == "clear":
             tx.output.side_effects.mutation(self)
             self.items.clear()
-            return ConstantVariable(None)
+            return ConstantVariable.create(None)
         elif (
             name == "update"
             and len(args) == 1
