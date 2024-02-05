@@ -201,6 +201,7 @@ def set_logs(
     export: Optional[int] = None,
     modules: Optional[Dict[str, Union[int, bool]]] = None,
     cudagraphs: bool = False,
+    sym_node: bool = False,
 ):
     """
     Sets the log level for individual components and toggles individual log
@@ -347,6 +348,9 @@ def set_logs(
         overlap (:class:`bool`):
             Whether to emit detailed Inductor compute/comm overlap decisions. Default: ``False``
 
+        sym_node (:class:`bool`):
+            Whether to emit debug info for various SymNode opterations. Default: ``False``
+
         export (:class:`Optional[int]`):
             The log level for export. Default: ``logging.WARN``
 
@@ -448,6 +452,7 @@ def set_logs(
         onnx_diagnostics=onnx_diagnostics,
         fusion=fusion,
         overlap=overlap,
+        sym_node=sym_node,
         export=export,
         cudagraphs=cudagraphs,
     )
