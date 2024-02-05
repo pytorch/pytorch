@@ -5,7 +5,7 @@ import re
 import sys
 import tempfile
 from os.path import abspath, dirname
-from typing import Any, Dict, Optional, Set, Type, TYPE_CHECKING
+from typing import Any, Dict, Optional, Set, Type, TYPE_CHECKING, Union
 
 import torch
 
@@ -220,24 +220,25 @@ force_unspec_int_unbacked_size_like_on_torchrec_kjt = False
 # false_fn produces code with identical guards.
 enforce_cond_guards_match = True
 
-# Automatically split model graph into pieces to match DDP bucket sizes
-# to allow DDP comm/compute overlap.  Disable to allow DDP models to
-# run without graph-breaks, but also without comm/compute overlap.
-# set TORCH_LOGS env to include any of 'dynamo', 'distributed', or
+# The flag to specify how to optimize a DDP module when it is compiled.
+# If the flag is set to True, Dynamo will automatically split model graph into
+# pieces to match DDP bucket sizes to allow DDP comm/compute overlap. Setting
+# the flag to False will allow DDP models to run without graph-breaks, but
+# also without comm/compute overlap.
+# Set TORCH_LOGS env to include any of 'dynamo', 'distributed', or
 # 'dist_ddp' for more info about optimize_ddp behavior.
-optimize_ddp = True
+#
+# Another optimization mode requires the usage of compiled_autograd. When the
+# flag is 'python_reducer', DDP will disable C++ reducer and use Python reducer
+# to allow compiled_autograd to trace the communication and allow comm/compute
+# overlap without graph-breaks.
+optimize_ddp: Union[bool, str] = True
 
 # If True, delays DDPOptimizer submodule compilation to 1st run of the model,
 # so that real tensor strides are used in all submodules
 # (instead of using FakeTensor strides which can differ from real tensor strides and causes error in some cases).
 # This feature is not hardened yet and it's known to cause issues to some models, so False by default.
 optimize_ddp_lazy_compile = False
-
-# Register Python hooks for AccumuldateGrad when using DDP. With Python hooks
-# and compiled_autograd(), the allreduce issued by DDP can be traced. This
-# flag is only used when DDP module is compiled.
-# This is an experimental feature.
-ddp_python_hook = False
 
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
