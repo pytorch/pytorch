@@ -68,6 +68,9 @@ _decomp_test_ops_core_autograd = [
     if op.aten_name in core_decomposition_names
     and op.supports_autograd
 ]
+_sdpa_op_info = [
+    op for op in op_db if "scaled_dot_product_attention" in op.aten_name
+]
 
 
 def diff_arg(arg, requires_grad=True):
@@ -926,26 +929,27 @@ class DecompOneOffTests(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCPU
     @skipIfCrossRef
-    def test_sdpa(self, device):
+    @ops(_sdpa_op_info, allowed_dtypes=(torch.float16, torch.float32, torch.float64))
+    def test_sdpa(self, device, dtype, op):
+        # skip torch.bfloat16 because difference is 0.01
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch._decomp import get_decompositions
-        from torch.nn import functional as F
 
         class ScaledDotProductAttention(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
             def forward(self, query_layer, key_layer, value_layer, mask=None, is_causal=True):
-                attn_output = F.scaled_dot_product_attention(
+                attn_output = op(
                     query_layer, key_layer, value_layer, attn_mask=mask, dropout_p=0.0, is_causal=is_causal
                 )
                 return attn_output
 
 
-        query_layer = torch.randn(1, 128, 100, 64, device=device)
-        key_layer = torch.randn(1, 128, 100, 64, device=device)
-        value_layer = torch.randn(1, 128, 100, 64, device=device)
-        masks = [None, torch.randn(1, 1, 100, 100, device=device)]
+        query_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
+        key_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
+        value_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
+        masks = [None, torch.ones(1, 1, 100, 100, device=device, dtype=bool)]
 
         for mask in masks:
             is_causal = mask is None
@@ -960,10 +964,10 @@ class DecompOneOffTests(TestCase):
             )(query_layer, key_layer, value_layer, mask, is_causal)
 
             compiled_res = fx_g(query_layer, key_layer, value_layer, mask, is_causal)
-            eager_res = F.scaled_dot_product_attention(
+            eager_res = op(
                 query_layer, key_layer, value_layer, attn_mask=mask, dropout_p=0.0, is_causal=is_causal
             )
-            self.assertTrue(torch.allclose(compiled_res, eager_res, atol=1e-6, rtol=1e-5))
+            self.assertTrue(torch.allclose(compiled_res, eager_res, atol=1e-6))
 
 
 instantiate_device_type_tests(DecompOneOffTests, globals())
