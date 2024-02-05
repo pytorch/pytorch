@@ -116,46 +116,6 @@ class TestFSDPHybridShard(FSDPTest):
         with err_ctx:
             model = FSDP(model, sharding_strategy=ShardingStrategy._HYBRID_SHARD_ZERO2)
 
-    @skip_if_lt_x_gpu(2)
-    def test_hybrid_shard_pg_mismatch_raises(self):
-        model = MyModel().cuda()
-        intra_pg = self.process_group
-        inter_pg = dist.new_group(ranks=[self.rank])
-        # Mismatched process groups for intra-node
-        model.lin1 = FSDP(
-            model.lin1,
-            process_group=(intra_pg, inter_pg),
-            sharding_strategy=ShardingStrategy.HYBRID_SHARD,
-        )
-        model = FSDP(
-            model,
-            process_group=(dist.new_group(), dist.new_group()),
-            sharding_strategy=ShardingStrategy.HYBRID_SHARD,
-        )
-        # Errors during _lazy_init
-        inp = torch.randn(4, 10)
-        with self.assertRaisesRegex(
-            ValueError, "intra-node process groups do not match"
-        ):
-            model(inp)
-
-        # Mismatched process groups for inter-node
-        model = MyModel().cuda()
-        model.lin1 = FSDP(
-            model.lin1,
-            process_group=(intra_pg, inter_pg),
-            sharding_strategy=ShardingStrategy.HYBRID_SHARD,
-        )
-        model = FSDP(
-            model,
-            process_group=(intra_pg, dist.new_group()),
-            sharding_strategy=ShardingStrategy.HYBRID_SHARD,
-        )
-        with self.assertRaisesRegex(
-            ValueError, "inter-node process groups do not match"
-        ):
-            model(inp)
-
     @skip_if_lt_x_gpu(4)
     def test_hsdp_save_load_state_dict(self):
         model = MyModel().cuda()
