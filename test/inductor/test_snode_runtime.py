@@ -11,7 +11,6 @@ from torch._inductor.comm_analysis import estimate_nccl_collective_runtime
 from torch._inductor.compile_fx import compile_fx, count_bytes_inner
 from torch._inductor.utils import is_collective
 from torch.testing._internal.common_utils import TestCase as TorchTestCase
-from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 aten = torch.ops.aten
@@ -180,6 +179,7 @@ class TestCommAnalysis(TestCase):
     RANKS = list(range(8))
 
     def _verify_runtime_estimation(self, fn, inps):
+        from torch.testing._internal.distributed.fake_pg import FakeStore
         store = FakeStore()
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.WORLD_SIZE, store=store
