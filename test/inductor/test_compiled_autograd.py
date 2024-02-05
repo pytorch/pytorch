@@ -42,7 +42,9 @@ def hook3(gI, gO):
 
 
 class TestCompiledAutograd(TestCase):
-    def check_output_and_recompiles(self, fn, count=1, compiler_fn=compiler_fn):
+    def check_output_and_recompiles(
+        self, fn, count=1, compiler_fn=compiler_fn, compile_fn=False
+    ):
         with torch.autograd.set_multithreading_enabled(False):
             torch._dynamo.reset()
             counters["compiled_autograd"].clear()
@@ -50,7 +52,8 @@ class TestCompiledAutograd(TestCase):
             expected = list(fn())
             torch.manual_seed(123)
             with compiled_autograd.enable(compiler_fn):
-                actual = list(fn())
+                opt_fn = torch.compile(fn) if compile_fn else fn
+                actual = list(opt_fn())
             self.assertEqual(expected, actual)
             self.assertEqual(counters["compiled_autograd"]["captures"], count)
             self.assertEqual(counters["compiled_autograd"]["compiles"], count)
@@ -633,6 +636,25 @@ class TestCompiledAutograd(TestCase):
 
         self.check_output_and_recompiles(fn, 3)
 
+    def test_mismatch_fake_tensor_mode(self):
+        """
+        Repro the failure of training nanogpt with both compiled-autograd
+        and _LazyGraphModule. Check https://github.com/pytorch/pytorch/pull/118981
+        for more context.
+        """
+        x = torch.rand(2, 16)
+        y = nn.Parameter(torch.rand(2, 16))
+
+        def f():
+            out = x + y
+
+            # make sure the backward call does not trigger any error when
+            # compiling the backward graph
+            out.sum().backward()
+            return out, y.grad
+
+        self.check_output_and_recompiles(f, compile_fn=True)
+
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
@@ -731,7 +753,8 @@ known_failing_tests = {
     "test_hook_edge_case_when_called_with_grad",  # RuntimeError: specifying inputs= with .backward() not yet
     "test_hooks",  # torch._dynamo.exc.Unsupported: inline in skipfiles
     "test_inplace_on_view_backward",  # RuntimeError: compiled_autograd does not support create_graph
-    "test_multi_grad_hooks",  # RuntimeError: specifying inputs= with .backward() not yet implemented for compiled autograd
+    "test_multi_grad_any_hooks",  # RuntimeError: specifying inputs= with .backward() not yet implemented for compiled autograd
+    "test_multi_grad_all_hooks",  # RuntimeError: specifying inputs= with .backward() not yet implemented for compiled autograd
     "test_nested_anomaly_detect_nan",  # RuntimeError: compiled_autograd does not support create_graph
     "test_nested_anomaly_printstack_cleanup",  # RuntimeError: compiled_autograd does not support create_graph
     "test_once_differentiable",  # RuntimeError: compiled_autograd does not support create_graph
