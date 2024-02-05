@@ -1321,10 +1321,7 @@ class BuiltinVariable(VariableTracker):
             if config.replay_record_enabled:
                 tx.exec_recorder.record_module_access(obj.value, name, member)
 
-            if is_utils_checkpoint(member):
-                options["source"] = source
-                return build_checkpoint_variable(**options)
-            elif source is not None:
+            if source is not None:
                 return VariableBuilder(tx, source)(member)
             else:
                 return SourcelessBuilder()(tx, member)
