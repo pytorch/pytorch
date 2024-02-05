@@ -25,10 +25,10 @@ from tools.testing.test_run import TestRun, TestRuns
 @total_ordering
 class Relevance(Enum):
     HIGH = 4
-    NONE = 3
-    PROBABLE = 2
+    PROBABLE = 3
+    UNRANKED = 2
     UNLIKELY = 1
-    UNRANKED = 0
+    NONE = 0
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Relevance):
@@ -42,13 +42,16 @@ class Relevance(Enum):
 
         return self.value < other.value
 
+    def __hash__(self) -> int:
+        return self.value
+
     @staticmethod
     def priority_traversal() -> Iterator["Relevance"]:
         yield Relevance.HIGH
-        yield Relevance.NONE
         yield Relevance.PROBABLE
-        yield Relevance.UNLIKELY
         yield Relevance.UNRANKED
+        yield Relevance.UNLIKELY
+        yield Relevance.NONE
 
 
 METRIC_RELEVANCE_GROUP = "relevance_group"
@@ -367,15 +370,87 @@ class AggregatedHeuristics:
         """
         Returns the aggregated priorities across all heuristics.
         """
+        valid_heuristics = {
+            heuristic: heuristic_results
+            for heuristic, heuristic_results in self._heuristic_results.items()
+            if heuristic.trial_mode == include_trial
+        }
+
+        def get_left_right_intersection(
+            left_testrun: TestRun, right_testrun: TestRun
+        ) -> Tuple[TestRun, TestRun, TestRun]:
+            only_left = left_testrun - right_testrun
+            only_right = right_testrun - left_testrun
+            both = left_testrun & right_testrun
+            return only_left, only_right, both
+
+        how_many_probable_is_equal_to_high = 3
+        relevance_value = {
+            Relevance.HIGH: 1,
+            Relevance.PROBABLE: 1 / how_many_probable_is_equal_to_high,
+            Relevance.UNRANKED: 0,
+            Relevance.UNLIKELY: -1 / how_many_probable_is_equal_to_high,
+            Relevance.NONE: -1,
+        }
+
+        # Get an ordering of the tests based on insertion order, which is
+        # preserved when sorting
+        ordering: List[Tuple[float, TestRun]] = []
+        for heuristic_results in valid_heuristics.values():
+            for relevance, testruns in heuristic_results._traverse_priorities():
+                if relevance == Relevance.UNRANKED:
+                    continue
+                for testrun in testruns:
+                    curr = testrun
+                    new_ordering = []
+                    for existing_relevance, existing_testrun in ordering:
+                        if curr.test_file == existing_testrun.test_file:
+                            left, right, intersection = get_left_right_intersection(
+                                existing_testrun, curr
+                            )
+                            if not intersection.is_empty():
+                                new_ordering.append(
+                                    (
+                                        existing_relevance + relevance_value[relevance],
+                                        intersection,
+                                    )
+                                )
+                            if not left.is_empty():
+                                new_ordering.append((existing_relevance, left))
+                            curr = right
+                        else:
+                            new_ordering.append((existing_relevance, existing_testrun))
+                    if not curr.is_empty():
+                        new_ordering.append((relevance_value[relevance], curr))
+                    ordering = new_ordering
+
         aggregated_priorities = TestPrioritizations(
-            tests_being_ranked=self.unranked_tests
+            tests_being_ranked=self.unranked_tests,
         )
 
-        for heuristic, heuristic_results in self._heuristic_results.items():
-            if heuristic.trial_mode and not include_trial:
-                continue
+        def get_relevance(val: float) -> Relevance:
+            if val >= 1:
+                return Relevance.HIGH
+            if 0 < val < 1:
+                return Relevance.PROBABLE
+            if val == 0:
+                return Relevance.UNRANKED
+            if -1 < val < 0:
+                return Relevance.UNLIKELY
+            # val <= -1:
+            return Relevance.NONE
 
-            aggregated_priorities.integrate_priorities(heuristic_results)
+        # Sort by relevance value (ex test that is marked high relevance by two
+        # heuristics has value 2 and should come before test that was only
+        # marked as high relevance by one heuristic), and then group by value
+        for relevance_val, testrun in sorted(
+            ordering, key=lambda x: x[0], reverse=True
+        ):
+            aggregated_priorities.set_test_relevance(
+                testrun, get_relevance(relevance_val)
+            )
+
+        aggregated_priorities.validate_test_priorities()
 
         return aggregated_priorities
 
