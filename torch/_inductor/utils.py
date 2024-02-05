@@ -6,6 +6,7 @@ import enum
 import functools
 import getpass
 import inspect
+import io
 import itertools
 import logging
 import math
@@ -19,6 +20,7 @@ import tempfile
 import textwrap
 import time
 import unittest
+from datetime import datetime
 from io import StringIO
 from typing import (
     Any,
@@ -45,7 +47,6 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
 from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
-
 from . import config
 
 log = logging.getLogger(__name__)
@@ -331,7 +332,7 @@ def timed(
         synchronize(device)
     t1 = time.perf_counter()
     # GC the result after timing
-    assert result is not None
+    assert result is not None  # type: ignore[possibly-undefined]
     return t1 - t0
 
 
@@ -546,7 +547,10 @@ def sympy_str(expr: sympy.Expr) -> str:
     return str(expr)
 
 
-def sympy_symbol(name: str) -> sympy.Symbol:
+def sympy_index_symbol(name: str) -> sympy.Symbol:
+    """
+    Used to generate an integer-nonnegative symbol.
+    """
     # This should never be used for creating shape/stride symbols, as those
     # should all be allocated before Inductor.
     assert name[0] != "s"
@@ -555,27 +559,35 @@ def sympy_symbol(name: str) -> sympy.Symbol:
     return sympy.Symbol(name, integer=True, nonnegative=True)
 
 
-def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]) -> sympy.Expr:
+def sympy_subs(expr: sympy.Expr, replacements: Dict[sympy.Expr, Any]) -> sympy.Expr:
     """
-    xreplace is faster than subs, but is way more picky
+    When the passed replacement symbol v is a string, it is converted to a symbol with name v that
+    have the same replaced expression integer and nonnegative properties.
     """
 
-    def promote_strings(key):
-        if isinstance(key, str):
-            return sympy_symbol(key)
-        return key
+    def to_symbol(replaced, replacement):
+        assert isinstance(replaced, sympy.Expr)
+        if isinstance(replacement, str):
+            return sympy.Symbol(
+                replacement,
+                integer=replaced.is_integer,  # type: ignore[attr-defined]
+                nonnegative=replaced.is_nonnegative,  # type: ignore[attr-defined]
+            )
+        else:
+            return replacement
 
+    # xreplace is faster than subs, but is way more picky
     return sympy.sympify(expr).xreplace(
-        {promote_strings(k): promote_strings(v) for k, v in replacements.items()}
+        {k: to_symbol(k, v) for k, v in replacements.items()}
     )
 
 
 def free_symbol_startswith(index: sympy.Expr, prefix: str):
-    return any(v.name.startswith(prefix) for v in index.free_symbols)
+    return any(v.name.startswith(prefix) for v in index.free_symbols)  # type: ignore[attr-defined]
 
 
 def free_symbol_has(index: sympy.Expr, pattern: str):
-    return any(pattern in v.name for v in index.free_symbols)
+    return any(pattern in v.name for v in index.free_symbols)  # type: ignore[attr-defined]
 
 
 def is_symbolic(a: Any) -> bool:
@@ -856,7 +868,7 @@ def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> 
 
 
 def _use_autotune_backend(backend: str) -> bool:
-    return backend.upper() in [
+    return backend.upper() in [  # noqa: C412
         x.strip() for x in config.max_autotune_gemm_backends.upper().split(",")
     ]
 
@@ -1070,7 +1082,7 @@ def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
     assert isinstance(
         val, sympy.Expr
     ), "only support sympy.Expr as input to get_sympy_Expr_dtype"
-    if val.is_integer:
+    if val.is_integer:  # type: ignore[attr-defined]
         return torch.int64
     else:
         return torch.float64
@@ -1094,6 +1106,13 @@ def triton_config_to_hashable(cfg):
     items.append(("num_warps", cfg.num_warps))
     items.append(("num_stages", cfg.num_stages))
     return tuple(items)
+
+
+def parallel_num_threads():
+    threads = config.cpp.threads
+    if threads < 1:
+        threads = torch.get_num_threads()
+    return threads
 
 
 HAS_COLORAMA = True
@@ -1207,3 +1226,35 @@ class Placeholder(enum.Enum):
     # The descriptive name of the triton kernel; when unique_kernel_names = False, this
     # placeholder will be replaced with a string with more information.
     DESCRIPTIVE_NAME = "DESCRIPTIVE_NAME"
+
+
+def pass_execution_and_save(func, gm, msg):
+    from .pattern_matcher import stable_topological_sort
+
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        delete=False,
+    ) as f:
+        before_io = io.StringIO()
+        after_io = io.StringIO()
+        print(f"Before:\n{gm.graph}", file=f)
+        print(gm.graph, file=before_io)
+        start_time = datetime.now()
+        func(gm.graph)
+        time_elapsed = datetime.now() - start_time
+        # recompile graph
+        stable_topological_sort(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        print(f"After:\n{gm.graph}", file=f)
+        print(gm.graph, file=after_io)
+        t = before_io.getvalue() == after_io.getvalue()
+        log.info(
+            "%s, save before/after graph to %s, graph before/after are the same = %s, time elapsed = %s",
+            msg,
+            f.name,
+            t,
+            time_elapsed,
+        )

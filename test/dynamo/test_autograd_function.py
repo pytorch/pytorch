@@ -281,7 +281,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            ".*HigherOrderOperator body's output must consist of tensors only",
+            "Illegal getattr invocation stride in strict mod",
         ):
             opt_model(x)
 
@@ -862,7 +862,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         foo(torch.randn(2))
         foo(torch.randn(2, requires_grad=True))
 
-    @requires_cuda()
+    @requires_cuda
     @skipIfRocm
     def test_triton_kernel_basic(self):
         class Add(torch.autograd.Function):
@@ -894,7 +894,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         loss.backward()
         self.assertEqual(x + y, z)
 
-    @requires_cuda()
+    @requires_cuda
     @skipIfRocm
     def test_triton_kernel_multiple_out(self):
         class Add(torch.autograd.Function):

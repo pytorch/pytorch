@@ -366,16 +366,16 @@ def forward(self, out_iter_1, it_1, y_1):
     return (getitem, getitem_1, getitem_2)
     """)  # noqa: B950
         self.assertExpectedInline(graphs["symbolic"].while_loop_cond_graph_0.code.strip("\n"), """\
-def forward(self, out_iter_1, it_1, y_1):
-    sum_1 = torch.ops.aten.sum.default(out_iter_1);  out_iter_1 = None
+def forward(self, arg0_1, arg1_1, arg2_1):
+    sum_1 = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
     lt = torch.ops.aten.lt.Scalar(sum_1, 2);  sum_1 = None
     return lt
     """)
         self.assertExpectedInline(graphs["symbolic"].while_loop_body_graph_0.code.strip("\n"), """\
-def forward(self, out_iter_1, it_1, y_1):
+def forward(self, arg0_1, arg1_1, arg2_1):
     while_loop_cond_graph_0 = self.while_loop_cond_graph_0
     while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (out_iter_1, it_1, y_1));  while_loop_cond_graph_0 = while_loop_body_graph_0 = out_iter_1 = it_1 = y_1 = None
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg1_1, arg0_1, arg2_1));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg1_1 = arg0_1 = arg2_1 = None
     getitem = while_loop[0]
     getitem_1 = while_loop[1]
     getitem_2 = while_loop[2];  while_loop = None
@@ -413,8 +413,8 @@ def forward(self, x_1):
     return (getitem,)
     """)  # noqa: B950
             self.assertExpectedInline(graphs["symbolic"].while_loop_cond_graph_0.code.strip("\n"), """\
-def forward(self, x_1):
-    clone = torch.ops.aten.clone.default(x_1);  x_1 = None
+def forward(self, arg0_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
     add_ = torch.ops.aten.add_.Tensor(clone, 1);  clone = None
     add__1 = torch.ops.aten.add_.Tensor(add_, -1);  add_ = None
     sum_1 = torch.ops.aten.sum.default(add__1);  add__1 = None
@@ -422,8 +422,8 @@ def forward(self, x_1):
     return lt
     """)
             self.assertExpectedInline(graphs["symbolic"].while_loop_body_graph_0.code.strip("\n"), """\
-def forward(self, x_1):
-    clone = torch.ops.aten.clone.default(x_1);  x_1 = None
+def forward(self, arg0_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
     add_ = torch.ops.aten.add_.Tensor(clone, 1);  clone = None
     add__1 = torch.ops.aten.add_.Tensor(add_, -1);  add_ = None
     add = torch.ops.aten.add.Tensor(add__1, 1);  add__1 = None
@@ -465,8 +465,8 @@ def forward(self, x_1):
     return (getitem,)
     """)  # noqa: B950
             self.assertExpectedInline(graphs["symbolic"].while_loop_cond_graph_0.code.strip("\n"), """\
-def forward(self, x_1):
-    clone = torch.ops.aten.clone.default(x_1);  x_1 = None
+def forward(self, arg0_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
     add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
     add_1 = torch.ops.aten.add.Tensor(add, -1);  add = None
     sum_1 = torch.ops.aten.sum.default(add_1);  add_1 = None
@@ -474,8 +474,8 @@ def forward(self, x_1):
     return lt
     """)
             self.assertExpectedInline(graphs["symbolic"].while_loop_body_graph_0.code.strip("\n"), """\
-def forward(self, x_1):
-    clone = torch.ops.aten.clone.default(x_1);  x_1 = None
+def forward(self, arg0_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
     add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
     add_1 = torch.ops.aten.add.Tensor(add, -1);  add = None
     add_2 = torch.ops.aten.add.Tensor(add_1, 1);  add_1 = None
@@ -1618,9 +1618,11 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             return cond(x.shape[0] == 4, true_fn, false_fn, [x])
 
         inp = torch.ones(2, 3)
-        # For top-level cond, it take 5 arguments (x, a, b, a, b)
+        # For top-level cond, it take 3 arguments (x, a, b). Dynamo should
+        # realize that the nonlocal variables are same for the true and false
+        # branches, so it should de-dupe them.
         # For second-level conds, it takes (x, a, b)
-        self._check_closure_correctly_lifted_with_mutation(foo, (a, b), args=(inp,), exp_arg_num=5)
+        self._check_closure_correctly_lifted_with_mutation(foo, (a, b), args=(inp,), exp_arg_num=3)
 
     def test_cond_nested_with_closure_graph_module(self):
         a = torch.ones(1, 1)
@@ -1907,6 +1909,8 @@ def forward(self, arg0_1):
             )
 
         res = torch.vmap(fn, in_dims=(0,))(a,)
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            res = torch.vmap(fn, in_dims=(0,))(a,)
         self.assertEqual(a + c, res)
 
     def test_cond_vmap_multiple_args_with_closure(self):
