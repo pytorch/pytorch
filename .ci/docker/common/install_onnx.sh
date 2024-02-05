@@ -29,7 +29,9 @@ pip_install \
   transformers==4.36.2
 
 pip_install coloredlogs packaging
-retry pip_install -i https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/ --no-cache-dir --no-input ort-nightly==1.17.0.dev20231005006
+pip_install onnxruntime==1.17.0
+# Install onnx-nightly
+# retry pip_install -i https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/ --no-cache-dir --no-input ort-nightly==1.17.0.dev20231005006
 
 pip_install -i https://test.pypi.org/simple/ onnx==1.15.0rc2
 pip_install onnxscript==0.1.0.dev20240117 --no-deps
