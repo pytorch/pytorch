@@ -2,6 +2,7 @@
 
 # Owner(s): ["oncall: distributed"]
 
+import contextlib
 import itertools
 import os
 import re
@@ -844,6 +845,26 @@ class MLP(nn.Module):
         if self.buffer:
             z += self.buffer
         return z
+
+
+@contextlib.contextmanager
+def patch_all_gather(new_all_gather_into_tensor: Callable):
+    orig_all_gather = dist.all_gather_into_tensor
+    dist.all_gather_into_tensor = new_all_gather_into_tensor
+    try:
+        yield
+    finally:
+        dist.all_gather_into_tensor = orig_all_gather
+
+
+@contextlib.contextmanager
+def patch_reduce_scatter(new_reduce_scatter_tensor: Callable):
+    orig_reduce_scatter = dist.reduce_scatter_tensor
+    dist.reduce_scatter_tensor = new_reduce_scatter_tensor
+    try:
+        yield
+    finally:
+        dist.reduce_scatter_tensor = orig_reduce_scatter
 
 
 def run_subtests(
