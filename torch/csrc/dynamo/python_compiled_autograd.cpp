@@ -211,11 +211,16 @@ struct CacheNode {
 };
 
 struct InputBuffers : public std::unordered_map<Node*, InputBuffer> {
-  InputBuffer& lookup(Node* function) {
-    auto it = find(function);
-    if (it == end()) {
-      it = emplace(function, InputBuffer(function->num_inputs())).first;
+  variable_list extract_inputs(Node* function) {
+    auto node_handle = extract(function);
+    if (!node_handle) {
+      return InputBuffer(function->num_inputs()).buffer;
     }
+    return node_handle.mapped().buffer;
+  }
+
+  InputBuffer& lookup(Node* function) {
+    auto it = emplace(function, InputBuffer(function->num_inputs())).first;
     return it->second;
   }
 };
@@ -385,7 +390,7 @@ variable_list compiled_autograd(
       // at::getStepCallbacksUnlessEmpty(at::RecordScope::BACKWARD_FUNCTION);
       // if (C10_UNLIKELY(step_callbacks.has_value())) { ... }
 
-      variable_list& inputs = input_buffers.lookup(call.node.get()).buffer;
+      variable_list inputs = input_buffers.extract_inputs(call.node.get());
 
       if (!call.tensor_pre_hooks.empty()) {
         THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
