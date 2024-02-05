@@ -1,6 +1,8 @@
 # Owner(s): ["module: inductor"]
 
 
+from unittest import skipIf
+
 import torch
 import torch.distributed as dist
 
@@ -172,6 +174,7 @@ class MemoryBoundedTests(TestCase):
         self.assertNotZero(calculate_runtime(f, *inp))
 
 
+@skipIf(not dist.is_available(), "requires distributed")
 class TestCommAnalysis(TestCase):
     WORLD_SIZE: int = 8
     RANKS = list(range(8))
