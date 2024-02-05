@@ -8,7 +8,7 @@ from typing import Optional
 import torch
 import torch._decomp as decomp
 import torch._prims_common as utils
-import torch.ao.quantization.fx._decomposed as quant_decomposed
+import torch.ao.quantization.fx._decomposed
 from torch._decomp import (
     core_aten_decompositions,
     get_decompositions,
@@ -496,68 +496,6 @@ def dequantize_per_tensor_tensor_decomp_impl(
     dtype: torch.dtype,
 ) -> torch.Tensor:
     return (input.to(torch.float32) - zero_point) * scale
-
-
-@register_decomposition(quantized_decomposed.quantize_per_channel.default)
-def quantize_per_channel_default_decomp_impl(
-    input: torch.Tensor,
-    scales: torch.Tensor,
-    zero_points: torch.Tensor,
-    axis: int,
-    quant_min: int,
-    quant_max: int,
-    dtype: torch.dtype,
-) -> torch.Tensor:
-    torch._check(
-        input.dtype == torch.float32,
-        f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}",
-    )
-    torch._check(axis < input.dim(), f"Expecting axis to be < {input.dim()}")
-    torch._check(scales.ndim == 1, "expect scales 1 dim")
-    torch._check(zero_points.ndim == 1, "expect scales 1 dim")
-    quant_decomposed._quant_min_max_bounds_check(quant_min, quant_max, dtype)
-
-    if input.dtype == torch.bfloat16:
-        input = input.to(torch.float32)
-    input, permute_axis_list = quant_decomposed._permute_to_axis_zero(input, axis)
-    original_input_size = input.size()
-    input = input.view((original_input_size[0], -1))
-    res = torch.clamp(
-        torch.round(input * (1.0 / scales).unsqueeze(1)) + zero_points.unsqueeze(1),
-        quant_min,
-        quant_max,
-    )
-    res = res.view(original_input_size)
-    out = res.permute(tuple(permute_axis_list))
-    return out.to(dtype)
-
-
-@register_decomposition(quantized_decomposed.dequantize_per_channel.default)
-def dequantize_per_channel_default_decomp_impl(
-    input: torch.Tensor,
-    scales: torch.Tensor,
-    zero_points: torch.Tensor,
-    axis: int,
-    quant_min: int,
-    quant_max: int,
-    dtype: torch.dtype,
-) -> torch.Tensor:
-    torch._check(
-        input.dtype == dtype,
-        f"Expecting input to have dtype {dtype}, but got dtype: {input.dtype}",
-    )
-    torch._check(axis < input.dim(), f"Expecting axis to be < {input.dim()}")
-    torch._check(scales.ndim == 1, "expect scales 1 dim")
-    torch._check(zero_points.ndim == 1, "expect scales 1 dim")
-    quant_decomposed._quant_min_max_bounds_check(quant_min, quant_max, dtype)
-
-    input, permute_axis_list = quant_decomposed._permute_to_axis_zero(input, axis)
-    original_input_size = input.size()
-    input = input.view((original_input_size[0], -1))
-    res = (input.to(torch.float32) - zero_points.unsqueeze(1)) * scales.unsqueeze(1)
-    res = res.view(original_input_size)
-    out = res.permute(tuple(permute_axis_list))
-    return out
 
 
 @register_decomposition(torch.ops.quantized.embedding_bag_byte_unpack)
