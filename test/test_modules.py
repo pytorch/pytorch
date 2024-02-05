@@ -873,7 +873,7 @@ class TestModule(TestCase):
 
             m = module_cls(*c_args, **c_kwargs)
 
-            # Avoid using `module.to()`` when constructing module since that is the method we are testing
+            # Avoid using `module.to()` when constructing module since that is the method we are testing
             def _to(m, set_grad=False):
                 for c in m.children():
                     _to(c, set_grad=set_grad)
