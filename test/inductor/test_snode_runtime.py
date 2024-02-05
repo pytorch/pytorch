@@ -180,6 +180,7 @@ class TestCommAnalysis(TestCase):
 
     def _verify_runtime_estimation(self, fn, inps):
         from torch.testing._internal.distributed.fake_pg import FakeStore
+
         store = FakeStore()
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.WORLD_SIZE, store=store
