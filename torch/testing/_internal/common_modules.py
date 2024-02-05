@@ -3455,9 +3455,10 @@ module_db: List[ModuleInfo] = [
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
                    # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
+                   # xfail does not work due to Fatal Python error: Aborted
+                   DecorateInfo(skipIfMps, "TestModule", "test_memory_format",
                                 device_type='mps', dtypes=[torch.float16]),
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
+                   DecorateInfo(skipIfMps, "TestModule", "test_non_contiguous_tensors",
                                 device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
@@ -3478,9 +3479,12 @@ module_db: List[ModuleInfo] = [
                                 device_type='cuda', dtypes=[torch.float64]),
                    # Fails with channels last test on MPS backend
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float16, torch.float32]),
+                                device_type='mps', dtypes=[torch.float32]),
                    # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
+                   # xfail does not work due to Fatal Python error: Aborted
+                   DecorateInfo(skipIfMps, "TestModule", "test_memory_format",
+                                device_type='mps', dtypes=[torch.float16]),
+                   DecorateInfo(skipIfMps, "TestModule", "test_non_contiguous_tensors",
                                 device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
@@ -3520,9 +3524,10 @@ module_db: List[ModuleInfo] = [
                    # Ref: https://github.com/pytorch/pytorch/issues/73502
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_pickle', dtypes=(torch.chalf,)),
                    # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
+                   # xfail does not work due to Fatal Python error: Aborted
+                   DecorateInfo(skipIfMps, "TestModule", "test_memory_format",
                                 device_type='mps', dtypes=[torch.float16]),
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
+                   DecorateInfo(skipIfMps, "TestModule", "test_non_contiguous_tensors",
                                 device_type='mps', dtypes=[torch.float16]),),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -3547,14 +3552,17 @@ module_db: List[ModuleInfo] = [
                                 dtypes=[torch.float64, torch.complex128]),
                    # Fails with channels last test on MPS backend
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float16, torch.float32]),
+                                device_type='mps', dtypes=[torch.float32]),
                    # Not implemented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
                                 dtypes=(torch.chalf,), device_type='cuda'),
                    # Ref: https://github.com/pytorch/pytorch/issues/73502
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_pickle', dtypes=(torch.chalf,)),
                    # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
+                   # xfail does not work due to Fatal Python error: Aborted
+                   DecorateInfo(skipIfMps, "TestModule", "test_memory_format",
+                                device_type='mps', dtypes=[torch.float16]),
+                   DecorateInfo(skipIfMps, "TestModule", "test_non_contiguous_tensors",
                                 device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
@@ -3646,9 +3654,10 @@ module_db: List[ModuleInfo] = [
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
                    # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
+                   # xfail does not work due to Fatal Python error: Aborted
+                   DecorateInfo(skipIfMps, "TestModule", "test_memory_format",
                                 device_type='mps', dtypes=[torch.float16]),
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
+                   DecorateInfo(skipIfMps, "TestModule", "test_non_contiguous_tensors",
                                 device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
@@ -3672,9 +3681,12 @@ module_db: List[ModuleInfo] = [
                                 device_type='cuda', dtypes=[torch.float64]),
                    # Fails with channels last test on MPS backend
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float16, torch.float32]),
+                                device_type='mps', dtypes=[torch.float32]),
                    # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
+                   # xfail does not work due to Fatal Python error: Aborted
+                   DecorateInfo(skipIfMps, "TestModule", "test_memory_format",
+                                device_type='mps', dtypes=[torch.float16]),
+                   DecorateInfo(skipIfMps, "TestModule", "test_non_contiguous_tensors",
                                 device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
@@ -3714,9 +3726,10 @@ module_db: List[ModuleInfo] = [
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
                    # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
+                   # xfail does not work due to Fatal Python error: Aborted
+                   DecorateInfo(skipIfMps, "TestModule", "test_memory_format",
                                 device_type='mps', dtypes=[torch.float16]),
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
+                   DecorateInfo(skipIfMps, "TestModule", "test_non_contiguous_tensors",
                                 device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
@@ -3740,9 +3753,12 @@ module_db: List[ModuleInfo] = [
                                 dtypes=[torch.float64]),
                    # Fails with channels last test on MPS backend
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float16, torch.float32]),
+                                device_type='mps', dtypes=[torch.float32]),
                    # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
+                   # xfail does not work due to Fatal Python error: Aborted
+                   DecorateInfo(skipIfMps, "TestModule", "test_memory_format",
+                                device_type='mps', dtypes=[torch.float16]),
+                   DecorateInfo(skipIfMps, "TestModule", "test_non_contiguous_tensors",
                                 device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
