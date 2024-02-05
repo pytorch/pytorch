@@ -1,6 +1,19 @@
 # Check if the processor is an ARM and if Neon instruction are available on the machine where
 # the project is compiled.
 
+INCLUDE(CheckCSourceCompiles)
+INCLUDE(CheckCXXSourceCompiles)
+
+SET(SVE_CODE "
+  #include <arm_sve.h>
+  int main()
+  {
+    svfloat64_t a;
+    a = svdup_n_f64(0);
+    return 0;
+  }
+")
+
 IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
    EXECUTE_PROCESS(COMMAND cat /proc/cpuinfo OUTPUT_VARIABLE CPUINFO)
 
@@ -79,3 +92,37 @@ if(NOT CORTEXA9_FOUND)
       MESSAGE(STATUS "No OMAP4 processor on this machine.")
 endif(NOT CORTEXA9_FOUND)
 mark_as_advanced(NEON_FOUND)
+
+MACRO(CHECK_SVE lang type flags)
+   SET(CMAKE_REQUIRED_FLAGS_SAVE ${CMAKE_REQUIRED_FLAGS})
+
+   SET(CMAKE_REQUIRED_FLAGS "${CMAKE_${lang}_FLAGS_INIT} ${flags}")
+   IF(lang STREQUAL "CXX")
+      CHECK_CXX_SOURCE_COMPILES("${SVE_CODE}" ${lang}_HAS_${type})
+   ELSE()
+      CHECK_C_SOURCE_COMPILES("${SVE_CODE}" ${lang}_HAS_${type})
+   ENDIF()
+   IF(${lang}_HAS_${type})
+      set(${lang}_SVE_FOUND TRUE CACHE BOOL "SVE available on host")
+      SET(${lang}_${type}_FOUND TRUE CACHE BOOL "${lang} ${type} support")
+      SET(${lang}_${type}_FLAGS "${flags}" CACHE STRING "${lang} ${type} flags")
+   ENDIF()
+
+   SET(CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS_SAVE})
+
+   IF(NOT ${lang}_${type}_FOUND)
+      SET(${lang}_${type}_FOUND FALSE CACHE BOOL "${lang} ${type} support")
+      SET(${lang}_${type}_FLAGS "" CACHE STRING "${lang} ${type} flags")
+   ENDIF()
+
+   MARK_AS_ADVANCED(${lang}_${type}_FOUND ${lang}_${type}_FLAGS)
+
+ENDMACRO()
+
+CHECK_SVE(CXX "SVE256" "-msve-vector-bits=256")
+
+if(NOT CXX_SVE_FOUND)
+   set(CXX_SVE_FOUND FALSE CACHE BOOL "SVE not available on host")
+   message(STATUS "No SVE processor on this machine.")
+endif()
+mark_as_advanced(CXX_SVE_FOUND)

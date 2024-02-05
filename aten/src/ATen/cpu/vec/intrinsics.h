@@ -41,3 +41,7 @@
 /* GCC-compatible compiler, targeting PowerPC with SPE */
 #include <spe.h>
 #endif
+/* CLANG and GCC-compatible compilers, targeting ARM with SVE */
+#if defined(__ARM_FEATURE_SVE)
+#include <arm_sve.h>
+#endif

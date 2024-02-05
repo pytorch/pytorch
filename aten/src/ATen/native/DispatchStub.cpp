@@ -9,6 +9,9 @@
 #endif
 #include <cstdlib>
 #include <cstring>
+#if defined(__linux__)
+#include <sys/prctl.h>
+#endif
 
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
 #include <sys/auxv.h>
@@ -34,6 +37,10 @@ static CPUCapability compute_cpu_capability() {
     if (strcmp(envar, "zvector") == 0) {
       return CPUCapability::ZVECTOR;
     }
+#elif HAVE_SVE256_CPU_DEFINITION
+    if (strcmp(envar, "sve256") == 0) {
+      return CPUCapability::SVE256;
+    }
 #else
 #ifdef HAVE_AVX512_CPU_DEFINITION
     if (strcmp(envar, "avx512") == 0) {
@@ -52,7 +59,7 @@ static CPUCapability compute_cpu_capability() {
     TORCH_WARN("ignoring invalid value for ATEN_CPU_CAPABILITY: ", envar);
   }
 
-#if !defined(__powerpc__) && !defined(__s390x__)
+#if !defined(__powerpc__) && !defined(__s390x__) && !defined(HAVE_SVE_CPU_DEFINITION)
   if (cpuinfo_initialize()) {
 #if defined(HAVE_AVX512_CPU_DEFINITION)
     // GCC supports some AVX512 intrinsics such as _mm512_set_epi16 only in
@@ -79,6 +86,31 @@ static CPUCapability compute_cpu_capability() {
   }
 #endif
 
+#if defined(__linux__) && defined(HAVE_SVE_CPU_DEFINITION)
+  if (cpuinfo_initialize()) {
+    if (cpuinfo_has_arm_sve()) {
+      int ret = prctl(PR_SVE_GET_VL);
+      if (ret < 0) {
+        if (errno == EINVAL) {
+          // SVE is not supported on this system.
+          // Return the default CPU capability.
+          return CPUCapability::DEFAULT;
+        } else {
+          // Undefined in the manual.
+          // Should report and exit.
+          TORCH_INTERNAL_ASSERT(false, "Unexpected error while checking SVE support");
+        }
+      } else { // ret >= 0
+        int vl = ret & PR_SVE_VL_LEN_MASK;
+        #ifdef HAVE_SVE256_CPU_DEFINITION
+        if (vl == 32) { // Check for SVE256 (32 bytes vector length)
+          return CPUCapability::SVE256;
+        }
+        #endif
+      }
+    }
+  }
+#endif
 #ifdef HAVE_VSX_CPU_DEFINITION
   return CPUCapability::VSX;
 #else
@@ -105,6 +137,9 @@ DispatchResult DispatchStubImpl::try_get_call_ptr(
 #endif
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
   , void *ZVECTOR
+#endif
+#ifdef HAVE_SVE256_CPU_DEFINITION
+  , void *SVE256
 #endif
 ) {
   constexpr auto supported_devices = c10::array_of<c10::DeviceType>(
@@ -139,6 +174,9 @@ DispatchResult DispatchStubImpl::try_get_call_ptr(
 #endif
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
           , ZVECTOR
+#endif
+#ifdef HAVE_SVE256_CPU_DEFINITION
+          , SVE256
 #endif
         );
         if (!std::holds_alternative<ErrorType>(result)) {
@@ -292,6 +330,9 @@ void* DispatchStubImpl::choose_cpu_impl(
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
   , void *ZVECTOR
 #endif
+#ifdef HAVE_SVE256_CPU_DEFINITION
+  , void *SVE256
+#endif
 ) {
   auto capability = static_cast<int>(get_cpu_capability());
   (void)capability;
@@ -325,6 +366,17 @@ void* DispatchStubImpl::choose_cpu_impl(
   if (capability >= static_cast<int>(CPUCapability::ZVECTOR)) {
     TORCH_INTERNAL_ASSERT(ZVECTOR, "DispatchStub: missing ZVECTOR kernel");
     return ZVECTOR;
+  }
+#endif
+#ifdef HAVE_SVE256_CPU_DEFINITION
+  if (capability >= static_cast<int>(CPUCapability::SVE256)) {
+    if (C10_UNLIKELY(!SVE256)) {
+      // dispatch to DEFAULT, since the SVE kernel is missing
+      TORCH_INTERNAL_ASSERT(DEFAULT, "DispatchStub: missing default kernel");
+      return DEFAULT;
+    } else {
+      return SVE256;
+    }
   }
 #endif
   TORCH_INTERNAL_ASSERT(DEFAULT, "DispatchStub: missing default kernel");
