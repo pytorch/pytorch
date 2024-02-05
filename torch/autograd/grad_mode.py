@@ -259,7 +259,7 @@ class inference_mode(_DecoratorContextManager):
         if not torch._jit_internal.is_scripting():
             super().__init__()
         # Holds a context manager that can enable or disable inference mode
-        self._inference_mode_raii_context: Optional[torch._C._InferenceMode] = None
+        self._inference_mode_context: Optional[torch._C._InferenceMode] = None
         self.mode = mode
 
     def __new__(cls, mode=True):
