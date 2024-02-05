@@ -631,8 +631,8 @@ def register_frexp():
     name = "frexp"
 
     pw_fns = [
-        make_pointwise(ops_wrapper("frexp0"), override_return_dtype=torch.int32),
-        make_pointwise(ops_wrapper("frexp1")),
+        make_pointwise(ops_wrapper("frexp0")),
+        make_pointwise(ops_wrapper("frexp1"), override_return_dtype=torch.int32),
     ]
 
     def fn(*args, **kwargs):

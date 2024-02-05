@@ -828,20 +828,20 @@ class CppOverrides(OpOverrides):
     def frexp0(x):
         code = BracesBuffer()
         exponent = V.kernel.cse.newvar()
-        code.writeline(f"int32_t {exponent};")
-        code.writeline(f"std::frexp({x}, &{exponent});")
-        V.kernel.compute.splice(code)
-        return exponent
-
-    @staticmethod
-    def frexp1(x):
-        code = BracesBuffer()
-        exponent = V.kernel.cse.newvar()
         mantissa = V.kernel.cse.newvar()
         code.writeline(f"int32_t {exponent};")
         code.writeline(f"auto {mantissa} = std::frexp({x}, &{exponent});")
         V.kernel.compute.splice(code)
         return mantissa
+
+    @staticmethod
+    def frexp1(x):
+        code = BracesBuffer()
+        exponent = V.kernel.cse.newvar()
+        code.writeline(f"int32_t {exponent};")
+        code.writeline(f"std::frexp({x}, &{exponent});")
+        V.kernel.compute.splice(code)
+        return exponent
 
     @staticmethod
     def hypot(x, y):
