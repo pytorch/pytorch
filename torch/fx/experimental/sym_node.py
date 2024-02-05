@@ -10,6 +10,7 @@ to avoid having to load SymPy at import time, as doing so is *very* slow.
 
 import builtins
 import itertools
+import logging
 import math
 import operator
 import sys
@@ -38,7 +39,9 @@ from torch.fx.experimental._sym_dispatch_mode import (
 if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
+log = logging.getLogger(__name__)
 sym_node_log = torch._logging.getArtifactLogger(__name__, "sym_node")
+
 
 __all__ = ["SymNode", "method_to_operator", "magic_methods"]
 
@@ -342,7 +345,7 @@ class SymNode:
         try:
             return int(r)
         except Exception:
-            sym_node_log.warning("Failed to convert to int: %s", r)
+            log.warning("Failed to convert to int: %s", r)
             raise
 
     def guard_float(self, file, line):
@@ -354,7 +357,7 @@ class SymNode:
         try:
             return float(r)
         except Exception:
-            sym_node_log.warning("Failed to convert to float: %s", r)
+            log.warning("Failed to convert to float: %s", r)
             raise
 
     def guard_bool(self, file, line):
@@ -364,7 +367,7 @@ class SymNode:
         try:
             return bool(r)
         except Exception:
-            sym_node_log.warning("Failed to convert to bool: %s", r)
+            log.warning("Failed to convert to bool: %s", r)
             raise
 
     def expect_true(self, file, line):
@@ -923,7 +926,7 @@ def _make_node_magic(method, func):
         try:
             out = func(self.expr, other.expr)
         except Exception:
-            sym_node_log.warning("failed to eval %s(%s, %s)", method, self.expr, other.expr)
+            log.warning("failed to eval %s(%s, %s)", method, self.expr, other.expr)
             raise
         out = safe_expand(out)
         sym_node_log.debug("%s %s %s -> %s", func, self.expr, other.expr, out)
@@ -972,7 +975,7 @@ def _make_node_magic(method, func):
         try:
             out = func(expr)
         except Exception:
-            sym_node_log.warning("failed to eval %s(%s)", method, expr)
+            log.warning("failed to eval %s(%s)", method, expr)
             raise
         sym_node_log.debug("%s %s -> %s", func, expr, out)
         out_hint = None
@@ -1017,7 +1020,7 @@ def _make_node_magic(method, func):
             try:
                 out = func(pred_node.expr, then_node.expr, else_node.expr)
             except Exception:
-                sym_node_log.warning(
+                log.warning(
                     "failed to eval %s(%s, %s, %s)",
                     method,
                     pred_node.expr,
@@ -1050,7 +1053,7 @@ def _make_node_magic(method, func):
             try:
                 out = func(expr, ndigits)
             except Exception:
-                sym_node_log.warning("failed to eval %s(%s, ndigits=%s)", method, expr, ndigits)
+                log.warning("failed to eval %s(%s, ndigits=%s)", method, expr, ndigits)
                 raise
             out = safe_expand(out)
 
@@ -1096,7 +1099,7 @@ def _make_node_sizes_strides(method, func):
         try:
             out = func(size_exprs, stride_exprs)
         except Exception:
-            sym_node_log.warning("failed to eval %s(%s, %s)", method, size_exprs, stride_exprs)
+            log.warning("failed to eval %s(%s, %s)", method, size_exprs, stride_exprs)
             raise
         # bool is never expandable
 
