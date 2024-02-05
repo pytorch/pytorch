@@ -37,6 +37,7 @@ from ..pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
     stable_topological_sort,
+    CallFunctionVarArgs,
 )
 from ..utils import decode_device, is_pointwise_use
 from ..virtualized import V
@@ -655,19 +656,23 @@ def decompose_auto_functionalized(graph):
     graph_pass = PatternMatcherPass()
 
     @register_graph_pattern(
-        CallFunction(
-            torch.ops.higher_order.auto_functionalized,
-            Arg(),
-            Arg(),
-            Arg(),
-        ),
+        CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized),
         pass_dict=graph_pass,
     )
-    def replacement(match: Match, *args):
+    def replacement(match: Match, *args, **kwargs):
         from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
 
+        flat_args, spec = pytree.tree_flatten((args, kwargs))
+
+        # NB: we combine (args, kwargs) into flat args for replacing.
+        # This is replace_by_example uses make_fx which does not support
+        # tracing a function with kwargs.
+        def decomp(*flat_args):
+            args, kwargs = pytree.tree_unflatten(flat_args, spec)
+            return auto_functionalized_dense(*args, **kwargs)
+
         with V.fake_mode:
-            match.replace_by_example(auto_functionalized_dense, args, run_dce=False)
+            match.replace_by_example(decomp, flat_args, run_dce=False)
 
     graph_pass.apply(graph)
     for node in graph.nodes:

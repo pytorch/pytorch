@@ -125,9 +125,7 @@ class Match:
         assert self.ctx
         if trace_fn is None:
             trace_fn = functools.partial(fwd_only, run_dce=run_dce)
-        replacement = trace_fn(
-            replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])
-        )
+        replacement = trace_fn(replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"]))
         ReplacementPatternEntry.replace_with_graph(
             self,
             self.ctx.graph,
@@ -926,7 +924,7 @@ def _return_true(match):
     return True
 
 
-def log_trace_fialure(search_fn, e):
+def log_trace_failure(search_fn, e):
     log.info(
         "Replacement pattern %s failed to apply due to shape mismatch: %s",
         search_fn.__name__,
@@ -1012,7 +1010,7 @@ def register_replacement(
                 try:
                     specific_graph = trace_fn(search_fn_new, sym_args + args)
                 except RuntimeError as e:
-                    log_trace_fialure(search_fn, e)
+                    log_trace_failure(search_fn, e)
                     return False
 
                 # correct argnames in the graph
@@ -1038,7 +1036,7 @@ def register_replacement(
                 try:
                     specific_graph = trace_fn(search_fn, args)
                 except RuntimeError as e:
-                    log_trace_fialure(search_fn, e)
+                    log_trace_failure(search_fn, e)
                     return False
 
             specific_pattern = fx_to_pattern(

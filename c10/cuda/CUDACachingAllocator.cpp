@@ -9,6 +9,7 @@
 #include <c10/util/ScopeExit.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/flat_hash_map.h>
+#include <c10/util/hash.h>
 #include <c10/util/irange.h>
 #include <c10/util/llvmMathExtras.h>
 #include <c10/util/static_tracepoint.h>
@@ -2836,14 +2837,28 @@ void local_raw_delete(void* ptr);
 
 class NativeCachingAllocator : public CUDAAllocator {
  private:
-  std::mutex mutex;
+  // Shard allocation region to have independent mutexes to reduce contention.
+  static constexpr size_t kNumMutexShard = 67;
+
+  // TODO: use std::hardware_destructive_interference_size once available
+  struct alignas(64) AlignedMutex {
+    std::mutex m;
+  };
+
+  std::array<AlignedMutex, kNumMutexShard> mutex;
 
   // allocated blocks by device pointer
-  ska::flat_hash_map<void*, Block*> allocated_blocks;
+  std::array<ska::flat_hash_map<void*, Block*>, kNumMutexShard>
+      allocated_blocks;
+
+  static size_t get_mutex_shard_id(void* ptr) {
+    return twang_mix64((size_t)ptr) % kNumMutexShard;
+  }
 
   void add_allocated_block(Block* block) {
-    std::lock_guard<std::mutex> lock(mutex);
-    allocated_blocks[block->ptr] = block;
+    const auto mutex_shard_id = get_mutex_shard_id(block->ptr);
+    std::lock_guard<std::mutex> lock(mutex[mutex_shard_id].m);
+    allocated_blocks[mutex_shard_id][block->ptr] = block;
   }
 
   c10::ApproximateClockToUnixTimeConverter clock_converter;
@@ -2852,14 +2867,15 @@ class NativeCachingAllocator : public CUDAAllocator {
   std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocator;
 
   Block* get_allocated_block(void* ptr, bool remove = false) {
-    std::lock_guard<std::mutex> lock(mutex);
-    auto it = allocated_blocks.find(ptr);
-    if (it == allocated_blocks.end()) {
+    const auto mutex_shard_id = get_mutex_shard_id(ptr);
+    std::lock_guard<std::mutex> lock(mutex[mutex_shard_id].m);
+    auto it = allocated_blocks[mutex_shard_id].find(ptr);
+    if (it == allocated_blocks[mutex_shard_id].end()) {
       return nullptr;
     }
     Block* block = it->second;
     if (remove) {
-      allocated_blocks.erase(it);
+      allocated_blocks[mutex_shard_id].erase(it);
     }
     return block;
   }
