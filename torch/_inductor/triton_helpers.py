@@ -132,7 +132,9 @@ def randint64(seed, offset, low, high):
     r0 = r0.to(tl.uint64)
     r1 = r1.to(tl.uint64)
     result = r0 | (r1 << 32)
-    size = high - low
+    high1=tl.full([], high, tl.int64)
+    low1=tl.full([], low, tl.int64)
+    size = high1 - low1
     result = result % size.to(tl.uint64)
     result = result.to(tl.int64) + low
     return result
