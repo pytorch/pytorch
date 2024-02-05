@@ -404,7 +404,7 @@ class SymNode:
         audited to ensure that the runtime semantics don't change in a material way.
         Acceptable runtime semantic changes are, e.g., squeeze() no longer dropping
         an unbacked one size, or a tensor reporting as non-contiguous even if it's
-        contiguous when it is one size.
+        contiguous if it would have been reported contiguous due to being empty.
         """
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
