@@ -2,7 +2,7 @@
 
 from torch.testing._internal.common_utils import (
     TestCase, TEST_WITH_TORCHDYNAMO, run_tests, skipIfCrossRef, skipIfRocm, skipIfTorchDynamo, parametrize,
-    instantiate_parametrized_tests)
+    instantiate_parametrized_tests, TemporaryFileName)
 import torch
 import torch._dynamo
 import itertools
@@ -1067,6 +1067,23 @@ class FakeTensorOperatorInvariants(TestCase):
                 op = self.get_aten_op(schema)
                 self.assertIn(op, torch._subclasses.fake_tensor._like_tensor_constructors)
 
+    def test_str_storage(self):
+        x = torch.zeros(3)
+        with FakeTensorMode() as m:
+            y = m.from_tensor(x)
+            self.assertExpectedInline(str(x.storage()), '''\
+ 0.0
+ 0.0
+ 0.0
+[torch.storage.TypedStorage(dtype=torch.float32, device=cpu) of size 3]''')
+            self.assertExpectedInline(str(y.storage()), '''\
+...
+[torch.storage.TypedStorage(dtype=torch.float32, device=meta) of size 3]''')
+
+        self.assertExpectedInline(str(y.storage()), '''\
+...
+[torch.storage.TypedStorage(dtype=torch.float32, device=meta) of size 3]''')
+
     # at::_embedding_bag has no op info,
     # and returns extra tensors that at::embedding bag throws away
     def test_embedding_bag_private(self):
@@ -1268,6 +1285,26 @@ class FakeTensorPropTest(TestCase):
             another_optional_value = torch.randn(5, 4)
             graph_model = torch.fx.symbolic_trace(model, (value, None, another_optional_value))
             FakeTensorProp(graph_model, fake_mode).propagate(value, None, another_optional_value)
+
+    def test_torch_load_with_fake_mode(self):
+
+        class TheModelClass(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(5, 10)
+
+            def forward(self, x):
+                return self.fc1(x)
+
+        with TemporaryFileName() as state_dict_file:
+            # Create state_dict to be loaded later
+            model = TheModelClass()
+            torch.save(model.state_dict(), state_dict_file)
+
+            fake_mode = FakeTensorMode()
+            with fake_mode:
+                # This is where the bug is triggered
+                torch.load(state_dict_file)
 
 
 class FakeTensorDispatchCache(TestCase):
