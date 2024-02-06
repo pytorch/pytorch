@@ -358,6 +358,10 @@ class ProcessLocalGroup(dist.ProcessGroup):
         """
         return self._world().pg_names[self]
 
+    @property
+    def group_name(self):
+        return self.pg_name
+
     def getBackendName(self):
         return "threaded"
 
