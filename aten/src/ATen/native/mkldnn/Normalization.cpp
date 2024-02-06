@@ -192,7 +192,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
 }
 
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> _new_batch_norm_with_update_mkldnn(
+std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_with_update_mkldnn(
     const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
     const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
     double momentum, double eps, bool cudnn_enabled) {
@@ -222,7 +222,7 @@ std::tuple<Tensor, Tensor, Tensor> _mkldnn_batch_norm_legit_no_stats(
 }
 
 
-std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
+std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mkldnn(
     const Tensor& grad_output, const Tensor& input, const Tensor& weight,
     const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
     const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_var_opt,

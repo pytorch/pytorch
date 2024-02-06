@@ -406,7 +406,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_mps(const Tensor& self,
   return std::make_tuple(output, save_mean, save_var);
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> _new_batch_norm_with_update_mps(
+std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_with_update_mps(
     const Tensor& input,
     const c10::optional<Tensor>& weight_opt,
     const c10::optional<Tensor>& bias_opt,
@@ -487,7 +487,7 @@ static string get_mem_string(c10::MemoryFormat memory_format) {
 }
 
 // Batch norm backward
-std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mps(const Tensor& grad_output,
+std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_output,
                                                                 const Tensor& input,
                                                                 const Tensor& weight,
                                                                 const c10::optional<Tensor>& running_mean_opt,

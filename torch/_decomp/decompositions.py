@@ -1861,8 +1861,8 @@ def _get_batch_norm_reserve_tensor(
         return Tensor()
 
 
-@register_decomposition(aten._new_batch_norm_with_update.default)
-def _new_batch_norm_with_update(
+@register_decomposition(aten.batch_norm_with_update.default)
+def batch_norm_with_update(
     input: Tensor,
     weight: Optional[Tensor],
     bias: Optional[Tensor],
@@ -1889,8 +1889,8 @@ def _new_batch_norm_with_update(
     return output, save_mean, save_rstd, reserve
 
 
-@register_decomposition(aten._new_batch_norm_no_update.default)
-def _new_batch_norm_no_update(
+@register_decomposition(aten.batch_norm_no_update.default)
+def batch_norm_no_update(
     input: Tensor,
     weight: Optional[Tensor],
     bias: Optional[Tensor],
