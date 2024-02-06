@@ -1933,7 +1933,7 @@ Tensor& vdot_out(const Tensor& self, const Tensor& other, Tensor& result) {
   return result.fill_(self.vdot(other));
 }
 
-#define AUTOTUNE_MAX_DIM 5
+#define AUTOTUNE_MAX_DIM 6
 
 struct MatmulAutotuneCacheKey {
   int64_t tensor1_dim[AUTOTUNE_MAX_DIM];
@@ -1986,29 +1986,6 @@ void update(const KeyType& key, T&& results) {
 MatmulAutotuneCache<float, MatmulAutotuneCacheKeyWrapper> matmul_autotune_cache;
 
 static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_out, MatmulAutotuneCacheKeyWrapper & key, bool& need_profiling, const bool autotune) {
-  if (autotune && tensor1.sizes().size() <= AUTOTUNE_MAX_DIM && tensor2.sizes().size() <= AUTOTUNE_MAX_DIM) {
-    need_profiling = true;
-    key = MatmulAutotuneCacheKeyWrapper(tensor1, tensor2, true);
-    const auto true_value = matmul_autotune_cache.find(key);
-    // don't have data for the true case, run it
-    if (!true_value) {
-      return true;
-    }
-    key = MatmulAutotuneCacheKeyWrapper(tensor1, tensor2, false);
-    const auto false_value = matmul_autotune_cache.find(key);
-    // don't have data for the false case, run it
-    if (!false_value) {
-      return false;
-    }
-    need_profiling = false;
-    if (*false_value < *true_value) {
-      return false;
-    }
-    // key will not be set correctly in this case
-    // but that is OK as we are not doing profiling in this case
-    return true;
-  }
-
   // We check that we can fold the larger tensor into a matrix and dispatch to mm or mv rather than
   // to bmm. We want to make sure we can do so without incurring in any extra copy
   const auto tensor1_larger = tensor1.dim() >= tensor2.dim();
@@ -2025,6 +2002,34 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_o
   // Just fold for dim_t1 >= 3 and (dim_t2 == 1 || dim_t2 == 2)
   if (!(dim_t1 >= 3 && dim_t2 <= 2)) {
     return false;
+  }
+
+  // Can always fold if the tensor is empty
+  // This serves as a precondition for the code below
+  if (t1->numel() == 0) {
+    return true;
+  }
+
+  if (autotune && tensor1.sizes().size() <= AUTOTUNE_MAX_DIM && tensor2.sizes().size() <= AUTOTUNE_MAX_DIM) {
+    need_profiling = true;
+    key = MatmulAutotuneCacheKeyWrapper(tensor1, tensor2, true);
+    const auto true_value = matmul_autotune_cache.find(key);
+    // don't have data for the true case, run it
+    if (!true_value) {
+      return true;
+    }
+    key = MatmulAutotuneCacheKeyWrapper(tensor1, tensor2, false);
+    const auto false_value = matmul_autotune_cache.find(key);
+    // don't have data for the false case, run it
+    if (!false_value) {
+      return false;
+    }
+    need_profiling = false;
+
+    // if false took longer return true
+    return *false_value > *true_value;
+    // key will not be set correctly in this case
+    // but that is OK as we are not doing profiling in this case
   }
 
   // In this case we *do* incur in an extra copy to avoid creating an unnecessary large tensor in the backward
@@ -2049,12 +2054,6 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_o
   // having to copy the tensor
   if (tensor1.dim() == 2) {
     return false;
-  }
-
-  // Can always fold if the tensor is empty
-  // This serves as a precondition for the code below
-  if (t1->numel() == 0) {
-    return true;
   }
 
   // t1->view(-1, t1->size(-1)) does not copy only when the first n-1 dimensions are contiguous
@@ -2111,7 +2110,7 @@ static Tensor _matmul_impl(
     );
   }
 
-  auto callback = [&] (float _timing_result) { 
+  auto callback = [&] (float _timing_result) {
     matmul_autotune_cache.update(key, std::move(_timing_result));
   };
 

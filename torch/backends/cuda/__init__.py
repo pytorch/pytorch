@@ -14,6 +14,8 @@ __all__ = [
     "preferred_linalg_library",
     "cufft_plan_cache",
     "matmul",
+    "set_matmul_autotune",
+    "get_matmul_autotune",
     "SDPBackend",
     "SDPAParams",
     "enable_flash_sdp",
@@ -342,6 +344,23 @@ def sdp_kernel(
             yield context
         finally:
             pass
+
+def get_matmul_autotune():
+    r"""Returns the current value of the matrix multiplication autotuning flag. Refer to
+    :func:`torch.set_matmul_autotune` documentation for more details.
+    """
+    return torch._C._get_matmul_autotune()
+
+def set_matmul_autotune(enabled: bool) -> None:
+    r"""Sets the autotuning flag for matrix multiplications.
+
+    If one of the arguments of batched matrix multiplication is N-dimensions with N >= 3
+    and the other argument is 2-dimensional then "should_fold" decides whether to fold
+    the N-dimensional argument into 2-dimensional and call a single matrix multiplication
+    (torch.mm). Normally "should_fold" relies on handcrafted heuristics, but this
+    `set_matmul_autotune(True)` enables autotuning for this decision..
+    """
+    torch._C._set_matmul_autotune(enabled)
 
 
 cufft_plan_cache = cuFFTPlanCacheManager()
