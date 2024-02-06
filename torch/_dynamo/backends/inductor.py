@@ -1,6 +1,6 @@
 # mypy: ignore-errors
 
-from torch._dynamo import register_backend, is_win32
+from torch._dynamo import is_win32, register_backend
 
 
 @register_backend
