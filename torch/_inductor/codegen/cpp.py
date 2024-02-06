@@ -981,15 +981,12 @@ class CppOverrides(OpOverrides):
         # auto tmp5 = tmp4 < 0 ? -1 : 1;
         left = V.kernel.cse.newvar()
         right = V.kernel.cse.newvar()
-        result = V.kernel.cse.newvar()
         scalar_zero = f"decltype({x})(0)"
         scalar_one = f"decltype({x})(1)"
         code.writeline(f"auto {left} = {x} > 0 ? {scalar_one} : {scalar_zero};")
         code.writeline(f"auto {right} = {x} < 0 ? {scalar_one} : {scalar_zero};")
-        code.writeline(f"auto {result} = {left} - {right};")
-        V.kernel.cse.cache[f"auto {result} = {left} - {right};"] = result
         V.kernel.compute.splice(code)
-        return result
+        return f"{left} - {right}"
 
 
 class CppVecOverrides(CppOverrides):
@@ -1328,11 +1325,8 @@ class CppVecOverrides(CppOverrides):
         blendv = f"decltype({x})::blendv({vec_zero}, {vec_one}, {x} < {vec_zero})"
         right = V.kernel.cse.newvar()
         code.writeline(f"auto {right} = {blendv};")
-        result = V.kernel.cse.newvar()
-        code.writeline(f"auto {result} = {left} - {right};")
-        V.kernel.cse.cache[f"auto {result} = {left} - {right};"] = result
         V.kernel.compute.splice(code)
-        return result
+        return f"{left} - {right}"
 
     @staticmethod
     def to_dtype(x, dtype, src_dtype=None):
