@@ -73,9 +73,7 @@ def consume_prefix_in_state_dict_if_present(
             # 'module.xx.xx': for the rest.
             if len(key) == 0:
                 continue
-            # we also remove the key 'module'
-            if key == 'module':
-                state_dict._metadata.pop(key)
-            if key.startswith(prefix):
+            # handling both, 'module' case and  'module.' cases
+            if key == prefix.replace('.', '') or key.startswith(prefix):
                 newkey = key[len(prefix) :]
                 state_dict._metadata[newkey] = state_dict._metadata.pop(key)
