@@ -34,7 +34,7 @@ from torch.testing._internal.common_utils import (
 from torch.utils._triton import has_triton
 
 CUSPARSELT_NUM_ALG_IDS = 4
-CUSPARSELT_MIXED_DTYPE_SUPPORT = [torch.float16, torch.bfloat16, torch.float32]
+CUSPARSELT_MIXED_DTYPE_SUPPORT = [torch.float16, torch.bfloat16, torch.int32]
 
 SEMI_STRUCTURED_SUPPORTED_DTYPES = _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG.keys()
 SEMI_STRUCTURED_SUPPORTED_BACKENDS = []
@@ -597,8 +597,7 @@ class TestCUSPARSELT(TestCase):
         else:
             SparseSemiStructuredTensor._FORCE_CUTLASS = False
 
-
-    @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.int32])
+    @parametrize("out_dtype", CUSPARSELT_MIXED_DTYPE_SUPPORT)
     @parametrize("dense_input_shape", [(128, 128)])
     def test_cslt_sparse_mm_mixed_dtype(self, dense_input_shape, out_dtype, device):
         A = rand_sparse_semi_structured_mask(128, 128, dtype=torch.int8)
@@ -625,7 +624,7 @@ class TestCUSPARSELT(TestCase):
 
         assert torch.allclose(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
-    @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.int32])
+    @parametrize("out_dtype", CUSPARSELT_MIXED_DTYPE_SUPPORT)
     def test_cslt_sparse_mm_alpha_mixed_dtype(self, out_dtype, device):
         A = torch.Tensor([0, 0, 10, 10]).tile((128, 64)).to(torch.int8).cuda()
         B = torch.ones((128, 256), device=device).to(torch.int8).t()
