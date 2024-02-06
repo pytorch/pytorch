@@ -608,10 +608,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ):
             args = [x.as_python_constant() for x in args]
             kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            random_call_index = len(tx.random_calls)
+            random_call_index = len(tx.output.random_calls)
             example_value = self.value(*args, **kwargs)
             source = RandomValueSource(random_call_index)
-            tx.random_calls.append((self.value, args, kwargs))
+            tx.output.random_calls.append((self.value, args, kwargs))
             return VariableBuilder(tx, source).wrap_unspecialized_primitive(
                 example_value
             )
