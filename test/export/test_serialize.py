@@ -534,9 +534,10 @@ class TestDeserialize(TestCase):
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
+                self.register_buffer("c", torch.tensor([1, 3, 5, 7]))
 
             def forward(self, x, y, z):
-                indices = [None, None, torch.tensor([1, 3, 5, 7])]
+                indices = [None, None, self.c]
                 indexed = torch.ops.aten.index.Tensor(x + y, indices)
                 return indexed + z
 
@@ -573,16 +574,28 @@ class TestDeserialize(TestCase):
         self.check_graph(WrapperModule(f), (torch.tensor(3), torch.randn(4, 5)))
 
     def test_get_attr(self) -> None:
-        def f(x):
-            return x + torch.tensor(3)
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("b", torch.tensor(3))
 
-        self.check_graph(WrapperModule(f), (torch.tensor(3),))
+            def forward(self, x):
+                return x + self.b
+
+        m = Model()
+        self.check_graph(m, (torch.tensor(3),))
 
     def test_get_attr_list(self) -> None:
-        def f(x):
-            return torch.cat([x, torch.tensor([1, 1])])
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("b", torch.tensor([1, 1]))
 
-        self.check_graph(WrapperModule(f), (torch.tensor([1, 1]),))
+            def forward(self, x):
+                return torch.cat([x, self.b])
+
+        m = Model()
+        self.check_graph(m, (torch.tensor([1, 1]),))
 
     @unittest.skipIf(not torch.cuda.is_available(), "Requires cuda")
     def test_device(self) -> None:
@@ -756,14 +769,16 @@ class TestSaveLoad(TestCase):
                 f.seek(0)
                 load(f)
 
-    def test_save_constants(self):
+    def test_save_non_persistent_buffers(self):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.a = torch.tensor(3)
+                self.register_buffer("a", torch.tensor(3), persistent=False)
+                self.register_buffer("c0", torch.tensor(3))
+                self.register_buffer("c1", torch.tensor(4))
 
             def forward(self, x):
-                list_tensor = [torch.tensor(3), torch.tensor(4)]
+                list_tensor = [self.c0, self.c1]
                 return x + self.a + list_tensor[0] + list_tensor[1]
 
         ep = export(Foo(), (torch.tensor(1),))

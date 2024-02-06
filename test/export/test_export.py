@@ -30,6 +30,7 @@ from torch.export._trace import (
     _export_to_torch_ir,
     DEFAULT_EXPORT_DYNAMO_CONFIG,
 )
+from torch._export.error import ExportError, ExportErrorType
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
@@ -548,8 +549,8 @@ class TestExport(TestCase):
         class MyLinear(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.weight = torch.randn(20, 98)
-                self.bias = torch.randn(20)
+                self.register_buffer("weight", torch.randn(20, 98))
+                self.register_buffer("bias", torch.randn(20))
 
             def forward(self, x):
                 return torch.nn.functional.linear(x, self.weight, self.bias)
@@ -1068,13 +1069,12 @@ class TestExport(TestCase):
                 _ = export(mod, inp)
 
     @testing.expectedFailureSerDer
-    @testing.expectedFailureNonStrict
     def test_module(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.weight = torch.randn(20, 98)
-                self.bias = torch.randn(20)
+                self.register_buffer("weight", torch.randn(20, 98))
+                self.register_buffer("bias", torch.randn(20))
 
             def forward(self, x):
                 return torch.nn.functional.linear(x, self.weight, self.bias)
@@ -1107,13 +1107,12 @@ class TestExport(TestCase):
         self.assertTrue(torch.allclose(ep.module()(*inp_test)[1], ep_rexported.module()(*inp_test)[1]))
 
     @testing.expectedFailureSerDer
-    @testing.expectedFailureNonStrict
     def test_module_with_dict_container_inp_out(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.weight = torch.randn(20, 98)
-                self.bias = torch.randn(20)
+                self.register_buffer("weight", torch.randn(20, 98))
+                self.register_buffer("bias", torch.randn(20))
 
             def forward(self, x):
                 return torch.nn.functional.linear(x, self.weight, self.bias)
@@ -1409,7 +1408,7 @@ def forward(self, arg_0):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.freq = torch.ones(5, 5)
+                self.register_buffer("freq", torch.ones(5, 5))
 
             def forward(self, start_pos: torch.Tensor):
                 pos = start_pos.item()
@@ -1916,39 +1915,6 @@ def forward(self, arg_0):
         exp_source_fns = [["cond", "cos"], ["cond", "sin"]]
         self.assertEqual(actual_source_fns, exp_source_fns)
 
-    @testing.expectedFailureRetraceability
-    @testing.expectedFailureNonStrict
-    def test_lifted_constants(self) -> None:
-        def f(x):
-            return x + torch.tensor(3)
-
-        ep = export(WrapperModule(f), (torch.tensor(1),))
-
-        self.assertEqual(len(ep.graph_signature.input_specs), 2)
-        self.assertEqual(len(ep.constants), 1)
-
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.a = torch.tensor(3)
-
-            def forward(self, x):
-                list_tensor = [torch.tensor(3), torch.tensor(4)]
-                return x + self.a + list_tensor[0] + list_tensor[1]
-
-        ep = export(Foo(), (torch.tensor(1),))
-
-        self.assertEqual(len(ep.graph_signature.input_specs), 4)
-        self.assertEqual(len(ep.state_dict), 0)
-        self.assertEqual(len(ep.constants), 3)
-
-        inp = (torch.tensor(5),)
-        self.assertTrue(torch.allclose(ep.module()(*inp), Foo()(*inp)))
-
-        transform = ep.run_decompositions()
-        self.assertEqual(len(ep.graph_signature.input_specs), 4)
-        self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
-
     def test_preserve_shape_dynamism_for_unused_inputs(self):
         @dataclass
         class Input:
@@ -2132,7 +2098,7 @@ def forward(self, l_x_):
         class ModuleConstant(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.b = torch.randn(3, 2)
+                self.register_buffer("b", torch.randn(3, 2))
 
             def forward(self):
                 return self.b
@@ -2140,7 +2106,7 @@ def forward(self, l_x_):
         class ModuleNestedConstant(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.bff = torch.randn(3, 2)
+                self.register_buffer("bff", torch.randn(3, 2))
 
             def forward(self, x, y):
                 return {"prediction": (x + y, self.bff)}
@@ -2251,12 +2217,11 @@ def forward(self, l_x_):
         test_inp = torch.ones(8, 4)
         self.assertTrue(torch.allclose(ep.module()(test_inp), Foo().forward(test_inp)))
 
-    @testing.expectedFailureNonStrict
     def test_issue_113041(self):
         class TestModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.a = torch.tensor(1.0)
+                self.register_buffer("a", torch.tensor(1.0))
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 return x + self.a
@@ -2265,7 +2230,7 @@ def forward(self, l_x_):
             return 2 * output
 
         seq = torch.nn.Sequential(TestModule()).eval()
-        seq.b = torch.tensor(2)
+        seq.register_buffer("b", torch.tensor(2))
         handle = seq.register_forward_hook(forward_hook)
 
         class M(torch.nn.Module):
@@ -2490,11 +2455,11 @@ def forward(self, l_x_):
         )
         self.assertEqual(ep.module()(*inputs), m3(*inputs))
 
-    def test_export_then_compile_tensor_ctor(self):
+    def test_export_then_compile_masked_fill(self):
         class M(torch.nn.Module):
             def forward(self, scores, mask):
                 scores = scores.masked_fill(
-                    mask, torch.tensor(torch.finfo(scores.dtype).min)
+                    mask, torch.finfo(scores.dtype).min
                 )  # (bs, n_heads, q_length, k_length)
                 return scores
 
@@ -2525,6 +2490,38 @@ def forward(self, l_x_):
         self.assertEqual(ep.module()(*inputs_export), model(*inputs_model))
         self.assertEqual(inputs[0] + 2.0, inputs_model[0])
         self.assertEqual(inputs[0] + 2.0, inputs_export[0])
+
+    def test_export_tensor_constants_attr(self):
+        class ModelAttr(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("b", torch.tensor(3.0))
+                self.c = torch.tensor(2.0)
+
+            def forward(self, x):
+                return x + self.c + self.b
+
+        inputs = (torch.tensor(1.0),)
+        model = ModelAttr()
+        with self.assertRaises(ExportError) as cm:
+            ep = export(model, inputs)
+        self.assertEqual(cm.exception.error_code, ExportErrorType.TENSOR_CONSTANT)
+
+    def test_export_tensor_constants_inline(self):
+        class ModelInline(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("b", torch.tensor(3.0))
+
+            def forward(self, x):
+                return x + torch.tensor(2.0) + self.b
+
+        inputs = (torch.tensor(1.0),)
+        model = ModelInline()
+        with self.assertRaises(ExportError) as cm:
+            ep = export(model, inputs)
+        self.assertEqual(cm.exception.error_code, ExportErrorType.TENSOR_CONSTANT)
+
 
     def test_export_input_mutation_dynamic_shape(self):
         class MutationModel(torch.nn.Module):

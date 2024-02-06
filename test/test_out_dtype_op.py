@@ -52,7 +52,7 @@ class TestOutDtypeOp(TestCase):
         class M(torch.nn.Module):
             def __init__(self, weight):
                 super().__init__()
-                self.weight = weight
+                self.register_buffer("weight", weight)
 
             def forward(self, x):
                 return out_dtype(
@@ -79,7 +79,7 @@ class TestOutDtypeOp(TestCase):
         class M(torch.nn.Module):
             def __init__(self, weight):
                 super().__init__()
-                self.weight = weight
+                self.register_buffer("weight", weight)
 
             def forward(self, x):
                 return out_dtype(

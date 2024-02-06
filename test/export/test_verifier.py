@@ -143,7 +143,7 @@ class TestVerifier(TestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.a = torch.tensor(3.0)
+                self.register_buffer("a", torch.tensor(3.0))
 
             def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                 return x + y + self.a

@@ -44,10 +44,10 @@ class CondBranchNonlocalVariables(torch.nn.Module):
 
     def __init__(self):
         super().__init__()
+        self.register_buffer("my_primitive_var", torch.tensor(3.14))
 
     def forward(self, x):
         my_tensor_var = x + 100
-        my_primitive_var = 3.14
 
         def true_fn(x, y, z):
             return x + y + z
@@ -59,5 +59,5 @@ class CondBranchNonlocalVariables(torch.nn.Module):
             x.shape[0] > 5,
             true_fn,
             false_fn,
-            [x, my_tensor_var, torch.tensor(my_primitive_var)],
+            [x, my_tensor_var, self.my_primitive_var],
         )

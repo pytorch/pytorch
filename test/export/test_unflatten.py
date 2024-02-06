@@ -526,14 +526,14 @@ class TestUnflatten(TestCase):
                         call_module_input_order.append(sub_node.op)
         self.assertEqual(call_module_input_order, ["placeholder", "get_attr", "get_attr"])
 
-    def test_unflatten_constant_tensor(self):
+    def test_unflatten_non_persistent_buffer(self):
         class SubMod(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.initializer = 0.1
+                self.register_buffer("buffer", torch.tensor(0.1), persistent=False)
 
             def forward(self, x):
-                return x + torch.tensor(self.initializer)
+                return x + self.buffer
 
         class Mod(torch.nn.Module):
             def __init__(self):

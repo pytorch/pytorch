@@ -21,6 +21,9 @@ class ExportErrorType(Enum):
     # User is using an API without proper initialization step.
     UNINITIALIZED = 6
 
+    # User's code use constant tensor that is not a buffer or introduced from tensor constructor.
+    TENSOR_CONSTANT = 7
+
 
 def internal_assert(pred: bool, assert_msg: str) -> None:
     """
@@ -53,4 +56,5 @@ class ExportError(Exception):
 
     def __init__(self, error_code: ExportErrorType, message: str) -> None:
         prefix = f"[{error_code}]: "
+        self.error_code = error_code
         super().__init__(prefix + message)

@@ -523,8 +523,12 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     )
     def test_expand_as_fill_tensor(self):
         class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("b", torch.tensor([1, 2, 3]))
+
             def forward(self, x):
-                x[:, x.size(0) :] = torch.tensor([1, 2, 3])
+                x[:, x.size(0) :] = self.b
                 return x
 
         x = torch.ones(2, 5, 3)
@@ -540,9 +544,12 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     )
     def test_expand_as_fill_separate_tensor(self):
         class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("aa", torch.tensor([[0], [1], [2]]))
+
             def forward(self, x):
-                aa = torch.tensor([[0], [1], [2]])
-                return aa.expand_as(x)
+                return self.aa.expand_as(x)
 
         x = torch.ones(3, 2)
         x2 = torch.randn(3, 5)

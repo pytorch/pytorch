@@ -14,6 +14,7 @@ import torch.fx
 
 import torch.utils._pytree as pytree
 from torch._dynamo.exc import UserError, UserErrorType
+from torch._export.error import ExportError, ExportErrorType
 from torch._export.non_strict_utils import make_constraints, make_fake_inputs
 from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
@@ -26,7 +27,7 @@ from torch._export.passes.lift_constants_pass import (
 from torch._export.wrappers import _wrap_submodules
 from torch._functorch.aot_autograd import aot_export_module, GraphSignature
 from torch._guards import detect_fake_mode
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, NonFakeInputError
 from torch.export.exported_program import OutputKind
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -82,6 +83,16 @@ def _ignore_backend_decomps():
     finally:
         torch.backends.mkldnn.set_flags(*orig_mkldnn_flag)
         torch.backends.nnpack.set_flags(*orig_nnpack_flag)
+
+
+def _tensor_constants_error(source):
+    return ExportError(
+        ExportErrorType.TENSOR_CONSTANT,
+        "Leaf tensor constants must be owned by a torch.nn.Module. Possbile reasons: "
+        + "1. Calling torch.tensor() in forward functions. "
+        + "2. Some tensor is not registered as a buffer / parameter in the exported torch.nn.Module. "
+        + f"Source: {source}",
+    )
 
 
 def _convert_input_to_fake(gm, args, kwargs):
@@ -433,12 +444,21 @@ def _export_non_strict(
     with torch.nn.utils.stateless._reparametrize_module(
         mod, fake_params_buffers
     ), grad_safe_guard, _ignore_backend_decomps():  # type: ignore[attr-defined]
-        gm, graph_signature = transform(aot_export_module)(
-            mod,
-            (*fake_args, *fake_kwargs.values()),
-            trace_joint=False,
-            pre_dispatch=pre_dispatch,
-        )
+        try:
+            gm, graph_signature = transform(aot_export_module)(
+                mod,
+                (*fake_args, *fake_kwargs.values()),
+                trace_joint=False,
+                pre_dispatch=pre_dispatch,
+            )
+        except NonFakeInputError as e:
+            # TODO(zhxchen17) better error message.
+            raise _tensor_constants_error(None) from e
+
+    if len(list(gm.named_buffers())) > 0:
+        # torch.tensor() call.
+        # TODO(zhxchen17) better error message.
+        raise _tensor_constants_error(None)
 
     # NOTE: aot_export adds symint metadata for placeholders with int values;
     # since these become specialized, we replace such metadata with the original values
@@ -527,26 +547,17 @@ def _get_params_buffers(mod: torch.nn.Module) -> Dict[str, torch.Tensor]:
     return params_buffers
 
 
-def rewrite_dynamo_tensor_constants(
+def _check_tensor_constants(
     orig_mod_buffers: Set[torch.Tensor],
     traced_mod_buffers: Dict[str, torch.Tensor],
     graph_signature: ExportGraphSignature,
-    constants: Dict[str, Union[torch.Tensor, torch.ScriptObject]],
 ):
-    """Dynamo erroneously marks tensor attributes on modules as a buffers.
-
-    Rewrite them to be tensor constants.
-    """
     for spec in graph_signature.input_specs:
         if spec.kind == InputKind.BUFFER:
             assert spec.target is not None
             value = traced_mod_buffers[spec.target]
             if value not in orig_mod_buffers:
-                # This was a tensor constant erroneously marked as a buffer.
-                # Convert it int oa constant in the graph signature, and add its
-                # value to the constants table.
-                spec.kind = InputKind.CONSTANT_TENSOR
-                constants[spec.target] = value
+                raise _tensor_constants_error(spec.target)
 
 
 def rewrite_non_persistent_buffers(
@@ -937,11 +948,10 @@ def _export(
     # Do some cleanups on the graph module to restore the state dict to the
     # expected form. Each of these steps should probably get fixed upstream.
     # 1. Remove tensor constants that were added as buffers.
-    rewrite_dynamo_tensor_constants(
+    _check_tensor_constants(
         orig_mod_buffers=set(f.buffers()),
         traced_mod_buffers=dict(gm_torch_level.named_buffers()),
         graph_signature=ep_non_strict.sig,
-        constants=ep_non_strict.constants,
     )
     # 2. Restore FQN of param/buffers
     param_buffer_table: Dict[str, str] = _get_param_buffer_mapping(f, gm_torch_level)

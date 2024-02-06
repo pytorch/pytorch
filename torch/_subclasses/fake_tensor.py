@@ -375,6 +375,10 @@ class FakeTensorConfig:
     debug = os.environ.get("TORCH_FAKE_TENSOR_DEBUG", "0") == "1"
 
 
+class NonFakeInputError(Exception):
+    pass
+
+
 class FakeTensor(torch.Tensor):
     """
     Meta tensors give you the ability to run PyTorch code without having to
@@ -1502,9 +1506,8 @@ class FakeTensorMode(TorchDispatchMode):
                     if isinstance(x, FakeTensor) and x.fake_mode is not self:
                         raise AssertionError("Mixing fake modes NYI")
                     args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
-                    raise Exception(
-                        f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
-                        f"with 'allow_non_fake_inputs'. Found in {render_call(func, args, kwargs)}"
+                    raise NonFakeInputError(
+                        f"Please convert all Tensors to FakeTensors first. Found in {render_call(func, args, kwargs)}"
                     )
 
                 x = converter(self, x)
