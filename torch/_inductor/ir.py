@@ -4613,9 +4613,9 @@ class FallbackKernel(ExternKernelAlloc):
         V.graph.warn_fallback(self.python_kernel_name)
 
         # args that are aliased
-        self.alias_names = []
+        self.alias_names: List[str] = []
         # args that are mutated AND returned from the op
-        self.mutation_names = []
+        self.mutation_names: List[str] = []
 
         if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
             # We assume here that HOPs with FallbackKernel are functional.
@@ -4648,21 +4648,32 @@ class FallbackKernel(ExternKernelAlloc):
 
         schema_args = schema.arguments
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
-        input_alias_sets = set()
-        for arg, info in zip(args, schema_args):
-            if arg is None:
-                continue
-            if info.alias_info is None:
-                continue
-            # can_auto_functionalize already filters out mutable List[Tensor].
-            # We can support this in the future, but this is very uncommon.
+
+        def handle_aliasing_and_mutation(info, arg):
+            # Assertions to make sure we didn't mismatch args
+            if isinstance(info.type, torch.ListType):
+                assert isinstance(arg, list)
             is_optional_tensor = isinstance(
                 info.type, torch.OptionalType
             ) and isinstance(info.type.getElementType(), torch.TensorType)
+            if is_optional_tensor:
+                assert arg is None or isinstance(arg, IRNode)
+            if isinstance(info.type, torch.TensorType):
+                assert isinstance(arg, IRNode)
+
+            if arg is None:
+                return
+            if info.alias_info is None:
+                return
+            # can_auto_functionalize already filters out mutable List[Tensor].
+            # We can support this in the future, but this is very uncommon.
             assert isinstance(info.type, torch.TensorType) or is_optional_tensor
             self.alias_names.append(arg.get_name())
             if info.alias_info.is_write:
                 mark_node_as_mutating(self, arg)
+
+        for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
+            handle_aliasing_and_mutation(info, arg)
 
     def set_cpp_kernel(self, kernel):
         from .codegen.wrapper import get_cpp_op_schema
