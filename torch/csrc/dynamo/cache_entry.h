@@ -59,7 +59,8 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
 // Returns borrowed reference
 PyCodeObject* CacheEntry_get_code(CacheEntry* e);
 
-// Returns a new reference to CacheEntry as a PyObject
+// Returns a borrowed reference to CacheEntry as a PyObject
+// Warning: lifetime is controlled by C++
 PyObject* CacheEntry_to_obj(CacheEntry* e);
 
 #ifdef __cplusplus
