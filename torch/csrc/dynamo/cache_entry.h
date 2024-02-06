@@ -4,6 +4,7 @@
 
 #ifdef __cplusplus
 
+#include <torch/csrc/dynamo/utils.h>
 #include <torch/csrc/utils/pybind.h>
 #include <list>
 
@@ -37,7 +38,7 @@ typedef struct ExtraState ExtraState;
 
 #ifdef __cplusplus
 
-typedef struct CacheEntry {
+typedef struct VISIBILITY_HIDDEN CacheEntry {
   // check the guards: lambda: <locals of user function>: bool
   py::object check_fn;
   // modified user bytecode (protected by check_fn's guards)
