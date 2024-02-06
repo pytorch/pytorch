@@ -668,8 +668,9 @@ class BuiltinVariable(VariableTracker):
             assert len(args) == 1
             assert len(kwargs) == 0
             maybe_iter_method = args[0].var_getattr(tx, "__iter__")
-            assert isinstance(maybe_iter_method, variables.UserMethodVariable)
-            return maybe_iter_method.call_function(tx, [], {})
+            if isinstance(maybe_iter_method, variables.UserMethodVariable):
+                return maybe_iter_method.call_function(tx, [], {})
+            unimplemented(f"__iter___ is not implemented fol {args[0]} {args[0].value}")
 
         # Handle binary ops (e.g. __add__ / __radd__, __iadd__, etc.)
         # NB: Tensor args are handled above and not here
