@@ -1,4 +1,6 @@
+#!/usr/bin/env python3
 import argparse
+import pathlib
 
 from common import (
     download_reports,
@@ -200,7 +202,15 @@ if __name__ == "__main__":
         description="Read from logs and update the dynamo_test_failures file",
     )
     # dynamo_test_failures path
-    parser.add_argument("filename")
+    parser.add_argument(
+        "filename",
+        nargs="?",
+        default=str(
+            pathlib.Path(__file__).absolute().parent.parent.parent
+            / "torch/testing/_internal/dynamo_test_failures.py"
+        ),
+        help="Optional path to dynamo_test_failures.py",
+    )
     parser.add_argument(
         "commit",
         help=(
@@ -214,5 +224,6 @@ if __name__ == "__main__":
         action="store_true",
     )
     args = parser.parse_args()
+    assert pathlib.Path(args.filename).exists(), args.filename
     dynamo38, dynamo311 = download_reports(args.commit, ("dynamo38", "dynamo311"))
     update(args.filename, dynamo38, dynamo311, args.also_remove_skips)
