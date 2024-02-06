@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import copy
 import unittest
+from typing import Optional
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -17,6 +18,7 @@ from torch._inductor.pattern_matcher import (
     _TargetExpr,
     Arg,
     CallFunction,
+    fwd_only,
     gen_pattern,
     KeywordArg,
     Match,
@@ -24,6 +26,7 @@ from torch._inductor.pattern_matcher import (
     PatternMatcherPass,
     PatternPrettyPrinter,
     register_graph_pattern,
+    register_replacement,
     stable_topological_sort,
 )
 from torch._inductor.utils import run_and_get_code
@@ -35,6 +38,15 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 class TestPatternMatcher(TestCase):
+    class _CustomPass(PatternMatcherPass):
+        def __init__(self):
+            super().__init__()
+            self.saved_graph: Optional[torch.fx.graph.Graph] = None
+
+        def __call__(self, g: torch.fx.graph.Graph):
+            self.apply(g)
+            self.saved_graph = g
+
     def common(
         self,
         fn,
@@ -772,29 +784,13 @@ class TestPatternMatcher(TestCase):
 
     def test_symint_pattern_matching(self):
         import torch._inductor.config as config
-        from torch._inductor.pattern_matcher import (
-            fwd_only,
-            PatternMatcherPass,
-            register_replacement,
-        )
-
-        saved_graph = None
-
-        class _CustomPass(PatternMatcherPass):
-            def __init__(self):
-                super().__init__()
-
-            def __call__(self, g: torch.fx.graph.Graph):
-                self.apply(g)
-                nonlocal saved_graph
-                saved_graph = g
 
         with config.patch(
             # leave custom pass only in post_grad_passes()
             pattern_matcher=False,
             # define pattern match as custom post grad opt pass
             post_grad_custom_pre_pass=None,
-            post_grad_custom_post_pass=_CustomPass(),
+            post_grad_custom_post_pass=self._CustomPass(),
         ):
 
             def add(x, y):
@@ -839,7 +835,62 @@ class TestPatternMatcher(TestCase):
             # we trace out the y.sym_size in replacement
             FileCheck().check("sym_size_int").check_same("num_users=2").check_same(
                 "target=torch.ops.aten.sym_size"
-            ).run(str(saved_graph))
+            ).run(str(config.post_grad_custom_post_pass.saved_graph))
+
+    def test_no_symint_guard_added(self):
+        import torch._inductor.config as config
+
+        saved_graph = None
+
+        with config.patch(
+            # leave custom pass only in post_grad_passes()
+            pattern_matcher=False,
+            # define pattern match as custom post grad opt pass
+            post_grad_custom_pre_pass=None,
+            post_grad_custom_post_pass=self._CustomPass(),
+        ):
+
+            def add_sum(x, y):
+                return (x + 1).sum() + (y + 1).sum()
+
+            def add_commutative(x, y):
+                return (x.sum() + y.sum()) + (x.numel() + y.numel())
+
+            device = "cpu"
+            my_args = [
+                torch.empty([8, 1], device=device),
+                torch.empty([10, 1], device=device),
+            ]
+
+            invoked = False
+
+            def extra_check(match):
+                nonlocal invoked
+                invoked = True
+                from torch._guards import TracingContext
+
+                tc = TracingContext.get()
+                self.assertTrue(len(tc.fake_mode.shape_env.guards) == 0)
+                return True
+
+            register_replacement(
+                add_sum,
+                add_commutative,
+                my_args,
+                fwd_only,
+                [config.post_grad_custom_post_pass],
+                extra_check=extra_check,
+            )
+
+            def foo(x, y):
+                return (x + 1).sum() + (y + 1).sum()
+
+            x = torch.rand([8, 1])
+            y = torch.rand([10])
+
+            foo_c = torch.compile(dynamic=True)(foo)
+            self.assertEqual(foo(x, y), foo_c(x, y))
+            self.assertTrue(invoked)
 
     def test_match_with_mutation(self):
         counter = 0

@@ -939,7 +939,7 @@ def register_replacement(
                         requires_grad=grad,
                     )
                     for v in itertools.chain(args[i].shape, args[i].stride()):
-                        if isinstance(v, torch.SymInt) and v not in sym_args:
+                        if isinstance(v, torch.SymInt):
                             sym_args.append(v)
 
             if sym_args:
@@ -949,6 +949,7 @@ def register_replacement(
                 # so we provide them as inputs.
                 # Later, when we actually do the replacement, the symbolic shape
                 # sizes will get re-traced and added to the graph.
+                # We could dedupe symint inputs but it currently doesnt matter
 
                 def search_fn_new(*args_new):
                     return search_fn(*args_new[len(args_new) - len(args) :])
