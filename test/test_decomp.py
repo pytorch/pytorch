@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     IS_WINDOWS,
+    IS_MACOS,
     TestCase,
     skipIfCrossRef,
     suppress_warnings,
@@ -67,6 +68,9 @@ _decomp_test_ops_core_autograd = [
     for op in op_db
     if op.aten_name in core_decomposition_names
     and op.supports_autograd
+]
+_sdpa_op_info = [
+    op for op in op_db if "scaled_dot_product_attention" in op.aten_name
 ]
 
 
@@ -926,44 +930,43 @@ class DecompOneOffTests(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCPU
     @skipIfCrossRef
-    def test_sdpa(self, device):
-        from torch.fx.experimental.proxy_tensor import make_fx
-        from torch._decomp import get_decompositions
-        from torch.nn import functional as F
+    @skipOps('DecompOneOffTests', 'test_sdpa', [
+        xfail("nn.functional.scaled_dot_product_attention", dtypes=[torch.half] + ([torch.bfloat16] if IS_MACOS else [])),
+    ])
+    @ops(_sdpa_op_info)
+    def test_sdpa(self, device, dtype, op):
+        # SDPA doesn't support float16, this is aligned with aten/src/ATen/native/transformers/attention.cpp. If we
+        # add support for float16 over there we should update this test as well.
 
         class ScaledDotProductAttention(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
             def forward(self, query_layer, key_layer, value_layer, mask=None, is_causal=True):
-                attn_output = F.scaled_dot_product_attention(
+                attn_output = op(
                     query_layer, key_layer, value_layer, attn_mask=mask, dropout_p=0.0, is_causal=is_causal
                 )
                 return attn_output
 
 
-        query_layer = torch.randn(1, 128, 100, 64, device=device)
-        key_layer = torch.randn(1, 128, 100, 64, device=device)
-        value_layer = torch.randn(1, 128, 100, 64, device=device)
-        masks = [None, torch.randn(1, 1, 100, 100, device=device)]
+        query_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
+        key_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
+        value_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
+        masks = [None, torch.ones((1, 1, 100, 100), device=device, dtype=torch.bool)]
+
+        atol, rtol = dtype_precisions[dtype]
 
         for mask in masks:
             is_causal = mask is None
             attention = ScaledDotProductAttention()
-            fx_g = make_fx(
-                attention,
-                decomposition_table=get_decompositions(
-                    [
-                        torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default,
-                    ]
-                ),
-            )(query_layer, key_layer, value_layer, mask, is_causal)
-
-            compiled_res = fx_g(query_layer, key_layer, value_layer, mask, is_causal)
-            eager_res = F.scaled_dot_product_attention(
+            decomposed_res = torch._decomp.decompositions.scaled_dot_product_flash_attention_for_cpu(
+                query_layer, key_layer, value_layer, 0.0, is_causal, attn_mask=mask
+            )
+            eager_res = op(
                 query_layer, key_layer, value_layer, attn_mask=mask, dropout_p=0.0, is_causal=is_causal
             )
-            self.assertTrue(torch.allclose(compiled_res, eager_res, atol=1e-6, rtol=1e-5))
+
+            self.assertTrue(torch.allclose(decomposed_res[0], eager_res, atol=atol, rtol=rtol))
 
 
 instantiate_device_type_tests(DecompOneOffTests, globals())
