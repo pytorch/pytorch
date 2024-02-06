@@ -1348,6 +1348,8 @@ class CPUReproTests(TestCase):
                 cpp_op_list.append(k)
 
         diff = [
+            "bessel_j0",
+            "bessel_j1",
             "constant",
             "index_expr",
             "signbit",
@@ -1456,11 +1458,14 @@ class CPUReproTests(TestCase):
         with config.patch({"cpp.fallback_scatter_reduce_sum": True}):
             _internal_check(fn, inps, "aten.scatter_reduce_")
 
-        with set_num_threads(1):
-            _internal_check(fn, inps, _target_code_check_not="aten.scatter_reduce_")
+        if torch.has_openmp:
+            # Fix https://github.com/pytorch/pytorch/issues/118518
+            # which fails to change thread number with native thread pool
+            with set_num_threads(1):
+                _internal_check(fn, inps, _target_code_check_not="aten.scatter_reduce_")
 
-        with config.patch({"cpp.dynamic_threads": True}), set_num_threads(1):
-            _internal_check(fn, inps, "aten.scatter_reduce_")
+            with config.patch({"cpp.dynamic_threads": True}), set_num_threads(1):
+                _internal_check(fn, inps, "aten.scatter_reduce_")
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -2942,6 +2947,18 @@ class CPUReproTests(TestCase):
         metrics.reset()
         self.common(fn, (x,))
         assert metrics.generated_cpp_vec_kernel_count == 1
+
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_symbolic_shape_scalar_value_reduction(self):
+        def fn(x, y):
+            return y + torch.ones(x).sum()
+
+        with torch.no_grad():
+            metrics.reset()
+            y = torch.randn(100)
+            self.common(fn, (100, y))
+            assert metrics.generated_cpp_vec_kernel_count == 2
 
 
 if __name__ == "__main__":

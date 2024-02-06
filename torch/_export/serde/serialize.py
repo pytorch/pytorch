@@ -52,9 +52,9 @@ from .schema import (  # type: ignore[attr-defined]
     GraphSignature,
     InputSpec,
     InputToBufferSpec,
+    InputToCustomObjSpec,
     InputToParameterSpec,
     InputToTensorConstantSpec,
-    InputToCustomObjSpec,
     Layout,
     LossOutputSpec,
     MemoryFormat,
@@ -727,10 +727,12 @@ class GraphModuleSerializer:
         elif spec.kind == ep.InputKind.BUFFER:
             assert spec.target is not None
             assert isinstance(spec.arg, ep.TensorArgument)
+            assert spec.persistent is not None
             return InputSpec.create(
                 buffer=InputToBufferSpec(
                     arg=TensorArgument(name=spec.arg.name),
                     buffer_name=spec.target,
+                    persistent=spec.persistent,
                 )
             )
         elif spec.kind == ep.InputKind.CONSTANT_TENSOR:
@@ -1291,6 +1293,7 @@ class GraphModuleDeserializer:
                 kind=ep.InputKind.BUFFER,
                 arg=ep.TensorArgument(name=i.buffer.arg.name),
                 target=i.buffer.buffer_name,
+                persistent=i.buffer.persistent,
             )
         elif i.type == "tensor_constant":
             return ep.InputSpec(
@@ -1305,7 +1308,7 @@ class GraphModuleDeserializer:
                 target=i.custom_obj.custom_obj_name,
             )
         else:
-            raise AssertionError(f"Unkown input spec {i}")
+            raise AssertionError(f"Unknown input spec {i}")
 
     def deserialize_output_spec(self, o: OutputSpec) -> ep.OutputSpec:
         if o.type == "user_output":
@@ -1368,7 +1371,7 @@ class GraphModuleDeserializer:
 
         module_call_graph = self.deserialize_module_call_graph(serialized_graph_module.module_call_graph)
         return GraphModuleDeserializer.Result(
-            graph_module=torch._export.exported_program._create_graph_module_for_export(self.module, self.graph),
+            graph_module=ep._create_graph_module_for_export(self.module, self.graph),
             signature=self.signature,
             module_call_graph=module_call_graph,
             names_to_symbols=self.symbol_name_to_symbol,
@@ -1419,7 +1422,7 @@ class GraphModuleDeserializer:
             assert isinstance(value, GraphArgument)
             with self.save_graph_module():
                 self.deserialize_graph(value.graph)
-                submodule = torch._export.exported_program._create_graph_module_for_export(self.module, self.graph)
+                submodule = ep._create_graph_module_for_export(self.module, self.graph)
             self.module.register_module(value.name, submodule)
             return self.graph.create_node(
                 "get_attr",
@@ -2137,7 +2140,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
         idx, (arg, spec) = inp
         assert isinstance(spec, InputSpec)
         if spec.type == "user_input":
-            return 4, None, idx
+            return 5, None, idx
         elif spec.type == "parameter":
             return 1, spec.parameter.parameter_name, idx
         elif spec.type == "buffer":
@@ -2145,7 +2148,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
         elif spec.type == "tensor_constant":
             return 3, spec.tensor_constant.tensor_constant_name, idx
         elif spec.type == "custom_obj":
-            return 3, spec.custom_obj.custom_obj_name, idx
+            return 4, spec.custom_obj.custom_obj_name, idx
         else:
             raise AssertionError(f"Unknown input type: {spec}")
 
@@ -2188,7 +2191,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
                     pass
                 else:
                     raise AssertionError(f"Unknown sym_int type: {s}")
-            elif arg.type in ("as_none", "as_int", "as_float", "as_string"):
+            elif arg.type in ("as_none", "as_int", "as_float", "as_string", "as_custom_obj"):
                 return
             else:
                 raise AssertionError(f"Unknown input type: {arg}")

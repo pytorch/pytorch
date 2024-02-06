@@ -13,7 +13,7 @@ from torch.nn.utils.rnn import pack_padded_sequence
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDNN
 from torch.testing._internal.common_dtype import (
-    floating_types, floating_and_complex_types_and, get_all_fp_dtypes, complex_types_and)
+    floating_types, floating_and_complex_types_and, get_all_fp_dtypes)
 from torch.testing._internal.common_device_type import (
     _TestParametrizer, _update_param_kwargs, toleranceOverride, tol,
     skipCUDAIfCudnnVersionLessThan, skipCUDAIfRocm, precisionOverride, skipMeta, skipMPS, skipCUDAVersionIn)
@@ -103,7 +103,7 @@ class modules(_TestParametrizer):
                                'instantiate_parametrized_tests()')
 
         for module_info in self.module_info_list:
-            dtypes = set(module_info.dtypes)
+            dtypes = set(module_info.supported_dtypes(device_cls.device_type))
             if self.allowed_dtypes is not None:
                 dtypes = dtypes.intersection(self.allowed_dtypes)
 
@@ -213,6 +213,7 @@ class ModuleInfo:
                  skips=(),  # Indicates which tests to skip
                  decorators=None,  # Additional decorators to apply to generated tests
                  dtypes=floating_types(),  # dtypes this function is expected to work with
+                 dtypesIfMPS=(torch.float16, torch.float32,),  # dtypes this function is expected to work with on MPS
                  supports_gradgrad=True,  # whether the op supports second order gradients
                  gradcheck_nondet_tol=0.0,  # tolerance for nondeterminism while performing gradcheck
                  module_memformat_affects_out=False,  # whether converting module to channels last will generate
@@ -224,6 +225,7 @@ class ModuleInfo:
         self.module_inputs_func = module_inputs_func
         self.decorators = (*(decorators if decorators else []), *(skips if skips else []))
         self.dtypes = dtypes
+        self.dtypesIfMPS = dtypesIfMPS
         self.supports_gradgrad = supports_gradgrad
         self.gradcheck_nondet_tol = gradcheck_nondet_tol
         self.module_memformat_affects_out = module_memformat_affects_out
@@ -239,6 +241,12 @@ class ModuleInfo:
             else:
                 result.append(decorator)
         return result
+
+    def supported_dtypes(self, device_type):
+        if device_type == 'mps':
+            return self.dtypesIfMPS
+        else:
+            return self.dtypes
 
     @property
     def name(self):
@@ -3329,14 +3337,10 @@ module_db: List[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.AdaptiveMaxPool1d,
                module_inputs_func=module_inputs_torch_nn_AdaptiveMaxPool1d,
-               skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.AdaptiveMaxPool2d,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_inputs_func=module_inputs_torch_nn_AdaptiveMaxPool2d,
-               skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.AdaptiveMaxPool3d,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -3348,13 +3352,10 @@ module_db: List[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.AvgPool1d,
                module_inputs_func=module_inputs_torch_nn_AvgPool1d,
-               skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.AvgPool2d,
                module_inputs_func=module_inputs_torch_nn_AvgPool2d,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # The difference between channels last backward and
                    # channels first backward of AvgPool2d on CUDA is too large
                    # See https://github.com/pytorch/pytorch/issues/107201
@@ -3364,7 +3365,9 @@ module_db: List[ModuleInfo] = [
                        'test_memory_format',
                        active_if=lambda p: p['training'],
                        device_type='cuda',
-                   ),),
+                   ),
+                   # error: input types 'tensor<f32>' and 'tensor<15x10xf16>' are not broadcast compatible
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float16]),),
                ),
     ModuleInfo(torch.nn.AvgPool3d,
                module_inputs_func=module_inputs_torch_nn_AvgPool3d,
@@ -3439,8 +3442,10 @@ module_db: List[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.CELU,
                module_inputs_func=module_inputs_torch_nn_CELU,
+               # not MPS specific, will be xfailed for all devices in next PR
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_check_inplace',
+                                device_type='mps', dtypes=[torch.float16]),)
                ),
     ModuleInfo(torch.nn.Conv1d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=False),
@@ -3451,7 +3456,12 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64])
+                   # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
+                   # xfail does not work due to Fatal Python error: Aborted
+                   DecorateInfo(skipIfMps, "TestModule", "test_memory_format",
+                                device_type='mps', dtypes=[torch.float16]),
+                   DecorateInfo(skipIfMps, "TestModule", "test_non_contiguous_tensors",
+                                device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -3465,7 +3475,6 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # This was wrongly being skipped before and needs investigation.
                    # See https://github.com/pytorch/pytorch/issues/80247
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
@@ -3473,6 +3482,12 @@ module_db: List[ModuleInfo] = [
                    # Fails with channels last test on MPS backend
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
                                 device_type='mps', dtypes=[torch.float32]),
+                   # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
+                   # xfail does not work due to Fatal Python error: Aborted
+                   DecorateInfo(skipIfMps, "TestModule", "test_memory_format",
+                                device_type='mps', dtypes=[torch.float16]),
+                   DecorateInfo(skipIfMps, "TestModule", "test_non_contiguous_tensors",
+                                device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -3505,14 +3520,17 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
-                   DecorateInfo(skipIfMps, 'TestModule',
-                                dtypes=complex_types_and(torch.chalf, torch.float64, torch.complex128)),
                    # Not implmented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
                                 dtypes=(torch.chalf,), device_type='cuda'),
                    # Ref: https://github.com/pytorch/pytorch/issues/73502
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_pickle', dtypes=(torch.chalf,)),
-               ),
+                   # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
+                   # xfail does not work due to Fatal Python error: Aborted
+                   DecorateInfo(skipIfMps, "TestModule", "test_memory_format",
+                                device_type='mps', dtypes=[torch.float16]),
+                   DecorateInfo(skipIfMps, "TestModule", "test_non_contiguous_tensors",
+                                device_type='mps', dtypes=[torch.float16]),),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
                    DecorateInfo(precisionOverride({torch.chalf: 5e-03}), 'TestModule', 'test_memory_format'),
@@ -3527,8 +3545,6 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
-                   DecorateInfo(skipIfMps, 'TestModule',
-                                dtypes=complex_types_and(torch.chalf, torch.float64, torch.complex128)),
                    # Fails on backward check because ViewAsRealBackward apply contiguous for grad
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format',
                                 dtypes=(torch.complex32, torch.complex64, torch.complex128)),
@@ -3544,6 +3560,12 @@ module_db: List[ModuleInfo] = [
                                 dtypes=(torch.chalf,), device_type='cuda'),
                    # Ref: https://github.com/pytorch/pytorch/issues/73502
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_pickle', dtypes=(torch.chalf,)),
+                   # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
+                   # xfail does not work due to Fatal Python error: Aborted
+                   DecorateInfo(skipIfMps, "TestModule", "test_memory_format",
+                                device_type='mps', dtypes=[torch.float16]),
+                   DecorateInfo(skipIfMps, "TestModule", "test_non_contiguous_tensors",
+                                device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -3582,13 +3604,14 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_CosineEmbeddingLoss,
                skips=(
                    # No channels_last support for loss functions.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.ELU,
                module_inputs_func=module_inputs_torch_nn_ELU,
+               # not MPS specific, will be xfailed for all devices in next PR
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_check_inplace',
+                                device_type='mps', dtypes=[torch.float16]),)
                ),
     ModuleInfo(torch.nn.FractionalMaxPool2d,
                module_inputs_func=module_inputs_torch_nn_FractionalMaxPool2d,
@@ -3610,15 +3633,15 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_L1Loss,
                skips=(
                    # No channels_last support for loss functions.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.SmoothL1Loss,
                module_inputs_func=module_inputs_torch_nn_SmoothL1Loss,
                skips=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   # See #119108: input types 'tensor<f32>' and 'tensor<15x10xf16>' are not broadcast compatible
+                   DecorateInfo(skipIfMps, 'TestModule', 'test_non_contiguous_tensors', dtypes=[torch.float16]),)
                ),
     ModuleInfo(torch.nn.LazyConv1d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=True),
@@ -3632,7 +3655,12 @@ module_db: List[ModuleInfo] = [
                    # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
+                   # xfail does not work due to Fatal Python error: Aborted
+                   DecorateInfo(skipIfMps, "TestModule", "test_memory_format",
+                                device_type='mps', dtypes=[torch.float16]),
+                   DecorateInfo(skipIfMps, "TestModule", "test_non_contiguous_tensors",
+                                device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -3642,7 +3670,6 @@ module_db: List[ModuleInfo] = [
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_memformat_affects_out=True,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # channels_last support on cuda requires cudnn >= 7603
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
                    # Failure on ROCM for float32 issue #70125
@@ -3657,6 +3684,12 @@ module_db: List[ModuleInfo] = [
                    # Fails with channels last test on MPS backend
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
                                 device_type='mps', dtypes=[torch.float32]),
+                   # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
+                   # xfail does not work due to Fatal Python error: Aborted
+                   DecorateInfo(skipIfMps, "TestModule", "test_memory_format",
+                                device_type='mps', dtypes=[torch.float16]),
+                   DecorateInfo(skipIfMps, "TestModule", "test_non_contiguous_tensors",
+                                device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -3694,7 +3727,12 @@ module_db: List[ModuleInfo] = [
                    # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
+                   # xfail does not work due to Fatal Python error: Aborted
+                   DecorateInfo(skipIfMps, "TestModule", "test_memory_format",
+                                device_type='mps', dtypes=[torch.float16]),
+                   DecorateInfo(skipIfMps, "TestModule", "test_non_contiguous_tensors",
+                                device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -3711,7 +3749,6 @@ module_db: List[ModuleInfo] = [
                    # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # This was wrongly being skipped before and needs investigation.
                    # See https://github.com/pytorch/pytorch/issues/80247
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cuda',
@@ -3719,6 +3756,12 @@ module_db: List[ModuleInfo] = [
                    # Fails with channels last test on MPS backend
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
                                 device_type='mps', dtypes=[torch.float32]),
+                   # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
+                   # xfail does not work due to Fatal Python error: Aborted
+                   DecorateInfo(skipIfMps, "TestModule", "test_memory_format",
+                                device_type='mps', dtypes=[torch.float16]),
+                   DecorateInfo(skipIfMps, "TestModule", "test_non_contiguous_tensors",
+                                device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -3747,7 +3790,6 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.Linear,
                module_inputs_func=module_inputs_torch_nn_Linear,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # No channels_last support for Linear currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
@@ -3758,26 +3800,26 @@ module_db: List[ModuleInfo] = [
                        toleranceOverride({
                            torch.float32: tol(atol=1e-4, rtol=1e-4),
                            torch.float64: tol(atol=1e-4, rtol=1e-4)}),
-                       'TestModule', 'test_forward', device_type='cpu')
+                       'TestModule', 'test_forward', device_type='cpu'),
                ],
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # No channels_last support for Bilinear currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   # See #119108: tolerance issue
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_forward",
+                                device_type='mps', dtypes=[torch.float16]),)
                ),
     ModuleInfo(torch.nn.LPPool1d,
                module_inputs_func=module_inputs_torch_nn_LPPool1d,
                skips=(
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),)
                ),
     ModuleInfo(torch.nn.LPPool2d,
                module_inputs_func=module_inputs_torch_nn_LPPool2d,
                skips=(
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # Fails on backward check on MPS
                    # See https://github.com/pytorch/pytorch/issues/107214
                    DecorateInfo(
@@ -3798,13 +3840,9 @@ module_db: List[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.MaxPool1d,
                module_inputs_func=module_inputs_torch_nn_MaxPool1d,
-               skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.MaxPool2d,
                module_inputs_func=module_inputs_torch_nn_MaxPool2d,
-               skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.MaxPool3d,
                module_inputs_func=module_inputs_torch_nn_MaxPool3d,
@@ -3818,7 +3856,6 @@ module_db: List[ModuleInfo] = [
                skips=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # https://github.com/pytorch/pytorch/issues/115588
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_cpu_gpu_parity'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
@@ -3829,14 +3866,17 @@ module_db: List[ModuleInfo] = [
                skips=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   # See #119108: input types 'tensor<f32>' and 'tensor<15x10xf16>' are not broadcast compatible
+                   DecorateInfo(skipIfMps, 'TestModule', 'test_non_contiguous_tensors', dtypes=[torch.float16]),
+                   # See #119108: tolerance issue
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_forward",
+                                device_type='mps', dtypes=[torch.float16]),)
                ),
     ModuleInfo(torch.nn.MarginRankingLoss,
                module_inputs_func=module_inputs_torch_nn_MarginRankingLoss,
                skips=(
                    # No channels_last support for loss functions.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.MultiLabelMarginLoss,
                module_inputs_func=module_inputs_torch_nn_MultiLabelMarginLoss,
@@ -3863,61 +3903,63 @@ module_db: List[ModuleInfo] = [
                skips=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   # See #119108: tolerance issue
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_forward",
+                                device_type='mps', dtypes=[torch.float16]),)
                ),
     ModuleInfo(torch.nn.MultiLabelSoftMarginLoss,
                module_inputs_func=module_inputs_torch_nn_MultiLabelSoftMarginLoss,
                skips=(
                    # No channels_last support for loss functions.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.NLLLoss,
                module_inputs_func=module_inputs_torch_nn_NLLLoss,
                skips=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   # See #119108: tolerance issue
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_forward",
+                                device_type='mps', dtypes=[torch.float16]),)
                ),
     ModuleInfo(torch.nn.GaussianNLLLoss,
                module_inputs_func=module_inputs_torch_nn_GaussianNLLLoss,
                skips=(
                    # No channels_last support for loss functions.
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)),
     ModuleInfo(torch.nn.PoissonNLLLoss,
                module_inputs_func=module_inputs_torch_nn_PoissonNLLLoss,
                skips=(
                    # No channels_last support for loss functions.
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)),
     ModuleInfo(torch.nn.HingeEmbeddingLoss,
                module_inputs_func=module_inputs_torch_nn_HingeEmbeddingLoss,
                skips=(
                    # No channels_last support for loss functions.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.HuberLoss,
                module_inputs_func=module_inputs_torch_nn_HuberLoss,
                skips=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   # See #119108: seemingly incorrect output dtype
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_forward",
+                                device_type='mps', dtypes=[torch.float16]),)
                ),
     ModuleInfo(torch.nn.BCELoss,
                module_inputs_func=module_inputs_torch_nn_BCELoss,
                skips=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   # error: input types 'tensor<f32>' and 'tensor<15x10xf16>' are not broadcast compatible
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float16]),)
                ),
     ModuleInfo(torch.nn.BCEWithLogitsLoss,
                module_inputs_func=module_inputs_torch_nn_BCEWithLogitsLoss,
                skips=(
                    # No channels_last support for loss functions.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.CrossEntropyLoss,
                module_inputs_func=module_inputs_torch_nn_CrossEntropyLoss,
@@ -3935,9 +3977,7 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_multiple_device_transfer", dtypes=[torch.float16],
                                 device_type='cuda'),
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity", dtypes=[torch.float16],
-                                device_type='cuda'),
-                   # MPS does not support double, so expect failures on MPS for torch.double
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', dtypes=[torch.float64], device_type='mps'),),
+                                device_type='cuda'),),
                ),
     ModuleInfo(torch.nn.CTCLoss,
                module_inputs_func=module_inputs_torch_nn_CTCLoss,
@@ -3955,18 +3995,17 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.GELU,
                module_inputs_func=module_inputs_torch_nn_GELU,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   # See #119108: tolerance issue
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_forward",
+                                device_type='mps', dtypes=[torch.float16]),)
                ),
     ModuleInfo(torch.nn.GLU,
                module_inputs_func=module_inputs_torch_nn_GLU,
-               skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.GroupNorm,
                module_inputs_func=module_inputs_torch_nn_GroupNorm,
                dtypes=get_all_fp_dtypes(include_bfloat16=True, include_half=True),
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64, torch.bfloat16]),
                    # Tracking at https://github.com/pytorch/pytorch/issues/98089
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_cpu_gpu_parity'),
                    DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
@@ -3986,7 +4025,6 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.Hardswish,
                module_inputs_func=module_inputs_torch_nn_Hardswish,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # Fails on backward check on MPS
                    # See https://github.com/pytorch/pytorch/issues/107214
                    DecorateInfo(
@@ -3999,14 +4037,11 @@ module_db: List[ModuleInfo] = [
                supports_gradgrad=False),
     ModuleInfo(torch.nn.Hardtanh,
                module_inputs_func=module_inputs_torch_nn_Hardtanh,
-               skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                ),
     ModuleInfo(torch.nn.InstanceNorm1d,
                module_inputs_func=partial(module_inputs_torch_nn_InstanceNormNd, N=1),
                train_and_eval_differ=True,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # No channels_last support for InstanceNorm1d currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
@@ -4014,7 +4049,6 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=partial(module_inputs_torch_nn_InstanceNormNd, N=2),
                train_and_eval_differ=True,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # No channels_last support for InstanceNorm2d currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
@@ -4036,7 +4070,6 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.LayerNorm,
                module_inputs_func=module_inputs_torch_nn_LayerNorm,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # No channels_last support for LayerNorm currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
@@ -4054,8 +4087,7 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    # Doesn't support device / dtype kwargs directly because it is just a
                    # container of TransformerEncoderLayers.
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_factory_kwargs'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_factory_kwargs'),)
                ),
     ModuleInfo(torch.nn.TransformerEncoderLayer,
                train_and_eval_differ=True,
@@ -4070,8 +4102,7 @@ module_db: List[ModuleInfo] = [
                ],
                skips=(
                    # No channels_last support for TransformerEncoderLayer currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.TransformerDecoderLayer,
                module_inputs_func=module_inputs_torch_nn_TransformerDecoderLayer,
@@ -4082,8 +4113,7 @@ module_db: List[ModuleInfo] = [
                ],
                skips=(
                    # No channels_last support for TransformerDecoderLayer currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.Transformer,
                module_inputs_func=module_inputs_torch_nn_Transformer,
@@ -4094,27 +4124,23 @@ module_db: List[ModuleInfo] = [
                ],
                skips=(
                    # No channels_last support for Transformer currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.MultiheadAttention,
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_MultiheadAttention,
                skips=(
                    # No channels_last support for MultiheadAttention currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.Embedding,
                module_inputs_func=module_inputs_torch_nn_Embedding,
                skips=(
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.ReLU,
                module_inputs_func=module_inputs_torch_nn_ReLU,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # Fails on backward check on MPS
                    # See https://github.com/pytorch/pytorch/issues/107214
                    DecorateInfo(
@@ -4127,8 +4153,6 @@ module_db: List[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.LeakyReLU,
                module_inputs_func=module_inputs_torch_nn_LeakyReLU,
-               skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.ReLU6,
                module_inputs_func=module_inputs_torch_nn_ReLU6,
@@ -4147,25 +4171,18 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.RNNCell,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU_Cell, is_rnn=True),
                module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU_Cell,
-               skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.GRUCell,
                module_inputs_func=module_inputs_torch_nn_RNN_GRU_Cell,
                module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU_Cell,
-               skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.LSTMCell,
                module_inputs_func=module_inputs_torch_nn_LSTMCell,
                module_error_inputs_func=module_error_inputs_torch_nn_LSTMCell,
-               skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.Sigmoid,
                module_inputs_func=module_inputs_torch_nn_Sigmoid,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # Fails on backward check on MPS
                    # See https://github.com/pytorch/pytorch/issues/107214
                    DecorateInfo(
@@ -4179,36 +4196,34 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.LogSigmoid,
                module_inputs_func=module_inputs_torch_nn_LogSigmoid,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   # See #119108: tolerance issue
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_forward", device_type='mps', dtypes=[torch.float16]),)
                ),
     ModuleInfo(torch.nn.SiLU,
                module_inputs_func=module_inputs_torch_nn_SiLU,
-               skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.Softmax,
                module_inputs_func=module_inputs_torch_nn_Softmax,
-               skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.Softmax2d,
                module_inputs_func=module_inputs_torch_nn_Softmax2d,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # no channels last support for Softmax2d currently
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   # See #119108: tolerance issue
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_forward", device_type='mps', dtypes=[torch.float16]),)
                ),
     ModuleInfo(torch.nn.LogSoftmax,
                module_inputs_func=module_inputs_torch_nn_LogSoftmax,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # no channels last support for LogSoftmax currently
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   # See #119108: inf nan error
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_forward", device_type='mps', dtypes=[torch.float16]),)
                ),
     ModuleInfo(torch.nn.Softmin,
                module_inputs_func=module_inputs_torch_nn_Softmin,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # no channels last support for Softmin currently
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
@@ -4227,13 +4242,10 @@ module_db: List[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.Softsign,
                module_inputs_func=module_inputs_torch_nn_Softsign,
-               skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.Tanh,
                module_inputs_func=module_inputs_torch_nn_Tanh,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # Fails on backward check on MPS
                    # See https://github.com/pytorch/pytorch/issues/107214
                    DecorateInfo(
@@ -4247,7 +4259,6 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.Tanhshrink,
                module_inputs_func=module_inputs_torch_nn_Tanhshrink,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # Fails on backward check on MPS
                    # See https://github.com/pytorch/pytorch/issues/107214
                    DecorateInfo(
@@ -4275,16 +4286,12 @@ module_db: List[ModuleInfo] = [
                train_and_eval_differ=True,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU, is_rnn=True),
                module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU,
-               skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                decorators=rnn_gru_lstm_module_info_decorators
                ),
     ModuleInfo(torch.nn.GRU,
                train_and_eval_differ=True,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU, is_rnn=False),
                module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU,
-               skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                decorators=rnn_gru_lstm_module_info_decorators),
     ModuleInfo(torch.nn.LSTM,
                train_and_eval_differ=True,
@@ -4296,8 +4303,6 @@ module_db: List[ModuleInfo] = [
                decorators=rnn_gru_lstm_module_info_decorators),
     ModuleInfo(torch.nn.ReflectionPad1d,
                module_inputs_func=module_inputs_torch_nn_ReflectionPad1d,
-               skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.ReflectionPad2d,
                module_inputs_func=module_inputs_torch_nn_ReflectionPad2d,
@@ -4306,8 +4311,7 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
                                 device_type='cuda'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
-                                device_type='mps'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                                device_type='mps'),)
                ),
     ModuleInfo(torch.nn.ReflectionPad3d,
                module_inputs_func=module_inputs_torch_nn_ReflectionPad3d,
@@ -4316,13 +4320,10 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
                                 device_type='cuda'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
-                                device_type='mps'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                                device_type='mps'),)
                ),
     ModuleInfo(torch.nn.ReplicationPad1d,
                module_inputs_func=module_inputs_torch_nn_ReplicationPad1d,
-               skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.ReplicationPad2d,
                module_inputs_func=module_inputs_torch_nn_ReplicationPad2d,
@@ -4331,8 +4332,7 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
                                 device_type='cuda'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
-                                device_type='mps'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                                device_type='mps'),)
                ),
     ModuleInfo(torch.nn.ReplicationPad3d,
                module_inputs_func=module_inputs_torch_nn_ReplicationPad3d,
@@ -4341,8 +4341,7 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
                                 device_type='cuda'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
-                                device_type='mps'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                                device_type='mps'),)
                ),
     ModuleInfo(torch.nn.SELU,
                module_inputs_func=module_inputs_torch_nn_SELU,
@@ -4353,59 +4352,46 @@ module_db: List[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.ZeroPad1d,
                module_inputs_func=module_inputs_torch_nn_ZeroPad1d,
-               skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.ZeroPad2d,
                module_inputs_func=module_inputs_torch_nn_ZeroPad2d,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # Fails with channels last test on MPS backend
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='mps'),)
                ),
     ModuleInfo(torch.nn.ZeroPad3d,
                module_inputs_func=module_inputs_torch_nn_ZeroPad3d,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # Fails with channels last test on MPS backend
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='mps'),)
                ),
     ModuleInfo(torch.nn.CircularPad1d,
                module_inputs_func=module_inputs_torch_nn_CircularPad1d,
                module_error_inputs_func=module_error_inputs_torch_nn_Pad1d,
-               skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.CircularPad2d,
                module_inputs_func=module_inputs_torch_nn_CircularPad2d,
                module_error_inputs_func=module_error_inputs_torch_nn_Pad2d,
-               skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.CircularPad3d,
                module_inputs_func=module_inputs_torch_nn_CircularPad3d,
                module_error_inputs_func=module_error_inputs_torch_nn_Pad3d,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # Fails with channels last test on MPS backend
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format"),)
                ),
     ModuleInfo(torch.nn.ConstantPad1d,
                module_inputs_func=module_inputs_torch_nn_ConstantPad1d,
-               skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.ConstantPad2d,
                module_inputs_func=module_inputs_torch_nn_ConstantPad2d,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # Fails with channels last test on MPS backend
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='mps'),)
                ),
     ModuleInfo(torch.nn.ConstantPad3d,
                module_inputs_func=module_inputs_torch_nn_ConstantPad3d,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # Fails with channels last test on MPS backend
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='mps'),)
                )
