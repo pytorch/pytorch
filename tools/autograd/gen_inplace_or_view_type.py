@@ -172,7 +172,7 @@ for (auto ${view_idx} : c10::irange(${var}.size())) {
 
 SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_METADATA_CHANGE = CodeTemplate(
     """\
-std::shared_ptr<torch::autograd::ViewFunc> func(nullptr);
+std::unique_ptr<torch::autograd::ViewFunc> func(nullptr);
 std::function<at::Tensor(const at::Tensor&)> rev_func=nullptr;
 if (${is_view_with_metadata_change} ||
     !self.unsafeGetTensorImpl()->support_as_strided() ||
@@ -186,7 +186,7 @@ if (${is_view_with_metadata_change} ||
 
 REPLAY_VIEW_FUNC = CodeTemplate(
     """\
-func = std::make_shared<${view_func_name}>(${view_func_args});
+func = std::make_unique<${view_func_name}>(${view_func_args});
 """
 )
 
@@ -489,7 +489,7 @@ def emit_view_body(
             as_view_call = (
                 f"as_view(/* base */ {view_info}, /* output */ {var}[{view_idx}], "
                 "/* is_bw_differentiable */ true, /* is_fw_differentiable */ true, "
-                "/* view_func */ func, /* rev_view_func */ rev_func, "
+                "/* view_func */ std::move(func), /* rev_view_func */ rev_func, "
                 f"/* creation_meta */ {creation_meta});"
             )
             call += MULTI_OUTPUT_VIEW_ITERATION.substitute(
@@ -502,7 +502,7 @@ def emit_view_body(
             rhs_value = (
                 f"as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, "
                 "/* is_fw_differentiable */ true, "
-                f"/* view_func */ func, /* rev_view_func */ rev_func, /* creation_meta */ {creation_meta})"
+                f"/* view_func */ std::move(func), /* rev_view_func */ rev_func, /* creation_meta */ {creation_meta})"
             )
     else:
         # This could be supported but we don't need it at the moment, so keeping things simple.
