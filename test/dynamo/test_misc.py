@@ -963,6 +963,24 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.testing.standard_test(self, fn, 1, expected_ops=1)
 
+    @unittest.skipIf(sys.version_info[:2] <= (3, 8), "Requires astunparse")
+    def test_cse_dict_guards(self):
+        def fn(x):
+            ret = torch.zeros(3)
+            for v in x.values():
+                ret = ret + v
+            return ret
+
+        from torch._dynamo.guards import build_guard_function, CLOSURE_VARS
+
+        x = {3: torch.randn(3), 2: torch.randn(3), 4: torch.randn(3)}
+        _, guards = torch._dynamo.export(fn, x)
+
+        code_lists = [c for g in guards for c in g.code_list or []]
+        _, pycode = build_guard_function(code_lists, [])
+        # Make sure we just call "list(dict.keys())" once
+        self.assertEqual(pycode.count("keys"), 1)
+
     def test_sys_modules(self):
         def fn(x, y):
             mod_a = sys.modules.get("aaaaaaaa")
@@ -1022,6 +1040,18 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         torch._dynamo.testing.standard_test(self, fn, 1, expected_ops=1)
 
+    def test_getattr_dict(self):
+        def fn(x):
+            from torch.masked.maskedtensor._ops_refs import _MASKEDTENSOR_FUNCTION_TABLE
+
+            return x * len(_MASKEDTENSOR_FUNCTION_TABLE)
+
+        i = torch.randn(5)
+        r1 = fn(i)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        r2 = opt_fn(i)
+        self.assertEqual(r1, r2)
+
     def test_shape_unpack(self):
         def fn(x):
             a, b = x.size()
@@ -1032,6 +1062,16 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_fn = torch._dynamo.optimize("eager")(fn)
         r2 = opt_fn(i)
         self.assertTrue(same(r1, r2))
+
+    def test_typing_dict(self):
+        def fn(d):
+            return d[T]
+
+        d = {T: torch.randn(3)}
+        r1 = fn(d)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        r2 = opt_fn(d)
+        self.assertEqual(r1, r2)
 
     def test_tensor_iter(self):
         def fn(x):
@@ -2502,6 +2542,20 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(fn(args2), opt_fn(args2))
         self.assertEqual(cnts.frame_count, 2)
         # Extra calls don't recompile
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_dict_namedtuple(self):
+        def fn(d):
+            return d[3] * 2
+
+        args1 = {collections.namedtuple: None, 3: torch.randn(3)}
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        self.assertEqual(fn(args1), opt_fn(args1))
+        self.assertEqual(cnts.frame_count, 1)
+        # Test a failing namedtuple guard
+        args2 = {2: None, 3: torch.randn(3)}
+        self.assertEqual(fn(args2), opt_fn(args2))
         self.assertEqual(cnts.frame_count, 2)
 
     def test_dict_order_keys_tensors(self):
@@ -9089,6 +9143,30 @@ ShapeEnv not equal: field values don't match:
             foo()
         with set_default_dtype(torch.double):
             foo()
+
+    def test_numpy_ufunc_out(self):
+        @torch.compile(backend="eager")
+        def foo():
+            x = np.arange(5)
+            out = np.empty((x.shape[0], x.shape[0]))
+            res_out = np.sin(x, out=out)
+            assert res_out is out
+
+        foo()
+
+    # Unfortunately, we don't currently preserve the ids of
+    # res_out and out correctly across the graph break
+    @unittest.expectedFailure
+    def test_numpy_ufunc_out_graph_break(self):
+        @torch.compile(backend="eager")
+        def foo():
+            x = np.arange(5)
+            out = np.empty((x.shape[0], x.shape[0]))
+            res_out = np.sin(x, out=out)
+            torch._dynamo.graph_break()
+            assert res_out is out
+
+        foo()
 
     def test_dict_subclass_cannot_be_initialized_in_graph(self):
         for super_class in (
