@@ -258,12 +258,8 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
     TemporaryFile file;
     store_ = c10::make_intrusive<::c10d::FileStore>(file.path, 1);
 
-    at::cuda::OptionalCUDAGuard deviceGuard;
     tensors_.resize(numDevices);
-    for (const auto i : c10::irange(numDevices)) {
-      deviceGuard.set_index(i);
-      tensors_[i] = at::ones({3, 3}, at::kCUDA);
-    }
+    tensors_[0] = at::empty({3, 3}, at::kCUDA);
   }
 
   void TearDown() override {
