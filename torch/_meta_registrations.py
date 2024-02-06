@@ -1147,7 +1147,7 @@ def _parse_qr_mode(mode: str) -> Tuple[bool, bool]:
                 f"but expected one of 'reduced' (default), 'r', or 'complete'"
             ),
         )
-    return compute_q, reduced
+    return compute_q, reduced  # type: ignore[possibly-undefined]
 
 
 @register_meta([aten.linalg_qr.default, aten.linalg_qr.out])
@@ -1412,7 +1412,7 @@ def triangular_solve_meta(
         cloned_coefficient = self.new_empty([0])
     else:
         torch._check(False, lambda: "triangular_solve: Got an unexpected layout.")
-    return solution, cloned_coefficient
+    return solution, cloned_coefficient  # type: ignore[possibly-undefined]
 
 
 # From aten/src/ATen/native/LinearAlgebra.cpp
@@ -1809,7 +1809,7 @@ def _pad3d_common(input, padding, *, is_reflection):
     )
 
     if batch_mode:
-        return input.new_empty((nbatch, nplane, output_d, output_h, output_w))
+        return input.new_empty((nbatch, nplane, output_d, output_h, output_w))  # type: ignore[possibly-undefined]
     else:
         return input.new_empty((nplane, output_d, output_h, output_w))
 
@@ -5447,9 +5447,10 @@ def meta__efficient_attention_forward(
 
     res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
 
+    logsumexp_batch_dim = cu_seqlens_q.size(0) - 1 if (cu_seqlens_q is not None) else B
     logsumexp_dim = math.ceil(M / 32) * 32 if compute_log_sumexp else 0
     logsum_exp = torch.empty(
-        (B, num_heads, logsumexp_dim),
+        (logsumexp_batch_dim, num_heads, logsumexp_dim),
         dtype=torch.float,
         device=query.device,
     )
