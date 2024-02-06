@@ -31,8 +31,8 @@
 #include <cuda_runtime.h>
 #endif
 
-#include <ATen/native/Resize.h>
 #include <ATen/detail/PrivateUse1HooksInterface.h>
+#include <ATen/native/Resize.h>
 
 #ifdef _MSC_VER
 #define LSEEK _lseeki64
@@ -151,7 +151,8 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
   } else if (device_type == at::kMeta) {
     at::native::resize_bytes_meta(storage.unsafeGetStorageImpl(), newsize);
   } else if (device_type == at::kPrivateUse1) {
-    at::GetPrivateUse1HooksInterface()->resizePrivateUse1Bytes(storage, newsize);
+    at::GetPrivateUse1HooksInterface()->resizePrivateUse1Bytes(
+        storage, newsize);
   } else if (device_type == at::kXPU) {
     ptrdiff_t size_bytes_i = newsize;
     TORCH_CHECK(
