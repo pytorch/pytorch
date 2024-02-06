@@ -3975,6 +3975,12 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(len(t), 2)
         last = t[-1]
         self.assertEqual(last['state'], 'completed')
+        s = last['time_discovered_started_ns']
+        f = last['time_discovered_completed_ns']
+        self.assertIsNotNone(f)
+        if timing_enabled:
+            self.assertIsNotNone(s)
+            self.assertTrue(s <= f)
         self.assertIn('test_c10d_nccl.py', str(last['frames']))
         self.assertEqual(last['input_sizes'], ((3, 4),))
         self.assertEqual(last['output_sizes'], ((3, 4),))
@@ -4131,6 +4137,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 else:
                     self.assertEqual(t[-1]['seq_id'], 2)
                     self.assertEqual(t[-1]['state'], self.started_or_scheduled(timing_enabled))
+                    self.assertIsNone(t[-1]['time_discovered_completed_ns'])
                 # this will eventually cause the missing rank 0
                 # to continue which will unblock the non-zero ranks
                 self.parent.send('next')

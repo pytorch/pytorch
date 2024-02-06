@@ -1,19 +1,22 @@
 #pragma once
 
+#include <aten/src/ATen/cuda/CUDAEvent.h>
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/profiler/combined_traceback.h>
 
 #include <sys/types.h>
 
 #include <cstdlib>
+#include <fstream>
 #include <string>
 #include <system_error>
 #include <vector>
-
 namespace c10d {
 
 /* Trace Utils Related to TORCH_NCCL_DESYNC_DEBUG */
@@ -407,7 +410,16 @@ struct NCCLTraceBuffer {
     c10::time_t time_created_;
     c10::optional<float> duration_;
 
-    const char* state_ = "scheduled";
+    // timestamp when our CPU threads discovered that the kernel started.
+    // will always be _after_ it actually started, and can be very late
+    // if the watchdog thread got stuck on CUDA APIs.
+    c10::optional<c10::time_t> time_discovered_started_;
+
+    // timestamp when our CPU threads discovered that the kernel completed.
+    // will always be _after_ it actually complated, and can be the same time
+    // as the discovery of the start if the watchdog thread is stuck on CUDA
+    // APIs
+    c10::optional<c10::time_t> time_discovered_completed_;
 
     // size information for input/output tensors
     c10::SmallVector<int, 4> input_dims_;
@@ -482,8 +494,8 @@ struct NCCLTraceBuffer {
           break;
         }
       }
-      if (started) {
-        r.state_ = "started";
+      if (started && !r.time_discovered_started_) {
+        r.time_discovered_started_ = c10::getTime();
       }
     }
     if (r.end_ != nullptr) {
@@ -494,8 +506,8 @@ struct NCCLTraceBuffer {
           break;
         }
       }
-      if (completed) {
-        r.state_ = "completed";
+      if (completed && !r.time_discovered_completed_) {
+        r.time_discovered_completed_ = c10::getTime();
       }
     }
   }
@@ -543,7 +555,7 @@ struct NCCLTraceBuffer {
       update_state(entry);
 
       if (compute_duration) {
-        can_compute_duration = strcmp(entry.state_, "completed") == 0 &&
+        can_compute_duration = entry.time_discovered_completed_.has_value() &&
             entry.start_ && entry.end_;
         startEvents = entry.start_;
         endEvents = entry.end_;
@@ -598,6 +610,8 @@ struct NCCLTraceBuffer {
     c10::IValue name_key = "name";
     c10::IValue filename_key = "filename";
     c10::IValue retired_key = "retired";
+    c10::IValue time_discovered_started_key = "time_discovered_started_ns";
+    c10::IValue time_discovered_completed_key = "time_discovered_completed_ns";
 
     std::vector<torch::CapturedTraceback*> tracebacks;
     for (auto& e : result) {
@@ -641,7 +655,24 @@ struct NCCLTraceBuffer {
 
       dict.insert(input_sizes_key, read_sizes(e.input_dims_));
       dict.insert(output_sizes_key, read_sizes(e.output_dims_));
-      dict.insert(state_key, e.state_);
+      if (e.time_discovered_completed_.has_value()) {
+        dict.insert(state_key, "completed");
+      } else if (e.time_discovered_started_.has_value()) {
+        dict.insert(state_key, "started");
+      } else {
+        dict.insert(state_key, "scheduled");
+      }
+
+      dict.insert(
+          time_discovered_started_key,
+          e.time_discovered_started_.has_value()
+              ? int64_t(*e.time_discovered_started_)
+              : c10::IValue());
+      dict.insert(
+          time_discovered_completed_key,
+          e.time_discovered_completed_.has_value()
+              ? int64_t(*e.time_discovered_completed_)
+              : c10::IValue());
       dict.insert(retired_key, e.retired_);
 
       auto frames = new_list();
