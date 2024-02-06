@@ -38,7 +38,7 @@ def foreach_all_gather(
     world_size, rank = group.size(), group.rank()
     # - Copy in
     with torch.cuda.stream(all_gather_copy_in_stream):
-        param_all_gather_inputs: List[Tuple[torch.Tensor, ...]] = [
+        param_all_gather_inputs: List[List[torch.Tensor]] = [
             fsdp_param.all_gather_inputs for fsdp_param in fsdp_params
         ]
         (
@@ -238,7 +238,7 @@ def foreach_reduce_scatter_copy_in(
 
 
 def _get_all_gather_input_metadatas(
-    param_all_gather_inputs: List[Tuple[torch.Tensor, ...]]
+    param_all_gather_inputs: List[List[torch.Tensor]],
 ) -> Tuple[List[List[torch.dtype]], List[List[int]]]:
     param_all_gather_input_dtypes: List[List[torch.dtype]] = []
     param_all_gather_input_numels: List[List[int]] = []

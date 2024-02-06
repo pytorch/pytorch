@@ -385,18 +385,17 @@ class FSDPParam:
         unsafe_free_storage(self.all_gather_outputs[0])
 
     @property
-    def all_gather_inputs(self) -> Tuple[torch.Tensor, ...]:  # 1D
+    def all_gather_inputs(self) -> List[torch.Tensor]:  # 1D
         self._assert_in_states(ShardedState.SHARDED, ShardedState.SHARDED_POST_FORWARD)
         if self.sharded_state == ShardedState.SHARDED:
-            return (_to_dtype_if_needed(self._sharded_param_data, self.param_dtype),)
+            return [_to_dtype_if_needed(self._sharded_param_data, self.param_dtype)]
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
-            return (
-                _to_dtype_if_needed(
-                    cast(torch.Tensor, self._sharded_post_forward_param_data),
-                    self.param_dtype,
-                ),
+            all_gather_input = _to_dtype_if_needed(
+                cast(torch.Tensor, self._sharded_post_forward_param_data),
+                self.param_dtype,
             )
-        return (torch.empty(0),)  # mypy
+            return [all_gather_input]
+        return [torch.empty(0)]  # mypy
 
     @property
     def unsharded_param(self) -> nn.Parameter:  # ND
