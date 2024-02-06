@@ -234,6 +234,28 @@ enforce_cond_guards_match = True
 # overlap without graph-breaks.
 optimize_ddp: Union[bool, str] = True
 
+_ddp_optimization_mode = [
+    "ddp_optimizer",
+    "python_reducer",  # experimental mode
+    "python_reducer_without_compiled_forward",  # experimental mode
+    "no_optimization",
+]
+
+def _get_optimize_ddp_mode():
+    m = sys.modules[__name__]
+    if isinstance(m.optimize_ddp, bool):
+        if m.optimize_ddp:
+            mode = "ddp_optimizer"
+        else:
+            mode = "no_optimization"
+    elif isinstance(m.optimize_ddp, str):
+        mode = m.optimize_ddp
+    else:
+        raise ValueError(f"Invalid type, {type(optimize_ddp)=}")
+
+    assert mode in m._ddp_optimization_mode, f"Invalid mode {mode=}"
+    return mode
+
 # If True, delays DDPOptimizer submodule compilation to 1st run of the model,
 # so that real tensor strides are used in all submodules
 # (instead of using FakeTensor strides which can differ from real tensor strides and causes error in some cases).

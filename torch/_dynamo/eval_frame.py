@@ -593,7 +593,7 @@ def catch_errors_wrapper(callback, hooks: Hooks):
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
             # nametuple constructor
             return None
-        if config.optimize_ddp and not isinstance(config.optimize_ddp, str):
+        if config._get_optimize_ddp_mode() == "ddp_optimizer":
             ddp_module = DistributedDataParallel._get_active_ddp_module()
             if ddp_module:
                 with compile_lock:
@@ -1568,7 +1568,7 @@ class TorchPatcher:
         }
 
         excluded_single_tensor = {
-            radam,  # https://github.com/pytorch/pytorch/issues/117807
+            radam,  # https://github.com/pytorch/pytorch/issues/118230
         }
 
         for opt_mod in optimizer_modules:
