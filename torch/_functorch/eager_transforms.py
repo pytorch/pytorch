@@ -366,10 +366,10 @@ def error_if_complex(func_name, args, is_input):
 
 def _error_if_not_argnum_t(caller: str, arg_name: str, value: Any) -> None:
     if not isinstance(value, int) and not isinstance(value, tuple):
-        raise ValueError(f"{caller}: `{arg_name}` should be int or Tuple[int, ...], got: {type(value)}")
+        raise TypeError(f"{caller}: `{arg_name}` should be int or Tuple[int, ...], got: {type(value)}")
     elif isinstance(value, tuple) and not all(isinstance(element, int) for element in value):
         types = ', '.join([str(type(element)) for element in value])
-        raise ValueError(f"{caller}: `{arg_name}` should be int or Tuple[int, ...], got: Tuple[{types}]")
+        raise TypeError(f"{caller}: `{arg_name}` should be int or Tuple[int, ...], got: Tuple[{types}]")
 
 
 @exposed_in("torch.func")
