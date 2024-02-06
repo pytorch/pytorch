@@ -238,6 +238,8 @@ aten::fmod.Tensor
 aten::fmod.Tensor_out
 aten::fmod_.Scalar
 aten::fmod_.Tensor
+aten::frexp.Tensor
+aten::frexp.Tensor_out
 aten::full
 aten::full.out
 aten::gcd
