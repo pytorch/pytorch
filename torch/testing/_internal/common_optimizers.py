@@ -1325,6 +1325,20 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_mixed_device_dtype",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
+                ),
+                "TestOptimRenewed",
+                "test_step_post_hook",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
+                ),
+                "TestOptimRenewed",
+                "test_step_pre_hook",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1718,6 +1732,20 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_mixed_device_dtype",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_step_post_hook",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_step_pre_hook",
             ),
         ),
     ),
