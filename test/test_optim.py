@@ -1121,6 +1121,4 @@ instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
 
 
 if __name__ == '__main__':
-    for n in range(8):
-        torch.cuda.synchronize(n)
     run_tests()
