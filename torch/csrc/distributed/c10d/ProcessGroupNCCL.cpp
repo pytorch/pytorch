@@ -3254,8 +3254,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
                 output.storage().data_ptr(), stream);
           }
           const auto ncclDataType = getNcclDataType(input.scalar_type());
-          const auto ncclReduceOp = getNcclReduceOp(
-              opts.reduceOp, input, ncclDataType, comm);
+          const auto ncclReduceOp =
+              getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
           return ncclReduceScatter(
               input.data_ptr(),
               output.data_ptr(),
