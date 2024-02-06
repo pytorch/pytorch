@@ -1336,7 +1336,7 @@ if(USE_ROCM)
     endif()
 
     if(USE_FLASH_ATTENTION)
-      include(${CMAKE_CURRENT_LIST_DIR}/External/oort.cmake)
+      include(${CMAKE_CURRENT_LIST_DIR}/External/aotriton.cmake)
     endif()
     if(USE_CUDA)
       caffe2_update_option(USE_MEM_EFF_ATTENTION OFF)
