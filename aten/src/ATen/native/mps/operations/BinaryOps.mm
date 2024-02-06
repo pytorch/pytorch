@@ -53,6 +53,9 @@ typedef MPSGraphTensor* (^BinaryOpBlock)(BinaryOpCachedGraph*, MPSGraphTensor*, 
 #define BinaryOpFn(graph, primary, secondary) \
   MPSGraphTensor*(mps::BinaryOpCachedGraph * graph, MPSGraphTensor * primary, MPSGraphTensor * secondary)
 
+static inline bool supportsComplex() {
+  return is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS);
+}
 // alpha is always 1.0 except when this function is called from add_sub_lerp_template()
 static void binaryOpTensor(const Tensor& self,
                            const Tensor& other,
@@ -69,7 +72,8 @@ static void binaryOpTensor(const Tensor& self,
               "MPS: ",
               op_name,
               " op with int64 input is supported natively starting from macOS 13.2");
-  TORCH_CHECK_TYPE(!isComplexType(self.scalar_type()), "Complex types are unsupported on MPS");
+  TORCH_CHECK_TYPE(!isComplexType(self.scalar_type()) || mps::supportsComplex(),
+                   "Complex types are supported starting from MacOS 14.0+");
   MPSStream* mpsStream = getCurrentMPSStream();
 
   const bool is_self_scalar = self.dim() == 0;
@@ -388,7 +392,7 @@ CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_or_out_mps, logicalOR, Tensor);
 CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_xor_out_mps, logicalXOR, Tensor);
 
 TORCH_IMPL_FUNC(mul_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
-  if (c10::isComplexType(self.scalar_type()) || c10::isComplexType(other.scalar_type())) {
+  if (!mps::supportsComplex() && (c10::isComplexType(self.scalar_type()) || c10::isComplexType(other.scalar_type()))) {
     return mps::complex_mul_out(self, other, output);
   }
   mps::binaryOpTensor(
@@ -418,7 +422,8 @@ TORCH_IMPL_FUNC(div_out_mps)(const Tensor& self, const Tensor& other, const Tens
 }
 
 TORCH_IMPL_FUNC(add_out_mps)(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output) {
-  if (isComplexType(self.scalar_type()) && isComplexType(other.scalar_type()) && !alpha.isComplex()) {
+  if (isComplexType(self.scalar_type()) && isComplexType(other.scalar_type()) && !alpha.isComplex() &&
+      !mps::supportsComplex()) {
     // Complex add with non-complex alpha is just add over views
     return mps::add_sub_lerp_template(
         at::view_as_real(self), at::view_as_real(other), alpha, at::view_as_real(output), "add");
@@ -427,7 +432,8 @@ TORCH_IMPL_FUNC(add_out_mps)(const Tensor& self, const Tensor& other, const Scal
 }
 
 TORCH_IMPL_FUNC(sub_out_mps)(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output) {
-  if (isComplexType(self.scalar_type()) && isComplexType(other.scalar_type()) && !alpha.isComplex()) {
+  if (isComplexType(self.scalar_type()) && isComplexType(other.scalar_type()) && !alpha.isComplex() &&
+      !mps::supportsComplex()) {
     // Complex sub with non-complex alpha is just add over views
     return mps::add_sub_lerp_template(
         at::view_as_real(self), at::view_as_real(other), alpha, at::view_as_real(output), "sub");

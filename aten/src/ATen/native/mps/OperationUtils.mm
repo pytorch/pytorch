@@ -148,6 +148,9 @@ MPSDataType getMPSScalarType(ScalarType scalar_type) {
       TORCH_CHECK_TYPE(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
                        "MPS complex types are only supported on MacOS 14.0 or newer.");
       return MPSDataTypeComplexFloat16;
+    // This is an intentional fallthrough supporting ComplexDouble for Scalar
+    // types as they are casted to Complex64 currently.
+    case ScalarType::ComplexDouble:
     case ScalarType::ComplexFloat:
       TORCH_CHECK_TYPE(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
                        "MPS complex types are only supported on MacOS 14.0 or newer.");
@@ -414,6 +417,11 @@ MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
       return {.value.i = scalar.to<uint8_t>(), .size = sizeof(uint8_t), .type = type};
     case ScalarType::Bool:
       return {.value.b = scalar.to<bool>(), .size = sizeof(bool), .type = type};
+    case ScalarType::ComplexHalf:
+      return {.value.cf = scalar.to<c10::complex<at::Half>>(), .size = sizeof(int32_t), .type = type};
+    case ScalarType::ComplexFloat:
+    case ScalarType::ComplexDouble:
+      return {.value.cf = scalar.to<c10::complex<float>>(), .size = sizeof(int64_t), .type = type};
     default:
       TORCH_INTERNAL_ASSERT(false, "Unsupported scalar type '", type, "' on MPS backend.");
   }
