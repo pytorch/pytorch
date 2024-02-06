@@ -632,6 +632,20 @@ class FunctoolsPartialVariable(VariableTracker):
         assert isinstance(keywords, dict)
         self.keywords = keywords
 
+    def reconstruct(self, codegen):
+        codegen.load_import_from("functools", "partial")
+        codegen(self.func)
+        if self.args:
+            codegen.foreach(self.args)
+        if not self.keywords:
+            return create_call_function(len(self.args) + 1, True)
+
+        codegen.foreach(self.keywords.values())
+        keys = tuple(self.keywords.keys())
+        return codegen.create_call_function_kw(
+            len(keys) + len(self.args) + 1, keys, True
+        )
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
