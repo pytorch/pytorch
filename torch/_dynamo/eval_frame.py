@@ -612,7 +612,8 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                     return hijacked_callback(frame, cache_entry, hooks, frame_state)
 
         with compile_lock, _disable_current_modes():
-            return callback(frame, cache_entry, hooks, frame_state)
+            # skip=1: skip this frame
+            return callback(frame, cache_entry, hooks, frame_state, skip=1)
 
     catch_errors._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
     return catch_errors
