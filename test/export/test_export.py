@@ -2096,7 +2096,10 @@ def forward(self, l_x_):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(l_x_);  l_x_ = None
     ge = _local_scalar_dense >= 0
     scalar_tensor = torch.ops.aten.scalar_tensor.default(ge);  ge = None
-    _assert_async = torch.ops.aten._assert_async.msg(scalar_tensor, '_local_scalar_dense is outside of inline constraint [0, inf].');  scalar_tensor = None
+    _assert_async = torch.ops.aten._assert_async.msg(scalar_tensor, '_local_scalar_dense is outside of inline constraint [0, 9223372036854775807].');  scalar_tensor = None
+    le = _local_scalar_dense <= 9223372036854775807
+    scalar_tensor_1 = torch.ops.aten.scalar_tensor.default(le);  le = None
+    _assert_async_1 = torch.ops.aten._assert_async.msg(scalar_tensor_1, '_local_scalar_dense is outside of inline constraint [0, 9223372036854775807].');  scalar_tensor_1 = None
     sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
     zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
     return (zeros,)""",

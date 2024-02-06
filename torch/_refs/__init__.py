@@ -371,6 +371,8 @@ def handle_noncontiguous_outputs(input_tlist, output):
 
 
 def _broadcast_shapes(*_shapes):
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     shapes = tuple(
         (x,) if isinstance(x, IntLike) else x
         for x in filter(lambda x: x is not None, _shapes)
@@ -391,13 +393,13 @@ def _broadcast_shapes(*_shapes):
     ] * reduce(max, (len(shape) for shape in shapes))
     for arg_idx, shape in enumerate(shapes):
         for idx in range(-1, -1 - len(shape), -1):
-            if common_shape[idx] == 1:
+            if guard_size_oblivious(common_shape[idx] == 1):
                 if shape[idx] < 0:
                     raise ValueError(
                         "Attempting to broadcast a dimension with negative length!"
                     )
                 common_shape[idx] = shape[idx]
-            elif shape[idx] != 1:
+            elif guard_size_oblivious(shape[idx] != 1):
                 if common_shape[idx] != shape[idx]:
                     raise RuntimeError(
                         f"Attempting to broadcast a dimension of length {shape[idx]} at {idx}! "
@@ -2710,9 +2712,11 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 
     utils.check_same_device(*tensors, allow_cpu_scalar_tensors=False)
 
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     for t in tensors:
         # match logic in legacy_cat_wrap_dim
-        if t.ndim == 1 and t.size(0) == 0:
+        if t.ndim == 1 and guard_size_oblivious(t.size(0) == 0):
             continue
         dim = utils.canonicalize_dim(t.ndim, dim)
         utils.validate_idx(t.ndim, dim)
@@ -2721,7 +2725,9 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     memory_format = cat_compute_output_memory_format(tensors)
 
     # Filters tensors with one dimension of length zero
-    filtered = tuple(x for x in tensors if not (x.ndim == 1 and x.numel() == 0))
+    filtered = tuple(
+        x for x in tensors if not (x.ndim == 1 and guard_size_oblivious(x.numel() == 0))
+    )
     if len(filtered) == 0:
         t = tensors[0]
 
@@ -2860,6 +2866,8 @@ def dstack(tensors: TensorSequenceType) -> TensorLikeType:
 
 @register_decomposition(aten.expand)
 def expand(a: Tensor, *shape) -> Tensor:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     # NOTE: cannot use utils.extract_shape_from_varargs here
     # because that also validates the shape, but the shape
     # given to expand may be "invalid"
@@ -2877,7 +2885,9 @@ def expand(a: Tensor, *shape) -> Tensor:
         offset_idx = idx + offset
         requested_length = shape[offset_idx]
         torch._check(
-            requested_length == x or x == 1 or requested_length == -1,
+            guard_size_oblivious(requested_length == x)
+            or guard_size_oblivious(x == 1)
+            or requested_length == -1,
             lambda: f"expand: attempting to expand a dimension of length {x}!",
         )
 
@@ -3559,6 +3569,8 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
 
 
 def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, sym_eq
+
     # Creates a valid shape
     shape = utils.extract_shape_from_varargs(shape, validate=False)
     # Reshape may be given a shape with a -1 length
@@ -3566,11 +3578,11 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
     shape = utils.infer_size(shape, a.numel())
 
     # Short-circuits if shape is the same
-    if tuple(a.shape) == tuple(shape):
+    if guard_size_oblivious(sym_eq(tuple(a.shape), tuple(shape))):
         return prims.view_of(a)
 
     # Special-cases tensors with no elements
-    if a.numel() == 0:
+    if guard_size_oblivious(a.numel() == 0):
         return as_strided(a, shape, utils.make_contiguous_strides_for(shape))
 
     # Special-cases reshaping zero dim tensors
@@ -3622,7 +3634,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             continue
 
         # Skips dimensions that are already the correct length
-        if length == a_.shape[idx]:
+        if guard_size_oblivious(length == a_.shape[idx]):
             idx = idx + 1
             continue
 
@@ -3631,7 +3643,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         # specify the same number of elements above
         accum = a_.shape[idx]
         end = idx
-        while accum % length != 0:
+        while guard_size_oblivious(accum % length != 0):
             end = end + 1
             accum = accum * a_.shape[end]
         if end != idx:
@@ -3653,7 +3665,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             a_ = flatten(a_, idx, end)
 
         # Splits the (possibly flattened) dimension to create the desired dim length
-        if accum != length:
+        if guard_size_oblivious(accum != length):
             a_ = prims.split_dim(a_, idx, length)
 
         idx = idx + 1
@@ -3966,6 +3978,8 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
 
 @register_decomposition(aten.squeeze.dims)
 def squeeze(a: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     if dim is None:
         dims = tuple(idx for idx, size in enumerate(a.shape) if size == 1)
         return prims.squeeze(a, dims) if dims else prims.view_of(a)
@@ -3979,7 +3993,7 @@ def squeeze(a: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType
         return prims.view_of(a)
 
     # Note: squeeze does not modify tensors when the given dim is not a dimension of length 1
-    dims = tuple(d for d in dims if a.shape[d] == 1)
+    dims = tuple(d for d in dims if guard_size_oblivious(a.shape[d] == 1))
     if len(dims) == 0:
         return prims.view_of(a)
     if len(dims) == 1:

@@ -396,6 +396,28 @@ class SymNode:
             _advise_is_size(SymInt(self))
         return r
 
+    def guard_size_oblivious(self, file, line):
+        """
+        Like guard_bool, but if we encounter unbacked symbols, if those symbols
+        are size-like, we will treat them as >= 2 for the purposes of the analysis.
+
+        This CHANGES the runtime semantics, but all size-oblivious sites have been
+        audited to ensure that the runtime semantics don't change in a material way.
+        Acceptable runtime semantic changes are, e.g., squeeze() no longer dropping
+        an unbacked one size, or a tensor reporting as non-contiguous even if it's
+        contiguous if it would have been reported contiguous due to being empty.
+        """
+        # TODO: use the file/line for some useful diagnostic on why a
+        # guard occurred
+        r = self.shape_env.evaluate_expr(
+            self.expr, self.hint, fx_node=self.fx_node, size_oblivious=True
+        )
+        try:
+            return bool(r)
+        except Exception:
+            log.warning("Failed to convert to bool: %s", r)
+            raise
+
     def bool_(self):
         return self.guard_bool("", 0)
 
@@ -1174,7 +1196,7 @@ def _make_user_magic(method, user_type):
     # so that our internal logic can assume everything is nodes
 
     if method in magic_methods_on_operator_with_trailing_underscore:
-        method_attr = f"{method}_"
+        method_attr = f"sym_{method}"
     else:
         method_attr = method
 

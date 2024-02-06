@@ -1168,8 +1168,6 @@ class GraphModuleDeserializer:
                             sym,
                             compiler_min=vr.lower,  # type: ignore[arg-type]
                             compiler_max=vr.upper,  # type: ignore[arg-type]
-                            runtime_min=vr.lower,  # type: ignore[arg-type]
-                            runtime_max=vr.upper  # type: ignore[arg-type]
                         )
 
             if val.hint is None:
