@@ -71,10 +71,9 @@ class FuncTorchInterpreter(ABC):
         return self._cptr.key()
 
     def get_state(self):
-        return (self.level(),)
+        raise NotImplementedError()
 
     def check_state(self, *state):
-        print('compare', state, self.get_state())
         return state == (self.get_state(),)
 
 
@@ -114,7 +113,7 @@ class VmapInterpreter(FuncTorchInterpreter):
         raise RuntimeError(f"Unknown RandomnessType: {typ}")
 
     def get_state(self):
-        return (self.level(), self.randomness())
+        return (self.key().name, self.level(), self.randomness())
 
 
 @contextlib.contextmanager
@@ -152,6 +151,9 @@ class GradInterpreter(FuncTorchInterpreter):
 
     def prev_grad_mode(self):
         return self._cptr.prevGradMode()
+
+    def get_state(self):
+        return (self.key().name, self.level())
 
 
 class JvpInterpreter(FuncTorchInterpreter):
