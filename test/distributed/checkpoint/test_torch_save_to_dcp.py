@@ -168,6 +168,7 @@ class TorchSaveReader(StorageReader):
     def prepare_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
         return global_plan
 
+    @staticmethod
     def check(checkpoint_id: Union[str, os.PathLike]) -> bool:
         return True
 
@@ -199,6 +200,7 @@ class ConversionReader(StorageReader):
     def prepare_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
         return self.reader.prepare_global_plan(global_plan)
 
+    @staticmethod
     def check(checkpoint_id: Union[str, os.PathLike]) -> bool:
         return True
 
