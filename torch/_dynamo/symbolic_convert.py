@@ -495,7 +495,7 @@ def break_graph_if_unsupported(*, push):
                 ):
                     graph_break_log.debug(
                         "Graph break: %s\nFrom user code at:\n%s",
-                        traceback.format_exception(excp),  # NB: yes chaining
+                        ''.join(traceback.format_exception(excp)),  # NB: yes chaining
                         user_stack_formatted,
                     )
 
