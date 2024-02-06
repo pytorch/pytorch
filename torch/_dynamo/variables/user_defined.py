@@ -116,7 +116,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if source
                 else functools.partial(SourcelessBuilder(), tx=tx)
             )
-            return builder(obj.__get__(self.value))
+            return builder(value=obj.__get__(self.value))
 
         # Special handling of collections.OrderedDict.fromkeys()
         # Wrap it as GetAttrVariable(collections.OrderedDict, "fromkeys") to make it consistent with
