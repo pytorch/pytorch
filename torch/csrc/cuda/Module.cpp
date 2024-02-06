@@ -925,7 +925,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
       static_cast<void (*)(
           c10::optional<std::string>,
           c10::optional<std::string>,
-          const std::string&,
+          c10::optional<std::string>,
           size_t)>(torch::cuda::_record_memory_history));
 
   m.def("_cuda_isHistoryEnabled", []() {

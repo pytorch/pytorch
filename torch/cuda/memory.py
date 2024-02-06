@@ -703,6 +703,7 @@ def _record_memory_history(enabled="all", *args, **kwargs):
             `"all"`, additionally keep tracebacks for free calls.
             Defaults to "all".
         stacks (Literal["python", "all"], optional):
+            `None`, Do not record any tracebacks.
             `"python"`, include Python, TorchScript, and inductor frames in tracebacks
             `"all"`, additionally include C++ frames
             Defaults to "all".
@@ -718,7 +719,7 @@ def _record_memory_history(enabled="all", *args, **kwargs):
 def _record_memory_history_impl(
     enabled: Optional[str] = "all",
     context: Optional[str] = "all",
-    stacks: str = "all",
+    stacks: Optional[str] = "all",
     max_entries: int = sys.maxsize,
     device: Union[Device, int] = None,
 ):

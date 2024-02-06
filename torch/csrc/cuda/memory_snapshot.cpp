@@ -78,7 +78,11 @@ std::vector<IValue> ivalue_symbolize(
   return result;
 }
 
-std::shared_ptr<c10::GatheredContext> gather() {
+std::shared_ptr<c10::GatheredContext> gather_none() {
+  return CapturedTraceback::gather(false, false, false);
+}
+
+std::shared_ptr<c10::GatheredContext> gather_with_python() {
   return CapturedTraceback::gather(true, true, false);
 }
 
@@ -104,7 +108,7 @@ void _record_memory_history(
     int64_t trace_alloc_max_entries,
     bool trace_alloc_record_context,
     bool record_cpp_context) {
-  c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
+  c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather_with_python;
   if (enabled && record_cpp_context) {
     recorder = gather_with_cpp;
     // warm up C++ stack unwinding
@@ -132,7 +136,7 @@ static void checkOptionIn(
 void _record_memory_history(
     c10::optional<std::string> enabled,
     c10::optional<std::string> context,
-    const std::string& stacks,
+    c10::optional<std::string> stacks,
     size_t max_entries) {
   if (enabled) {
     checkOptionIn(
@@ -146,14 +150,23 @@ void _record_memory_history(
         {"state", "alloc", "all"},
         "expected context to be 'state', 'alloc', 'all', or None");
   }
-  checkOptionIn(
-      stacks, {"python", "all"}, "expected stacks to be 'python', or 'all'");
+  if (stacks) {
+    checkOptionIn(
+        *stacks,
+        {"python", "all"},
+        "expected stacks to be 'python', 'all', or None");
+  }
 
-  c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
-  if (enabled && stacks == "all") {
-    recorder = gather_with_cpp;
-    // warm up C++ stack unwinding
-    unwind::unwind();
+  c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather_none;
+  if (enabled && stacks) {
+    if (*stacks == "all") {
+      recorder = gather_with_cpp;
+      // warm up C++ stack unwinding
+      unwind::unwind();
+    }
+    else if (*stacks == "python") {
+      recorder = gather_with_python;
+    }
   }
   max_entries = (enabled && *enabled == "all") ? max_entries : 1;
   auto when = c10::cuda::CUDACachingAllocator::RecordContext::NEVER;
