@@ -3,12 +3,11 @@
 import unittest
 import functools
 import itertools
-from copy import deepcopy
 
 import torch
 from torch.nn import Parameter
 from torch.optim import (
-    Adadelta, Adagrad, Adam, Adamax, AdamW, ASGD, NAdam, RAdam, RMSprop, Rprop, SGD, SparseAdam, Optimizer
+    Adadelta, Adagrad, Adam, Adamax, AdamW, ASGD, NAdam, RAdam, RMSprop, Rprop, SGD, SparseAdam
 )
 from torch.optim.lr_scheduler import (
     StepLR,
@@ -28,7 +27,6 @@ from torch.testing._internal.common_utils import (
 
 
 from torch.testing._internal.common_cuda import TEST_CUDA
-from typing import Dict, Any
 from unittest.mock import patch
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -746,60 +744,6 @@ class TestOptim(TestCase):
                     nesterov=False,
                     maximize=False,
                 )
-
-    @staticmethod
-    def _load_state_dict_pre_hook1(optimizer: Optimizer, state_dict: Dict[str, Any]) -> None:
-        state_dict["param_groups"][0]["lr"] = 0.002
-
-    @staticmethod
-    def _load_state_dict_pre_hook2(optimizer: Optimizer, state_dict: Dict[str, Any]) -> Dict[str, Any]:
-        # The typical use case for returning a state dict is to drastically modify the state dict.
-        # I will simulate by simply making a deep copy and ensuring that my_state_dict still gets used
-        my_state_dict = deepcopy(state_dict)
-        my_state_dict["param_groups"][0]["lr"] = 0.003
-        return my_state_dict
-
-    @staticmethod
-    def _load_state_dict_post_hook(optimizer: Optimizer) -> None:
-        optimizer.state["ran_load_state_dict_pre_hook2"] = optimizer.param_groups[0]["lr"] == 0.003
-        optimizer.state["ran_load_state_dict_post_hook"] = True
-
-    def test_load_state_dict_pre_hook_and_prepend(self):
-        param = torch.rand(2, 3, requires_grad=True)
-        param.grad = torch.rand(2, 3, requires_grad=True)
-        opt = SGD([param], lr=0.001)
-        state_dict = opt.state_dict()
-
-        # usually one would have a new opt instance here, but it's all the same here
-        opt.register_load_state_dict_pre_hook(self._load_state_dict_pre_hook1)
-        opt.load_state_dict(state_dict)
-        self.assertEqual(opt.param_groups[0]["lr"], 0.002)
-
-        opt.register_load_state_dict_pre_hook(self._load_state_dict_pre_hook2, prepend=True)
-        opt.load_state_dict(state_dict)
-        # If prepend were False would be 0.003 but since prepend is True, the other hook overrides
-        self.assertEqual(opt.param_groups[0]["lr"], 0.002)
-
-    def test_load_state_dict_post_hook(self):
-        param = torch.rand(2, 3, requires_grad=True)
-        param.grad = torch.rand(2, 3, requires_grad=True)
-        opt = SGD([param], lr=0.001)
-
-        opt.register_load_state_dict_post_hook(self._load_state_dict_post_hook)
-        opt.load_state_dict(opt.state_dict())
-        self.assertFalse(opt.state["ran_load_state_dict_pre_hook2"])
-        self.assertTrue(opt.state["ran_load_state_dict_post_hook"])
-
-    def test_load_state_dict_pre_post_hook(self):
-        param = torch.rand(2, 3, requires_grad=True)
-        param.grad = torch.rand(2, 3, requires_grad=True)
-        opt = SGD([param], lr=0.001)
-
-        opt.register_load_state_dict_pre_hook(self._load_state_dict_pre_hook2)
-        opt.register_load_state_dict_post_hook(self._load_state_dict_post_hook)
-        opt.load_state_dict(opt.state_dict())
-        self.assertTrue(opt.state["ran_load_state_dict_pre_hook2"])
-        self.assertTrue(opt.state["ran_load_state_dict_post_hook"])
 
 
 def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
