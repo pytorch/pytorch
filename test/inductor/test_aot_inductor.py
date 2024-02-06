@@ -1751,6 +1751,14 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    def test_fft_c2c(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.fft.fftn(x), torch.fft.fftn(x).real
+
+        example_inputs = (torch.randn(16, 16, 16, device=self.device),)
+        self.check_model(Model(), example_inputs)
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
@@ -1816,6 +1824,7 @@ CPU_TEST_FAILURES = {
     "test_dynamic_cat": fail_minimal_arrayref_interface(),
     "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
     "test_dynamic_smem_above_default_limit": fail_with_and_without_stack_allocation(),
+    "test_fft_c2c": fail_stack_allocation(is_skip=True),
     # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
     #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
     "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),
