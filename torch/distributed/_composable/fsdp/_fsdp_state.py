@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
-from torch.autograd.graph import register_multi_grad_hook
+from torch.autograd.graph import Node, register_multi_grad_hook
 from torch.distributed._composable_state import (
     _get_module_state,
     _insert_module_state,
@@ -186,7 +186,7 @@ class FSDPState(_State):
                 )
         return output
 
-    def _pre_backward(self, forward_grad_fns: Tuple[Any], *unused: Any) -> None:
+    def _pre_backward(self, forward_grad_fns: Tuple[Node, ...], *unused: Any) -> None:
         self._training_state = TrainingState.PRE_BACKWARD
         self._register_root_post_backward_final_callback()
         if self._fsdp_param_group:
