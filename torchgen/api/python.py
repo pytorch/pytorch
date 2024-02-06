@@ -1002,6 +1002,7 @@ def returns_named_tuple_pyi(signature: PythonSignature) -> Optional[Tuple[str, s
         namedtuple_def_lines.extend(
             f"    {name}: {typ}" for name, typ in zip(field_names, python_returns)
         )
+        namedtuple_def_lines.append("    def __init__(self, sequence: Sequence): ...")
         namedtuple_def_lines.append("")  # add an extra newline
         namedtuple_def = "\n".join(namedtuple_def_lines)
         # Example:
@@ -1009,6 +1010,7 @@ def returns_named_tuple_pyi(signature: PythonSignature) -> Optional[Tuple[str, s
         #     "class max(NamedTuple):\n"
         #     "    values: Tensor\n"
         #     "    indices: Tensor\n"
+        #     "    def __init__(self, sequence: Sequence): ...\n
         # )
         return namedtuple_name, namedtuple_def
     return None

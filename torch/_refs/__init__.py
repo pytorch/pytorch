@@ -1367,6 +1367,7 @@ def fmod(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 
 @register_decomposition(aten.frexp)
+@out_wrapper("mantissa", "exponent")
 def frexp(self: TensorLikeType) -> Tuple[TensorLikeType, TensorLikeType]:
     return torch.return_types.frexp(prims.frexp(self))
 
