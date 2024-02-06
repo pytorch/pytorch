@@ -1849,10 +1849,14 @@ def _get_batch_norm_reserve_tensor(
     eps: float,
     cudnn_enabled: bool,
 ) -> Tensor:
-    backend = torch._C._select_batch_norm_backend(input, weight, bias, running_mean, running_var, True, eps, cudnn_enabled)
-    if backend == torch._C._BatchNormBackend.Cudnn:
-        reserve_size = torch._C._get_cudnn_batch_norm_reserve_space_size(input)
-        return torch.empty(reserve_size, dtype=input.dtype, layout=input.layout, device=input.device)
+    backend = torch._C._select_batch_norm_backend(  # type: ignore[attr-defined]
+        input, weight, bias, running_mean, running_var, True, eps, cudnn_enabled
+    )
+    if backend == torch._C._BatchNormBackend.Cudnn:  # type: ignore[attr-defined]
+        reserve_size = torch._C._get_cudnn_batch_norm_reserve_space_size(input)  # type: ignore[attr-defined]
+        return torch.empty(
+            reserve_size, dtype=input.dtype, layout=input.layout, device=input.device
+        )
     else:
         return Tensor()
 
@@ -1879,7 +1883,9 @@ def _new_batch_norm_with_update(
         eps,
         False,  # functional
     )
-    reserve = _get_batch_norm_reserve_tensor(input, weight, bias, running_mean, running_var, eps, cudnn_enabled)
+    reserve = _get_batch_norm_reserve_tensor(
+        input, weight, bias, running_mean, running_var, eps, cudnn_enabled
+    )
     return output, save_mean, save_rstd, reserve
 
 
@@ -1905,7 +1911,9 @@ def _new_batch_norm_no_update(
         eps,
         False,  # functional
     )
-    reserve = _get_batch_norm_reserve_tensor(input, weight, bias, running_mean, running_var, eps, cudnn_enabled)
+    reserve = _get_batch_norm_reserve_tensor(
+        input, weight, bias, running_mean, running_var, eps, cudnn_enabled
+    )
     return output, save_mean, save_rstd, reserve
 
 
@@ -4381,13 +4389,6 @@ def scaled_dot_product_flash_attention_for_cpu(
     scale: Optional[float] = None,
 ) -> Tuple[Tensor, Tensor]:
     dtype = query.dtype
-    batchSize, num_head, qSize, headSize = (
-        query.shape[0],
-        query.shape[1],
-        query.shape[2],
-        query.shape[3],
-    )
-
     torch._check(
         torch.is_floating_point(query) and dtype is not torch.half,
         lambda: f"query must be FP32, FP64, BF16 but got {query.dtype}",

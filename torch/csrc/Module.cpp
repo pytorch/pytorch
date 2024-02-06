@@ -2066,12 +2066,12 @@ Call this whenever a new thread is created in order to propagate values from
 
 #ifdef USE_CUDA
 #if AT_CUDNN_ENABLED()
-   py_module.def(
-       "_get_cudnn_batch_norm_reserve_space_size",
-       [](const at::Tensor& input) {
-         return at::native::_get_cudnn_batch_norm_reserve_space_size(input);
-       },
-       py::arg("input"));
+  py_module.def(
+      "_get_cudnn_batch_norm_reserve_space_size",
+      [](const at::Tensor& input) {
+        return at::native::_get_cudnn_batch_norm_reserve_space_size(input);
+      },
+      py::arg("input"));
 #endif
 #endif
 
