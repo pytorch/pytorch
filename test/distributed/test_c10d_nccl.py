@@ -3951,7 +3951,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         ver = t['version']
-        self.assertEqual(ver, "1.0")
+        self.assertEqual(ver, "1.1")
         t = t['entries']
         self.assertEqual(len(t), 2)
         last = t[-1]
