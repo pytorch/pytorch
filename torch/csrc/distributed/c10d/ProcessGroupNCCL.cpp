@@ -1523,7 +1523,9 @@ void ProcessGroupNCCL::watchdogHandler() {
          /* no increment */) {
       // PG and comms have already been terminated, work status check will throw
       if (terminateProcessGroup_.load()) {
-        LOG(INFO) << logPrefix() << "Terminating watchdog thread during processing workMetaList_";
+        LOG(INFO)
+            << logPrefix()
+            << "Terminating watchdog thread during processing workMetaList_";
         break;
       }
       auto& work = *it;
