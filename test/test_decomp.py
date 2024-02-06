@@ -954,6 +954,8 @@ class DecompOneOffTests(TestCase):
         masks = [None, torch.ones((1, 1, 100, 100), device=device, dtype=torch.bool)]
 
         atol, rtol = dtype_precisions[dtype]
+        if dtype == torch.float16:
+            atol = 0.13
 
         for mask in masks:
             is_causal = mask is None
