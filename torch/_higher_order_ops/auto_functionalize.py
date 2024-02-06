@@ -38,10 +38,10 @@ class AutoFunctionalized(HigherOrderOperator):
 
     This HOP runs a "functional" version of _mutable_op.
 
-    Concretely, it clones kwargs that `_mutable_op` mutates (specified by
-    _mutated_args_names), runs `out = _mutable_op(**kwargs)` with the cloned
-    values, and then returns (out, Tuple of the cloned values that were
-    mutated).
+    Concretely, it looks at all the arguments that are mutable through
+    _mutable_op's operator schema, clones those kwargs, runs
+    `out = _mutable_op(**kwargs)` with the cloned values, and then returns the
+    operator output concatenated with the cloned values that were mutated.
 
     We have some restrictions on `_mutable_op`.
     See `can_auto_functionalize` for the restrictions. We can likely lift
@@ -182,7 +182,7 @@ def do_auto_functionalize(
     op: torch._ops.OpOverload, args: Tuple[Any, ...], kwargs: Dict[str, Any]
 ) -> Any:
     """Functionalizes a call to op(*args, **kwargs) by emitting a call to
-    `outs = auto_functionalized(op, mutated_args_names, normalized_kwargs)`
+    `outs = auto_functionalized(op, normalized_kwargs)`
     and replacing the mutated (args, kwargs) with the corresponding outputs.
 
     The normalized_kwargs are just the (args, kwargs), but all in kwarg form.
