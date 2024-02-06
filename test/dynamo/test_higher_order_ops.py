@@ -2473,7 +2473,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertIn(
             """\
     triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter().check_state((1, 'same'))  # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:401 in _flat_vmap""",
+    - torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter().check_state(('Vmap', 1, 'same'))  # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:401 in _flat_vmap""",
             record.getMessage(),
         )
 
@@ -2500,7 +2500,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertIn(
             """\
     triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter().check_state((1, 'error'))  # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:401 in _flat_vmap""",
+    - torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter().check_state(('Vmap', 1, 'error'))  # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:401 in _flat_vmap""",
             record.getMessage(),
         )
 
@@ -2531,7 +2531,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertIn(
             """\
     triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter().check_state((1, 'error'))  # with grad_increment_nesting() as level:  # _functorch/eager_transforms.py:1232 in grad_and_value_impl""",
+    - torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter().check_state(('Vmap', 1, 'error'))  # with grad_increment_nesting() as level:  # _functorch/eager_transforms.py:1232 in grad_and_value_impl""",
             record.getMessage(),
         )
 
@@ -2552,7 +2552,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertIn(
             """\
     triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter().check_state((1, 'same'))  # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:401 in _flat_vmap""",
+    - torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter().check_state(('Vmap', 1, 'same'))  # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:401 in _flat_vmap""",
             record.getMessage(),
         )
 
@@ -3302,7 +3302,20 @@ class GraphModule(torch.nn.Module):
 
         x = torch.zeros(3, 3, 4, 5)
         y = torch.vmap(fn)(x)
+        # should not recompile on second call. See Pytorch issue #118493
         y = torch.vmap(fn)(x)
+
+    @config.patch(capture_func_transforms=True)
+    @config.patch(error_on_recompile=True)
+    def test_vmap_recompile_with_randomness(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            return torch.vmap(lambda x: x.sin())(x)
+
+        x = torch.zeros(3, 3, 4, 5)
+        y = torch.vmap(fn, randomness="same")(x)
+        with self.assertRaises(torch._dynamo.exc.RecompileError):
+            y = torch.vmap(fn, randomness="different")(x)
 
     @config.patch(capture_func_transforms=True)
     def test_vmap_get_wrapped(self):
