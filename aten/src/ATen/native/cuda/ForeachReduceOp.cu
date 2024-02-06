@@ -112,7 +112,7 @@ template <
     typename opmath_t = at::opmath_type<T>>
 __global__ void lpnorm_cleanup(
     const opmath_t* output_per_tensor,
-    TensorListMetadata<1> vec_res_meta,
+    T* ret_per_tensor,
     int max_chunks_per_tensor) {
   __shared__ opmath_t vals[512];
 
@@ -130,7 +130,7 @@ __global__ void lpnorm_cleanup(
       ? at::native::cuda_utils::BlockReduceSum<opmath_t>(val, vals)
       : at::native::cuda_utils::BlockReduceMax(val, vals);
   if (threadIdx.x == 0) {
-    *(T*)vec_res_meta.addresses[0][blockIdx.x] =
+    ret_per_tensor[blockIdx.x] =
         norm_type == NormType::L1 || norm_type == NormType::LInf
         ? final_val
         : ::sqrt(final_val);
@@ -180,12 +180,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
   auto output_per_tensor = at::zeros(
       {ntensors * max_chunks_per_tensor},
       options.dtype(toOpMathType(tensors[0].scalar_type())));
-
-  std::vector<at::Tensor> vec_res;
-  vec_res.reserve(ntensors);
-  for (int i = 0; i < ntensors; i++) {
-    vec_res.push_back(at::empty({}, options));
-  }
+  auto ret_per_tensor = at::empty({ntensors}, options);
 
   auto tensor_lists = std::vector<std::vector<Tensor>>{tensors.vec()};
   if (p == static_cast<double>(1)) {
@@ -205,14 +200,9 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
           const at::cuda::OptionalCUDAGuard device_guard(
               device_of(output_per_tensor));
           auto stream = at::cuda::getCurrentCUDAStream();
-          TensorListMetadata<1> vecResMeta;
-          for (int i = 0; i < ntensors; i++) {
-            vecResMeta.addresses[0][i] =
-                vec_res[i].mutable_data_ptr<scalar_t>();
-          }
           lpnorm_cleanup<scalar_t, NormType::L1><<<ntensors, 512, 0, stream>>>(
               output_per_tensor.const_data_ptr<opmath_t>(),
-              vecResMeta,
+              ret_per_tensor.mutable_data_ptr<scalar_t>(),
               max_chunks_per_tensor);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
@@ -233,14 +223,9 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
           const at::cuda::OptionalCUDAGuard device_guard(
               device_of(output_per_tensor));
           auto stream = at::cuda::getCurrentCUDAStream();
-          TensorListMetadata<1> vecResMeta;
-          for (int i = 0; i < ntensors; i++) {
-            vecResMeta.addresses[0][i] =
-                vec_res[i].mutable_data_ptr<scalar_t>();
-          }
           lpnorm_cleanup<scalar_t, NormType::L2><<<ntensors, 512, 0, stream>>>(
               output_per_tensor.const_data_ptr<opmath_t>(),
-              vecResMeta,
+              ret_per_tensor.mutable_data_ptr<scalar_t>(),
               max_chunks_per_tensor);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
@@ -261,15 +246,10 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
           const at::cuda::OptionalCUDAGuard device_guard(
               device_of(output_per_tensor));
           auto stream = at::cuda::getCurrentCUDAStream();
-          TensorListMetadata<1> vecResMeta;
-          for (int i = 0; i < ntensors; i++) {
-            vecResMeta.addresses[0][i] =
-                vec_res[i].mutable_data_ptr<scalar_t>();
-          }
           lpnorm_cleanup<scalar_t, NormType::LInf>
               <<<ntensors, 512, 0, stream>>>(
                   output_per_tensor.const_data_ptr<opmath_t>(),
-                  vecResMeta,
+                  ret_per_tensor.mutable_data_ptr<scalar_t>(),
                   max_chunks_per_tensor);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
@@ -287,7 +267,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
   int i = 0;
   for (const auto& t : tensors) {
     if (t.numel() != 0) {
-      result.emplace_back(vec_res[i]);
+      result.emplace_back(ret_per_tensor[i]);
       i++;
     } else {
       result.emplace_back(at::zeros({}, options));
