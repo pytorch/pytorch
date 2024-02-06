@@ -372,7 +372,7 @@ There are mainly three call sites of check/check_verbose:
     * Dynamo decides inline/skip everytime it encounters a new recursively function call, and the call site
       is in InliningInstructionTranslator.check_inlineable of symbolic_convert.py.
     * If f2 is skipped by Dynamo, when evaluating the frame of f3, Dynamo need the inline/skip check again
-      and the call site is in catch_errors_wrapper.catch_errors of eval_frame.py.
+      and the call site is in catch_errors_wrapper.catch_errors of convert_frame.py.
 * For global variables and function arguments, Dynamo needs to decide if they are wrapped as SkipFilesVariable in builder.py.
 
 `is_inlined_call` is used to indicate if the current function call is inlined (f2 is inlined call if it passes check)
