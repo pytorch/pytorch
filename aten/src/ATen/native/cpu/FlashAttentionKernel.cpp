@@ -91,7 +91,7 @@ inline void _mul_reduce_max_fusion_kernel(
 
 template <typename scalar_t>
 static inline scalar_t* conditional_data_ptr(scalar_t* ptr, scalar_t* ptr2) {
-  TORCH_INTERNAL_ASSERT(ptr2 == nullptr);
+  TORCH_CHECK(ptr2 == nullptr);
   return ptr;
 }
 
