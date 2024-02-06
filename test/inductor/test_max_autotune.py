@@ -223,6 +223,73 @@ class TestMaxAutotune(TestCase):
         with config.patch({"max_autotune": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
+    def test_precompilation_threads(self):
+        import threading
+        from typing import Any, Dict
+        from unittest.mock import Mock, patch
+
+        class FakeChoiceCaller(ChoiceCaller):
+            def __init__(self):
+                super().__init__("none", [], Mock())
+                self.thread_id = None
+
+            def precompile(self):
+                self.thread_id = threading.get_ident()
+
+            def call_name(self) -> str:
+                return None
+
+            def to_callable(self):
+                return None
+
+            def hash_key(self) -> str:
+                return None
+
+            def output_node(self) -> "TensorBox":  # noqa: F821
+                return None
+
+        fake_choices = [FakeChoiceCaller() for i in range(10)]
+        fake_lookup_result = {choice: 0.123 for choice in fake_choices}
+
+        def no_lookup(
+            choices: List[ChoiceCaller],
+            op: str,
+            inputs: str,
+            benchmark: Callable[[Any], Dict[ChoiceCaller, float]],
+        ) -> Dict[ChoiceCaller, float]:
+            return benchmark(choices)
+
+        asc = AlgorithmSelectorCache()
+
+        def fake_benchmark_fn(*args, **kwargs):
+            return fake_lookup_result
+
+        main_thread_id = threading.get_ident()
+        mock_debug_handler = Mock()
+        old_debug_handler = V.debug
+        try:
+            V.set_debug_handler(mock_debug_handler)
+            with patch.object(asc, "lookup", new=no_lookup):
+                with patch.object(
+                    asc, "make_benchmark_fn", return_value=fake_benchmark_fn
+                ):
+                    with config.patch(
+                        {
+                            "autotune_in_subproc": False,
+                            "autotune_precompilation_workers": len(fake_choices),
+                        }
+                    ):
+                        asc("test_call", fake_choices, [], Mock())
+            for fake_choice in fake_choices:
+                assert (
+                    fake_choice.thread_id is not None
+                ), "Expected all ChoiceCaller's precompile method to have been called"
+                assert (
+                    fake_choice.thread_id != main_thread_id
+                ), "Expected all ChoiceCaller's precompile method to have been called on separate thread"
+        finally:
+            V.set_debug_handler(old_debug_handler)
+
     @unittest.skipIf(not SM75OrLater, "need sm_75")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
