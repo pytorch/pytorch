@@ -2455,6 +2455,31 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
     @xfailIfTorchDynamo
     @config.patch(capture_func_transforms=True)
     @make_logging_test(recompiles=True)
+    def test_vmap_guard_fail_different_state(self, records):
+        @torch.compile(backend="eager")
+        def fn(x):
+            return torch.vmap(lambda x: x.sin())(x)
+
+        x = torch.zeros(3, 4)
+        y = torch.vmap(fn, randomness="same")(x)
+        self.assertEqual(x.sin(), y)
+        self.assertEqual(len(records), 0)
+
+        # call vmap(vmap(fn))(x) should retrigger compilation
+        y = torch.vmap(fn, randomness="different")(x)
+        self.assertEqual(x.sin(), y)
+        self.assertGreater(len(records), 0)
+        record = self.getRecord(records, "pyfunctorch")
+        self.assertIn(
+            """\
+    triggered by the following guard failure(s):
+    - torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter().check_state((1, 'same'))  # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:401 in _flat_vmap""",
+            record.getMessage(),
+        )
+
+    @xfailIfTorchDynamo
+    @config.patch(capture_func_transforms=True)
+    @make_logging_test(recompiles=True)
     def test_vmap_guard_fail(self, records):
         @torch.compile(backend="eager")
         def fn(x):

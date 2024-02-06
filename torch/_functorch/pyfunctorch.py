@@ -74,7 +74,6 @@ class FuncTorchInterpreter(ABC):
         return (self.level(),)
 
     def check_state(self, *state):
-        print('compare', state, self.get_state())
         return state == (self.get_state(),)
 
 
