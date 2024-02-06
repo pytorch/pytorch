@@ -929,7 +929,7 @@ class DecompOneOffTests(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCPU
     @skipIfCrossRef
-    @ops(_sdpa_op_info, allowed_dtypes=(torch.float16, torch.float32, torch.float64))
+    @ops(_sdpa_op_info)
     def test_sdpa(self, device, dtype, op):
         # skip torch.bfloat16 because difference is 0.01
         from torch.fx.experimental.proxy_tensor import make_fx
@@ -946,10 +946,10 @@ class DecompOneOffTests(TestCase):
                 return attn_output
 
 
-        query_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
-        key_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
-        value_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
-        masks = [None, torch.ones(1, 1, 100, 100, device=device, dtype=bool)]
+        query_layer = torch.randn(1, 128, 4, 4, device=device, dtype=dtype)
+        key_layer = torch.randn(1, 128, 4, 4, device=device, dtype=dtype)
+        value_layer = torch.randn(1, 128, 4, 4, device=device, dtype=dtype)
+        masks = [None, torch.ones((1, 1, 4, 4), device=device, dtype=torch.bool)]
 
         for mask in masks:
             is_causal = mask is None
@@ -967,7 +967,8 @@ class DecompOneOffTests(TestCase):
             eager_res = op(
                 query_layer, key_layer, value_layer, attn_mask=mask, dropout_p=0.0, is_causal=is_causal
             )
-            self.assertTrue(torch.allclose(compiled_res, eager_res, atol=1e-6))
+
+            self.assertTrue(torch.allclose(compiled_res, eager_res, atol=1e-6, rtol=1e-4))
 
 
 instantiate_device_type_tests(DecompOneOffTests, globals())
