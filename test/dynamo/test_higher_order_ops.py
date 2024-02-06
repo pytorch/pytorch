@@ -2419,11 +2419,11 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         y = torch.vmap(torch.vmap(fn))(x)
         self.assertEqual(x.sin(), y)
         self.assertGreater(len(records), 0)
-        record = self.getRecord(records, "maybe_current_level()")
+        record = self.getRecord(records, "pyfunctorch")
         self.assertIn(
             """\
     triggered by the following guard failure(s):
-    - torch._C._functorch.maybe_current_level() == 1                # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:399 in _flat_vmap""",
+    - torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter().check_state((1, 'error'))  # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:401 in _flat_vmap""",
             record.getMessage(),
         )
 
