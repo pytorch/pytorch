@@ -373,8 +373,7 @@ def nll_loss_forward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
         if reduction == Reduction.NONE.value:
             output_expected_spec = target_expected_spec
             total_weight_expected_spec = DTensorSpec(
-                mesh=mesh,
-                placements= tuple([Replicate()] * mesh.ndim)
+                mesh=mesh, placements=tuple([Replicate()] * mesh.ndim)
             )
         else:
             if reduction == Reduction.MEAN.value:
@@ -398,9 +397,21 @@ def nll_loss_forward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
                 reduce_dims_map,
                 reduction_op,
             )
-            total_weight_expected_spec = output_expected_spec = DTensorSpec(
+            output_expected_spec = DTensorSpec(
                 mesh=mesh,
                 placements=out_placements,
+            )
+
+            # whether reduction is sum or mean, the total weight has to be summed up if not replicated
+            total_weight_placements = map_placements_after_reduction(
+                target_expected_spec.placements,
+                reduce_dims,
+                reduce_dims_map,
+                c10d.ReduceOp.SUM,
+            )
+            total_weight_expected_spec = DTensorSpec(
+                mesh=mesh,
+                placements=total_weight_placements,
             )
 
         output_strategy.strategies.append(
@@ -440,8 +451,8 @@ def nll_loss_backward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrat
 
     grad_in_strategy = OpStrategy([])
     for idx, input_placement_strategy in enumerate(input_strategy.strategies):
-        op_args_target_specs = [None]
-        redistribute_costs = [None]
+        op_args_target_specs = []
+        redistribute_costs = []
 
         # make sure input is replicated along the channel dim
         input_src_spec = input_placement_strategy.output_spec
@@ -480,8 +491,10 @@ def nll_loss_backward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrat
                 placements=_replicate_dims_start_at(grad_out_src_spec.placements),
                 tensor_meta=grad_out_src_spec.tensor_meta,
             )
-        op_args_target_specs[0] = grad_out_expected_spec
-        redistribute_costs[0] = generate_redistribute_costs(grad_out_strategy, grad_out_expected_spec)
+        op_args_target_specs.insert(0, grad_out_expected_spec)
+        redistribute_costs.insert(
+            0, generate_redistribute_costs(grad_out_strategy, grad_out_expected_spec)
+        )
 
         # weight tensor, if given, has to be a Tensor of size input_shape[channel_dim]
         # make sure it is replicated
@@ -507,7 +520,9 @@ def nll_loss_backward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrat
         )
         op_args_target_specs.append(total_weight_expected_spec)
         redistribute_costs.append(
-            generate_redistribute_costs(total_weight_strategy, total_weight_expected_spec)
+            generate_redistribute_costs(
+                total_weight_strategy, total_weight_expected_spec
+            )
         )
 
         grad_in_expected_spec = input_expected_spec

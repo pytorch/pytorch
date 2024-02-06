@@ -185,11 +185,19 @@ class DistMathOpsTest(DTensorTestBase):
                             self.assertTrue(dist_y.placements[0].is_partial())
                         self.assertEqual(dist_y.full_tensor(), y)
 
-                    # if reduction == "none":
-                    #     dist_y.sum().backward()
-                    # else:
-                    #     dist_y.backward()
-                    # self.assertEqual(dist_x.grad.full_tensor(), x.grad)
+                    if reduction == "none":
+                        dist_y.sum().backward()
+                    else:
+                        dist_y.backward()
+                    if shard_dim == channel_dim:
+                        self.assertTrue(dist_x.grad.placements[0].is_replicate())
+                        self.assertEqual(dist_x.grad.to_local(), x.grad)
+                    else:
+                        self.assertTrue(
+                            dist_x.grad.placements[0].is_shard(dim=shard_dim)
+                        )
+                        self.assertEqual(dist_x.grad.full_tensor(), x.grad)
+                    x.grad.zero_()
 
     @with_comms
     def test_full_shard_math_ops(self):
