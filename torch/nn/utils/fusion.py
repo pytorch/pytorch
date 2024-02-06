@@ -97,6 +97,10 @@ def fuse_linear_bn_eval(linear: LinearT, bn: torch.nn.modules.batchnorm._BatchNo
     assert not (linear.training or bn.training), "Fusion only for eval!"
     fused_linear = copy.deepcopy(linear)
 
+    assert not (
+        linear.out_features != bn.num_features and bn.num_features > 1
+    ), "To fuse, linear.out_features == bn.num_features or bn.num_features == 1"
+
     assert bn.running_mean is not None and bn.running_var is not None
     fused_linear.weight, fused_linear.bias = fuse_linear_bn_weights(
         fused_linear.weight, fused_linear.bias,

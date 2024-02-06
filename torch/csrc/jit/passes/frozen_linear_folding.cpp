@@ -58,6 +58,15 @@ bool FoldFrozenLinearBatchnorm(Block* b) {
       auto bn_eps = constant_as<double>(bn->namedInput("eps")).value();
       auto linear_w = constant_as<Tensor>(linear->namedInput("weight")).value();
 
+      int64_t linear_out_features = linear_w.size(0);
+      int64_t bn_num_features = bn_rm.size(0);
+      // check linear out_features match bn num_features
+      // if they don't match, bn num_features need to be 1 to broadcast.
+      // otherwise, skip the folding the path.
+      if (linear_out_features != bn_num_features && bn_num_features > 1) {
+        continue;
+      }
+
       // implementation taken from torch/nn/utils/fusion.py
       Tensor linear_b;
       if (linear->namedInput("bias")->type() == NoneType::get()) {
