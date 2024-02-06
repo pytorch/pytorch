@@ -268,7 +268,7 @@ class FSDPParamGroup:
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard()  # no-op if prefetched
             self.wait_for_unshard()
-            # Can be already removed if running backward >1 time
+            # Can be already removed if running multiple `backward`s
             self.all_forward_grad_fns.discard(forward_grad_fns)
             self._prefetch_unshard()
 
@@ -311,8 +311,7 @@ class FSDPParamGroup:
     def _prefetch_unshard(self):
         if self._training_state == TrainingState.PRE_BACKWARD:
             if not self._post_forward_indices:
-                # Can happen if running backward >1 time through this module
-                # (with `retain_graph=True`)
+                # Can be cleared if running multiple `backward`s
                 return
             curr_index = self._post_forward_indices.pop()
             if (target_index := curr_index - 1) < 0:
