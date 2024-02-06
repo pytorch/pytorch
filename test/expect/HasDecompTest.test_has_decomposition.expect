@@ -1004,10 +1004,6 @@ aten::ormqr
 aten::ormqr.out
 aten::permute_copy
 aten::permute_copy.out
-aten::pixel_shuffle
-aten::pixel_shuffle.out
-aten::pixel_unshuffle
-aten::pixel_unshuffle.out
 aten::poisson
 aten::poisson.out
 aten::polygamma
@@ -1119,15 +1115,9 @@ aten::resize_as_
 aten::resize_as_sparse
 aten::resize_as_sparse.out
 aten::resize_as_sparse_
-aten::round
-aten::round.decimals
-aten::round.decimals_out
-aten::round.out
 aten::row_indices
 aten::row_indices_copy
 aten::row_indices_copy.out
-aten::rsub.Scalar_out
-aten::rsub.Tensor_out
 aten::scalar_tensor
 aten::scalar_tensor.out
 aten::scatter.reduce
@@ -1294,8 +1284,6 @@ aten::special_shifted_chebyshev_polynomial_w.x_scalar
 aten::special_shifted_chebyshev_polynomial_w.x_scalar_out
 aten::split_copy.Tensor
 aten::split_copy.Tensor_out
-aten::split_with_sizes_copy
-aten::split_with_sizes_copy.out
 aten::squeeze_
 aten::squeeze_.dim
 aten::squeeze_.dims

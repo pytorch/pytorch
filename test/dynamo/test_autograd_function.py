@@ -281,7 +281,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            ".*HigherOrderOperator body's output must consist of tensors only",
+            "Illegal getattr invocation stride in strict mod",
         ):
             opt_model(x)
 
