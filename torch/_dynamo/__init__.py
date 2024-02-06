@@ -66,7 +66,7 @@ if torch.manual_seed is torch.random.manual_seed:
 
 def reset() -> None:
     """Clear all compile caches and restore initial state"""
-    with eval_frame.compile_lock:
+    with convert_frame.compile_lock:
         for weak_code in (
             convert_frame.input_codes.seen + convert_frame.output_codes.seen
         ):
