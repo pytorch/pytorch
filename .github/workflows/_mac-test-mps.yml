@@ -36,6 +36,7 @@ jobs:
       keep-going: ${{ steps.filter.outputs.keep-going }}
       ci-verbose-test-logs: ${{ steps.filter.outputs.ci-verbose-test-logs }}
       ci-no-test-timeout: ${{ steps.filter.outputs.ci-no-test-timeout }}
+      ci-no-td: ${{ steps.filter.outputs.ci-no-td }}
       reenabled-issues: ${{ steps.filter.outputs.reenabled-issues }}
     steps:
       - name: Checkout PyTorch
