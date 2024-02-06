@@ -929,11 +929,13 @@ class DecompOneOffTests(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCPU
     @skipIfCrossRef
+    @skipOps('DecompOneOffTests', 'test_sdpa', [
+        xfail("nn.functional.scaled_dot_product_attention", dtypes=[torch.half]),
+    ])
     @ops(_sdpa_op_info)
     def test_sdpa(self, device, dtype, op):
-        # skip torch.bfloat16 because difference is 0.01
-        from torch.fx.experimental.proxy_tensor import make_fx
-        from torch._decomp import get_decompositions
+        # SDPA doesn't support float16, this is aligned with aten/src/ATen/native/transformers/attention.cpp. If we
+        # add support for float16 over there we should update this test as well.
 
         class ScaledDotProductAttention(torch.nn.Module):
             def __init__(self):
@@ -946,29 +948,24 @@ class DecompOneOffTests(TestCase):
                 return attn_output
 
 
-        query_layer = torch.randn(1, 128, 4, 4, device=device, dtype=dtype)
-        key_layer = torch.randn(1, 128, 4, 4, device=device, dtype=dtype)
-        value_layer = torch.randn(1, 128, 4, 4, device=device, dtype=dtype)
-        masks = [None, torch.ones((1, 1, 4, 4), device=device, dtype=torch.bool)]
+        query_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
+        key_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
+        value_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
+        masks = [None, torch.ones((1, 1, 100, 100), device=device, dtype=torch.bool)]
+
+        atol, rtol = dtype_precisions[dtype]
 
         for mask in masks:
             is_causal = mask is None
             attention = ScaledDotProductAttention()
-            fx_g = make_fx(
-                attention,
-                decomposition_table=get_decompositions(
-                    [
-                        torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default,
-                    ]
-                ),
-            )(query_layer, key_layer, value_layer, mask, is_causal)
-
-            compiled_res = fx_g(query_layer, key_layer, value_layer, mask, is_causal)
+            decomposed_res = torch._decomp.decompositions.scaled_dot_product_flash_attention_for_cpu(
+                query_layer, key_layer, value_layer, 0.0, is_causal, attn_mask=mask
+            )
             eager_res = op(
                 query_layer, key_layer, value_layer, attn_mask=mask, dropout_p=0.0, is_causal=is_causal
             )
 
-            self.assertTrue(torch.allclose(compiled_res, eager_res, atol=1e-6, rtol=1e-4))
+            self.assertTrue(torch.allclose(decomposed_res[0], eager_res, atol=atol, rtol=rtol))
 
 
 instantiate_device_type_tests(DecompOneOffTests, globals())
