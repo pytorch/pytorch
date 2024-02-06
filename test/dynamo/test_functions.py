@@ -6,6 +6,7 @@ import inspect
 import itertools
 import math
 import operator
+import random
 import sys
 import unittest
 from dataclasses import dataclass, field
@@ -2019,6 +2020,17 @@ class GraphModule(torch.nn.Module):
 
                 opt_fn = torch._dynamo.optimize(nopython=True)(fn)
                 self.assertEqual(opt_fn(), fn())
+
+    def test_rand_inlined(self):
+        @torch.compile(backend="eager", dynamic=True)
+        def fn():
+            idx_size = [10]
+            idx_size[random.randint(0, 0)] = random.randint(1, 8)
+            t = tuple(idx_size)
+            src_size = [random.randint(1, 5) + s for s in idx_size]
+            idx = torch.empty(t)
+
+        fn()
 
     def test_elipsis(self):
         @torch.compile(backend="eager", fullgraph=True)
