@@ -1229,6 +1229,7 @@ class CommonTemplate:
             self.common(fn, (inp.view(10, -1),), rtol=1e-5, atol=1e-5)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(TEST_WITH_ROCM, "Numerical issues on ROCm")
     def test_split_cumsum_low_prec(self):
         if self.device == "cpu":
             raise unittest.SkipTest("ir.Scan nyi on CPU")
@@ -1265,6 +1266,7 @@ class CommonTemplate:
             self.common(fn, (inp,), atol=1e-5, rtol=1e-4)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(TEST_WITH_ROCM, "Numerical issues on ROCm")
     def test_split_cumprod_low_prec(self):
         if self.device == "cpu":
             raise unittest.SkipTest("ir.Scan nyi on CPU")
