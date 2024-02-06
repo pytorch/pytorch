@@ -160,19 +160,36 @@ def get_cpp_op_schema(kernel: torch._ops.OpOverload) -> str:
 
 # TODO: Move to a well known place
 TritonMetaParams = Dict[str, int]
-TritonGrid = Union[Tuple[int, ...], Callable[[TritonMetaParams], Tuple[int, ...]]]
+TritonGrid = Union[
+    Tuple[Union[int, sympy.Expr], ...], Callable[[TritonMetaParams], Tuple[int, ...]]
+]
 
 
 def user_defined_kernel_grid_fn_code(
-    name: str, configs: List["triton.Config"], grids: List[TritonGrid]
+    name: str,
+    configs: List["triton.Config"],
+    grids: List[TritonGrid],
+    wrapper: Optional["WrapperCodeGen"] = None,
 ) -> Tuple[str, str]:
     output = IndentedBuffer()
+
+    def _convert_to_sympy_expr(item: Union[int, sympy.Expr]) -> sympy.Expr:
+        return item if isinstance(item, sympy.Expr) else sympy.Integer(item)
+
+    def determine_grid(grid: TritonGrid):
+        if wrapper is None or callable(grid):
+            # return as-is when used in eager mode or when grid is callable
+            return grid
+        # Grid contains ints/Expr, so utilize wrapper's expr printer for codegen
+        sympy_grid = tuple(_convert_to_sympy_expr(g) for g in grid)
+        return wrapper.codegen_shape_tuple(sympy_grid)
 
     fn_name = f"grid_wrapper_for_{name}"
     output.writeline(f"def {fn_name}(meta):")
     with output.indent():
         if len(grids) == 1:
-            output.writeline(f"return {grids[0]}")
+            grid = determine_grid(grids[0])
+            output.writeline(f"return {grid}")
         else:
             assert len(grids) > 1
             assert len(grids) == len(configs)
@@ -180,6 +197,7 @@ def user_defined_kernel_grid_fn_code(
             for grid, c in zip(grids, configs):
                 guards = [f"meta['{name}'] == {val}" for name, val in c.kwargs.items()]
                 guards = " and ".join(guards)
+                grid = determine_grid(grid)
                 statement = f"if {guards}: return {grid}"
                 if statement in seen:
                     continue
@@ -620,7 +638,9 @@ class WrapperCodeGen(CodeGen):
         self.writeline(f"{kernel}({', '.join(args)})")
 
     def generate_user_defined_triton_kernel(self, kernel_name, grid, configs, args):
-        grid, code = user_defined_kernel_grid_fn_code(kernel_name, configs, grid)
+        grid, code = user_defined_kernel_grid_fn_code(
+            kernel_name, configs, grid, wrapper=self
+        )
         # Must happen after free symbols are already codegened
         with self.prefix.indent():
             self.prefix.splice(code)
@@ -1133,6 +1153,7 @@ class WrapperCodeGen(CodeGen):
         device_index=None,
         cuda=True,
         triton=True,
+        arg_types=None,
     ):
         """
         Generates kernel call code.
@@ -1430,6 +1451,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         device_index=None,
         cuda=True,
         triton=True,
+        arg_types=None,
     ):
         """
         Generates kernel call code.
@@ -1442,19 +1464,24 @@ class CppWrapperCodeGen(WrapperCodeGen):
         """
         if cuda:
             return super().generate_kernel_call(
-                name, call_args, grid, device_index, cuda, triton
+                name, call_args, grid, device_index, cuda, triton, arg_types
             )
         else:
             if V.graph.aot_mode and config.abi_compatible:
-                from .cpp import DTYPE_TO_CPP
-
+                assert arg_types is not None and len(call_args) == len(
+                    arg_types
+                ), "Mismatch call_args and arg_types in generate_kernel_call"
                 new_args = []
-                for arg in call_args:
-                    var_name = f"var_{next(self.arg_var_id)}"
-                    self.writeline(f"auto* {var_name} = get_data_ptr_wrapper({arg});")
-                    dtype = V.graph.get_dtype(arg)
-                    cpp_dtype = DTYPE_TO_CPP[dtype]
-                    new_args.append(f"({cpp_dtype}*)({var_name})")
+                for idx, arg in enumerate(call_args):
+                    if "*" in arg_types[idx]:
+                        var_name = f"var_{next(self.arg_var_id)}"
+                        self.writeline(
+                            f"auto* {var_name} = get_data_ptr_wrapper({arg});"
+                        )
+                        new_args.append(f"({arg_types[idx]})({var_name})")
+                    else:
+                        # arg is a scalar
+                        new_args.append(arg)
                 self.writeline(self.wrap_kernel_call(name, new_args))
             else:
                 self.writeline(self.wrap_kernel_call(name, call_args))
@@ -2380,18 +2407,13 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
         if V.graph.aot_mode and V.graph.cpp_wrapper and config.abi_compatible:
-            # Make the fallback call ABI-compatible in the C++ wrapper file.
-            kernel = kernel.replace("at::", "aoti_torch_")
-            num_indices = str(
-                len(indices)
-            )  # num_indices for indexing into indices array
-            tensor_handle_array_var = (
-                f"tensor_handle_array_{next(self.kernel_callsite_id)}"
+            # See the comment in codegen_reinterpret_view about why having something like
+            # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the correponding
+            # tensor prematurely deallocated, thus this std:vector().data() trick here.
+            indices_str = (
+                f"std::vector<AtenTensorHandle>{{{', '.join(indices)}}}.data()"
             )
-            self.writeline(
-                f"AtenTensorHandle {tensor_handle_array_var}[] = {{{', '.join(indices)}}};"
-            )
-            args = [x, tensor_handle_array_var, num_indices, values, accumulate]
+            args = [x, indices_str, str(len(indices)), values, accumulate]
         else:
             indices_str = (
                 f"{self.open_bracket}{', '.join(indices)}{self.closed_bracket}"
@@ -2433,6 +2455,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
             dtype_str = str(dtype).split(".")[-1]
             self.writeline(f"{DTYPE_TO_CPP[dtype]} {node.sym};")
             self.writeline(f"aoti_torch_item_{dtype_str}({data}, &{node.sym});")
+            # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
+            self.unbacked_symbol_decls.add(str(node.sym))
         else:
             if node.is_bool:
                 self.writeline(f"bool {node.sym} = {data}.item() ? 1 : 0;")
@@ -2778,7 +2802,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 new_int_args.append(str(arg))
             elif isinstance(arg_type, torch.SymIntType):
                 # SymInt
-                new_int_args.append(str(arg))
+                expr = arg.node.expr if isinstance(arg, torch.SymInt) else arg
+                new_int_args.append(self.expr_printer(expr))
             elif isinstance(arg_type, torch.NumberType):
                 # Scalar of type int
                 assert isinstance(arg, (int, float, bool))
@@ -2800,11 +2825,17 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     new_tensor_args.extend(
                         [f"{a.codegen_reference()}" for a in arg if a is not None]
                     )
-                # List [int] or List[SymInt]
-                elif isinstance(
-                    arg_type.getElementType(), (torch.IntType, torch.SymIntType)
-                ):
+                # List[int]
+                elif isinstance(arg_type.getElementType(), torch.IntType):
                     new_int_args.extend([str(a) for a in arg])
+                # List[SymInt]
+                elif isinstance(arg_type.getElementType(), torch.SymIntType):
+                    expressions = [
+                        a.node.expr if isinstance(a, torch.SymInt) else a for a in arg
+                    ]
+                    new_int_args.extend(
+                        [self.expr_printer(expr) for expr in expressions]
+                    )
                 # List[Scalar]
                 elif isinstance(arg_type.getElementType(), torch.NumberType):
                     # Only treat int Scalar as dynamic
@@ -3222,12 +3253,19 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         return grid_fn(block_cfg)
 
     def generate_kernel_call(
-        self, name, call_args, grid=None, device_index=None, cuda=True, triton=True
+        self,
+        name,
+        call_args,
+        grid=None,
+        device_index=None,
+        cuda=True,
+        triton=True,
+        arg_types=None,
     ):
         if not cuda:
             # Even in CudaWrapperCodeGen, we may see cpp kernels
             return super().generate_kernel_call(
-                name, call_args, grid, device_index, cuda, triton
+                name, call_args, grid, device_index, cuda, triton, arg_types
             )
 
         params = CudaKernelParamCache.get(name)
