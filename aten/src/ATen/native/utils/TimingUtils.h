@@ -41,5 +41,4 @@ class AutotuneTimer {
     bool _profile = false;
   };
 
-
 }}
