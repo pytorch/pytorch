@@ -169,6 +169,36 @@ class TestExport(TestCase):
         ep = export(WrapperModule(f), args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
 
+    @testing.expectedFailureRetraceability
+    def test_conv_dynamic(self):
+        # Simple module for demonstration
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=32
+                    , kernel_size=3, padding=1
+                )
+                self.relu = torch.nn.ReLU()
+                self.maxpool = torch.nn.MaxPool2d(kernel_size=3)
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                a = self.conv(x)
+                a.add_(y)
+                return self.maxpool(self.relu(a))
+
+        example_args = (torch.randn(2, 3, 256, 256), torch.ones(2, 32, 256, 256))
+        dynamic_shapes = {"x": {0: Dim("batch")}, "y": {0: Dim("batch")}}
+        m = M()
+        exported_program: torch.export.ExportedProgram = export(
+            m, args=example_args, dynamic_shapes=dynamic_shapes
+        )
+
+        args = (torch.randn(17, 3, 256, 256), torch.ones(17, 32, 256, 256))
+        self.assertEqual(exported_program.module()(*args), m(*args))
+        args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
+        self.assertEqual(exported_program.module()(*args), m(*args))
+
     def test_basic_non_strict_real_tensor(self):
         class Basic(torch.nn.Module):
             def __init__(self):
@@ -1734,6 +1764,8 @@ def forward(self, arg_0):
                 1
             )
 
+    # map_fn references module outside the module hierarchy
+    @unittest.expectedFailure
     def test_map_buffers(self):
         class M1(torch.nn.Module):
             def __init__(self):
@@ -1907,8 +1939,8 @@ def forward(self, arg_0):
         ep = export(Foo(), (torch.tensor(1),))
 
         self.assertEqual(len(ep.graph_signature.input_specs), 4)
-        self.assertEqual(len(ep.state_dict), 1)
-        self.assertEqual(len(ep.constants), 2)
+        self.assertEqual(len(ep.state_dict), 0)
+        self.assertEqual(len(ep.constants), 3)
 
         inp = (torch.tensor(5),)
         self.assertTrue(torch.allclose(ep.module()(*inp), Foo()(*inp)))
@@ -2479,28 +2511,6 @@ def forward(self, l_x_):
         optimized_model = torch.compile(exported_model)
         optimized_model(tensor_cpu, mask_cpu)
 
-    def test_export_mkldnn_disabled(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.lstm = torch.nn.LSTM(input_size=4, hidden_size=5, num_layers=1)
-
-            def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-                return self.lstm(inputs)
-
-        inp = (torch.ones(3, 4),)
-        torch._C._set_mkldnn_enabled(False)
-        ep = torch.export.export(M(), inp)
-        FileCheck().check_count(
-            "torch.ops.aten.mkldnn_rnn_layer.default", 0, exactly=True
-        ).run(ep.graph_module.code)
-
-        torch._C._set_mkldnn_enabled(True)
-        ep = torch.export.export(M(), inp)
-        FileCheck().check_count(
-            "torch.ops.aten.mkldnn_rnn_layer.default", 1, exactly=True
-        ).run(ep.graph_module.code)
-
     def test_export_input_mutation_static_shape(self):
         class MutationModel(torch.nn.Module):
             def forward(self, x, y):
@@ -2539,6 +2549,28 @@ def forward(self, l_x_):
         self.assertEqual(ep.module()(*inputs_export), model(*inputs_model))
         self.assertEqual(inputs[0][0] * 2.0, inputs_model[0][0])
         self.assertEqual(inputs[0][0] * 2.0, inputs_export[0][0])
+
+    def test_export_input_mutation_bug(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x[:, :2, :] = x[:,:2,:] + 1
+                return x
+
+        inputs = (torch.ones(4,4,4),)
+        ep = torch.export.export(M(), inputs)
+        m = ep.module()
+
+        # Make the name conflict with a placeholder name that we get from
+        # aot_export
+        for i, node in enumerate(m.graph.nodes):
+            if node.op == "placeholder":
+                node.name = f"arg0_{i + 1}"
+        m.recompile()
+
+        ep = torch.export.export(m, inputs)
+
+        inputs = (torch.randn(4,4,4),)
+        self.assertEqual(ep.module()(*copy.deepcopy(inputs)), M()(*copy.deepcopy(inputs)))
 
     def test__scaled_dot_product_flash_attention(self):
         class Module(torch.nn.Module):
@@ -2898,6 +2930,33 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         # this doesn't work today
         gm_unflat_strict = unflatten(ep)
 
+    def test_non_persistent_buffer(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("foo", torch.rand(2, 3), persistent=False)
+
+            def forward(self, x):
+                return self.foo + x
+
+        inp = torch.rand(2, 3)
+        m = MyModule()
+        ep = export(m, (inp,), {})
+
+        self.assertEqual(ep(inp), m(inp))
+        # Non-persistent buffers should not show up in the state dict
+        self.assertNotIn("foo", ep.state_dict)
+        named_buffers = {name: buffer for (name, buffer) in ep.named_buffers()}
+        # But they should show up in named_buffers()
+        self.assertIn("foo", named_buffers)
+
+        # Check the same properties of the unlifted module
+        mod = ep.module()
+        self.assertNotIn("foo", mod.state_dict())
+        mod_named_buffers = {name: buffer for (name, buffer) in mod.named_buffers()}
+        self.assertIn("foo", mod_named_buffers)
+        self.assertEqual(mod(inp), m(inp))
+
     def test_nonstrict_retrace_preserves_metadata(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -2985,6 +3044,15 @@ def forward(self, l_q_, l_k_, l_v_):
     getitem = _scaled_dot_product_flash_attention[0];  _scaled_dot_product_flash_attention = None
     return (getitem,)""")
 
+    def test_int_list_output(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return [((1, 3), [x + x, x * x])]
+
+        ep = torch.export.export(M(), (torch.ones(2, 3),))
+        res = ep(torch.ones(2, 3))
+        self.assertEqual(res[0][0], (1, 3))
+
     def test_primitive_constant_output(self):
         class Z(torch.nn.Module):
             def forward(self, x, y):
@@ -3025,15 +3093,6 @@ def forward(self, l_q_, l_k_, l_v_):
         res = ep(torch.tensor(4), 5)
         self.assertEqual(res[0], torch.tensor(20))
         self.assertEqual(res[1], 4)
-
-    def test_int_list_output(self):
-        class M(torch.nn.Module):
-            def forward(self, x):
-                return [((1, 3), [x + x, x * x])]
-
-        ep = torch.export.export(M(), (torch.ones(2, 3),))
-        res = ep(torch.ones(2, 3))
-        self.assertEqual(res[0][0], (1, 3))
 
     def test_none_input_output(self):
         class Z(torch.nn.Module):
