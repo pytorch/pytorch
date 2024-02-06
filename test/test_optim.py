@@ -1,10 +1,12 @@
 # Owner(s): ["module: optimizer"]
 import functools
 import math
+from typing import Any, Dict, Tuple
 import unittest
 from copy import deepcopy
 
 import torch
+from torch.optim import Optimizer
 from optim.test_optim import TestOptim, TestDifferentiableOptimizer  # noqa: F401
 from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
 from optim.test_swa_utils import TestSWAUtils  # noqa: F401
@@ -918,6 +920,76 @@ class TestOptimRenewed(TestCase):
                 optimizer_cuda.step(closure)
                 self.assertEqual(params, params_cuda)
                 self.assertEqual(optimizer.state_dict(), optimizer_cuda.state_dict())
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_step_post_hook(self, device, dtype, optim_info):
+        def post_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+            nonlocal data
+            data += 2
+
+        params = [torch.tensor([1, 1], device=device, dtype=dtype)]
+
+        def dummy_closure():
+            return 1
+
+        closure = dummy_closure if optim_info.step_requires_closure else None
+
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
+        for optim_input in all_optim_inputs:
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
+            optim = optim_info.optim_cls(params, **optim_input.kwargs)
+            data = 2
+            hook_handle = optim.register_step_post_hook(post_hook)
+
+            optim.step(closure)
+            optim.step(closure)
+            # check if post hooks were registered
+            self.assertEqual(data, 6)
+
+            # remove handles, take step and verify that hook is no longer registered
+            hook_handle.remove()
+
+            optim.step(closure)
+            self.assertEqual(data, 6)
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_step_pre_hook(self, device, dtype, optim_info):
+        def pre_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+            nonlocal data
+            data += 2
+
+        params = [torch.tensor([1, 1], device=device, dtype=dtype)]
+
+        def dummy_closure():
+            return 1
+
+        closure = dummy_closure if optim_info.step_requires_closure else None
+
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
+        for optim_input in all_optim_inputs:
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
+            optim = optim_info.optim_cls(params, **optim_input.kwargs)
+            data = 5
+            hook_handle = optim.register_step_pre_hook(pre_hook)
+
+            optim.step(closure)
+            optim.step(closure)
+            # check if pre hooks were registered
+            self.assertEqual(data, 9)
+
+            # remove handles, take step and verify that hook is no longer registered
+            hook_handle.remove()
+
+            optim.step(closure)
+            self.assertEqual(data, 9)
 
 
     @optims(optim_db, dtypes=[torch.float32])
