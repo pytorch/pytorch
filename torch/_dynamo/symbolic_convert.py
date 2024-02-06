@@ -494,8 +494,8 @@ def break_graph_if_unsupported(*, push):
                     and graph_break_dup_warning_checker.add(frame_loc)
                 ):
                     graph_break_log.debug(
-                        "Graph break: %s from user code at:\n%s",
-                        excp,
+                        "Graph break: %s\nFrom user code at:\n%s",
+                        traceback.format_exception(excp),  # NB: yes chaining
                         user_stack_formatted,
                     )
 
