@@ -1515,13 +1515,13 @@ class CppKernel(Kernel):
             ],
         )
 
-    def cache_reduction_var(self, line: str):
+    def get_reduction_var_pattern(self, line: str):
         return re.search("tmp_acc[0-9]+", line)
 
     def update_stores_with_parallel_reduction(self):
         for i, line in enumerate(self.stores._lines):
             if isinstance(line, str):
-                m = self.cache_reduction_var(line)
+                m = self.get_reduction_var_pattern(line)
                 if m:
                     var_name = m.group(0)
                     self.stores._lines[i] = line.replace(var_name, f"{var_name}_local")
@@ -1872,7 +1872,7 @@ class CppVecKernel(CppKernel):
         self.tiling_idx = tiling_idx
         metrics.generated_cpp_vec_kernel_count += 1
 
-    def cache_reduction_var(self, line: str):
+    def get_reduction_var_pattern(self, line: str):
         return re.search("tmp_acc[0-9]+_vec", line)
 
     def _get_vec_load_line(
