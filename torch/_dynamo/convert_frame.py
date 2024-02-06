@@ -4,6 +4,7 @@ import itertools
 import logging
 import os
 import random
+import traceback
 import types
 import typing
 import weakref
@@ -276,7 +277,7 @@ def convert_frame_assert(
     reset_graph_break_dup_checker()
 
     def _convert_frame_assert(
-        frame: types.FrameType, cache_entry, hooks: Hooks, frame_state
+        frame: types.FrameType, cache_entry, hooks: Hooks, frame_state, *, skip: int = 0
     ):
         increment_frame()
 
@@ -401,6 +402,7 @@ def convert_frame_assert(
             frame,
             frame_state=frame_state,
             compile_id=compile_id,
+            skip=skip + 1,
         )
 
     _convert_frame_assert._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
@@ -452,6 +454,8 @@ def _compile(
     frame: Optional[types.FrameType] = None,
     frame_state=None,
     compile_id=None,
+    *,
+    skip: int = 0,
 ) -> Optional[GuardedCode]:
     from torch.fx.experimental.validator import (
         bisect,
@@ -646,6 +650,15 @@ def _compile(
         return guarded_code
 
     with compile_context(CompileContext(compile_id)):
+        log.debug(
+            "torchdynamo start compiling %s %s:%s, stack (elided %s frames):\n%s",
+            code.co_name,
+            code.co_filename,
+            code.co_firstlineno,
+            skip + 2,
+            # -2: omit current frame, omit contextlib decorator
+            "".join(traceback.format_list(traceback.extract_stack()[: -2 - skip])),
+        )
         try:
             guarded_code = compile_inner(code, one_graph, hooks, transform)
             return guarded_code
@@ -742,10 +755,14 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
 
-    def _convert_frame(frame: types.FrameType, cache_entry, hooks: Hooks, frame_state):
+    def _convert_frame(
+        frame: types.FrameType, cache_entry, hooks: Hooks, frame_state, skip: int = 0
+    ):
         counters["frames"]["total"] += 1
         try:
-            result = inner_convert(frame, cache_entry, hooks, frame_state)
+            result = inner_convert(
+                frame, cache_entry, hooks, frame_state, skip=skip + 1
+            )
             counters["frames"]["ok"] += 1
             return result
         except Exception as e:
