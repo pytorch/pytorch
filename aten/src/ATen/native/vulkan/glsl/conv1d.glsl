@@ -28,13 +28,6 @@ layout(set = 0, binding = 4) uniform PRECISION restrict Block {
 }
 uBlock;
 
-// In our shader's usage, both the numerator and denominator are int, so the
-// result of their division is already truncated to int. GLSL's ceil() expects
-// one float input, so instead we introduce our own helper.
-int ceil(int a, int b) {
-  return (a + b - 1) / b;
-}
-
 // Let us define
 //
 // input = (n, in_C, in_L),
@@ -86,38 +79,37 @@ void main() {
   int out_l = 0;
 
   for (int in_l = l_start; in_l < l_end; in_l += strides, ++out_l) {
-
-    // "k" tracks the kernel's index for our input-kernel computation.
-    // The kstart/kend borders detect when the corresponding input index is out
-    // of bounds.
-    int k_start = max(0, ceil(-in_l, dilation));
-    int k_end = min(kernel_size, ceil(in_length-in_l, dilation));
-
     // Since the input/output tensors are channel-packed, which is along the
     // batch dimension, we can batch-read/write four elements at a time.
     for (int n = 0; n < batch_size; n += 4) {
-      vec4 v = vec4(0,0,0,0);
+      vec4 sum = vec4(0,0,0,0);
 
       for (int in_c = c_start; in_c < c_end; ++in_c) {
-        for (int k = k_start; k < k_end;) {
-
+        // "k" tracks the kernel's index for our input-kernel computation.
+        // It reads out-of-bound zeros, but trying to avoid them complicates
+        // for-loop conditions, which results in worse performance.
+        for (int k = 0; k < kernel_size; k += 4) {
           // Since the weight tensor is width-packed, which is along the kernel
-          // dimension, we can batch-read four elements at a time.
+          // dimension we can batch-read four elements at a time.
           const ivec3 w_pos = ivec3(k / 4, in_c % in_group_size, out_c);
           const vec4 weight = texelFetch(uKernel, w_pos, 0);
 
-          for (int k_off = k % 4; k_off < 4 && k < k_end; ++k, ++k_off) {
-            int in_pos_x = in_l + k * dilation;
-            const ivec3 in_pos = ivec3(in_pos_x, in_c, n / 4);
-            const vec4 input_value = texelFetch(uInput, in_pos, 0);
+          const ivec3 in_pos_0 = ivec3(in_l + k * dilation, in_c, n / 4);
+          sum = fma(weight.xxxx, texelFetch(uInput, in_pos_0, 0), sum);
 
-            v += weight[k_off] * input_value;
-          }
+          const ivec3 in_pos_1 = ivec3(in_l + (k+1) * dilation, in_c, n / 4);
+          sum = fma(weight.yyyy, texelFetch(uInput, in_pos_1, 0), sum);
+
+          const ivec3 in_pos_2 = ivec3(in_l + (k+2) * dilation, in_c, n / 4);
+          sum = fma(weight.zzzz, texelFetch(uInput, in_pos_2, 0), sum);
+
+          const ivec3 in_pos_3 = ivec3(in_l + (k+3) * dilation, in_c, n / 4);
+          sum = fma(weight.wwww, texelFetch(uInput, in_pos_3, 0), sum);
         }
       }
 
       ivec3 out_pos = ivec3(out_l, out_c, n / 4);
-      imageStore(uOutput, out_pos, v + bias.x);
+      imageStore(uOutput, out_pos, sum + bias.x);
     }
   }
 }
