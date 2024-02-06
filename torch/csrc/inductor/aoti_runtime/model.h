@@ -15,7 +15,7 @@
 // in model.so, and should not refer to any aten/c10 headers except the stable
 // C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
-#include <c10/util/Exception.h>
+#include <c10/macros/Macros.h>
 #include <torch/csrc/inductor/aoti_runtime/device_utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
@@ -84,8 +84,15 @@ AOTI_NOINLINE static void __aoti_check(
     const char* file,
     uint32_t line,
     const char* msg) {
-  if (C10_UNLIKELY_OR_CONST(!cond)) {
-    ::c10::detail::torchCheckFail(func, file, line, msg);
+#if defined(__CUDACC__)
+  if (!cond) {
+#else
+  if (C10_UNLIKELY(!cond)) {
+#endif
+    std::stringstream ss;
+    ss << "AOTI_CHECK failed at line " << line << ", func " << func << ", file "
+       << file << ", msg " << msg;
+    throw std::runtime_error(ss.str());
   }
 }
 
