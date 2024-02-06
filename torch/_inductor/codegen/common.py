@@ -1335,7 +1335,7 @@ class OptimizationContext:
     dtype: Optional[torch.dtype] = None
     ops_name: str = ""
 
-    # Load int8 value as float32
+    # Load uint8/int8 value as float32
     is_load_int8_as_float: bool = False
 
 

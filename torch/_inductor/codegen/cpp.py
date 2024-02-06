@@ -1349,20 +1349,21 @@ class CppVecOverrides(CppOverrides):
             return f"cvt_fp32_to_lowp_fp<{DTYPE_TO_CPP[dtype]}>({x})"
         if opt_ctx_x.dtype in DTYPE_LOWP_FP and dtype in (torch.float, torch.float32):
             return f"cvt_lowp_fp_to_fp32<{DTYPE_TO_CPP[opt_ctx_x.dtype]}>({x})"
-        if opt_ctx_x.dtype == torch.uint8 and dtype in (torch.float, torch.float32):
-            # Note: this function only convert inputs number of elements equal to at::vec::Vectorized<float>.size()
-            return f"at::vec::convert_uint8_to_float({x})"
-        if opt_ctx_x.dtype == torch.int8 and dtype in (torch.float, torch.float32):
+        if opt_ctx_x.dtype in (torch.uint8, torch.int8) and dtype in (
+            torch.float,
+            torch.float32,
+        ):
             # Note: this function only convert inputs number of elements equal to at::vec::Vectorized<float>.size()
             return f"at::vec::convert_int8_to_float({x})"
-        if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype == torch.uint8:
-            # TODO(Leslie): Add fast path to at::vec::convert_float_to_uint8,
+        if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype in (
+            torch.uint8,
+            torch.int8,
+        ):
+            # TODO(Leslie): Add fast path to at::vec::convert_float_to_int8,
             # if we already handle the saturation previously.
             # * Pattern match of quantization op in the loop body.
-            # * Skip the explicit saturation and clamp inside at::vec::convert_float_to_uint8.
-            return f"at::vec::convert_float_to_uint8({x})"
-        if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype == torch.int8:
-            return f"at::vec::convert_float_to_int8({x})"
+            # * Skip the explicit saturation and clamp inside at::vec::convert_float_to_int8.
+            return f"at::vec::convert_float_to_int8<{DTYPE_TO_CPP[dtype]}>({x})"
         # TODO(jgong5): support conversion for other types
         # currently we only allow load/store torch.uint8 and handle conversion there
         return f"({x})"
@@ -1815,7 +1816,7 @@ class CppVecKernel(CppKernel):
         assert opt_ctx is not None
         load_mask_str = f"to_float_mask({load_mask})" if load_mask else None
         loadbuf = f"{var} + {cexpr_index(index)}" if index != 0 else var
-        if dtype in [torch.uint8, torch.int8] and opt_ctx.is_load_int8_as_float:
+        if dtype in (torch.uint8, torch.int8) and opt_ctx.is_load_int8_as_float:
             line = (
                 f"masked_load({loadbuf}, {load_mask_str})"
                 if load_mask_str
@@ -2334,7 +2335,7 @@ class CppTile2DKernel(CppVecKernel):
             storebuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
             if V.graph.get_dtype(name) in DTYPE_LOWP_FP:
                 line = f"{value}.store({storebuf}, {self.tiling_factor});"
-            elif V.graph.get_dtype(name) in [torch.uint8, torch.int8]:
+            elif V.graph.get_dtype(name) in (torch.uint8, torch.int8):
                 line = f"{value}.store({storebuf}, {self.tiling_factor});"
             else:
                 line = f"{value}.store({storebuf});"
@@ -2419,9 +2420,9 @@ class CppVecKernelChecker(CppVecKernel):
         load_type = V.graph.get_dtype(name)
         if load_type == torch.bool:
             return all(user.target in ("where", "masked") for user in users.keys())
-        elif load_type in [torch.uint8, torch.int8]:
+        elif load_type in (torch.uint8, torch.int8):
             """
-            If the load value is torch.int8/uint8, then we only support the loaded
+            If the load value is torch.uint8/int8, then we only support the loaded
             value is as the mask.
             """
             if not all(
@@ -2449,7 +2450,7 @@ class CppVecKernelChecker(CppVecKernel):
         3. dtype of to_dtype is torch.float
         """
         load_type = V.graph.get_dtype(name)
-        if load_type not in [torch.uint8, torch.int8]:
+        if load_type not in (torch.uint8, torch.int8):
             return False
         if len(users) == 1:
             user = next(iter(users))
@@ -2466,12 +2467,12 @@ class CppVecKernelChecker(CppVecKernel):
         3. dtype of to_dtype node is torch.uint8/torch.int8
         """
         store_type = V.graph.get_dtype(store_var)
-        if store_type not in [torch.uint8, torch.int8]:
+        if store_type not in (torch.uint8, torch.int8):
             return False
-        if value_node.target == "to_dtype" and value_node.args[-1] in [
+        if value_node.target == "to_dtype" and value_node.args[-1] in (
             torch.uint8,
             torch.int8,
-        ]:
+        ):
             return True
 
         return False
@@ -2504,7 +2505,7 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec("not a loop")
                 return var
 
-            if load_dtype in [torch.bool, torch.uint8, torch.int8] and not (
+            if load_dtype in (torch.bool, torch.uint8, torch.int8) and not (
                 opt_ctx.is_load_as_mask or opt_ctx.is_load_int8_as_float
             ):
                 if not opt_ctx.is_load_as_mask:
@@ -2541,7 +2542,7 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec(f"{store_dtype} not supported by store")
                 return self.simd_vec
 
-            if store_dtype in [torch.uint8, torch.int8]:
+            if store_dtype in (torch.uint8, torch.int8):
                 value_node = node_ctx.get_fx_node().all_input_nodes[-1]
                 if not self.can_store_fp32_as_int8(name, value_node):
                     self.disable_vec("not support store float32 as uint8/int8")
@@ -2830,7 +2831,7 @@ class CppVecKernelChecker(CppVecKernel):
                             return x
                     elif dtype == torch.bool:
                         pass
-                    elif dtype in [torch.uint8, torch.int8]:
+                    elif dtype in (torch.uint8, torch.int8):
                         # Only allow below 2 cases:
                         # Case 1: to_int8 and store which corresponding to the single quant node
                         # at last of fusion pattern.
