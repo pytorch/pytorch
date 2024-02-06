@@ -4,12 +4,37 @@
 #include <c10/xpu/XPUFunctions.h>
 #include <torch/csrc/Module.h>
 #include <torch/csrc/THP.h>
+#include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 
+#include <pthread.h>
+
 using namespace torch;
 
+static bool in_bad_fork = false; // True for children forked after xpu init
+
+// Called in the forked child if xpu has already been initialized
+static void forked_child() {
+  in_bad_fork = true;
+  torch::utils::set_requires_device_init(at::kXPU, true);
+}
+
+// Should be called before the first xpu call. It is mainly called in lazy_init.
+// Note: This is distinct from initExtension because a stub xpu implementation
+// has some working functions (e.g. device_count) but cannot fully initialize.
+static void poison_fork() {
+  static c10::once_flag flag;
+  c10::call_once(flag, [] { pthread_atfork(nullptr, nullptr, forked_child); });
+}
+
 // XPU management methods
+
+static PyObject* THXPModule_isInBadFork_wrap(PyObject* self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return PyBool_FromLong(in_bad_fork);
+  END_HANDLE_TH_ERRORS
+}
 
 PyObject* THXPModule_setDevice_wrap(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
@@ -30,6 +55,8 @@ PyObject* THXPModule_exchangeDevice_wrap(PyObject* self, PyObject* arg) {
   if (device < 0) {
     return THPUtils_packInt32(-1);
   }
+
+  torch::utils::device_lazy_init(at::kXPU);
   int current_device = c10::xpu::exchange_device(device);
 
   return THPUtils_packInt32(current_device);
@@ -45,6 +72,8 @@ PyObject* THXPModule_maybeExchangeDevice_wrap(PyObject* self, PyObject* arg) {
   if (device < 0) {
     return THPUtils_packInt32(-1);
   }
+
+  torch::utils::device_lazy_init(at::kXPU);
   int current_device = c10::xpu::maybe_exchange_device(device);
 
   return THPUtils_packInt32(current_device);
@@ -63,7 +92,7 @@ PyObject* THXPModule_getDevice_wrap(PyObject* self, PyObject* noargs) {
 
 PyObject* THXPModule_getDeviceCount_wrap(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-
+  poison_fork();
   return THPUtils_packUInt64(at::xpu::device_count());
   END_HANDLE_TH_ERRORS
 }
@@ -145,6 +174,8 @@ static void bindGetDeviceProperties(PyObject* module) {
 // classes
 static PyObject* THXPModule_initExtension(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
+  TORCH_INTERNAL_ASSERT(!in_bad_fork); // Handled at python level
+  poison_fork();
 
   auto m = THPObjectPtr(PyImport_ImportModule("torch.xpu"));
   if (!m)
@@ -172,6 +203,7 @@ static struct PyMethodDef _THXPModule_methods[] = {
      THXPModule_getDeviceCount_wrap,
      METH_NOARGS,
      nullptr},
+    {"_xpu_isInBadFork", THXPModule_isInBadFork_wrap, METH_NOARGS, nullptr},
     {nullptr}};
 
 PyMethodDef* THXPModule_methods() {

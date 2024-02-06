@@ -14,5 +14,7 @@ torch.xpu
     get_device_capability
     get_device_name
     get_device_properties
+    init
     is_available
+    is_initialized
     set_device

@@ -46,6 +46,28 @@ class TestXpu(TestCase):
         self.assertTrue(device_capability["max_work_group_size"] > 0)
         self.assertTrue(device_capability["max_num_sub_groups"] > 0)
 
+    def test_wrong_xpu_fork(self):
+        stderr = TestCase.runWithPytorchAPIUsageStderr(
+            """\
+import torch
+from torch.multiprocessing import Process
+def run(rank):
+    torch.xpu.set_device(rank)
+if __name__ == "__main__":
+    size = 2
+    processes = []
+    for rank in range(size):
+        # it would work fine without the line below
+        torch.xpu.set_device(0)
+        p = Process(target=run, args=(rank,))
+        p.start()
+        processes.append(p)
+    for p in processes:
+        p.join()
+"""
+        )
+        self.assertRegex(stderr, "Cannot re-initialize XPU in forked subprocess.")
+
 
 if __name__ == "__main__":
     run_tests()
