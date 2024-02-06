@@ -1,19 +1,15 @@
 #pragma once
 
-#include <aten/src/ATen/cuda/CUDAEvent.h>
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
-#include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/profiler/combined_traceback.h>
 
 #include <sys/types.h>
 
 #include <cstdlib>
-#include <fstream>
 #include <string>
 #include <system_error>
 #include <vector>
