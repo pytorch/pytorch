@@ -1081,10 +1081,11 @@ def get_matmul_autotune() -> builtins.bool:
 def set_matmul_autotune(enabled: bool) -> None:
     r"""Sets the autotuning flag for matrix multiplications.
 
-    Certain matmuls can be folded into bmm (batched matrix multiply), and by default the decision
-    on whether to fold or not is hardcoded via manual heuristics. Setting this flag to true
-    enables autotuning of this folding. Note that at least two warmup runs are needed for each
-    workload to populate the autotuning cache for that workload.
+    If one of the arguments of batched matrix multiplication is N-dimensions with N >= 3
+    and the other argument is 2-dimensional then "should_fold" decides whether to fold
+    the N-dimensional argument into 2-dimensional and call a single matrix multiplication
+    (torch.mm). Normally "should_fold" relies on handcrafted heuristics, but this
+    `set_matmul_autotune(True)` enables autotuning for this decision..
     """
     _C._set_matmul_autotune(enabled)
 
