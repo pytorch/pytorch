@@ -480,6 +480,50 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
 
+BatchNormBackend _select_batch_norm_backend(
+    const Tensor& input, const Tensor& weight, const Tensor& bias, const Tensor& running_mean,
+    const Tensor& running_var, bool training, double eps, bool cudnn_enabled) {
+
+  if (
+      input.is_cuda()
+      && input.scalar_type() != at::kBFloat16 && weight.scalar_type() != at::kBFloat16
+      && (input.scalar_type() != at::kHalf
+        || weight.scalar_type() == at::kFloat)
+      && weight.defined() && bias.defined()
+      && ((running_mean.defined() && running_var.defined())
+        || (!running_mean.defined() && !running_var.defined() && training))
+      && (input.dim() >= 3)
+      && ((input.sym_size(0) <= 880801 && training) // spatial, training
+          ||(input.sym_size(0) <= 65535 && !training)) //spatial, eval
+      && detail::getCUDAHooks().compiledWithCuDNN()
+      && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()
+      && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L
+      && input.sym_numel() < std::numeric_limits<std::int32_t>::max() // some cuDNN kernels have 32-bit indexing limitations
+  ) {
+    return BatchNormBackend::Cudnn;
+  }
+
+  if (
+      input.is_cuda()
+      && input.dim() <= MIOPEN_DIM_MAX
+      && input.scalar_type() != at::kDouble
+      && input.scalar_type() != at::kBFloat16
+      && (weight.scalar_type() != at::kHalf)
+      && weight.defined() && bias.defined()
+      && ((running_mean.defined() && running_var.defined())
+        || (!running_mean.defined() && !running_var.defined() && training))
+      && detail::getCUDAHooks().compiledWithMIOpen()
+      && cudnn_enabled
+      && input.suggest_memory_format() != MemoryFormat::ChannelsLast
+      && input.suggest_memory_format() != MemoryFormat::ChannelsLast3d
+  ) {
+    return BatchNormBackend::Miopen;
+  }
+
+  return BatchNormBackend::Native;
+}
+
+
 // _batch_norm_impl_index(_backward) are used in the JIT be able to keep the run-time selection
 // of backends, while enabling it to keep the information about the used backend, so that it can
 // use its corresponding backward implementation.
@@ -528,24 +572,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     check_dims_match_num_input_features("bias", std::move(num_features), bias.sym_numel());
   }
 
-  const bool use_cudnn = (
-      input.is_cuda()
-      && input.scalar_type() != at::kBFloat16 && weight.scalar_type() != at::kBFloat16
-      && (input.scalar_type() != at::kHalf
-        || weight.scalar_type() == at::kFloat)
-      && weight.defined() && bias.defined()
-      && ((running_mean.defined() && running_var.defined())
-        || (!running_mean.defined() && !running_var.defined() && training))
-      && (input.dim() >= 3)
-      && ((input.sym_size(0) <= 880801 && training) // spatial, training
-          ||(input.sym_size(0) <= 65535 && !training)) //spatial, eval
-      && detail::getCUDAHooks().compiledWithCuDNN()
-      && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()
-      && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L
-      && input.sym_numel() < std::numeric_limits<std::int32_t>::max() // some cuDNN kernels have 32-bit indexing limitations
-      );
+  BatchNormBackend backend = _select_batch_norm_backend(input, weight, bias, running_mean, running_var, training, eps, cudnn_enabled);
 
-  if (use_cudnn) {
+  if (backend == BatchNormBackend::Cudnn) {
     auto input_c = input.contiguous(input.suggest_memory_format());
     auto weight_c = weight.contiguous();
     auto bias_c = bias.contiguous();
@@ -563,19 +592,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
 
   Tensor reserve = at::empty({0}, input.options().dtype(kByte));
 
-  bool use_miopen = (input.is_cuda()
-               && input.dim() <= MIOPEN_DIM_MAX
-               && input.scalar_type() != at::kDouble
-               && input.scalar_type() != at::kBFloat16
-               && (weight.scalar_type() != at::kHalf)
-               && weight.defined() && bias.defined()
-               && ((running_mean.defined() && running_var.defined())
-                 || (!running_mean.defined() && !running_var.defined() && training))
-               && detail::getCUDAHooks().compiledWithMIOpen()
-               && cudnn_enabled
-               );
-
-  if (use_miopen && input.suggest_memory_format() != MemoryFormat::ChannelsLast && input.suggest_memory_format() != MemoryFormat::ChannelsLast3d) {
+  if (backend == BatchNormBackend::Miopen) {
     return std::tuple_cat(
              at::miopen_batch_norm(
                input.contiguous(), weight.contiguous(), bias.contiguous(),
@@ -647,16 +664,16 @@ Tensor batch_norm(
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
-  return std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
-                                                training, momentum, eps, cudnn_enabled));
+  // return std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
+  //                                               training, momentum, eps, cudnn_enabled));
   // TODO: switch to the new stack after the 2 week FC window
-  // if (training) {
-  //   return std::get<0>(at::_new_batch_norm_with_update(input, weight, bias, running_mean, running_var,
-  //                                                      momentum, eps, cudnn_enabled));
-  // } else {
-  //   return std::get<0>(at::_new_batch_norm_no_update(input, weight, bias, running_mean, running_var,
-  //                                                    momentum, eps, cudnn_enabled));
-  // }
+  if (training) {
+    return std::get<0>(at::_new_batch_norm_with_update(input, weight, bias, running_mean, running_var,
+                                                       momentum, eps, cudnn_enabled));
+  } else {
+    return std::get<0>(at::_new_batch_norm_no_update(input, weight, bias, running_mean, running_var,
+                                                     momentum, eps, cudnn_enabled));
+  }
 }
 
 Tensor instance_norm(
@@ -863,7 +880,7 @@ std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_cpu(
     const Tensor& grad_output, const Tensor& input, const Tensor& weight,
     const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
     const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_var_opt,
-    bool update, double eps, std::array<bool,3> grad_input_mask, const Tensor& reserve) {
+    bool update, double eps, std::array<bool,3> grad_input_mask, const Tensor& reserve, bool cudnn_enabled) {
   return batch_norm_backward_cpu(grad_output, input, weight, running_mean_opt, running_var_opt, save_mean_opt, save_var_opt, update, eps, grad_input_mask);
 }
 

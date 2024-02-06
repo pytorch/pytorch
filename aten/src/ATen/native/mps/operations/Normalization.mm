@@ -497,7 +497,8 @@ std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mps(const Tensor& gr
                                                                 bool update,
                                                                 double eps,
                                                                 std::array<bool, 3> grad_input_mask,
-                                                                const Tensor& reserve) {
+                                                                const Tensor& reserve,
+                                                                bool cudnn_enabled) {
   return batch_norm_backward_mps(grad_output,
                                  input,
                                  weight,

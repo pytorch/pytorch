@@ -18,6 +18,7 @@
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
+#include <ATen/native/Normalization.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
@@ -90,8 +91,13 @@
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <torch/csrc/profiler/combined_traceback.h>
 #include <sstream>
+
 #ifdef USE_CUDA
+#include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
+#if AT_CUDNN_ENABLED()
+#include <ATen/native/cudnn/BatchNorm.h>
+#endif
 #endif
 
 #ifdef USE_DISTRIBUTED
@@ -1441,6 +1447,13 @@ void initModule(PyObject* module);
 } // namespace torch::cuda
 #endif
 
+#ifdef USE_XPU
+PyMethodDef* THXPModule_methods();
+namespace torch::xpu {
+void initModule(PyObject* module);
+} // namespace torch::xpu
+#endif
+
 #ifdef USE_ITT
 namespace torch::profiler {
 void initIttBindings(PyObject* module);
@@ -1500,6 +1513,9 @@ PyObject* initModule() {
 #ifdef USE_CUDA
   THPUtils_addPyMethodDefs(methods, THCPModule_methods());
 #endif
+#ifdef USE_XPU
+  THPUtils_addPyMethodDefs(methods, THXPModule_methods());
+#endif
 #if defined(USE_DISTRIBUTED) && defined(USE_C10D)
   THPUtils_addPyMethodDefs(
       methods, torch::distributed::c10d::python_functions());
@@ -1558,6 +1574,9 @@ PyObject* initModule() {
 #endif
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
+#endif
+#ifdef USE_XPU
+  torch::xpu::initModule(module);
 #endif
   torch::cpu::initModule(module);
   torch::initVerboseBindings(module);
@@ -1888,10 +1907,17 @@ Call this whenever a new thread is created in order to propagate values from
   PyObject* has_mps = Py_False;
 #endif
 
+#ifdef USE_XPU
+  PyObject* has_xpu = Py_True;
+#else
+  PyObject* has_xpu = Py_False;
+#endif
+
   ASSERT_TRUE(set_module_attr("_has_cuda", has_cuda));
   ASSERT_TRUE(
       set_module_attr("_has_magma", at::hasMAGMA() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("_has_mps", has_mps));
+  ASSERT_TRUE(set_module_attr("_has_xpu", has_xpu));
   ASSERT_TRUE(
       set_module_attr("_has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
 
@@ -2037,6 +2063,51 @@ Call this whenever a new thread is created in order to propagate values from
         return c10::impl::cow::is_cow_data_ptr(tensor.storage().data_ptr());
       },
       "Checks if a tensor's data pointer is COW");
+
+#ifdef USE_CUDA
+#if AT_CUDNN_ENABLED()
+   py_module.def(
+       "_get_cudnn_batch_norm_reserve_space_size",
+       [](const at::Tensor& input) {
+         return at::native::_get_cudnn_batch_norm_reserve_space_size(input);
+       },
+       py::arg("input"));
+#endif
+#endif
+
+  py::enum_<at::native::BatchNormBackend>(py_module, "_BatchNormBackend")
+      .value("Native", at::native::BatchNormBackend::Native)
+      .value("Cudnn", at::native::BatchNormBackend::Cudnn)
+      .value("Miopen", at::native::BatchNormBackend::Miopen);
+
+  py_module.def(
+      "_select_batch_norm_backend",
+      [](const at::Tensor& input,
+         const at::Tensor& weight,
+         const at::Tensor& bias,
+         const at::Tensor& running_mean,
+         const at::Tensor& running_var,
+         bool training,
+         double eps,
+         bool cudnn_enabled) {
+        return at::native::_select_batch_norm_backend(
+            input,
+            weight,
+            bias,
+            running_mean,
+            running_var,
+            training,
+            eps,
+            cudnn_enabled);
+      },
+      py::arg("input"),
+      py::arg("weight"),
+      py::arg("bias"),
+      py::arg("running_mean"),
+      py::arg("running_var"),
+      py::arg("training"),
+      py::arg("eps"),
+      py::arg("cudnn_enabled"));
 
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();
   THPDefaultCPUGenerator =

@@ -29,11 +29,9 @@ class WorkRegistry {
     const auto storage = tensor.storage().getWeakStorageImpl();
     std::unique_lock lock(lock_);
     auto it = registry_.find(storage);
-    TORCH_CHECK(
-        it != registry_.end(),
-        "No pending collective is associated with the tensor storage. "
-        "This typically means that the tensor is not a collective output, "
-        "or the tensor has already been waited on.");
+    if (it == registry_.end()) {
+      return nullptr;
+    }
     auto work = it->second;
     registry_.erase(it);
     return work;
@@ -220,7 +218,9 @@ at::Tensor all_to_all_single(
 
 at::Tensor wait_tensor(const at::Tensor& tensor) {
   auto work = c10d::RankLocal<WorkRegistry>::get().pop_work(tensor);
-  work->wait();
+  if (work != nullptr) {
+    work->wait();
+  }
   return tensor;
 }
 

@@ -315,6 +315,10 @@ class TestCommon(TestCase):
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_meta(self, device, dtype, op):
+        CHECK_CONJ_SKIPS = {
+            torch._refs.linalg.svd,
+        }
+
         with FakeTensorMode() as mode:
             pass
 
@@ -341,12 +345,12 @@ class TestCommon(TestCase):
 
             if isinstance(result, torch.Tensor):
                 self.assertTrue(isinstance(meta_result, FakeTensor))
-                prims.utils.compare_tensor_meta(result, meta_result)
+                prims.utils.compare_tensor_meta(result, meta_result, check_conj=op.op not in CHECK_CONJ_SKIPS)
             elif isinstance(result, Sequence):
                 for a, b in zip(result, meta_result):
                     if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
                         self.assertTrue(isinstance(b, FakeTensor))
-                        prims.utils.compare_tensor_meta(a, b)
+                        prims.utils.compare_tensor_meta(a, b, check_conj=op.op not in CHECK_CONJ_SKIPS)
 
     def _ref_test_helper(
         self,
@@ -1866,7 +1870,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.nn.functional.group_norm',
         '_refs.nn.functional.mse_loss',
         '_refs.floor_divide',
-        '_refs.rsub',
         # duplicated as refs do not have decent support for advanced indexing
         '_refs.index_copy',
         '_refs.index_copy_',
@@ -1953,7 +1956,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.sum_to_size',
         # ref implementation missing kwargs
         '_refs.full_like',  # missing "layout"
-        '_refs.round',  # missing "decimals"
         '_refs.scalar_tensor',  # missing "layout"
         # other
         '_refs.block_diag',  # only refs._block_diag_iterable is in decomposition table

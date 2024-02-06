@@ -29,6 +29,7 @@ from torch._guards import (
     TracingContext,
 )
 from torch._utils_internal import signpost_event
+from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -493,6 +494,12 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             out if out is not None else self.tracing_context.global_context.global_state
         )
 
+        # TODO - Consider having a torch level API for torch_function_state. As
+        # of now, we create a ref cycle by passing the
+        # output.set_torch_function_state to
+        # output.tracing_context.global_context.global_state. In the interim,
+        # the problem can be solved by manually set
+        # output.tracing_context.global_context.global_state to None at cleanup.
         global_state["torch_function_enabled"] = (
             self.set_torch_function_state,
             self.torch_function_enabled,
@@ -1058,7 +1065,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # free a bit of memory
         self.real_value_cache.clear()
 
-        gm = fx.GraphModule(root, self.graph)
+        gm = _make_graph_module(root, self.graph)
         for register_finalizer in self.register_finalizer_fns:
             register_finalizer(gm)
 
@@ -1126,8 +1133,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             # TODO: Why isn't this stored in meta :think:
             pl._dynamo_source = arg.source
 
-        gm._param_name_to_source = self.param_name_to_source
-        gm._source_to_user_stacks = self.source_to_user_stacks
+        gm._param_name_to_source = self.param_name_to_source  # type: ignore[assignment]
+        gm._source_to_user_stacks = self.source_to_user_stacks  # type: ignore[assignment]
 
         try:
             name = (
@@ -1411,7 +1418,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     def cleanup(self) -> None:
         # There is a reference cycle between tracer and OutputGraph, causing
         # some of the tensor objects to be held alive for longer than necessary.
-
         self.root_tx = None
         self.nn_modules.clear()
         self.param_name_to_source = None
@@ -1424,6 +1430,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.side_effects.clear()
         self.register_finalizer_fns.clear()
         self.dynamo_flat_name_to_original_fqn.clear()
+        self.tracing_context.clear()
 
     def set_torch_function_state(self, enabled: bool) -> None:
         self.torch_function_enabled = enabled

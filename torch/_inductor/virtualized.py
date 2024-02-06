@@ -82,7 +82,7 @@ from torch._inductor.utils import IndentedBuffer
 
 from torch.fx.graph import inplace_methods, magic_methods
 
-from .utils import reduction_num_outputs, sympy_str, sympy_symbol
+from .utils import reduction_num_outputs, sympy_index_symbol, sympy_str
 
 if TYPE_CHECKING:
     import torch
@@ -202,7 +202,7 @@ class MockHandler:
 
     @staticmethod
     def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:
-        return sympy_symbol(f"({str(index_var)})")
+        return sympy_index_symbol(f"({str(index_var)})")
 
     @classmethod
     def _init_cls(cls):
@@ -259,7 +259,10 @@ class OpsHandler(Protocol[T]):
     magic method from being called).  Instead, define a function that casts an
     argument of your type to the protocol, which is sufficient to induce mypy to
     test that the protocol is implemented correctly.  Search for ``_typecheck_``
-    in this file to see some examples.
+    in this file to see some examples.  If you see an obscure error where a
+    class doesn't implement a Protocol, but mypy doesn't say why, check to see
+    that ``__getattr__`` is typed correctly (typically, it is not possible to
+    type ``__getattr__`` without typing it as ``Callable[..., Any]``)
     """
 
     def constant(self, value: Union[bool, float, int], dtype: torch.dtype) -> T:
@@ -341,6 +344,9 @@ class OpsHandler(Protocol[T]):
         Convert an integral x into a sympy.Expr that can be subsequently used in
         indexing computation.  'size' represents an upper bound on the what valid
         indexes can be; when 'check' is True, we check that the x is in bounds.
+
+        NB: This is typically mandatory to implement for any analysis, because you
+        MUST return a valid sympy.Expr of some sort (even if it's a meaningless symbol).
         """
         ...
 

@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/Normalization.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/Resize.h>
@@ -31,8 +32,6 @@
 #include <ATen/ops/scalar_tensor.h>
 #endif
 
-static const int MIOPEN_DIM_MAX = 5;
-
 namespace at::native {
 
 namespace {
@@ -59,45 +58,6 @@ inline bool batch_norm_use_channels_last_kernels(const at::Tensor& self) {
     self.is_contiguous(at::MemoryFormat::ChannelsLast) ||
     self.is_contiguous(at::MemoryFormat::ChannelsLast3d) ||
     (self.is_contiguous() && self.strides()[1] == 1)
-  );
-}
-
-// TODO(andrew): merge this with _batch_norm_impl_index
-bool _use_cudnn(const Tensor& input, const Tensor& weight, const Tensor& bias, const Tensor& running_mean, const Tensor& running_var, bool train, bool epsilon, bool backward) {
-  return (
-      input.is_cuda()
-      && input.scalar_type() != at::kBFloat16 && weight.scalar_type() != at::kBFloat16
-      && (input.scalar_type() != at::kHalf
-        || weight.scalar_type() == at::kFloat)
-      && weight.defined()
-      && (bias.defined() || backward)
-      && ((running_mean.defined() && running_var.defined())
-        || (!running_mean.defined() && !running_var.defined() && train))
-      && (input.dim() >= 3)
-      && ((input.sym_size(0) <= 880801 && train) // spatial, training
-          ||(input.sym_size(0) <= 65535 && !train)) //spatial, eval
-      && at::detail::getCUDAHooks().compiledWithCuDNN()
-      && epsilon >= at::detail::getCUDAHooks().batchnormMinEpsilonCuDNN()
-      && at::detail::getCUDAHooks().versionCuDNN() >= 5110L
-      && input.sym_numel() < std::numeric_limits<std::int32_t>::max() // some cuDNN kernels have 32-bit indexing limitations
-  );
-}
-
-// TODO(andrew): merge this with _batch_norm_impl_index
-bool _use_miopen(const Tensor& input, const Tensor& weight, const Tensor& bias, const Tensor& running_mean, const Tensor& running_var, bool train, bool backward) {
-  return (
-      input.is_cuda()
-      && input.dim() <= MIOPEN_DIM_MAX
-      && input.scalar_type() != at::kDouble
-      && input.scalar_type() != at::kBFloat16
-      && (weight.scalar_type() != at::kHalf)
-      && weight.defined()
-      && (bias.defined() || backward)
-      && ((running_mean.defined() && running_var.defined())
-        || (!running_mean.defined() && !running_var.defined() && train))
-      && at::detail::getCUDAHooks().compiledWithMIOpen()
-      && input.suggest_memory_format() != MemoryFormat::ChannelsLast
-      && input.suggest_memory_format() != MemoryFormat::ChannelsLast3d
   );
 }
 
@@ -531,26 +491,25 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _new_batch_norm_with_update_cuda(
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
   Tensor output, save_mean, save_var, reserve;
 
-  const bool use_cudnn = _use_cudnn(input, weight, bias, running_mean, running_var, /*train*/true, eps, /*backward*/false);
-  const bool use_miopen = _use_miopen(input, weight, bias, running_mean, running_var, /*train*/true, /*backward*/false);
+  BatchNormBackend backend = _select_batch_norm_backend(input, weight, bias, running_mean, running_var, /*training*/true, eps, cudnn_enabled);
   auto weight_c = weight.contiguous();
   auto bias_c = bias.contiguous();
   auto rmean_c = running_mean.defined() ? running_mean.contiguous() : running_mean;
   auto rvar_c = running_var.defined() ? running_var.contiguous() : running_var;
 
-  if (use_cudnn) {
+  if (backend == BatchNormBackend::Cudnn) {
     auto input_c = input.contiguous(input.suggest_memory_format());
     std::tie(output, save_mean, save_var, reserve) =
-        at::cudnn_batch_norm(input_c, weight_c, bias_c, rmean_c, rvar_c, /*train*/true, momentum, eps);
-  } else if (use_miopen) {
+        at::cudnn_batch_norm(input_c, weight_c, bias_c, rmean_c, rvar_c, /*training*/true, momentum, eps);
+  } else if (backend == BatchNormBackend::Miopen) {
     auto input_c = input.contiguous();
     reserve = at::empty({0}, input.options().dtype(kByte));
     std::tie(output, save_mean, save_var) =
-        at::miopen_batch_norm(input_c, weight_c, bias_c, rmean_c, rvar_c, /*train*/true, momentum, eps);
+        at::miopen_batch_norm(input_c, weight_c, bias_c, rmean_c, rvar_c, /*training*/true, momentum, eps);
   } else {
     reserve = at::empty({0}, input.options().dtype(kByte));
     std::tie(output, save_mean, save_var) =
-        batch_norm_cuda(input, weight_opt, bias_opt, running_mean_opt, running_var_opt, /*train*/true, momentum, eps);
+        batch_norm_cuda(input, weight_opt, bias_opt, running_mean_opt, running_var_opt, /*training*/true, momentum, eps);
   }
   return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, save_mean, save_var, reserve);
 }
@@ -575,18 +534,18 @@ std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_cuda(
     const Tensor& grad_output, const Tensor& input, const Tensor& weight,
     const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
     const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_var_opt,
-    bool update, double eps, std::array<bool,3> grad_input_mask, const Tensor& reserve) {
-  const Tensor& dummy_bias = Tensor();
+    bool update, double eps, std::array<bool,3> grad_input_mask, const Tensor& reserve, bool cudnn_enabled) {
+  const Tensor& dummy_bias = at::empty(1);
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
   const Tensor& save_mean = c10::value_or_else(save_mean_opt, [] {return Tensor();});
   const Tensor& save_var = c10::value_or_else(save_var_opt, [] {return Tensor();});
-  const bool use_cudnn = _use_cudnn(input, weight, dummy_bias, running_mean, running_var, update, eps, /*backward*/true);
-  const bool use_miopen = _use_miopen(input, weight, dummy_bias, running_mean, running_var, update, /*backward*/true);
 
-  if (use_cudnn) {
+  BatchNormBackend backend = _select_batch_norm_backend(input, weight, dummy_bias, running_mean, running_var, /*training*/true, eps, cudnn_enabled);
+
+  if (backend == BatchNormBackend::Cudnn) {
     return at::cudnn_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var, eps, reserve);
-  } else if (use_miopen) {
+  } else if (backend == BatchNormBackend::Miopen) {
     return at::miopen_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var, eps);
   } else {
     return batch_norm_backward_cuda(grad_output, input, weight, running_mean, running_var, save_mean, save_var, update, eps, grad_input_mask);

@@ -63,6 +63,14 @@ aten = torch.ops.aten
 check_model = test_torchinductor.check_model
 
 
+@contextlib.contextmanager
+def set_num_threads(num_threads):
+    orig_num_threads = torch.get_num_threads()
+    torch.set_num_threads(num_threads)
+    yield
+    torch.set_num_threads(orig_num_threads)
+
+
 class LstmModule(torch.nn.Module):
     def __init__(
         self,
@@ -596,6 +604,39 @@ class CPUReproTests(TestCase):
                 fn,
                 (x,),
             )
+
+    def test_acosh_with_negative_large_input(self):
+        # https://github.com/pytorch/pytorch/issues/118267.
+
+        def fn(input):
+            out = torch.acosh(input)
+            return out
+
+        x = torch.Tensor(
+            [
+                [
+                    -8493.9854,
+                    431654.1250,
+                    71741.5859,
+                    608234.5000,
+                    -103814.7500,
+                    -699397.0000,
+                    -910685.8125,
+                    -832737.1875,
+                    875343.5000,
+                ]
+            ]
+        ).repeat(3, 9)
+
+        for dtype in [torch.float32, torch.bfloat16, torch.double]:
+            with torch.no_grad():
+                torch._dynamo.reset()
+                metrics.reset()
+                _x = x.to(dtype)
+                self.common(
+                    fn,
+                    (_x,),
+                )
 
     @config.patch(implicit_fallbacks=True)
     def test_repeat_interleave(self):
@@ -1171,13 +1212,6 @@ class CPUReproTests(TestCase):
         def fn(x1, x2):
             return x1 + x2
 
-        @contextlib.contextmanager
-        def set_num_threads(num_threads):
-            orig_num_threads = torch.get_num_threads()
-            torch.set_num_threads(num_threads)
-            yield
-            torch.set_num_threads(orig_num_threads)
-
         x1 = torch.randn((10, 20))
         x2 = torch.randn((10, 20))
         with set_num_threads(1):
@@ -1314,6 +1348,8 @@ class CPUReproTests(TestCase):
                 cpp_op_list.append(k)
 
         diff = [
+            "bessel_j0",
+            "bessel_j1",
             "constant",
             "index_expr",
             "signbit",
@@ -1396,15 +1432,40 @@ class CPUReproTests(TestCase):
             torch.randn(1, 1, 10),
         )
 
-        fn_opt = torch.compile()(fn)
-        with config.patch({"cpp.fallback_scatter_reduce_sum": False}):
-            _, code = run_and_get_cpp_code(fn_opt, *inps)
-            FileCheck().check("atomic_add").run(code)
+        def _internal_check(
+            _fn,
+            _inps,
+            _target_code_check=None,
+            _target_code_check_not=None,
+        ):
+            torch._dynamo.reset()
+            metrics.reset()
+            _fn_opt = torch.compile()(_fn)
+            _, code = run_and_get_cpp_code(_fn_opt, *inps)
+            if _target_code_check:
+                FileCheck().check(_target_code_check).run(code)
+            if _target_code_check_not:
+                FileCheck().check_not(_target_code_check_not).run(code)
 
             self.assertEqual(
-                fn(*inps),
-                fn_opt(*inps),
+                _fn(*_inps),
+                _fn_opt(*_inps),
             )
+
+        with config.patch({"cpp.fallback_scatter_reduce_sum": False}):
+            _internal_check(fn, inps, "atomic_add")
+
+        with config.patch({"cpp.fallback_scatter_reduce_sum": True}):
+            _internal_check(fn, inps, "aten.scatter_reduce_")
+
+        if torch.has_openmp:
+            # Fix https://github.com/pytorch/pytorch/issues/118518
+            # which fails to change thread number with native thread pool
+            with set_num_threads(1):
+                _internal_check(fn, inps, _target_code_check_not="aten.scatter_reduce_")
+
+            with config.patch({"cpp.dynamic_threads": True}), set_num_threads(1):
+                _internal_check(fn, inps, "aten.scatter_reduce_")
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -1973,6 +2034,47 @@ class CPUReproTests(TestCase):
                 metrics.reset()
                 self.common(fn, (x,))
                 assert metrics.generated_cpp_vec_kernel_count == 0
+
+    def test_argmin(self):
+        def fn(x):
+            return torch.argmin(x, -1)
+
+        for dtype in vec_dtypes:
+            x = torch.randn((10, 10), dtype=dtype)
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            assert metrics.generated_cpp_vec_kernel_count == 0
+
+    def test_argmax_argmin_with_nan_value(self):
+        def fn(x):
+            return torch.argmax(x)
+
+        def fn2(x):
+            return torch.argmin(x)
+
+        inputs = [
+            torch.Tensor([-755832.1250, 100]),
+            torch.Tensor([-755832.1250, 100, 200]),
+            torch.Tensor([100, -755832.1250]),
+            torch.Tensor([100, 200, -755832.1250]),
+        ]
+
+        for x in inputs:
+            x = x.repeat(16, 16)
+            x = torch.log1p(x)
+
+            # Test argmax
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            assert metrics.generated_cpp_vec_kernel_count == 0
+
+            # Test argmin
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn2, (x,))
+            assert metrics.generated_cpp_vec_kernel_count == 0
 
     # Currently, we enabled AVX2 and AVX512 for vectorization. If the platform is not
     # supported, the vectorization will not work and skip this test case. For ARM or
@@ -2835,6 +2937,28 @@ class CPUReproTests(TestCase):
             o2 = torch.rand([3, 3, 2, 8, 9, 2], dtype=dtype)
             with torch.no_grad():
                 self.common(fn, (o1, o2, x, y))
+
+    def test_constant_bool_vec(self):
+        def fn(x):
+            mask = torch.zeros(1, dtype=torch.bool)
+            return torch.where(mask, x, -1.0)
+
+        x = torch.rand(1000)
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_symbolic_shape_scalar_value_reduction(self):
+        def fn(x, y):
+            return y + torch.ones(x).sum()
+
+        with torch.no_grad():
+            metrics.reset()
+            y = torch.randn(100)
+            self.common(fn, (100, y))
+            assert metrics.generated_cpp_vec_kernel_count == 2
 
 
 if __name__ == "__main__":

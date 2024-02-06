@@ -226,7 +226,7 @@ std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
     const Tensor& grad_output, const Tensor& input, const Tensor& weight,
     const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
     const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_var_opt,
-    bool update, double eps, std::array<bool,3> grad_input_mask, const Tensor& reserve) {
+    bool update, double eps, std::array<bool,3> grad_input_mask, const Tensor& reserve, bool cudnn_enabled) {
   return mkldnn_batch_norm_backward(grad_output, input, weight, running_mean_opt, running_var_opt, save_mean_opt, save_var_opt, update, eps, grad_input_mask);
 }
 

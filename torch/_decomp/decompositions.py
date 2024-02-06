@@ -1153,16 +1153,6 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
     return result
 
 
-@register_decomposition(aten.rsub.Tensor)
-def rsub_Tensor(self: Tensor, other: Tensor, alpha: float = 1) -> Tensor:
-    return torch.sub(other, self, alpha=alpha)
-
-
-@register_decomposition(aten.rsub.Scalar)
-def rsub_Scalar(self: Tensor, other: float, alpha: float = 1) -> Tensor:
-    return torch.sub(other, self, alpha=alpha)
-
-
 @register_decomposition(aten.embedding)
 @out_wrapper()
 def embedding(
@@ -1252,6 +1242,26 @@ def split_with_sizes(
     return splits
 
 
+# out_wrapper currently does not allow optional outputs
+@register_decomposition(
+    [aten.split_with_sizes_copy.default, aten.split_with_sizes_copy.out]
+)
+def split_with_sizes_copy(
+    self: Tensor,
+    split_sizes: List[int],
+    dim: int = 0,
+    out: Optional[List[Tensor]] = None,
+) -> Optional[List[Tensor]]:
+    splits = split_with_sizes(self, split_sizes, dim=dim)
+    if out is None:
+        return [s.clone(memory_format=torch.contiguous_format) for s in splits]
+    else:
+        for output, split in zip(out, splits):
+            _maybe_resize_out(output, split.shape)
+            _safe_copy_out(copy_from=split, copy_to=output, exact_dtype=True)
+        return None
+
+
 @register_decomposition(aten.unsafe_split.Tensor)
 def unsafe_split(input: Tensor, split_size: int, dim: int = 0) -> Tuple[Tensor, ...]:
     return aten.split.Tensor(input, split_size, dim)
@@ -1289,7 +1299,7 @@ def tensor_split_tensor_indices_or_sections_py_impl(
     self: Tensor,
     tensor_indices_or_sections: Tensor,
     dim: int = 0,
-) -> List[Tensor]:
+) -> Tuple[Tensor, ...]:
     assert tensor_indices_or_sections.device.type == "cpu"
     assert tensor_indices_or_sections.dtype == torch.int64
     split_dim = tensor_indices_or_sections.dim()
@@ -1830,6 +1840,23 @@ def _native_batch_norm_legit_functional(
     return output, save_mean, save_rstd, new_running_mean, new_running_var
 
 
+def _get_batch_norm_reserve_tensor(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Tensor,
+    running_var: Tensor,
+    eps: float,
+    cudnn_enabled: bool,
+) -> Tensor:
+    backend = torch._C._select_batch_norm_backend(input, weight, bias, running_mean, running_var, True, eps, cudnn_enabled)
+    if backend == torch._C._BatchNormBackend.Cudnn:
+        reserve_size = torch._C._get_cudnn_batch_norm_reserve_space_size(input)
+        return torch.empty(reserve_size, dtype=input.dtype, layout=input.layout, device=input.device)
+    else:
+        return Tensor()
+
+
 @register_decomposition(aten._new_batch_norm_with_update.default)
 def _new_batch_norm_with_update(
     input: Tensor,
@@ -1852,8 +1879,8 @@ def _new_batch_norm_with_update(
         eps,
         False,  # functional
     )
-    # TODO: investigate correct size for reserve tensor, used only in cudnn
-    return output, save_mean, save_rstd, Tensor()
+    reserve = _get_batch_norm_reserve_tensor(input, weight, bias, running_mean, running_var, eps, cudnn_enabled)
+    return output, save_mean, save_rstd, reserve
 
 
 @register_decomposition(aten._new_batch_norm_no_update.default)
@@ -1878,8 +1905,8 @@ def _new_batch_norm_no_update(
         eps,
         False,  # functional
     )
-    # TODO: investigate correct size for reserve tensor, used only in cudnn
-    return output, save_mean, save_rstd, Tensor()
+    reserve = _get_batch_norm_reserve_tensor(input, weight, bias, running_mean, running_var, eps, cudnn_enabled)
+    return output, save_mean, save_rstd, reserve
 
 
 @register_decomposition(aten._fused_dropout)
@@ -2884,7 +2911,7 @@ def _rnn_helper(
             final_hiddens.append(bwd_hidden)
 
         if bidirectional:
-            input = torch.cat([fwd_inp, bwd_inp], fwd_inp.dim() - 1)
+            input = torch.cat([fwd_inp, bwd_inp], fwd_inp.dim() - 1)  # type: ignore[possibly-undefined]
         else:
             input = fwd_inp
 
@@ -3873,18 +3900,11 @@ def mv(self, vec):
 def binary_cross_entropy_with_logits(
     self, target, weight=None, pos_weight=None, reduction=Reduction.MEAN.value
 ):
-    max_val = (-self).clamp_min(0)
     if pos_weight is not None:
         log_weight = (pos_weight - 1) * target + 1
-        loss = (1 - target) * self + log_weight * (
-            ((-max_val).exp() + (-self - max_val).exp()).log() + max_val
-        )
+        loss = (1 - target) * self - (log_weight * F.logsigmoid(self))
     else:
-        loss = (
-            (1 - target) * self
-            + max_val
-            + ((-max_val).exp() + (-self - max_val).exp()).log()
-        )
+        loss = (1 - target) * self - F.logsigmoid(self)
 
     if weight is not None:
         loss = loss * weight
@@ -3892,14 +3912,14 @@ def binary_cross_entropy_with_logits(
     return apply_loss_reduction(loss, reduction)
 
 
-def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor) -> bool:
+def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> bool:
     # For comments of the logic of this function see eager in /native/LinearAlgebra.cpp
 
     t1, t2 = (tensor1, tensor2) if tensor1.ndim >= tensor2.ndim else (tensor2, tensor1)
 
     if not (t1.ndim >= 3 and t2.ndim <= 2):
         return False
-    if t2.requires_grad:
+    if t2.requires_grad and not is_out:
         return True
     if tensor1.ndim == 2:
         return False
@@ -3915,8 +3935,8 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor) -> bool:
 
 
 @aten.matmul.default.py_impl(DispatchKey.CompositeImplicitAutograd)
-@out_wrapper()
-def matmul(tensor1, tensor2):
+@out_wrapper(pass_is_out=True)
+def matmul(tensor1, tensor2, *, is_out=False):
     dim_tensor1 = tensor1.dim()
     dim_tensor2 = tensor2.dim()
     assert dim_tensor1 != 0 and dim_tensor2 != 0
@@ -3928,7 +3948,7 @@ def matmul(tensor1, tensor2):
         return torch.squeeze(torch.mm(torch.unsqueeze(tensor1, 0), tensor2), 0)
     elif dim_tensor1 == 2 and dim_tensor2 == 2:
         return torch.mm(tensor1, tensor2)
-    elif should_fold(tensor1, tensor2):
+    elif should_fold(tensor1, tensor2, is_out):
         # dim_tensor1 >=3 && (dim_tensor2 == 1 || dim_tensor2 == 2) ||
         # dim_tensor2 >=3 && (dim_tensor1 == 1 || dim_tensor1 == 2)
         # and some condition on the strides is fulfilled
@@ -4490,7 +4510,7 @@ def squeeze_default(self: Tensor, dim: Optional[int] = None):
 
 
 @register_decomposition(torch.ops.aten._weight_norm_interface)
-def _weight_norm_interface(x, y, dim):
+def _weight_norm_interface(x, y, dim=0):
     # https://github.com/pytorch/pytorch/blob/852f8526c52190125446adc9a6ecbcc28fb66182/aten/src/ATen/native/WeightNorm.cpp#L58
     keep_dim = tuple(i for i in range(len(x.shape)) if i != dim)
     norm = x.norm(2, keep_dim, keepdim=True)
