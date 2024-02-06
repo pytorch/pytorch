@@ -236,11 +236,11 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         foo = Foo(1, 2)
         guard_manager = RootGuardManager()
         guard_manager.add_type_match_guard(id_type(foo), "type(x) == Foo")
-        guard_manager.x.add_lambda_guard(
+        guard_manager.__getitem__("x", 1).add_lambda_guard(
             functools.partial(equals_match, expected=foo.x),
             equals_match_failure_fn(foo.x),
         )
-        guard_manager.y.add_lambda_guard(
+        guard_manager.__getitem__("y", 2).add_lambda_guard(
             functools.partial(equals_match, expected=foo.y),
             equals_match_failure_fn(foo.y),
         )
@@ -775,6 +775,41 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         global x
         del x
         self.assertFalse(guard_manager.check(None))
+
+    def test_dict_manager(self):
+        f_locals = {
+            "foo": 1,
+            "bar": {"a": 1, "b": 2},
+        }
+        guard_manager = RootGuardManager()
+
+        foo_manager = guard_manager.__getitem__("foo", f_locals["foo"])
+        foo_manager.add_equals_match_guard(1, "guard_fail a")
+        bar_manager = guard_manager.__getitem__("bar", f_locals["bar"])
+        bar_manager.get_key_value_manager(0).get_key_manager(
+            "a"
+        ).add_equals_match_guard("a", "guard_fail a")
+        bar_manager.get_key_value_manager(0).get_value_manager(
+            1
+        ).add_equals_match_guard(1, "guard_fail b")
+        bar_manager.get_key_value_manager(1).get_key_manager(
+            "b"
+        ).add_equals_match_guard("b", "guard_fail c")
+        bar_manager.get_key_value_manager(1).get_value_manager(
+            2
+        ).add_equals_match_guard(2, "guard_fail d")
+
+        self.assertTrue(guard_manager.check(f_locals))
+        f_locals = {
+            "foo": 1,
+            "bar": {"a": 1, "b": 1},
+        }
+        self.assertFalse(guard_manager.check(f_locals))
+        f_locals = {
+            "foo": 1,
+            "bar": {"b": 2, "a": 1},
+        }
+        self.assertFalse(guard_manager.check(f_locals))
 
 
 if __name__ == "__main__":
