@@ -2115,26 +2115,15 @@ initializer(omp_priv={{{self.reduction_init_vec(reduction_type, dtype)}}})
             # Horizontal reduction
             if is_welford_reduction(reduction_type):
                 next_value = f"welford_vec_reduce_all({acc_vec})"
-            else:
-                reduce_all_vec_body = (
+            else:                
+                reduce_all_body = (
                     "{ return "
                     + self.reduction_combine_vec(reduction_type, "x", "y")
                     + "; }"
                 )
-                reduce_all_scalar_body = (
-                    "{ return " + reduction_combine(reduction_type, "x", "y") + "; }"
-                )
-                cpp_type = f"{DTYPE_TO_CPP[dtype]}"
-                vec = f"at::vec::Vectorized<{cpp_type}>"
-                vec_func = f"[]({vec}& x, {vec}& y) {reduce_all_vec_body}"
-                scalar_func = f"[]({cpp_type} x, {cpp_type} y) {reduce_all_scalar_body}"
-                reduce_all_args = [vec_func]
-                if self._get_num_vectors(dtype) > 1:
-                    reduce_all_args.append(scalar_func)
-                reduce_all_args.append(acc_vec)
-                next_value = (
-                    f"at::vec::vec_reduce_all<{cpp_type}>({','.join(reduce_all_args)})"
-                )
+                vec = f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>"
+                vec_reduce_all_func = f"at::vec::vec_reduce_all<{DTYPE_TO_CPP[dtype]}>"
+                next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {acc_vec})"
 
             self.reduction_suffix.writeline(
                 f"{acc} = {reduction_combine(reduction_type, acc, next_value)};"

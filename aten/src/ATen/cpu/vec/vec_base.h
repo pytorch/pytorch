@@ -622,7 +622,9 @@ template <class T> Vectorized<T> inline operator/(const Vectorized<T> &a, const 
   return c;
 }
 
-template <class T> Vectorized<T> inline operator%(const Vectorized<T> &a, const Vectorized<T> &b) __ubsan_ignore_float_divide_by_zero__ {
+template <class T,
+          typename std::enable_if<!is_floating_point_v<T>, int>::type = 0>
+Vectorized<T> inline operator%(const Vectorized<T> &a, const Vectorized<T> &b) __ubsan_ignore_float_divide_by_zero__ {
   return a - a / b * b;
 }
 

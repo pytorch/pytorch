@@ -91,12 +91,13 @@ class VectorizedN {
     return values[i];
   }
 
+  template <int64_t mask>
   static VectorizedN<T, N> blend(
       const VectorizedN<T, N>& a,
       const VectorizedN<T, N>& b) {
     VectorizedN<T, N> result;
     for (int i = 0; i < N; ++i) {
-      result.values[i] = Vectorized<T>::blend(a.values[i], b.values[i]);
+      result.values[i] = Vectorized<T>::blend<mask>(a.values[i], b.values[i]);
     }
     return result;
   }
@@ -132,8 +133,11 @@ class VectorizedN {
     VectorizedN<T, N> result;
     for (int i = 0; i < N; ++i) {
       result.values[i] =
-          Vectorized<T>::set(a, b, std::min(count, Vectorized<T>::size()));
+          Vectorized<T>::set(a.values[i], b.values[i], std::min(count, Vectorized<T>::size()));
       count -= Vectorized<T>::size();
+      if (count <= 0) {
+        break;
+      }
     }
     return result;
   }
@@ -188,18 +192,18 @@ class VectorizedN {
     return false;
   }
 
-  Vectorized<T> map(T (*const f)(T)) const {
-    Vectorized<T> result;
+  VectorizedN<T, N> map(T (*const f)(T)) const {
+    VectorizedN<T, N> result;
     for (int i = 0; i < N; ++i) {
-      result[i] = f(values[i]);
+      result.values[i] = values[i].map(f);
     }
     return result;
   }
 
-  Vectorized<T> map(T (*const f)(const T&)) const {
-    Vectorized<T> result;
+  VectorizedN<T, N> map(T (*const f)(const T&)) const {
+    VectorizedN<T, N> result;
     for (int i = 0; i < N; ++i) {
-      result[i] = f(values[i]);
+      result.values[i] = values[i].map(f);
     }
     return result;
   }
@@ -327,13 +331,13 @@ VECTORIZEDN_DEFINE_BINARY_OP_INPLACE_GLOBAL(operator>>=)
 #undef VECTORIZEDN_DEFINE_BINARY_OP_GLOBAL
 #undef VECTORIZEDN_DEFINE_BINARY_OP_INPLACE_GLOBAL
 
-template <typename T, int N, typename OpVec, typename OpScalar>
-inline T vec_reduce_all(const OpVec& vec_fun, const OpScalar& scalar_fun, VectorizedN<T, N> acc_vec) {
-  T result = vec_reduce_all(vec_fun, acc_vec[0]);
+template <typename T, int N, typename OpVec>
+inline T vec_reduce_all(const OpVec& vec_fun, VectorizedN<T, N> acc_vec) {
+  Vectorized<T> vec_result = acc_vec[0];
   for (int i = 1; i < N; i++) {
-    result = scalar_fun(result, vec_reduce_all(vec_fun, acc_vec[i]));
+    vec_result = vec_fun(vec_result, acc_vec[i]);
   }
-  return result;
+  return vec_reduce_all(vec_fun, vec_result);
 }
 
 } // namespace CPU_CAPABILITY
