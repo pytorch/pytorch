@@ -1522,9 +1522,10 @@ void ProcessGroupNCCL::watchdogHandler() {
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
          /* no increment */) {
       auto& work = *it;
-      // When terminateProcessGroup_ is true, communicators have already been aborted,
-      // So cannot check exception based on them. But watchdog needs to finish the check
-      // for the works that have already been enqueued to workMetaList_
+      // When terminateProcessGroup_ is true, communicators have already been
+      // aborted, So cannot check exception based on them. But watchdog needs to
+      // finish the check for the works that have already been enqueued to
+      // workMetaList_
       if (!terminateProcessGroup_.load()) {
         work.checkAndSetException();
       }

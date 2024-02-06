@@ -1146,7 +1146,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         dist.all_reduce(t)
 
         def abortpg():
-            c10d.distributed_c10d._get_default_group()._get_backend(torch.device(device))._shutdown()
+            c10d.distributed_c10d._get_default_group()._get_backend(torch.device(device)).shutdown()
 
         # Initialize DDP to ensure "destroy_process_group" will not call
         # ProcessGroupNCCL destructor since DDP holds a reference to process group.
