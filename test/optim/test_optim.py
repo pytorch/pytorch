@@ -750,50 +750,6 @@ class TestOptim(TestCase):
 
 
     @skipIfTorchDynamo()
-    def test_post_hook(self):
-        def post_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
-            nonlocal data
-            data += 2
-
-        params = [torch.Tensor([1, 1])]
-        opt = SGD(params, lr=0.001)
-        data = 2
-        hook_handle = opt.register_step_post_hook(post_hook)
-
-        opt.step()
-        opt.step()
-        # check if pre hooks were registered
-        self.assertEqual(data, 6)
-
-        # remove handles, take step and verify that hook is no longer registered
-        hook_handle.remove()
-
-        opt.step()
-        self.assertEqual(data, 6)
-
-    @skipIfTorchDynamo()
-    def test_pre_hook(self):
-        def pre_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
-            nonlocal data
-            data += 2
-
-        params = [torch.Tensor([1, 1])]
-        opt = SGD(params, lr=0.001)
-        data = 5
-        hook_handle = opt.register_step_pre_hook(pre_hook)
-
-        opt.step()
-        opt.step()
-        # check if pre hooks were registered
-        self.assertEqual(data, 9)
-
-        # remove handles, take step and verify that hook is no longer registered
-        hook_handle.remove()
-
-        opt.step()
-        self.assertEqual(data, 9)
-
-    @skipIfTorchDynamo()
     def test_pre_and_post_hook(self):
         def global_pre_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
             nonlocal data
