@@ -706,8 +706,11 @@ class BuiltinVariable(VariableTracker):
         # unnecessarily putting guards on objects which might not actually be used.
         has_constant_handler = self.has_constant_handler(args, kwargs)
         if has_constant_handler:
+            from .builder import SourcelessBuilder
+
             # constant fold
-            return variables.ConstantVariable.create(
+            return SourcelessBuilder()(
+                tx,
                 self.as_python_constant()(
                     *[x.as_python_constant() for x in args],
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
@@ -835,8 +838,9 @@ class BuiltinVariable(VariableTracker):
             else:
                 return result
         elif isinstance(a, SymNodeVariable) or isinstance(b, SymNodeVariable):
+            fn = torch.sym_max if self.fn is max else torch.sym_min
             proxy = tx.output.create_proxy(
-                "call_function", self.fn, *proxy_args_kwargs([a, b], {})
+                "call_function", fn, *proxy_args_kwargs([a, b], {})
             )
             return SymNodeVariable.create(tx, proxy, None)
 
