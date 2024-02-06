@@ -532,11 +532,10 @@ static std::vector<T> map_py_func(
     const py::function& func,
     const std::vector<T>& items) {
   std::vector<T> new_items;
-  new_items.resize(items.size());
-  std::transform(
-      items.begin(), items.end(), new_items.begin(), [&](const T& item) {
-        return py::cast<T>(func(item));
-      });
+  new_items.reserve(items.size());
+  for (auto& item : items) {
+    new_items.push_back(py::cast<T>(func(item)));
+  }
   return new_items;
 }
 
@@ -568,7 +567,7 @@ static PyObject* view_func_impl(
         torch::autograd::utils::has_same_meta(new_base, view_info.base_)) {
       // Do the actual view replay
       if (view_info.has_view_fn()) {
-        auto view_func = view_info.view_fn();
+        auto& view_func = view_info.view_fn();
 
         // Mutate saved SymInt / tensor state as needed.
         c10::optional<std::vector<c10::SymInt>> new_symints = c10::nullopt;
@@ -586,7 +585,11 @@ static PyObject* view_func_impl(
         }
 
         // call view func
-        out = (*view_func)(new_base, new_symints, new_tensors);
+        if (new_symints.has_value() || new_tensors.has_value()) {
+          out = (*view_func->clone_and_set(new_symints, new_tensors))(new_base);
+        } else {
+          out = (*view_func)(new_base);
+        }
       } else {
         out = new_base.as_strided(
             self.sizes(), self.strides(), self.storage_offset());

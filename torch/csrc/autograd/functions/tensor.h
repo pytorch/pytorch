@@ -160,7 +160,7 @@ struct TORCH_API CopySlices : public Node {
   CopySlices(
       const Variable& base_var,
       at::TensorGeometry view_,
-      std::shared_ptr<ViewFunc> view_fn_,
+      std::unique_ptr<ViewFunc> view_fn_,
       std::shared_ptr<Node> fn_);
 
   // common code between apply/apply_with_saved
@@ -178,7 +178,7 @@ struct TORCH_API CopySlices : public Node {
   // view and view_fn are redundant and view_fn will be used if available.
   // See Note [View + Inplace update for base tensor] for details.
   at::TensorGeometry view;
-  std::shared_ptr<ViewFunc> view_fn;
+  std::unique_ptr<ViewFunc> view_fn;
   std::shared_ptr<Node> fn;
 };
 
