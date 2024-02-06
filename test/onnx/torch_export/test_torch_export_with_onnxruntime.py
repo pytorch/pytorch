@@ -34,7 +34,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         onnx_outputs = onnx_exported_program(*input_args, **input_kwargs)
         torch_outputs = torch_exported_program(*input_args, **input_kwargs)
         torch_outputs_onnx_format = onnx_exported_program.adapt_torch_outputs_to_onnx(
-            torch_outputs
+            torch_outputs, model=torch_exported_program
         )
         if len(torch_outputs_onnx_format) != len(onnx_outputs):
             raise AssertionError(

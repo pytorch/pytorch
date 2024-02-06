@@ -106,6 +106,7 @@ class OutputAdaptStep(Protocol):
     def apply(
         self,
         model_outputs: Any,
+        model: Optional[torch_export.ExportedProgram] = None,
     ) -> Any:
         ...
 
@@ -140,7 +141,7 @@ class OutputAdapter:
             PyTorch model outputs in exported ONNX model outputs format.
         """
         for step in self._steps:
-            model_outputs = step.apply(model_outputs)
+            model_outputs = step.apply(model_outputs, model)
         return model_outputs
 
 
@@ -485,11 +486,13 @@ class FlattenOutputStep(OutputAdaptStep):
     def apply(
         self,
         model_outputs: Any,
+        model: Optional[torch_export.ExportedProgram] = None,
     ) -> Sequence[Any]:
         """Flatten the model outputs.
 
         Args:
             model_outputs: The model outputs to flatten.
+            model: The PyTorch model.
 
         Returns:
             A tuple of the flattened model outputs.
@@ -509,11 +512,13 @@ class ConvertComplexToRealRepresentationOutputStep(OutputAdaptStep):
     def apply(
         self,
         model_outputs: Any,
+        model: Optional[torch_export.ExportedProgram] = None,
     ) -> Any:
         """Convert float tensors to complex tensors.
 
         Args:
             model_output: The model output.
+            model: The PyTorch model.
 
         Returns:
             A tuple of the model output.
@@ -538,11 +543,13 @@ class FlattenOutputWithTreeSpecValidationOutputStep(OutputAdaptStep):
     def apply(
         self,
         model_outputs: Any,
+        model: Optional[torch_export.ExportedProgram] = None,
     ) -> Sequence[Any]:
         """Flatten the model outputs and validate the `SpecTree` output.
 
         Args:
             model_outputs: The model outputs to flatten.
+            model: The PyTorch model.
 
         Returns:
             flattened_outputs: The flattened model outputs.
@@ -624,3 +631,41 @@ class AppendLiftedConstantNonPersistentBufferInputStep(InputAdaptStep):
                 onnx_input_names=onnx_input_names,
             )
         return updated_args, {}
+
+
+class PrependMutatedBufferOutputStep(OutputAdaptStep):
+    """Prepend model's mutated buffers to the user output.
+
+    :func:`torch.export.export` lifts model's mutated buffers as outputs, thus, they
+    must be added to the user output after the model is executed.
+
+    Args:
+        model: The PyTorch model with mutated buffers.
+    """
+
+    def apply(
+        self,
+        model_outputs: Any,
+        model: Optional[torch_export.ExportedProgram] = None,
+    ) -> Sequence[Any]:
+        """Flatten the model outputs and validate the `SpecTree` output.
+
+        Args:
+            model_outputs: The model outputs to flatten.
+            model: The PyTorch model.
+
+        Returns:
+            flattened_outputs: The flattened model outputs.
+        """
+
+        assert isinstance(
+            model, torch_export.ExportedProgram
+        ), "'model' must be torch_export.ExportedProgram"
+        ordered_buffers = tuple(
+            model.state_dict[name]
+            for name in model.graph_signature.buffers_to_mutate.values()
+        )
+
+        # NOTE: calling convention is first mutated buffers, then outputs args as model returned them.
+        updated_outputs = (*ordered_buffers, *model_outputs)
+        return updated_outputs

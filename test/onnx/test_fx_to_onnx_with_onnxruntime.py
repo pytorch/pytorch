@@ -1069,9 +1069,17 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 kwargs = create_kwargs()
 
                 # Original outputs.
-                ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(
-                    real_model(*args, **kwargs)
-                )
+                if (
+                    model_type
+                    == pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+                ):
+                    ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(
+                        real_model(*args, **kwargs), model=real_model
+                    )
+                elif model_type == pytorch_test_common.TorchModelType.TORCH_NN_MODULE:
+                    ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(
+                        real_model(*args, **kwargs)
+                    )
                 # ORT outputs.
                 # exported_program=real_model is used to create non-fake weights
                 if (

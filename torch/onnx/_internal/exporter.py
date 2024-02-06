@@ -926,6 +926,7 @@ class ONNXProgram:
     def adapt_torch_outputs_to_onnx(
         self,
         model_outputs: Any,
+        model: Optional[torch.export.ExportedProgram] = None,
     ) -> Sequence[Union[torch.Tensor, int, float, bool]]:
         """Converts the PyTorch model outputs to exported ONNX model outputs format.
 
@@ -942,6 +943,7 @@ class ONNXProgram:
 
         Args:
             model_outputs: The PyTorch model outputs.
+            model: The Pytorch model
 
         Returns:
             PyTorch model outputs in exported ONNX model outputs format.
@@ -970,7 +972,7 @@ class ONNXProgram:
             This API is experimental and is *NOT* backward-compatible.
 
         """
-        return self._output_adapter.apply(model_outputs)
+        return self._output_adapter.apply(model_outputs, model)
 
     @_beartype.beartype
     def save(
