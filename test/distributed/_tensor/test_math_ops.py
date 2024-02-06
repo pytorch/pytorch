@@ -139,9 +139,9 @@ class DistMathOpsTest(DTensorTestBase):
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
-        channel_size, channel_dim = 4, 1
+        channel_size, channel_dim = 16, 1
         test_setup = [
-            (2, (4, channel_size), (4,)),  # calling aten.nll_loss_forward
+            (2, (8, channel_size), (8,)),  # calling aten.nll_loss_forward
             (3, (8, channel_size, 12), (8, 12)),  # calling aten.nll_loss2d_forward
         ]
         for input_ndim, input_size, target_size in test_setup:
