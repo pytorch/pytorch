@@ -1,4 +1,3 @@
-#include "fmt/core.h"
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <iostream>
 #include <optional>
