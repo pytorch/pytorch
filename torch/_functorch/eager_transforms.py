@@ -1130,7 +1130,7 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
         >>> assert torch.allclose(jacobian[1], expectedY)
 
     """
-    _error_if_not_argnum_t("jafwd", "argnums", argnums)
+    _error_if_not_argnum_t("jacfwd", "argnums", argnums)
 
     @wraps(func)
     def wrapper_fn(*args):
