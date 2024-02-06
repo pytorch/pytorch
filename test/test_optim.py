@@ -6,7 +6,8 @@ import unittest
 from copy import deepcopy
 
 import torch
-from torch.optim import Optimizer
+from torch.optim import Optimizer, SGD
+from torch.optim.optimizer import register_optimizer_step_pre_hook, register_optimizer_step_post_hook
 from optim.test_optim import TestOptim, TestDifferentiableOptimizer  # noqa: F401
 from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
 from optim.test_swa_utils import TestSWAUtils  # noqa: F401
@@ -990,6 +991,71 @@ class TestOptimRenewed(TestCase):
 
             optim.step(closure)
             self.assertEqual(data, 9)
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_step_all_hooks(self, device, dtype, optim_info):
+        def global_pre_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+            nonlocal data
+            data.append(0)
+
+        def global_post_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+            nonlocal data
+            data.append(5)
+
+        def local_pre_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+            nonlocal data
+            data.append(1)
+
+        def local_post_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+            nonlocal data
+            data.append(2)
+
+        params = [torch.tensor([1, 1], device=device, dtype=dtype)]
+
+        def dummy_closure():
+            return 1
+
+        closure = dummy_closure if optim_info.step_requires_closure else None
+
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
+        for optim_input in all_optim_inputs:
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
+            optim = optim_info.optim_cls(params, **optim_input.kwargs)
+            optim2 = SGD(params)
+            data = []
+
+            # register global hooks to both optimizers
+            global_pre_handle = register_optimizer_step_pre_hook(global_pre_hook)
+            global_post_handle = register_optimizer_step_post_hook(global_post_hook)
+
+            # register local hooks
+            first_pre_handle = optim.register_step_pre_hook(local_pre_hook)
+            first_post_handle = optim.register_step_post_hook(local_post_hook)
+            second_pre_handle = optim2.register_step_pre_hook(local_pre_hook)
+            second_post_handle = optim2.register_step_post_hook(local_post_hook)
+
+            optim.step(closure)
+            self.assertListEqual(data, [0, 1, 2, 5])
+            optim2.step(closure)
+            self.assertListEqual(data, [0, 1, 2, 5, 0, 1, 2, 5])
+            optim.step(closure)
+            self.assertListEqual(data, [0, 1, 2, 5, 0, 1, 2, 5, 0, 1, 2, 5])
+
+            # remove all hooks
+            global_pre_handle.remove()
+            global_post_handle.remove()
+            first_pre_handle.remove()
+            first_post_handle.remove()
+            second_pre_handle.remove()
+            second_post_handle.remove()
+
+            optim.step(closure)
+            optim2.step(closure)
+            self.assertListEqual(data, [0, 1, 2, 5, 0, 1, 2, 5, 0, 1, 2, 5])
 
 
     @optims(optim_db, dtypes=[torch.float32])
