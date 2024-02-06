@@ -351,11 +351,11 @@ class GuardBuilder(GuardBuilderBase):
     def FUNCTORCH_CURRENT_LEVEL_MATCH(self, guard: Guard):
         # Invalidate functorch code if current level is different than
         # the one when FX graph was generated
-        level = torch._C._functorch.maybe_current_level()
-        code = [
-            f"torch._C._functorch.maybe_current_level() == {level}",
-        ]
-        self._produce_guard_code(guard, code)
+        if torch._C._functorch.peek_interpreter_stack() is not None:
+            ci = torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter()
+            state = ci.get_state()
+            code = f"torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter().check_state({state})"
+            self._produce_guard_code(guard, [code])
 
     def EQUALS_MATCH(self, guard: Guard):
         ref = self.arg_ref(guard)
