@@ -113,13 +113,6 @@ def foreach_all_gather_copy_out(
         )  # no-op after 1st call
         fsdp_param.alloc_all_gather_outputs()
     all_gather_output = all_gather_output.view(world_size, -1)
-    for fsdp_param in fsdp_params:
-        assert (
-            type(fsdp_param.all_gather_outputs) is list
-        ), f"{fsdp_param.all_gather_outputs}"
-        assert (
-            len(fsdp_param.all_gather_outputs) == 1
-        ), f"{fsdp_param.all_gather_outputs}"
     out: List[torch.Tensor] = [
         t.view(world_size, -1)
         for fsdp_param in fsdp_params
