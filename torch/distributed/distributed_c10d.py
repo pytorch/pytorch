@@ -1340,7 +1340,7 @@ def _shutdown_backend(pg):
         pass
     if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
         # explictly call shutdown to ensure that NCCL resources are released
-        backend.shutdown()
+        backend._shutdown()
 
 def _new_process_group_helper(
     group_size,
