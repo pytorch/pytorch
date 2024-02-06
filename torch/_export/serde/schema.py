@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (3, 1)
+SCHEMA_VERSION = (4, 1)
 TREESPEC_VERSION = 1
 
 
@@ -92,12 +92,6 @@ class TensorMeta:
     strides: List[SymInt]
     storage_offset: int
     layout: Layout
-
-
-@dataclass
-class ScriptObjectMeta:
-    constant_name: str
-    class_fqn: str
 
 
 # In most cases we will use the "as_name" field to store arguments which are
@@ -206,7 +200,7 @@ class Graph:
     # tensor, rather than following export schema and returning a singleton
     # list.
     is_single_tensor_return: bool = False
-    script_object_metas: Dict[str, ScriptObjectMeta] = field(default_factory=dict)
+    custom_obj_values: Dict[str, CustomObjArgument] = field(default_factory=dict)
 
 
 @dataclass
@@ -225,6 +219,8 @@ class InputToParameterSpec:
 class InputToBufferSpec:
     arg: TensorArgument
     buffer_name: str
+    persistent: bool
+
 
 
 @dataclass

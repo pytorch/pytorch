@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import sys
 import threading
 from dataclasses import dataclass
@@ -355,6 +357,10 @@ class ProcessLocalGroup(dist.ProcessGroup):
         return the global registered name of the current pg in the world
         """
         return self._world().pg_names[self]
+
+    @property
+    def group_name(self):
+        return self.pg_name
 
     def getBackendName(self):
         return "threaded"
