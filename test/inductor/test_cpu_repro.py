@@ -1353,6 +1353,8 @@ class CPUReproTests(TestCase):
             "index_expr",
             "signbit",
             "isinf",
+            "frexp0",
+            "frexp1",
             "mod",
             "masked",
             "randn",
