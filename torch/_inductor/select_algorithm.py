@@ -773,13 +773,13 @@ class AlgorithmSelectorCache(PersistentCache):
                 or precompilation_timeout_seconds <= 0
             ):
                 return
-            if config.autotune_precompilation_workers <= 0:
-                return
             num_workers = min(
-                config.autotune_precompilation_workers,
+                config.compile_threads,
                 torch.get_num_threads(),
                 len(choices),
             )
+            if num_workers <= 0:
+                return
             log.info(
                 "Multithreaded precompilation for %d choices using %d worker threads",
                 len(choices),
