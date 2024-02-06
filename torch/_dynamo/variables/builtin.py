@@ -24,7 +24,7 @@ from ..exc import (
 )
 from ..guards import GuardBuilder, install_guard
 from ..replay_record import DummyModule
-from ..source import AttrSource, GetItemSource, is_constant_source, TypeSource
+from ..source import AttrSource, is_constant_source, TypeSource
 from ..utils import (
     build_checkpoint_variable,
     check_constant_args,

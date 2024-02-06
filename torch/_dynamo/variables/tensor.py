@@ -176,12 +176,18 @@ class TensorVariable(VariableTracker):
         if not self.source:
             return
 
+        from ..guards import CLOSURE_VARS, GuardBuilder
+
         # For local source, we associate the real value. We use this real value
         # for implementing getattr fallthrough on the variable tracker base class.
 
         # Note - this scope construction is mirrored in guards
         # A subsequent PR will introduce a util.
-        scope = {"L": tx.output.local_scope, "G": tx.output.global_scope}
+        scope = {
+            "L": tx.output.local_scope,
+            "G": tx.output.global_scope,
+            **CLOSURE_VARS,
+        }
         try:
             # We raise in case we get a typerror bug w/ SuperSource.
             # SuperSource has bugs in it atm, and can produce code like
@@ -190,7 +196,7 @@ class TensorVariable(VariableTracker):
             # Which is incorrect, and violates the invariant that all sources should be eval()-able against the scope.
             _input_associated_real_value = eval(self.source.name(), scope)
         except Exception as exc:
-            return
+            raise NotImplementedError() from exc
 
         if _input_associated_real_value is None:
             return
@@ -208,7 +214,6 @@ class TensorVariable(VariableTracker):
             # Note - at a certain point we may want to handle
             return
 
-        from ..guards import GuardBuilder
         from .builder import VariableBuilder
 
         attr_source = AttrSource(self.source, name)
