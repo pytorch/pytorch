@@ -1515,15 +1515,15 @@ class CppKernel(Kernel):
             ],
         )
 
-    def _reduction_var_name(self, name_prefix: str, line: str) -> str:
-        return name_prefix
+    def cache_reduction_var(self, line: str):
+        return re.search("tmp_acc[0-9]+", line)
 
     def update_stores_with_parallel_reduction(self):
         for i, line in enumerate(self.stores._lines):
             if isinstance(line, str):
-                m = re.search("tmp_acc[0-9]+", line)
+                m = self.cache_reduction_var(line)
                 if m:
-                    var_name = self._reduction_var_name(m.group(0), line)
+                    var_name = m.group(0)
                     self.stores._lines[i] = line.replace(var_name, f"{var_name}_local")
 
     @contextlib.contextmanager
@@ -1749,23 +1749,22 @@ class CppKernel(Kernel):
 
             def gen_loops(loops: List[LoopLevel], in_reduction=False):
                 with contextlib.ExitStack() as stack_outer:
-                    local_reduction_init, local_reduction_stores = None, None
+                    local_reduction_init = local_reduction_stores = None
                     if loops:
                         loop = loops[0]
                         if loop.is_reduction and not in_reduction:
-                            (
-                                local_reduction_init,
-                                local_reduction_stores,
-                            ) = get_reduction_code_buffer(loops, "local")
                             reduction_prefix = get_reduction_code_buffer(loops)
-                            if local_reduction_init:
-                                assert local_reduction_stores
                             if reduction_prefix:
                                 stack_outer.enter_context(code.indent())
                             code.splice(reduction_prefix)
                         if loop_nest.is_reduction_only() and loop.parallel:
+                            (
+                                local_reduction_init,
+                                local_reduction_stores,
+                            ) = get_reduction_code_buffer(loops, "local")
                             worksharing.parallel(threads)
                             if local_reduction_init:
+                                assert local_reduction_stores
                                 code.splice(local_reduction_init)
 
                     for loop in loops:
@@ -1873,10 +1872,8 @@ class CppVecKernel(CppKernel):
         self.tiling_idx = tiling_idx
         metrics.generated_cpp_vec_kernel_count += 1
 
-    def _reduction_var_name(self, name_prefix: str, line: str) -> str:
-        if f"{name_prefix}_vec" in line:
-            name_prefix = f"{name_prefix}_vec"
-        return name_prefix
+    def cache_reduction_var(self, line: str):
+        return re.search("tmp_acc[0-9]+_vec", line)
 
     def _get_vec_load_line(
         self,
@@ -3508,8 +3505,6 @@ class WorkSharing:
         self.code = code
         self.in_parallel = False
         self.num_threads = None
-        self.reduction_init = IndentedBuffer()
-        self.reduction_stores = IndentedBuffer()
         self.stack = contextlib.ExitStack()
 
     def parallel(self, threads):
@@ -3527,8 +3522,6 @@ class WorkSharing:
             self.code.writeline(
                 "int tid = omp_get_thread_num();",
             )
-            self.code.splice(self.reduction_init)
-            self.reduction_init = IndentedBuffer()
 
     def single(self):
         if self.in_parallel:
@@ -3536,8 +3529,6 @@ class WorkSharing:
         return self.in_parallel
 
     def close(self):
-        self.code.splice(self.reduction_stores)
-        self.reduction_stores = IndentedBuffer()
         self.stack.close()
         self.in_parallel = False
 
