@@ -2789,7 +2789,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 new_int_args.append(str(arg))
             elif isinstance(arg_type, torch.SymIntType):
                 # SymInt
-                new_int_args.append(str(arg))
+                expr = arg.node.expr if isinstance(arg, torch.SymInt) else arg
+                new_int_args.append(self.expr_printer(expr))
             elif isinstance(arg_type, torch.NumberType):
                 # Scalar of type int
                 assert isinstance(arg, (int, float, bool))
@@ -2811,11 +2812,17 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     new_tensor_args.extend(
                         [f"{a.codegen_reference()}" for a in arg if a is not None]
                     )
-                # List [int] or List[SymInt]
-                elif isinstance(
-                    arg_type.getElementType(), (torch.IntType, torch.SymIntType)
-                ):
+                # List[int]
+                elif isinstance(arg_type.getElementType(), torch.IntType):
                     new_int_args.extend([str(a) for a in arg])
+                # List[SymInt]
+                elif isinstance(arg_type.getElementType(), torch.SymIntType):
+                    expressions = [
+                        a.node.expr if isinstance(a, torch.SymInt) else a for a in arg
+                    ]
+                    new_int_args.extend(
+                        [self.expr_printer(expr) for expr in expressions]
+                    )
                 # List[Scalar]
                 elif isinstance(arg_type.getElementType(), torch.NumberType):
                     # Only treat int Scalar as dynamic

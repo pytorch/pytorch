@@ -721,7 +721,7 @@ void flash_attention_kernel_impl(
     c10::optional<double> scale) {
   auto q_seq_len = query.size(2);
 
-  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, query.scalar_type(), "flash_attention", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, query.scalar_type(), "flash_attention", [&] {
     if (q_seq_len >= 768) {
       cpu_flash_attention<scalar_t, 256, 512>(
         output, logsumexp, query, key, value,
@@ -758,7 +758,7 @@ void flash_attention_backward_kernel_impl(
   auto grad_out_contig = grad_out.contiguous();
   auto q_seq_len = query.size(1);
 
-  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, query.scalar_type(), "flash_attention_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, query.scalar_type(), "flash_attention_backward", [&] {
     if (q_seq_len >= 768) {
       cpu_flash_attention_backward<scalar_t, 256, 512>(
         grad_q, grad_k, grad_v, grad_out_contig,
