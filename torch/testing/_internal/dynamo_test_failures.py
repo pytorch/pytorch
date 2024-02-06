@@ -6322,7 +6322,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cat_cpu_float32",  # known py38 fail
     "TestBasicsCPU.test_invalid_sparse_csr_values_cpu",  # known py38 fail
     "TestBasicsCPU.test_invalid_sparse_coo_values_cpu",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_uint8",  # known py38 fail
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_int64",  # known py38 fail
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_int16",  # known py38 fail
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_float64",  # known py38 fail
@@ -6341,73 +6340,9 @@ dynamo_skips = {
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_int32",  # known py38 fail
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_int8",  # known py38 fail
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_int32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_add_cpu",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_float32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_bool",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_bool",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_bool",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_int32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_float64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_float16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_int64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_float64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_int8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_bool",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_float64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_int16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_uint8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_float32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_int32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int32_int64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_int64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_bool",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_gradients_cpu_float64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_int64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_float64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_float16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int32_uint8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_int32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_float64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_int32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_float32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_int64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_int16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_float16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_float32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_bool",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int32_bool",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_int16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_int16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_int16",  # known py38 fail
+    # "TestBinaryUfuncsCPU.test_add_cpu",  # known py38 fail
     "TestBinaryUfuncsCPU.test_int_tensor_pow_neg_ints_cpu",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_int8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_uint8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_uint8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_bool",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_float16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_float32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_float16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_int16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_uint8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_int64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_uint8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_float16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_int8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_bool",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_int32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_float16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_float64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_float64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_int16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int32_float32",  # known py38 fail
     "TestBinaryUfuncsCPU.test_shift_limits_cpu_uint8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_int64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int32_float16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_float32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_int64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_int8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_long_tensor_pow_floats_cpu",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_int32",  # known py38 fail
     "TestFXExperimental.test_optimize_for_inference_cpu",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int32",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int64",  # known py38 fail
