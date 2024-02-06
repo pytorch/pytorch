@@ -21,6 +21,7 @@ from typing import Optional, Sequence
 import torch
 from torch import _C
 from torch.onnx import _type_utils, errors, symbolic_helper
+from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype, jit_utils, registration
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -57,14 +58,20 @@ def layer_norm(
     if symbolic_helper._is_none(bias):
         bias_value = torch.zeros(normalized_shape, dtype=dtype)
         bias = g.op("Constant", value_t=bias_value)
-    return g.op(
+    out = g.op(
         "LayerNormalization",
         input,
         weight,
         bias,
         epsilon_f=eps,
         axis_i=axis,
+        outputs=1 if not GLOBALS.export_training else 3,
     )
+    if not GLOBALS.export_training:
+        return out
+    else:
+        res, new_running_mean, new_running_var = out
+        return res, new_running_mean, new_running_var
 
 
 def _compute_edge_sizes(n_fft, window_size):

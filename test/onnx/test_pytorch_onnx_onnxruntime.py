@@ -13668,6 +13668,26 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_rnn(self, *args, **kwargs):
         self._dispatch_rnn_test(*args, **kwargs)
 
+    def test_layer_norm_17_training_mode(self):
+        class Net(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.norm = torch.nn.LayerNorm([784])
+
+            def forward(self, x):
+                x = x.view(x.shape[0], -1)
+                x = self.norm(x)
+                return x
+
+        model = Net()
+        model.train()
+        images = torch.randn(8, 28, 28)
+        self.run_test(
+            model,
+            images,
+            training=torch._C._onnx.TrainingMode.TRAINING,
+        )
+
 
 if __name__ == "__main__":
     common_utils.TestCase._default_dtype_check_enabled = True
