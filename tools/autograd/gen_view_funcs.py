@@ -32,28 +32,27 @@ from .gen_inplace_or_view_type import (
 FUNCTION_DECLARATION = CodeTemplate(
     """\
 #define ${uppercase_op}_AVAILABLE
-#ifdef _WIN32
 struct ${op} : public ${superclass} {
-#else
-struct TORCH_API ${op} : public ${superclass} {
-#endif
   ${op}(${constructor_args}) ${initializer_list}
   {};
   virtual ~${op}() override {};
   virtual std::vector<c10::SymInt> get_symints() const override;
+  virtual size_t num_symints() const override;
   virtual std::vector<at::Tensor> get_tensors() const override;
-  virtual at::Tensor operator()(
-      const at::Tensor&,
-      const std::optional<std::vector<c10::SymInt>>& = c10::nullopt,
-      const std::optional<std::vector<at::Tensor>>& = c10::nullopt) const override;
+  virtual size_t num_tensors() const override;
+  virtual at::Tensor operator()(const at::Tensor&) const override;
+  virtual std::unique_ptr<ViewFunc> clone_and_set(
+      std::optional<std::vector<c10::SymInt>> = c10::nullopt,
+      std::optional<std::vector<at::Tensor>> = c10::nullopt) const override;
 
 protected:
-  virtual void set_symints(const std::vector<c10::SymInt>&) override;
-  virtual void set_tensors(const std::vector<at::Tensor>&) override;
+  virtual void set_symints(std::vector<c10::SymInt>) override;
+  virtual void set_tensors(std::vector<at::Tensor>) override;
 
 private:
   ${state}
 };
+
 """
 )
 
@@ -63,7 +62,12 @@ std::vector<c10::SymInt> ${op}::get_symints() const {
   ${get_symints}
 }
 
-void ${op}::set_symints(const std::vector<c10::SymInt>& ${symints_vec}) {
+size_t ${op}::num_symints() const {
+  return static_cast<size_t>(${num_symints});
+}
+
+void ${op}::set_symints(std::vector<c10::SymInt> ${symints_vec}) {
+  TORCH_INTERNAL_ASSERT(${symints_vec}.size() == num_symints());
   ${set_symints}
 }
 
@@ -71,17 +75,30 @@ std::vector<at::Tensor> ${op}::get_tensors() const {
   ${get_tensors}
 }
 
-void ${op}::set_tensors(const std::vector<at::Tensor>& ${tensors_vec}) {
+size_t ${op}::num_tensors() const {
+  return static_cast<size_t>(${num_tensors});
+}
+
+void ${op}::set_tensors(std::vector<at::Tensor> ${tensors_vec}) {
+  TORCH_INTERNAL_ASSERT(${tensors_vec}.size() == num_tensors());
   ${set_tensors}
 }
 
-at::Tensor ${op}::operator()(
-    const at::Tensor& ${call_input_name},
-    const std::optional<std::vector<c10::SymInt>>& ${symints_vec},
-    const std::optional<std::vector<at::Tensor>>& ${tensors_vec}) const {
-  torch::autograd::ViewFuncSavedStateGuard guard(
-      const_cast<${op}&>(*this), ${symints_vec}, ${tensors_vec});
+at::Tensor ${op}::operator()(const at::Tensor& ${call_input_name}) const {
   return ${op_call};
+}
+
+std::unique_ptr<ViewFunc> ${op}::clone_and_set(
+    std::optional<std::vector<c10::SymInt>> ${symints_vec},
+    std::optional<std::vector<at::Tensor>> ${tensors_vec}) const {
+  auto output = std::make_unique<${op}>(${clone_args});
+  if (${symints_vec}.has_value()) {
+    output->set_symints(std::move(*(${symints_vec})));
+  }
+  if (${tensors_vec}.has_value()) {
+    output->set_tensors(std::move(*(${tensors_vec})));
+  }
+  return output;
 }
 
 """
@@ -135,11 +152,12 @@ def returns_multi_tensor(fn: NativeFunction) -> bool:
 #   state_vec_type (NamedCType): Type of vector to either return or copy from
 #
 # Returns:
-#   tuple: (list of getter logic strings, list of setter logic strings)
+#   tuple: (list of getter logic strings, list of setter logic strings, string
+#     with num items expression)
 def generate_state_getter_setter(
     bindings: List[Binding],
     state_vec_type: NamedCType,
-) -> Tuple[List[str], List[str]]:
+) -> Tuple[List[str], List[str], str]:
     getter_logic = []
     setter_logic = []
 
@@ -181,14 +199,10 @@ def generate_state_getter_setter(
     num_items = "0" if len(num_exprs) == 0 else " + ".join(num_exprs)
     if len(bindings) > 0:
         getter_logic.insert(1, f"{state_vec}.reserve({num_items});")
-        setter_logic.insert(
-            0,
-            f"TORCH_INTERNAL_ASSERT({state_vec}.size() == static_cast<size_t>({num_items}));",
-        )
 
     getter_logic.append(f"return {state_vec};")
 
-    return getter_logic, setter_logic
+    return getter_logic, setter_logic, num_items
 
 
 def process_function(fn: NativeFunction, template: CodeTemplate) -> str:
@@ -200,8 +214,9 @@ def process_function(fn: NativeFunction, template: CodeTemplate) -> str:
         dispatcher.argument(a, remove_non_owning_ref_types=True) for a in non_self_args
     ]
 
-    # Generate constructor args for the generated struct.
+    # Generate constructor / clone args for the generated struct.
     constructor_args = [b.defn() for b in non_self_bindings]
+    clone_args = [b.name for b in non_self_bindings]
 
     # Generate state variable declarations for the generated struct.
     state_variables = [
@@ -234,6 +249,7 @@ def process_function(fn: NativeFunction, template: CodeTemplate) -> str:
         view_idx_typename = "int64_t"
         view_idx_decl = f"{view_idx_typename} {view_idx_name}"
         constructor_args.append(view_idx_decl)
+        clone_args.append(view_idx_name)
         state_variables.append(f"{view_idx_decl};")
         initializers.append(f"{view_idx_name}({view_idx_name})")
         op_call += f"[{view_idx_name}]"
@@ -248,7 +264,7 @@ def process_function(fn: NativeFunction, template: CodeTemplate) -> str:
         if isinstance(b.argument, Argument) and b.argument.type.is_symint_like()
     ]
     symints_vec_type = NamedCType("symints", VectorCType(BaseCType(SymIntT)))
-    get_symints, set_symints = generate_state_getter_setter(
+    get_symints, set_symints, num_symints = generate_state_getter_setter(
         symint_bindings, symints_vec_type
     )
 
@@ -259,7 +275,7 @@ def process_function(fn: NativeFunction, template: CodeTemplate) -> str:
         if isinstance(b.argument, Argument) and b.argument.type.is_tensor_like()
     ]
     tensors_vec_type = NamedCType("tensors", VectorCType(BaseCType(tensorT)))
-    get_tensors, set_tensors = generate_state_getter_setter(
+    get_tensors, set_tensors, num_tensors = generate_state_getter_setter(
         tensor_bindings, tensors_vec_type
     )
 
@@ -270,12 +286,15 @@ def process_function(fn: NativeFunction, template: CodeTemplate) -> str:
         initializer_list=initializer_list,
         state=state_variables,
         constructor_args=constructor_args,
+        clone_args=clone_args,
         symints_vec=symints_vec_type.name,
         get_symints=get_symints,
         set_symints=set_symints,
+        num_symints=num_symints,
         tensors_vec=tensors_vec_type.name,
         get_tensors=get_tensors,
         set_tensors=set_tensors,
+        num_tensors=num_tensors,
         call_input_name=call_input_name,
         op_call=op_call,
     )
