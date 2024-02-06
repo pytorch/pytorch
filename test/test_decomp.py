@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     IS_WINDOWS,
+    IS_MACOS,
     TestCase,
     skipIfCrossRef,
     suppress_warnings,
@@ -930,7 +931,7 @@ class DecompOneOffTests(TestCase):
     @onlyCPU
     @skipIfCrossRef
     @skipOps('DecompOneOffTests', 'test_sdpa', [
-        xfail("nn.functional.scaled_dot_product_attention", dtypes=[torch.half]),
+        xfail("nn.functional.scaled_dot_product_attention", dtypes=[torch.half] + ([torch.bfloat16] if IS_MACOS else [])),
     ])
     @ops(_sdpa_op_info)
     def test_sdpa(self, device, dtype, op):
@@ -954,8 +955,6 @@ class DecompOneOffTests(TestCase):
         masks = [None, torch.ones((1, 1, 100, 100), device=device, dtype=torch.bool)]
 
         atol, rtol = dtype_precisions[dtype]
-        if dtype == torch.float16:
-            atol = 0.13
 
         for mask in masks:
             is_causal = mask is None
