@@ -819,7 +819,7 @@ class CppWrapperKernelArgs(KernelArgs):
     def wrap_ptr_arg(self, buf, dtype):
         from .cpp import DTYPE_TO_CPP
 
-        if config.aot_inductor.abi_compatible:
+        if config.abi_compatible:
             # In the abi_compatible model, we just return the buf here.
             # We will form correct call args later in wrapper.generate_kernel_all.
             return buf

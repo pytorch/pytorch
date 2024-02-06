@@ -120,7 +120,7 @@ class TestUnbackedSymints(TorchTestCase):
 
     @skipCUDAIf(not HAS_CUDA, "requires cuda")
     @dynamo_config.patch({"capture_scalar_outputs": True})
-    @inductor_config.patch({"aot_inductor.abi_compatible": True})
+    @inductor_config.patch({"abi_compatible": True})
     def test_triton_kernel_grid(self, device):
         if device == "cpu":
             raise unittest.SkipTest("Triton kernel requires GPU")

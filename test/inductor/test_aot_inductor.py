@@ -73,7 +73,7 @@ def check_model(
 ):
     with torch.no_grad(), config.patch(
         {
-            "aot_inductor.abi_compatible": self.abi_compatible,
+            "abi_compatible": self.abi_compatible,
             "allow_stack_allocation": self.allow_stack_allocation,
             "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
         }
@@ -107,7 +107,7 @@ def check_model_with_multiple_inputs(
 ):
     with torch.no_grad(), config.patch(
         {
-            "aot_inductor.abi_compatible": self.abi_compatible,
+            "abi_compatible": self.abi_compatible,
             "allow_stack_allocation": self.allow_stack_allocation,
         }
     ):
@@ -819,9 +819,7 @@ class AOTInductorTestsTemplate:
         result_cpu = Model(w1, w2)(*inputs)
 
         # Compile model with AOTInductor
-        with torch.cuda.device(0), config.patch(
-            "aot_inductor.abi_compatible", self.abi_compatible
-        ):
+        with torch.cuda.device(0), config.patch("abi_compatible", self.abi_compatible):
             so_path = AOTIRunnerUtil.compile(
                 model=Model(w1.cuda(0), w2.cuda(0)),
                 example_inputs=tuple(t.cuda(0) for t in inputs),
@@ -870,14 +868,14 @@ class AOTInductorTestsTemplate:
         result_cpu = Model(weight)(*inputs)
 
         with torch.cuda.device(0), torch.no_grad(), config.patch(
-            "aot_inductor.abi_compatible", self.abi_compatible
+            "abi_compatible", self.abi_compatible
         ):
             result_cuda_0 = AOTIRunnerUtil.run(
                 "cuda", Model(weight.cuda(0)), tuple(t.cuda(0) for t in inputs)
             )
 
         with torch.cuda.device(1), torch.no_grad(), config.patch(
-            "aot_inductor.abi_compatible", self.abi_compatible
+            "abi_compatible", self.abi_compatible
         ):
             result_cuda_1 = AOTIRunnerUtil.run(
                 "cuda", Model(weight.cuda(1)), tuple(t.cuda(1) for t in inputs)
@@ -1645,7 +1643,7 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     @skipIfRocm
-    @config.patch({"aot_inductor.abi_compatible": True})
+    @config.patch({"abi_compatible": True})
     def test_triton_kernel_reinterpret_view_mem_leak(self):
         # Check for memory leak when using user-defined Triton Kernel + AOTI.
         if self.device != "cuda":

@@ -86,7 +86,7 @@ class TestMemoryPlanning(TestCase):
         f, args = self._generate(device="cuda")
         dim0_x = Dim("dim0_x", min=1, max=2048)
         dynamic_shapes = ({0: dim0_x}, None, None)
-        with config.patch("aot_inductor.abi_compatible", True):
+        with config.patch("abi_compatible", True):
             result, code = run_and_get_cpp_code(
                 lambda: AOTIRunnerUtil.run(
                     "cuda", f, args, dynamic_shapes=dynamic_shapes
