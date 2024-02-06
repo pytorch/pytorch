@@ -111,7 +111,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif inspect.ismemberdescriptor(obj) or inspect.isdatadescriptor(obj):
-            builder = VariableBuilder(tx, source) if source else SourcelessBuilder
+            builder = (
+                VariableBuilder(tx, source)
+                if source
+                else functools.partial(SourcelessBuilder(), tx=tx)
+            )
             return builder(obj.__get__(self.value))
 
         # Special handling of collections.OrderedDict.fromkeys()
