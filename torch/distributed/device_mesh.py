@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 import math
+from functools import cached_property
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
@@ -370,6 +371,7 @@ else:
 
             return submesh
 
+        @cached_property
         def get_group(
             self, mesh_dim: Optional[Union[int, str]] = None
         ) -> Optional[Union[ProcessGroup, List[ProcessGroup]]]:
