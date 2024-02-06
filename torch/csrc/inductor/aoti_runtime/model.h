@@ -1,15 +1,9 @@
 #pragma once
 
-#include <functional>
-#include <iostream>
 #include <memory>
 #include <optional>
 #include <regex>
-#include <sstream>
-#include <stdexcept>
-#include <string>
 #include <unordered_map>
-#include <vector>
 
 // WARNING: Be careful when adding new includes here. This header will be used
 // in model.so, and should not refer to any aten/c10 headers except the stable
@@ -17,6 +11,14 @@
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
 #include <torch/csrc/inductor/aoti_runtime/device_utils.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
+
+#define AOTI_RUNTIME_CHECK(EXPR, MSG) \
+  do {                                \
+    bool ok = EXPR;                   \
+    if (!ok) {                        \
+      throw std::runtime_error(MSG);  \
+    }                                 \
+  } while (0)
 
 // At codegen time, we write out a binary file called constants.bin.
 // We then turn the raw binary to an object file that exposes this
