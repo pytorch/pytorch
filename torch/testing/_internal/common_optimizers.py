@@ -1202,7 +1202,6 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adamax,
         optim_error_inputs_func=optim_error_inputs_func_adamax,
         supported_impls=("foreach", "differentiable"),
-        only_supports_capturable_on_foreach=False,
         skips=(
             DecorateInfo(
                 skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
@@ -1275,56 +1274,7 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_can_load_older_state_dict",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
-                ),
-                "TestOptimRenewed",
-                "test_step_is_noop_for_zero_grads",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
-                ),
-                "TestOptimRenewed",
-                "test_step_is_noop_when_params_have_no_grad",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
-                ),
-                "TestOptimRenewed",
-                "test_load_nontensor_step",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
-                ),
-                "TestOptimRenewed",
-                "test_param_groups_weight_decay",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
-                ),
-                "TestOptimRenewed",
-                "test_param_groups_lr",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_with_cuda_params",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
-                ),
-                "TestOptimRenewed",
-                "test_mixed_device_dtype",
-            ),
+            )
         ),
     ),
     OptimizerInfo(
@@ -1584,7 +1534,6 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_radam,
         optim_error_inputs_func=optim_error_inputs_func_radam,
         supported_impls=("foreach", "differentiable"),
-        only_supports_capturable_on_foreach=False,
         skips=(
             DecorateInfo(
                 skipIfTorchDynamo(
