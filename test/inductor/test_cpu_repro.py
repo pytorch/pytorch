@@ -1458,14 +1458,11 @@ class CPUReproTests(TestCase):
         with config.patch({"cpp.fallback_scatter_reduce_sum": True}):
             _internal_check(fn, inps, "aten.scatter_reduce_")
 
-        if torch.has_openmp:
-            # Fix https://github.com/pytorch/pytorch/issues/118518
-            # which fails to change thread number with native thread pool
-            with set_num_threads(1):
-                _internal_check(fn, inps, _target_code_check_not="aten.scatter_reduce_")
+        with set_num_threads(1):
+            _internal_check(fn, inps, _target_code_check_not="aten.scatter_reduce_")
 
-            with config.patch({"cpp.dynamic_threads": True}), set_num_threads(1):
-                _internal_check(fn, inps, "aten.scatter_reduce_")
+        with config.patch({"cpp.dynamic_threads": True}), set_num_threads(1):
+            _internal_check(fn, inps, "aten.scatter_reduce_")
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
