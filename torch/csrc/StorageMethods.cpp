@@ -151,13 +151,7 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
   } else if (device_type == at::kMeta) {
     at::native::resize_bytes_meta(storage.unsafeGetStorageImpl(), newsize);
   } else if (device_type == at::kPrivateUse1) {
-    if (at::isPrivateUse1HooksRegistered()) {
-        at::GetPrivateUse1HooksInterface()->resizePrivateUse1Bytes(storage, newsize);
-    } else {
-        TORCH_CHECK(
-            false,
-            "PrivateUse1HooksInterface has not been registered.");
-    }
+    at::GetPrivateUse1HooksInterface()->resizePrivateUse1Bytes(storage, newsize);
   } else if (device_type == at::kXPU) {
     ptrdiff_t size_bytes_i = newsize;
     TORCH_CHECK(
