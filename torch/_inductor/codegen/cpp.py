@@ -977,16 +977,21 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def sign(x):
+        """
+        auto left = tmp1 > 0 ? decltype(tmp1)(1) : decltype(tmp1)(0);
+        auto right = tmp1 < 0 ? decltype(tmp1)(1) : decltype(tmp1)(0);
+        return left - right;
+        """
         code = BracesBuffer()
-        # auto tmp5 = tmp4 < 0 ? -1 : 1;
-        left = V.kernel.cse.newvar()
-        right = V.kernel.cse.newvar()
         scalar_zero = f"decltype({x})(0)"
         scalar_one = f"decltype({x})(1)"
-        code.writeline(f"auto {left} = {x} > 0 ? {scalar_one} : {scalar_zero};")
-        code.writeline(f"auto {right} = {x} < 0 ? {scalar_one} : {scalar_zero};")
-        V.kernel.compute.splice(code)
-        return f"{left} - {right}"
+        code.writeline("[&]()")
+        with code.indent():
+            code.writeline(f"auto left = {x} > 0 ? {scalar_one} : {scalar_zero};")
+            code.writeline(f"auto right = {x} < 0 ? {scalar_one} : {scalar_zero};")
+            code.writeline("return left - right;")
+        code.writeline("()")
+        return code
 
 
 class CppVecOverrides(CppOverrides):
@@ -1314,19 +1319,21 @@ class CppVecOverrides(CppOverrides):
     @staticmethod
     def sign(x):
         code = BracesBuffer()
-        # auto tmp5 = tmp4 < 0 ? -1 : 1;
+        """
+        auto left = decltype(tmp1)::blendv(decltype(tmp1)(0), decltype(tmp1)(1), decltype(tmp1)(0) < tmp1);
+        auto right = decltype(tmp1)::blendv(decltype(tmp1)(0), decltype(tmp1)(1), tmp1 < decltype(tmp1)(0));
+        return left - right;
+        """
         vec_zero = f"decltype({x})(0)"
         vec_one = f"decltype({x})(1)"
-        blendv = f"decltype({x})::blendv({vec_zero}, {vec_one}, {vec_zero} < {x})"
-        left = V.kernel.cse.newvar()
-        code.writeline(f"auto {left} = {blendv};")
-
-        # auto tmp6 = tmp4 == 0 ? 0 : tmp5;
-        blendv = f"decltype({x})::blendv({vec_zero}, {vec_one}, {x} < {vec_zero})"
-        right = V.kernel.cse.newvar()
-        code.writeline(f"auto {right} = {blendv};")
-        V.kernel.compute.splice(code)
-        return f"{left} - {right}"
+        blendv_l = f"decltype({x})::blendv({vec_zero}, {vec_one}, {vec_zero} < {x})"
+        blendv_r = f"decltype({x})::blendv({vec_zero}, {vec_one}, {x} < {vec_zero})"
+        code.writeline("[&]()")
+        with code.indent():
+            code.writeline(f"auto left = {blendv_l};")
+            code.writeline(f"auto right = {blendv_r};")
+            code.writeline("return left - right;")
+        code.writeline("()")
 
     @staticmethod
     def to_dtype(x, dtype, src_dtype=None):
@@ -1497,14 +1504,37 @@ class CppKernel(Kernel):
         finally:
             self._load_mask = prior
 
-    def cache_fp32_cse_var_before_store(self, var_to_store):
+    def cache_fp32_cse_var_before_lowp_store(self, var_to_store):
         """
         https://github.com/pytorch/pytorch/issues/115260
-        For FusedSchedulerNode[node1, node2], the node2 might need to load node1's result
-        the node1's result might be lowp data type and node2 might need to cast node1's lowp dtype
-        to fp32 to do following computes. Thus we add a pair
-        {to_fp32_expr, node1's fp32 store cse var} in cse cache here to avoid the "to_dtype"
-        after node2's "load".
+        For FusedSchedulerNode[node1, node2], the node2 loads what node1 stores and the buffer is
+        in low-precision floating point data type. When the output of node1 also serves as the output of the
+        kernel, the result of nodes would be different from the case when output of node1 is not the output
+        of the kernel (where we don't need to insert `to_dtype` for legalization). To address the problem, on
+        storing the lowp node1 output, we also add the inverse dtype conversion to high precision data type
+        to the cse cache.
+
+        Example (pseudo code):
+            node1_output = ...
+            node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
+            store(buf, node1_output_lowp)
+            node2_input_lowp = load(buf)
+            node2_input = to_dtype(node2_input_lowp, dtype=torch.float)
+
+        Without cse cache trick:
+            node1_output = ...
+            node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
+            store(buf, node1_output_lowp)
+            node2_input_lowp = node_output_lowp # hit store cache
+            node2_input = to_dtype(node2_input_lowp, dtype=torch.float)
+
+        With cse cache trick:
+            node1_output = ...
+            node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
+            # also add `to_dtype(node1_input_lowp, dtype=torch.float)` -> `node1_output` to cse cache
+            store(buf, node1_output_lowp)
+            node2_input_lowp = node_output_lowp # hit store cache
+            node2_input = node1_output # hit cse cache
         """
 
         if var_to_store.dtype not in DTYPE_LOWP_FP:
@@ -1580,7 +1610,7 @@ class CppKernel(Kernel):
     def store(self, name, index, value, mode=None):
         assert "buf" in name
         var = self.args.output(name)
-        self.cache_fp32_cse_var_before_store(value)
+        self.cache_fp32_cse_var_before_lowp_store(value)
         index = self.rename_indexing(index)
         if mode is None:
             line = f"{var}[{cexpr_index(index)}] = {value};"
@@ -2067,7 +2097,7 @@ class CppVecKernel(CppKernel):
             value = self.broadcast(value)
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.output(name)
-        self.cache_fp32_cse_var_before_store(value)
+        self.cache_fp32_cse_var_before_lowp_store(value)
         index = self.rename_indexing(index)
         self.stores.writeline(
             DeferredLine(
