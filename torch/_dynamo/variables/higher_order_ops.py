@@ -462,12 +462,9 @@ def speculate_subgraph(
             f"that Dynamo was unable to prove safety for this API and will "
             f"fall back to eager-mode PyTorch, which could lead to a slowdown."
         )
-        log.warning(msg)
-        log.exception(ex)
-        raise Unsupported(
-            f"{msg} Scroll up for the stack trace "
-            f"of the initial exception. The reason was: {ex.msg}"
-        ) from ex
+        log.info(msg)
+        log.info(ex)
+        raise ex
 
 
 def make_attr(tx, name):
@@ -1580,7 +1577,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         else:
             unimplemented("non-function or method")
 
-        with tx.output.subtracer(fwd_fn, fwd_tracer):
+        with tx.output.subtracer(fwd_fn, fwd_tracer), tx.strict_translation_mode():
             (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
                 tx,
                 bwd_fn,
