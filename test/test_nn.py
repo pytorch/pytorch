@@ -2114,6 +2114,25 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 res_bf16 = F.threshold(x.to(dtype=dtype), threshold, 0).float()
                 self.assertEqual(res_bf16, expected)
 
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         'Linear_FP16_weight requires FBGEMM. FBGEMM is only optimized for CPUs'
+                         ' with instruction set support avx2 or newer.')
+    def test_fb_fc_packed(self):
+        X = np.random.rand(16, 16).astype(np.float32) - 0.5
+        W = np.random.rand(16, 16).astype(np.float32) - 0.5
+        b = np.random.rand(16).astype(np.float32) - 0.5
+
+        def fc_op(X, W, b):
+            return np.dot(X, W.T) + b
+
+        x_tensor = torch.tensor(X)
+        w_tensor = torch.tensor(W)
+        b_tensor = torch.tensor(b)
+        packed_w_tensor = torch.fbgemm_pack_gemm_matrix_fp16(w_tensor)
+        actual_output = torch.fbgemm_linear_fp16_weight(x_tensor, packed_w_tensor, b_tensor)
+        expected_output = fc_op(X, W, b)
+        torch.testing.assert_close(torch.from_numpy(expected_output), actual_output.cpu(), atol=1e-3, rtol=1e-3)
+
     def test_pad_scalar_error(self):
         inputs = torch.tensor(0., requires_grad=True)
         self.assertRaises(RuntimeError, lambda: F.pad(inputs, (1, 1)))
@@ -9871,7 +9890,12 @@ class TestNNDeviceType(NNTestCase):
 
         torch.manual_seed(0)
 
-        input_ui8 = torch.randint(0, 256, size=(batch_size, num_channels, 400, 400), dtype=torch.uint8, device=device)
+        # - input range is set to [30, 220] for bicubic mode, because the bicubic kernel may create
+        #   [intermediate] values outside of the [0, 255] range, which need
+        #   to be clipped in uint8 path, but not in float path. This isn't
+        #   an issue with bilinear kernel.
+        input_range = (30, 220) if mode == "bicubic" else (0, 256)
+        input_ui8 = torch.randint(*input_range, size=(batch_size, num_channels, 400, 400), dtype=torch.uint8, device=device)
         input_ui8 = input_ui8.contiguous(memory_format=memory_format)
 
         if non_contig == "sliced":
@@ -9905,37 +9929,21 @@ class TestNNDeviceType(NNTestCase):
             self.assertTrue(output_ui8.is_contiguous(memory_format=memory_format))
             self.assertTrue(output_f32.is_contiguous(memory_format=memory_format))
 
-        diff = (output_f32 - output_ui8.float()).abs()
         if mode == "bilinear":
             torch.testing.assert_close(output_f32, output_ui8.float(), rtol=0, atol=1)
         else:
-            # - tolerances for bicubic mode are in general higher than for
-            #   bilinear mode, because the bicubic kernel may create
-            #   [intermediate] values outside of the [0, 255] range, which need
-            #   to be clipped in uint8 path, but not in float path. This isn't
-            #   an issue with bilinear kernel.
-            # - Also in bicubic mode, when antialias=False, we have to use
-            #   bigger tolerances than when antialias=True. This is partially
-            #   due to the fact that when False, the float path uses the -0.75
-            #   constant while the uint8 path uses the -0.5 constant in the
-            #   bicubic kernel (when True, they both use -0.5). This difference
-            #   in constants exists for historical reasons. Should both paths
-            #   use the -0.5 constant, we would have closer results and we would
-            #   be able to lower the tolerances.
-
-            max_diff = 30 if antialias else 44
-            assert diff.max() < max_diff
+            diff = (output_f32 - output_ui8.float()).abs()
+            self.assertLess(diff.max(), 15)
 
             threshold = 2
-            percent = 3 if antialias else 40
-            assert (diff > threshold).float().mean() < (percent / 100)
+            percent = 3
+            self.assertLess((diff > threshold).float().mean(), percent / 100)
 
             threshold = 5
-            percent = 1 if antialias else 20
-            assert (diff > threshold).float().mean() < (percent / 100)
+            percent = 1
+            self.assertLess((diff > threshold).float().mean(), percent / 100)
 
-            mae = .4 if antialias else 3
-            assert diff.mean() < mae
+            self.assertLess(diff.mean(), 0.4)
 
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("align_corners", [True, False])
@@ -11722,6 +11730,47 @@ class TestNNDeviceType(NNTestCase):
             result_byte, grad_byte = compute_result_and_gradient(reduction, torch.uint8)
             self.assertEqual(result_long, result_byte)
             self.assertEqual(grad_long, grad_byte)
+
+    @onlyCUDA
+    @skipIfRocm
+    @dtypes(torch.float16, torch.float32)
+    def test_cross_entropy_loss_2d_out_of_bounds_class_index(self, device, dtype):
+        # Test for issue #117532
+        # Run in a different process to prevent the device-side assert from affecting other tests
+        stderr = TestCase.runWithPytorchAPIUsageStderr(f"""\
+#!/usr/bin/env python3
+
+import torch
+import torch.nn.functional as F
+from torch.testing._internal.common_utils import (run_tests, TestCase)
+
+class TestThatContainsCUDAAssert(TestCase):
+    def test_cross_entropy_loss_2d_out_of_bounds_class_index(self):
+        device = '{str(device)}'
+        dtype = {str(dtype).strip("'")}
+        ignore_index = 255
+        b = 10
+        n_classes = 3
+        w = 768
+        h = 1024
+        pred = torch.randn(b, n_classes, w, h, dtype=dtype, device=device)
+        labels = torch.zeros(b, w, h, dtype=torch.int64, device=device)
+        labels[5, 200, 200] = ignore_index
+        # Set invalid class index
+        labels[5, 200, 200] = 254
+
+        x = F.cross_entropy(
+            pred, labels, reduction="none", ignore_index=ignore_index
+        )
+        torch.cuda.synchronize()
+
+
+if __name__ == '__main__':
+    run_tests()
+        """)
+        self.assertIn('CUDA error: device-side assert triggered', stderr)
+
+
 
     def test_cross_entropy_loss_prob_target_all_reductions(self, device):
         # Test with k-dimensional loss.

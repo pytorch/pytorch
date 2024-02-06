@@ -24,7 +24,27 @@ _wait_all
 
 """
 
-USE_NATIVE_C10D_FUNCTIONAL = "_USE_NATIVE_C10D_FUNCTIONAL" in os.environ
+_use_native_funcol = "_USE_NATIVE_C10D_FUNCTIONAL" in os.environ
+
+
+# These are for testing purposes only and will be removed after we fully
+# migrate to native funcol.
+def native_funcol_enabled():
+    return _use_native_funcol
+
+
+def enable_native_funcol():
+    global _use_native_funcol
+    os.environ["_USE_NATIVE_C10D_FUNCTIONAL"] = "1"
+    _use_native_funcol = True
+
+
+def disable_native_funcol():
+    global _use_native_funcol
+    if "_USE_NATIVE_C10D_FUNCTIONAL" in os.environ:
+        del os.environ["_USE_NATIVE_C10D_FUNCTIONAL"]
+    _use_native_funcol = False
+
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +115,7 @@ def _wait_reg_dec(ptr, wait_reg):
 
 
 def _register_tensor_wrapper(tensor) -> None:
-    if USE_NATIVE_C10D_FUNCTIONAL:
+    if native_funcol_enabled():
         # Tensor storage -> work mapping is maintained in C++
         weakref.finalize(
             tensor,
