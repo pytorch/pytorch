@@ -134,3 +134,25 @@ def is_inplace_aten_op(op: torch._ops.OpOverload):
         if arg.alias_info is not None:
             return False
     return True
+
+
+def zip_schema(schema, args, kwargs):
+    """zips schema.arguments and (args, kwargs) together.
+
+    Assumes that (args, kwargs) were the inputs to some torch._ops.OpOverload:
+    that is, kwargs must be keyword-only arguments and default values may be omitted.
+    """
+    assert len(schema.arguments) >= len(args) + len(kwargs)
+    for i in range(len(schema.arguments)):
+        info = schema.arguments[i]
+        if info.kwarg_only:
+            if info.name in kwargs:
+                yield info, kwargs[info.name]
+            continue
+        if i >= len(args):
+            # args that are equal to their default values are not populated
+            # if they are followed by args that are equal to their defaults.
+            # Skip these.
+            continue
+        yield info, args[i]
+    return
