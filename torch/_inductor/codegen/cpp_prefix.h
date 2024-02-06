@@ -280,15 +280,7 @@ inline float flag_to_float_scalar(T src) {
 
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR)
 
-template <typename T>
-class Mask : public at::vec::Vectorized<T>{
-public:
-  Mask() = default;
-  Mask(at::vec::Vectorized<T> vec) : at::vec::Vectorized<T>(vec) {}
-  Mask(T scalar) : at::vec::Vectorized<T>(scalar) {}
-};
-
-inline at::vec::Vectorized<float> masked_load(const float* src, Mask<float> mask) {
+inline at::vec::Vectorized<float> masked_load(const float* src, at::vec::Vectorized<float> mask) {
 # if defined(CPU_CAPABILITY_AVX512)
     at::vec::Vectorized<float> zero_vec(0);
     auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
@@ -308,7 +300,7 @@ inline at::vec::Vectorized<float> masked_load(const float* src, Mask<float> mask
 
 template <typename T>
 typename std::enable_if<std::is_same<T, bfloat16>::value || std::is_same<T, half>::value, at::vec::Vectorized<T>>::type
-inline masked_load(const T* src, Mask<float> mask) {
+inline masked_load(const T* src, at::vec::Vectorized<float> mask) {
 # if defined(CPU_CAPABILITY_AVX512)
   auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
   auto mmask = _mm512_cmp_epi32_mask(_mm512_castps_si512(mask), all_ones, _MM_CMPINT_EQ);
@@ -340,7 +332,7 @@ inline masked_load(const T* src, Mask<float> mask) {
 # endif
 }
 
-inline at::vec::Vectorized<uint8_t> masked_load(const uint8_t* src, Mask<float> mask) {
+inline at::vec::Vectorized<uint8_t> masked_load(const uint8_t* src, at::vec::Vectorized<float> mask) {
 # if defined(CPU_CAPABILITY_AVX512)
     auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
     auto mmask = _mm512_cmp_epi32_mask(_mm512_castps_si512(mask), all_ones, _MM_CMPINT_EQ);
@@ -373,13 +365,13 @@ inline at::vec::Vectorized<uint8_t> masked_load(const uint8_t* src, Mask<float> 
 }
 
 template <typename T>
-inline Mask<float> flag_to_float_vec(const T* src) {
+inline at::vec::Vectorized<float> flag_to_float_vec(const T* src) {
   __at_align__ float dst_tmp[at::vec::Vectorized<float>::size()];
   #pragma unroll
   for (int64_t i = 0; i < at::vec::Vectorized<float>::size(); i++) {
     dst_tmp[i] = flag_to_float_scalar(src[i]);
   }
-  return Mask<float>::loadu(dst_tmp);
+  return at::vec::Vectorized<float>::loadu(dst_tmp);
 }
 
 template <typename scalar_t>
