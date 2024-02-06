@@ -489,6 +489,7 @@ def _advise_is_size(a):
         isinstance(a, SymInt)
         and isinstance(a.node, SymNode)
         and not a.node.has_hint()
+        and isinstance(a.node.expr, sympy.Symbol)
     ):
         _constrain_range_for_size(a)
 
@@ -502,6 +503,7 @@ def _constrain_range_for_size(a, min: Optional[int] = None, max: Optional[int] =
         raise ValueError("Constraining SymFloat/SymBool is nyi")
 
     assert isinstance(a, SymInt), "can only constrain range for SymInt"
+    assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
 
     if min is None:
         min = 0
@@ -514,42 +516,13 @@ def _constrain_range_for_size(a, min: Optional[int] = None, max: Optional[int] =
             "received min={min} and max={max}"
         )
 
-    shape_env = a.node.shape_env
-
-    vr = ValueRanges(min, max)
-    if free_unbacked_symbols(a.node.expr):
-        if (
-            not isinstance(a.node.expr, sympy.Symbol) and
-            not bound_sympy(a.node.expr, shape_env.var_to_range).issubset(vr)
-        ):
-            # Generate a new unbacked SymInt and setup a replacement.  The new
-            # unbacked SymInt can be marked as size like and it can also
-            # now have a refined range
-            u1 = shape_env.create_unbacked_symint().node.expr
-            # TODO: Also use whatever old range we knew from the expression
-            shape_env.var_to_range[u1] = vr
-            # Log this before the replacement occurs, so we can get the old
-            # a.node.expr
-            log.info("_constrain_range_for_size %s = %s [%s, %s]", a.node.expr, u1, min, max)
-            shape_env.complex_replacements[a.node.expr] = u1
-            shape_env._update_version_counter()
-            assert isinstance(a.node.expr, sympy.Symbol)
-    else:
-        assert isinstance(a.node.expr, sympy.Symbol), "constraining on non-symbol backed SymInt NYI"
-        # TODO: Could we do the unbacked replacement strategy here?  It's
-        # possible: we generate a fresh backed size variable with a formula
-        # for how to compute it from other backed size variables.  But this
-        # requires some plumbing because Dynamo needs to know how to feed in
-        # this size variable.  Don't do this unless we need it.
-
     _constrain_symbol_range(
-        shape_env,
+        a.node.shape_env,
         a.node.expr,
         compiler_min=min,
         compiler_max=max,
     )
-
-    shape_env.size_like.add(a.node.expr)
+    a.node.shape_env.size_like.add(a.node.expr)
 
 
 # inclusive both ways
@@ -1823,18 +1796,11 @@ class ShapeEnv:
         # Maps from sympy ints to expressions representing them
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
         self.replacements: Dict[sympy.Symbol, sympy.Expr] = {}  #
-        # Complicated replacements from non-symbol expressions to other
-        # expressions.  These only ever involve unbacked SymInts on the LHS
-        self.complex_replacements: Dict[sympy.Expr, sympy.Expr] = {}
         # Set holds a % b expressions that evaluate to 0.
         self.divisible: Set[sympy.Expr] = set()
-        # Set that holds "size-like" unbacked symbols.  When we perform
+        # Set that holds "size-like" expressions.  When we perform
         # "size-oblivious" tests, these can be assumed to be >= 2.
-        # Backed symbols with hints cannot be size like (we instead will
-        # just look at the hint to resolve the test.)  This set cannot hold
-        # expressions because we will always generate a fresh unbacked symbol
-        # if you denote a complex expression as size-like.
-        self.size_like: Set[sympy.Symbol] = set()
+        self.size_like: Set[sympy.Expr] = set()
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_var: Dict[int, sympy.Expr] = {}
@@ -2140,7 +2106,7 @@ class ShapeEnv:
         Defines the current "state" of the guards we've accumulated in this ShapeEnv.
         Determines when we need to invalidate our cache
         """
-        return (len(self.replacements), len(self.complex_replacements), len(self.divisible), self.num_deferred_runtime_asserts)
+        return (len(self.replacements), len(self.divisible), self.num_deferred_runtime_asserts)
 
     def _update_version_counter(self):
         # The shape environment is queried orders of magnitude more often than
@@ -3231,6 +3197,12 @@ class ShapeEnv:
 
         return '\n'.join(f" - {guard.expr}{format_tb(guard.stack)}" for guard in self.guards)
 
+    def get_shape_groups(self):
+        shape_groups = collections.defaultdict(list)
+        for k, v in self.replacements.items():
+            shape_groups[v].append(k)
+        return shape_groups
+
     @_lru_cache
     def _maybe_evaluate_static(
         self, expr: "sympy.Expr", *, unbacked_only: bool = False, compute_hint: bool = False,
@@ -3344,13 +3316,7 @@ class ShapeEnv:
 
     @_lru_cache
     def replace(self, expr: "sympy.Expr") -> "sympy.Expr":
-        replacements = {}
-        for s in expr.free_symbols:
-            new_s = self._find(cast(sympy.Symbol, s))
-            if new_s != s:
-                replacements[s] = new_s
-        if free_unbacked_symbols(expr):
-            replacements.update(self.complex_replacements)
+        replacements = {s: self._find(cast(sympy.Symbol, s)) for s in expr.free_symbols}
         return safe_expand(expr.xreplace(replacements))
 
     @_lru_cache
@@ -3870,10 +3836,7 @@ class ShapeEnv:
             stack = CapturedTraceback.extract(skip=1)
             ra = RuntimeAssert(expr, msg, stack)
             # TODO: Do this in a way that is less janky than int(s.name[1:])
-            cands = sorted([
-                s for s in expr.free_symbols if s.name.startswith(("u", "f"))
-            ], key=lambda s: (s.name[0], int(s.name[1:])))
-            assert cands, expr
+            cands = sorted([s for s in expr.free_symbols if s.name.startswith("u")], key=lambda s: int(s.name[1:]))
             self.deferred_runtime_asserts.setdefault(cands[-1], []).append(ra)
             self.num_deferred_runtime_asserts += 1
             self._update_version_counter()
