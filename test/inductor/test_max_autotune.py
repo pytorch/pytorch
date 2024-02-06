@@ -273,7 +273,7 @@ class TestMaxAutotune(TestCase):
                     with config.patch(
                         {
                             "autotune_in_subproc": False,
-                            "autotune_precompilation_workers": len(fake_choices),
+                            "compile_threads": len(fake_choices),
                         }
                     ):
                         asc("test_call", fake_choices, [], Mock())
@@ -311,7 +311,7 @@ class TestMaxAutotune(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": "CUTLASS,Triton,ATen",
-                "autotune_precompilation_workers": 4,
+                "compile_threads": 4,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": 2,
             }
