@@ -1781,9 +1781,8 @@ class CppKernel(Kernel):
 
             def gen_loop(loop: LoopLevel):
                 def is_parallel_reduction(loop):
-                    while loop.parent:
-                        loop = loop.parent
-                    return loop.is_reduction and loop.parallel
+                    root = loop.get_root()
+                    return root.is_reduction and root.parallel
 
                 with contextlib.ExitStack() as stack:
                     loop_lines = loop.lines()
@@ -3578,6 +3577,13 @@ class LoopLevel:
         for loop in self.inner:
             kernels += loop.get_kernels()
         return kernels
+
+    def get_root(self):
+        """Get all kernel objects under this loop level"""
+        root = self
+        while root.parent:
+            root = root.parent
+        return root
 
     def set_kernel(self, kernel: CppKernel):
         """
