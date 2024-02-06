@@ -663,15 +663,6 @@ class BuiltinVariable(VariableTracker):
         if self.fn == str and args and isinstance(args[0], (UserFunctionVariable)):
             return variables.ConstantVariable.create(value=str(args[0].fn))
 
-        # Handle `for t in iter(user_obj)`, where user_obj defines a __iter__ method.
-        if self.fn is iter and args and isinstance(args[0], UserDefinedObjectVariable):
-            assert len(args) == 1
-            assert len(kwargs) == 0
-            maybe_iter_method = args[0].var_getattr(tx, "__iter__")
-            if isinstance(maybe_iter_method, variables.UserMethodVariable):
-                return maybe_iter_method.call_function(tx, [], {})
-            unimplemented(f"__iter___ is not implemented fol {args[0]} {args[0].value}")
-
         # Handle binary ops (e.g. __add__ / __radd__, __iadd__, etc.)
         # NB: Tensor args are handled above and not here
         if len(kwargs) == 0 and len(args) == 2:
@@ -726,6 +717,15 @@ class BuiltinVariable(VariableTracker):
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
                 ),
             )
+
+        # Handle `for t in iter(user_obj)`, where user_obj defines a __iter__ method.
+        if self.fn is iter and args and isinstance(args[0], UserDefinedObjectVariable):
+            assert len(args) == 1
+            assert len(kwargs) == 0
+            maybe_iter_method = args[0].var_getattr(tx, "__iter__")
+            if isinstance(maybe_iter_method, variables.UserMethodVariable):
+                return maybe_iter_method.call_function(tx, [], {})
+            unimplemented(f"__iter__ is not implemented for {args[0]} {args[0].value}")
 
         return super().call_function(tx, args, kwargs)
 
