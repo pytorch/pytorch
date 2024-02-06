@@ -342,7 +342,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: fix-conda-macos-nightly
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -445,7 +445,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: fix-conda-macos-nightly
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -795,7 +795,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: fix-conda-macos-nightly
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -898,7 +898,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: fix-conda-macos-nightly
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -1248,7 +1248,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: fix-conda-macos-nightly
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -1351,7 +1351,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: fix-conda-macos-nightly
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -1701,7 +1701,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: fix-conda-macos-nightly
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -1804,7 +1804,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: fix-conda-macos-nightly
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -2154,7 +2154,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: fix-conda-macos-nightly
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -2257,7 +2257,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: fix-conda-macos-nightly
           submodules: recursive
           repository: pytorch/builder
           path: builder
