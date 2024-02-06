@@ -2457,7 +2457,7 @@ PyObject* torch_c_dynamo_guards_init() {
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
       .def(
-          "__getitem__",
+          "getitem_manager",
           &GuardManager::get_child_manager<GetItemGuardAccessor>,
           py::return_value_policy::reference)
       // return by reference because GuardManager has the ownership of accessors

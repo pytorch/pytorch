@@ -417,7 +417,7 @@ class GuardBuilder(GuardBuilderBase):
                     return base_guard_manager.get_key_value_manager(
                         source.index.index
                     ).get_value_manager(example_value)
-                return base_guard_manager.__getitem__(source.index, example_value)
+                return base_guard_manager.getitem_manager(source.index, example_value)
             elif istype(source, ODictGetItemSource):
                 # Necessary to call dict_get_item_manager to call PyDict_GetItem
                 # instead of PyObject_GetItem which can trigger user code.
@@ -434,11 +434,11 @@ class GuardBuilder(GuardBuilderBase):
                 if not source.is_kw:
                     return base_guard_manager.getattr_manager(
                         "__defaults__", None
-                    ).__getitem__(source.idx_key, example_value)
+                    ).getitem_manager(source.idx_key, example_value)
                 else:
                     return base_guard_manager.getattr_manager(
                         "__kwdefaults__", None
-                    ).__getitem__(str(source.idx_key), example_value)
+                    ).getitem_manager(str(source.idx_key), example_value)
             elif istype(source, NumpyTensorSource):
                 return base_guard_manager.lambda_manager(from_numpy, example_value)
             elif istype(source, TupleIteratorGetItemSource):
@@ -826,10 +826,12 @@ class GuardBuilder(GuardBuilderBase):
             code.append(f"___key_to_id({ref}) == {const_keys_repr}")
         else:
             code.append(f"list({ref}.keys()) == {const_keys_repr}")
-            # We don't need C++ guard for this, we can just rely on KeyError
-            # self.add_python_lambda_leaf_guard_to_root(
-            #     code, self.get_guard_str(guard, code), is_epilogue=False
-            # )
+            dict_mgr = self.get_guard_manager(guard)
+            assert isinstance(dict_mgr, DictGuardManager)
+            for idx, key in enumerate(list(value.keys())):
+                dict_mgr.get_key_value_manager(idx).get_key_manager(
+                    key
+                ).add_equals_match_guard(key, f"key value == {key}")
 
         self._produce_guard_code(guard, code)
 
@@ -868,10 +870,12 @@ class GuardBuilder(GuardBuilderBase):
 
         self._produce_guard_code(guard, code)
 
-        # We don't need C++ guard for this, we can just rely on KeyError
-        # self.add_python_lambda_leaf_guard_to_root(
-        #     code, self.get_guard_str(guard, code), is_epilogue=False
-        # )
+        dict_mgr = self.get_guard_manager(guard)
+        assert isinstance(dict_mgr, DictGuardManager)
+        for idx, key in enumerate(list(value.keys())):
+            dict_mgr.get_key_value_manager(idx).get_key_manager(
+                key
+            ).add_equals_match_guard(key, f"key value == {key}")
 
     def OBJECT_MUTATION(self, guard: Guard):
         mutation_guard.watch(self.get(guard.name), self.check_fn_manager)
