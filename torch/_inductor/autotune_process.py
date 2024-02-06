@@ -334,7 +334,7 @@ class TuningProcessPool:
 tuning_pool = TuningProcessPool()
 
 
-LayoutViewOrBuffer = Union[ir.Layout, ir.Buffer, ir.ReinterpretView]
+LayoutOrBuffer = Union[ir.Layout, ir.Buffer]
 
 
 @dataclasses.dataclass
@@ -344,11 +344,10 @@ class TensorMeta:
     sizes: torch._prims_common.ShapeType
     strides: torch._prims_common.StrideType
     offset: int
-    name: Optional[str] = None
 
     @classmethod
     def from_irnodes(
-        cls, irnodes: Union[LayoutViewOrBuffer, Sequence[LayoutViewOrBuffer]]
+        cls, irnodes: Union[LayoutOrBuffer, Sequence[LayoutOrBuffer]]
     ) -> Union[TensorMeta, List[TensorMeta]]:
         if isinstance(irnodes, Sequence):
             result: List[Any] = [cls.from_irnodes(x) for x in irnodes]
@@ -361,11 +360,7 @@ class TensorMeta:
 
         dtype = node.get_dtype()
         assert dtype is not None
-        node_name = None
-        try:
-            node_name = node.get_name()
-        except Exception:
-            pass
+
         return TensorMeta(
             device=node.get_device(),
             dtype=dtype,
@@ -381,7 +376,6 @@ class TensorMeta:
                 node.get_layout().offset,
                 fallback=config.unbacked_symint_fallback,
             ),
-            name=node_name,
         )
 
     def to_tensor(self) -> torch.Tensor:
@@ -567,24 +561,9 @@ class CUDABenchmarkRequest(BenchmarkRequest):
         self.workspace_size: int = 0
         self.workspace: Optional[torch.Tensor] = None
         self.DLL: Optional[DLLWrapper] = None
-        self._workspace_size_updated = False
         self.hash_key: str = ""
         self.source_file: str = ""
         self.hash_key, self.source_file = CUDACodeCache.write(self.source_code, "so")
-        self.unique_input_tensor_meta = self._create_unique_tensor_meta(
-            input_tensor_meta
-        )
-
-    def _create_unique_tensor_meta(self, input_tensor_meta):
-        unique_input_tensor_meta: List[TensorMeta] = []
-        seen = set()
-        for tm in input_tensor_meta:
-            if tm.name is None:
-                unique_input_tensor_meta.append(tm)
-            elif tm.name not in seen:
-                unique_input_tensor_meta.append(tm)
-                seen.add(tm.name)
-        return unique_input_tensor_meta
 
     def precompile(self):
         # Prepopulate CUDACodeCache
@@ -596,8 +575,9 @@ class CUDABenchmarkRequest(BenchmarkRequest):
     def make_run_fn(
         self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
     ) -> Callable[[], None]:
-        self.ensure_dll_loaded()
-        self.update_workspace_size()
+        self.DLL, self.hash_key, self.source_file = CUDACodeCache.load(
+            self.source_code, "so"
+        )
         args = [
             c_void_p(tensor.data_ptr())
             for tensor in list(input_tensors) + [output_tensor]
@@ -611,35 +591,9 @@ class CUDABenchmarkRequest(BenchmarkRequest):
             args,
             self.extra_args,
         )
-        stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)
         run_method = getattr(self.DLL, self.kernel_name)
-        workspace_ptr = c_void_p(0)
-        if self.workspace_size > 0:
-            self.workspace = torch.zeros(
-                (self.workspace_size + 7) // 8,
-                dtype=torch.float64,
-                device=output_tensor.device,
-            )
-            workspace_ptr = c_void_p(self.workspace.data_ptr())
-
-        # Generate partial function.
-        return functools.partial(
-            run_method,
-            *args,
-            *self.extra_args,
-            None,  # null workspace size ptr
-            workspace_ptr,  # set workspace ptr,
-            stream_ptr,
-        )
-
-    def update_workspace_size(self) -> None:
-        if self._workspace_size_updated:
-            return
-        self.ensure_dll_loaded()
-        args = [c_void_p(None) for _ in range(len(self.unique_input_tensor_meta) + 1)]
         stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)
 
-        run_method = getattr(self.DLL, self.kernel_name)
         # Retrieve workspace_size and initialize workspace.
         c_workspace_size = c_size_t()
         run_method(
@@ -651,25 +605,23 @@ class CUDABenchmarkRequest(BenchmarkRequest):
             None,  # null workspace ptr
             stream_ptr,
         )
-        torch.cuda.synchronize()  # shake out any CUDA errors
         self.workspace_size = c_workspace_size.value
-        log.debug(
-            "update_workspace_size called: new workspace size=%d, self.kernel_name=%s, self.source_file=%s, self.hash_key=%s, self.DLL=%s, args=%s, self.extra_args=%s",  # noqa: B950
-            self.workspace_size,
-            self.kernel_name,
-            self.source_file,
-            self.hash_key,
-            self.DLL,
-            args,
-            self.extra_args,
+        # TODO: Support non-zero workspace_size.
+        assert self.workspace_size == 0, (
+            "Things need to be fixed to support non-zero workspace_size: "
+            "1) max autotune cache needs to store workspace size; "
+            "2) memory allocation needs to allocate / deallocate workspace correctly; "
         )
-        self._workspace_size_updated = True
 
-    def ensure_dll_loaded(self):
-        if self.DLL is None:
-            self.DLL, self.hash_key, self.source_file = CUDACodeCache.load(
-                self.source_code, "so"
-            )
+        # Generate partial function.
+        return functools.partial(
+            run_method,
+            *args,
+            *self.extra_args,
+            None,  # null workspace size ptr
+            None,  # set workspace ptr, TODO: update it to a real ptr if workspace_size > 0
+            stream_ptr,
+        )
 
     def cleanup_run_fn(self) -> None:
         if self.DLL is not None:
