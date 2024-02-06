@@ -947,7 +947,7 @@ class TestOptimRenewed(TestCase):
 
             optim.step(closure)
             optim.step(closure)
-            # check if pre hooks were registered
+            # check if post hooks were registered
             self.assertEqual(data, 6)
 
             # remove handles, take step and verify that hook is no longer registered
