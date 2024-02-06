@@ -827,14 +827,23 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const c10:
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_with_update_cpu(
     const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
-    const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
-    double momentum, double eps, bool cudnn_enabled) {
+    Tensor& running_mean, Tensor& running_var, double momentum, double eps, bool cudnn_enabled) {
   Tensor output, save_mean, save_var;
   std::tie(output, save_mean, save_var) =
-    batch_norm_cpu(input, weight_opt, bias_opt, running_mean_opt, running_var_opt, /*update*/true, momentum, eps);
+    batch_norm_cpu(input, weight_opt, bias_opt, running_mean, running_var, /*update*/true, momentum, eps);
   Tensor reserve = at::empty({0}, input.options().dtype(kByte));
   return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, save_mean, save_var, reserve);
 }
+
+std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> batch_norm_with_update_cpu_out(
+    const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+    Tensor& running_mean, Tensor& running_var, double momentum, double eps, bool cudnn_enabled,
+    Tensor& out, Tensor& save_mean, Tensor& save_var, Tensor& reserve) {
+  std::tie(out, save_mean, save_var) =
+    batch_norm_cpu_out(input, weight_opt, bias_opt, running_mean, running_var, /*update*/true, momentum, eps, out, save_mean, save_var);
+  return std::tuple<Tensor&, Tensor&, Tensor&, Tensor&>(out, save_mean, save_var, reserve);
+}
+
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_no_update(
     const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
