@@ -2510,31 +2510,6 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
             record.getMessage(),
         )
 
-        # self.assertEqual(x.sum(0).cos(), y)
-
-        # x = torch.zeros(3)
-        # y = fn(x)
-
-        # print(y)
-        # y = grad(fn)(x)
-        # self.assertEqual(x.sin(), y)
-        # self.assertEqual(len(records), 0)
-
-        # call vmap(vmap(fn))(x) should retrigger compilation as
-        # _functorch.current_level() is not the same
-
-    #     x = torch.zeros(3, 3, 3, 4, 5)
-    #     y = torch.vmap(torch.vmap(fn))(x)
-    #     self.assertEqual(x.sin(), y)
-    #     self.assertGreater(len(records), 0)
-    #     record = self.getRecord(records, "maybe_current_level()")
-    #     self.assertIn(
-    #         """\
-    # triggered by the following guard failure(s):
-    # - torch._C._functorch.maybe_current_level() == 1                # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:399 in _flat_vmap""",
-    #         record.getMessage(),
-    #     )
-
     @config.patch(capture_func_transforms=True)
     @make_logging_test(recompiles=True)
     def test_vmap_recompile_different_states(self, records):
