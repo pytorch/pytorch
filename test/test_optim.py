@@ -1,5 +1,6 @@
 # Owner(s): ["module: optimizer"]
 import functools
+import math
 import unittest
 from copy import deepcopy
 
@@ -953,6 +954,29 @@ class TestOptimRenewed(TestCase):
                 optimizer.step(closure)
 
             self.assertEqual(getPublicAttrs(optimizer), getPublicAttrs(deepcopy(optimizer)))
+
+
+    @optims([optim for optim in optim_db if optim.step_requires_closure], dtypes=[torch.float32])
+    def test_second_order_optims_return_consistent_types(self, device, dtype, optim_info):
+        # Motivated by #7586
+        optim_cls = optim_info.optim_cls
+        params = [torch.randn(10, 5, device=device, dtype=dtype), torch.randn(10, device=device, dtype=dtype)]
+
+        def closure():
+            return torch.tensor([10], device=device, dtype=dtype)
+
+        for optim_input in optim_info.optim_inputs_func(device=device):
+            # Currently, the only second order optim is LBFGS, so we just go ahead and modify
+            # "tolerance_grad", but this may not scale if we add second order optims in the future
+            kwargs = optim_input.kwargs
+            kwargs["tolerance_grad"] = math.inf
+            optim_inf = optim_cls(params, **kwargs)
+            kwargs["tolerance_grad"] = -math.inf
+            optim_neg_inf = optim_cls(params, **kwargs)
+
+            res1 = optim_inf.step(closure)
+            res2 = optim_neg_inf.step(closure)
+            self.assertEqual(type(res1), type(res2))
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)

@@ -1,6 +1,5 @@
 # Owner(s): ["module: optimizer"]
 
-import math
 import unittest
 import functools
 import itertools
@@ -9,7 +8,7 @@ from copy import deepcopy
 import torch
 from torch.nn import Parameter
 from torch.optim import (
-    Adadelta, Adagrad, Adam, Adamax, AdamW, ASGD, LBFGS, NAdam, RAdam, RMSprop, Rprop, SGD, SparseAdam, Optimizer
+    Adadelta, Adagrad, Adam, Adamax, AdamW, ASGD, NAdam, RAdam, RMSprop, Rprop, SGD, SparseAdam, Optimizer
 )
 from torch.optim.lr_scheduler import (
     StepLR,
@@ -676,19 +675,6 @@ class TestOptim(TestCase):
     def test_rprop(self):
         for foreach in (False, True):
             self._test_complex_2d(lambda param: Rprop(param, foreach=foreach))
-
-
-    def test_lbfgs_returns_consistent_type(self):
-        params = [torch.randn(10, 5), torch.randn(10)]
-        opt1 = LBFGS(params, 0.01, tolerance_grad=math.inf)
-        opt2 = LBFGS(params, 0.01, tolerance_grad=-math.inf)
-
-        def closure():
-            return torch.tensor([10])
-
-        res1 = opt1.step(closure)
-        res2 = opt2.step(closure)
-        self.assertEqual(type(res1), type(res2))
 
 
     def test_fused_optimizer_does_not_step_if_foundinf(self):
