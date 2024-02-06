@@ -63,13 +63,26 @@ class TestPatternMatcher(TestCase):
         def fn(a, b, c, d):
             return torch.add(torch.mm(a, b), torch.mm(c, d))
 
-        args_list = [
+        # when m1 == n1 and m2 == n2, mm_plus_mm can be matched to fused op
+        fusible_args_list = [
             (
                 torch.randn(16, 16, device="cuda"),
                 torch.randn(16, 16, device="cuda"),
                 torch.randn(16, 16, device="cuda"),
                 torch.randn(16, 16, device="cuda"),
             ),
+            (
+                torch.randn(1, 4, device="cuda"),
+                torch.randn(4, 2, device="cuda"),
+                torch.randn(1, 5, device="cuda"),
+                torch.randn(5, 2, device="cuda"),
+            ),
+        ]
+        for args in fusible_args_list:
+            self.common(fn, args, 1, 3)
+
+        # if not fusible, it can only match add(mm())
+        unfusible_args_list = [
             # https://github.com/pytorch/pytorch/issues/100670.
             (
                 torch.randn(1, 4, device="cuda"),
@@ -83,15 +96,9 @@ class TestPatternMatcher(TestCase):
                 torch.randn(1, 4, device="cuda"),
                 torch.randn(4, 2, device="cuda"),
             ),
-            (
-                torch.randn(1, 4, device="cuda"),
-                torch.randn(4, 2, device="cuda"),
-                torch.randn(1, 5, device="cuda"),
-                torch.randn(5, 2, device="cuda"),
-            ),
         ]
-        for args in args_list:
-            self.common(fn, args, 1, 3)
+        for args in unfusible_args_list:
+            self.common(fn, args, 1, 2)
 
     def _test_fused_int_mm_mul_impl(self, fn, args, fused_int_mm_mul_expected=True):
         torch._dynamo.reset()

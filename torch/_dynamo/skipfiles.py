@@ -145,11 +145,19 @@ THIRDPARTY_SKIPLIST = (
 
 
 def _strip_init_py(s):
-    return re.sub(r"__init__.py$", "", s)
+    # TODO: Once we require py3.9 use removesuffix instead.
+    suffix = "__init__.py"
+    if s.endswith(suffix):
+        return s[: -len(suffix)]
+    else:
+        return s
 
 
 def _module_dir(m: types.ModuleType):
-    return _strip_init_py(m.__file__)
+    # Protect against a module not exporting __file__ - this can happen for
+    # frozen modules, for example.
+    file = getattr(m, "__file__", None)
+    return file and _strip_init_py(file)
 
 
 # TODO: Add a decoractor for easily adding functions to FUNC_INLINELIST
@@ -158,6 +166,7 @@ FUNC_INLINELIST = {
     "torch._constrain_as_size",
     "torch._constrain_as_value",
     "torch._tensor._convert",
+    "torch.backends.mha.get_fastpath_enabled",
     "torch.jit._unwrap_optional",
 }
 
@@ -222,6 +231,7 @@ MOD_INLINELIST = {
     "torch.utils._pytree",
     "torch._tensor",
     "torch._higher_order_ops.strict_mode",
+    "torch._higher_order_ops.while_loop",
 }
 
 
@@ -263,7 +273,8 @@ SKIP_DIRS = [
     "<frozen importlib",
     "<__array_function__ internals>",
     _config_module.__file__,
-] + [_module_dir(m) for m in BUILTIN_SKIPLIST]
+]
+SKIP_DIRS.extend(filter(None, (_module_dir(m) for m in BUILTIN_SKIPLIST)))
 
 SKIP_DIRS_RE = re.compile(r"match nothing^")
 
@@ -362,7 +373,7 @@ There are mainly three call sites of check/check_verbose:
     * Dynamo decides inline/skip everytime it encounters a new recursively function call, and the call site
       is in InliningInstructionTranslator.check_inlineable of symbolic_convert.py.
     * If f2 is skipped by Dynamo, when evaluating the frame of f3, Dynamo need the inline/skip check again
-      and the call site is in catch_errors_wrapper.catch_errors of eval_frame.py.
+      and the call site is in catch_errors_wrapper.catch_errors of convert_frame.py.
 * For global variables and function arguments, Dynamo needs to decide if they are wrapped as SkipFilesVariable in builder.py.
 
 `is_inlined_call` is used to indicate if the current function call is inlined (f2 is inlined call if it passes check)
