@@ -1440,6 +1440,9 @@ class CppVecOverrides(CppOverrides):
         return csevar
 
 
+CppVecOverrides._initialize_pointwise_overrides("cppvec")
+
+
 class CppTile2DOverrides(CppVecOverrides):
     @staticmethod
     def index_expr(expr, dtype):

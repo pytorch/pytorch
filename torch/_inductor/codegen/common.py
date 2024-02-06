@@ -513,133 +513,174 @@ class OpOverrides:
 
     @classmethod
     def _initialize_pointwise_overrides(cls, target):
-        assert target in {"triton", "cpp"}, target
+        assert target in {"triton", "cpp", "cppvec"}, target
 
-        def pointwise_factory(impl):
+        def pointwise_factory_1(impl):
             def func(x):
-                return f"{impl}({x})"
+                return impl.format(x=x)
+
+            return func
+
+        def pointwise_factory_2(impl):
+            def func(x, y):
+                return impl.format(x=x, y=y)
 
             return func
 
         for funcname, impls in pointwise_overrides_data.items():
             impl = impls.get(target)
             if impl is not None:
-                setattr(cls, funcname, staticmethod(pointwise_factory(impl)))
+                nof_args = 2 if "{y}" in impl else 1
+                # extend the following dictionary with factory
+                # functions for a specific number of arguments as
+                # needed:
+                factory = {1: pointwise_factory_1, 2: pointwise_factory_2}[nof_args]
+                setattr(cls, funcname, staticmethod(factory(impl)))
 
 
 pointwise_overrides_data: Dict[str, Dict[str, str]] = dict(
     airy_ai=dict(
-        cpp="airy_ai_forward",
-        # triton=None,  # libdevice/triton do not provide Airy Ai function
+        cpp="airy_ai_forward({x})",
+        # triton=...,  # libdevice/triton do not provide Airy Ai function
+        # cppvec=...,  # not impl in aten/.../vec
         aten="special_airy_ai",
     ),
     bessel_j0=dict(
-        cpp="bessel_j0_forward", triton="tl.math.j0", aten="special_bessel_j0"
+        cpp="bessel_j0_forward({x})",
+        triton="tl.math.j0({x})",
+        # cppvec=...,  # not impl in aten/.../vec
+        aten="special_bessel_j0",
     ),
     bessel_j1=dict(
-        cpp="bessel_j1_forward", triton="tl.math.j1", aten="special_bessel_j1"
+        cpp="bessel_j1_forward({x})",
+        triton="tl.math.j1({x})",
+        # cppvec=...,  # not impl in aten/.../vec
+        aten="special_bessel_j1",
     ),
     bessel_y0=dict(
-        cpp="bessel_y0_forward", triton="tl.math.y0", aten="special_bessel_y0"
+        cpp="bessel_y0_forward({x})",
+        triton="tl.math.y0({x})",
+        # cppvec=...,  # not impl in aten/.../vec
+        aten="special_bessel_y0",
     ),
     bessel_y1=dict(
-        cpp="bessel_y1_forward", triton="tl.math.y1", aten="special_bessel_y1"
+        cpp="bessel_y1_forward({x})",
+        triton="tl.math.y1({x})",
+        # cppvec=...,  # not impl in aten/.../vec
+        aten="special_bessel_y1",
     ),
     digamma=dict(
-        cpp="calc_digamma",
-        # triton=None,  # libdevice/triton do not provide digamma function
+        cpp="calc_digamma({x})",
+        # triton=...,  # libdevice/triton do not provide digamma function
+        cppvec="{x}.digamma()",
         aten="digamma",
     ),
     # no cpp nor triton implementation for entr, it is defined as decomposition
     # erf, erfc
     erfcx=dict(
-        cpp="calc_erfcx",
-        triton="tl.math.erfcx",
+        cpp="calc_erfcx({x})",
+        triton="tl.math.erfcx({x})",
+        # cppvec=...,  # not impl in aten/.../vec
         aten="special_erfcx",
     ),
     # , erfinv, exp2, expit, gammainc, gammaincc, gammaln
     i0=dict(
-        cpp="modified_bessel_i0_forward",
-        triton="tl.math.cyl_bessel_i0",
+        cpp="modified_bessel_i0_forward({x})",
+        triton="tl.math.cyl_bessel_i0({x})",
+        cppvec="{x}.i0()",
         aten="i0",
     ),
     i0e=dict(
-        cpp="calc_i0e",
-        # triton=None,  # libdevice/triton do not provide i0e function
+        cpp="calc_i0e({x})",
+        # triton=...,  # libdevice/triton do not provide i0e function
+        cppvec="{x}.i0e()",
         aten="special_i0e",
     ),
     i1=dict(
-        cpp="calc_i1",
-        triton="tl.math.cyl_bessel_i1",
+        cpp="calc_i1({x})",
+        triton="tl.math.cyl_bessel_i1({x})",
+        # cppvec=...,  # not impl in aten/.../vec
         aten="special_i1",
     ),
     i1e=dict(
-        cpp="calc_i1e",
-        # triton=None,  # libdevice/triton do not provide i1e function
+        cpp="calc_i1e({x})",
+        # triton=...,  # libdevice/triton do not provide i1e function
+        # cppvec=...,  # not impl in aten/.../vec
         aten="special_i1e",
     ),
     log_ndtr=dict(
-        cpp="calc_log_ndtr",
-        # triton=None,  # libdevice/triton do not provide log_ndtr function
+        cpp="calc_log_ndtr({x})",
+        # triton=...,  # libdevice/triton do not provide log_ndtr function
+        # cppvec=...,  # not impl in aten/.../vec
         aten="special_log_ndtr",
     ),
     # todo: log_softmax
     # logit
     # logsumexp
     modified_bessel_i0=dict(
-        cpp="modified_bessel_i0_forward",
-        triton="tl.math.cyl_bessel_i0",
+        cpp="modified_bessel_i0_forward({x})",
+        triton="tl.math.cyl_bessel_i0({x})",
+        # cppvec=...,  # not impl in aten/.../vec
         aten="special_modified_bessel_i0",
     ),
     modified_bessel_i1=dict(
-        cpp="modified_bessel_i1_forward",
-        triton="tl.math.cyl_bessel_i1",
+        cpp="modified_bessel_i1_forward({x})",
+        triton="tl.math.cyl_bessel_i1({x})",
+        # cppvec=...,  # not impl in aten/.../vec
         aten="special_modified_bessel_i1",
     ),
     modified_bessel_k0=dict(
-        cpp="modified_bessel_k0_forward",
-        # triton=None,  # libdevice/triton do not provide modified_bessel_k0 function
+        cpp="modified_bessel_k0_forward({x})",
+        # triton=...,  # libdevice/triton do not provide modified_bessel_k0 function
+        # cppvec=...,  # not impl in aten/.../vec
         aten="special_modified_bessel_k0",
     ),
     modified_bessel_k1=dict(
-        cpp="modified_bessel_k1_forward",
-        # triton=None,  # libdevice/triton do not provide modified_bessel_k1 function
+        cpp="modified_bessel_k1_forward({x})",
+        # triton=...,  # libdevice/triton do not provide modified_bessel_k1 function
+        # cppvec=...,  # not impl in aten/.../vec
         aten="special_modified_bessel_k1",
     ),
     # multigamma
     ndtr=dict(
-        cpp="calc_ndtr",
-        # triton=None,  # libdevice/triton do not provide ndtr function
+        cpp="calc_ndtr({x})",
+        # triton=...,  # libdevice/triton do not provide ndtr function
+        # cppvec=...,  # not impl in aten/.../vec
         aten="special_ndtr",
     ),
     ndtri=dict(
-        cpp="calc_ndtri",
-        # triton=None,  # libdevice/triton do not provide ndtri function
+        cpp="calc_ndtri({x})",
+        # triton=...,  # libdevice/triton do not provide ndtri function
+        # cppvec=...,  # not impl in aten/.../vec
         aten="special_ndtri",
     ),
     # polygamma
     # psi - alias to digamma
     # round
     scaled_modified_bessel_k0=dict(
-        cpp="scaled_modified_bessel_k0_forward",
-        # triton=None,  # libdevice/triton do not provide scaled_modified_bessel_k0 function
+        cpp="scaled_modified_bessel_k0_forward({x})",
+        # triton=...,  # libdevice/triton do not provide scaled_modified_bessel_k0 function
+        # cppvec=...,  # not impl in aten/.../vec
         aten="special_scaled_modified_bessel_k0",
     ),
     scaled_modified_bessel_k1=dict(
-        cpp="scaled_modified_bessel_k1_forward",
-        # triton=None,  # libdevice/triton do not provide scaled_modified_bessel_k1 function
+        cpp="scaled_modified_bessel_k1_forward({x})",
+        # triton=...,  # libdevice/triton do not provide scaled_modified_bessel_k1 function
+        # cppvec=...,  # not impl in aten/.../vec
         aten="special_scaled_modified_bessel_k1",
     ),
     # sinc
     spherical_bessel_j0=dict(
-        cpp="spherical_bessel_j0_forward",
+        cpp="spherical_bessel_j0_forward({x})",
         # triton=None,  # libdevice/triton do not provide spherical_bessel_j0 function
+        # cppvec=...,   # not impl in aten/.../vec
         aten="special_spherical_bessel_j0",
     ),
     # softmax
     zeta=dict(
-        cpp="calc_zeta",
-        # triton=None,  # libdevice/triton do not provide zeta function
+        cpp="calc_zeta({x})",
+        # triton=...,  # libdevice/triton do not provide zeta function
+        # cppvec=...,  # not impl in aten/.../vec
         aten="special_zeta",
     ),
 )
