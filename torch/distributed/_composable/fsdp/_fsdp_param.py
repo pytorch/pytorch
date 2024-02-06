@@ -14,7 +14,6 @@ from ._fsdp_common import (
     _chunk_with_empty,
     _from_local_no_grad,
     _get_dim0_chunked_size,
-    _get_dim0_padded_size,
     _raise_assert_with_print,
     FSDPMeshInfo,
 )
@@ -97,8 +96,9 @@ class FSDPParam:
 
     orig_dtype: torch.dtype
     _orig_size: torch.Size  # ND
+    _contiguous_orig_stride: Tuple[int, ...]
     sharded_size: torch.Size  # ND
-    contiguous_sharded_stride: Tuple[int, ...]  # goes with sharded size
+    contiguous_sharded_stride: Tuple[int, ...]
     sharded_post_forward_size: torch.Size  # ND
     contiguous_sharded_post_forward_stride: Tuple[int, ...]
     _sharded_param_data: torch.Tensor  # 1D
@@ -190,6 +190,7 @@ class FSDPParam:
             self._global_stride = param.stride()
             param_data = param
         self._orig_size = param_data.size()
+        self._contiguous_orig_stride = make_contiguous_strides_for(self._orig_size)
         shard_rank = self.mesh_info.shard_mesh_rank
         shard_world_size = self.mesh_info.shard_mesh_size
         chunks = _chunk_with_empty(param_data, shard_world_size, dim=0)
@@ -243,12 +244,12 @@ class FSDPParam:
             return  # already initialized
         # For the default path (no post-all-gather), the all-gather output
         # gives the unsharded parameter data directly
-        world_size = self.mesh_info.shard_mesh_size
-        padded_unsharded_param_size = _get_dim0_padded_size(self._orig_size, world_size)
-        padded_unsharded_param = self.all_gather_output.view(
-            padded_unsharded_param_size
+        unsharded_param = torch.as_strided(
+            self.all_gather_output,
+            self._orig_size,
+            self._contiguous_orig_stride,
+            storage_offset=0,
         )
-        unsharded_param = padded_unsharded_param[: self._orig_size[0]]
         if self.is_dtensor:
             unsharded_param = _from_local_no_grad(
                 unsharded_param,
