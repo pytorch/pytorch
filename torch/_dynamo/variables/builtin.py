@@ -524,7 +524,7 @@ class BuiltinVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import UserFunctionVariable
+        from . import UserDefinedObjectVariable, UserFunctionVariable
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
         args = [v.realize() for v in args]
@@ -662,6 +662,14 @@ class BuiltinVariable(VariableTracker):
         # Handle `str` on a user defined function
         if self.fn == str and args and isinstance(args[0], (UserFunctionVariable)):
             return variables.ConstantVariable.create(value=str(args[0].fn))
+
+        # Handle `for t in iter(user_obj)`, where user_obj defines a __iter__ method.
+        if self.fn is iter and args and isinstance(args[0], UserDefinedObjectVariable):
+            assert len(args) == 1
+            assert len(kwargs) == 0
+            maybe_iter_method = args[0].var_getattr(tx, "__iter__")
+            assert isinstance(maybe_iter_method, variables.UserMethodVariable)
+            return maybe_iter_method.call_function(tx, [], {})
 
         # Handle binary ops (e.g. __add__ / __radd__, __iadd__, etc.)
         # NB: Tensor args are handled above and not here
