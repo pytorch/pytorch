@@ -22,7 +22,7 @@ getTensorInfo(const at::TensorBase &t) {
   }
 
   scalar* data_ptr;
-  
+
   if constexpr (std::is_const<scalar>::value) {
     data_ptr = t.const_data_ptr<std::remove_const_t<scalar>>();
   } else {

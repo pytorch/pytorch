@@ -1564,7 +1564,6 @@ class TestCompositeCompliance(TestCase):
             # Check that COW inputs remain COW after the op is executed
             for idx, arg in enumerate(args):
                 if is_strided_tensor(arg):
-                    any_input_materializes = any_input_materializes or not torch._C._is_cow_tensor(arg)
                     is_cow = torch._C._is_cow_tensor(arg)
 
                     if op.supports_cow_input_no_materialize:
@@ -1584,14 +1583,6 @@ class TestCompositeCompliance(TestCase):
                                 f"Argument {idx} avoided materialization, "
                                 "but the operation mutated its data."
                             ))
-
-        #if not op.supports_cow_input_no_materialize:
-        #    self.assertTrue(
-        #        any_input_materializes,
-        #        msg=(
-        #            "Operation unexpectedly avoids materialization. "
-        #            "Remove `supports_cow_input_no_materialize=False` "
-        #            "from this operation's OpInfo"))
 
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_view_replay(self, device, dtype, op):
