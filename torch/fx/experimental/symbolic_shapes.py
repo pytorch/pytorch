@@ -1994,6 +1994,11 @@ class ShapeEnv:
 
     @record_shapeenv_event()
     def freeze(self):
+        """Freeze this ShapeEnv to stop accumulating guards
+
+        A frozen ShapeEnv will ignore any further guards generated on it and
+        only emit a warning which may lead to accuracy problems.
+        """
         self.frozen = True
 
     def _create_symbol_for_source(self, source: Source) -> Optional[sympy.Symbol]:
