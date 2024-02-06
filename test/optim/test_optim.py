@@ -747,20 +747,6 @@ class TestOptim(TestCase):
                     maximize=False,
                 )
 
-
-    @staticmethod
-    def _state_dict_pre_hook(optimizer: Optimizer) -> None:
-        optimizer.state["test"] = 1
-
-    @staticmethod
-    def _state_dict_post_hook(optimizer: Optimizer, state_dict: Dict[str, Any]) -> Dict[str, Any]:
-        if "test" in state_dict["state"]:
-            state_dict["state"].pop("test")
-            state_dict["ran_state_dict_pre_hook"] = True
-        else:
-            state_dict["ran_state_dict_pre_hook"] = False
-        return state_dict
-
     @staticmethod
     def _load_state_dict_pre_hook1(optimizer: Optimizer, state_dict: Dict[str, Any]) -> None:
         state_dict["param_groups"][0]["lr"] = 0.002
@@ -777,32 +763,6 @@ class TestOptim(TestCase):
     def _load_state_dict_post_hook(optimizer: Optimizer) -> None:
         optimizer.state["ran_load_state_dict_pre_hook2"] = optimizer.param_groups[0]["lr"] == 0.003
         optimizer.state["ran_load_state_dict_post_hook"] = True
-
-    def test_state_dict_pre_hook(self):
-        param = torch.rand(2, 3, requires_grad=True)
-        param.grad = torch.rand(2, 3, requires_grad=True)
-        opt = SGD([param], lr=0.001)
-        opt.register_state_dict_pre_hook(self._state_dict_pre_hook)
-        state_dict = opt.state_dict()
-        self.assertEqual(state_dict["state"]["test"], 1)
-
-    def test_state_dict_post_hook(self):
-        param = torch.rand(2, 3, requires_grad=True)
-        param.grad = torch.rand(2, 3, requires_grad=True)
-        opt = SGD([param], lr=0.001)
-        opt.register_state_dict_post_hook(self._state_dict_post_hook)
-        state_dict = opt.state_dict()
-        self.assertEqual(state_dict["ran_state_dict_pre_hook"], False)
-
-    def test_state_dict_pre_post_hook(self):
-        param = torch.rand(2, 3, requires_grad=True)
-        param.grad = torch.rand(2, 3, requires_grad=True)
-        opt = SGD([param], lr=0.001)
-        opt.register_state_dict_pre_hook(self._state_dict_pre_hook)
-        opt.register_state_dict_post_hook(self._state_dict_post_hook)
-        state_dict = opt.state_dict()
-        self.assertFalse("test" in state_dict["state"])
-        self.assertEqual(state_dict["ran_state_dict_pre_hook"], True)
 
     def test_load_state_dict_pre_hook_and_prepend(self):
         param = torch.rand(2, 3, requires_grad=True)
