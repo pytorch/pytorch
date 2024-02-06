@@ -14983,6 +14983,8 @@ op_db: List[OpInfo] = [
            supports_gradgrad=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           # TODO: Avoid COW materialize
+           supports_cow_input_no_materialize=False,
            autodiff_nonfusible_nodes=["aten::gelu"],
            skips=(
                # AssertionError: Tensor-likes are not close!
