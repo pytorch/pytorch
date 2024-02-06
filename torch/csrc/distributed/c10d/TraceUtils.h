@@ -594,7 +594,7 @@ struct NCCLTraceBuffer {
     c10::IValue version_key = "version";
     // Update whenever changing contents or formatting of the dump
     // (minor when adding fields, major when changing existing fields)
-    c10::IValue version_val = "1.0";
+    c10::IValue version_val = "1.1";
 
     c10::IValue pg_id_key = "pg_id";
     c10::IValue seq_id_key = "seq_id";
