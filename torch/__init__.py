@@ -1520,7 +1520,7 @@ for name in dir(_C._VariableFunctions):
 import torch
 
 for attribute in dir(torch):
-    if getattr(torch, attribute).__class__ == torch.dtype:
+    if isinstance(getattr(torch, attribute), torch.dtype):
         __all__.append(attribute)
 
 ################################################################################
