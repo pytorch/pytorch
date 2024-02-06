@@ -3926,8 +3926,19 @@ class TestBinaryUfuncs(TestCase):
         test_dx((2, 3, 4), 1, 1, device)
         test_dx((10, 2), 0, 0.1, device)
         test_dx((1, 10), 0, 2.3, device)
-        test_dx((0, 2), 0, 1.0, device)
-        test_dx((0, 2), 1, 1.0, device)
+
+        try:
+            test_dx((0, 2), 0, 1.0, device)
+        except ValueError as e:
+            err_msg = "At least one point is required along `axis`."
+            self.assertEqual(str(e), err_msg)
+
+        try:
+            test_dx((0, 2), 1, 1.0, device)
+        except ValueError as e:
+            err_msg = "At least one point is required along `axis`."
+            self.assertEqual(str(e), err_msg)
+
         test_dx((512, 512), 1, 1.0, device)
         test_dx((100, 100, 100), 1, 1.0, device)
 
