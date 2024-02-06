@@ -175,16 +175,24 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         break;
   }
   ScalarType out_dtype = dense_B.scalar_type();
-  // special check for int8 int8 -> fp16 support
+  // special check for mixed dtype int8 int8 -> {fp16, bf16, int32} support
   if (out_dtype_opt.has_value()) {
     out_dtype = out_dtype_opt.value();
-    if (input_type == CUDA_R_8I and out_dtype == at::ScalarType::Half)
+    TORCH_CHECK(input_type == CUDA_R_8I, "out_dtype support only available for int8 inputs");
+    switch (out_dtype)
     {
-        output_type = CUDA_R_16F;
-    }
-    else
-    {
-        TORCH_CHECK(false, "Setting out_dtype is only supported for int8 input and fp16 output.");
+        case at::ScalarType::Half:
+            output_type = CUDA_R_16F;
+            break;
+        case at::ScalarType::BFloat16:
+            output_type = CUDA_R_16BF;
+            break;
+        case at::ScalarType::Int:
+            output_type = CUDA_R_32I;
+            break;
+        default:
+            TORCH_CHECK(false, "Unsupported out_dtype passed, must be one of {fp16, bf16, int32}");
+            break;
     }
   }
 
