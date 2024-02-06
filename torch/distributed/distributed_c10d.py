@@ -1333,10 +1333,13 @@ def _shutdown_backend(pg):
     Currently, only ProcessGroupNCCL backend is supported.
     No op for other backends.
     """
+    backend = None
     try:
         backend = pg._get_backend(torch.device("cuda"))
     except RuntimeError:
         pass
+    while isinstance(backend, _ProcessGroupWrapper):
+        backend = backend.wrapped_pg
     if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
         # explictly call shutdown to ensure that NCCL resources are released
         backend._shutdown()

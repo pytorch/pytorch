@@ -1508,7 +1508,7 @@ void ProcessGroupNCCL::watchdogHandler() {
     // the global PG and has globally unique rank ids across trainers.
     dumpPipe.emplace(rank_);
   }
-  while (!done && !terminateProcessGroup_.load()) {
+  while (!done || !terminateProcessGroup_.load()) {
     std::unique_lock<std::mutex> lock(workMetaListMutex_);
     // We busy-poll the work vector every kWatchdogThreadSleepMillis
     // milliseconds as long as the atomic is True.
@@ -1521,15 +1521,13 @@ void ProcessGroupNCCL::watchdogHandler() {
 
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
          /* no increment */) {
-      // PG and comms have already been terminated, work status check will throw
-      if (terminateProcessGroup_.load()) {
-        LOG(INFO)
-            << logPrefix()
-            << "Terminating watchdog thread during processing workMetaList_";
-        break;
-      }
       auto& work = *it;
-      work.checkAndSetException();
+      // When terminateProcessGroup_ is true, communicators have already been aborted,
+      // So cannot check exception based on them. But watchdog needs to finish the check
+      // for the works that have already been enqueued to workMetaList_
+      if (!terminateProcessGroup_.load()) {
+        work.checkAndSetException();
+      }
       bool timedOut = work.checkTimeout();
 
       // If work hits an exception (either an error or timeout)
