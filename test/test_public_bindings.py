@@ -461,7 +461,7 @@ class TestPublicBindings(TestCase):
             def check_one_element(elem, modname, mod, *, is_public, is_all):
                 obj = getattr(mod, elem)
                 # torch.dtype is not a class nor callable, so we need to check for it separately
-                if not (isinstance(obj, Callable) or inspect.isclass(obj) or isinstance(obj, torch.dtype)):
+                if not (isinstance(obj, (Callable, torch.dtype)) or inspect.isclass(obj)):
                     return
                 elem_module = getattr(obj, '__module__', None)
                 # Only used for nice error message below

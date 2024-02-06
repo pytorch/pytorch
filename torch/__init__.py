@@ -1514,7 +1514,7 @@ for name in dir(_C._VariableFunctions):
 
 
 ################################################################################
-# Add torch.dtype instances to the public API 
+# Add torch.dtype instances to the public API
 ################################################################################
 
 import torch
