@@ -264,7 +264,7 @@ TEST(SerializationTest, ParentDirNotExist) {
 }
 
 TEST(SerializationTest, DriverDirectoryCheck) {
-  #ifdef WIN32
+#ifdef WIN32
   expectThrowsEq(
       []() {
         auto t = torch::nn::Linear(5, 5);
@@ -272,7 +272,7 @@ TEST(SerializationTest, DriverDirectoryCheck) {
         torch::save(t, "Z:\\file.pt");
       },
       "Parent directory Z:\\ does not exist.");
-  #endif
+#endif
 }
 
 TEST(SerializationTest, CalculateNecessaryArgsTest) {
