@@ -4,6 +4,7 @@
 
 #ifdef __cplusplus
 
+#include <torch/csrc/dynamo/utils.h>
 #include <torch/csrc/utils/pybind.h>
 #include <list>
 
@@ -32,7 +33,7 @@ typedef struct CacheEntry CacheEntry;
 
 #ifdef __cplusplus
 
-typedef struct ExtraState {
+typedef struct VISIBILITY_HIDDEN ExtraState {
   // List of cache entries for compiled code objects
   std::list<CacheEntry> cache_entry_list;
   // Frame state to detect dynamic shape dims
