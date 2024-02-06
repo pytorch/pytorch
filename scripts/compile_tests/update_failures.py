@@ -209,7 +209,7 @@ if __name__ == "__main__":
             pathlib.Path(__file__).absolute().parent.parent.parent
             / "torch/testing/_internal/dynamo_test_failures.py"
         ),
-        help="Optionally path to dynamo_test_failures.py"
+        help="Optional path to dynamo_test_failures.py",
     )
     parser.add_argument(
         "commit",
