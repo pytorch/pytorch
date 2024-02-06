@@ -1985,7 +1985,7 @@ void update(const KeyType& key, T&& results) {
 
 MatmulAutotuneCache<float, MatmulAutotuneCacheKeyWrapper> matmul_autotune_cache;
 
-static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, MatmulAutotuneCacheKeyWrapper & key, bool& need_profiling, const bool autotune) {
+static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_out, MatmulAutotuneCacheKeyWrapper & key, bool& need_profiling, const bool autotune) {
   if (autotune && tensor1.sizes().size() <= AUTOTUNE_MAX_DIM && tensor2.sizes().size() <= AUTOTUNE_MAX_DIM) {
     need_profiling = true;
     key = MatmulAutotuneCacheKeyWrapper(tensor1, tensor2, true);
@@ -2125,7 +2125,7 @@ static Tensor _matmul_impl(
                    : tensor1.unsqueeze(0).mm(tensor2).squeeze_(0);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
     return has_out ? at::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
-  } else if (should_fold(tensor1, tensor2, key, need_profiling, autotune)) {
+  } else if (should_fold(tensor1, tensor2, has_out, key, need_profiling, autotune)) {
     AutotuneTimer timer(std::move(callback), key.pod.is_cuda, need_profiling);
     // dim_tensor1 >=3 && (dim_tensor2 == 1 || dim_tensor2 == 2) ||
     // dim_tensor2 >=3 && (dim_tensor1 == 1 || dim_tensor1 == 2)
