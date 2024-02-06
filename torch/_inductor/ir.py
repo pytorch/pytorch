@@ -4657,9 +4657,11 @@ class FallbackKernel(ExternKernelAlloc):
                 info.type, torch.OptionalType
             ) and isinstance(info.type.getElementType(), torch.TensorType)
             if is_optional_tensor:
-                assert arg is None or isinstance(arg, IRNode)
+                # Pre-existing: Inductor accepts scalars in place of Tensors.
+                assert arg is None or isinstance(arg, (IRNode, int, float, complex))
             if isinstance(info.type, torch.TensorType):
-                assert isinstance(arg, IRNode)
+                # Pre-existing: Inductor accepts scalars in place of Tensors.
+                assert isinstance(arg, (IRNode, int, float, complex))
 
             if arg is None:
                 return
