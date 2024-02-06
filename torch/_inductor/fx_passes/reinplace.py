@@ -338,7 +338,7 @@ except AttributeError:
     # is built with USE_DISTRIBUTED=1.
     pass
 
-inplaceable_foreach_ops = {}
+inplaceable_foreach_ops: Dict[torch._ops.OpOverload, InplaceableOp] = {}
 for outplace_op, inplace_op in inplaceable_foreach_ops_lowerings.items():
     inplaceable_foreach_ops[outplace_op] = InplaceableOp(inplace_op, 0)
 
