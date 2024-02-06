@@ -60,6 +60,11 @@ KERNEL_COUNT_OVERRIDES = {
     "test_sgd_foreach_momentum_nesterov_weight_decay_cpu": 16,
     "test_sgd_foreach_momentum_dampening_cuda": 5,
     "test_sgd_foreach_momentum_cuda": 5,
+    "test_radam_foreach_weight_decay_decoupled_weight_decay_cpu": 12,
+    "test_radam_foreach_weight_decay_cpu": 12,
+    "test_radam_foreach_eps_cpu": 12,
+    "test_radam_foreach_cpu": 12,
+    "test_radam_capturable_weight_decay_decoupled_weight_decay_cuda": 12,
 }
 
 # also tracks currently supported optimizers
@@ -74,7 +79,7 @@ KERNEL_COUNTS = {
     ASGD: KernelCounts(multitensor=2, singletensor=12),
     SGD: KernelCounts(multitensor=2, singletensor=8),
     RAdam: KernelCounts(
-        multitensor=2, singletensor=12
+        multitensor=2, singletensor=8
     ),
     Adamax: KernelCounts(
         multitensor=2, singletensor=8

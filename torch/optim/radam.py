@@ -45,9 +45,6 @@ class RAdam(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
-        if foreach is False and capturable:
-            raise ValueError("Capturable not supported with single tensor RAdam")
-
         defaults = dict(
             lr=lr,
             betas=betas,

@@ -34,9 +34,6 @@ class Adamax(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
-        if foreach is False and capturable:
-            raise ValueError("Capturable not supported with single tensor Adamax")
-
         defaults = dict(
             lr=lr,
             betas=betas,
@@ -267,9 +264,6 @@ def _single_tensor_adamax(
     capturable: bool,
     has_complex: bool,
 ):
-    if capturable:
-        raise RuntimeError("capturable is not supported for single tensor Adamax (when foreach=False)")
-
     for i, param in enumerate(params):
         grad = grads[i]
         grad = grad if not maximize else -grad
