@@ -8,11 +8,11 @@ import torch.distributed as dist
 from torch.distributed._state_dict_utils import _offload_state_dict_to_cpu
 from torch.distributed.checkpoint.stateful import Stateful
 
+from ._storage_utils import _storage_setup
 from .default_planner import DefaultSavePlanner
 from .metadata import Metadata, STATE_DICT_TYPE
 from .planner import SavePlanner
 from .storage import StorageWriter
-from .storage_utils import _storage_setup
 from .utils import _api_bc_check, _DistWrapper, _profile
 
 

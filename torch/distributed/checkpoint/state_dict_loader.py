@@ -6,10 +6,10 @@ import torch
 import torch.distributed as dist
 from torch.distributed.checkpoint.stateful import Stateful
 
+from ._storage_utils import _storage_setup
 from .default_planner import DefaultLoadPlanner
 from .planner import LoadPlanner
 from .storage import StorageReader
-from .storage_utils import _storage_setup
 from .utils import _all_gather_keys, _api_bc_check, _DistWrapper, _profile
 
 __all__ = ["load_state_dict", "load"]

@@ -1,5 +1,5 @@
 import os
-from typing import List, Union
+from typing import List, Type, Union
 
 from .filesystem import FileSystemReader, FileSystemWriter
 
@@ -20,7 +20,7 @@ def _storage_setup(
             "storage_reader/storage_writer is None."
         )
 
-    targets: List[type[Union[StorageReader, StorageWriter]]] = []
+    targets: List[Type[Union[StorageReader, StorageWriter]]] = []
     if reader:
         targets = [
             FileSystemReader,

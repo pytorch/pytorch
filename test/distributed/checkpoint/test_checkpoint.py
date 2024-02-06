@@ -198,6 +198,9 @@ class FaultyStorageWriter(TestStorageBase, StorageWriter):
     def finish(self, metadata: Metadata, results: List[List[WriteResult]]) -> None:
         self._fail_rank("fail_finish")
 
+    def check(checkpoint_id: Union[str, os.PathLike]) -> bool:
+        return True
+
 
 class FaultyStorageReader(TestStorageBase, StorageReader):
     def __init__(self, metadata, fail_conf):
@@ -225,6 +228,9 @@ class FaultyStorageReader(TestStorageBase, StorageReader):
     def read_metadata(self) -> Metadata:
         self._fail_rank("fail_read_metadata")
         return self.metadata
+
+    def check(checkpoint_id: Union[str, os.PathLike]) -> bool:
+        return True
 
 
 class TestDistributedFailure(ShardedTensorTestBase):

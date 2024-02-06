@@ -5,10 +5,11 @@ from typing import cast, List, Optional, Tuple
 import torch
 import torch.nn as nn
 
+from torch._prims_common import make_contiguous_strides_for
+from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed._tensor import DTensor, Placement, Replicate, Shard
 from torch.distributed._tensor.device_mesh import _mesh_resources
 from torch.distributed._tensor.placement_types import DTensorSpec
-
 from ._fsdp_common import (
     _chunk_with_empty,
     _from_local_no_grad,
@@ -90,6 +91,7 @@ class FSDPParam:
     orig_dtype: torch.dtype
     _orig_size: torch.Size  # ND
     sharded_size: torch.Size  # ND
+    contiguous_sharded_stride: Tuple[int, ...]  # goes with sharded size
     _sharded_param_data: torch.Tensor  # 1D
     sharded_param: nn.Parameter  # ND
     _unsharded_param: nn.Parameter  # ND
@@ -178,6 +180,7 @@ class FSDPParam:
         chunks = _chunk_with_empty(param_data, shard_world_size, dim=0)
         sharded_param = chunks[shard_rank]
         self.sharded_size = sharded_param.size()
+        self.contiguous_sharded_stride = make_contiguous_strides_for(self.sharded_size)
         padded_sharded_size = chunks[0].size()  # 0th always padded
         padded_sharded_param = param_data.new_zeros(padded_sharded_size)
         if sharded_param.numel() > 0:
@@ -283,6 +286,24 @@ class FSDPParam:
         if self.sharded_state == ShardedState.SHARDED:
             return self._sharded_param_data
         return torch.empty(0)  # mypy
+
+    @property
+    def unsharded_param(self) -> nn.Parameter:  # ND
+        self._assert_in_states(ShardedState.UNSHARDED)
+        return self._unsharded_param
+
+    @property
+    def unsharded_grad_data(self) -> torch.Tensor:
+        grad = self.unsharded_param.grad
+        assert grad is not None, "Expects unsharded_param.grad to not be None"
+        return self._get_grad_inner_tensor(grad)
+
+    def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:
+        if self.is_dtensor:
+            if isinstance(grad, AsyncCollectiveTensor):
+                grad = grad.wait()
+            grad = cast(DTensor, grad)._local_tensor
+        return grad
 
     def _assert_in_states(self, *states: ShardedState) -> None:
         if self.sharded_state not in states:
