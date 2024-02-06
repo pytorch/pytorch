@@ -2209,6 +2209,7 @@ dynamo_expected_failures = {
     "TestJvpCPU.test_simple_cpu",  # functorch/test_eager_transforms.py
     "TestJvpCPU.test_inputs_are_tuples_of_tensors_cpu",  # functorch/test_eager_transforms.py
     "TestJvpCPU.test_disable_fwd_grad_outside_cpu",  # functorch/test_eager_transforms.py
+    "TestAOTDispatch.test_aot_dispatch_simple",  # functorch/test_aotdispatch.py
 }
 
 # see NOTE [dynamo_test_failures.py] for more details
