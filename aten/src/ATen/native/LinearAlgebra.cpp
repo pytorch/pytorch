@@ -20,6 +20,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/native/utils/ParamsHash.h>
+#include <ATen/native/utils/TimingUtils.h>
 #include <c10/core/GradMode.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
@@ -2113,6 +2114,11 @@ static Tensor _matmul_impl(
     );
   }
 
+  auto callback = [&] (float _timing_result) { 
+    matmul_autotune_cache.update(key, _timing_result);
+  };
+
+
   if (dim_tensor1 == 1 && dim_tensor2 == 1) {
     return has_out ? at::dot_out(out, tensor1, tensor2) : tensor1.dot(tensor2);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
@@ -2123,14 +2129,7 @@ static Tensor _matmul_impl(
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
     return has_out ? at::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
   } else if (should_fold(tensor1, tensor2, key, need_profiling, autotune)) {
-    std::chrono::time_point<std::chrono::high_resolution_clock> start;
-    std::chrono::time_point<std::chrono::high_resolution_clock> stop;
-    if (need_profiling) {
-        if (key.pod.is_cuda) {
-          at::detail::getCUDAHooks().deviceSynchronize(at::detail::getCUDAHooks().current_device());
-        }
-        start = std::chrono::high_resolution_clock::now();
-    }
+    AutotuneTimer timer(std::move(callback), key.pod.is_cuda, need_profiling);
     // dim_tensor1 >=3 && (dim_tensor2 == 1 || dim_tensor2 == 2) ||
     // dim_tensor2 >=3 && (dim_tensor1 == 1 || dim_tensor1 == 2)
     // and at least one of the following two conditions hold
@@ -2197,26 +2196,9 @@ static Tensor _matmul_impl(
       }
       output_tensor = out;
     }
-    if (need_profiling) {
-        if (key.pod.is_cuda) {
-          at::detail::getCUDAHooks().deviceSynchronize(at::detail::getCUDAHooks().current_device());
-        }
-        stop = std::chrono::high_resolution_clock::now();
-        auto dur = stop - start;
-        float time = dur.count();
-        matmul_autotune_cache.update(key, time);
-    }
     return output_tensor;
   } else {
-    std::chrono::time_point<std::chrono::high_resolution_clock> start;
-    std::chrono::time_point<std::chrono::high_resolution_clock> stop;
-    if (need_profiling) {
-        if (key.pod.is_cuda) {
-          at::detail::getCUDAHooks().deviceSynchronize(at::detail::getCUDAHooks().current_device());
-        }
-        start = std::chrono::high_resolution_clock::now();
-    }
-
+    AutotuneTimer timer(std::move(callback), key.pod.is_cuda, need_profiling);
     // dim_tensor1 >= 3 || dim_tensor2 >= 3
     // We track m1 vs m2 separately even though they must match for nicer error messages
     const int64_t n = dim_tensor1 > 1 ? tensor1.sizes().cend()[-2] : 1LL;
@@ -2290,15 +2272,6 @@ static Tensor _matmul_impl(
         }
         output_tensor = out;
       }
-    }
-    if (need_profiling) {
-        if (key.pod.is_cuda) {
-          at::detail::getCUDAHooks().deviceSynchronize(at::detail::getCUDAHooks().current_device());
-        }
-        stop = std::chrono::high_resolution_clock::now();
-        auto dur = stop - start;
-        float time = dur.count();
-        matmul_autotune_cache.update(key, time);
     }
     return output_tensor;
   }
