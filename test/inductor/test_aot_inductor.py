@@ -1710,13 +1710,16 @@ class AOTInductorTestsTemplate:
             class Model(torch.nn.Module):
                 def forward(self, x, i1, i2, y):
                     return torch.ops.aten.index_put(
-                        x, (None, None, i1, i2), y, accumulate=True
+                        x,
+                        (None, None, i1, i2.transpose(0, 1)),
+                        y,
+                        accumulate=True,
                     )
 
             example_inputs = (
                 torch.rand(8, 192, 30, 30, device=self.device),
                 torch.zeros(3, 14, 1, 1, dtype=torch.int64, device=self.device),
-                torch.ones(3, 14, dtype=torch.int64, device=self.device),
+                torch.ones(14, 3, dtype=torch.int64, device=self.device),
                 torch.randn(8, 192, 3, 14, 3, 14, device=self.device),
             )
             self.check_model(Model(), example_inputs)
@@ -1816,11 +1819,10 @@ CPU_TEST_FAILURES = {
     "test_bmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
     "test_constant_folding": fail_with_and_without_stack_allocation(is_skip=True),
     "test_dup_unbacked_sym_decl": fail_with_and_without_stack_allocation(),
-    "test_dynamic_cat": fail_with_and_without_stack_allocation(),
+    "test_dynamic_cat": fail_minimal_arrayref_interface(),
     "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
     "test_dynamic_smem_above_default_limit": fail_with_and_without_stack_allocation(),
     "test_fft_c2c": fail_stack_allocation(is_skip=True),
-    "test_foreach_multiple_dynamic": fail_with_and_without_stack_allocation(),
     # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
     #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
     "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),
@@ -1830,7 +1832,6 @@ CPU_TEST_FAILURES = {
     # minimal arrayref interface only works with CPU; test crashes.
     "test_multi_device": fail_minimal_arrayref_interface(is_skip=True),
     "test_normal_functional": fail_with_and_without_stack_allocation(),
-    "test_poi_multiple_dynamic": fail_with_and_without_stack_allocation(),
     # There is a double-free issue which will be fixed in another PR
     "test_repeat_output": fail_with_and_without_stack_allocation(is_skip=True),
     # the test segfaults
@@ -1845,7 +1846,7 @@ CPU_TEST_FAILURES = {
     "test_shifted_constraint_ranges": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
-    "test_simple_dynamic": fail_with_and_without_stack_allocation(),
+    "test_simple_dynamic": fail_minimal_arrayref_interface(),
     "test_zero_grid_with_unbacked_symbols": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
