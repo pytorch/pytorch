@@ -6,6 +6,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 
+from torch.autograd.graph import Node
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
@@ -109,7 +110,7 @@ class FSDPParamGroup:
         # in forward but not in backward: for each forward, we record a tuple
         # of the output's grad fns and later query the autograd engine whether
         # any grad fn will execute in the current backward to know to prefetch.
-        self.all_forward_grad_fns: Set[Tuple[Any, ...]] = set()
+        self.all_forward_grad_fns: Set[Tuple[Node, ...]] = set()
         self._init_grad_divide_factors()
 
         # - CUDA events for stream synchronization
