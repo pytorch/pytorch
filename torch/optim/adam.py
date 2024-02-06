@@ -71,6 +71,7 @@ class Adam(Optimizer):
             group.setdefault('foreach', None)
             group.setdefault('capturable', False)
             group.setdefault('differentiable', False)
+            group.setdefault('decoupled_weight_decay', False)
             fused = group.setdefault('fused', None)
             for p in group["params"]:
                 p_state = self.state.get(p, [])
