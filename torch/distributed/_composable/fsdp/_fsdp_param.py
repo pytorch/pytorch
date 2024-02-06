@@ -5,10 +5,10 @@ from typing import cast, List, Optional, Tuple
 import torch
 import torch.nn as nn
 
+from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._tensor import DTensor, Placement, Replicate, Shard
 from torch.distributed._tensor.device_mesh import _mesh_resources
 from torch.distributed._tensor.placement_types import DTensorSpec
-
 from ._fsdp_common import (
     _chunk_with_empty,
     _from_local_no_grad,
@@ -87,8 +87,10 @@ class FSDPParam:
     implementing dim-0 per-parameter sharding.
     """
 
+    orig_dtype: torch.dtype
     _orig_size: torch.Size  # ND
     sharded_size: torch.Size  # ND
+    contiguous_sharded_stride: Tuple[int, ...]  # goes with sharded size
     _sharded_param_data: torch.Tensor  # 1D
     sharded_param: nn.Parameter  # ND
     _unsharded_param: nn.Parameter  # ND
@@ -108,9 +110,13 @@ class FSDPParam:
         self._module_info: ParamModuleInfo = module_info
         self.mesh_info = mesh_info
         self.device = device
+        self._init_dtype_attrs(param)
         self._init_sharded_param(param, device)
         self.all_gather_output = torch.empty(0)
         self._param_fqn: Optional[str] = None  # prefixed from root module
+
+    def _init_dtype_attrs(self, param: nn.Parameter):
+        self.orig_dtype = param.dtype
 
     @torch.no_grad()
     def _init_sharded_param(self, param: nn.Parameter, device: torch.device):
@@ -173,6 +179,7 @@ class FSDPParam:
         chunks = _chunk_with_empty(param_data, shard_world_size, dim=0)
         sharded_param = chunks[shard_rank]
         self.sharded_size = sharded_param.size()
+        self.contiguous_sharded_stride = make_contiguous_strides_for(self.sharded_size)
         padded_sharded_size = chunks[0].size()  # 0th always padded
         padded_sharded_param = param_data.new_zeros(padded_sharded_size)
         if sharded_param.numel() > 0:

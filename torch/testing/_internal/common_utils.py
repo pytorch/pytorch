@@ -1232,8 +1232,7 @@ TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_MPS = torch.backends.mps.is_available()
-# TODO change it when torch.backends.xpu.is_avaliable() is ready
-TEST_XPU = False
+TEST_XPU = torch.xpu.is_available()
 TEST_CUDA = torch.cuda.is_available()
 custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name(), None)
 TEST_PRIVATEUSE1 = True if (hasattr(custom_device_mod, "is_available") and custom_device_mod.is_available()) else False
@@ -3908,6 +3907,14 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
             del env["CI"]
         (stdout, stderr) = TestCase.run_process_no_exception(code, env=env)
         return stderr.decode('ascii')
+
+
+class TestCaseBase(TestCase):
+    # Calls to super() in dynamically created classes are a bit odd.
+    # See https://github.com/pytorch/pytorch/pull/118586 for more info
+    # Subclassing this class and then calling super(TestCaseBase) will run
+    # TestCase's setUp, tearDown etc functions
+    pass
 
 
 def download_file(url, binary=True):
