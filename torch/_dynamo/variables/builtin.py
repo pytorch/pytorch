@@ -26,14 +26,12 @@ from ..guards import GuardBuilder, install_guard
 from ..replay_record import DummyModule
 from ..source import AttrSource, GetItemSource, is_constant_source, TypeSource
 from ..utils import (
-    build_checkpoint_variable,
     check_constant_args,
     check_numpy_ndarray_args,
     check_unspec_python_args,
     extract_fake_example_value,
     get_fake_value,
     guard_if_dyn,
-    is_utils_checkpoint,
     istype,
     numpy_operator_wrapper,
     proxy_args_kwargs,
@@ -1321,10 +1319,7 @@ class BuiltinVariable(VariableTracker):
             if config.replay_record_enabled:
                 tx.exec_recorder.record_module_access(obj.value, name, member)
 
-            if is_utils_checkpoint(member):
-                options["source"] = source
-                return build_checkpoint_variable(**options)
-            elif source is not None:
+            if source is not None:
                 return VariableBuilder(tx, source)(member)
             else:
                 return SourcelessBuilder()(tx, member)
