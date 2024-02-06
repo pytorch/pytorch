@@ -55,7 +55,7 @@ variable_list CopyBackwards::apply_with_saved(
 CopySlices::CopySlices(
     const Variable& base_var,
     at::TensorGeometry view_,
-    std::shared_ptr<ViewFunc> view_fn_,
+    std::unique_ptr<ViewFunc> view_fn_,
     std::shared_ptr<Node> fn_)
     : Node(),
       base(base_var),

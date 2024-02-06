@@ -469,10 +469,10 @@ static Tensor _fw_primal(
     at::AutoDispatchBelowADInplaceOrView guard;
     return at::alias(self);
   })();
-  std::shared_ptr<torch::autograd::ViewFunc> func(nullptr);
+  std::unique_ptr<torch::autograd::ViewFunc> func(nullptr);
   std::function<at::Tensor(const at::Tensor&)> rev_func = nullptr;
   if (!self.unsafeGetTensorImpl()->support_as_strided()) {
-    func = std::make_shared<ViewViewFunc>(self.sym_sizes());
+    func = std::make_unique<ViewViewFunc>(self.sym_sizes());
     rev_func = [=](const at::Tensor& input_view) {
       TORCH_INTERNAL_ASSERT(
           false,
@@ -502,10 +502,10 @@ static Tensor _make_dual(
     at::AutoDispatchBelowADInplaceOrView guard;
     return at::alias(primal);
   })();
-  std::shared_ptr<torch::autograd::ViewFunc> func(nullptr);
+  std::unique_ptr<torch::autograd::ViewFunc> func(nullptr);
   std::function<at::Tensor(const at::Tensor&)> rev_func = nullptr;
   if (!primal.unsafeGetTensorImpl()->support_as_strided()) {
-    func = std::make_shared<ViewViewFunc>(primal.sym_sizes());
+    func = std::make_unique<ViewViewFunc>(primal.sym_sizes());
     rev_func = [=](const at::Tensor& input_view) {
       TORCH_INTERNAL_ASSERT(
           false,
