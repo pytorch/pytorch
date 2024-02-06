@@ -2115,7 +2115,7 @@ initializer(omp_priv={{{self.reduction_init_vec(reduction_type, dtype)}}})
             # Horizontal reduction
             if is_welford_reduction(reduction_type):
                 next_value = f"welford_vec_reduce_all({acc_vec})"
-            else:                
+            else:
                 reduce_all_body = (
                     "{ return "
                     + self.reduction_combine_vec(reduction_type, "x", "y")
