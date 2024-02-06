@@ -4426,13 +4426,8 @@ def sample_inputs_linear(self, device, dtype, requires_grad, **kwargs):
         yield SampleInput(input_tensor, weight, bias)
 
     # 5D tensor, used to crash on MPS, see https://github.com/pytorch/pytorch/issues/114942
-    input_tensor = create_tensor(2, 1, 2, 1, 2)
-    weight = create_tensor(4, 2)
-    yield SampleInput(input_tensor, weight)
-    # Hide for now from test_neg_view/test_conj_view
-    # See https://github.com/pytorch/pytorch/issues/117854
-    if dtype in [torch.float32, torch.float16]:
-        yield SampleInput(input_tensor, weight, create_tensor(4))
+    yield SampleInput(create_tensor(2, 1, 2, 1, 2), create_tensor(4, 2))
+    yield SampleInput(create_tensor(2, 1, 2, 1, 2), create_tensor(4, 2), create_tensor(4))
 
 def sample_inputs_bilinear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4, 5], [8, 8, 8]]
@@ -9693,11 +9688,7 @@ foreach_reduce_op_db: List[ForeachFuncInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
         ),
     ),
 ]
@@ -13378,6 +13369,11 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.chalf: tol(atol=6e-2, rtol=5e-2)}),
                    'TestCommon', 'test_complex_half_reference_testing',
                ),
+               # TF32
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=5e-3, rtol=1e-3)}),
+                   'TestCommon', 'test_noncontiguous_samples',
+               ),
                DecorateInfo(
                    toleranceOverride({torch.complex64: tol(atol=5e-5, rtol=5e-6)}),
                    'TestMathBits', 'test_conj_view',
@@ -15447,6 +15443,12 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_autodiffed=True),
+    OpInfo('split_with_sizes_copy',
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool, torch.chalf),
+           sample_inputs_func=sample_inputs_split_with_sizes,
+           supports_out=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True),
     BinaryUfuncInfo('__radd__',
                     op=torch.Tensor.__radd__,
                     dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),

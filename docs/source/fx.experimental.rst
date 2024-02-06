@@ -9,6 +9,7 @@ torch.fx.experimental
 torch.fx.experimental.symbolic_shapes
 -------------------------------------
 .. currentmodule:: torch.fx.experimental.symbolic_shapes
+.. automodule:: torch.fx.experimental.symbolic_shapes
 
 .. autosummary::
     :toctree: generated
@@ -31,6 +32,7 @@ torch.fx.experimental.symbolic_shapes
     has_free_symbols
     definitely_true
     definitely_false
+    guard_size_oblivious
     parallel_or
     parallel_and
     sym_eq

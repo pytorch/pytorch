@@ -1232,8 +1232,7 @@ TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_MPS = torch.backends.mps.is_available()
-# TODO change it when torch.backends.xpu.is_avaliable() is ready
-TEST_XPU = False
+TEST_XPU = torch.xpu.is_available()
 TEST_CUDA = torch.cuda.is_available()
 custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name(), None)
 TEST_PRIVATEUSE1 = True if (hasattr(custom_device_mod, "is_available") and custom_device_mod.is_available()) else False
@@ -2745,12 +2744,12 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
 
         # TODO: Remove this; this is grandfathered in because we suppressed errors
         # on test suite previously
-        # When strict mode is False, supress_errors is True
+        # When strict mode is False, suppress_errors is True
         if compiled:
-            supress_errors = not strict_mode
+            suppress_errors = not strict_mode
         else:
-            supress_errors = torch._dynamo.config.suppress_errors
-        with unittest.mock.patch("torch._dynamo.config.suppress_errors", supress_errors):
+            suppress_errors = torch._dynamo.config.suppress_errors
+        with unittest.mock.patch("torch._dynamo.config.suppress_errors", suppress_errors):
             if TEST_WITH_TORCHINDUCTOR:  # noqa: F821
                 super_run = torch._dynamo.optimize("inductor")(super_run)
             elif TEST_WITH_AOT_EAGER:  # noqa: F821
@@ -2781,7 +2780,11 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                             f(*args, **kwargs)
                         except BaseException as e:
                             self.skipTest(e)
-                        self.skipTest("This test passed, maybe we can remove the skip from dynamo_test_failures.py")
+                        method = getattr(self, self._testMethodName)
+                        if getattr(method, "__unittest_expecting_failure__", False):
+                            self.skipTest("unexpected success")
+                        else:
+                            self.skipTest("This test passed, maybe we can remove the skip from dynamo_test_failures.py")
                     return wrapper
 
                 if key in dynamo_skips:
@@ -3908,6 +3911,14 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
             del env["CI"]
         (stdout, stderr) = TestCase.run_process_no_exception(code, env=env)
         return stderr.decode('ascii')
+
+
+class TestCaseBase(TestCase):
+    # Calls to super() in dynamically created classes are a bit odd.
+    # See https://github.com/pytorch/pytorch/pull/118586 for more info
+    # Subclassing this class and then calling super(TestCaseBase) will run
+    # TestCase's setUp, tearDown etc functions
+    pass
 
 
 def download_file(url, binary=True):

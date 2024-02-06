@@ -4232,6 +4232,60 @@ class InplaceBernoulliFallback(ExternKernel):
         mark_node_as_mutating(self, x)
 
 
+# Used to deal with torch.complex types
+class InplaceCopyFallback(ExternKernel):
+    """
+    This needs to be a custom class to handle mutation properly
+    """
+
+    def codegen(self, wrapper):
+        (dst, src, non_blocking) = self.codegen_args()
+        wrapper.writeline(
+            f"{self.get_kernel_name()}({dst}, {src}, {non_blocking}){wrapper.ending}"
+        )
+
+    def should_allocate(self):
+        return False
+
+    def get_mutation_names(self):
+        return [self.inputs[0].get_name()]
+
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args,
+    ):
+        super().__init__(
+            None,
+            layout,
+            inputs,
+            constant_args,
+            python_kernel_name="aten.copy_",
+            cpp_kernel_name=(
+                "aoti_torch_copy_"
+                if config.aot_inductor.abi_compatible
+                else "at::_ops::copy_::call"
+            ),
+        )
+        self.name = V.graph.register_buffer(self)
+
+    @classmethod
+    def create(cls, dst, src, non_blocking: bool = False):
+        inputs = [cls.realize_input(t) for t in [dst, src]]
+        constant_args = (non_blocking,)
+        result = InplaceCopyFallback(
+            NoneLayout(dst.get_device()),  # type: ignore[arg-type]
+            inputs,
+            constant_args,
+        )
+        mark_node_as_mutating(result, dst)
+        return result
+
+
 class AccumulateGrad(ExternKernel):
     """
     This needs to be a custom class to handle mutation properly
@@ -4399,16 +4453,24 @@ class IndexPutFallback(ExternKernel):
         )
         self.name = V.graph.register_buffer(self)
         self.python_kernel_name = "aten.index_put_"
-        self.cpp_kernel_name = "at::index_put_out"
+        self.cpp_kernel_name = (
+            "aoti_torch_index_put_out"
+            if config.aot_inductor.abi_compatible
+            else "at::index_put_out"
+        )
         mark_node_as_mutating(self, x)
 
 
 class DeviceCopy(ExternKernelOut):
     @classmethod
     def create(cls, x, device):
-        if not x.is_extern() and all(
-            (r.name in V.graph.constants and isinstance(r, dependencies.MemoryDep))
-            for r in x.get_reads()
+        if (
+            not x.is_extern()
+            and all(
+                (r.name in V.graph.constants and isinstance(r, dependencies.MemoryDep))
+                for r in x.get_reads()
+            )
+            and not config.aot_inductor.use_runtime_constant_folding
         ):
             return x.constant_to_device(device)
 
@@ -4480,15 +4542,18 @@ class ExternKernelNode:
 
 has_c_shim = {
     aten._embedding_bag.default,
+    aten._fft_c2c.default,
     aten._scaled_dot_product_efficient_attention.default,
     aten._scaled_dot_product_flash_attention.default,
+    aten._scaled_mm.default,
     aten.addmm.out,
     aten.bmm.out,
+    aten.copy_.default,
     aten.mm.out,
-    aten._scaled_mm.default,
     aten.repeat_interleave.Tensor,
     aten.nonzero.default,
     aten.view.dtype,
+    aten.view_as_real.default,
 }
 
 
@@ -4500,11 +4565,12 @@ def get_aten_cpp_kernel_name(kernel):
     assert (
         isinstance(kernel, torch._ops.OpOverload) and kernel.namespace == "aten"
     ), "Invalid aten kernel"
-    return (
-        f"at::{kernel.__name__.split('.')[0]}"
+    opname = (
+        kernel.__name__.split(".")[0]
         if kernel._overloadname == "default"
-        else f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
+        else kernel.__name__.replace(".", "_")
     )
+    return f"at::_ops::{opname}::call"
 
 
 class FallbackKernel(ExternKernelAlloc):
@@ -4566,7 +4632,7 @@ class FallbackKernel(ExternKernelAlloc):
 
         self.cpp_kernel_name = kernel._schema.name
         self.cpp_kernel_overload_name = kernel._schema.overload_name
-        self.cpp_kernel_key = f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]
+        self.cpp_kernel_key = f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]  # noqa: B950
 
         self.cpp_op_schema = get_cpp_op_schema(kernel)
         self.init_args_default_value(kernel._schema)
@@ -7337,7 +7403,7 @@ class _CollectiveKernel(FallbackKernel):
 
         self.cpp_kernel_name = kernel._schema.name
         self.cpp_kernel_overload_name = kernel._schema.overload_name
-        self.cpp_kernel_key = f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]
+        self.cpp_kernel_key = f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]  # noqa: B950
 
         self.cpp_op_schema = get_cpp_op_schema(kernel)
         self.ordered_kwargs_for_cpp_kernel = [

@@ -31,7 +31,8 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     make_tensor,
     NOTEST_CPU,
-    IS_WINDOWS
+    IS_WINDOWS,
+    TEST_WITH_TORCHDYNAMO,
 )
 from torch._dynamo.testing import CompileCounterWithBackend
 
@@ -660,7 +661,7 @@ class TestTransformers(NNTestCase):
             torch.arange(3)[None, :].cpu() >= input_seq_len[:, None]
         )
 
-        with self.assertNoLogs(None):
+        with (self.assertNoLogs(None) if not TEST_WITH_TORCHDYNAMO else contextlib.nullcontext()):
             encoder(
                 inputs,
                 mask=src_mask,
