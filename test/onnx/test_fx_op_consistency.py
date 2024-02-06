@@ -1821,7 +1821,7 @@ def _run_test_output_match(
                     try:
                         model = torch.export.export(model, inputs)
                     except AssertionError as e:
-                        # TODO: avoid fake_mode detection bug in torch.export.export
+                        # NOTE: avoid fake_mode detection bug in torch.export.export
                         pytest.xfail(
                             onnx_test_common.reason_dynamo_does_not_support(str(e))
                         )
@@ -1949,7 +1949,6 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
 
     @common_device_type.ops(
         [op for op in OPS_DB if op.name in ALL_OPS_IN_DB],
-        # TODO: Add back complex64
         allowed_dtypes=onnx_test_common.TESTED_DTYPES,
     )
     def test_output_match(self, device: str, dtype: torch.dtype, op):
