@@ -1,11 +1,12 @@
-.. _cuda-semantics:
-
 .. meta::
    :description: A guide to torch.cuda, a PyTorch module to run CUDA operations
    :keywords: memory management, PYTORCH_CUDA_ALLOC_CONF, optimize PyTorch, CUDA
 
+.. _cuda-semantics:
+
 CUDA semantics
 ==============
+
 
 :mod:`torch.cuda` is used to set up and run CUDA operations. It keeps track of
 the currently selected GPU, and all CUDA tensors you allocate will by default be
