@@ -207,7 +207,7 @@ autotune_precompilation_workers = min(
     int(
         os.environ.get(
             "TORCHINDUCTOR_MAX_AUTOTUNE_PRECOMPILATION_WORKERS",
-            str(torch.get_num_threads() - 8),
+            str(torch.get_num_threads()),
         )
     ),
 )
