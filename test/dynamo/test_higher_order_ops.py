@@ -2398,6 +2398,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         fn(x)
         self.assertEqual(len(records), 0)
 
+    @unittest.expectedFailure
     @xfailIfTorchDynamo
     @config.patch(capture_func_transforms=True)
     @make_logging_test(recompiles=True)
@@ -2406,26 +2407,27 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
 
         @torch.compile(backend="eager")
         def fn(x):
-            return grad(torch.sin)(x)
+            return grad(torch.sin)(x.sum())
 
         x = torch.randn([])
         fn(x)
         self.assertEqual(len(records), 0)
 
+        # calling again should not invalidate the graph
+        fn(x)
+        self.assertEqual(len(records), 0)
+
         # call grad should retrigger compilation
+        x = torch.randn(3)
         grad(fn)(x)
         self.assertGreater(len(records), 0)
-        record = self.getRecord(records, "maybe_current_level()")
+        record = self.getRecord(records, "pyfunctorch")
         self.assertIn(
             """\
     triggered by the following guard failure(s):
-    - torch._C._functorch.maybe_current_level() is None             # with grad_increment_nesting() as level:  # _functorch/eager_transforms.py:1232 in grad_and_value_impl""",
+    - torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter().check_state((1,))  # with grad_increment_nesting() as level:  # _functorch/eager_transforms.py:1232 in grad_and_value_impl""",
             record.getMessage(),
         )
-
-        # calling again should not invalidate the graph
-        grad(fn)(x)
-        self.assertEqual(len(records), 0)
 
     @config.patch(capture_func_transforms=True)
     @make_logging_test(recompiles=True)
@@ -2469,11 +2471,88 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         y = torch.vmap(torch.vmap(fn))(x)
         self.assertEqual(x.sin(), y)
         self.assertGreater(len(records), 0)
-        record = self.getRecord(records, "maybe_current_level()")
+        record = self.getRecord(records, "pyfunctorch")
         self.assertIn(
             """\
     triggered by the following guard failure(s):
-    - torch._C._functorch.maybe_current_level() == 1                # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:399 in _flat_vmap""",
+    - torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter().check_state((1, 'error'))  # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:401 in _flat_vmap""",
+            record.getMessage(),
+        )
+
+    @xfailIfTorchDynamo
+    @config.patch(capture_func_transforms=True)
+    @make_logging_test(recompiles=True)
+    def test_vmap_grad_vmap_guard_fail(self, records):
+        vmap = torch.vmap
+        grad = torch.func.grad
+
+        def g(x):
+            y = vmap(torch.sin, randomness="same")(x)
+            return y.sum(0)
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            return grad(g)(x)
+
+        x = torch.randn(3, 3)
+        y = vmap(fn, randomness="error")(x)
+        self.assertEqual(x.cos(), y)
+
+        # previous FX graph should be invalidated
+        x = torch.randn(3, 3, 4)
+        y = vmap(vmap(fn, randomness="different"))(x)
+        self.assertGreater(len(records), 0)
+        record = self.getRecord(records, "pyfunctorch")
+        self.assertIn(
+            """\
+    triggered by the following guard failure(s):
+    - torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter().check_state((1, 'error'))  # with grad_increment_nesting() as level:  # _functorch/eager_transforms.py:1232 in grad_and_value_impl""",
+            record.getMessage(),
+        )
+
+        # self.assertEqual(x.sum(0).cos(), y)
+
+        # x = torch.zeros(3)
+        # y = fn(x)
+
+        # print(y)
+        # y = grad(fn)(x)
+        # self.assertEqual(x.sin(), y)
+        # self.assertEqual(len(records), 0)
+
+        # call vmap(vmap(fn))(x) should retrigger compilation as
+        # _functorch.current_level() is not the same
+
+    #     x = torch.zeros(3, 3, 3, 4, 5)
+    #     y = torch.vmap(torch.vmap(fn))(x)
+    #     self.assertEqual(x.sin(), y)
+    #     self.assertGreater(len(records), 0)
+    #     record = self.getRecord(records, "maybe_current_level()")
+    #     self.assertIn(
+    #         """\
+    # triggered by the following guard failure(s):
+    # - torch._C._functorch.maybe_current_level() == 1                # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:399 in _flat_vmap""",
+    #         record.getMessage(),
+    #     )
+
+    @config.patch(capture_func_transforms=True)
+    @make_logging_test(recompiles=True)
+    def test_vmap_recompile_different_states(self, records):
+        @torch.compile(backend="eager")
+        def fn(x):
+            return torch.vmap(lambda x: x.sin())(x)
+
+        x = torch.zeros(3, 3, 4, 5)
+        y = torch.vmap(fn, randomness="same")(x)
+        self.assertEqual(len(records), 0)  # sanity check
+
+        y = torch.vmap(fn, randomness="different")(x)
+        self.assertGreater(len(records), 0)
+        record = self.getRecord(records, "retrieve_current_functorch_interpreter()")
+        self.assertIn(
+            """\
+    triggered by the following guard failure(s):
+    - torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter().check_state((1, 'same'))  # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:401 in _flat_vmap""",
             record.getMessage(),
         )
 

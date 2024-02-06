@@ -194,7 +194,7 @@ class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     """represents torch.func.grad increment/decrement nesting"""
 
     # A guard is needed as the grad level is baked into the torch FX graph
-    # generated. This is fine if grad is only called from within the function
+    # This is fine if grad is only called from within the function
     # being compiled. But the FX graph may be invalid in the case of a grad
     # call from eager that calls the compiled function, as the grad levels
     # may be different.
