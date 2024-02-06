@@ -478,8 +478,9 @@ def _reset_warn_typed_storage_removal():
     _warn_typed_storage_removal.__dict__['has_warned'] = False
 
 def _get_device_from_module(module: str):
-    if module.split(".")[-1] in ["cuda", torch._C._get_privateuse1_backend_name()]:
-        return module.split(".")[-1]
+    last_part = module.rsplit(".", 1)[-1]
+    if last_part in ["cuda", torch._C._get_privateuse1_backend_name()]:
+        return last_part
     else:
         return "cpu"
 

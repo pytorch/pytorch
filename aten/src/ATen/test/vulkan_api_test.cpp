@@ -7842,6 +7842,14 @@ void test_linear(
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, linear_1d_small) {
+  test_linear({3}, {4, 3}, {4});
+}
+
+TEST_F(VulkanAPITest, linear_1d_large) {
+  test_linear({37}, {23, 37}, {23});
+}
+
 TEST_F(VulkanAPITest, linear_2d_flat) {
   test_linear({1, 37}, {41, 37}, {41});
 }
