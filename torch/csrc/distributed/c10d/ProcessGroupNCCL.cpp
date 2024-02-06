@@ -1126,7 +1126,17 @@ void ProcessGroupNCCL::shutdown() {
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
-  terminateProcessGroup_.store(true);
+  if (!terminateProcessGroup_.load()) {
+    LOG(WARNING) << c10::str(
+        "WARNING: process group has NOT been destroyed before it is being destructed. ",
+        "On normal program exit, the application should call destroy_process_group to ",
+        "ensure that any pending NCCL data transfers have finished in this process. "
+        "In rare cases this process can exit before this point and block the progress of "
+        "another member of the process group. This constraint has always been present, "
+        " but this warning has only been added since PyTorch 2.3");
+    terminateProcessGroup_.store(true);
+  }
+
   workMetaListCV_.notify_one();
 
 #ifdef ENABLE_NCCL_ERROR_CHECKING
@@ -1136,19 +1146,9 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
 #endif
 
-  if (onCompletionHookThread_.joinable())
+  if (onCompletionHookThread_.joinable()) {
     onCompletionHookThread_.join();
-
-  // Abort communicators after all threads have exited to avoid having the
-  // threads dying due to aborted communicator and raising a SIGABRT
-  // We need to include PG information in the abort reason so we can tell the
-  // abort order.
-  std::string abortReason = c10::str("Process Group destroyed on rank ", rank_);
-  LOG(INFO)
-      << logPrefix()
-      << "ProcessGroupNCCL aborting communicators, check for 'abort finished' logs or look for abort hang";
-  abort(abortReason);
-  LOG(INFO) << logPrefix() << "ProcessGroupNCCL abort finished.";
+  }
 
   // We need to wait for abort to finish before we can safely shut down
   // heartbeat monitoring thread.
@@ -1508,7 +1508,7 @@ void ProcessGroupNCCL::watchdogHandler() {
     // the global PG and has globally unique rank ids across trainers.
     dumpPipe.emplace(rank_);
   }
-  while (!done || !terminateProcessGroup_.load()) {
+  while (!done && !terminateProcessGroup_.load()) {
     std::unique_lock<std::mutex> lock(workMetaListMutex_);
     // We busy-poll the work vector every kWatchdogThreadSleepMillis
     // milliseconds as long as the atomic is True.
@@ -1521,6 +1521,11 @@ void ProcessGroupNCCL::watchdogHandler() {
 
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
          /* no increment */) {
+      // PG and comms have already been terminated, work status check will throw
+      if (terminateProcessGroup_.load()) {
+        LOG(INFO) << logPrefix() << "Terminating watchdog thread during processing workMetaList_";
+        break;
+      }
       auto& work = *it;
       work.checkAndSetException();
       bool timedOut = work.checkTimeout();
