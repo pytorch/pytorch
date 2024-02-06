@@ -19,7 +19,9 @@ class _SymExprHash:
     def __eq__(self, value) -> bool:
         if not isinstance(value, _SymExprHash):
             return False
-        return self.sym_obj.node.expr == value.sym_obj.node.expr
+        return self.sym_obj.node.expr == value.sym_obj.node.expr and type(
+            self.sym_obj
+        ) == type(value.sym_obj)
 
 
 class _SymHashingDict:

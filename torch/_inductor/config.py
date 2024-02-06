@@ -271,7 +271,7 @@ enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", ""
 max_fusion_size = 64
 
 # max number of inputs to generate cat as a pointwise op with masked laods
-max_pointwise_cat_inputs = 4
+max_pointwise_cat_inputs = 128
 
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
@@ -606,7 +606,10 @@ class aot_inductor:
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
 
     # Wether to codegen abi compatible model.so
-    abi_compatible = is_fbcode()
+    abi_compatible = (
+        os.environ.get("AOT_INDUCTOR_ABI_COMPATIBLE", "1" if is_fbcode() else "0")
+        == "1"
+    )
 
     # Serialized tree spec for flattening inputs
     serialized_in_spec = ""
