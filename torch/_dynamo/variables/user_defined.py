@@ -438,6 +438,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def python_type(self):
         return self.value_type
 
+    def guard_as_python_constant(self):
+        if self.source:
+            install_guard(self.source.make_guard(GuardBuilder.ID_MATCH))
+            return self.value
+        return super().guard_as_python_constant()
+
     def torch_function_check(self):
         assert has_torch_function(
             self

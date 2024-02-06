@@ -494,6 +494,41 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(obj.count, 2)
 
+    def test_register_hook_partial_guarding(
+        self,
+    ):
+        class SomePyClass:
+            def __init__(self, val):
+                self.val = val
+
+        def some_hook(grad, *, obj):
+            return grad + obj.val
+
+        class MyMod(torch.nn.Module):
+            def forward(self, x, obj):
+                y = x.mul(2)
+                hook1 = functools.partial(some_hook, obj=obj)
+                y.register_hook(hook1)
+                z = y.mul(3)
+                return (z,)
+
+        mod = MyMod()
+        obj1 = SomePyClass(88)
+        obj2 = SomePyClass(99)
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        x0 = torch.ones(4, requires_grad=True)
+        x1 = torch.ones(4, requires_grad=True)
+
+        with compiled_autograd.enable(compiler_fn):
+            torch.compile(mod, backend=cnt, fullgraph=True)(x0, obj1)
+            torch.compile(mod, backend=cnt, fullgraph=True)(x1, obj1)
+            self.assertEqual(cnt.frame_count, 1)
+            # New obj forces recompile (for now)
+            # TODO(jansel): this behavor is bad, we should fix it so it doesn't happen
+            torch.compile(mod, backend=cnt, fullgraph=True)(x0, obj2)
+            self.assertEqual(cnt.frame_count, 2)
+
     def test_no_recompile_on_hook_identity_change(self):
         def my_hook(grad, k=0):
             return grad + k

@@ -260,6 +260,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """For constants"""
         raise NotImplementedError(f"{self} is not a constant")
 
+    def guard_as_python_constant(self):
+        """Similar to as_python_constant(), but add ID_MATCH guards to try to force things to become constants"""
+        try:
+            return self.as_python_constant()
+        except NotImplementedError as e:
+            unimplemented(str(e))
+
     def is_python_constant(self):
         try:
             self.as_python_constant()
