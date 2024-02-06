@@ -275,8 +275,8 @@ class FSDPParam:
         shard_world_size = self.post_forward_mesh_info.shard_mesh_size
         if (numel := self.all_gather_output.numel()) % shard_world_size != 0:
             _raise_assert_with_print(
-                f"All-gather output size ({self.all_gather_output.numel()}) must "
-                f"be divisible by the shard world size ({shard_world_size})"
+                f"All-gather output size ({numel}) must be divisible by the shard "
+                f"world size ({shard_world_size})"
             )
         shard_rank = self.post_forward_mesh_info.shard_mesh_rank
         sharded_numel = numel // shard_world_size
