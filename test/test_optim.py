@@ -988,6 +988,87 @@ class TestOptimRenewed(TestCase):
             self.assertTrue(state_dict["ran_state_dict_pre_hook"])
 
 
+    @staticmethod
+    def _load_state_dict_pre_hook1(optimizer: Optimizer, state_dict: Dict[str, Any]) -> None:
+        state_dict["param_groups"][0]["lr"] = 0.002
+
+
+    @staticmethod
+    def _load_state_dict_pre_hook2(optimizer: Optimizer, state_dict: Dict[str, Any]) -> Dict[str, Any]:
+        # The typical use case for returning a state dict is to drastically modify the state dict.
+        # I will simulate by simply making a deep copy and ensuring that my_state_dict still gets used
+        my_state_dict = deepcopy(state_dict)
+        my_state_dict["param_groups"][0]["lr"] = 0.003
+        return my_state_dict
+
+
+    @staticmethod
+    def _load_state_dict_post_hook(optimizer: Optimizer) -> None:
+        optimizer.state["ran_load_state_dict_pre_hook2"] = optimizer.param_groups[0]["lr"] == 0.003
+        optimizer.state["ran_load_state_dict_post_hook"] = True
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_load_state_dict_pre_hook_and_prepend(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
+        for optim_input in all_optim_inputs:
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
+            param = torch.rand(2, 3, device=device, dtype=dtype, requires_grad=True)
+            optim = optim_cls([param], **optim_input.kwargs)
+            state_dict = optim.state_dict()
+
+            # usually one would have a new optim instance here, but it's all the same here
+            optim.register_load_state_dict_pre_hook(self.__class__._load_state_dict_pre_hook1)
+            optim.load_state_dict(state_dict)
+            self.assertEqual(optim.param_groups[0]["lr"], 0.002)
+
+            optim.register_load_state_dict_pre_hook(self.__class__._load_state_dict_pre_hook2, prepend=True)
+            optim.load_state_dict(state_dict)
+            # If prepend were False would be 0.003 but since prepend is True, the other hook overrides
+            self.assertEqual(optim.param_groups[0]["lr"], 0.002)
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_load_state_dict_post_hook(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
+        for optim_input in all_optim_inputs:
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
+            param = torch.rand(2, 3, device=device, dtype=dtype, requires_grad=True)
+            optim = optim_cls([param], **optim_input.kwargs)
+
+            optim.register_load_state_dict_post_hook(self.__class__._load_state_dict_post_hook)
+            optim.load_state_dict(optim.state_dict())
+            self.assertFalse(optim.state["ran_load_state_dict_pre_hook2"])
+            self.assertTrue(optim.state["ran_load_state_dict_post_hook"])
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_load_state_dict_pre_post_hook(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
+        for optim_input in all_optim_inputs:
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
+            param = torch.rand(2, 3, device=device, dtype=dtype, requires_grad=True)
+            optim = optim_cls([param], **optim_input.kwargs)
+
+            optim.register_load_state_dict_pre_hook(self.__class__._load_state_dict_pre_hook2)
+            optim.register_load_state_dict_post_hook(self.__class__._load_state_dict_post_hook)
+            optim.load_state_dict(optim.state_dict())
+            self.assertTrue(optim.state["ran_load_state_dict_pre_hook2"])
+            self.assertTrue(optim.state["ran_load_state_dict_post_hook"])
+
+
     @optims(optim_db, dtypes=[torch.float32])
     def test_step_post_hook(self, device, dtype, optim_info):
         def post_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
