@@ -371,8 +371,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # i.e. buffers and parameters.
         self.dynamo_flat_name_to_original_fqn: Dict[str, str] = {}
 
-        # All calls to random() are replaced with a single call to __gen_rand_values functions that returns a tuple of random values for each original call. random_calls tracks calls to random() and
-        # random_values_var stores the name of the variable that stores __gen_rand_values results.
+        # All calls to random() are replaced with a single call to __gen_rand_values
+        # functions that returns a tuple of random values for each original call.
+        # random_calls tracks calls to random() and random_values_var stores the name of
+        # the variable that stores __gen_rand_values results.
         self.random_calls: List[
             Tuple[Callable[..., object], Tuple[object, ...], Dict[str, object]]
         ] = []
