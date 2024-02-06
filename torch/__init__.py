@@ -304,9 +304,14 @@ class SymInt:
         ret = self.node.singleton_int()
         if ret is not None:
             return hash(ret)
-        else:
-            # We could support constant SymInts as well, but not doing it for now
-            raise TypeError("unhashable type: non-singleton SymInt")
+
+        if (
+            self.node.is_symbolic()
+            and isinstance(self.node.hint, builtins.int)
+        ):
+            return hash(self.node.hint)
+
+        raise ValueError("unexpected unhashable SymInt")
 
 class SymFloat:
     """

@@ -822,12 +822,9 @@ class TestSymNumberMagicMethods(TestCase):
     def test_symnode_hashing(self):
         shape_env = ShapeEnv()
 
-        # SymInt, SymBool, SymFloat are unhashable
+        # SymBool, SymFloat are unhashable
         unhashable = (
-            create_symint(shape_env, 3),
             create_symbool(shape_env, True),
-            # We should be passing in float here, but create_symbol currently
-            # only supports int
             create_symfloat(shape_env, 3.0),
         )
 
@@ -835,14 +832,15 @@ class TestSymNumberMagicMethods(TestCase):
             with self.assertRaisesRegex(TypeError, "unhashable"):
                 hash(x)
 
-        # Singleton SymInt, constant SymBool, SymNode are hashable
+        # SymInt, constant SymBool, SymNode are hashable
         j1 = torch._C._get_singleton_int(1, 1)
         j1_copy = torch._C._get_singleton_int(1, 1)
         j2 = torch._C._get_singleton_int(2, 1)
         t = self.get_constant_bool(True)
         t_copy = self.get_constant_bool(True)
         f = self.get_constant_bool(False)
-        n = create_symint(shape_env, 3).node
+        n1 = create_symint(shape_env, 3)
+        n2 = create_symint(shape_env, 3).node
         m = self.get_constant_bool(True).node
 
         self.assertIs(j1 == j1_copy, True)
@@ -854,7 +852,8 @@ class TestSymNumberMagicMethods(TestCase):
         self.assertIs(t == f, False)
         self.assertNotEqual(hash(t), hash(f))
 
-        hash(n)
+        hash(n1)
+        hash(n2)
         hash(m)
 
     def test_non_symbolic_symnode(self):

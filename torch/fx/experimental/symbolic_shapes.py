@@ -2515,9 +2515,13 @@ class ShapeEnv:
             # We always associate vars to vals
             if isinstance(val, int):
                 self.var_to_val[sympy_expr] = sympy.Integer(val)
-            else:
+            elif isinstance(val, float):
+                self.var_to_val[sympy_expr] = sympy.Integer(int(val))
+            elif isinstance(val, SymNode):
                 # Only used for jagged layout nested tensors
                 self.var_to_val[sympy_expr] = SingletonInt(val.node.singleton_int(), coeff=val.node.singleton_coeff())
+            else:
+                raise TypeError(f"Unexpected type '{type(val)}' for {val=}")
 
             # Do the appending later, because we always want to populate this
             self.var_to_sources[sympy_expr] = []
