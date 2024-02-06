@@ -1,3 +1,5 @@
+import itertools
+
 from typing import List, NamedTuple, Optional
 
 import torch
@@ -30,12 +32,16 @@ def foreach_all_gather(
     world_size, rank = group.size(), group.rank()
     # - Copy in
     with torch.cuda.stream(all_gather_copy_in_stream):
-        param_all_gather_inputs = tuple(
+        param_all_gather_inputs = [
             fsdp_param.all_gather_input for fsdp_param in fsdp_params
-        )
-        dtypes = {t.dtype for t in param_all_gather_inputs}
-        assert len(dtypes) == 1, f"Mixed dtype not supported yet: {dtypes}"
-        dtype = next(iter(dtypes))
+        ]
+        g = itertools.groupby(t.dtype for t in param_all_gather_inputs)
+        if next(g, True) and not next(g, False):  # same dtype
+            dtype = param_all_gather_inputs[0].dtype
+        else:
+            raise NotImplementedError(
+                f"Mixed dtype not supported yet: {[t.dtype for t in param_all_gather_inputs]}"
+            )
         inp_split_sizes = [inp.numel() for inp in param_all_gather_inputs]
         all_gather_input_numel = sum(inp_split_sizes)
         all_gather_output = torch.empty(
