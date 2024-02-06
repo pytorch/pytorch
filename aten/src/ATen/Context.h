@@ -330,7 +330,7 @@ class TORCH_API Context {
       c10::utils::check_env("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE") == true
       ? at::Float32MatmulPrecision::HIGH
       : at::Float32MatmulPrecision::HIGHEST;
-  bool matmul_autotune = false;
+  bool matmul_autotune = true;
   int benchmark_limit_cudnn = 10;
   bool allow_tf32_cudnn = true;
   bool allow_fp16_reduction_cublas = true;
