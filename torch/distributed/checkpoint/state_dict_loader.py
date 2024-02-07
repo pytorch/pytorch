@@ -150,7 +150,8 @@ def load(
             # https://github.com/pytorch/pytorch/issues/118036
             storage_reader = FileSystemReader(checkpoint_id)
 
-        storage_reader.reset(checkpoint_id)
+        if checkpoint_id is not None:
+            storage_reader.reset(checkpoint_id)
 
         if no_dist:
             keys = list(state_dict.keys())

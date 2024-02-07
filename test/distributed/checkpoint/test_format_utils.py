@@ -2,15 +2,21 @@
 
 import torch
 import torch.distributed.checkpoint as dcp
+from torch.distributed._tensor.device_mesh import init_device_mesh
 from torch.distributed.checkpoint.format_utils import (
+    BroadcastingTorchSaveReader,
     dcp_to_torch_save,
+    DynamicMetaLoadPlanner,
     torch_save_to_dcp,
 )
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     ModelArgs,
+    skip_if_lt_x_gpu,
     Transformer,
+    with_comms,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
@@ -41,6 +47,37 @@ class TestFormatUtils(DTensorTestBase):
         dcp.load({"model": model}, checkpoint_id=self.temp_dir)
 
         self.assertEqual({"model": model.state_dict()}, sd)
+
+    @with_comms
+    @with_temp_dir
+    @skip_if_lt_x_gpu(2)
+    def test_online_torch_save_to_dcp(self) -> None:
+        """Tests loading a model saved by torch.save directly into a sharded model
+        using dcp.load
+        """
+        # Save a model with torch.save
+        model = Transformer(ModelArgs())
+        sd = {"model": model.state_dict()}
+
+        torch_fn = self.temp_dir + "/model.pt"
+        torch.save(sd, torch_fn)
+
+        # Load into a sharded model
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        model = Transformer(ModelArgs()).cuda()
+        model = FSDP(
+            model,
+            device_mesh=device_mesh,
+            use_orig_params=True,
+        )
+        dcp.load(
+            {"model": model},
+            planner=DynamicMetaLoadPlanner(),
+            storage_reader=BroadcastingTorchSaveReader(),
+            checkpoint_id=torch_fn,
+        )
+
+        self.assertEqual(sd["model"], model.state_dict())
 
 
 if __name__ == "__main__":
