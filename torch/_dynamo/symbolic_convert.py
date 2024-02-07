@@ -17,7 +17,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Type
+from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple, Type
 from unittest.mock import patch
 
 import torch
@@ -588,9 +588,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     inline_depth: int
     inconsistent_side_effects: bool
     current_speculation: Optional[SpeculationEntry]
-    random_calls: List[
-        Tuple[Callable[..., object], Tuple[object, ...], Dict[str, object]]
-    ]
 
     def mark_inconsistent_side_effects(self):
         """
@@ -1975,7 +1972,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.export = export
 
         self.current_speculation = None
-        self.random_calls = []
 
         self.strict_checks_enabled = False
 
@@ -2033,7 +2029,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         _step_logger()(
             logging.INFO,
             f"torchdynamo start tracing {f_code.co_name} {code_options['co_filename']}:{code_options['co_firstlineno']}",
-            stack_info=True,
         )
         super().__init__(
             output=OutputGraph(
