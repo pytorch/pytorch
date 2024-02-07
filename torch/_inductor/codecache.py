@@ -1871,11 +1871,13 @@ class CppCodeCache:
         return cls.cache[key]
 
 
+# Customized Python binding for cpp kernels
 class CppPythonBindingsCodeCache(CppCodeCache):
     cache: Dict[str, Union[CDLL, ModuleType]] = {}
     clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
-        "include_pytorch": True,
+        # kernels have no dependency on libtorch
+        "include_pytorch": False,
         "shared": True,
     }
     entry_function = "kernel"
