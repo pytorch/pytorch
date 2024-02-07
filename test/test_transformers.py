@@ -2803,10 +2803,8 @@ class TestSDPACudaOnly(NNTestCase):
                 return n & (n - 1) == 0
             if not is_power_of_2(seq_len_q) or not is_power_of_2(seq_len_k) or not is_power_of_2(head_dim):
                 self.skipTest("Flash attention on ROCM only supports power of two seq_len_q seq_len_k headdim, for now.")
-            if head_dim < 16 or seq_len_q < 16 or seq_len_k < 16:
+            if head_dim < 16 or seq_len_q < 128 or seq_len_k < 128:
                 self.skipTest("Flash attention on ROCM only supports power of two seq_len_q, seq_len_k, headdim >= 16, for now.")
-            if head_dim > 128:
-                self.skipTest("Flash attention on ROCM only supports power of two headdim <= 128, for now.")
 
         if isSM8XDevice and head_dim in range(193, 256 + 1):
             self.skipTest("Flash attention on sm86, sm87, and sm89 for headdim > 192 currently disabled")
