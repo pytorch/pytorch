@@ -271,7 +271,7 @@ enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", ""
 max_fusion_size = 64
 
 # max number of inputs to generate cat as a pointwise op with masked laods
-max_pointwise_cat_inputs = 4
+max_pointwise_cat_inputs = 128
 
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
@@ -366,6 +366,19 @@ kernel_name_max_ops = 10
 
 # Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
 shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "1") == "1"
+
+# When, during shape padding, dimension N would have to be padded, but
+# dimension M would not, then we can avoid a padding if we perform an
+# explicit transpose ( e.g. matmul(A,B) = matmul(B.T, A.T) ).T in order to
+# put the M dimension in the N position, therefore ensuring an aligned
+# GEMM result without padding. This can have dramatic
+# performance benefits if it is possible. Also, if this flag is enabled,
+# dimension M is not padded if N is aligned, since that's unneccessary
+# for an aligned result.
+shape_pad_use_transpose: bool = True
+
+# Whether to always use shape padding if it is enabled and possible
+force_shape_pad: bool = False
 
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
@@ -541,8 +554,8 @@ class triton:
         os.environ.get("TORCHINDUCTOR_PERSISTENT_REDUCTIONS", "1") == "1"
     )
 
-    # 0: disable
-    # 1: enable, use tuning to pick between different subkernels
+    # 0/False: disable
+    # 1/True: enable, use tuning to pick between different subkernels
     # 2: enable, force using persistent reduction (for debugging)
     # 3: enable, force using non-persistent reduction (for debugging)
     multi_kernel = int(os.environ.get("TORCHINDUCTOR_MULTI_KERNEL", "0"))
@@ -599,13 +612,19 @@ class aot_inductor:
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
 
     # Wether to codegen abi compatible model.so
-    abi_compatible = is_fbcode()
+    abi_compatible = (
+        os.environ.get("AOT_INDUCTOR_ABI_COMPATIBLE", "1" if is_fbcode() else "0")
+        == "1"
+    )
 
     # Serialized tree spec for flattening inputs
     serialized_in_spec = ""
 
     # Serialized tree spec for flattening outputs
     serialized_out_spec = ""
+
+    # flag to decide whether to create a submodule for constant graph.
+    use_runtime_constant_folding: bool = False
 
 
 class cuda:
