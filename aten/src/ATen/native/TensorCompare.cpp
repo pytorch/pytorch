@@ -128,7 +128,7 @@ const OptionalTensorRef max) {
     TensorIteratorConfig()                  \
       .set_check_mem_overlap(true)          \
       .add_output(maybe_get_output())       \
-      .add_const_input(self)                      \
+      .add_const_input(self)                \
       .promote_inputs_to_common_dtype(true) \
       .cast_common_dtype_to_outputs(true)   \
       .enforce_safe_casting_to_output(true)

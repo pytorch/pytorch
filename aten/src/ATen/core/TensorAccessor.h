@@ -18,11 +18,6 @@ struct DefaultPtrTraits {
   typedef T* PtrType;
 };
 
-template <typename T>
-struct ConstPtrTraits {
-  typedef const T* PtrType;
-};
-
 #if defined(__CUDACC__) || defined(__HIPCC__)
 template <typename T>
 struct RestrictPtrTraits {

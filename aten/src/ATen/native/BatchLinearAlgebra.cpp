@@ -2088,7 +2088,7 @@ TORCH_IMPL_FUNC(lu_unpack_out)(const Tensor& LU,
       .resize_outputs(false)
       .declare_static_shape(pivots.sizes(), /*squash_dim=*/pivots.dim() - 1)
       .add_output(perm)
-      .add_owned_input(pivots.contiguous())
+      .add_owned_const_input(pivots.contiguous())
       .build();
 
     unpack_pivots_stub(pivots.device().type(), iter, std::min(m, n), m);
