@@ -227,12 +227,12 @@ void rebase_history(const Variable& self, Edge gradient_edge) {
     TORCH_CHECK(
         gradient_edge.function->num_inputs() == 1,
         "Functions which modify views in-place must return a single Variable");
-    auto& view_info = diff_view_meta->get_backward_view();
+    const auto& view_info = diff_view_meta->get_backward_view();
     diff_view_meta->output_nr_ = gradient_edge.input_nr;
     auto copy_slices = std::make_shared<CopySlices>(
         view_info.base_,
         at::TensorGeometry(self),
-        view_info.view_fn_->clone_and_set(),
+        view_info.has_view_fn() ? view_info.view_fn().clone_and_set() : nullptr,
         std::move(gradient_edge.function));
     if (self.requires_grad()) {
       // If self did not previously require grad, there are no hooks to move
@@ -696,7 +696,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
         {
           // We can reach this path with grad_mode disabled, e.g. engine
           AutoGradMode grad_mode(true);
-          diff_view = (*view_fn)(view_info.base_);
+          diff_view = view_fn(view_info.base_);
         }
         diff_view_meta->grad_fn_ = diff_view.grad_fn();
       } else {

@@ -574,21 +574,21 @@ static PyObject* view_func_impl(
         if (symint_visitor_fn != Py_None) {
           new_symints = map_py_func(
               py::cast<py::function>(symint_visitor_fn),
-              view_func->get_symints());
+              view_func.get_symints());
         }
 
         c10::optional<std::vector<at::Tensor>> new_tensors = c10::nullopt;
         if (tensor_visitor_fn != Py_None) {
           new_tensors = map_py_func(
               py::cast<py::function>(tensor_visitor_fn),
-              view_func->get_tensors());
+              view_func.get_tensors());
         }
 
         // call view func
         if (new_symints.has_value() || new_tensors.has_value()) {
-          out = (*view_func->clone_and_set(new_symints, new_tensors))(new_base);
+          out = (*view_func.clone_and_set(new_symints, new_tensors))(new_base);
         } else {
-          out = (*view_func)(new_base);
+          out = view_func(new_base);
         }
       } else {
         out = new_base.as_strided(
