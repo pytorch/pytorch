@@ -149,7 +149,7 @@ struct IntArrayRefCaster<TargetType, 4> {
 
 
 template<int Rank = 4>
-aotriton::TensorView<Rank> mk_aotensor(at::Tensor q, c10::string_view tensor_name)
+aotriton::TensorView<Rank> mk_aotensor(const at::Tensor& q, c10::string_view tensor_name)
 {
   const auto strides = q.strides();
   int real_rank = strides.size();
@@ -295,14 +295,14 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
   at::Tensor v_t = v_padded.permute({0,2,1,3});
   at::Tensor output_t = out.permute({0,2,1,3});
 
-  at::Tensor M = at::empty({batch_size, num_heads, seqlen_q}, at::dtype(at::kFloat).device(q.device())); // aka softmax_lse
+  at::Tensor M = at::empty({batch_size * num_heads, seqlen_q}, at::dtype(at::kFloat).device(q.device())); // aka softmax_lse
 
   at::Tensor softmax_fa_t;
   if (return_softmax) {
     softmax_fa_t = at::empty({batch_size, num_heads, seqlen_q, seqlen_k},
                              at::dtype(q.dtype()).device(q.device()));
   } else {
-    softmax_fa_t = at::empty({}, at::dtype(q.dtype()).device(q.device()));
+    softmax_fa_t = at::empty({ 0, 0, 0, 0 }, at::dtype(q.dtype()).device(q.device()));
   }
 
   hipError_t err; // TODO: Error handling
