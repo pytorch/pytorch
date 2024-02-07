@@ -1953,6 +1953,9 @@ class ShapeEnv:
             elif key == "name_to_node":
                 # Compare just the set of keys is the same.
                 return set(value.keys())
+            elif key == "symbol_guard_counter":
+                # Skip this for comparisons
+                return None
             return value
 
         shape_env_check_state_equal(self, other, non_state_variable_names, map_value)
