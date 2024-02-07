@@ -1274,6 +1274,31 @@ def compile_fx(
 
     def partition_fn(graph, joint_inputs, **kwargs):
         joint_graph_passes(graph)
+        # for some reason with activation checkpointing we get
+        # multiple chains of alias(alias(alias(x))). This pass
+        # removes them
+        # TODO: should be moved to the joint passes
+        def replace_no_op(node):
+            replacement = node.args[0]
+
+            # https://github.com/pytorch/pytorch/issues/86128 causes
+            # non-Tensor inputs even for ops with only Tensor inputs.
+            # TODO - decompose/type promote to avoid this
+            if not all(isinstance(arg, torch.fx.Node) for arg in node.args):
+                return
+
+            node.replace_all_uses_with(replacement)
+            replacement.meta.update(node.meta)
+            graph.graph.erase_node(node)
+
+        for node in graph.graph.nodes:
+            if node.op != "call_function":
+                continue
+
+            if node.target == torch.ops.aten.alias.default:
+                if len(node.users) == 1 and list(node.users.keys())[0].target == torch.ops.aten.alias.default:
+                    replace_no_op(node)
+
         return min_cut_rematerialization_partition(
             graph, joint_inputs, **kwargs, compiler="inductor"
         )

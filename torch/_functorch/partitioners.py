@@ -436,6 +436,10 @@ def reordering_to_mimic_autograd_engine(gm):
     # Populate depth for the nodes. Depth is the distance from the inputs.
     depths = {}
     output_node = next(node for node in gm.graph.nodes if node.op == "output")
+    # TODO: reimplement get_depth so that it doesn't blow up
+    # recursion limits for lager models
+    import sys
+    sys.setrecursionlimit(max(sys.getrecursionlimit(), 5000))
     get_depth(output_node, depths)
 
     def insert_node_in_graph(node):
@@ -896,6 +900,116 @@ def min_cut_rematerialization_partition(
                 joint_module, fw_module, bw_module, len(saved_sym_nodes)
             )
         bw_module = reordering_to_mimic_autograd_engine(bw_module)
+
+    def _move_ops_to_top(gm, ops_to_top, prefetch=10, max_distance=80):
+        new_graph = fx.Graph()
+        env = {}
+
+        # Add new placeholder nodes in the order specified by the inputs
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                new_node = new_graph.placeholder(node.name)
+                # Can't use node_copy here as we may be turning previous call_function into placeholders
+                new_node.meta = node.meta
+                env[node] = new_node
+
+        order = {}
+        for idx, node in enumerate(gm.graph.nodes):
+            order[node] = idx
+
+        the_ops = []
+        other_ops = []
+        for node in gm.graph.nodes:
+            if node.op == "call_function" and getattr(node.target, "overloadpacket", "") in ops_to_top:
+                the_ops.append(node)
+            elif node in env:
+                pass
+            else:
+                other_ops.append(node)
+
+        counter1 = 0
+        counter2 = 0
+        o_n1 = 1000000
+        o_n2 = 0
+        # base idea: move as many the_ops to the top as possible
+        # until a certain criteria is met, then add the remaining
+        # when they are within a min_distance from their use site
+        while True:
+            if counter1 < len(the_ops):
+                n1 = the_ops[counter1]
+                o_n1 = order[n1]
+            if counter2 < len(other_ops):
+                n2 = other_ops[counter2]
+                o_n2 = order[n2]
+            if (counter1 < prefetch) and counter1 < len(the_ops):
+                node = n1
+                counter1 += 1
+            elif (o_n1 < o_n2 + max_distance) and counter1 < len(the_ops):
+                node = n1
+                counter1 += 1
+            elif counter2 < len(other_ops):
+                node = n2
+                counter2 += 1
+            else:
+                break
+
+            if node in env:
+                continue
+            env[node] = new_graph.node_copy(node, lambda x: env[x])
+
+        new_gm = torch.fx.GraphModule(gm, new_graph)
+        return new_gm
+
+    def _move_ops_to_bottom(gm, ops_to_bottom):
+        new_graph = fx.Graph()
+        env = {}
+
+        # Add new placeholder nodes in the order specified by the inputs
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                new_node = new_graph.placeholder(node.name)
+                # Can't use node_copy here as we may be turning previous call_function into placeholders
+                new_node.meta = node.meta
+                env[node] = new_node
+
+        order = {}
+        for idx, node in enumerate(gm.graph.nodes):
+            order[node] = idx
+
+        for node in gm.graph.nodes:
+            if node.op == "call_function" and getattr(node.target, "overloadpacket", "") in ops_to_bottom and node.args[0].target.overloadpacket in {torch.ops.c10d_functional.reduce_scatter_tensor, torch.ops.my_new_lib.reduce_scatter}:
+                continue
+            elif node.op == "output":
+                continue
+            elif node in env:
+                continue
+            else:
+                env[node] = new_graph.node_copy(node, lambda x: env[x])
+
+        for node in gm.graph.nodes:
+            if node in env:
+                continue
+            env[node] = new_graph.node_copy(node, lambda x: env[x])
+
+        new_gm = torch.fx.GraphModule(gm, new_graph)
+        return new_gm
+
+    # reorder collective operators for prefetch + comms/compute overlap
+    # we should use better heuristics with the estimated runtime
+    # of operators instead, but for the model I tested this was
+    # enough already
+    ops_to_top = {
+        torch.ops.my_new_lib.all_gather,
+        torch.ops.c10d_functional.all_gather_into_tensor
+    }
+    fw_module = _move_ops_to_top(fw_module, ops_to_top)
+    bw_module = _move_ops_to_top(bw_module, ops_to_top)
+
+    ops_to_bottom = {
+        torch.ops.my_new_lib.wait,
+        torch.ops.c10d_functional.wait_tensor
+    }
+    bw_module = _move_ops_to_bottom(bw_module, ops_to_bottom)
 
     if AOT_PARTITIONER_DEBUG:
         print("Theoretical Activations Stored: ", sum([_size_of(i) for i in saved_values]) / 1e9)
