@@ -258,7 +258,7 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
     // including the init -- when there are GPUs available.
     if (skipTest()) {
       GTEST_SKIP() << "Skipping ProcessGroupNCCLErrorsTest because system "
-                   << "requirement is not met (no CUDA or GPU)."
+                   << "requirement is not met (no CUDA or GPU).";
     }
 
     size_t numDevices = 1; // One device per rank (thread)
