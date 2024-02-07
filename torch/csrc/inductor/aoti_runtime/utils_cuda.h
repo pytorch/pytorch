@@ -8,6 +8,7 @@
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 
 #include <cuda.h>
+#include <cuda_runtime.h>
 
 namespace torch::aot_inductor {
 
