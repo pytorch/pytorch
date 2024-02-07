@@ -663,6 +663,24 @@ class TestCompiledAutograd(TestCase):
     def test_mismatch_fake_tensor_mode_dynamic_shape(self):
         self.test_mismatch_fake_tensor_mode(dynamic_shape=True)
 
+    def test_accumulate_grad_accuracy(self):
+        def fn():
+            model = torch.nn.Sequential(
+                torch.nn.Linear(2, 1, bias=False),
+                torch.nn.Linear(1, 2, bias=False),
+            )
+            x = torch.randn(2, 2)
+
+            out = model(x)
+            loss = out.sum()
+            torch.manual_seed(0)
+            loss.backward()
+
+            yield model[0].weight.grad
+            yield model[1].weight.grad
+
+        self.check_output_and_recompiles(fn, 1)
+
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
