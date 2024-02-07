@@ -14,7 +14,6 @@ NO_PR_RETENTION = 1.5 * 365 * SEC_IN_DAY
 PR_WINDOW = 90 * SEC_IN_DAY  # Set to None to look at all PRs (may take a lot of tokens)
 REPO_OWNER = "pytorch"
 REPO_NAME = "pytorch"
-PR_BODY_MAGIC_STRING = "do-not-delete-branch"
 ESTIMATED_TOKENS = [0]
 
 TOKEN = os.environ["GITHUB_TOKEN"]
@@ -42,7 +41,6 @@ query ($owner: String!, $repo: String!, $cursor: String) {
         number
         updatedAt
         state
-        body
       }
     }
   }
@@ -67,7 +65,6 @@ query ($owner: String!, $repo: String!, $cursor: String) {
         number
         updatedAt
         state
-        body
       }
     }
   }
@@ -89,7 +86,6 @@ query ($owner: String!, $repo: String!, $cursor: String) {
           number
           updatedAt
           state
-          body
         }
       }
     }
