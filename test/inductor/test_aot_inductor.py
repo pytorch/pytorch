@@ -191,6 +191,24 @@ class AOTInductorTestsTemplate:
         self.assertTrue(actual_path == expected_path)
 
     @requires_cuda
+    def test_constant_folding(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w_pre = torch.randn(4, 4, device=device)
+                self.b = torch.randn(4, device=device)
+
+            def forward(self, x):
+                w_transpose = torch.transpose(self.w_pre, 0, 1)
+                w_relu = torch.nn.functional.relu(w_transpose)
+                w = w_relu + self.b
+                return torch.matmul(x, w)
+
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            self.check_model(Model(self.device), example_inputs)
+
+    @requires_cuda
     def test_multi_device(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -1761,6 +1779,7 @@ CPU_TEST_FAILURES = {
     "test_add_complex": fail_stack_allocation(is_skip=True),
     "test_addmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
     "test_bmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    "test_constant_folding": fail_with_and_without_stack_allocation(is_skip=True),
     "test_dup_unbacked_sym_decl": fail_with_and_without_stack_allocation(),
     "test_dynamic_cat": fail_with_and_without_stack_allocation(),
     "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
@@ -1945,6 +1964,7 @@ copy_tests(
     {
         "test_addmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",)),
         "test_bmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",)),
+        "test_constant_folding": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
         "test_dynamic_smem_above_default_limit": TestFailure(
             ("non_abi_compatible_cpu",)
         ),

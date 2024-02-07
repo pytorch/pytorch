@@ -2,7 +2,6 @@ import os
 from typing import Union
 
 import torch
-import torch.distributed as dist
 from torch.distributed.checkpoint import FileSystemReader
 from torch.distributed.checkpoint._traverse import set_element
 from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
@@ -18,8 +17,8 @@ __all__ = ["dcp_to_torch_save"]
 
 class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
     """
-    Load Planner which rebuilds state_dict from the saved metadata. Useful
-    for loading in state_dict without first initializing a model, such as
+    Extension of DefaultLoadPlanner, which rebuilds state_dict from the saved metadata.
+    Useful for loading in state_dict without first initializing a model, such as
     when converting a DCP checkpoint into a Torch save file.
 
     . N.B. `state_dict` must be an empty dictionary when used with this LoadPlanner
@@ -29,6 +28,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
         this LoadPlanner on a single rank or process to avoid OOM.
 
     """
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -52,7 +52,6 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
         super().set_up_planner(state_dict, metadata, is_coordinator)
 
 
-
 def dcp_to_torch_save(
     dcp_checkpoint_dir: Union[str, os.PathLike],
     torch_save_fn: Union[str, os.PathLike],
@@ -67,19 +66,18 @@ def dcp_to_torch_save(
         torch_save_fn: Filename to store the converted Torch save file.
         coordinator_rank: Rank that will perform the conversion. Ignored
             if dist is not available.
+
+    .. warning::
+        To avoid OOM, it's recommended to only run this function on a single rank.
     """
-    is_dist = dist.is_available() and dist.is_initialized()
-    if not is_dist or dist.get_rank() == coordinator_rank:
-        sd = {}
-        storage_reader = FileSystemReader(dcp_checkpoint_dir)
 
-        _load_state_dict(
-            sd,
-            storage_reader=storage_reader,
-            planner=_EmptyStateDictLoadPlanner(),
-            no_dist=True,
-        )
-        torch.save(sd, torch_save_fn)
+    sd = {}
+    storage_reader = FileSystemReader(dcp_checkpoint_dir)
 
-    if is_dist:
-        dist.barrier()
+    _load_state_dict(
+        sd,
+        storage_reader=storage_reader,
+        planner=_EmptyStateDictLoadPlanner(),
+        no_dist=True,
+    )
+    torch.save(sd, torch_save_fn)
