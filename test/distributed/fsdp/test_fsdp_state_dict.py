@@ -152,7 +152,7 @@ class TestDummyModel(torch.nn.Module):
 class TestFSDPStateDict(FSDPTest):
     @property
     def world_size(self):
-        return 2
+        return min(torch.cuda.device_count(),2)
 
     def _broadcast_state_dict(self, model, state_dict):
         # TODO (rohan-varma): remove model
@@ -1236,7 +1236,7 @@ class TestFSDPStateDict(FSDPTest):
 class TestFSDPStateDict4GPUs(FSDPTest):
     @property
     def world_size(self):
-        return max(torch.cuda.device_count(), 2)
+        return torch.cuda.device_count()
 
     @skip_if_lt_x_gpu(4)
     def test_local_state_dict_reshard(self):

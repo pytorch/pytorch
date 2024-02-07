@@ -58,7 +58,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
     @property
     def world_size(self) -> int:
-        return 2
+        return min(torch.cuda.device_count(), 2)
 
     def _test_save_load(
         self,
