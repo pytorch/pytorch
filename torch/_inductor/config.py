@@ -27,6 +27,11 @@ fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
+# codegen cpp wrapper code in an ABI compatible mode
+abi_compatible = (
+    os.environ.get("TORCHINDUCTOR_ABI_COMPATIBLE", "1" if is_fbcode() else "0") == "1"
+)
+
 # dead code elimination
 dce = False
 
@@ -604,12 +609,6 @@ class aot_inductor:
     output_path = ""
 
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
-
-    # Wether to codegen abi compatible model.so
-    abi_compatible = (
-        os.environ.get("AOT_INDUCTOR_ABI_COMPATIBLE", "1" if is_fbcode() else "0")
-        == "1"
-    )
 
     # Serialized tree spec for flattening inputs
     serialized_in_spec = ""
