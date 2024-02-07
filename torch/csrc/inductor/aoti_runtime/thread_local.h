@@ -1,11 +1,8 @@
-// NOTE: Like interface.cpp, this file will be copied into AOTInductor
-// generated output. This file is intended to keep implementation
-// details separate from the implementation of the AOTI public
-// interface. Note also that #includes should go into interface.cpp
-// for simplicity of maintenance.
+#include <torch/csrc/inductor/aoti_runtime/arrayref_tensor.h>
 
 namespace torch {
 namespace aot_inductor {
+
 template <typename T>
 struct ThreadLocalCachedOutputTensor;
 
@@ -239,7 +236,8 @@ template <typename T>
 void assert_numel(const ArrayRefTensor<T>& tensor, int64_t numel) {
   if (tensor.numel() != numel) {
     std::stringstream err;
-    err << "incorrect numel for input tensor. expected " << numel << ", got " << tensor.numel();
+    err << "incorrect numel for input tensor. expected " << numel << ", got "
+        << tensor.numel();
     throw std::runtime_error(err.str());
   }
 }

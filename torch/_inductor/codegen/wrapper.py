@@ -1496,7 +1496,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             return
 
         if V.graph.aot_mode:
-            for header_cpp_file in ("interface.cpp", "implementation.cpp"):
+            for header_cpp_file in ("interface.cpp",):
                 with open(
                     os.path.join(
                         os.path.dirname(__file__), "aoti_runtime", header_cpp_file
