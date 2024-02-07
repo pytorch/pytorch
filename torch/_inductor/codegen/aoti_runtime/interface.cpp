@@ -341,8 +341,4 @@ AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
   })
 }
 
-#define CACHE_TORCH_DTYPE(typename) static auto cached_torch_dtype_##typename = aoti_torch_dtype_##typename()
-
-  static auto cached_torch_device_type_cpu = aoti_torch_device_type_cpu();
-  static auto cached_torch_device_type_cuda = aoti_torch_device_type_cuda();
 } // extern "C"
