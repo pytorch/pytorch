@@ -836,15 +836,6 @@ Tensor quantized_convolution(
 namespace conv1d {
 
 vTensor pack_weights_using_width_packing(const Tensor& weight_arg) {
-  TORCH_INTERNAL_ASSERT(
-      !weight_arg.is_quantized(),
-      "Vulkan Linear not usable! "
-      "Reason: Weight packing only supports non-quantized tensors.");
-  TORCH_INTERNAL_ASSERT(
-      weight_arg.dim() == 2 || weight_arg.dim() == 3,
-      "Vulkan Linear not usable! "
-      "Reason: Weight packing only supports 2D or 3D tensors.");
-
   Tensor weight = weight_arg;
 
   if (weight.is_cpu()) {

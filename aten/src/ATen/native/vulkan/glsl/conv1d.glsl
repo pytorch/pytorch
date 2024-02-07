@@ -30,8 +30,8 @@ uBlock;
 
 // Let us define
 //
-// input = (n, in_C, in_L),
-// output = (n, out_C, out_L),
+// input = (N, in_C, in_L),
+// output = (N, out_C, out_L),
 // groups = G,
 // kernel = K,
 //
@@ -40,9 +40,13 @@ uBlock;
 // weight = (out_C, in_C / G, K),
 // bias = (out_C,).
 //
-// This implementation performs out_C number of shader invocations, where each
-// invocation calculates the rolling kernel of the length dimension, i.e.,
-// computes the out_L results.
+// This implementation performs out_C shader invocations, where each invocation
+// calculates the rolling kernel of the length dimension for each batch, i.e.,
+// computes out_L * N results.
+//
+// Note that we can rewrite this implementation as out_L * out_C * ceil(N / 4)
+// shader invocations, where each invocation computes 1 result. But that
+// performs worse.
 void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
 
@@ -55,13 +59,8 @@ void main() {
   const int out_group_size = uBlock.out_group_size;
   const int batch_size = uBlock.batch_size;
 
-  // The global workgroup should have taken care of it. We perform one shader
-  // invocation, per 1D length array of the output tensor.
-  if (pos.x >= 1 || pos.z >= 1) {
-    return;
-  }
-
   // "out_c" is the output's channel index where we write our result.
+  // Across shader invocations, this is the only value that varies.
   int out_c = pos.y;
   vec4 bias = texelFetch(uBias, ivec3(out_c, 0, 0), 0);
 
@@ -75,13 +74,13 @@ void main() {
   int l_start = -padding;
   int l_end = in_length + padding - dilation * (kernel_size - 1);
 
-  // "out_l" tracks the output's length index where we write our result.
-  int out_l = 0;
+  // Since the input/output tensors are channel-packed, which is along the
+  // batch dimension, we can batch-read/write four elements at a time.
+  for (int n = 0; n < batch_size; n += 4) {
+    // "out_l" tracks the output's length index where we write our result.
+    int out_l = 0;
 
-  for (int in_l = l_start; in_l < l_end; in_l += strides, ++out_l) {
-    // Since the input/output tensors are channel-packed, which is along the
-    // batch dimension, we can batch-read/write four elements at a time.
-    for (int n = 0; n < batch_size; n += 4) {
+    for (int in_l = l_start; in_l < l_end; in_l += strides, ++out_l) {
       vec4 sum = vec4(0,0,0,0);
 
       for (int in_c = c_start; in_c < c_end; ++in_c) {
@@ -90,7 +89,7 @@ void main() {
         // for-loop conditions, which results in worse performance.
         for (int k = 0; k < kernel_size; k += 4) {
           // Since the weight tensor is width-packed, which is along the kernel
-          // dimension we can batch-read four elements at a time.
+          // dimension, we can batch-read four elements at a time.
           const ivec3 w_pos = ivec3(k / 4, in_c % in_group_size, out_c);
           const vec4 weight = texelFetch(uKernel, w_pos, 0);
 
