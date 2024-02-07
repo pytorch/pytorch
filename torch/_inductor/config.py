@@ -589,6 +589,14 @@ class aot_inductor:
     # Serialized tree spec for flattening outputs
     serialized_out_spec = ""
 
+    # AOTI is used for eager mode
+    eager_mode = (
+        True if os.environ.get("TORCHINDUCTOR_AOTI_EAGER", "0") == "1" else False
+    )
+
+    # used for eager mode
+    eager_op_name = ""
+
 
 class cuda:
     # CUDA arch to use for CUDA template kernel compilation.

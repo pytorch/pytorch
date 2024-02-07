@@ -23,7 +23,7 @@ from torch.utils._sympy.singleton_int import SingletonInt
 
 from .. import codecache, config, ir
 from ..codecache import CudaKernelParamCache
-from ..ir import ReinterpretView
+from ..ir import FixedLayout, ReinterpretView, TensorBox
 from ..triton_heuristics import grid as default_grid
 from ..utils import (
     cache_on_self,
@@ -364,6 +364,7 @@ class WrapperCodeGen(CodeGen):
         self.prefix = IndentedBuffer()
         self.suffix = IndentedBuffer()
         self.wrapper_call = IndentedBuffer()
+        self.kernel_meta_info = IndentedBuffer()
         self.src_to_kernel = {}
         self.kenel_numel_expr = set()
         self.lines = []
@@ -494,6 +495,16 @@ class WrapperCodeGen(CodeGen):
             self.prefix.writeline(line)
             line = f"assert not {name}.isinf().any().item()"
             self.prefix.writeline(line)
+
+    def write_kernel_meta_info(self):
+        for value in V.graph.graph_inputs.values():
+            if isinstance(value, TensorBox) and isinstance(value.layout, FixedLayout):
+                device_type = value.get_device().type
+                dtype = value.get_dtype()
+                sizes = value.get_size()
+                strides = value.get_stride()
+                kernel_meta_info_item = f"true;{device_type};{dtype};{sizes};{strides}"
+                self.kernel_meta_info.writeline(kernel_meta_info_item)
 
     def write_prefix(self):
         self.prefix.splice(
@@ -1439,7 +1450,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.header.splice(
                 """
                 import torch
-                from torch._inductor.codecache import CppWrapperCodeCache
+                from torch._inductor.codecache import CppWrapperCodeCache, CppWrapperCodeCacheForEager
 
                 cpp_wrapper_src = (
                 '''
@@ -1606,17 +1617,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 self.prefix.splice(run_impl_proto)
         else:
             self.prefix.splice(
-                f"""std::vector<at::Tensor> {self.call_func_name}(const std::vector<at::Tensor>& inputs);"""
-            )
-            # For aoti eager mode
-            self.prefix.splice(
-                f"""
-                extern "C" std::vector<at::Tensor> aoti_eager_{self.call_func_name}(const std::vector<at::Tensor>& inputs) {{
-                    return {self.call_func_name}(inputs);
-                }}
-                """
-            )
-            self.prefix.splice(
                 f"""std::vector<at::Tensor> {self.call_func_name}(const std::vector<at::Tensor>& inputs) {{"""
             )
         with self.prefix.indent():
@@ -1636,6 +1636,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
                                 auto inputs = alloc_tensors_by_stealing_from_handles(input_handles, num_inputs());
                             """
                         )
+                elif config.aot_inductor.eager_mode:
+                    pass
                 else:
                     self.prefix.splice(
                         """
@@ -1851,6 +1853,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.codegen_model_kernels()
             self.codegen_model_constructor()
         self.write_wrapper_decl()
+
+        if config.aot_inductor.eager_mode:
+            self.write_kernel_meta_info()
+
         return super().generate(is_inference)
 
     def finalize_prefix(self):
@@ -1995,9 +2001,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
             return
 
         result.writeline("'''\n)")
+        cache_cls_name = (
+            "CppWrapperCodeCacheForEager"
+            if config.aot_inductor.eager_mode
+            else "CppWrapperCodeCache"
+        )
         result.splice(
             f"""
-            inductor_entry = CppWrapperCodeCache.load_pybinding(["std::vector<at::Tensor>"], cpp_wrapper_src, {self.cuda})
+            inductor_entry = {cache_cls_name}.load_pybinding(["std::vector<at::Tensor>"], cpp_wrapper_src, {self.cuda})
             """
         )
 
@@ -2268,6 +2279,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 and V.graph.aot_mode
                 and buffer.get_name() in V.graph.graph_inputs
             )
+            or config.aot_inductor.eager_mode
             else f"{buffer.get_name()}.reset();"
         )
 

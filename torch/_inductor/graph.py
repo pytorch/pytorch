@@ -1171,6 +1171,9 @@ class GraphLowering(torch.fx.Interpreter):
             return AotCodeCompiler.compile(
                 self, code, serialized_extern_kernel_nodes, cuda=self.cuda
             )
+        elif config.aot_inductor.eager_mode:
+            assert self.cpp_wrapper, "AOT mode for eager only supports C++ wrapper"
+            return self.compile_to_module().call
         else:
             return self.compile_to_module().call
 

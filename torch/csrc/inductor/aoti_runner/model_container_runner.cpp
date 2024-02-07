@@ -157,6 +157,8 @@ AOTIEagerKernelRunner::AOTIEagerKernelRunner(const std::string& model_so_path) {
   TORCH_CHECK(run_func_, "Failed to load function: ", run_func_name);
 }
 
+AOTIEagerKernelRunner::~AOTIEagerKernelRunner() {}
+
 std::vector<at::Tensor> AOTIEagerKernelRunner::operator()(
     std::vector<at::Tensor>& inputs) {
   return run_func_(inputs);
