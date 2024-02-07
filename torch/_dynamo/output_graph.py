@@ -1356,6 +1356,31 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     # arbitrary expressions, not just symbols.  But it is not
                     # so easy to make use of this information, see
                     # https://twitter.com/ezyang/status/1745801370299482492
+                    # We actually made an attempt at this in
+                    # https://github.com/pytorch/pytorch/pull/119043
+                    # which didn't work.
+                    #
+                    # Another ideas for how to do this:
+                    # - Have bound_sympy be the source of truth of the ranges of any expression
+                    # - Cache intermediate results for every subexpression of bound_sympy
+                    # - This cache should be possible to edit to refine ranges
+                    #
+                    # One issue with this proposal is that if
+                    # we have a bound on 2x, we are not going to be able to
+                    # apply it for 4x.  Similarly, we may have bounds for an
+                    # equivalent expression that we are not applying because
+                    # it's not a perfect match (e.g. x < y vs y > x)".
+                    #
+                    # The first issue we already have it and it's impossible
+                    # to solve in general, so any implementation on a best
+                    # effort basis should do.
+                    #
+                    # The second issue is a preexisting one. It can be mitigated
+                    # with a normalisation algorithm. In general, it may also
+                    # be on a best effort basis, but since our grammar is not
+                    # terribly difficult, chances are we could even fully
+                    # normalise SymPy expressions... who knows.
+
                     if i0 in self.shape_env.size_like:
                         self.graph.call_function(
                             torch._check_is_size, (symbol_to_proxy[i0].node,)
@@ -1377,7 +1402,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
                         self.graph.call_function(
                             torch._constrain_as_value,
-                            # TODO: this could choke if it's sympy.oo
                             (
                                 symbol_to_proxy[i0].node,
                                 convert(vr.lower),

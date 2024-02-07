@@ -3424,7 +3424,8 @@ class ShapeEnv:
 
         # Precondition: a == tgt
 
-        # Handles NT symbolic variables...
+        # Handles nested tensor symbolic variables which don't have
+        # var_to_range bounds
         tgt_bound = None
         if a in self.var_to_range:
             src_bound = self.var_to_range[a]
@@ -3524,7 +3525,7 @@ class ShapeEnv:
             # specializing to a constant, which is likely unexpected
 
             # NOTE(avik): It is possible that we try logging the same specialization multiple times, e.g.,
-            # when adding a to self.replacements, and again when simplifying an tgtession containing a.
+            # when adding a to self.replacements, and again when simplifying an expression containing a.
             # Thus to avoid duplication, checking whether a is in self.replacements isn't enough; if it is,
             # it must not already map to `tgt`. Fortunately this check is cheap because `tgt` is a constant.
             if a not in self.replacements or tgt != self.replacements[a]:
