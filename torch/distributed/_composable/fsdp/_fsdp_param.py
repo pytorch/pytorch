@@ -28,23 +28,25 @@ FSDP considers the following tensors:
   on the module when applying FSDP
 - Sharded parameter: sharding the original parameter on dim-0 as a DTensor
   over the main mesh
-- All-gather input: the ``torch.Tensor`` passed to all-gather, derived from the
-  sharded parameter
-- All-gather output: the ``torch.Tensor`` resulting from all-gathering the
-  all-gather input
+- All-gather inputs: the ``torch.Tensor`` or ``Tensor`` s passed to all-gather,
+  derived from the sharded parameter
+- All-gather output: the ``torch.Tensor`` or ``Tensor`` s resulting from
+  all-gathering the all-gather input
 - Unsharded parameter: parameter used for forward/backward computation, derived
   from the all-gather output; autograd leaf
 
 We define these tensors to describe the general framework that can accomodate
 extensions, where:
-- all-gather-input = pre-all-gather-transform(sharded-parameter)
-- unsharded-parameter = post-all-gather-transform(all-gather-output)
+- all-gather-inputs = pre-all-gather-transform(sharded-parameter)
+- unsharded-parameter = post-all-gather-transform(all-gather-outputs)
 
-For the default ``torch.Tensor`` case, the sharded parameter and all-gather
-input share the same underlying tensor data, meaning that they can be thought
-of as the same tensors. The same applies for the all-gather output and
-unsharded parameter. For non-``torch.Tensor`` extensions, these equivalences
-may no longer hold due to the pre/post-all-gather transforms.
+For the default ``torch.Tensor`` case, there is only one all-gather input, and
+it shares the same underlying tensor data as the sharded parameter, meaning
+that they can be thought of as the same tensors. The same applies for the
+all-gather output and unsharded parameter. For non-``torch.Tensor`` extensions,
+these equivalences may no longer hold due to the pre/post-all-gather
+transforms, and some may have multiple all-gather inputs/outputs (e.g.
+quantized data and scales).
 
 [Note: FSDP and autograd]
 FSDP dynamically frees and allocates the unsharded parameter. Since autograd
