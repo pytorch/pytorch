@@ -290,6 +290,8 @@ test_inductor_distributed() {
   pytest test/inductor/test_aot_inductor.py -k test_replicate_on_devices
   pytest test/distributed/_tensor/test_dtensor_compile.py
   pytest test/distributed/tensor/parallel/test_fsdp_2d_parallel.py
+  pytest test/distributed/_composable/fsdp/test_fully_shard_comm.py
+  pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_multi_group
 
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
