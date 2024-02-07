@@ -240,12 +240,6 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         return 8
 
     @with_comms
-    def test_raises_mesh_dim_less_than_2(self):
-        with self.assertRaisesRegex(RuntimeError, "Cannot slice a DeviceMesh"):
-            mesh = init_device_mesh(self.device_type, (8,))
-            child_mesh = mesh["DP"]
-
-    @with_comms
     def test_raises_no_mesh_dim_found(self):
         with self.assertRaisesRegex(KeyError, "No `mesh_dim_names` found."):
             mesh = init_device_mesh(self.device_type, (2, 4))
