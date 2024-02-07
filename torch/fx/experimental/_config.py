@@ -1,6 +1,8 @@
 import os
 import sys
 
+from typing import Optional
+
 import torch
 
 
@@ -57,7 +59,7 @@ validate_shape_env_version_key = False
 # issued (as we test if we've hit the limit on-the-fly, whereas we may
 # do further simplifications at final guard issuance time that make guards
 # irrelevant.)
-symbol_guard_limit_before_specialize = None if is_fbcode() else 100
+symbol_guard_limit_before_specialize: Optional[int] = None if is_fbcode() else 100
 
 from torch.utils._config_module import install_config_module
 
