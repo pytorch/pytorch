@@ -2419,6 +2419,14 @@ class ShapeEnv:
         # for validation.
         return SymBool(SymNode(sym, self, bool, None))
 
+    def _log_create_unbacked_symbol(self, prefix: str, symbol, vr: ValueRanges):
+        is_debug = config.extended_debug_create_symbol is not None and str(symbol) in config.extended_debug_create_symbol.split(',')
+        fsummary, user_tb, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
+        log.info(
+            "%s %s [%s, %s]%s (%s)%s",
+            prefix, symbol, vr.lower, vr.upper, maybe_user_loc, format_frame(fsummary), maybe_extra_debug, stack_info=is_debug
+        )
+
     @record_shapeenv_event()
     def create_unbacked_symfloat(self):
         """Create a symbolic float without a hint value
@@ -2431,8 +2439,7 @@ class ShapeEnv:
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self._create_fx_placeholder_and_z3var(symbol, float)
 
-        fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
-        log.info("create_unbacked_symfloat %s [%s, %s]%s (%s)", symbol, vr.lower, vr.upper, maybe_user_loc, format_frame(fsummary))
+        self._log_create_unbacked_symbol("create_unbacked_symfloat", symbol, vr)
 
         return SymFloat(SymNode(symbol, self, float, None, fx_node=fx_node))
 
@@ -2448,8 +2455,7 @@ class ShapeEnv:
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self._create_fx_placeholder_and_z3var(symbol, int)
 
-        fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
-        log.info("create_unbacked_symint %s [%s, %s]%s (%s)", symbol, vr.lower, vr.upper, maybe_user_loc, format_frame(fsummary))
+        self._log_create_unbacked_symbol("create_unbacked_symint", symbol, vr)
 
         return SymInt(SymNode(symbol, self, int, None, fx_node=fx_node))
 
@@ -2471,8 +2477,7 @@ class ShapeEnv:
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self._create_fx_placeholder_and_z3var(symbol, bool)
 
-        fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
-        log.info("create_unbacked_symbool %s [%s, %s]%s (%s)", symbol, vr.lower, vr.upper, maybe_user_loc, format_frame(fsummary))
+        self._log_create_unbacked_symbol("create_unbacked_symbool", symbol, vr)
 
         return SymBool(SymNode(sympy.Eq(symbol, 1), self, bool, None, fx_node=fx_node))
 
@@ -2607,11 +2612,15 @@ class ShapeEnv:
 
             r = sympy_expr
 
-            fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
+            is_debug = (
+                config.extended_debug_create_symbol is not None and
+                str(sympy_expr) in config.extended_debug_create_symbol.split(',')
+            )
+            fsummary, user_tb, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
             self.log.info(
-                "create_symbol %s = %s for %s %s%s (%s)",
+                "create_symbol %s = %s for %s %s%s (%s)%s",
                 sympy_expr, val, source.name(), range_str,
-                maybe_user_loc, format_frame(fsummary)
+                maybe_user_loc, format_frame(fsummary), maybe_extra_debug, stack_info=is_debug
             )
 
             self.counter["create_symbol"] += 1
@@ -3475,13 +3484,20 @@ class ShapeEnv:
         for s in expr.free_symbols:
             stacktrace = ''.join(self.var_to_stack[s].format())
             self.log.debug("Data dependent variable '%s' allocated at:\n%s", s, stacktrace)
-        # cpp_stack = CapturedTraceback.extract(cpp=True)
+        maybe_cpp_stack = ""
+        if config.extended_debug_cpp:
+            cpp_stack = CapturedTraceback.extract(cpp=True)
+            maybe_cpp_stack = "C++ stack trace:\n" + ''.join(cpp_stack.format()) + "\n\n"
         return GuardOnDataDependentSymNode(
-            # "C++ stack trace:\n" + ''.join(cpp_stack.format()) + "\n\n"
+            maybe_cpp_stack +
             "It appears that you're trying to get a value out of symbolic int/float "
             "whose value is data-dependent (and thus we do not know the true value.)  "
-            f"The expression we were trying to evaluate is {expr} (unhinted: {unhinted_expr}).  "
-            "For more information, run with TORCH_LOGS=\"+dynamic\".\n"
+            f"The expression we were trying to evaluate is {expr} (unhinted: {unhinted_expr}).\n\n"
+            "For more information, run with TORCH_LOGS=\"dynamic\".\n"
+            "For extended logs when we create symbols, also add "
+            f"TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL=\"{','.join(map(str, expr.free_symbols))}\".\n"
+            "To get a C++ backtrace for this exception or the extended logs above, also add TORCHDYNAMO_EXTENDED_DEBUG_CPP=1.\n"
+            "For more debugging help, see https://docs.google.com/document/d/1HSuTTVvYH1pTew89Rtpeu84Ht3nQEFTYhAX3Ypa_xJs/edit?usp=sharing"
             # TODO: Help text about how to use our runtime tests to fix this
             # problem
         )
@@ -3766,7 +3782,7 @@ class ShapeEnv:
             log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
 
 
-    def _get_stack_summary(self):
+    def _get_stack_summary(self, is_debug: bool = False):
         fsummary = None
         frame = inspect.currentframe()
         try:
@@ -3789,28 +3805,24 @@ class ShapeEnv:
         if user_tb:
             maybe_user_loc = " at " + format_frame(user_tb[-1])
 
-        return fsummary, user_tb, maybe_user_loc
+        maybe_extra_debug = ""
+        if is_debug and user_tb:
+            maybe_extra_debug = (
+                '\nUser Stack (most recent call last):\n' +
+                '  (snipped, see stack below for prefix)\n' +
+                ''.join(traceback.format_list(user_tb))
+            )
+        if is_debug and config.extended_debug_cpp:
+            cpp_stack = CapturedTraceback.extract(cpp=True)
+            maybe_extra_debug += "\nC++ stack trace:\n" + ''.join(cpp_stack.format())
+
+        return fsummary, user_tb, maybe_user_loc, maybe_extra_debug
 
     def _log_guard(self, prefix: str, g):
         if self.log.isEnabledFor(logging.INFO):
-            fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
-
             str_g = str(g)
-
-            # TODO: make this an artifact
-            is_debug = False
-            if config.extended_debug_guard_added is not None and str_g == config.extended_debug_guard_added:
-                is_debug = True
-            maybe_extra_debug = ""
-            if is_debug and user_tb:
-                maybe_extra_debug = (
-                    '\nUser Stack (most recent call last):\n' +
-                    '  (snipped, see stack below for prefix)\n' +
-                    ''.join(traceback.format_list(user_tb))
-                )
-            if is_debug:
-                cpp_stack = CapturedTraceback.extract(cpp=True)
-                maybe_extra_debug += "\nC++ stack trace:\n" + ''.join(cpp_stack.format())
+            is_debug = config.extended_debug_guard_added is not None and str_g == config.extended_debug_guard_added
+            fsummary, user_tb, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
             self.log.info(
                 "%s %s [guard added]%s (%s)%s",
                 prefix,
