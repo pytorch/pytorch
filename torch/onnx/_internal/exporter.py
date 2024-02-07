@@ -707,6 +707,9 @@ class ONNXProgram:
         """
         import onnxruntime  # type: ignore[import]
 
+        # model specified by the user has precedence, when specified
+        model_with_state_dict = model_with_state_dict or self._model_torch
+
         options = options or ONNXRuntimeOptions()
         providers = options.execution_providers or onnxruntime.get_available_providers()
         onnx_model = self.model_proto.SerializeToString()

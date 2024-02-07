@@ -150,7 +150,7 @@ class OutputAdapter:
             PyTorch model outputs in exported ONNX model outputs format.
         """
         for step in self._steps:
-            model_outputs = step.apply(model_outputs, model)
+            model_outputs = step.apply(model_outputs, model=model)
         return model_outputs
 
 
@@ -620,7 +620,7 @@ class AppendLiftedConstantNonPersistentBufferInputStep(InputAdaptStep):
         ] = None,
         onnx_input_names: Optional[Sequence[str]] = None,
     ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
-        """Prepend model's lifted constants to the user input.
+        """Append model's lifted constants and non-persisten buffers to the user input.
 
         Args:
             model_args: The model args.
@@ -681,14 +681,14 @@ class PrependMutatedBufferOutputStep(OutputAdaptStep):
             Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
         ] = None,
     ) -> Sequence[Any]:
-        """Flatten the model outputs and validate the `SpecTree` output.
+        """Prepend model's mutated buffers to the user output.
 
         Args:
             model_outputs: The model outputs to flatten.
             model: The PyTorch model.
 
         Returns:
-            flattened_outputs: The flattened model outputs.
+            updated_outputs: The updated model outputs with model's mutated buffers prepended.
         """
 
         assert isinstance(
