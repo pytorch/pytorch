@@ -324,6 +324,7 @@ JIT_EXECUTOR_TESTS = [
 ]
 
 INDUCTOR_TESTS = [test for test in TESTS if test.startswith(INDUCTOR_TEST_PREFIX)]
+DYNAMO_TESTS = [test for test in TESTS if test.startswith("dynamo")]
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith(DISTRIBUTED_TEST_PREFIX)]
 TORCH_EXPORT_TESTS = [test for test in TESTS if test.startswith("export")]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
@@ -1330,6 +1331,7 @@ def get_selected_tests(options) -> List[str]:
     if (sys.version_info >= (3, 12)):
         options.exclude.extend(INDUCTOR_TESTS)
         options.exclude.extend(FUNCTORCH_TESTS)
+        options.exclude.extend(DYNAMO_TESTS)
         options.exclude.extend(["functorch/test_dims",
                                 "functorch/test_rearrange",
                                 "functorch/test_parsing",
