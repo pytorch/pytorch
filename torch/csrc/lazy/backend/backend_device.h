@@ -73,13 +73,15 @@ TORCH_API c10::Device backendDeviceToAtenDevice(const BackendDevice& device);
 
 // Tries to extract the backend device out of the lazy tensor. Returns nullopt
 // if the input is not a lazy tensor.
-TORCH_API c10::optional<BackendDevice> GetBackendDevice(
+TORCH_API c10::optional<BackendDevice> GetBackendDeviceOneArg(
     const at::ITensorListRef tensors);
-TORCH_API c10::optional<BackendDevice> GetBackendDevice(
+TORCH_API c10::optional<BackendDevice> GetBackendDeviceOneArg(
     const at::TensorList tensors);
-TORCH_API c10::optional<BackendDevice> GetBackendDevice(
+TORCH_API c10::optional<BackendDevice> GetBackendDeviceOneArg(
     const at::Tensor& tensor);
-TORCH_API c10::optional<BackendDevice> GetBackendDevice(
+TORCH_API c10::optional<BackendDevice> GetBackendDeviceOneArg(
+    const std::optional<at::Tensor>&);
+TORCH_API c10::optional<BackendDevice> GetBackendDeviceOneArg(
     const c10::optional<c10::Device>& device);
 
 // For variadic template.
@@ -89,7 +91,7 @@ template <typename T, typename... Args>
 c10::optional<BackendDevice> GetBackendDevice(
     const T& tensor,
     const Args&... forward_tensors) {
-  auto optional_device = GetBackendDevice(tensor);
+  auto optional_device = GetBackendDeviceOneArg(tensor);
   if (optional_device) {
     return optional_device;
   }
