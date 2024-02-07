@@ -75,7 +75,7 @@ class BaseListVariable(VariableTracker):
 
     def as_proxy(self):
         assert self.python_type() is not SizeVariable
-        return self.python_type()(self._as_proxy())
+        return self.python_type()(*self._as_proxy())
 
     def getitem_const(self, arg: VariableTracker):
         from .tensor import SymNodeVariable
