@@ -1,8 +1,15 @@
 #pragma once
 
+#include <c10/util/Exception.h>
+#include <cstddef>
 #include <functional>
 #include <iomanip>
+#include <ios>
 #include <sstream>
+#include <string>
+#include <tuple>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <c10/util/ArrayRef.h>
@@ -109,8 +116,8 @@ struct sha1 {
     unsigned int e = h_[4];
 
     for (std::size_t i = 0; i < 80; ++i) {
-      unsigned int f;
-      unsigned int k;
+      unsigned int f = 0;
+      unsigned int k = 0;
 
       if (i < 20) {
         f = (b & c) | (~b & d);
@@ -212,11 +219,11 @@ struct sha1 {
     process_byte_impl(
         static_cast<unsigned char>((bit_count_high >> 16) & 0xFF));
     process_byte_impl(static_cast<unsigned char>((bit_count_high >> 8) & 0xFF));
-    process_byte_impl(static_cast<unsigned char>((bit_count_high)&0xFF));
+    process_byte_impl(static_cast<unsigned char>((bit_count_high) & 0xFF));
     process_byte_impl(static_cast<unsigned char>((bit_count_low >> 24) & 0xFF));
     process_byte_impl(static_cast<unsigned char>((bit_count_low >> 16) & 0xFF));
     process_byte_impl(static_cast<unsigned char>((bit_count_low >> 8) & 0xFF));
-    process_byte_impl(static_cast<unsigned char>((bit_count_low)&0xFF));
+    process_byte_impl(static_cast<unsigned char>((bit_count_low) & 0xFF));
 
     // get final digest
     digest[0] = h_[0];
@@ -226,12 +233,23 @@ struct sha1 {
     digest[4] = h_[4];
   }
 
-  unsigned int h_[5];
-  unsigned char block_[64];
-  std::size_t block_byte_index_;
-  std::size_t bit_count_low;
-  std::size_t bit_count_high;
+  unsigned int h_[5]{};
+  unsigned char block_[64]{};
+  std::size_t block_byte_index_{};
+  std::size_t bit_count_low{};
+  std::size_t bit_count_high{};
 };
+
+constexpr uint64_t twang_mix64(uint64_t key) noexcept {
+  key = (~key) + (key << 21); // key *= (1 << 21) - 1; key -= 1;
+  key = key ^ (key >> 24);
+  key = key + (key << 3) + (key << 8); // key *= 1 + (1 << 3) + (1 << 8)
+  key = key ^ (key >> 14);
+  key = key + (key << 2) + (key << 4); // key *= 1 + (1 << 2) + (1 << 4)
+  key = key ^ (key >> 28);
+  key = key + (key << 31); // key *= 1 + (1 << 31)
+  return key;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // c10::hash implementation
@@ -244,8 +262,7 @@ template <typename T>
 size_t simple_get_hash(const T& o);
 
 template <typename T, typename V>
-using type_if_not_enum =
-    typename std::enable_if<!std::is_enum<T>::value, V>::type;
+using type_if_not_enum = std::enable_if_t<!std::is_enum_v<T>, V>;
 
 // Use SFINAE to dispatch to std::hash if possible, cast enum types to int
 // automatically, and fall back to T::hash otherwise. NOTE: C++14 added support
@@ -259,9 +276,8 @@ auto dispatch_hash(const T& o)
 }
 
 template <typename T>
-typename std::enable_if<std::is_enum<T>::value, size_t>::type dispatch_hash(
-    const T& o) {
-  using R = typename std::underlying_type<T>::type;
+std::enable_if_t<std::is_enum_v<T>, size_t> dispatch_hash(const T& o) {
+  using R = std::underlying_type_t<T>;
   return std::hash<R>()(static_cast<R>(o));
 }
 

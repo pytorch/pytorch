@@ -12,8 +12,8 @@ void add_copy_node(
 }
 
 ValueRef add_copy_node(ComputeGraph& graph, const ValueRef from) {
-  IntArrayRef out_sizes = graph.get_val_sizes(from);
-  c10::ScalarType out_dtype = graph.get_val_dtype(from);
+  std::vector<int64_t> out_sizes = graph.get_val_sizes(from);
+  api::ScalarType out_dtype = graph.get_val_dtype(from);
   ValueRef to = graph.add_tensor(out_sizes, out_dtype);
   add_copy_node(graph, from, to);
   return to;

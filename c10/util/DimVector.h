@@ -3,6 +3,7 @@
 #include <c10/core/SymInt.h>
 #include <c10/core/impl/SizesAndStrides.h>
 #include <c10/util/SmallVector.h>
+#include <cstddef>
 #include <cstdint>
 
 namespace c10 {

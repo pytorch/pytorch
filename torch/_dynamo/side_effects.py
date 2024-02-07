@@ -214,29 +214,25 @@ class SideEffects:
 
     def _track_obj(
         self,
-        source: Source,
         item: Any,
         variable: VariableTracker,
         mutable_cls=MutableSideEffects,
     ):
         """Start tracking a new variable for mutation"""
-        variable = variable.clone(mutable_local=mutable_cls(source), source=source)
+        assert variable.source is not None
+        variable.mutable_local = mutable_cls(variable.source)
         self.id_to_variable[id(item)] = variable
         self.keepalive.append(item)
         return variable
 
-    track_list = _track_obj
-    track_dict = _track_obj
+    track_mutable = _track_obj
 
     def track_object_existing(
         self,
-        source: Source,
         item: Any,
         variable: VariableTracker,
     ):
-        return self._track_obj(
-            source, item, variable, mutable_cls=AttributeMutationExisting
-        )
+        return self._track_obj(item, variable, mutable_cls=AttributeMutationExisting)
 
     def track_object_new(
         self,
@@ -291,6 +287,18 @@ class SideEffects:
         assert isinstance(ctx, variables.AutogradFunctionContextVariable)
         self.save_for_backward.append((ctx, args))
 
+    def track_tensor_variables_from_runahead_side_effects(self, other):
+        # In higher order ops we want to keep track of tensors seen in the
+        # speculate_subgraph so that we don't lift them again as a new input in
+        # other speculate_subgraph or in the root tracer.
+        for other_item in other.keepalive:
+            other_id = id(other_item)
+            other_variable = other.id_to_variable[other_id]
+            if other_id not in self.id_to_variable and isinstance(
+                other_variable, variables.TensorVariable
+            ):
+                self.track_object_existing(other_item, other_variable)
+
     def prune_dead_object_new(self, tx):
         live_new_objects = set()
         skip_obj = None
@@ -325,11 +333,10 @@ class SideEffects:
             k: v for k, v in self.store_attr_mutations.items() if is_live(k)
         }
 
-    def mutation(self, oldvar, newvar):
-        self.check_allowed_side_effect(oldvar)
-        return newvar.clone(
-            mutable_local=MutableSideEffects(oldvar.mutable_local.source, True)
-        )
+    def mutation(self, var):
+        self.check_allowed_side_effect(var)
+        if isinstance(var.mutable_local, MutableSideEffects):
+            var.mutable_local = MutableSideEffects(var.mutable_local.source, True)
 
     def _get_modified_vars(self):
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
@@ -343,7 +350,7 @@ class SideEffects:
                 cg.extend_output(create_call_function(0, True))
                 cg.add_cache(var)
                 if isinstance(var.mutable_local, AttributeMutationNew):
-                    var.mutable_local.source = LocalSource(cg.tempvars[var])
+                    var.mutable_local.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
             elif isinstance(var.mutable_local, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
@@ -460,7 +467,7 @@ class SideEffects:
             if isinstance(var, variables.ListVariable):
                 # old[:] = new
                 cg(var, allow_cache=False)
-                cg(var.mutable_local.source)
+                cg(var.mutable_local.source)  # type: ignore[attr-defined]
                 cg.extend_output(
                     [
                         cg.create_load_const(None),
@@ -473,11 +480,11 @@ class SideEffects:
                 cg.tx.output.update_co_names("clear")
                 cg.tx.output.update_co_names("update")
 
-                cg(var.mutable_local.source)
+                cg(var.mutable_local.source)  # type: ignore[attr-defined]
                 cg.extend_output([create_instruction("LOAD_METHOD", argval="update")])
                 cg(var, allow_cache=False)
 
-                cg(var.mutable_local.source)
+                cg(var.mutable_local.source)  # type: ignore[attr-defined]
                 cg.extend_output([create_instruction("LOAD_METHOD", argval="clear")])
 
                 suffixes.append(
@@ -514,6 +521,12 @@ class SideEffects:
                         cg(value)
                         cg(var.mutable_local.source)
                         suffixes.append([create_instruction("STORE_ATTR", argval=name)])
+            elif isinstance(var, variables.TupleIteratorVariable):
+                for _ in range(var.index):
+                    cg.load_import_from(utils.__name__, "iter_next")
+                    cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                    cg.extend_output(create_call_function(1, True))
+                    cg.append_output(create_instruction("POP_TOP"))
             else:
                 raise AssertionError(type(var))
 

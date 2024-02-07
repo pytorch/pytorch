@@ -8,7 +8,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed._tensor.api as dtensor
 import torch.distributed._tensor.random as random
-from torch.distributed._tensor.device_mesh import DeviceMesh
+from torch.distributed._tensor._utils import try_find_mesh_from_args
 from torch.distributed._tensor.op_schema import (
     _is_inplace_op,
     _is_out_variant_op,
@@ -24,6 +24,7 @@ from torch.distributed._tensor.tp_conv import (
     convolution_backward_handler,
     convolution_handler,
 )
+from torch.distributed.device_mesh import DeviceMesh
 
 try:
     from torch.utils import _cxx_pytree as pytree
@@ -86,6 +87,12 @@ class OpDispatcher:
             aten.convolution.default: convolution_handler,
             aten.convolution_backward.default: convolution_backward_handler,
         }
+
+        # This flag is used internally to control whether we treat the torch.Tensor(non-DTensor)
+        # as implicitly replicated or we throw error to user.
+        # NOTE: It is EXTREMELY UNSAFE to turn this flag on by default so we intentionally leave
+        # it as False by default.
+        self._allow_implicit_replication = False
 
     def dispatch(
         self,
@@ -192,7 +199,7 @@ class OpDispatcher:
         if output_sharding.output_spec is None:
             if op_call == aten.equal.default:
                 obj_list = [None for _ in range(dist.get_world_size())]
-                dist.all_gather_object(obj_list, local_results)
+                dist.all_gather_object(obj_list, local_results)  # type: ignore[possibly-undefined]
                 obj_list = list(filter(lambda x: x is not None, obj_list))
                 # perform reduce on the collection with AND op
                 local_results = functools.reduce(operator.and_, obj_list, True)
@@ -222,7 +229,7 @@ class OpDispatcher:
             assert len(out_dts) >= 1, "out variant should have at least one out arg"
             return tuple(out_dts) if len(out_dts) > 1 else out_dts[0]
         else:
-            return self.wrap(local_results, output_sharding.output_spec)
+            return self.wrap(local_results, output_sharding.output_spec)  # type: ignore[possibly-undefined]
 
     @staticmethod
     def redistribute_local_args(
@@ -293,7 +300,8 @@ class OpDispatcher:
                 else:
                     mesh = arg.device_mesh
             elif isinstance(arg, torch.Tensor):
-                if arg.ndim == 0 and mesh is not None:
+                if arg.ndim == 0 or self._allow_implicit_replication:
+                    mesh = mesh or try_find_mesh_from_args(op_call, args_list)
                     # scalar tensor can be safely treated as replicated
                     args_schema.append(
                         DTensorSpec(

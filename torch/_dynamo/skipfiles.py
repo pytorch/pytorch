@@ -34,14 +34,16 @@ import torch
 import torch._inductor.test_operators
 import torch.distributed
 import torch.utils._content_store
+from ..utils import _config_module
 from .utils import getfile
 
-from .variables.functions import (
+from .variables import (
+    FunctorchVmapHigherOrderVariable,
     NestedUserFunctionVariable,
+    SkipFilesVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
-
 
 """
 A note on skipfiles:
@@ -124,7 +126,6 @@ BUILTIN_SKIPLIST = (
 # third party libraries skiplist is defined by str, because users may not use these libraries.
 # we should use lazy import & skip in the future.
 THIRDPARTY_SKIPLIST = (
-    "functorch",
     "fx2trt_oss",
     "networkx",
     "numpy",
@@ -146,20 +147,19 @@ THIRDPARTY_SKIPLIST = (
 
 
 def _strip_init_py(s):
-    return re.sub(r"__init__.py$", "", s)
+    # TODO: Once we require py3.9 use removesuffix instead.
+    suffix = "__init__.py"
+    if s.endswith(suffix):
+        return s[: -len(suffix)]
+    else:
+        return s
 
 
 def _module_dir(m: types.ModuleType):
-    return _strip_init_py(m.__file__)
-
-
-# TODO: Add a decoractor for easily adding functions to FUNC_INLINELIST
-# after resolving all circular import issues.
-FUNC_INLINELIST = {
-    "torch._constrain_as_size",
-    "torch._constrain_as_value",
-    "torch._tensor._convert",
-}
+    # Protect against a module not exporting __file__ - this can happen for
+    # frozen modules, for example.
+    file = getattr(m, "__file__", None)
+    return file and _strip_init_py(file)
 
 
 # These are legacy workarounds, don't add new modules to this list.
@@ -183,7 +183,7 @@ if torch.distributed.is_available():
     LEGACY_MOD_INLINELIST |= {
         "torch.distributed._tensor.api",
         "torch.distributed._tensor.device_mesh",
-        "torch.distributed._device_mesh",
+        "torch.distributed.device_mesh",
         "torch.distributed.algorithms._checkpoint.checkpoint_wrapper",
         "torch.distributed.tensor.parallel._data_parallel_utils",
         "torch.distributed.tensor.parallel._utils",
@@ -201,12 +201,15 @@ MOD_INLINELIST = {
     "torch._dynamo._trace_wrapped_higher_order_op",
     "torch._dynamo.comptime",
     "torch._dynamo.polyfill",
+    "torch._functorch.vmap",
     "torch._inductor.test_operators",
     "torch.amp.autocast_mode",
     "torch.ao.nn",
     "torch.autograd.function",
+    "torch.backends.cuda",
     "torch.cuda.amp.autocast_mode",
     "torch.distributions",
+    "torch.export.wrapper",
     "torch.fx._pytree",
     "torch.fx.passes.shape_prop",
     "torch.nn",
@@ -218,24 +221,14 @@ MOD_INLINELIST = {
     "torch.utils._foreach_utils",
     "torch.utils._pytree",
     "torch._tensor",
+    "torch._higher_order_ops.strict_mode",
+    "torch._higher_order_ops.while_loop",
 }
 
 
 if torch.distributed.is_available():
     MOD_INLINELIST.add("torch.distributed")
     MOD_INLINELIST.add("torch.distributed._functional_collectives")
-
-
-# TODO: support adding bound method into this list
-@functools.lru_cache(None)
-def get_func_inlinelist():
-    inlinelist = set()
-    for f in FUNC_INLINELIST:
-        module_name, fn_name = f.rsplit(".", 1)
-        m = importlib.import_module(module_name)
-        fn = getattr(m, fn_name)
-        inlinelist.add(fn.__code__)
-    return inlinelist
 
 
 @functools.lru_cache(None)
@@ -258,7 +251,9 @@ def get_mod_inlinelist():
 SKIP_DIRS = [
     "<frozen importlib",
     "<__array_function__ internals>",
-] + [_module_dir(m) for m in BUILTIN_SKIPLIST]
+    _config_module.__file__,
+]
+SKIP_DIRS.extend(filter(None, (_module_dir(m) for m in BUILTIN_SKIPLIST)))
 
 SKIP_DIRS_RE = re.compile(r"match nothing^")
 
@@ -357,7 +352,7 @@ There are mainly three call sites of check/check_verbose:
     * Dynamo decides inline/skip everytime it encounters a new recursively function call, and the call site
       is in InliningInstructionTranslator.check_inlineable of symbolic_convert.py.
     * If f2 is skipped by Dynamo, when evaluating the frame of f3, Dynamo need the inline/skip check again
-      and the call site is in catch_errors_wrapper.catch_errors of eval_frame.py.
+      and the call site is in catch_errors_wrapper.catch_errors of convert_frame.py.
 * For global variables and function arguments, Dynamo needs to decide if they are wrapped as SkipFilesVariable in builder.py.
 
 `is_inlined_call` is used to indicate if the current function call is inlined (f2 is inlined call if it passes check)
@@ -385,20 +380,22 @@ def check_verbose(obj, is_inlined_call=False):
         )
     else:
         fi = FunctionInfo(obj, None, getfile(obj), None)
-    # Go through function based skip/inline rules.
-    if fi.code in get_func_inlinelist():
+
+    # Consulte the central trace rules defined in torch._dynamo.trace_rules.
+    rule = torch._dynamo.trace_rules.lookup_inner(
+        fi.py_obj, fi.name, fi.filename, is_inlined_call
+    )
+    if rule in [UserFunctionVariable, FunctorchVmapHigherOrderVariable]:
         return SkipResult(
             False,
-            "inlined according skipfiles.FUNC_INLINELIST",
+            "inlined according trace_rules.lookup",
         )
-    if is_inlined_call:
-        if fi.name == "patched_init":
-            return SkipResult(True, "patched init cannot be inlined.")
-        elif fi.name == "__torch_function__":
-            return SkipResult(False, "allow inlining __torch_function__")
-
-    # Go through file based skip/inline rules.
-    return check_file(fi.filename, is_inlined_call)
+    else:
+        assert rule == SkipFilesVariable, rule
+        return SkipResult(
+            True,
+            "skipped according trace_rules.lookup",
+        )
 
 
 def check(obj, is_inlined_call=False):

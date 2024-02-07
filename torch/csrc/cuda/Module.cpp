@@ -12,8 +12,6 @@
 
 #if AT_CUDNN_ENABLED()
 
-#include <ATen/native/cudnn/Macros.h>
-
 #endif
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
@@ -41,7 +39,7 @@
 #include <torch/csrc/cuda/python_comm.h>
 #include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/python_headers.h>
-#include <torch/csrc/utils/cuda_lazy_init.h>
+#include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_numbers.h>
@@ -64,7 +62,7 @@ static bool in_bad_fork = false; // True for children forked after cuda init
 // Called in the forked child if cuda has already been initialized
 static void forked_child() {
   in_bad_fork = true;
-  torch::utils::set_requires_cuda_init(true);
+  torch::utils::set_requires_device_init(at::kCUDA, true);
 }
 #endif
 
@@ -82,17 +80,13 @@ static void poison_fork() {
 // CUDA management methods
 ////////////////////////////////////////////////////////////////////////////////
 
-void THCPModule_setDevice(int device) {
-  c10::cuda::set_device(static_cast<c10::DeviceIndex>(device));
-}
-
 PyObject* THCPModule_setDevice_wrap(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to setDevice");
-  int64_t device = THPUtils_unpackLong(arg);
+  TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to setDevice");
+  auto device = THPUtils_unpackLong(arg);
 
-  torch::utils::cuda_lazy_init();
-  THCPModule_setDevice(device);
+  torch::utils::device_lazy_init(at::kCUDA);
+  c10::cuda::set_device(static_cast<c10::DeviceIndex>(device));
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -106,7 +100,7 @@ PyObject* THCPModule_exchangeDevice(PyObject* self, PyObject* arg) {
     return THPUtils_packInt32(-1);
   }
 
-  torch::utils::cuda_lazy_init();
+  torch::utils::device_lazy_init(at::kCUDA);
   int current_device = c10::cuda::ExchangeDevice(device);
 
   return THPUtils_packInt32(current_device);
@@ -121,7 +115,7 @@ PyObject* THCPModule_maybeExchangeDevice(PyObject* self, PyObject* arg) {
     return THPUtils_packInt32(-1);
   }
 
-  torch::utils::cuda_lazy_init();
+  torch::utils::device_lazy_init(at::kCUDA);
   int current_device = c10::cuda::MaybeExchangeDevice(device);
 
   return THPUtils_packInt32(current_device);
@@ -130,7 +124,7 @@ PyObject* THCPModule_maybeExchangeDevice(PyObject* self, PyObject* arg) {
 
 PyObject* THCPModule_getDevice_wrap(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  torch::utils::cuda_lazy_init();
+  torch::utils::device_lazy_init(at::kCUDA);
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   auto device = static_cast<int32_t>(c10::cuda::current_device());
   return THPUtils_packInt32(device);
@@ -150,14 +144,14 @@ PyObject* THCPModule_canDeviceAccessPeer_wrap(PyObject* self, PyObject* args) {
         "(int device, int peer_device);");
     return nullptr;
   }
-  THPUtils_assert(
+  TORCH_CHECK(
       THPUtils_checkLong(arg1), "invalid argument to canDeviceAccessPeer");
-  THPUtils_assert(
+  TORCH_CHECK(
       THPUtils_checkLong(arg2), "invalid argument to canDeviceAccessPeer");
   int64_t device = THPUtils_unpackLong(arg1);
   int64_t peer_device = THPUtils_unpackLong(arg2);
 
-  torch::utils::cuda_lazy_init();
+  torch::utils::device_lazy_init(at::kCUDA);
   auto can_access = at::cuda::canDeviceAccessPeer(device, peer_device);
   return PyBool_FromLong(can_access);
   END_HANDLE_TH_ERRORS
@@ -192,7 +186,7 @@ PyObject* THCPModule_getCurrentStream_wrap(
     PyObject* /* unused */,
     PyObject* device_index) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
+  TORCH_CHECK(
       THPUtils_checkLong(device_index), "invalid argument to getCurrentStream");
   int64_t device = THPUtils_unpackLong(device_index);
   auto stream = at::cuda::getCurrentCUDAStream(device);
@@ -215,7 +209,7 @@ PyObject* THCPModule_getCurrentStream_raw(
     PyObject* /* unused */,
     PyObject* device_index) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
+  TORCH_CHECK(
       THPUtils_checkLong(device_index), "invalid argument to getCurrentStream");
   int64_t device = THPUtils_unpackLong(device_index);
   return PyLong_FromVoidPtr(at::cuda::getCurrentCUDAStream(device).stream());
@@ -226,7 +220,7 @@ PyObject* THCPModule_getDefaultStream_wrap(
     PyObject* /* unused */,
     PyObject* device_index) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
+  TORCH_CHECK(
       THPUtils_checkLong(device_index), "invalid argument to getDefaultStream");
   int64_t device = THPUtils_unpackLong(device_index);
   auto stream = at::cuda::getDefaultCUDAStream(device);
@@ -261,6 +255,7 @@ PyObject* THCPModule_setStream_wrap(
           args,
           kwargs,
           "|LLL",
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(kwlist),
           &stream_id,
           &device_index,
@@ -268,11 +263,13 @@ PyObject* THCPModule_setStream_wrap(
   }
 
   auto stream = at::cuda::CUDAStream::unpack3(
-      stream_id, device_index, static_cast<c10::DeviceType>(device_type));
+      stream_id,
+      static_cast<c10::DeviceIndex>(device_index),
+      static_cast<c10::DeviceType>(device_type));
 
   auto device = c10::cuda::current_device();
   if (device != stream.device_index()) {
-    THCPModule_setDevice(stream.device_index());
+    c10::cuda::set_device(stream.device_index());
   }
   at::cuda::setCurrentCUDAStream(stream);
   Py_RETURN_NONE;
@@ -372,20 +369,20 @@ PyObject* THCPModule_cudaJiteratorCompileAndLaunchKernel(
   const bool return_by_ref = THPUtils_unpackBool(return_by_ref_o);
   const int num_outputs = static_cast<int>(THPUtils_unpackLong(num_outputs_o));
 
-  THPUtils_assert(
+  TORCH_CHECK(
       PyTuple_Check(tensors_o),
       "tensors argument is expected to "
-      "be a tuple, but got %s",
+      "be a tuple, but got ",
       THPUtils_typename(tensors_o));
   Py_ssize_t num_tensors = PyTuple_GET_SIZE(tensors_o);
 
   c10::SmallVector<at::Tensor> tensors;
   for (const auto i : c10::irange(num_tensors)) {
     PyObject* _tensor = PyTuple_GET_ITEM(tensors_o, i);
-    THPUtils_assert(
+    TORCH_CHECK(
         THPVariable_Check(_tensor),
-        "%d of input tensors tuple is not a Tensor",
-        i);
+        i,
+        " of input tensors tuple is not a Tensor");
 
     tensors.emplace_back(THPVariable_Unpack(_tensor));
   }
@@ -466,7 +463,7 @@ PyObject* THCPModule_cudaIPCCollect(PyObject* _unused, PyObject* noargs) {
 
 PyObject* THCPModule_cudaSleep(PyObject* _unused, PyObject* cycles) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
+  TORCH_CHECK(
       THPUtils_checkLong(cycles), "torch.cuda._sleep(): expected 'int'");
   int64_t unpacked_cycles = THPUtils_unpackLong(cycles);
   {
@@ -514,7 +511,7 @@ PyObject* THCPModule_cudaUnlockMutex(PyObject* module, PyObject* noargs) {
 
 PyObject* THCPModule_hasPrimaryContext(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
+  TORCH_CHECK(
       THPUtils_checkLong(arg), "invalid argument to has_primary_context");
   int64_t device_index = static_cast<int64_t>(THPUtils_unpackLong(arg));
   if (c10::cuda::hasPrimaryContext(device_index)) {
@@ -555,8 +552,7 @@ PyObject* THCPModule_emptyCache(PyObject* _unused, PyObject* noargs) {
 
 PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
-      THPUtils_checkLong(arg), "invalid argument to memory_allocated");
+  TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to memory_allocated");
   const int device = (int)THPUtils_unpackLong(arg);
 
   using c10::cuda::CUDACachingAllocator::DeviceStats;
@@ -611,7 +607,7 @@ PyObject* THCPModule_resetAccumulatedMemoryStats(
     PyObject* _unused,
     PyObject* arg) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
+  TORCH_CHECK(
       THPUtils_checkLong(arg),
       "invalid argument to reset_accumulated_memory_stats");
   const int device = (int)THPUtils_unpackLong(arg);
@@ -622,7 +618,7 @@ PyObject* THCPModule_resetAccumulatedMemoryStats(
 
 PyObject* THCPModule_resetPeakMemoryStats(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
+  TORCH_CHECK(
       THPUtils_checkLong(arg), "invalid argument to reset_peak_memory_stats");
   const int device = (int)THPUtils_unpackLong(arg);
   c10::cuda::CUDACachingAllocator::resetPeakStats(device);
@@ -831,7 +827,7 @@ PyObject* THCPModule_cudaSetSyncDebugMode(PyObject* _unused, PyObject* arg) {
   TORCH_WARN_ONCE(
       "Synchronization debug mode is a prototype feature and does not yet detect all "
       "synchronizing operations");
-  THPUtils_assert(
+  TORCH_CHECK(
       THPUtils_checkLong(arg), "invalid argument to set_sync_debug_mode");
   int64_t debug_mode = THPUtils_unpackLong(arg);
   TORCH_CHECK(
@@ -892,6 +888,11 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def_readonly(
           "max_threads_per_multi_processor",
           &cudaDeviceProp::maxThreadsPerMultiProcessor)
+#if !USE_ROCM
+      // NVIDA only property
+      .def_readonly(
+          "regs_per_multiprocessor", &cudaDeviceProp::regsPerMultiprocessor)
+#endif // USE_ROCM
       // HIP-only property; reuse name attribute for CUDA builds
       .def_readonly(
           "gcnArchName",
@@ -924,7 +925,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
       static_cast<void (*)(
           c10::optional<std::string>,
           c10::optional<std::string>,
-          std::string,
+          const std::string&,
           size_t)>(torch::cuda::_record_memory_history));
 
   m.def("_cuda_isHistoryEnabled", []() {
@@ -1050,22 +1051,23 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             self.set_record_stream_fn(func);
           })
       .def(
-          "set_begin_allocate_stream_to_pool",
+          "set_begin_allocate_to_pool",
           [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
              uint64_t func_ptr) {
-            using FuncType = void(int, cudaStream_t, c10::cuda::MempoolId_t);
+            using FuncType = void(
+                int, c10::cuda::MempoolId_t, std::function<bool(cudaStream_t)>);
             std::function<FuncType> func =
                 reinterpret_cast<FuncType*>(func_ptr);
-            self.set_begin_allocate_stream_to_pool(func);
+            self.set_begin_allocate_to_pool(func);
           })
       .def(
-          "set_end_allocate_stream_to_pool_fn",
+          "set_end_allocate_to_pool_fn",
           [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
              uint64_t func_ptr) {
-            using FuncType = void(int, cudaStream_t);
+            using FuncType = void(int, c10::cuda::MempoolId_t);
             std::function<FuncType> func =
                 reinterpret_cast<FuncType*>(func_ptr);
-            self.set_end_allocate_stream_to_pool_fn(func);
+            self.set_end_allocate_to_pool_fn(func);
           })
       .def(
           "set_release_pool",
@@ -1161,15 +1163,17 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       [](int device, at::cuda::MempoolId_t mempool_id) {
         auto stream = at::cuda::getCurrentCUDAStream(device);
         TORCH_CHECK(stream, "Expected stream capture to be under way");
-        c10::cuda::CUDACachingAllocator::beginAllocateStreamToPool(
-            device, stream, mempool_id);
+        c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+            device, mempool_id, [stream](cudaStream_t target) {
+              return target == stream;
+            });
       });
 
-  m.def("_cuda_endAllocateCurrentStreamToPool", [](int device) {
-    auto stream = at::cuda::getCurrentCUDAStream(device);
-    TORCH_CHECK(stream, "Expected stream capture to be under way");
-    c10::cuda::CUDACachingAllocator::endAllocateStreamToPool(device, stream);
-  });
+  m.def(
+      "_cuda_endAllocateCurrentStreamToPool",
+      [](int device, at::cuda::MempoolId_t mempool_id) {
+        c10::cuda::CUDACachingAllocator::endAllocateToPool(device, mempool_id);
+      });
 
   m.def("_cuda_releasePool", [](int device, at::cuda::MempoolId_t mempool_id) {
     c10::cuda::CUDACachingAllocator::releasePool(device, mempool_id);
@@ -1206,7 +1210,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
           }
         }
         auto delta = c10::cuda::CUDACachingAllocator::setCheckpointPoolState(
-            device, pps);
+            device, std::move(pps));
         auto& freed_pointers = delta.ptrs_freed;
 
         std::unordered_set<void*> allocd_set;
@@ -1270,17 +1274,12 @@ static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
   if (!m)
     throw python_error();
 
-  bool has_half = true;
-
   auto set_module_attr = [&](const char* name, PyObject* v) {
     // PyObject_SetAttrString doesn't steal reference. So no need to incref.
     if (PyObject_SetAttrString(m, name, v) < 0) {
       throw python_error();
     }
   };
-
-  set_module_attr("has_magma", at::hasMAGMA() ? Py_True : Py_False);
-  set_module_attr("has_half", has_half ? Py_True : Py_False);
 
   auto num_gpus = c10::cuda::device_count();
   auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
@@ -1347,25 +1346,20 @@ static PyObject* THCPModule_isCurrentStreamCapturing_wrap(
 }
 
 PyObject* THCPModule_setBenchmarkLimitCuDNN(PyObject* _unused, PyObject* arg) {
-  THPUtils_assert(
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
       THPUtils_checkLong(arg),
       "set_benchmark_limit_cudnn expects an int, "
-      "but got %s",
+      "but got ",
       THPUtils_typename(arg));
 #if defined(USE_ROCM)
   TORCH_WARN_ONCE(
       "cuDNN Benchmark limit is not supported in MIOpen and will have no effect.");
 #endif
-#if AT_CUDNN_ENABLED()
-#if HAS_CUDNN_V8()
   auto benchmark_limit = static_cast<int>(THPUtils_unpackLong(arg));
   at::globalContext().setBenchmarkLimitCuDNN(benchmark_limit);
-#else
-  TORCH_WARN_ONCE(
-      "cuDNN Benchmark limit is not supported with cuDNN v7 API and will have no effect.");
-#endif
-#endif
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THCPModule_benchmarkLimitCuDNN(PyObject* _unused, PyObject* noargs) {

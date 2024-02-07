@@ -15,10 +15,10 @@ namespace c10d {
 
 static std::vector<std::string> TORCH_NCCL_BLOCKING_WAIT = {
     "TORCH_NCCL_BLOCKING_WAIT",
-    "TORCH_NCCL_BLOCKING_WAIT"};
+    "NCCL_BLOCKING_WAIT"};
 static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
     "TORCH_NCCL_ASYNC_ERROR_HANDLING",
-    "TORCH_NCCL_ASYNC_ERROR_HANDLING"};
+    "NCCL_ASYNC_ERROR_HANDLING"};
 
 // Logs runtime stats to configured destination. Note that since data collection
 // only runs every ddp_runtime_logging_sample_rate iterations, the actual
