@@ -15,6 +15,7 @@ import torch
 import torch.nn as nn
 import torch.utils.data
 from torch.utils.data import DataLoader
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     ops,
     onlyCPU,
@@ -24,7 +25,6 @@ from torch.testing._internal.common_methods_invocations import op_db
 import torch.cuda
 from torch.utils._pytree import tree_any, tree_all_only
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
-from torch import set_default_device
 from torch.utils._device import set_device
 from torch.utils._traceback import report_compile_source_on_error, format_traceback_short, CapturedTraceback
 import torch.utils.cpp_extension
@@ -694,9 +694,75 @@ class TestONNXUtils(TestCase):
 
 
 class TestHipify(TestCase):
+
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python  # noqa: F401
 
+
+class TestHipifyTrie(TestCase):
+    def setUp(self):
+        self.trie = torch.utils.hipify.hipify_python.Trie()
+
+    def test_add_and_search_trie(self):
+        self.trie.add("banana")
+        self.assertTrue(self.trie.search("banana"))
+        self.assertFalse(self.trie.search("ban"))
+        self.assertFalse(self.trie.search("dog"))
+
+    def test_add_multiple_and_search_trie(self):
+        words_to_add = ["banana", "apple", "orange"]
+        for word in words_to_add:
+            self.trie.add(word)
+
+        for word in words_to_add:
+            self.assertTrue(self.trie.search(word))
+
+        for word in ["ban", "dog", "okay", "app"]:
+            self.assertFalse(self.trie.search(word))
+
+    def test_quote_escape(self):
+        orig_chars = ["*", "[", ".", "+", "a", "z", "-"]
+        quoted_strs = ["\\*", "\\[", "\\.", "\\+", "a", "z", "\\-"]
+        for i in range(len(orig_chars)):
+            self.assertEqual(self.trie.quote(orig_chars[i]), quoted_strs[i])
+
+    def test_export_trie_to_regex(self):
+        words_to_add = ["__CUDACC__", "CUDA_ERROR_CONTEXT_ALREADY_CURRENT", "CUDA_ERROR_ARRAY_IS_MAPPED",
+                        "CUDA_ERROR_NOT_MAPPED", "CUDA_ERROR_INVALID_SOURCE"]
+        for word in words_to_add:
+            self.trie.add(word)
+        regex = self.trie.export_to_regex()
+        expected_regex = r"(?:CUDA_ERROR_(?:ARRAY_IS_MAPPED|CONTEXT_ALREADY_CURRENT|INVALID_SOURCE|NOT_MAPPED)|__CUDACC__)"
+        self.assertEqual(regex, expected_regex)
+
+
+    def test_prefix_words_export_trie_to_regex(self):
+        # test case where some nodes have both children and are also leaf nodes.
+        words_to_add = ["apple", "app", "ban", "banana"]
+        for word in words_to_add:
+            self.trie.add(word)
+        regex = self.trie.export_to_regex()
+        expected_regex = r"(?:app(?:le)?|ban(?:ana)?)"
+        self.assertEqual(regex, expected_regex)
+
+    def test_single_export_trie_to_regex(self):
+        words_to_add = ["cudaErrorInvalidMemcpyDirection"]
+        for word in words_to_add:
+            self.trie.add(word)
+        regex = self.trie.export_to_regex()
+        expected_regex = "cudaErrorInvalidMemcpyDirection"
+        self.assertEqual(regex, expected_regex)
+
+
+    def test_char_export_trie_to_regex(self):
+        self.trie.add("a")
+        self.assertEqual(self.trie.export_to_regex(), "a")
+        self.trie.add("b")
+        self.assertEqual(self.trie.export_to_regex(), "[ab]")
+
+    def test_special_char_export_trie_to_regex(self):
+        self.trie.add(r"c*")
+        self.assertEqual(self.trie.export_to_regex(), r"c\*")
 
 class TestAssert(TestCase):
     def test_assert_true(self):
@@ -889,7 +955,6 @@ class TestDeviceUtils(TestCase):
         self.assertEqual(r1.device.type, 'meta')
         self.assertEqual(r2.device.type, 'meta')
 
-
     def test_nn_module(self):
         with torch.device('meta'):
             m = nn.Linear(40, 50)
@@ -897,12 +962,32 @@ class TestDeviceUtils(TestCase):
 
     def test_set_default_device(self):
         try:
-            set_default_device('meta')
+            torch.set_default_device('meta')
             r = torch.empty(2, 2)
         finally:
-            set_default_device(None)
+            torch.set_default_device(None)
 
         self.assertEqual(r.device.type, 'meta')
+
+    def test_get_default_device(self):
+        torch.set_default_device('meta')
+        self.assertEqual(torch.get_default_device().type, 'meta')
+        torch.set_default_device(None)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_get_default_device_more(self):
+        torch.set_default_device("cuda")
+        self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
+        torch.set_default_device(None)
+
+        torch.set_default_device("cuda")
+        torch.cuda.set_device("cuda:1")
+        self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
+        torch.set_default_device(None)
+
+        torch.set_default_device("cuda:1")
+        self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
+        torch.set_default_device(None)
 
     @onlyCPU
     @ops(op_db)

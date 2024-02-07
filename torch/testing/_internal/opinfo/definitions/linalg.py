@@ -1,9 +1,11 @@
+# mypy: ignore-errors
+
 import itertools
 import random
 import unittest
 from functools import partial
 from itertools import chain, product
-from typing import Iterable, List
+from typing import Iterable, List, Tuple
 
 import numpy as np
 from numpy import inf

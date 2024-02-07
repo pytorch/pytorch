@@ -61,7 +61,7 @@
  * Restrictions are defined in histogram_check_inputs() and in select_outer_bin_edges().
  */
 
-namespace at { namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(histogramdd_stub);
 DEFINE_DISPATCH(histogramdd_linear_stub);
@@ -437,4 +437,4 @@ std::tuple<Tensor, std::vector<Tensor>> histogramdd(
   return at::native::histogramdd(self, bins_v, range, weight, density);
 }
 
-}} // namespace at::native
+} // namespace at::native

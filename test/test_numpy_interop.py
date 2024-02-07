@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # Owner(s): ["module: numpy"]
 
 import torch
@@ -220,7 +222,7 @@ class TestNumPyInterop(TestCase):
                     self.assertEqual(tensor_from_array2[i], array2[i])
 
         # Test unsupported type
-        array = np.array([1, 2, 3, 4], dtype=np.uint16)
+        array = np.array(['foo', 'bar'], dtype=np.dtype(np.str_))
         with self.assertRaises(TypeError):
             tensor_from_array = torch.from_numpy(array)
 
@@ -417,7 +419,7 @@ class TestNumPyInterop(TestCase):
     @onlyCPU
     def test_parse_numpy_int(self, device):
         # Only concrete class can be given where "Type[number[_64Bit]]" is expected
-        self.assertRaisesRegex(RuntimeError, "Overflow",
+        self.assertRaisesRegex(RuntimeError, "(Overflow|an integer is required)",
                                lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)))  # type: ignore[call-overload]
         # https://github.com/pytorch/pytorch/issues/29252
         for nptype in [np.int16, np.int8, np.uint8, np.int32, np.int64]:
@@ -481,6 +483,21 @@ class TestNumPyInterop(TestCase):
                     self.assertFalse(t == a)
                 else:
                     self.assertTrue(t == a)
+
+    @onlyCPU
+    def test_empty_tensors_interop(self, device):
+        x = torch.rand((), dtype=torch.float16)
+        y = torch.tensor(np.random.rand(0), dtype=torch.float16)
+        # Same can be achieved by running
+        # y = torch.empty_strided((0,), (0,), dtype=torch.float16)
+
+        # Regression test for https://github.com/pytorch/pytorch/issues/115068
+        self.assertEqual(torch.true_divide(x, y).shape, y.shape)
+        # Regression test for https://github.com/pytorch/pytorch/issues/115066
+        self.assertEqual(torch.mul(x, y).shape, y.shape)
+        # Regression test for https://github.com/pytorch/pytorch/issues/113037
+        self.assertEqual(torch.div(x, y, rounding_mode='floor').shape, y.shape)
+
 
 instantiate_device_type_tests(TestNumPyInterop, globals())
 

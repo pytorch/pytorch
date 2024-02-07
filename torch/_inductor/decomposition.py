@@ -20,7 +20,11 @@ from torch._decomp.decompositions import (
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
 from torch._higher_order_ops.out_dtype import out_dtype
-from torch._prims_common import type_to_dtype
+from torch._prims_common import (
+    elementwise_dtypes,
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
+    type_to_dtype,
+)
 
 from . import config, inductor_prims
 
@@ -53,6 +57,7 @@ inductor_decompositions = get_decompositions(
         aten.native_batch_norm,
         aten.native_group_norm,
         aten.native_layer_norm,
+        aten.pixel_shuffle,
         aten._softmax,
         aten.sin_,
         aten.sqrt_,
@@ -69,7 +74,7 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 # the Inductor decomp table.
 decomps_to_exclude = [
     aten._unsafe_index,
-    aten._scaled_dot_product_flash_attention.default,  # See comments in torch/_decomp/decompositions.py
+    aten._scaled_dot_product_flash_attention_for_cpu.default,  # See comments in torch/_decomp/decompositions.py
     aten.clamp_max,
     aten.clamp_min,
     aten.glu,  # inductor lowers this directly
@@ -186,7 +191,7 @@ def round_dec(x, decimals=0):
 @pw_cast_for_opmath
 def bmm(self, batch2):
     if config.coordinate_descent_tuning:
-        if self.shape[1] == 1:
+        if self.shape[1] == 1 or batch2.shape[2] == 1:
             out = (self.unsqueeze(-1) * batch2.unsqueeze(1)).sum(dim=2)
             return out
     if self.device.type == "cpu":
@@ -215,6 +220,11 @@ def addmm(self, mat1, mat2, beta=1, alpha=1):
 @register_decomposition([aten.mm])
 @pw_cast_for_opmath
 def mm(self, input2):
+    from torch.fx.experimental.symbolic_shapes import (
+        definitely_true,
+        guard_size_oblivious,
+    )
+
     # Our matrix vector multiplies only achieve peak bandwidth with coordinate descent tuning.
     # todo: Look into why and fix it (hopefully)
     if config.coordinate_descent_tuning:
@@ -222,14 +232,16 @@ def mm(self, input2):
             return (self.unsqueeze(2) * input2.unsqueeze(0)).sum(dim=1)
     if self.device.type == "cpu":
         if (
-            self.size(-1) == 1
-            and self.size(0) > 0
-            and input2.size(0) == 1
+            guard_size_oblivious(self.size(-1) == 1)
+            and guard_size_oblivious(self.size(0) > 0)
+            and guard_size_oblivious(input2.size(0) == 1)
             and (self.dtype == input2.dtype)
-            and ((torch.numel(self) + torch.numel(input2)) <= 32)
+            and definitely_true((torch.numel(self) + torch.numel(input2)) <= 32)
         ):
             return torch.cat([self[i, :] * input2 for i in range(self.size(0))])
-        if self.size(0) == 1 and input2.size(-1) == 1:
+        if guard_size_oblivious(self.size(0) == 1) and guard_size_oblivious(
+            input2.size(-1) == 1
+        ):
             return torch.sum(
                 self.squeeze(0) * input2.squeeze(-1), dim=0, keepdim=True
             ).unsqueeze(0)
@@ -260,14 +272,18 @@ def angle(x):
         return torch.where(
             torch.isnan(x.real), float("nan"), torch.atan2(x.imag, x.real)
         )
-    else:
-        # when x is real number
-        #   if x >= 0, return 0
-        #   if x < 0, return pi
-        #   if x is nan, return nan
-        ret = torch.where(x < 0, math.pi, 0.0)
-        nan = torch.where(torch.isnan(x), float("nan"), 0.0)
-        return ret + nan
+
+    # when x is real number
+    #   if x >= 0, return 0
+    #   if x < 0, return pi
+    #   if x is nan, return nan
+    _, dtype = elementwise_dtypes(
+        x,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    )
+    pi = torch.scalar_tensor(math.pi, dtype=dtype, device=x.device)
+    ret = torch.where(x < 0, pi, 0.0)
+    return torch.where(torch.isnan(x), float("nan"), ret)
 
 
 @register_decomposition([aten.add])
@@ -297,7 +313,7 @@ def lift(self):
 @register_decomposition([aten.bernoulli.default])
 def bernoulli(self, *, generator=None):
     assert generator is None
-    return torch.rand_like(self, dtype=torch.float32) < self
+    return (torch.rand_like(self, dtype=torch.float32) < self).to(self.dtype)
 
 
 @register_decomposition([aten.fmin, prims.fmin])
