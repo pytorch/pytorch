@@ -68,17 +68,9 @@ def cherry_pick(
     Create a local branch to cherry pick the commit and submit it as a pull request
     """
     current_branch = repo.current_branch()
-
-    try:
-        cherry_pick_branch = create_cherry_pick_branch(
-            github_actor, repo, pr, commit_sha, onto_branch
-        )
-    except RuntimeError as error:
-        # Clean up if we fail to create the cherry pick due to conflicts
-        repo._run_git("cherry-pick", "--abort")
-        if current_branch:
-            repo.checkout(branch=current_branch)
-        raise error
+    cherry_pick_branch = create_cherry_pick_branch(
+        github_actor, repo, pr, commit_sha, onto_branch
+    )
 
     try:
         if not dry_run:
