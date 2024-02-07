@@ -44,6 +44,14 @@ inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY = False
 # [@compile_ignored: debug] Validate that ShapeEnv's version key is updated correctly
 validate_shape_env_version_key = False
 
+# If we produce more than this many guards on a symbol, force the symbol to
+# get specialized and bail out if this many guards mention this particular
+# symbol.  This may be slightly more aggressive than the true number of guards
+# issued (as we test if we've hit the limit on-the-fly, whereas we may
+# do further simplifications at final guard issuance time that make guards
+# irrelevant.)
+symbol_guard_limit_before_specialize = None
+
 from torch.utils._config_module import install_config_module
 
 install_config_module(sys.modules[__name__])
