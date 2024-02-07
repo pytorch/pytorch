@@ -1493,7 +1493,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             val = seq.unpack_var_sequence(self)
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
-        assert len(val) == inst.argval
+        if len(val) != inst.argval:
+            unimplemented("UNPACK_SEQUENCE length mismatch")
         for i in reversed(val):
             self.push(i)
 
@@ -2261,7 +2262,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             return cls.inline_call_(parent, func, args, kwargs)
 
     @staticmethod
-    def check_inlineable(func) -> skipfiles.SkipResult:
+    def check_inlineable(func: BaseUserFunctionVariable) -> skipfiles.SkipResult:
         if func.has_self():
             unimplemented("inline with __self__")
 
@@ -2270,8 +2271,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             if func.should_force_inline():
                 # Known sound
                 return skipfiles.SkipResult(False, "allowlist in dynamo known function")
+            fn_qualname = func.fn.__qualname__ if hasattr(func, "fn") else ""
             unimplemented(
-                f"'inline in skipfiles: {func.fn.__qualname__} | {func.get_name()} {func.get_filename()}, {result.reason}'"
+                f"'inline in skipfiles: {fn_qualname} | {func.get_name()} {func.get_filename()}, {result.reason}'"
             )
 
         if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
