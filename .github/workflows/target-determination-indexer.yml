@@ -55,8 +55,10 @@ jobs:
           cd "${GITHUB_WORKSPACE}"
           ls
           pwd
-          cd llm-target-determinator 
+          cd llm-target-determinator
           pip install -r requirements.txt
+          cd ../codellama
+          pip install -e .
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v3
@@ -81,7 +83,7 @@ jobs:
           set -euxo pipefail
 
           conda activate tdenv
-          cd "${GITHUB_WORKSPACE}"/llm-target-determinator 
+          cd "${GITHUB_WORKSPACE}"/llm-target-determinator
 
           python create_filelist.py \
             --project-dir "${GITHUB_WORKSPACE}/pytorch"
