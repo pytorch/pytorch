@@ -11,6 +11,7 @@ import torch
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_rot_n
 from ..exc import unimplemented, Unsupported
+from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import get_first_attr, identity, istype, make_cell
 from .base import typestr, VariableTracker
@@ -110,6 +111,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     @classmethod
     def create_with_source(cls, value, source):
+        install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
         return cls(
             value,
             source=source,

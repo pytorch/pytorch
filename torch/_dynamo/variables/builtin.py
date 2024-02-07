@@ -99,6 +99,11 @@ def _polyfill_call_impl(name):
 class BuiltinVariable(VariableTracker):
     _SENTINEL = object()
 
+    @classmethod
+    def create_with_source(cls, value, source):
+        install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
+        return BuiltinVariable(value, source=source)
+
     @staticmethod
     @functools.lru_cache(None)
     def _constant_fold_functions():

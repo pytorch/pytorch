@@ -524,6 +524,7 @@ def is_function_or_wrapper(value):
         is_function(value)
         or isinstance(value, functools._lru_cache_wrapper)
         and is_function(inspect.getattr_static(value, "__wrapped__"))
+        or isinstance(value, (torch._ops.OpOverloadPacket, torch._ops.OpOverload))
     )
 
 
@@ -535,14 +536,20 @@ def is_function(value):
             types.BuiltinFunctionType,
             types.MethodDescriptorType,
             types.WrapperDescriptorType,
+            torch.jit.ScriptFunction,
         ),
     )
 
 
-def unwrap_if_wrapper(value):
-    if isinstance(value, functools._lru_cache_wrapper):
-        value = inspect.getattr_static(value, "__wrapped__")
-    return value
+def unwrap_if_wrapper(fn):
+    if isinstance(fn, functools._lru_cache_wrapper):
+        fn = inspect.getattr_static(fn, "__wrapped__")
+    # unpack @torch._dynamo.optimize()(fn) wrapped function
+    fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
+    # unpack torch.jit.script_if_tracing
+    if inspect.getattr_static(fn, "__script_if_tracing_wrapper", False):
+        fn = inspect.getattr_static(fn, "__original_fn", fn)
+    return fn
 
 
 def is_numpy_ndarray(value):

@@ -102,6 +102,7 @@ from .variables.misc import (
     InlinedClosureVariable,
     NullVariable,
     PythonModuleVariable,
+    SkipFilesVariable,
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable
@@ -2290,6 +2291,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def inline_call_(
         parent, func: VariableTracker, args: List[VariableTracker], kwargs
     ):
+        if isinstance(func, SkipFilesVariable):
+            unimplemented("inline with functions in skip files")
         assert isinstance(
             func,
             (UserFunctionVariable, NestedUserFunctionVariable),
