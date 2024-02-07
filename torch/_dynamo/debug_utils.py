@@ -742,10 +742,9 @@ def aot_graph_input_parser(
 
     container = TensorContainer()
     # Dictionary for tensors from annotations
-    kwargs = {}
+    kwargs: Dict[str, Any] = {}
 
-    def gen_tensor(shape, dtype):
-        shape = tuple(map(int, shape_str.split(",")))
+    def gen_tensor(shape, dtype) -> Tensor:
         constructor = torch.randn if dtype.is_floating_point else torch.zeros
         return constructor(shape, dtype=dtype, device=device)
 
