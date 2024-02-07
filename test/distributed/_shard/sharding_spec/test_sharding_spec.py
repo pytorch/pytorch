@@ -30,7 +30,7 @@ from torch.distributed._shard.sharding_spec._internals import (
     get_chunk_sharding_params,
     validate_non_overlapping_shards_metadata,
 )
-
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
@@ -45,7 +45,7 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
 
 class TestShardingSpec(TestCase):
 
-    @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, '2 CUDA GPUs are needed')
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, '2 CUDA GPUs are needed')
     def test_device_placement(self):
         # valid devices
         DevicePlacementSpec("cuda:0")
@@ -65,7 +65,7 @@ class TestShardingSpec(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
             DevicePlacementSpec("rank:0/cpu2")
 
-    @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, '2 CUDA GPUs are needed')
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, '2 CUDA GPUs are needed')
     def test_chunked_sharding_spec(self):
         # Test valid specs.
         ChunkShardingSpec(0, [torch.device(0), torch.device(1)])
@@ -98,7 +98,7 @@ class TestShardingSpec(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
             ChunkShardingSpec(0, ["rank:0/cuda:foo", "cuda:1"])
 
-    @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, '2 CUDA GPUs are needed')
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, '2 CUDA GPUs are needed')
     def test_enumerable_sharding_spec(self):
         # test valid specs
 

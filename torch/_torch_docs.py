@@ -1,4 +1,4 @@
-"""Adds docstrings to functions defined in the torch._C"""
+"""Adds docstrings to functions defined in the torch._C module."""
 
 import re
 
@@ -7,7 +7,8 @@ from torch._C import _add_docstr as add_docstr
 
 
 def parse_kwargs(desc):
-    """Maps a description of args to a dictionary of {argname: description}.
+    r"""Map a description of args to a dictionary of {argname: description}.
+
     Input:
         ('    weight (Tensor): a weight tensor\n' +
          '        Some optional description')
@@ -24,6 +25,7 @@ def parse_kwargs(desc):
 
 
 def merge_dicts(*dicts):
+    """Merge dictionaries into a single dictionary."""
     return {x: d[x] for d in dicts for x in d}
 
 
@@ -92,12 +94,12 @@ factory_common_args = merge_dicts(
     parse_kwargs(
         """
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-        Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
+        Default: if ``None``, uses a global default (see :func:`torch.set_default_dtype`).
     layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
         Default: ``torch.strided``.
     device (:class:`torch.device`, optional): the desired device of returned tensor.
         Default: if ``None``, uses the current device for the default tensor type
-        (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
+        (see :func:`torch.set_default_device`). :attr:`device` will be the CPU
         for CPU tensor types and the current CUDA device for CUDA tensor types.
     requires_grad (bool, optional): If autograd should record operations on the
         returned tensor. Default: ``False``.
@@ -148,7 +150,7 @@ factory_data_common_args = parse_kwargs(
         Default: if ``None``, infers data type from :attr:`data`.
     device (:class:`torch.device`, optional): the desired device of returned tensor.
         Default: if ``None``, uses the current device for the default tensor type
-        (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
+        (see :func:`torch.set_default_device`). :attr:`device` will be the CPU
         for CPU tensor types and the current CUDA device for CUDA tensor types.
     requires_grad (bool, optional): If autograd should record operations on the
         returned tensor. Default: ``False``.
@@ -4428,7 +4430,7 @@ elements.
 Note that either of the following must be true:
 
 1. :attr:`count` is a positive non-zero number, and the total number of bytes
-in the buffer is less than :attr:`offset` plus :attr:`count` times the size
+in the buffer is more than :attr:`offset` plus :attr:`count` times the size
 (in bytes) of :attr:`dtype`.
 
 2. :attr:`count` is negative, and the length (number of bytes) of the buffer
@@ -4993,9 +4995,6 @@ Example::
     >>> torch.set_default_dtype(torch.float64)
     >>> torch.get_default_dtype()  # default is now changed to torch.float64
     torch.float64
-    >>> torch.set_default_tensor_type(torch.FloatTensor)  # setting tensor type also affects this
-    >>> torch.get_default_dtype()  # changed to torch.float32, the dtype for torch.FloatTensor
-    torch.float32
 
 """,
 )
@@ -7715,12 +7714,16 @@ Keyword args:
 
 Example::
 
-    >>> a = torch.randint(10, (5,))
-    >>> a
-    tensor([6, 5, 1, 0, 2])
-    >>> b = a + (torch.randn(50, 1) * 5).long()
+    >>> b = torch.tensor(
+           [[0, 0, 0, 2, 0, 0, 2],
+            [0, 3, 0, 0, 2, 0, 1],
+            [2, 2, 2, 0, 0, 0, 3],
+            [2, 2, 3, 0, 1, 1, 0],
+            [1, 1, 0, 0, 2, 0, 2]])
     >>> torch.mode(b, 0)
-    torch.return_types.mode(values=tensor([6, 5, 1, 0, 2]), indices=tensor([2, 2, 2, 2, 2]))
+    torch.return_types.mode(
+    values=tensor([0, 2, 0, 0, 0, 0, 2]),
+    indices=tensor([1, 3, 4, 4, 2, 4, 4]))
 """.format(
         **single_dim_common
     ),
@@ -9217,7 +9220,21 @@ distribution).
 .. math::
     \text{{out}}_{{i}} \sim \mathcal{{N}}(0, 1)
 
+For complex dtypes, the tensor is i.i.d. sampled from a `complex normal distribution`_ with zero mean and
+unit variance as
+
+.. math::
+    \text{{out}}_{{i}} \sim \mathcal{{CN}}(0, 1)
+
+This is equivalent to separately sampling the real :math:`(\operatorname{{Re}})` and imaginary
+:math:`(\operatorname{{Im}})` part of :math:`\text{{out}}_i` as
+
+.. math::
+    \operatorname{{Re}}(\text{{out}}_{{i}}) \sim \mathcal{{N}}(0, \frac{{1}}{{2}}),\quad
+    \operatorname{{Im}}(\text{{out}}_{{i}}) \sim \mathcal{{N}}(0, \frac{{1}}{{2}})
+
 The shape of the tensor is defined by the variable argument :attr:`size`.
+
 
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
@@ -9239,6 +9256,8 @@ Example::
     >>> torch.randn(2, 3)
     tensor([[ 1.5954,  2.8929, -1.0923],
             [ 1.1719, -0.4709, -0.1996]])
+
+.. _complex normal distribution: https://en.wikipedia.org/wiki/Complex_normal_distribution
 """.format(
         **factory_common_args
     ),
@@ -9250,8 +9269,8 @@ add_docstr(
 randn_like(input, *, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same size as :attr:`input` that is filled with
-random numbers from a normal distribution with mean 0 and variance 1.
-``torch.randn_like(input)`` is equivalent to
+random numbers from a normal distribution with mean 0 and variance 1. Please refer to :func:`torch.randn` for the
+sampling process of complex dtypes. ``torch.randn_like(input)`` is equivalent to
 ``torch.randn(input.size(), dtype=input.dtype, layout=input.layout, device=input.device)``.
 
 Args:
@@ -10276,7 +10295,7 @@ Keyword args:
     device (:class:`torch.device`, optional): the desired device of
         returned tensor.  Default: if None, uses the current device
         for the default tensor type (see
-        :func:`torch.set_default_tensor_type`). :attr:`device` will be
+        :func:`torch.set_default_device`). :attr:`device` will be
         the CPU for CPU tensor types and the current CUDA device for
         CUDA tensor types.
     {requires_grad}
@@ -10337,7 +10356,7 @@ Keyword args:
     device (:class:`torch.device`, optional): the desired device of
         returned tensor.  Default: if None, uses the current device
         for the default tensor type (see
-        :func:`torch.set_default_tensor_type`). :attr:`device` will be
+        :func:`torch.set_default_device`). :attr:`device` will be
         the CPU for CPU tensor types and the current CUDA device for
         CUDA tensor types.
     {requires_grad}
@@ -10400,7 +10419,7 @@ Keyword args:
     device (:class:`torch.device`, optional): the desired device of
         returned tensor.  Default: if None, uses the current device
         for the default tensor type (see
-        :func:`torch.set_default_tensor_type`). :attr:`device` will be
+        :func:`torch.set_default_device`). :attr:`device` will be
         the CPU for CPU tensor types and the current CUDA device for
         CUDA tensor types.
     {requires_grad}
@@ -10465,7 +10484,7 @@ Keyword args:
     device (:class:`torch.device`, optional): the desired device of
         returned tensor.  Default: if None, uses the current device
         for the default tensor type (see
-        :func:`torch.set_default_tensor_type`). :attr:`device` will be
+        :func:`torch.set_default_device`). :attr:`device` will be
         the CPU for CPU tensor types and the current CUDA device for
         CUDA tensor types.
     {requires_grad}
@@ -10532,7 +10551,7 @@ Keyword args:
     device (:class:`torch.device`, optional): the desired device of
         returned tensor.  Default: if None, uses the current device
         for the default tensor type (see
-        :func:`torch.set_default_tensor_type`). :attr:`device` will be
+        :func:`torch.set_default_device`). :attr:`device` will be
         the CPU for CPU tensor types and the current CUDA device for
         CUDA tensor types.
     {requires_grad}
@@ -10591,7 +10610,7 @@ Keyword args:
         Default: if None, infers data type from :attr:`values`.
     device (:class:`torch.device`, optional): the desired device of returned tensor.
         Default: if None, uses the current device for the default tensor type
-        (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
+        (see :func:`torch.set_default_device`). :attr:`device` will be the CPU
         for CPU tensor types and the current CUDA device for CUDA tensor types.
     {requires_grad}
     {check_invariants}
@@ -11107,7 +11126,7 @@ always be real-valued, even if :attr:`input` is complex.
 .. warning:: If the distance between any two singular values is close to zero, the gradients with respect to
              `U` and `V` will be numerically unstable, as they depends on
              :math:`\frac{1}{\min_{i \neq j} \sigma_i^2 - \sigma_j^2}`. The same happens when the matrix
-             has small singular values, as these gradients also depend on `S⁻¹`.
+             has small singular values, as these gradients also depend on `S^{-1}`.
 
 .. warning:: For complex-valued :attr:`input` the singular value decomposition is not unique,
              as `U` and `V` may be multiplied by an arbitrary phase factor :math:`e^{i \phi}` on every column.

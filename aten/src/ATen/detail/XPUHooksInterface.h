@@ -9,11 +9,6 @@
 #include <functional>
 #include <memory>
 
-// We use forward declaration here instead of #include <ATen/dlpack.h> to avoid
-// leaking DLPack implementation detail to every project that includes `ATen/Context.h`, which in turn
-// would lead to a conflict when linked with another project using DLPack (for example TVM)
-struct DLDevice_;
-
 namespace at {
 
 constexpr const char* XPU_HELP =
@@ -44,23 +39,8 @@ struct TORCH_API XPUHooksInterface {
         XPU_HELP);
   }
 
-  virtual Device getATenDeviceFromDLPackDevice(
-      const DLDevice_& dl_device,
-      void* data) const {
-    TORCH_CHECK(
-        false,
-        "Cannot get XPU device without Intel Extension for Pytorch. ",
-        XPU_HELP);
-  }
-
-  virtual DLDevice_& getDLPackDeviceFromATenDevice(
-      DLDevice_& dl_device,
-      const Device& aten_device,
-      void* data) const {
-    TORCH_CHECK(
-        false,
-        "Cannot get XPU DL device without Intel Extension for Pytorch. ",
-        XPU_HELP);
+  virtual int getGlobalIdxFromDevice(const Device& device) const {
+    TORCH_CHECK(false, "Cannot get XPU global device index without ATen_xpu library.");
   }
 
   virtual Generator getXPUGenerator(C10_UNUSED DeviceIndex device_index = -1) const {
@@ -73,6 +53,10 @@ struct TORCH_API XPUHooksInterface {
 
   virtual int getNumGPUs() const {
     return 0;
+  }
+
+  virtual Device getDeviceFromPtr(void* /*data*/) const {
+    TORCH_CHECK(false, "Cannot get device of pointer on XPU without ATen_xpu library.");
   }
 };
 

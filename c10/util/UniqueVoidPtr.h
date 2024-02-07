@@ -1,6 +1,9 @@
 #pragma once
+#include <cstddef>
 #include <memory>
+#include <utility>
 
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 
 namespace c10 {

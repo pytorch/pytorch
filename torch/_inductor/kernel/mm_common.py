@@ -8,6 +8,7 @@ import torch
 from torch._inductor.select_algorithm import realize_inputs
 from torch._inductor.virtualized import V
 
+from .. import config as inductor_config
 from ..utils import ceildiv as cdiv, next_power_of_2
 
 log = logging.getLogger(__name__)
@@ -35,7 +36,7 @@ def filtered_configs(
     m = max(
         next_power_of_2(
             V.graph.sizevars.size_hint(
-                m, fallback=torch._inductor.config.unbacked_symint_fallback
+                m, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
             )
         ),
         min_block_size,
@@ -43,7 +44,7 @@ def filtered_configs(
     n = max(
         next_power_of_2(
             V.graph.sizevars.size_hint(
-                n, fallback=torch._inductor.config.unbacked_symint_fallback
+                n, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
             )
         ),
         min_block_size,
@@ -51,7 +52,7 @@ def filtered_configs(
     k = max(
         next_power_of_2(
             V.graph.sizevars.size_hint(
-                k, fallback=torch._inductor.config.unbacked_symint_fallback
+                k, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
             )
         ),
         min_block_size,
@@ -159,7 +160,7 @@ def acc_type(dtype):
     return f"tl.{dtype}".replace("torch.", "")
 
 
-def mm_options(config, sym_k, layout, b_prologue_cast_type=None):
+def mm_options(config, sym_m, sym_n, sym_k, layout, b_prologue_cast_type=None):
     """
     Common options to matmul triton templates.
     """
@@ -168,10 +169,14 @@ def mm_options(config, sym_k, layout, b_prologue_cast_type=None):
         sympy.gcd(sym_k, config.kwargs["BLOCK_K"])
         == config.kwargs["BLOCK_K"]
     )
+    allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
+        not inductor_config.force_same_precision
+        or ((sym_m % 16) == 0 and (sym_n % 16) == 0 and (sym_k % 8) == 0)
+    )
     return dict(
         GROUP_M=8,
         EVEN_K=even_k_symbolic,
-        ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
+        ALLOW_TF32=allow_tf32,
         ACC_TYPE=acc_type(layout.dtype),
         B_PROLOGUE_CAST_TYPE=b_prologue_cast_type,
         num_stages=config.num_stages,

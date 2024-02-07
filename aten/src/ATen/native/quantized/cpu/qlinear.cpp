@@ -565,14 +565,19 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl_xnnp(
     rows_input *= input_contig.size(i);
   }
 
+  // Reshape the operator
+  status = at::native::xnnp_utils::xnnp_reshape_fully_connected_nc(
+      xnnp_linear_op.get(),
+      rows_input, /* batch_size */
+      caffe2::pthreadpool_());
+
   // Setup the operator
   status = at::native::xnnp_utils::xnnp_setup_fully_connected_nc(
       xnnp_linear_op.get(),
-      rows_input, /* batch_size */
       reinterpret_cast<const underlying_t*>(
           input_contig.template data_ptr<scalar_t>()),
-      reinterpret_cast<underlying_t*>(output.template data_ptr<scalar_t>()),
-      caffe2::pthreadpool_());
+      reinterpret_cast<underlying_t*>(output.template data_ptr<scalar_t>())
+    );
 
   TORCH_CHECK(
       status == xnn_status_success,
@@ -931,10 +936,18 @@ static at::Tensor linear_int8_with_onednn_weight(
         output_scale == 1.0f && output_zero_point == 0, "onednn qlinear: expect scale=1 and zero point=0 for fp32 output");
   }
 
-  auto input_contig = input.contiguous();
+  // If the input has more than two dimensions, we will reshape it to a 2-dimensional form
+  // for calculation and subsequently reshape the output back.
+  auto input_contig =
+      dim == 2 ? input.contiguous() : input.reshape({-1, input.size(dim - 1)}).contiguous();
+
   auto src = at::native::itensor_from_tensor(input_contig);
   auto packed_weight = at::native::itensor_from_mkldnn(onednn_weight);
   int64_t K = input.size(dim - 1), M = input.numel() / K, N = packed_weight.get_dim(1);
+
+  auto output_size = input.sizes().vec();
+  output_size[dim - 1] = N;
+
   c10::optional<ideep::tensor> onednn_bias{c10::nullopt};
   bool with_bias = bias.has_value();
   at::Tensor bias_val_float;
@@ -967,7 +980,17 @@ static at::Tensor linear_int8_with_onednn_weight(
   auto bias_desc = with_bias ?
       tensor::desc(onednn_bias.value().get_dims(), ideep::data_type::f32, ideep::format_tag::any) :
       tensor::desc();
-  auto op_attr = onednn_utils::create_attr_by_post_op(post_op_name, post_op_args);
+  dnnl::algorithm post_op_algo = dnnl::algorithm::undef;
+  if (post_op_name == "gelu") {
+    if (post_op_algorithm == "none") {
+      post_op_algo = dnnl::algorithm::eltwise_gelu_erf;
+    } else if (post_op_algorithm == "tanh") {
+      post_op_algo = dnnl::algorithm::eltwise_gelu_tanh;
+    } else {
+      TORCH_CHECK(false, "un-supported GELU approximate, none or tanh is supported.");
+    }
+  }
+  auto op_attr = onednn_utils::create_attr_by_post_op(post_op_name, post_op_args, post_op_algo);
   if (input_scale != 1.0f) {
     op_attr.set_scales_mask(DNNL_ARG_SRC, 0);
   }
@@ -1020,7 +1043,7 @@ static at::Tensor linear_int8_with_onednn_weight(
     args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST, dst_zp_t});
   }
   primitive.execute(ideep::stream::default_stream(), args);
-  return output;
+  return dim == 2 ? output : output.reshape(output_size);
 }
 #endif // #if AT_MKLDNN_ENABLED()
 

@@ -13,13 +13,13 @@ namespace c10 {
 // information as well as the source of our implementations.
 template <class To, class From>
 std::enable_if_t<
-    sizeof(To) == sizeof(From) && std::is_trivially_copyable<From>::value &&
-        std::is_trivially_copyable<To>::value,
+    sizeof(To) == sizeof(From) && std::is_trivially_copyable_v<From> &&
+        std::is_trivially_copyable_v<To>,
     To>
 // constexpr support needs compiler magic
 bit_cast(const From& src) noexcept {
   static_assert(
-      std::is_trivially_constructible<To>::value,
+      std::is_trivially_constructible_v<To>,
       "This implementation additionally requires "
       "destination type to be trivially constructible");
 

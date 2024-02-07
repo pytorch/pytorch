@@ -313,9 +313,7 @@ def was_tensor_metadata_updated(arg, new_arg):
 
 
 # Returns the number of detected copy_
-def assert_functional_graph(
-    fx_g: torch.fx.Graph, *, allow_input_mutations: bool = False
-) -> int:
+def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
     placeholders = set()
     copy_count = 0
     # NB: It would also be nice to verify that the mutations all happen at the
@@ -325,7 +323,7 @@ def assert_functional_graph(
         if n.op == "placeholder":
             placeholders.add(n)
         if isinstance(n.target, torch._ops.OpOverload):
-            if n.target is torch.ops.aten.copy_.default and allow_input_mutations:
+            if n.target is torch.ops.aten.copy_.default:
                 suffix = True
                 # Can only copy_ into an input, and can only do so once
                 assert n.args[0] in placeholders
@@ -336,6 +334,25 @@ def assert_functional_graph(
                     not n.target._schema.is_mutable
                 ), f"aot_autograd expected to have an entirely functional graph, but found {n.format_node()}"
     return copy_count
+
+
+def propagate_input_mutation_stacktraces(fx_g: torch.fx.Graph) -> None:
+    placeholders = set()
+    for n in fx_g.nodes:
+        if n.op == "placeholder":
+            placeholders.add(n)
+        if isinstance(n.target, torch._ops.OpOverload):
+            if n.target is torch.ops.aten.copy_.default:
+                # Can only copy_ into an input, and can only do so once
+                assert n.args[0] in placeholders
+                placeholders.remove(n.args[0])
+                copy_from_node = n.args[1]
+                # Pre-condition: every node has a "stack_trace" field in its meta,
+                # but copy_() nodes do not (since we manually added them during functionalization).
+                # Instead, we manually propagate here.
+                if "stack_trace" in copy_from_node.meta:
+                    assert "stack_trace" not in n.meta, str(n)
+                    n.meta["stack_trace"] = copy_from_node.meta["stack_trace"]
 
 
 def _check_if_mutation_can_be_in_graph(

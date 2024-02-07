@@ -71,7 +71,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   c10::optional<at::Tensor> dk{c10::nullopt};
   c10::optional<at::Tensor> dv{c10::nullopt};
 
-  //  The kernel computes irregadless we will drop for this functions return
+  //  The kernel computes irregardless we will drop for this functions return
   Tensor grad_softmax;
 
   // We check the whether the cumulative_sequence_length_q is defined
@@ -212,7 +212,7 @@ _efficient_attention_backward(
     TORCH_CHECK(cu_seqlens_q->size(0) == cu_seqlens_k->size(0));
     TORCH_CHECK(query.size(0) == 1, "cu_seqlen only supports batch_size=1");
     TORCH_CHECK(max_seqlen_q > 0, "max_seqlen_q required with `cu_seqlens_q`");
-    TORCH_CHECK(max_seqlen_k > 0, "max_seqlen_q required with `cu_seqlens_q`");
+    TORCH_CHECK(max_seqlen_k > 0, "max_seqlen_k required with `cu_seqlens_k`");
     TORCH_CHECK(
         max_seqlen_k <= key.size(1), "Invalid max_seqlen_k:", max_seqlen_k);
     TORCH_CHECK(

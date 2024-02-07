@@ -8,7 +8,8 @@ import torch
 from torch import ops
 
 from model import Model, get_custom_op_library_path
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
+import unittest
 
 torch.ops.import_module("pointwise")
 
@@ -29,6 +30,17 @@ class TestCustomOperators(TestCase):
         x = torch.randn(3, device='meta')
         with self.assertRaisesRegex(RuntimeError, "pointwise"):
             torch.ops.custom.cos(x)
+
+    @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
+    def test_dynamo_pystub_suggestion(self):
+        x = torch.randn(3)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            return torch.ops.custom.asin(x)
+
+        with self.assertRaisesRegex(RuntimeError, r'unsupported operator: .* \(you may need to `import nonexistent`'):
+            f(x)
 
     def test_abstract_impl_pystub_faketensor(self):
         from functorch import make_fx
