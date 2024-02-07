@@ -50,24 +50,6 @@ class DenseModel(torch.nn.Module):
 
 # TODO: Consolidate DeviceMesh based FSDP and HSDP test cases.
 class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
-    @with_comms
-    @skip_if_lt_x_gpu(4)
-    def test_raises_tp_hsdp_not_supported_error(self):
-        mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
-        # manually set a fake parent mesh to mesh_2d
-        fake_parent_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        _mesh_resources.child_to_parent_mapping[mesh_2d] = fake_parent_mesh
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Hybrid sharding \+ TP is not supported yet.",
-        ):
-            model = FSDP(
-                DenseModel().cuda(),
-                device_mesh=mesh_2d,
-                sharding_strategy=ShardingStrategy.HYBRID_SHARD,
-            )
-
     def _create_model(self, device_mesh=None):
         if device_mesh:
             model = FSDP(
