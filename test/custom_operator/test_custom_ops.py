@@ -33,7 +33,7 @@ class TestCustomOperators(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
     @unittest.skipIf(
-    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
     )
     def test_dynamo_pystub_suggestion(self):
         x = torch.randn(3)
