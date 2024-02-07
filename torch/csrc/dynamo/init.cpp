@@ -44,6 +44,9 @@ void initDynamoBindings(PyObject* torch) {
       .def_readonly("code", &CacheEntry::code)
       .def_property_readonly("next", &CacheEntry::next);
 
+  py::class_<ExtraState>(m, "_ExtraState")
+      .def("invalidate", &ExtraState::invalidate);
+
   m.def("_debug_get_cache_entry_list", &_debug_get_cache_entry_list);
 }
 

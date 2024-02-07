@@ -22,6 +22,13 @@ void ExtraState::move_to_front(CacheEntry* cache_entry) {
       cache_entry->_owner_loc);
 }
 
+void ExtraState::invalidate(CacheEntry* cache_entry) {
+  CHECK(cache_entry->_owner == this);
+  CHECK(!this->cache_entry_list.empty());
+  CHECK(cache_entry == &*cache_entry->_owner_loc);
+  this->cache_entry_list.erase(cache_entry->_owner_loc);
+}
+
 CacheEntry* extract_cache_entry(ExtraState* extra_state) {
   if (extra_state == NULL || extra_state == SKIP_CODE) {
     return NULL;
@@ -110,6 +117,13 @@ CacheEntry* create_cache_entry(
   auto new_iter = extra_state->cache_entry_list.begin();
   new_iter->_owner = extra_state;
   new_iter->_owner_loc = new_iter;
+  // Set check_fn references to extra_state and CacheEntry
+  // Warning: lifetime is controlled by C++!
+  py::handle check_fn = py::handle(guarded_code).attr("check_fn");
+  check_fn.attr("cache_entry") =
+      py::cast(*new_iter, py::return_value_policy::reference);
+  check_fn.attr("extra_state") =
+      py::cast(extra_state, py::return_value_policy::reference);
   return &*new_iter;
 }
 

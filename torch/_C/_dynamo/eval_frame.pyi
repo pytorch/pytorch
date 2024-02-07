@@ -18,4 +18,7 @@ class _CacheEntry:
     code: types.CodeType
     next: Optional[_CacheEntry]
 
+class _ExtraState:
+    def invalidate(self, cache_entry: _CacheEntry): ...
+
 def _debug_get_cache_entry_list(code: types.CodeType) -> List[_CacheEntry]: ...
