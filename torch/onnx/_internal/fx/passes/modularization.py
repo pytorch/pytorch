@@ -222,6 +222,9 @@ class _ModuleStackMeta:
             return
         raw_meta = copy.copy(nn_module_stack_meta)
         for item in raw_meta.items():
+            # In exported program: there are two  call stack in nn_module_stack,
+            # The first one is created in torch.export.export which we need to
+            # skip
             if is_exported_program:
                 is_exported_program = False
                 continue
@@ -909,7 +912,7 @@ class Modularize(_pass.Transform):
                         ".", "/"
                     )
                     get_attr_node = graph.create_node("get_attr", node_target)
-                _replace_the_use_with(
+                _replace_placeholder_with_getattr_node(
                     node=node,
                     replace_with=get_attr_node,
                     user=user,
@@ -924,6 +927,11 @@ class Modularize(_pass.Transform):
     def _assign_state_dict_to_graph_module(
         self, graph_module: torch.fx.GraphModule
     ) -> None:
+        """Assigns state_dict to the graph_module for retrieving attributes.
+
+        Args:
+            graph_module (torch.fx.GraphModule): The graph_module to assign state_dict to.
+        """
         assert self.exported_program is not None
         assert self.graph_signature is not None
         for name in self.graph_signature.parameters:
@@ -988,24 +996,25 @@ def _assign_attr(
         setattr(to_module, target, from_obj)
 
 
-def _replace_the_use_with(
+def _replace_placeholder_with_getattr_node(
     node: torch.fx.Node,
     replace_with: torch.fx.Node,
     user: torch.fx.Node,
     propagate_meta=False,
 ) -> None:
-    """
-    Replace the use of ``self`` in the Graph with the Node ``replace_with``.
+    """Replace a placeholder node with a get_attr node.
+
+    This is a helper function to replace a placeholder node with a get_attr node in the graph.
+    It also updates the user node of the placeholder node to use the get_attr node instead.
+
+    Referenced from `replace_all_uses_with` in `torch.fx.Node`.
 
     Args:
-
-        node (Node): The node to replace.
-        replace_with (Node): The node to replace all uses of ``self`` with.
-        user (Node): The node that uses ``node``.
-        propagate_meta (bool): Whether or not to copy all properties
-            on the .meta field of the user node onto the replacement node.
-            For safety, this is only valid to do if the replacement node
-            doesn't already have an existing .meta field.
+        node (torch.fx.Node): The placeholder node to be replaced.
+        replace_with (torch.fx.Node): The get_attr node to replace the placeholder node.
+        user (torch.fx.Node): The user node of the placeholder node.
+        propagate_meta (bool, optional): Whether to propagate the metadata from the
+            placeholder node to the get_attr node. Defaults to False.
     """
     if propagate_meta:
         assert len(replace_with.meta) == 0, (
@@ -1037,5 +1046,3 @@ def _replace_the_use_with(
     assert isinstance(new_kwargs, dict)
     user.args = new_args
     user.kwargs = new_kwargs
-
-    return

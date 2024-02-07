@@ -194,36 +194,6 @@ def skip_min_ort_version(reason: str, version: str, dynamic_only: bool = False):
     return skip_dec
 
 
-def xfail_within_fake_mode_test(
-    error_message: str,
-    model_type: Optional[TorchModelType] = None,
-    reason: Optional[str] = None,
-):
-    """Xfail dynamic exporting test.
-
-    Args:
-        reason: The reason for xfail within fake mode exporting test.
-        model_type (TorchModelType): The model type to xfail dynamic exporting test for.
-            When None, model type is not used to skip dynamic tests.
-
-    Returns:
-        A decorator for skipping dynamic exporting test.
-    """
-
-    def skip_dec(func):
-        @functools.wraps(func)
-        def wrapper(self, *args, **kwargs):
-            if self.export_within_fake_mode and (
-                not model_type or self.model_type == model_type
-            ):
-                return xfail(error_message, reason)(func)(self, *args, **kwargs)
-            return func(self, *args, **kwargs)
-
-        return wrapper
-
-    return skip_dec
-
-
 def xfail_dynamic_fx_test(
     error_message: str,
     model_type: Optional[TorchModelType] = None,

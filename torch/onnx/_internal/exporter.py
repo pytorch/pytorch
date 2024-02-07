@@ -687,7 +687,9 @@ class ONNXProgram:
     def __call__(
         self,
         *args: Any,
-        exported_program: Optional[torch_export.ExportedProgram] = None,
+        model_with_state_dict: Optional[
+            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
+        ] = None,
         options: Optional[ONNXRuntimeOptions] = None,
         **kwargs: Any,
     ) -> Any:
@@ -696,23 +698,14 @@ class ONNXProgram:
         Args:
             args: The positional inputs to the model.
             kwargs: The keyword inputs to the model.
-            exported_program: Required when :func:`enable_fake_mode` is used to extract real initializers as
-                needed by the ONNX graph. In fake mode export, constant tensors and non-persistent buffers
-                are lost, as they are not supported in state_dict, so the original model is needed to
-                fetch the initializers.
+            model_with_state_dict: The PyTorch model to fetch state from.
+                Required when :func:`enable_fake_mode` is used to extract real initializers as needed by the ONNX graph.
             options: The options to use for running the model with ONNX Runtime.
 
         Returns:
             The model output as computed by ONNX Runtime
         """
         import onnxruntime  # type: ignore[import]
-
-        # backward compatibility: Respect the usage of *args, **kwargs for users and
-        # also None for the optional arguments
-        if "exported_program" in kwargs and kwargs["exported_program"] is None:
-            exported_program = kwargs.pop("exportped_program")
-        if "options" in kwargs and kwargs["options"] is None:
-            options = kwargs.pop("options")
 
         options = options or ONNXRuntimeOptions()
         providers = options.execution_providers or onnxruntime.get_available_providers()
@@ -722,7 +715,7 @@ class ONNXProgram:
         ort_input_names = [input.name for input in ort_session.get_inputs()]
         onnx_input = self.adapt_torch_inputs_to_onnx(
             *args,
-            exported_program=exported_program,
+            model_with_state_dict=model_with_state_dict,
             onnx_input_names=ort_input_names,
             **kwargs,
         )
@@ -838,7 +831,9 @@ class ONNXProgram:
     def adapt_torch_inputs_to_onnx(
         self,
         *model_args,
-        exported_program: Optional[torch_export.ExportedProgram] = None,
+        model_with_state_dict: Optional[
+            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
+        ] = None,
         onnx_input_names: Optional[Sequence[str]] = None,
         **model_kwargs,
     ) -> Sequence[Union[torch.Tensor, int, float, bool]]:
@@ -857,10 +852,9 @@ class ONNXProgram:
 
         Args:
             model_args: The PyTorch model inputs.
-            exported_program: Required when :func:`enable_fake_mode` is used to extract real initializers as
-                needed by the ONNX graph. In fake mode export, constant tensors and non-persistent buffers
-                are lost, as they are not supported in state_dict, so the original model is needed to
-                fetch the initializers.
+            model_with_state_dict: The PyTorch model to get extra state from.
+                If not specified, the model used during export is used.
+                Required when :func:`enable_fake_mode` is used to extract real initializers as needed by the ONNX graph.
             onnx_input_names: Required when :func:`enable_fake_mode` is used to extract real initializers as
                 needed by the ONNX graph. In fake mode export, the input order of constant tensors and
                 non-persistent buffers are lost, so the onnx input names are needed to match the
@@ -902,22 +896,15 @@ class ONNXProgram:
             This API is experimental and is *NOT* backward-compatible.
 
         """
-        # backward compatibility: Respect the usage of *args, **kwargs for users and
-        # also None for the optional arguments
-        if (
-            "exportped_program" in model_kwargs
-            and model_kwargs["exportped_program"] is None
-        ):
-            exported_program = model_kwargs.pop("exportped_program")
-        if (
-            "onnx_input_names" in model_kwargs
-            and model_kwargs["onnx_input_names"] is None
-        ):
-            onnx_input_names = model_kwargs.pop("onnx_input_names")
+        # model specified by the user has precedence, when specified
+        model_with_state_dict = model_with_state_dict or self._model_torch
+        assert (
+            model_with_state_dict is not None
+        ), "model_with_state_dict must be specified."
 
         return self._input_adapter.apply(
             *model_args,
-            model=exported_program,
+            model=model_with_state_dict,
             onnx_input_names=onnx_input_names,
             **model_kwargs,
         )
@@ -926,7 +913,9 @@ class ONNXProgram:
     def adapt_torch_outputs_to_onnx(
         self,
         model_outputs: Any,
-        model: Optional[torch.export.ExportedProgram] = None,
+        model_with_state_dict: Optional[
+            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
+        ] = None,
     ) -> Sequence[Union[torch.Tensor, int, float, bool]]:
         """Converts the PyTorch model outputs to exported ONNX model outputs format.
 
@@ -943,7 +932,9 @@ class ONNXProgram:
 
         Args:
             model_outputs: The PyTorch model outputs.
-            model: The Pytorch model
+            model_with_state_dict: The PyTorch model to get extra state from.
+                If not specified, the model used during export is used.
+                Required when :func:`enable_fake_mode` is used to extract real initializers as needed by the ONNX graph.
 
         Returns:
             PyTorch model outputs in exported ONNX model outputs format.
@@ -972,7 +963,12 @@ class ONNXProgram:
             This API is experimental and is *NOT* backward-compatible.
 
         """
-        return self._output_adapter.apply(model_outputs, model)
+        # model specified by the user has precedence, when specified
+        model_with_state_dict = model_with_state_dict or self._model_torch
+        assert (
+            model_with_state_dict is not None
+        ), "model_with_state_dict must be specified."
+        return self._output_adapter.apply(model_outputs, model=model_with_state_dict)
 
     @_beartype.beartype
     def save(
