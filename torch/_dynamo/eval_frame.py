@@ -1,9 +1,15 @@
 # mypy: disable-error-code="method-assign"
 
+"""
+Functions in this file are responsible for modifying the eval frame
+handler at RUNTIME.  Therefore, all functions in this file are hot.
+Functions that only execute at compile time should be placed
+in torch._dynamo.convert_frame.
+"""
+
 from __future__ import annotations
 
 import contextlib
-import dis
 import functools
 import inspect
 import logging
@@ -14,6 +20,7 @@ import threading
 import traceback
 import types
 import warnings
+import weakref
 from enum import Enum
 from os.path import dirname, join
 from typing import (
@@ -45,7 +52,6 @@ from torch.fx.experimental.symbolic_shapes import (
     StatelessSymbolicContext,
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
-from torch.nn.parallel.distributed import DistributedDataParallel
 
 from ..fx import GraphModule
 from .backends.registry import CompilerFn, lookup_backend
@@ -76,7 +82,6 @@ from .utils import common_constant_types, compile_times
 log = logging.getLogger(__name__)
 
 from torch._dispatch.python import enable_python_dispatcher
-from torch.utils._python_dispatch import _disable_current_modes
 
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
 null_context = contextlib.nullcontext
@@ -92,7 +97,6 @@ class Unset(Enum):
 
 unset = Unset.token
 
-compile_lock = threading.RLock()
 guarded_backend_cache = threading.local()
 cached_backends: Dict[int, CompilerFn] = {}
 
@@ -183,12 +187,7 @@ def _debug_get_cache_entry_list(
     """
     if callable(code):
         code = code.__code__
-    cache_head = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(code)
-    cache_list = []
-    while cache_head is not None:
-        cache_list.append(cache_head)
-        cache_head = cache_head.next
-    return cache_list
+    return torch._C._dynamo.eval_frame._debug_get_cache_entry_list(code)
 
 
 class OptimizedModule(torch.nn.Module):
@@ -386,7 +385,9 @@ class _TorchDynamoContext:
             # Assume that the underlying node metadata of `fn`,
             # a GraphModule instance, accurately represents
             # all instances of type(fn).
-            code_context.get_context(fn.forward.__code__)["orig_graphmodule"] = fn
+            code_context.get_context(fn.forward.__code__)[
+                "orig_graphmodule"
+            ] = weakref.ref(fn)
 
         # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):
@@ -553,71 +554,6 @@ class DisableContext(_TorchDynamoContext):
         super().__init__(callback=None)
 
 
-def first_real_inst_idx(code):
-    if sys.version_info < (3, 11):
-        return 0
-    for inst in dis.get_instructions(code):
-        if inst.opname == "RESUME":
-            return inst.offset // 2
-    raise RuntimeError("RESUME instruction not found in code")
-
-
-def catch_errors_wrapper(callback, hooks: Hooks):
-    @functools.wraps(callback)
-    def catch_errors(frame, cache_entry, frame_state):
-        assert frame_state is not None
-
-        is_skipfile = skipfiles.check(frame.f_code)
-        if (
-            # TODO: the first condition is not covered by any test
-            frame.f_lasti >= first_real_inst_idx(frame.f_code)
-            or is_skipfile
-            or config.disable
-        ):
-            if log.isEnabledFor(logging.DEBUG):
-                skip_reason = (
-                    "traced frame already"
-                    if frame.f_lasti >= first_real_inst_idx(frame.f_code)
-                    else "in skipfiles"
-                    if skipfiles.check(frame.f_code)
-                    else "dynamo tracing is disabled"
-                )
-                if not is_skipfile or config.verbose:
-                    log.debug(
-                        "skipping: %s (reason: %s, file: %s)",
-                        frame.f_code.co_name,
-                        skip_reason,
-                        frame.f_code.co_filename,
-                    )
-            return None
-        if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
-            # nametuple constructor
-            return None
-        if config.optimize_ddp:
-            ddp_module = DistributedDataParallel._get_active_ddp_module()
-            if ddp_module:
-                with compile_lock:
-                    from torch._dynamo.backends.distributed import DDPOptimizer
-
-                    ddp_optimizer = DDPOptimizer(
-                        bucket_bytes_cap=ddp_module.bucket_bytes_cap,
-                        backend_compile_fn=callback._torchdynamo_orig_callable,
-                    )
-                    assert hasattr(
-                        callback, "_clone_with_backend"
-                    ), "DDPOptimizer only supports callback fns that know how to clone themselves."
-                    hijacked_callback = callback._clone_with_backend(
-                        ddp_optimizer.compile_fn,
-                    )
-                    return hijacked_callback(frame, cache_entry, hooks, frame_state)
-
-        with compile_lock, _disable_current_modes():
-            return callback(frame, cache_entry, hooks, frame_state)
-
-    catch_errors._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
-    return catch_errors
-
-
 def _optimize_catch_errors(
     compile_fn,
     hooks: Hooks,
@@ -627,7 +563,7 @@ def _optimize_catch_errors(
     compiler_config=None,
 ):
     return OptimizeContext(
-        catch_errors_wrapper(compile_fn, hooks),
+        convert_frame.catch_errors_wrapper(compile_fn, hooks),
         backend_ctx_ctor=backend_ctx_ctor,
         first_ctx=True,
         export=export,
