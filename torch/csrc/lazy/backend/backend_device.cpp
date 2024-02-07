@@ -67,11 +67,19 @@ c10::optional<BackendDevice> GetBackendDevice(at::TensorList tensors) {
   return GetBackendDevice(at::ITensorListRef(tensors));
 }
 
-c10::optional<BackendDevice> GetBackendDevice(const at::Tensor& tensor) {
+template <typename T, typename... Args>
+c10::optional<BackendDevice> GetBackendDevice(
+    const T& tensor,
+    const Args&... forward_tensors) {
+  const std::size_t n_args = sizeof...(Args);
   if (auto lt = TryGetLtcTensor(tensor)) {
     return lt->GetDevice();
   }
-  return c10::nullopt;
+  if (n_args > 0) {
+    return GetBackendDevice(forward_tensors...);
+  } else {
+    return c10::nullopt;
+  }
 }
 
 c10::optional<BackendDevice> GetBackendDevice(
