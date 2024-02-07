@@ -4315,8 +4315,8 @@ def scaled_dot_product_flash_attention_for_cpu(
 ) -> Tuple[Tensor, Tensor]:
     dtype = query.dtype
     torch._check(
-        torch.is_floating_point(query) and dtype is not torch.half,
-        lambda: f"query must be FP32, FP64, BF16 but got {query.dtype}",
+        torch.is_floating_point(query),
+        lambda: f"query must be FP32, FP64, BF16, FP16 but got {query.dtype}",
     )
     torch._check(
         query.dim() == 4 and key.dim() == 4 and value.dim() == 4,
