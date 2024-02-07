@@ -1257,7 +1257,7 @@ function create_trace_view(
     .append('div')
     .attr(
       'style',
-      'grid-column: 1; grid-row: 3; width: 100%; height: 80%; overflow: auto;',
+      'grid-column: 1; grid-row: 3; width: 100%; height: 100%; overflow: auto;',
     );
   const delegate = ContextViewer(context_div.append('pre').text('none'), data);
   plot.set_delegate(delegate);
@@ -1569,7 +1569,7 @@ pre {
 }
 html, body {
   height: 100%;
-  overflow: clip;
+  overflow: auto;
 }`;
 
 const head = d3.select('head');
