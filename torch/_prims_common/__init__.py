@@ -107,8 +107,12 @@ def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
             # with each other
             if isinstance(y, torch.SymInt):
                 continue
-        # TODO: this is actually kind of weird, why does this one need to be
-        # size oblivious
+        # NB: Naively, you would not expect to have to do an oblivious guard
+        # here because there is seemingly no broadcasting here, but in fact we
+        # use this in some situations to determine if we need to do an expand
+        # on the tensor because they don't line up, so you can definitely end
+        # up trying to prove u0 != 1 in this situation.  See
+        # python test/test_proxy_tensor.py -k test_cumsum_unbacked
         if guard_size_oblivious(x != y):
             return False
 
