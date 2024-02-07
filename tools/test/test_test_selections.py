@@ -294,6 +294,12 @@ class TestCalculateShards(unittest.TestCase):
                 ],
             ),
         ]
+        print( calculate_shards(
+                2,
+                [TestRun(t) for t in test_times.keys()],
+                test_times,
+                gen_class_times(test_times),
+            ),)
         self.assert_shards_equal(
             expected_shards,
             calculate_shards(
