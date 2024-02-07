@@ -156,7 +156,14 @@ def capture_pre_autograd_graph(
     else:
         constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
 
-    decomp_table = {op: op.decompose for op in FunctionalTensor.maybe_aliasing_or_mutating_ops}
+    # Do not decompose dropout for exported models, because in eval mode the dropout
+    # op disappears from the graph, which makes it difficult to switch to train mode.
+    # See https://github.com/pytorch/pytorch/pull/115258#issuecomment-1900755832.
+    decomp_table = {
+        op: op.decompose
+        for op in FunctionalTensor.maybe_aliasing_or_mutating_ops
+        if op != torch.ops.aten.dropout.default
+    }
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
         m = torch._dynamo.export(
             f,
@@ -175,7 +182,7 @@ def capture_pre_autograd_graph(
 
         m.meta["inline_constraints"] = {
             k: v
-            for k, v in fake_mode.shape_env.runtime_var_to_range.items()
+            for k, v in fake_mode.shape_env.var_to_range.items()
             if re.match(r"^[if]\d+$", str(k))
         }
 
@@ -190,11 +197,26 @@ def capture_pre_autograd_graph(
             range_constraints=range_constraints,
         )
 
+    error_message = \
+        """
+        Calling train() or eval() is not supported for exported models.
+        Alternatively, you may override these methods to do custom user behavior as follows:
+
+            def _my_train(self, mode: bool = True):
+                ...
+
+            def _my_eval(self):
+                ...
+
+            model.train = types.MethodType(_my_train, model)
+            model.eval = types.MethodType(_my_eval, model)
+        """
+
     def _train(self, mode: bool = True):
-        raise NotImplementedError("Calling train() is not supported yet.")
+        raise NotImplementedError(error_message)
 
     def _eval(self, mode: bool = True):
-        raise NotImplementedError("Calling eval() is not supported yet.")
+        raise NotImplementedError(error_message)
 
     module.train = types.MethodType(_train, module)  # type: ignore[method-assign]
     module.eval = types.MethodType(_eval, module)  # type: ignore[method-assign]

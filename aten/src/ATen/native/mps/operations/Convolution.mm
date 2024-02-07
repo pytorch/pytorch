@@ -318,10 +318,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
       feeds[biasPlaceholder.getMPSGraphTensor()] = biasPlaceholder.getMPSGraphTensorData();
     }
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return *output;
@@ -486,15 +483,8 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
     auto weightsPlaceholder = Placeholder(cachedGraph->weightTensor_, weight_t);
     auto outputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, *grad_input);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      gradOutputPlaceholder.getMPSGraphTensor() : gradOutputPlaceholder.getMPSGraphTensorData(),
-      weightsPlaceholder.getMPSGraphTensor() : weightsPlaceholder.getMPSGraphTensorData(),
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(gradOutputPlaceholder, weightsPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
   return *grad_input;
 }
@@ -650,15 +640,8 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
     auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
     auto outputPlaceholder = Placeholder(cachedGraph->gradWeightTensor_, grad_weight_t);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      gradOutputPlaceholder.getMPSGraphTensor() : gradOutputPlaceholder.getMPSGraphTensorData(),
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(gradOutputPlaceholder, inputPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return grad_weight_t;

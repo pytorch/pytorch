@@ -17,7 +17,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Type
+from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple, Type
 from unittest.mock import patch
 
 import torch
@@ -588,9 +588,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     inline_depth: int
     inconsistent_side_effects: bool
     current_speculation: Optional[SpeculationEntry]
-    random_calls: List[
-        Tuple[Callable[..., object], Tuple[object, ...], Dict[str, object]]
-    ]
 
     def mark_inconsistent_side_effects(self):
         """
@@ -1493,7 +1490,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             val = seq.unpack_var_sequence(self)
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
-        assert len(val) == inst.argval
+        if len(val) != inst.argval:
+            unimplemented("UNPACK_SEQUENCE length mismatch")
         for i in reversed(val):
             self.push(i)
 
@@ -1974,7 +1972,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.export = export
 
         self.current_speculation = None
-        self.random_calls = []
 
         self.strict_checks_enabled = False
 
@@ -2032,7 +2029,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         _step_logger()(
             logging.INFO,
             f"torchdynamo start tracing {f_code.co_name} {code_options['co_filename']}:{code_options['co_firstlineno']}",
-            stack_info=True,
         )
         super().__init__(
             output=OutputGraph(
@@ -2271,13 +2267,14 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
             # _origin marks this as coming from an internal dynamo known function that is safe to
             # trace through.
-            if hasattr(func.fn, "_origin") and func.fn._origin in [
+            if hasattr(getattr(func, "fn", None), "_origin") and func.fn._origin in [
                 produce_trampoline_autograd_apply,
             ]:
                 # Known sound
                 return skipfiles.SkipResult(False, "allowlist in dynamo known function")
+            fn_qualname = func.fn.__qualname__ if hasattr(func, "fn") else ""
             unimplemented(
-                f"'inline in skipfiles: {func.fn.__qualname__} | {func.get_name()} {func.get_filename()}, {result.reason}'"
+                f"'inline in skipfiles: {fn_qualname} | {func.get_name()} {func.get_filename()}, {result.reason}'"
             )
 
         if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
