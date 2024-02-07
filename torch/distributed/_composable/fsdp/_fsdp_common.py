@@ -1,3 +1,4 @@
+import math
 import traceback
 
 from dataclasses import dataclass
@@ -53,8 +54,8 @@ class DDPMeshInfo(DataParallelMeshInfo):
 @dataclass
 class HSDPMeshInfo(FSDPMeshInfo, DDPMeshInfo):
     def __post_init__(self):
-        super(FSDPMeshInfo, self).__post_init__()
-        super(DDPMeshInfo, self).__post_init__()
+        # Calls `FSDPMeshInfo` -> `DDPMeshInfo` -> `DataParallelMeshInfo`
+        super().__post_init__()
 
 
 class TrainingState(Enum):
@@ -83,6 +84,11 @@ def _is_composable_with_fsdp(module: nn.Module) -> bool:
         return True
     # Registry keys by function name
     return "replicate" not in registry
+
+
+def _get_dim0_padded_size(tensor_size: torch.Size, dim0_factor: int) -> torch.Size:
+    padded_dim0 = math.ceil(tensor_size[0] / dim0_factor) * dim0_factor
+    return cast(torch.Size, torch.Size([padded_dim0]) + tensor_size[1:])
 
 
 def _chunk_with_empty(
@@ -116,3 +122,11 @@ def _from_local_no_grad(
         requires_grad=local_tensor.requires_grad,
         stride=global_stride,
     )
+
+
+def _to_dtype_if_needed(
+    tensor: torch.Tensor, dtype: Optional[torch.dtype]
+) -> torch.Tensor:
+    if dtype is not None and tensor.dtype != dtype:
+        return tensor.to(dtype)
+    return tensor
