@@ -97,6 +97,7 @@ query ($owner: String!, $repo: String!, $cursor: String) {
 }
 """
 
+
 def is_protected(branch: str) -> bool:
     ESTIMATED_TOKENS[0] += 1
     res = gh_fetch_json_dict(
@@ -146,7 +147,10 @@ def get_recent_prs() -> Dict[str, Any]:
     while hasNextPage:
         ESTIMATED_TOKENS[0] += 1
         res = gh_graphql(
-            GRAPHQL_ALL_PRS_BY_UPDATED_AT, owner="pytorch", repo="pytorch", cursor=endCursor
+            GRAPHQL_ALL_PRS_BY_UPDATED_AT,
+            owner="pytorch",
+            repo="pytorch",
+            cursor=endCursor,
         )
         info = res["data"]["repository"]["pullRequests"]
         pr_infos.extend(info["nodes"])
@@ -172,6 +176,7 @@ def get_recent_prs() -> Dict[str, Any]:
                 prs_by_branch_base[branch_base_name] = pr
     return prs_by_branch_base
 
+
 def get_branches_with_magic_label_or_open_pr() -> Set[str]:
     pr_infos: List[Dict[str, Any]] = []
 
@@ -181,7 +186,10 @@ def get_branches_with_magic_label_or_open_pr() -> Set[str]:
     while hasNextPage:
         ESTIMATED_TOKENS[0] += 1
         res = gh_graphql(
-            GRAPHQL_NO_DELETE_BRANCH_LABEL, owner="pytorch", repo="pytorch", cursor=endCursor
+            GRAPHQL_NO_DELETE_BRANCH_LABEL,
+            owner="pytorch",
+            repo="pytorch",
+            cursor=endCursor,
         )
         info = res["data"]["repository"]["label"]["pullRequests"]
         pr_infos.extend(info["nodes"])
@@ -209,6 +217,7 @@ def get_branches_with_magic_label_or_open_pr() -> Set[str]:
             branch_base_name = x.group(1)
         branch_bases.add(branch_base_name)
     return branch_bases
+
 
 def delete_branch(repo: GitRepo, branch: str) -> None:
     repo._run_git("push", "origin", "-d", branch)
