@@ -154,9 +154,9 @@ def shard(
     if sort_by_time:
         known_tests = sorted(known_tests, key=lambda j: j.get_time(), reverse=True)
 
-    def _shard_serial():
-        nonlocal sharded_jobs
-        for test in known_tests:
+    def _shard_serial(tests: List[ShardedTest], sharded_jobs: List[ShardJob]) -> None:
+        assert estimated_time_limit is not None, "Estimated time limit must be provided"
+        for test in tests:
             if (
                 len(sharded_jobs) > 1
                 and sharded_jobs[-1].get_total_time() > estimated_time_limit
@@ -165,15 +165,15 @@ def shard(
             min_sharded_job = min(sharded_jobs, key=lambda j: j.get_total_time())
             min_sharded_job.serial.append(test)
 
-    def _shard_parallel():
-        for test in known_tests:
+    def _shard_parallel(tests: List[ShardedTest], sharded_jobs: List[ShardJob]) -> None:
+        for test in tests:
             min_sharded_job = min(sharded_jobs, key=lambda j: j.get_total_time())
             min_sharded_job.parallel.append(test)
 
     if serial:
-        _shard_serial()
+        _shard_serial(known_tests, sharded_jobs)
     else:
-        _shard_parallel()
+        _shard_parallel(known_tests, sharded_jobs)
 
     # Round robin the unknown jobs starting with the smallest shard
     num_shards = len(sharded_jobs)
