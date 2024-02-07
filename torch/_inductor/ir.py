@@ -4652,16 +4652,14 @@ class FallbackKernel(ExternKernelAlloc):
         def handle_aliasing_and_mutation(info, arg):
             # Assertions to make sure we didn't mismatch args
             if isinstance(info.type, torch.ListType):
-                assert isinstance(arg, list)
+                assert isinstance(arg, (list, tuple))
             is_optional_tensor = isinstance(
                 info.type, torch.OptionalType
             ) and isinstance(info.type.getElementType(), torch.TensorType)
-            if is_optional_tensor:
-                # Pre-existing: Inductor accepts scalars in place of Tensors.
-                assert arg is None or isinstance(arg, (IRNode, int, float, complex))
-            if isinstance(info.type, torch.TensorType):
-                # Pre-existing: Inductor accepts scalars in place of Tensors.
-                assert isinstance(arg, (IRNode, int, float, complex))
+            if is_optional_tensor or isinstance(info.type, torch.TensorType):
+                # PyTorch also accepts None and scalar types for args marked as "Tensor".
+                # We're not going to check all of them here.
+                assert not isinstance(arg, (tuple, list))
 
             if arg is None:
                 return
