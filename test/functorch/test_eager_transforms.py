@@ -10,7 +10,7 @@ import copy
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, parametrize, subtest, instantiate_parametrized_tests,
     IS_FBCODE, freeze_rng_state, skipIfTorchDynamo, IS_WINDOWS, IS_MACOS, IS_ARM64,
-    markDynamoStrictTest, xfailIfTorchDynamo
+    markDynamoStrictTest
 )
 import torch
 import torch.nn as nn
@@ -358,7 +358,6 @@ class TestGradTransform(TestCase):
             expected, = torch.autograd.grad(f(x), x)
             self.assertEqual(result, expected)
 
-    @xfailIfTorchDynamo
     def test_vjp(self, device):
         x = torch.randn([], device=device)
         out, vjp_fn = vjp(torch.sin, x)
@@ -368,7 +367,6 @@ class TestGradTransform(TestCase):
         result, = vjp_fn(v)
         self.assertEqual(result, v * x.cos())
 
-    @xfailIfTorchDynamo
     def test_vjp_two_outputs(self, device):
         def f(x):
             return x, x
@@ -609,7 +607,6 @@ class TestGradTransform(TestCase):
         expected = (torch.zeros_like(x),)
         self.assertEqual(result, expected)
 
-    @xfailIfTorchDynamo
     def test_unrelated_vjp_multiple_inputs_outputs(self, device):
         w = torch.tensor(3., device=device)
         x = torch.tensor(4., device=device)
@@ -650,7 +647,6 @@ class TestGradTransform(TestCase):
         result = vjp_fn(v)
         self.assertEqual(result, ((x * v, (x * v, 0.)),))
 
-    @xfailIfTorchDynamo
     def test_vjp_pytree_output(self, device):
         def f(x):
             return x, (x, x)
@@ -1648,7 +1644,6 @@ FIXME_jacrev_only = parametrize("jacapi", [subtest(jacrev, name='jacrev')])
 
 @markDynamoStrictTest
 class TestJac(TestCase):
-    @xfailIfTorchDynamo
     @jacrev_and_jacfwd
     def test_simple(self, device, jacapi):
         x = torch.randn(3, device=device)
@@ -1656,7 +1651,6 @@ class TestJac(TestCase):
         expected = torch.diagflat(x.cos())
         assert torch.allclose(y, expected)
 
-    @xfailIfTorchDynamo
     @jacrev_and_jacfwd
     def test_simple_not_flat(self, device, jacapi):
         x = torch.randn(2, 3, device=device)
@@ -1710,7 +1704,6 @@ class TestJac(TestCase):
         expected = torch.diagflat(-x.sin())
         assert torch.allclose(y, expected)
 
-    @xfailIfTorchDynamo
     @jacrev_and_jacfwd
     def test_multiple_args(self, device, jacapi):
         x = torch.randn(3, device=device)
@@ -1975,7 +1968,6 @@ class TestJac(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'xpected'):
             jacapi(f)(x, y)
 
-    @xfailIfTorchDynamo
     @jacrev_and_jacfwd
     def test_argnums_tuple(self, device, jacapi):
         x = torch.randn(3, device=device)
@@ -1987,7 +1979,6 @@ class TestJac(TestCase):
         assert torch.allclose(z[0], expected0)
         assert torch.allclose(z[1], expected1)
 
-    @xfailIfTorchDynamo
     @jacrev_and_jacfwd
     def test_argnums_effect_on_return(self, device, jacapi):
         x = torch.randn(3, device=device)
@@ -2016,35 +2007,30 @@ class TestJac(TestCase):
         expected = torch.diagflat(torch.full_like(x, 2))
         self.assertEqual(z, expected)
 
-    @xfailIfTorchDynamo
     @jacrev_and_jacfwd
     def test_empty_argnums(self, device, jacapi):
         x = torch.randn(3, device=device)
         with self.assertRaisesRegex(RuntimeError, "must be non-empty"):
             jacapi(torch.sin, argnums=())(x)
 
-    @xfailIfTorchDynamo
     @jacrev_and_jacfwd
     def test_out_of_bounds_argnums(self, device, jacapi):
         x = torch.randn(3, device=device)
         with self.assertRaisesRegex(RuntimeError, "only 1 positional inputs"):
             jacapi(torch.sin, argnums=2)(x)
 
-    @xfailIfTorchDynamo
     @jacrev_and_jacfwd
     def test_negative_argnums(self, device, jacapi):
         x = torch.randn(3, device=device)
         with self.assertRaisesRegex(RuntimeError, "only 1 positional inputs"):
             jacapi(torch.sin, argnums=-2)(x)
 
-    @xfailIfTorchDynamo
     @jacrev_and_jacfwd
     def test_repeated_argnums(self, device, jacapi):
         x = torch.randn(3, device=device)
         with self.assertRaisesRegex(RuntimeError, "must be unique"):
             jacapi(torch.sin, argnums=(0, 0))(x)
 
-    @xfailIfTorchDynamo
     @jacrev_and_jacfwd
     def test_float_argnums(self, device, jacapi):
         x = torch.randn(3, device=device)
@@ -2171,7 +2157,6 @@ class TestJac(TestCase):
         out_val = out(x, y, z)
         self.assertEqual(out_val, expected_out)
 
-    # @xfailIfTorchDynamo
     @parametrize('_preallocate_and_copy', (True, False))
     def test_chunk_jacrev(self, device, _preallocate_and_copy):
         x = torch.randn(10, 2, device=device)
@@ -2359,7 +2344,6 @@ class TestJvp(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'mutate a captured Tensor'):
             grad(foo)(x)
 
-    @xfailIfTorchDynamo
     def test_simple(self, device):
         x = torch.randn(2, 3, device=device)
         t = torch.randn(2, 3, device=device)
@@ -2461,7 +2445,6 @@ class TestJvp(TestCase):
         self.assertTrue(isinstance(result, tuple))
         self.assertEqual(result, expected)
 
-    # @xfailIfTorchDynamo
     def test_multiple_inputs_outputs(self, device):
         x = torch.randn(2, 3, device=device)
         y = torch.randn(2, 3, device=device)
@@ -2476,7 +2459,6 @@ class TestJvp(TestCase):
         self.assertTrue(isinstance(result, tuple))
         self.assertEqual(result, expected)
 
-    @xfailIfTorchDynamo
     def test_primals_tangents_length_mismatch(self, device):
         x = torch.randn(2, 3, device=device)
         t = torch.randn(2, 3, device=device)
@@ -2487,12 +2469,10 @@ class TestJvp(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             jvp(torch.sin, (x, x), (t, t, t))
 
-    @xfailIfTorchDynamo
     def test_nonempty_primals_and_tangents(self, device):
         with self.assertRaisesRegex(RuntimeError, "at least one Tensor"):
             jvp(torch.sin, (), ())
 
-    @xfailIfTorchDynamo
     def test_inputs_are_tuples_of_tensors(self, device):
         x = torch.randn(2, 3, device=device)
         t = torch.randn(2, 3, device=device)
@@ -2607,7 +2587,6 @@ class TestJvp(TestCase):
         x = torch.randn(3, requires_grad=True)
         MySquare.apply(x)
 
-    @xfailIfTorchDynamo
     def test_disable_fwd_grad_outside(self, device):
         x = torch.randn([], device=device)
         t = torch.ones_like(x)
@@ -2641,7 +2620,6 @@ class TestJvp(TestCase):
 
         self.assertEqual(y, 2 * x)
 
-    @xfailIfTorchDynamo
     def test_jvp_inside_autograd_function(self, device):
         class MySin(torch.autograd.Function):
             @staticmethod
@@ -3161,7 +3139,6 @@ class TestComposability(TestCase):
         y = vmap(vmap(torch.sin))(x)
         self.assertEqual(y, x.sin())
 
-    @xfailIfTorchDynamo
     def test_vmap_vjp(self, device):
         x = torch.randn(3, device=device)
         _, vjp_fn = vjp(torch.sin, x)
@@ -3196,7 +3173,6 @@ class TestComposability(TestCase):
         v = torch.randn(3, device=device)
         self.assertEqual(vjp_fn(v)[0], x.cos() * v)
 
-    @xfailIfTorchDynamo
     def test_vjp_vjp(self, device):
         x = torch.randn(3, device=device)
         y, vjp_fn = vjp(torch.sin, x)
@@ -3801,7 +3777,6 @@ class TestExamplesCorrectness(TestCase):
             assert mechanism == "functional_call"
             return {k: params[k] - alpha * grads[k] for k in params}
 
-    @xfailIfTorchDynamo
     @parametrize("mechanism", ["make_functional", "functional_call"])
     def test_maml_regression(self, device, mechanism):
         class ThreeLayerNet(nn.Module):
@@ -4229,7 +4204,6 @@ class TestExamplesCorrectness(TestCase):
         self.assertNotEqual(tuple(weight[0] for weight in result_weights),
                             tuple(weight[1] for weight in result_weights))
 
-    @xfailIfTorchDynamo
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     @parametrize('mechanism', ["make_functional", "functional_call"])
@@ -4784,7 +4758,6 @@ def traceable(f):
 @markDynamoStrictTest
 class TestCompileTransforms(TestCase):
     @skipIfRocm(msg="test leaks memory on ROCm")
-    @xfailIfTorchDynamo
     # torch.compile is not supported on Windows
     # Triton only supports GPU with SM70 or later.
     @expectedFailureIf((IS_ARM64 and not IS_MACOS) or IS_WINDOWS or (TEST_CUDA and not SM70OrLater))

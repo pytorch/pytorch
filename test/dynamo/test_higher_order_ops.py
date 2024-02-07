@@ -2535,6 +2535,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
             record.getMessage(),
         )
 
+    @xfailIfTorchDynamo
     @config.patch(capture_func_transforms=True)
     @make_logging_test(recompiles=True)
     def test_vmap_recompile_different_states(self, records):
@@ -3305,6 +3306,7 @@ class GraphModule(torch.nn.Module):
         # should not recompile on second call. See Pytorch issue #118493
         y = torch.vmap(fn)(x)
 
+    @xfailIfTorchDynamo
     @config.patch(capture_func_transforms=True)
     @config.patch(error_on_recompile=True)
     def test_vmap_recompile_with_randomness(self):
