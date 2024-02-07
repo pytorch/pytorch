@@ -1913,7 +1913,7 @@ class TritonKernel(Kernel):
         if advance_block_ptr:
             load_buffer.writeline(advance_block_ptr)
 
-        if not self.inside_reduction or not indexing.has_rmask():
+        if not self.inside_reduction or (not indexing.has_rmask() and not has_rindex):
             self.outside_loop_vars.add(result_var)
 
         return result_var

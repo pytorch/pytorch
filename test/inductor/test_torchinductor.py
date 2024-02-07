@@ -6997,7 +6997,6 @@ class CommonTemplate:
             index: "f32[6144, 4190]" = torch.ops.aten.index.Tensor(
                 primals_48, [None, lift_fresh_copy]
             )
-            lift_fresh_copy = None
 
             _tensor_constant1: "i64[6]" = self._tensor_constant1
             lift_fresh_copy_1: "i64[6]" = torch.ops.aten.lift_fresh_copy.default(
@@ -7008,18 +7007,14 @@ class CommonTemplate:
             )
             primals_48 = lift_fresh_copy_1 = None
             permute: "f32[6, 1001]" = torch.ops.aten.permute.default(primals_1, [1, 0])
-            primals_1 = None
             addmm: "f32[6144, 1001]" = torch.ops.aten.addmm.default(
                 primals_2, index_1, permute
             )
-            primals_2 = permute = None
             amax: "f32[6144, 1]" = torch.ops.aten.amax.default(addmm, [-1], True)
             sub: "f32[6144, 1001]" = torch.ops.aten.sub.Tensor(addmm, amax)
             exp: "f32[6144, 1001]" = torch.ops.aten.exp.default(sub)
-            sub = None
             sum_1: "f32[6144, 1]" = torch.ops.aten.sum.dim_IntList(exp, [-1], True)
             div: "f32[6144, 1001]" = torch.ops.aten.div.Tensor(exp, sum_1)
-            exp = None
 
             full_default: "i32[6144, 1001]" = torch.ops.aten.full.default(
                 [6144, 1001],
@@ -7040,8 +7035,6 @@ class CommonTemplate:
             )
 
             mul: "i32[6144, 1001]" = torch.ops.aten.mul.Tensor(full_default, iota)
-            full_default = iota = None
-
             iota_1: "i32[6144]" = torch.ops.prims.iota.default(
                 6144,
                 start=0,
@@ -7051,9 +7044,7 @@ class CommonTemplate:
                 requires_grad=False,
             )
             view: "i32[6150144]" = torch.ops.aten.reshape.default(mul, [-1])
-            mul = None
             view_1: "f32[6150144]" = torch.ops.aten.reshape.default(div, [-1])
-            div = None
             _embedding_bag = torch.ops.aten._embedding_bag.default(
                 primals_3, view, iota_1, False, 0, False, view_1
             )
@@ -7061,29 +7052,18 @@ class CommonTemplate:
             getitem_1: "i32[6150144]" = _embedding_bag[1]
             getitem_2: "i32[6144]" = _embedding_bag[2]
             getitem_3: "i32[0]" = _embedding_bag[3]
-            _embedding_bag = None
-
             unsqueeze: "f32[6144, 1, 64]" = torch.ops.aten.unsqueeze.default(getitem, 1)
-            getitem = None
-
             var_mean = torch.ops.aten.var_mean.correction(
                 index, [1], correction=0, keepdim=True
             )
             getitem_4: "f32[6144, 1]" = var_mean[0]
             getitem_5: "f32[6144, 1]" = var_mean[1]
-            var_mean = None
             add: "f32[6144, 1]" = torch.ops.aten.add.Tensor(getitem_4, 1e-05)
-            getitem_4 = None
             rsqrt: "f32[6144, 1]" = torch.ops.aten.rsqrt.default(add)
-            add = None
             sub_1: "f32[6144, 4190]" = torch.ops.aten.sub.Tensor(index, getitem_5)
             mul_1: "f32[6144, 4190]" = torch.ops.aten.mul.Tensor(sub_1, rsqrt)
-            sub_1 = None
             mul_2: "f32[6144, 4190]" = torch.ops.aten.mul.Tensor(mul_1, primals_4)
-            mul_1 = primals_4 = None
             add_1: "f32[6144, 4190]" = torch.ops.aten.add.Tensor(mul_2, primals_5)
-            mul_2 = primals_5 = None
-
             permute_1: "f32[4190, 1739]" = torch.ops.aten.permute.default(
                 primals_6, [1, 0]
             )
