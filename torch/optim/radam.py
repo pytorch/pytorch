@@ -45,9 +45,6 @@ class RAdam(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
-        if foreach is False and capturable:
-            raise ValueError("Capturable not supported with single tensor RAdam")
-
         defaults = dict(
             lr=lr,
             betas=betas,
@@ -300,8 +297,11 @@ def _single_tensor_radam(
     capturable: bool,
     has_complex: bool,
 ):
-    if capturable:
-        raise RuntimeError("capturable is not supported for single tensor RAdam (when foreach=False)")
+    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+    if not torch._utils.is_compiling() and capturable:
+        assert (param.is_cuda and step_t.is_cuda) or (
+            param.is_xla and step_t.is_xla
+        ), "If capturable=True, params and state_steps must be CUDA or XLA tensors."
 
     for i, param in enumerate(params):
         grad = grads[i]
@@ -317,7 +317,10 @@ def _single_tensor_radam(
 
         # update step
         step_t += 1
-        step = _get_value(step_t)
+        if capturable:
+            step = step_t
+        else:
+            step = _get_value(step_t)
 
         bias_correction1 = 1 - beta1 ** step
         bias_correction2 = 1 - beta2 ** step
@@ -340,23 +343,33 @@ def _single_tensor_radam(
         # compute the length of the approximated SMA
         rho_t = rho_inf - 2 * step * (beta2 ** step) / bias_correction2
 
-        if rho_t > 5.0:
-            # Compute the variance rectification term and update parameters accordingly
-            rect = math.sqrt(
-                (rho_t - 4)
-                * (rho_t - 2)
-                * rho_inf
-                / ((rho_inf - 4) * (rho_inf - 2) * rho_t)
-            )
-            exp_avg_sq_sqrt = exp_avg_sq.sqrt()
-            if differentiable:
-                exp_avg_sq_sqrt = exp_avg_sq_sqrt.add(eps)
-            else:
-                exp_avg_sq_sqrt = exp_avg_sq_sqrt.add_(eps)
-            adaptive_lr = math.sqrt(bias_correction2) / exp_avg_sq_sqrt
-            param.add_(bias_corrected_exp_avg * lr * adaptive_lr * rect, alpha=-1.0)
+        # Compute the variance rectification term and update parameters accordingly
+        rect = (
+            (rho_t - 4)
+            * (rho_t - 2)
+            * rho_inf
+            / ((rho_inf - 4) * (rho_inf - 2) * rho_t)
+        ) ** 0.5
+
+        if capturable:
+            rect = torch.where(rho_t > 5.0, rect, 0.0)
         else:
-            param.add_(bias_corrected_exp_avg * lr, alpha=-1.0)
+            rect = rect if rho_t > 5.0 else 0.0
+
+        exp_avg_sq_sqrt = exp_avg_sq.sqrt()
+        if differentiable:
+            exp_avg_sq_sqrt = exp_avg_sq_sqrt.add(eps)
+        else:
+            exp_avg_sq_sqrt = exp_avg_sq_sqrt.add_(eps)
+
+        adaptive_lr = (bias_correction2 ** 0.5) / exp_avg_sq_sqrt
+
+        if capturable:
+            update = torch.where(rect > 0, adaptive_lr * rect, 1.0)
+        else:
+            update = adaptive_lr * rect if rect > 0 else 1.0
+
+        param.add_(bias_corrected_exp_avg * lr * update, alpha=-1.0)
 
 
 def _multi_tensor_radam(
