@@ -17,21 +17,23 @@ jobs:
     #   options: '--gpus all'
     steps:
       - name: Clone PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: actions/checkout@v3
+        with:
+          path: pytorch
 
       - name: Clone CodeLlama
         uses: actions/checkout@v3
         with:
           repository: osalpekar/codellama
           ref: main
-          path: ../codellama
+          path: codellama
 
       - name: Clone Target Determination Code
         uses: actions/checkout@v3
         with:
           repository: osalpekar/llm-target-determinator
           ref: main
-          path: ../llm-target-determinator
+          path: llm-target-determinator
 
       - name: Setup Conda
         uses: conda-incubator/setup-miniconda@v2.1.1
