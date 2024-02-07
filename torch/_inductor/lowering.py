@@ -5073,7 +5073,7 @@ def logcumsumexp(x, dim):
     dtype = x.get_dtype()
     if len(x.get_size()) == 0:
         assert dim in [0, -1]
-        return to_dtype(x, dtype, copy=True)
+        return clone(x)
 
     kwargs = _make_scan_inner(x, axis=dim, dtype=dtype)
     result = ir.Scan.create(**kwargs, combine_fn=log_add_exp_helper, init=float("-inf"))
