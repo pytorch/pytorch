@@ -129,4 +129,48 @@ inline std::vector<RAIIAtenTensorHandle> steal_from_raw_handles_to_raii_handles(
   return result;
 }
 
+class ConstantHandle {
+ public:
+  ConstantHandle() = default;
+
+  explicit ConstantHandle(AtenTensorHandle handle) : handle_(handle) {
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(handle_, &data_));
+  }
+
+  operator AtenTensorHandle() const {
+    return handle_;
+  }
+
+  AtenTensorHandle tensor() const {
+    return handle_;
+  }
+
+  void* data_ptr() const {
+    return data_;
+  }
+
+ private:
+  AtenTensorHandle handle_;
+  void* data_ = nullptr;
+};
+
+inline void* get_data_ptr_wrapper(const ConstantHandle& constant) {
+  return constant.data_ptr();
+}
+
+inline const ConstantHandle& unwrap_raii_handle_if_needed(
+    const ConstantHandle& handle) {
+  return handle;
+}
+
+// Shouldn't be called.
+inline AtenTensorHandle wrap_with_raii_handle_if_needed(
+    const ConstantHandle& handle) = delete;
+
+#define CACHE_TORCH_DTYPE(typename) \
+  static auto cached_torch_dtype_##typename = aoti_torch_dtype_##typename()
+
+static auto cached_torch_device_type_cpu = aoti_torch_device_type_cpu();
+static auto cached_torch_device_type_cuda = aoti_torch_device_type_cuda();
+
 } // namespace torch::aot_inductor
