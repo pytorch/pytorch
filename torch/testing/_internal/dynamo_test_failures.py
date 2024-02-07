@@ -554,9 +554,6 @@ dynamo_expected_failures = {
     "PackedSequenceTest.test_pack_sequence",  # nn/test_packed_sequence
     "PackedSequenceTest.test_total_length",  # nn/test_packed_sequence
     "TestModuleHookNN.test_hook_inplace",  # nn/test_module_hooks
-    "TestModuleHooks.test_full_backward_hooks_named_tuple_True",  # nn/test_module_hooks
-    "TestModuleHooks.test_forward_pre_hooks_named_tuple_False",  # nn/test_module_hooks
-    "TestModuleHooks.test_full_backward_pre_hooks_named_tuple_False",  # nn/test_module_hooks
     "TestLazyModules.test_lazy_conv3d",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv_transposed1d",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv2d",  # nn/test_lazy_modules
