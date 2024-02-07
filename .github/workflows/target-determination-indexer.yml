@@ -74,7 +74,8 @@ jobs:
           conda activate tdenv
           pip install awscli
           cd codellama/
-          aws s3 cp "s3://target-determinator-assets/CodeLlama-7b-Python" . --recursive
+          mkdir "CodeLlama-7b-Python"
+          aws s3 cp "s3://target-determinator-assets/CodeLlama-7b-Python" "CodeLlama-7b-Python" --recursive
           ls
 
       - name: Run Indexer
