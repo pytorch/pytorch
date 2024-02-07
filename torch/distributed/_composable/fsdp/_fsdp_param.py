@@ -18,6 +18,7 @@ from ._fsdp_common import (
     _raise_assert_with_print,
     _to_dtype_if_needed,
     FSDPMeshInfo,
+    HSDPMeshInfo,
 )
 
 """
@@ -367,13 +368,13 @@ class FSDPParam:
             _raise_assert_with_print(
                 f"Expects size {self.sharded_post_forward_size} but got {tensor.shape}"
             )
-        assert self.post_forward_mesh_info is not None  # mypy
+        assert isinstance(self.post_forward_mesh_info, HSDPMeshInfo)
         # TODO: Prefer this DTensor to be read-only and generalize the
         # placement once we support TP.
         return _from_local_no_grad(
             tensor,
             self.post_forward_mesh_info.mesh,
-            (Shard(0),),
+            (Replicate(), Shard(0)),
             self._global_size,
             self._global_stride,
         )

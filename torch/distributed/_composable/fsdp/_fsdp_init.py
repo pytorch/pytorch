@@ -7,7 +7,7 @@ import torch.nn as nn
 
 from torch.distributed._tensor import DeviceMesh, DTensor, init_device_mesh
 from torch.distributed.device_mesh import _get_device_handle
-from ._fsdp_common import _is_composable_with_fsdp, FSDPMeshInfo
+from ._fsdp_common import _is_composable_with_fsdp, FSDPMeshInfo, HSDPMeshInfo
 from ._fsdp_state import _get_module_fsdp_state
 
 
@@ -41,28 +41,14 @@ def _get_post_forward_mesh_info(
     if reshard_after_forward is True:
         post_forward_mesh_info = mesh_info
     elif reshard_after_forward is not False:  # int case
-        post_forward_shard_mesh_size = reshard_after_forward
-        num_post_forward_meshes = (
-            mesh_info.shard_mesh_size // post_forward_shard_mesh_size
+        # For HSDP, we can flatten the two replicate dims into the 0th dim
+        post_forward_mesh_tensor = mesh_info.mesh.mesh.view(-1, reshard_after_forward)
+        post_forward_mesh = DeviceMesh(
+            mesh_info.mesh.device_type, post_forward_mesh_tensor
         )
-        shard_pg = mesh_info.mesh.get_group(mesh_info.shard_mesh_dim)
-        assert isinstance(shard_pg, dist.ProcessGroup)  # mypy
-        mesh_shard_ranks = sorted(
-            dist.distributed_c10d.get_process_group_ranks(shard_pg)
+        post_forward_mesh_info = HSDPMeshInfo(
+            post_forward_mesh, shard_mesh_dim=1, replicate_mesh_dim=0
         )
-        for i in range(num_post_forward_meshes):
-            # E.g., ranks (i, i+1, ..., i+7) for 1D FSDP or ranks
-            # (i, i+8, ..., i+56) for 2D intra-node TP + inter-node FSDP
-            post_forward_shard_mesh_ranks = mesh_shard_ranks[
-                i
-                * post_forward_shard_mesh_size : (i + 1)
-                * post_forward_shard_mesh_size
-            ]
-            post_forward_mesh = DeviceMesh("cuda", post_forward_shard_mesh_ranks)
-            if i == mesh_info.shard_mesh_rank // post_forward_shard_mesh_size:
-                post_forward_mesh_info = FSDPMeshInfo(
-                    post_forward_mesh, shard_mesh_dim=0
-                )
     return post_forward_mesh_info
 
 
