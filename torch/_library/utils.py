@@ -98,7 +98,7 @@ def is_functional_schema(schema: Any) -> bool:
     return True
 
 
-def is_inplace_aten_op(op: torch._ops.OpOverload):
+def mutates_and_returns_first_arg(op: torch._ops.OpOverload):
     """Check if an op is an inplace aten op, i.e. it mutates and returns the first arg.
 
     TODO: torchgen/model.py's FunctionSchema.parse is the source of truth for this,
