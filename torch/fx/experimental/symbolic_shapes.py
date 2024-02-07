@@ -1745,6 +1745,11 @@ class ShapeEnv:
             [ShapeEnvEvent(ShapeEnv, kwargs=kwargs)] if self.should_record_events else []
         )
 
+    # Pro-tip: if you add new field to ShapeEnv, this affects some accept
+    # tests.  Accept their output with:
+    #
+    #   EXPECTTEST_ACCEPT=1 python test/dynamo/test_dynamic_shapes.py -k test_shape_env_equal
+    #
     def _init(
         self, *,
         allow_scalar_outputs=True,

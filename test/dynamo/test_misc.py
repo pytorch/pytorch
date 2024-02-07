@@ -9044,6 +9044,9 @@ ShapeEnv not equal: field values don't match:
 ==> name_to_node: values don't match.
   >  Left: {_assert, eq, mod, x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
   > Right: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
+==> symbol_guard_counter: values don't match.
+  >  Left: {s0: 1, s1: 0}
+  > Right: {s0: 0, s1: 0}
 """,
         )
         self._replay_and_check(main)
@@ -9081,6 +9084,9 @@ ShapeEnv not equal: field values don't match:
 ==> replacements: values don't match.
   >  Left: {s0: 3}
   > Right: {}
+==> symbol_guard_counter: values don't match.
+  >  Left: {s0: 1, s1: 0}
+  > Right: {s0: 0, s1: 0}
 """,
         )
         self._replay_and_check(main)
@@ -9116,6 +9122,9 @@ ShapeEnv not equal: field values don't match:
 ==> name_to_node: values don't match.
   >  Left: {_assert, ge, x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
   > Right: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
+==> symbol_guard_counter: values don't match.
+  >  Left: {s0: 1, s1: 0}
+  > Right: {s0: 0, s1: 0}
 ==> var_to_guards: values don't match.
   >  Left: {s0: (s0 >= 3, None)}
   > Right: {}
