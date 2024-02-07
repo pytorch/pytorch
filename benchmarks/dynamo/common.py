@@ -635,7 +635,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     tolerance = args.xla_tolerance if args.trace_on_xla else 1e-4
     torch._dynamo.config.repro_tolerance = tolerance
 
-    with maybe_profile(args.export_profiler_trace) as p:
+    with maybe_profile(args.export_profiler_trace) as p, maybe_snapshot_memory(args.snapshot_memory):
         if args.export_aot_inductor:
             frozen_model_iter_fn = export_aot_inductor(
                 model, example_inputs, args.devices[0]
@@ -1963,6 +1963,27 @@ def maybe_init_distributed(should_init_distributed, rank, world_size, port="6789
         if should_init_distributed:
             torch.distributed.destroy_process_group()
 
+@contextmanager
+def maybe_snapshot_memory(should_snapshot_memory):
+    # Enables Memory Snapshot tool for memory deep dives:
+    # https://pytorch.org/blog/understanding-gpu-memory-1/
+    try:
+        if should_snapshot_memory:
+            torch.cuda.memory._record_memory_history(
+                max_entries=100000
+            )
+        yield
+    finally:
+        if should_snapshot_memory:
+            try:
+                torch.cuda.memory._dump_snapshot(
+                    os.path.join(torch._dynamo.config.base_dir, "memory_snapshot.pickle")
+                )
+            except Exception as e:
+                logger.error(f"Failed to save memory snapshot, {e}")
+
+            torch.cuda.memory._record_memory_history(enabled=None)
+
 
 class BenchmarkRunner:
     def __init__(self):
@@ -3190,6 +3211,12 @@ def parse_args(args=None):
         "--compiled-autograd",
         action="store_true",
         help="Enables compiled autograd on compiled benchmark",
+    )
+
+    parser.add_argument(
+        "--snapshot-memory",
+        action="store_true",
+        help="Enables Memory Snapshot tool for memory deep dives: https://pytorch.org/blog/understanding-gpu-memory-1/",
     )
 
     group_fuser = parser.add_mutually_exclusive_group()
