@@ -339,9 +339,21 @@ class MetaConverter:
                             bdim = maybe_get_bdim(t)
                             r = _add_batch_dim(ft, bdim, lvl)
                         elif is_gradtrackingtensor(t):
-                            ft = _to_fake_tensor(get_unwrapped(t))
+                            disable_functorch = torch._C._DisableFuncTorch
+                            with disable_functorch():
+                                ft = _to_fake_tensor(get_unwrapped(t))
                             lvl = torch._C._functorch.maybe_get_level(t)
                             r = torch._C._functorch._wrap_for_grad(ft, lvl)
+
+                            if t._is_view():
+                                # is this correct?
+                                # it fails if r is a nested functorch tensor:
+                                # r = GradTrackingTensor(
+                                #       BatchedTensor(
+                                #           Tensor
+                                #       )
+                                #   )
+                                r = r.view_as(r)
 
                             is_leaf = safe_is_leaf(t)
                             if t.requires_grad and safe_is_leaf(r):
@@ -715,13 +727,16 @@ class MetaConverter:
                 return NotImplemented
             else:
                 self.hit += 1
-                r = self.meta_tensor(
-                    t,
-                    shape_env=shape_env,
-                    callback=callback,
-                    source=source,
-                    symbolic_context=symbolic_context,
-                )
+
+                disable_functorch = torch._C._DisableFuncTorch
+                with disable_functorch():
+                    r = self.meta_tensor(
+                        t,
+                        shape_env=shape_env,
+                        callback=callback,
+                        source=source,
+                        symbolic_context=symbolic_context,
+                    )
                 if type(t) is torch.nn.Parameter:
                     # NB: Cannot directly use Parameter constructor
                     # because that would force a detach, not desirable
