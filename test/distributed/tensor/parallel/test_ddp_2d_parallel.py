@@ -40,7 +40,7 @@ def init_model(device_type, model_parallel_size=TP_DEGREE):
         mesh=torch.arange(0, world_size).view(-1, model_parallel_size),
     )
 
-    dp_pg = twod_mesh.get_dim_groups()[0]
+    dp_pg = twod_mesh.get_group(mesh_dim=0)
 
     parallelize_plan = {
         "net1": ColwiseParallel(),

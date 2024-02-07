@@ -1,22 +1,32 @@
 # Owner(s): ["module: pytree"]
 
+import collections
 import inspect
 import re
 import unittest
-from collections import defaultdict, namedtuple, OrderedDict, UserDict
+from collections import defaultdict, deque, namedtuple, OrderedDict, UserDict
+from dataclasses import dataclass
+from typing import Any, NamedTuple
 
 import torch
-import torch.utils._cxx_pytree as cxx_pytree
 import torch.utils._pytree as py_pytree
+from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_FBCODE,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
 
+if IS_FBCODE:
+    # optree is not yet enabled in fbcode, so just re-test the python implementation
+    cxx_pytree = py_pytree
+else:
+    import torch.utils._cxx_pytree as cxx_pytree
 
 GlobalPoint = namedtuple("GlobalPoint", ["x", "y"])
 
@@ -43,18 +53,10 @@ class TestGenericPytree(TestCase):
                 cxx_signature = inspect.signature(cxx_api)
                 py_signature = inspect.signature(py_api)
 
-                # The C++ pytree APIs provide more features than the Python APIs.
-                # The Python APIs are a subset of the C++ APIs.
-                # Check the signature of the Python API is a subset of the C++ API.
+                # Check the parameter names are the same.
                 cxx_param_names = list(cxx_signature.parameters)
                 py_param_names = list(py_signature.parameters)
-                self.assertTrue(
-                    set(cxx_param_names).issuperset(py_param_names),
-                    msg=(
-                        f"C++ parameter(s) ({cxx_param_names}) "
-                        f"not in Python parameter(s) ({py_param_names})"
-                    ),
-                )
+                self.assertEqual(cxx_param_names, py_param_names)
 
                 # Check the positional parameters are the same.
                 cxx_positional_param_names = [
@@ -203,13 +205,13 @@ class TestGenericPytree(TestCase):
         def run_test(tup):
             expected_spec = gen_expected_fn(tup)
             values, treespec = pytree_impl.tree_flatten(tup)
-            self.assertTrue(isinstance(values, list))
+            self.assertIsInstance(values, list)
             self.assertEqual(values, list(tup))
             self.assertEqual(treespec, expected_spec)
 
             unflattened = pytree_impl.tree_unflatten(values, treespec)
             self.assertEqual(unflattened, tup)
-            self.assertTrue(isinstance(unflattened, tuple))
+            self.assertIsInstance(unflattened, tuple)
 
         run_test(())
         run_test((1.0,))
@@ -238,13 +240,13 @@ class TestGenericPytree(TestCase):
         def run_test(lst):
             expected_spec = gen_expected_fn(lst)
             values, treespec = pytree_impl.tree_flatten(lst)
-            self.assertTrue(isinstance(values, list))
+            self.assertIsInstance(values, list)
             self.assertEqual(values, lst)
             self.assertEqual(treespec, expected_spec)
 
             unflattened = pytree_impl.tree_unflatten(values, treespec)
             self.assertEqual(unflattened, lst)
-            self.assertTrue(isinstance(unflattened, list))
+            self.assertIsInstance(unflattened, list)
 
         run_test([])
         run_test([1.0, 2])
@@ -277,13 +279,13 @@ class TestGenericPytree(TestCase):
         def run_test(dct):
             expected_spec = gen_expected_fn(dct)
             values, treespec = pytree_impl.tree_flatten(dct)
-            self.assertTrue(isinstance(values, list))
+            self.assertIsInstance(values, list)
             self.assertEqual(values, list(dct.values()))
             self.assertEqual(treespec, expected_spec)
 
             unflattened = pytree_impl.tree_unflatten(values, treespec)
             self.assertEqual(unflattened, dct)
-            self.assertTrue(isinstance(unflattened, dict))
+            self.assertIsInstance(unflattened, dict)
 
         run_test({})
         run_test({"a": 1})
@@ -320,13 +322,13 @@ class TestGenericPytree(TestCase):
         def run_test(odict):
             expected_spec = gen_expected_fn(odict)
             values, treespec = pytree_impl.tree_flatten(odict)
-            self.assertTrue(isinstance(values, list))
+            self.assertIsInstance(values, list)
             self.assertEqual(values, list(odict.values()))
             self.assertEqual(treespec, expected_spec)
 
             unflattened = pytree_impl.tree_unflatten(values, treespec)
             self.assertEqual(unflattened, odict)
-            self.assertTrue(isinstance(unflattened, OrderedDict))
+            self.assertIsInstance(unflattened, OrderedDict)
 
         od = OrderedDict()
         run_test(od)
@@ -364,20 +366,60 @@ class TestGenericPytree(TestCase):
         def run_test(ddct):
             expected_spec = gen_expected_fn(ddct)
             values, treespec = pytree_impl.tree_flatten(ddct)
-            self.assertTrue(isinstance(values, list))
+            self.assertIsInstance(values, list)
             self.assertEqual(values, list(ddct.values()))
             self.assertEqual(treespec, expected_spec)
 
             unflattened = pytree_impl.tree_unflatten(values, treespec)
             self.assertEqual(unflattened, ddct)
             self.assertEqual(unflattened.default_factory, ddct.default_factory)
-            self.assertTrue(isinstance(unflattened, defaultdict))
+            self.assertIsInstance(unflattened, defaultdict)
 
         run_test(defaultdict(list, {}))
         run_test(defaultdict(int, {"a": 1}))
         run_test(defaultdict(int, {"abcdefg": torch.randn(2, 3)}))
         run_test(defaultdict(int, {1: torch.randn(2, 3)}))
         run_test(defaultdict(int, {"a": 1, "b": 2, "c": torch.randn(2, 3)}))
+
+    @parametrize(
+        "pytree_impl,gen_expected_fn",
+        [
+            subtest(
+                (
+                    py_pytree,
+                    lambda deq: py_pytree.TreeSpec(
+                        deque, deq.maxlen, [py_pytree.LeafSpec() for _ in deq]
+                    ),
+                ),
+                name="py",
+            ),
+            subtest(
+                (
+                    cxx_pytree,
+                    lambda deq: cxx_pytree.tree_structure(
+                        deque(deq, maxlen=deq.maxlen)
+                    ),
+                ),
+                name="cxx",
+            ),
+        ],
+    )
+    def test_flatten_unflatten_deque(self, pytree_impl, gen_expected_fn):
+        def run_test(deq):
+            expected_spec = gen_expected_fn(deq)
+            values, treespec = pytree_impl.tree_flatten(deq)
+            self.assertIsInstance(values, list)
+            self.assertEqual(values, list(deq))
+            self.assertEqual(treespec, expected_spec)
+
+            unflattened = pytree_impl.tree_unflatten(values, treespec)
+            self.assertEqual(unflattened, deq)
+            self.assertEqual(unflattened.maxlen, deq.maxlen)
+            self.assertIsInstance(unflattened, deque)
+
+        run_test(deque([]))
+        run_test(deque([1.0, 2]))
+        run_test(deque([torch.tensor([1.0, 2]), 2, 10, 9, 11], maxlen=8))
 
     @parametrize(
         "pytree_impl",
@@ -397,13 +439,13 @@ class TestGenericPytree(TestCase):
             else:
                 expected_spec = cxx_pytree.tree_structure(Point(0, 1))
             values, treespec = pytree_impl.tree_flatten(tup)
-            self.assertTrue(isinstance(values, list))
+            self.assertIsInstance(values, list)
             self.assertEqual(values, list(tup))
             self.assertEqual(treespec, expected_spec)
 
             unflattened = pytree_impl.tree_unflatten(values, treespec)
             self.assertEqual(unflattened, tup)
-            self.assertTrue(isinstance(unflattened, Point))
+            self.assertIsInstance(unflattened, Point)
 
         run_test(Point(1.0, 2))
         run_test(Point(torch.tensor(1.0), 2))
@@ -422,14 +464,14 @@ class TestGenericPytree(TestCase):
             subtest(cxx_pytree, name="cxx"),
         ],
     )
-    def test_flatten_unflatten_return_type(self, pytree_impl, op):
+    def test_flatten_unflatten_return_types(self, pytree_impl, op):
         x = torch.randn(3, 3)
         expected = op(x, dim=0)
 
         values, spec = pytree_impl.tree_flatten(expected)
         # Check that values is actually List[Tensor] and not (ReturnType(...),)
         for value in values:
-            self.assertTrue(isinstance(value, torch.Tensor))
+            self.assertIsInstance(value, torch.Tensor)
         result = pytree_impl.tree_unflatten(values, spec)
 
         self.assertEqual(type(result), type(expected))
@@ -445,7 +487,7 @@ class TestGenericPytree(TestCase):
     def test_flatten_unflatten_nested(self, pytree_impl):
         def run_test(pytree):
             values, treespec = pytree_impl.tree_flatten(pytree)
-            self.assertTrue(isinstance(values, list))
+            self.assertIsInstance(values, list)
             self.assertEqual(len(values), treespec.num_leaves)
 
             # NB: python basic data structures (dict list tuple) all have
@@ -470,7 +512,52 @@ class TestGenericPytree(TestCase):
             subtest(cxx_pytree, name="cxx"),
         ],
     )
-    def test_treemap(self, pytree_impl):
+    def test_flatten_with_is_leaf(self, pytree_impl):
+        def run_test(pytree, one_level_leaves):
+            values, treespec = pytree_impl.tree_flatten(
+                pytree, is_leaf=lambda x: x is not pytree
+            )
+            self.assertIsInstance(values, list)
+            self.assertEqual(len(values), treespec.num_nodes - 1)
+            self.assertEqual(len(values), treespec.num_leaves)
+            self.assertEqual(len(values), treespec.num_children)
+            self.assertEqual(values, one_level_leaves)
+
+            self.assertEqual(
+                treespec,
+                pytree_impl.tree_structure(
+                    pytree_impl.tree_unflatten([0] * treespec.num_leaves, treespec)
+                ),
+            )
+
+            unflattened = pytree_impl.tree_unflatten(values, treespec)
+            self.assertEqual(unflattened, pytree)
+
+        cases = [
+            ([()], [()]),
+            (([],), [[]]),
+            ({"a": ()}, [()]),
+            ({"a": 0, "b": [{"c": 1}]}, [0, [{"c": 1}]]),
+            (
+                {
+                    "a": 0,
+                    "b": [1, {"c": 2}, torch.ones(3)],
+                    "c": (torch.zeros(2, 3), 1),
+                },
+                [0, [1, {"c": 2}, torch.ones(3)], (torch.zeros(2, 3), 1)],
+            ),
+        ]
+        for case in cases:
+            run_test(*case)
+
+    @parametrize(
+        "pytree_impl",
+        [
+            subtest(py_pytree, name="py"),
+            subtest(cxx_pytree, name="cxx"),
+        ],
+    )
+    def test_tree_map(self, pytree_impl):
         def run_test(pytree):
             def f(x):
                 return x * 3
@@ -504,7 +591,40 @@ class TestGenericPytree(TestCase):
             subtest(cxx_pytree, name="cxx"),
         ],
     )
-    def test_tree_only(self, pytree_impl):
+    def test_tree_map_multi_inputs(self, pytree_impl):
+        def run_test(pytree):
+            def f(x, y, z):
+                return x, [y, (z, 0)]
+
+            pytree_x = pytree
+            pytree_y = pytree_impl.tree_map(lambda x: (x + 1,), pytree)
+            pytree_z = pytree_impl.tree_map(lambda x: {"a": x * 2, "b": 2}, pytree)
+
+            self.assertEqual(
+                pytree_impl.tree_map(f, pytree_x, pytree_y, pytree_z),
+                pytree_impl.tree_map(
+                    lambda x: f(x, (x + 1,), {"a": x * 2, "b": 2}), pytree
+                ),
+            )
+
+        cases = [
+            [()],
+            ([],),
+            {"a": ()},
+            {"a": 1, "b": [{"c": 2}]},
+            {"a": 0, "b": [2, {"c": 3}, 4], "c": (5, 6)},
+        ]
+        for case in cases:
+            run_test(case)
+
+    @parametrize(
+        "pytree_impl",
+        [
+            subtest(py_pytree, name="py"),
+            subtest(cxx_pytree, name="cxx"),
+        ],
+    )
+    def test_tree_map_only(self, pytree_impl):
         self.assertEqual(
             pytree_impl.tree_map_only(int, lambda x: x + 2, [0, "a"]), [2, "a"]
         )
@@ -607,15 +727,17 @@ class TestPythonPytree(TestCase):
             )
 
     def test_treespec_equality(self):
-        self.assertTrue(
-            py_pytree.LeafSpec() == py_pytree.LeafSpec(),
+        self.assertEqual(
+            py_pytree.LeafSpec(),
+            py_pytree.LeafSpec(),
         )
-        self.assertTrue(
-            py_pytree.TreeSpec(list, None, []) == py_pytree.TreeSpec(list, None, []),
+        self.assertEqual(
+            py_pytree.TreeSpec(list, None, []),
+            py_pytree.TreeSpec(list, None, []),
         )
-        self.assertTrue(
-            py_pytree.TreeSpec(list, None, [py_pytree.LeafSpec()])
-            == py_pytree.TreeSpec(list, None, [py_pytree.LeafSpec()]),
+        self.assertEqual(
+            py_pytree.TreeSpec(list, None, [py_pytree.LeafSpec()]),
+            py_pytree.TreeSpec(list, None, [py_pytree.LeafSpec()]),
         )
         self.assertFalse(
             py_pytree.TreeSpec(tuple, None, []) == py_pytree.TreeSpec(list, None, []),
@@ -830,7 +952,7 @@ TreeSpec(tuple, None, [*,
             DummyType, None, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
         )
         serialized_spec = py_pytree.treespec_dumps(spec, 1)
-        self.assertTrue("moo" in serialized_spec)
+        self.assertIn("moo", serialized_spec)
         roundtrip_spec = py_pytree.treespec_loads(serialized_spec)
         self.assertEqual(roundtrip_spec, spec)
 
@@ -939,10 +1061,177 @@ TreeSpec(tuple, None, [*,
         self.assertEqual(serialized_spec, saved_spec)
         self.assertEqual(complicated_spec, py_pytree.treespec_loads(saved_spec))
 
+    def test_tree_map_with_path(self):
+        tree = [{i: i for i in range(10)}]
+        all_zeros = py_pytree.tree_map_with_path(
+            lambda kp, val: val - kp[1].key + kp[0].idx, tree
+        )
+        self.assertEqual(all_zeros, [dict.fromkeys(range(10), 0)])
+
+    def test_tree_map_with_path_multiple_trees(self):
+        @dataclass
+        class ACustomPytree:
+            x: Any
+            y: Any
+            z: Any
+
+        tree1 = [ACustomPytree(x=12, y={"cin": [1, 4, 10], "bar": 18}, z="leaf"), 5]
+        tree2 = [
+            ACustomPytree(
+                x=2,
+                y={"cin": [2, 2, 2], "bar": 2},
+                z="leaf",
+            ),
+            2,
+        ]
+
+        py_pytree.register_pytree_node(
+            ACustomPytree,
+            flatten_fn=lambda f: ([f.x, f.y], f.z),
+            unflatten_fn=lambda xy, z: ACustomPytree(xy[0], xy[1], z),
+            flatten_with_keys_fn=lambda f: ((("x", f.x), ("y", f.y)), f.z),
+        )
+        from_two_trees = py_pytree.tree_map_with_path(
+            lambda kp, a, b: a + b, tree1, tree2
+        )
+        from_one_tree = py_pytree.tree_map(lambda a: a + 2, tree1)
+        self.assertEqual(from_two_trees, from_one_tree)
+
+    @skipIfTorchDynamo("dynamo pytree tracing doesn't work here")
+    def test_tree_flatten_with_path_is_leaf(self):
+        leaf_dict = {"foo": [(3)]}
+        pytree = (["hello", [1, 2], leaf_dict],)
+        key_leaves, spec = py_pytree.tree_flatten_with_path(
+            pytree, is_leaf=lambda x: isinstance(x, dict)
+        )
+        self.assertTrue(key_leaves[-1][1] is leaf_dict)
+
+    def test_tree_flatten_with_path_roundtrip(self):
+        class ANamedTuple(NamedTuple):
+            x: torch.Tensor
+            y: int
+            z: str
+
+        @dataclass
+        class ACustomPytree:
+            x: Any
+            y: Any
+            z: Any
+
+        py_pytree.register_pytree_node(
+            ACustomPytree,
+            flatten_fn=lambda f: ([f.x, f.y], f.z),
+            unflatten_fn=lambda xy, z: ACustomPytree(xy[0], xy[1], z),
+            flatten_with_keys_fn=lambda f: ((("x", f.x), ("y", f.y)), f.z),
+        )
+
+        SOME_PYTREES = [
+            (None,),
+            ["hello", [1, 2], {"foo": [(3)]}],
+            [ANamedTuple(x=torch.rand(2, 3), y=1, z="foo")],
+            [ACustomPytree(x=12, y={"cin": [1, 4, 10], "bar": 18}, z="leaf"), 5],
+        ]
+        for pytree in SOME_PYTREES:
+            key_leaves, spec = py_pytree.tree_flatten_with_path(pytree)
+            actual = py_pytree.tree_unflatten([leaf for _, leaf in key_leaves], spec)
+            self.assertEqual(actual, pytree)
+
+    def test_tree_leaves_with_path(self):
+        class ANamedTuple(NamedTuple):
+            x: torch.Tensor
+            y: int
+            z: str
+
+        @dataclass
+        class ACustomPytree:
+            x: Any
+            y: Any
+            z: Any
+
+        py_pytree.register_pytree_node(
+            ACustomPytree,
+            flatten_fn=lambda f: ([f.x, f.y], f.z),
+            unflatten_fn=lambda xy, z: ACustomPytree(xy[0], xy[1], z),
+            flatten_with_keys_fn=lambda f: ((("x", f.x), ("y", f.y)), f.z),
+        )
+
+        SOME_PYTREES = [
+            (None,),
+            ["hello", [1, 2], {"foo": [(3)]}],
+            [ANamedTuple(x=torch.rand(2, 3), y=1, z="foo")],
+            [ACustomPytree(x=12, y={"cin": [1, 4, 10], "bar": 18}, z="leaf"), 5],
+        ]
+        for pytree in SOME_PYTREES:
+            flat_out, _ = py_pytree.tree_flatten_with_path(pytree)
+            leaves_out = py_pytree.tree_leaves_with_path(pytree)
+            self.assertEqual(flat_out, leaves_out)
+
+    def test_key_str(self):
+        class ANamedTuple(NamedTuple):
+            x: str
+            y: int
+
+        tree = (["hello", [1, 2], {"foo": [(3)], "bar": [ANamedTuple(x="baz", y=10)]}],)
+        flat, _ = py_pytree.tree_flatten_with_path(tree)
+        paths = [f"{py_pytree.keystr(kp)}: {val}" for kp, val in flat]
+        self.assertEqual(
+            paths,
+            [
+                "[0][0]: hello",
+                "[0][1][0]: 1",
+                "[0][1][1]: 2",
+                "[0][2]['foo'][0]: 3",
+                "[0][2]['bar'][0].x: baz",
+                "[0][2]['bar'][0].y: 10",
+            ],
+        )
+
+    @skipIfTorchDynamo("AssertionError in dynamo")
+    def test_flatten_flatten_with_key_consistency(self):
+        """Check that flatten and flatten_with_key produces consistent leaves/context."""
+        reg = py_pytree.SUPPORTED_NODES
+
+        EXAMPLE_TREE = {
+            list: [1, 2, 3],
+            tuple: (1, 2, 3),
+            dict: {"foo": 1, "bar": 2},
+            namedtuple: collections.namedtuple("ANamedTuple", ["x", "y"])(1, 2),
+            OrderedDict: OrderedDict([("foo", 1), ("bar", 2)]),
+            defaultdict: defaultdict(int, {"foo": 1, "bar": 2}),
+            deque: deque([1, 2, 3]),
+            torch.Size: torch.Size([1, 2, 3]),
+            immutable_dict: immutable_dict({"foo": 1, "bar": 2}),
+            immutable_list: immutable_list([1, 2, 3]),
+        }
+
+        for typ in reg:
+            example = EXAMPLE_TREE.get(typ)
+            if example is None:
+                continue
+            flat_with_path, spec1 = py_pytree.tree_flatten_with_path(example)
+            flat, spec2 = py_pytree.tree_flatten(example)
+
+            self.assertEqual(flat, [x[1] for x in flat_with_path])
+            self.assertEqual(spec1, spec2)
+
+    def test_key_access(self):
+        class ANamedTuple(NamedTuple):
+            x: str
+            y: int
+
+        tree = (["hello", [1, 2], {"foo": [(3)], "bar": [ANamedTuple(x="baz", y=10)]}],)
+        flat, _ = py_pytree.tree_flatten_with_path(tree)
+        for kp, val in flat:
+            self.assertEqual(py_pytree.key_get(tree, kp), val)
+
 
 class TestCxxPytree(TestCase):
+    def setUp(self):
+        if IS_FBCODE:
+            raise unittest.SkipTest("C++ pytree tests are not supported in fbcode")
+
     def test_treespec_equality(self):
-        self.assertTrue(cxx_pytree.LeafSpec() == cxx_pytree.LeafSpec())
+        self.assertEqual(cxx_pytree.LeafSpec(), cxx_pytree.LeafSpec())
 
     @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo test in test_treespec_repr_dynamo.")
     def test_treespec_repr(self):

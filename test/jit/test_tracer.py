@@ -1911,7 +1911,7 @@ class TestTracer(JitTestCase):
 
     def test_non_tensor_tracing(self):
         def f(x):
-            return x + param
+            return x + param  # noqa: F821
         with self.assertRaisesRegex(RuntimeError, r"Type 'Tuple\[int\]' cannot be traced"):
             torch.jit.trace(f, (1,))
 

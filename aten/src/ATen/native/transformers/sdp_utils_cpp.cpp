@@ -42,11 +42,11 @@ bool use_flash_attention_cpp(sdp_params const& params, bool debug) {
       check_nested_tensor,
       check_for_dropout,
       check_tensor_shapes,
-      check_batch_size_and_num_heads,
-      check_for_attn_mask,
+      check_batch_size_and_num_heads_dense,
+      check_attn_mask_shape,
       check_head_dim_size_cpp,
-      check_nonzero_sequence_lengths,
-      check_last_dim_stride_equals_1);
+      check_nonzero_sequence_lengths_dense,
+      check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim*/>);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;

@@ -31,7 +31,6 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
 #include <c10/util/copysign.h>
-#include <c10/util/math_compat.h>
 #include <ATen/native/cpu/zmath.h>
 #include <c10/util/TypeCast.h>
 #include <c10/macros/Macros.h>
@@ -147,9 +146,8 @@ public:
   // versions GCC/Clang have buggy determinations on whether or not an
   // identifier is odr-used or not, and in any case it's hard to tell if
   // a variable is odr-used or not.  So best to just cut the problem at the root.
-  static constexpr size_type size_T = sizeof(T);  // Workaround to compile with VS2022.
   static constexpr size_type size() {
-    return VECTOR_WIDTH / size_T;
+    return VECTOR_WIDTH / sizeof(T);
   }
   Vectorized() : values{static_cast<T>(0)} {}
   Vectorized(T val) {
@@ -255,6 +253,14 @@ public:
     }
     return vector;
   }
+  bool has_inf_nan() const {
+    for (int64_t i = 0; i != size(); i++) {
+      if(_isnan(values[i]) || _isinf(values[i])) {
+        return true;
+      }
+    }
+    return false;
+  }
   Vectorized<T> map(T (*const f)(T)) const {
     Vectorized<T> ret;
     for (int64_t i = 0; i != size(); i++) {
@@ -359,6 +365,9 @@ public:
   Vectorized<T> acos() const {
     return map(std::acos);
   }
+  Vectorized<T> acosh() const {
+    return map(std::acosh);
+  }
   Vectorized<T> asin() const {
     return map(std::asin);
   }
@@ -402,6 +411,9 @@ public:
   }
   Vectorized<T> expm1() const {
     return map(std::expm1);
+  }
+  Vectorized<T> exp_u20() const {
+    return map(std::exp);
   }
   Vectorized<T> frac() const {
     return *this - this->trunc();

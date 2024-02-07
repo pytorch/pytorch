@@ -346,7 +346,11 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_out_cuda)
     isizeH = input_.size(3);
     isizeW = input_.size(4);
 
-    istrideD = input_.stride(1);
+    // In the kernel, the batch and channel dimensions are treated as if they
+    // are flattened and istrideD is used as the stride of this flattened dim
+    // Handle the edge case where input_.size(1) == 1, where despite passing the
+    // contiguity check the stride might not be T * H * W
+    istrideD = isizeT * isizeH * isizeW;
     istrideT = input_.stride(2);
     istrideH = input_.stride(3);
     istrideW = input_.stride(4);

@@ -390,6 +390,8 @@ if HAS_PYDOT:
                         get_module_params_or_buffers()
 
             for subgraph in buf_name_to_subgraph.values():
+                subgraph.set('color', 'royalblue')
+                subgraph.set('penwidth', '2')
                 dot_graph.add_subgraph(subgraph)
 
             for node in graph_module.graph.nodes:

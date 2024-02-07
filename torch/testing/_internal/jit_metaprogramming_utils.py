@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # Torch
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
 import torch.nn.functional as F
@@ -7,7 +9,7 @@ import torch.jit
 import torch.jit._logging
 import torch.jit.frontend
 from torch.testing._internal.common_nn import module_tests, new_module_tests
-from torch.testing._internal.common_utils import is_iterable_of_tensors
+from torch.testing._internal.common_utils import is_iterable_of_tensors, noncontiguous_like
 
 import collections
 from copy import deepcopy
@@ -115,6 +117,7 @@ nn_functional_tests = [
     ('max_unpool3d', torch.tensor([[[[[2., 4]]]]]), (torch.tensor([[[[[1, 3]]]]]), 2, 2, 0)),
     ('lp_pool1d', (S, S, S), (2., 3, 2,)),
     ('lp_pool2d', (S, S, S, S), (2., 3, 2,)),
+    ('lp_pool3d', (S, S, S, S, S), (2., 3, 2,)),
     ('adaptive_max_pool1d', (S, S, S), (5,)),
     ('adaptive_max_pool2d', (S, S, S, S), ([5, 7],)),
     ('adaptive_max_pool3d', (S, S, S, S, S), ([3, 2, 2],)),
@@ -330,7 +333,7 @@ def value_to_literal(value):
 def get_call(method_name, func_type, args, kwargs):
     kwargs_str = ', '.join([k + '=' + value_to_literal(v) for k, v in kwargs.items()])
     self_arg = args[0]
-    if(func_type == 'method'):
+    if func_type == 'method':
         args = args[1:]
 
     argument_str = ', '.join(args)

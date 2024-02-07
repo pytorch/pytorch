@@ -285,14 +285,14 @@ public:
   Vectorized<T> angle() const {
     __m256 lo, hi;
     cvt_to_fp32<T>(values, lo, hi);
-    auto angle_lambda = [](__m256 values) {
+    auto angle_lambda = [](__m256 values_2) {
       const auto zero_vec = _mm256_set1_ps(0.f);
       const auto nan_vec = _mm256_set1_ps(NAN);
-      const auto not_nan_mask = _mm256_cmp_ps(values, values, _CMP_EQ_OQ);
+      const auto not_nan_mask = _mm256_cmp_ps(values_2, values_2, _CMP_EQ_OQ);
       const auto nan_mask = _mm256_cmp_ps(not_nan_mask, zero_vec, _CMP_EQ_OQ);
       const auto pi = _mm256_set1_ps(c10::pi<float>);
 
-      const auto neg_mask = _mm256_cmp_ps(values, zero_vec, _CMP_LT_OQ);
+      const auto neg_mask = _mm256_cmp_ps(values_2, zero_vec, _CMP_LT_OQ);
       auto angle = _mm256_blendv_ps(zero_vec, pi, neg_mask);
       angle = _mm256_blendv_ps(angle, nan_vec, nan_mask);
       return angle;
@@ -312,6 +312,9 @@ public:
   }
   Vectorized<T> acos() const {
     return map(Sleef_acosf8_u10);
+  }
+  Vectorized<T> acosh() const {
+    return map(Sleef_acoshf8_u10);
   }
   Vectorized<T> asin() const {
     return map(Sleef_asinf8_u10);
@@ -368,6 +371,9 @@ public:
   }
   Vectorized<T> expm1() const {
     return map(Sleef_expm1f8_u10);
+  }
+  Vectorized<T> exp_u20() const {
+    return exp();
   }
   Vectorized<T> fmod(const Vectorized<T> & q) const {
     __m256 x_lo, x_hi;

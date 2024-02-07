@@ -135,6 +135,26 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             expected_node="aten.convolution.default",
         )
 
+    def test_no_warnings_on_complex_dtype_in_op_level_debug(self):
+        class ComplexModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.ops.aten.mul(input, input)
+
+        real = torch.tensor([1, 2], dtype=torch.float32)
+        imag = torch.tensor([3, 4], dtype=torch.float32)
+        x = torch.complex(real, imag)
+
+        onnx_program = dynamo_export(
+            ComplexModel(), x, export_options=ExportOptions(op_level_debug=True)
+        )
+
+        assert_has_diagnostics(
+            onnx_program.diagnostic_context,
+            diagnostics.rules.op_level_debugging,
+            diagnostics.levels.NONE,
+            expected_node="aten.mul.Tensor",
+        )
+
     def test_trace_only_op_with_evaluator(self):
         model_input = torch.tensor([[1.0, 2.0, 3.0], [1.0, 1.0, 2.0]])
 
@@ -236,8 +256,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 namespace="aten", op_name="add", overload="Tensor"
             )
         )
-        # TODO: Replace this example with a torch custom op when overload is supported
-        # Currently, torch only supports custom op with namespace and op_name
+
         aten_add_Tensor = registration.OpName.from_name_parts(
             namespace="aten", op_name="add", overload="Tensor"
         )
@@ -508,69 +527,17 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                     fake_model, real_x, export_options=export_options
                 )
 
-    # NOTE: To all transformer models, config is preferred to pre-trained model for testing because:
-    # 1. Pre-trained model is too big for CI
-    # 2. Pre-trained model is has uint8/bool issue: https://github.com/huggingface/transformers/issues/21013
-    def test_fake_tensor_mode_huggingface_gpt2(self):
-        config = transformers.GPT2Config(
-            vocab_size=8096, n_positions=256, n_embd=256, n_layer=2, n_head=2
-        )
-        batch, seq = 4, 256
-
-        with torch.onnx.enable_fake_mode() as fake_context:
-            model = transformers.GPT2Model(config).eval()
-            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
-            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
-            position_ids = torch.arange(0, seq, dtype=torch.long)
-            position_ids = position_ids.unsqueeze(0).view(-1, seq)
-
-            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
-            onnx_program = torch.onnx.dynamo_export(
-                model,
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                position_ids=position_ids,
-                export_options=export_options,
-            )
-            onnx.checker.check_model(onnx_program.model_proto)
-            onnx.shape_inference.infer_shapes(onnx_program.model_proto)
-
-    def test_fake_tensor_mode_huggingface_open_llama(self):
-        config = transformers.OpenLlamaConfig(
-            vocab_size=8096, hidden_size=256, num_hidden_layers=2, num_attention_heads=2
-        )
-        batch, seq = 4, 256
-
-        with torch.onnx.enable_fake_mode() as fake_context:
-            model = transformers.OpenLlamaModel(config).eval()
-            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
-            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
-            position_ids = torch.arange(0, seq, dtype=torch.long)
-            position_ids = position_ids.unsqueeze(0).view(-1, seq)
-
-            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
-            onnx_program = torch.onnx.dynamo_export(
-                model,
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                position_ids=position_ids,
-                export_options=export_options,
-            )
-            onnx.checker.check_model(onnx_program.model_proto)
-            onnx.shape_inference.infer_shapes(onnx_program.model_proto)
-
     @pytorch_test_common.xfail(
-        "This is addressed in main branch of transformers."
-        "https://github.com/huggingface/transformers/pull/24941"
+        error_message="Dynamic control flow is not supported at the moment."
     )
-    def test_fake_tensor_mode_huggingface_databricks_dolly_v2_3b(self):
-        config = transformers.GPTNeoXConfig(
+    def test_fake_tensor_mode_huggingface_llama(self):
+        config = transformers.LlamaConfig(
             vocab_size=8096, hidden_size=256, num_hidden_layers=2, num_attention_heads=2
         )
         batch, seq = 4, 256
 
         with torch.onnx.enable_fake_mode() as fake_context:
-            model = transformers.GPTNeoXModel(config).eval()
+            model = transformers.LlamaModel(config).eval()
             input_ids = torch.randint(0, config.vocab_size, (batch, seq))
             attention_mask = torch.ones(batch, seq, dtype=torch.bool)
             position_ids = torch.arange(0, seq, dtype=torch.long)
@@ -588,9 +555,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx.shape_inference.infer_shapes(onnx_program.model_proto)
 
     @pytorch_test_common.xfail(
-        "Not decorated with xfail because CI doesn't have enough memory to run and then fail."
-        "AssertionError: Mutating module attribute seq_len_cached during export."
-        "self.seq_len_cached = seq_len"
+        error_message="Dynamic control flow is not supported at the moment."
     )
     def test_fake_tensor_mode_huggingface_tiiuae_falcon(self):
         config = transformers.FalconConfig()
@@ -649,11 +614,12 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return self.normal.sample(x.shape)
 
         x = torch.randn(2, 3)
-        exported_program = torch.export.export(Model(), args=(x,))
-        _ = torch.onnx.dynamo_export(
-            exported_program,
-            x,
-        )
+        with torch.no_grad():
+            exported_program = torch.export.export(Model(), args=(x,))
+            _ = torch.onnx.dynamo_export(
+                exported_program,
+                x,
+            )
 
     def test_aten_linalg_vector_norm_with_reducel2(self):
         class Net(nn.Module):

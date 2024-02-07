@@ -179,7 +179,7 @@ class TestNew2dParallelTraining(DTensorTestBase):
         for i in range(5):
             # Ensure all input across TP ranks are same.
             # TODO: add a get_group_rank() to DeviceMesh.
-            torch.manual_seed(i + dist.get_rank(dp_mesh.get_dim_groups()[0]))
+            torch.manual_seed(i + dist.get_rank(dp_mesh.get_group(mesh_dim=0)))
             input = torch.rand(4, 5).cuda(self.rank)
             output = model(input)
             output_2d = model_2d(input)

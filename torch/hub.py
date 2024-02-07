@@ -82,8 +82,8 @@ ENV_XDG_CACHE_HOME = 'XDG_CACHE_HOME'
 DEFAULT_CACHE_DIR = '~/.cache'
 VAR_DEPENDENCY = 'dependencies'
 MODULE_HUBCONF = 'hubconf.py'
-READ_DATA_CHUNK = 8192
-_hub_dir = None
+READ_DATA_CHUNK = 128 * 1024
+_hub_dir: Optional[str] = None
 
 
 @contextlib.contextmanager
@@ -201,8 +201,7 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, ref):
 def _get_cache_or_reload(github, force_reload, trust_repo, calling_fn, verbose=True, skip_validation=False):
     # Setup hub_dir to save downloaded files
     hub_dir = get_dir()
-    if not os.path.exists(hub_dir):
-        os.makedirs(hub_dir)
+    os.makedirs(hub_dir, exist_ok=True)
     # Parse github repo information
     repo_owner, repo_name, ref = _parse_repo_info(github)
     # Github allows branch name with slash '/',
@@ -648,17 +647,17 @@ def download_url_to_file(url: str, dst: str, hash_prefix: Optional[str] = None,
         with tqdm(total=file_size, disable=not progress,
                   unit='B', unit_scale=True, unit_divisor=1024) as pbar:
             while True:
-                buffer = u.read(8192)
+                buffer = u.read(READ_DATA_CHUNK)
                 if len(buffer) == 0:
                     break
-                f.write(buffer)
+                f.write(buffer)  # type: ignore[possibly-undefined]
                 if hash_prefix is not None:
-                    sha256.update(buffer)
+                    sha256.update(buffer)  # type: ignore[possibly-undefined]
                 pbar.update(len(buffer))
 
         f.close()
         if hash_prefix is not None:
-            digest = sha256.hexdigest()
+            digest = sha256.hexdigest()  # type: ignore[possibly-undefined]
             if digest[:len(hash_prefix)] != hash_prefix:
                 raise RuntimeError(f'invalid hash value (expected "{hash_prefix}", got "{digest}")')
         shutil.move(f.name, dst)
@@ -742,15 +741,7 @@ def load_state_dict_from_url(
         hub_dir = get_dir()
         model_dir = os.path.join(hub_dir, 'checkpoints')
 
-    try:
-        os.makedirs(model_dir)
-    except OSError as e:
-        if e.errno == errno.EEXIST:
-            # Directory already exists, ignore.
-            pass
-        else:
-            # Unexpected OSError, re-raise.
-            raise
+    os.makedirs(model_dir, exist_ok=True)
 
     parts = urlparse(url)
     filename = os.path.basename(parts.path)

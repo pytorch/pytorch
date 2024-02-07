@@ -724,7 +724,7 @@ HeapAllocator::MPSHeapAllocatorImpl& _getAllocImpl() {
   static HeapAllocator::MPSHeapAllocatorImpl s_allocatorImpl;
   return s_allocatorImpl;
 }
-}
+} // namespace
 
 // MPS allocator struct to be registered with Pytorch
 struct TORCH_API MPSAllocator final : public IMPSAllocator {
@@ -817,6 +817,10 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   }
   std::string formatSize(size_t size) const override {
     return _getAllocImpl().format_size(size);
+  }
+
+  void copy_data(void* dest, const void* src, std::size_t count) const final {
+    default_copy_data(dest, src, count);
   }
 
  private:
