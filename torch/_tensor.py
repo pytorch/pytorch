@@ -710,63 +710,36 @@ class Tensor(torch._C.TensorBase):
         self._typed_storage()._share_memory_()
         return self
 
-    def module_load_from(self, other):
+    def module_load(self, other):
         r"""Defines how ``other`` should be transformed when loading ``other`` from a state_dict into ``self``.
 
-        Used when :func:`~torch.nn.utils.get_swap_module_params_on_conversion` is ``True``.
+        Used when :func:`~torch.__future__.get_swap_module_params_on_conversion` is ``True``.
 
         If ``self`` is a parameter or buffer in an ``nn.Module`` and ``other`` is the
         value in the state dictionary with the corresponding key, this method defines
         how ``other`` is remapped before being swapped with ``self`` via
         :func:`~torch.utils.swap_tensor(self, other)`` in ``module.load_state_dict()``.
 
-        To customize how a tensor is loaded, one can override this function with a
-        ``__torch_function__`` subclass.
+        To customize how to load from or to a tensor subclass, one can override this function with
+        ``__torch_function__``.
 
         After applying ``result = self.module_load_from(other)``, if ``self`` is an ``nn.Parameter``,
         ``result`` will be wrapped in a new :class:`~torch.nn.Parameter` instance before
         being swapped with ``self``.
 
         ..note::
-            If both ``self`` and ``other`` have ``__torch_function__`` implemented, this
-            method will take precedence over :meth:`~Tensor.module_load_to`.
+            If both ``self`` and ``other`` have ``__torch_function__`` handlers implemented
+            for this method, the handler of ``self`` will take precedence unless ``other``
+            subclasses ``self``, then the handler of ``other`` will take precedence.
 
         Args:
             other (Tensor): value in state dict with key corresponding to ``self``
 
         """
-        if has_torch_function_unary(self):
-            return handle_torch_function(Tensor.module_load_from, (self,), self, other)
+        if has_torch_function_variadic(self, other):
+            return handle_torch_function(Tensor.module_load, (self, other), self, other)
         # In the default case, swap_tensors becomes a no-op
         return self.copy_(other)
-
-    def module_load_to(self, other):
-        r"""Defines how ``other`` should be transformed when loading ``self`` from a state_dict into ``other``.
-
-        Used when :func:`~torch.nn.utils.get_swap_module_params_on_conversion` is ``True``.
-
-        If ``other`` is a parameter or buffer in an ``nn.Module`` and ``self`` is the
-        value in the state dictionary with the corresponding key, this method defines
-        how ``self`` is remapped before being swapped with ``other`` via
-        :func:`~torch.utils.swap_tensor(self, other)`` in ``module.load_state_dict()``.
-
-        To customize how a tensor is loaded, one can override this function with a
-        ``__torch_function__`` subclass.
-
-        After applying ``result = self.module_load_to(other)``, if ``other`` is an ``nn.Parameter``,
-        ``result`` will be wrapped in a new :class:`~torch.nn.Parameter` instance before
-        being swapped with ``other``.
-
-        See also: :meth:`~Tensor.module_load_from`
-
-        Args:
-            other (Tensor): parameter or buffer in ``nn.Module`` with key corresponding to ``self``
-
-        """
-        if has_torch_function_unary(self):
-            return handle_torch_function(Tensor.module_load_to, (self,), self, other)
-        # In the default case, swap_tensors becomes a no-op
-        return other.copy_(self)
 
     def __reversed__(self):
         r"""Reverses the tensor along dimension 0."""

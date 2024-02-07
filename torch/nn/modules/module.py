@@ -6,7 +6,6 @@ import weakref
 
 import torch
 from torch._prims_common import DeviceLikeType
-from torch.overrides import has_torch_function, has_torch_function_unary
 from ..parameter import Parameter
 import torch.utils.hooks as hooks
 
@@ -2020,7 +2019,7 @@ class Module:
         local_name_params = itertools.chain(self._parameters.items(), persistent_buffers.items())
         local_state = {k: v for k, v in local_name_params if v is not None}
         assign_to_params_buffers = local_metadata.get("assign_to_params_buffers", False)
-        use_swap_tensors = torch.nn.utils.get_swap_module_params_on_conversion()
+        use_swap_tensors = torch.__future__.get_swap_module_params_on_conversion()
 
         for name, param in local_state.items():
             key = prefix + name
@@ -2063,20 +2062,24 @@ class Module:
                                 setattr(self, name, torch.nn.Parameter(input_param))
                             else:
                                 setattr(self, name, input_param)
-                        elif use_swap_tensors and has_torch_function({param, input_param}):
+                        elif use_swap_tensors:
                             param_requires_grad = param.requires_grad
-                            if has_torch_function_unary(param):
-                                new_input_param = param.module_load_from(input_param)
-                            elif has_torch_function_unary(input_param):
-                                new_input_param = input_param.module_load_to(param)
+                            new_input_param = param.module_load(input_param)
                             if (isinstance(param, torch.nn.Parameter) and
                                     not isinstance(new_input_param, torch.nn.Parameter)):
                                 new_input_param = torch.nn.Parameter(new_input_param, requires_grad=param_requires_grad)
+                            elif id(new_input_param) == id(input_param):
+                                # preserve reference in state_dict, in the if-block, Parameter already calls .detach()
+                                # However storage of param and input_param might be the same after the swap
+                                # which differs from the param.copy_(input_param) path
+                                new_input_param = new_input_param.detach()
                             torch.utils.swap_tensors(param, new_input_param)
+                            del new_input_param
                         else:
                             param.copy_(input_param)
                 except Exception as ex:
-                    error_msgs.append(f'While copying the parameter named "{key}", '
+                    action = "swapping" if use_swap_tensors else "copying"
+                    error_msgs.append(f'While {action} the parameter named "{key}", '
                                       f'whose dimensions in the model are {param.size()} and '
                                       f'whose dimensions in the checkpoint are {input_param.size()}, '
                                       f'an exception occurred : {ex.args}.'
@@ -2112,6 +2115,13 @@ class Module:
         .. warning::
             If :attr:`assign` is ``True`` the optimizer must be created after
             the call to :attr:`load_state_dict`.
+
+        .. warning::
+            If :func:`~torch.__future__.get_swap_module_params_on_conversion` is set
+            and parameters or their corresponding values in the ``state_dict`` have a
+            torch function handler for :meth:`~torch.Tensor.module_load`, values in the
+            ``state_dict`` might refer to the same tensors as their corresponding
+            parameters in the ``nn.Module`` after loading.
 
         Args:
             state_dict (dict): a dict containing parameters and
@@ -2175,6 +2185,9 @@ class Module:
 
         load(self, state_dict)
         del load
+        # print("linear1 weight")
+        # print(self.linear1.weight)
+        # print(id(self.linear1.weight))
 
         if strict:
             if len(unexpected_keys) > 0:

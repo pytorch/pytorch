@@ -9,11 +9,21 @@ import torch.nn as nn
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import TestCase, \
     TEST_NUMPY, IS_WINDOWS, skipIfTorchDynamo, instantiate_parametrized_tests, \
-    run_tests, wrapSwapTensorsTest, skipIfCrossRef
+    run_tests, wrapSwapTensorsTest, skipIfCrossRef, _TestParametrizer
 from torch.utils._pytree import tree_map
 
 if TEST_NUMPY:
     import numpy as np
+
+
+class swap(_TestParametrizer):
+    def __init__(self, swap_values):
+        super().__init__()
+        self.swap_values = swap_values
+
+    def _parametrize_test(self, test, generic_cls, device_cls):
+        for swap in self.swap_values:
+            yield wrapSwapTensorsTest(swap)(test), f'swap_{swap}', {}, lambda _: []
 
 
 class TestLoadStateDict(NNTestCase):
@@ -21,6 +31,7 @@ class TestLoadStateDict(NNTestCase):
     _do_cuda_non_default_stream = True
 
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
+    @swap([True, False])
     def test_load_state_dict_invalid(self):
         m = torch.nn.Linear(2, 2, bias=False)
 
@@ -34,6 +45,7 @@ class TestLoadStateDict(NNTestCase):
                                     "expected torch.Tensor or Tensor-like object from checkpoint but received"):
             m.load_state_dict(state_dict)
 
+    @swap([True, False])
     def test_load_state_dict_type(self):
         m = nn.Module()
 
@@ -44,6 +56,7 @@ class TestLoadStateDict(NNTestCase):
                                     "Expected state_dict to be dict-like, got"):
             m.load_state_dict(2)
 
+    @swap([True, False])
     def test_load_state_dict(self):
         l = nn.Linear(5, 5)
         block = nn.Module()
@@ -136,6 +149,7 @@ class TestLoadStateDict(NNTestCase):
         for k, v, in old_state_dict.items():
             self.assertTrue(v.equal(new_state_dict[k]))
 
+    @swap([True, False])
     def test_load_state_dict_BC(self):
         # BatchNormNd
         # Added num_batches_tracked buffer at version 2. For state dict with
@@ -152,6 +166,7 @@ class TestLoadStateDict(NNTestCase):
         self.assertEqual(bn.num_batches_tracked.dtype, torch.long)
         self.assertEqual(bn.num_batches_tracked.item(), 0)
 
+    @swap([True, False])
     def test_load_state_dict_child(self):
         base_module = nn.Linear(1, 1)
         model = base_module
@@ -166,6 +181,7 @@ class TestLoadStateDict(NNTestCase):
         model.load_state_dict(model.state_dict(), strict=True)
 
     @unittest.skipIf(IS_WINDOWS, "Tempfile permission issue on windows")
+    @swap([True, False])
     def test_register_state_dict_pre_hook_backward_compat(self):
         called = False
 
@@ -191,8 +207,8 @@ class TestLoadStateDict(NNTestCase):
         _ = m.state_dict()
         self.assertTrue(called)
 
-    # fails in crossref mode when swapping tensors as LSTM installs weakrefs
-    @skipIfCrossRef
+    # fails swapping as LSTM installs weak references on the parameters
+    @swap([False])
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_load_state_dict_ref_cycle(self):
         # load_state_dict shouldn't cause a reference cycle involving Tensors
@@ -206,6 +222,7 @@ class TestLoadStateDict(NNTestCase):
 
         self.assertEqual(refcycles, 0)
 
+    @swap([True, False])
     def test_load_state_dict_custom(self):
 
         class CustomState(nn.Module):
@@ -239,6 +256,7 @@ class TestLoadStateDict(NNTestCase):
         self.assertEqual(mm[0].param[0].item(), 10)
         self.assertEqual(mm[0].sub.weight[0, 0].item(), 555)
 
+    @swap([True, False])
     def test_load_state_dict_assign_meta(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -286,6 +304,7 @@ class TestLoadStateDict(NNTestCase):
 
         self.assertEqual(out_net, out_net_meta)
 
+    @swap([True, False])
     def test_load_state_dict_assign_with_optimizer(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -333,6 +352,7 @@ class TestLoadStateDict(NNTestCase):
         self.assertEqual(opt.state_dict(), opt2.state_dict())
         self.assertEqual(net.state_dict(), net_meta.state_dict())
 
+    @swap([True, False])
     def test_load_state_dict_assign_shape_stride(self):
         # Assigned tensor is allowed to have different properties than initial
         # tensor except for shape
@@ -356,6 +376,7 @@ class TestLoadStateDict(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "size mismatch for fc1.weight: copying a param with shape"):
             net2.load_state_dict(state_dict, strict=False, assign=True)
 
+    @swap([True, False])
     def test_load_state_dict_warn_assign(self):
         with torch.device('meta'):
             m = torch.nn.Linear(3, 5)
@@ -365,46 +386,48 @@ class TestLoadStateDict(NNTestCase):
             m.load_state_dict(state_dict)
 
 
+def load_torch_function_handler(cls, func, types, args=(), kwargs=None):
+    kwargs = {} if kwargs is None else kwargs
+
+    def module_load(dest, src):
+        # always convert src to cls
+        if isinstance(dest, cls):
+            if type(src) is torch.Tensor:
+                return cls(src)
+            elif type(src) is cls:
+                return src
+            else:
+                if isinstance(src, MyWrapperLoadTensor):
+                    return cls(src._data)
+                return cls(src)
+        else:
+            return src
+
+    if func is torch.Tensor.module_load:
+        return module_load(*args, **kwargs)
+    else:
+        with torch._C.DisableTorchFunctionSubclass():
+            # detach must return instance of same subclass for nn.Parameter()
+            if func == torch.Tensor.detach:
+                ret = func(*args, **kwargs)
+                if not isinstance(ret, cls):
+                    return cls(ret)
+                return ret
+            return func(*args, **kwargs)
+
 class MyLoadTensor(torch.Tensor):
-
-    # enable deepcopy
-    def new_empty(self, shape):
-        return type(self)(shape)
-
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
-        kwargs = {} if kwargs is None else kwargs
+        return load_torch_function_handler(cls, func, types, args, kwargs)
 
-        def module_load_from(dest, src):
-            # always convert src to MyLoadTensor
-            if type(src) is torch.Tensor:
-                return MyLoadTensor(src)
-            elif type(src) is MyLoadTensor:
-                return src
-            elif type(src) is MyWrapperLoadTensor:
-                return MyLoadTensor(src._data)
-            else:
-                raise NotImplementedError(f"module_load_from(): unsupported type(src) {type(src)}")
+# We use MyLoadTensor2 to test tensor subclass, wrapper tensor subclass
+# where neither inherits from each other
+class MyLoadTensor2(torch.Tensor):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        return load_torch_function_handler(cls, func, types, args, kwargs)
 
-        def module_load_to(src, dest):
-            if type(dest) in {torch.nn.Parameter, torch.Tensor, MyLoadTensor, MyWrapperLoadTensor}:
-                return src
-            else:
-                raise NotImplementedError(f"module_load_to(): unsupported type(dest) {type(dest)}")
-
-        if func is torch.Tensor.module_load_from:
-            return module_load_from(*args, **kwargs)
-        elif func is torch.Tensor.module_load_to:
-            return module_load_to(*args, **kwargs)
-        elif func is torch.Tensor.detach:
-            return MyLoadTensor(args[0].data.detach())
-        else:
-            with torch._C.DisableTorchFunctionSubclass():
-                return func(*args, **kwargs)
-
-
-class MyWrapperLoadTensor(torch.Tensor):
-
+class MyWrapperLoadTensor(MyLoadTensor):
     @staticmethod
     def __new__(cls, data: torch.Tensor):
         t = torch.Tensor._make_wrapper_subclass(
@@ -420,51 +443,18 @@ class MyWrapperLoadTensor(torch.Tensor):
     def __repr__(self):
         return f"MyWrapperLoadTensor({self._data.__repr__()})"
 
-    # enable deepcopy
-    def new_empty(self, shape):
-        return type(self)(self._data.new_empty(shape))
-
-    @classmethod
-    def __torch_function__(cls, func, types, args=(), kwargs=None):
-        kwargs = {} if kwargs is None else kwargs
-
-        def module_load_from(dest, src):
-            # always convert src to MyWrapperLoadTensor
-            if type(src) is torch.Tensor:
-                return MyWrapperLoadTensor(src)
-            elif type(src) is MyWrapperLoadTensor:
-                return src
-            elif type(src) is MyLoadTensor:
-                return MyWrapperLoadTensor(src.data)
-            else:
-                raise NotImplementedError(f"module_load_from(): unsupported type(src) {type(src)}")
-
-        def module_load_to(src, dest):
-            if type(dest) in {torch.nn.Parameter, torch.Tensor, MyLoadTensor, MyWrapperLoadTensor}:
-                return src
-            else:
-                raise NotImplementedError(f"module_load_to(): unsupported type(dest) {type(dest)}")
-
-        if func is torch.Tensor.module_load_from:
-            return module_load_from(*args, **kwargs)
-        elif func is torch.Tensor.module_load_to:
-            return module_load_to(*args, **kwargs)
-        else:
-            with torch._C.DisableTorchFunctionSubclass():
-                return func(*args, **kwargs)
-
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
 
         def unwrap(t):
             return t._data if isinstance(t, MyWrapperLoadTensor) else t
 
+        def wrap(t):
+            return MyWrapperLoadTensor(t) if isinstance(t, torch.Tensor) else t
+
         kwargs = {} if kwargs is None else kwargs
         out = func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs))
-        if isinstance(out, torch.Tensor):
-            return MyWrapperLoadTensor(out)
-        else:
-            return out
+        return tree_map(wrap, out)
 
 
 class TestLoadStateDictSwap(TestCase):
@@ -481,44 +471,36 @@ class TestLoadStateDictSwap(TestCase):
                 m.buf = subclass(m.buf)
             return m
 
-        def _test(module_subclass=None, sd_subclass=None):
-            m = _create_model(module_subclass)
+        def _test(m_subclass=None, sd_subclass=None):
+            m = _create_model(m_subclass)
             sd = _create_model(sd_subclass).state_dict()
-            # deepcopy as swap_tensors might destructively modify state dict
-            ref_sd = deepcopy(sd)
+            sd = sd
             m.load_state_dict(sd)
-            self.assertEqual(m.weight, ref_sd['weight'])
-            self.assertEqual(m.buf, ref_sd['buf'])
+            self.assertEqual(m.weight, sd['weight'])
+            self.assertEqual(m.buf, sd['buf'])
             self.assertTrue(isinstance(m.weight, torch.nn.Parameter))
             self.assertTrue(not isinstance(m.buf, torch.nn.Parameter))
 
             weight_type, buf_type = (torch.nn.Parameter, torch.Tensor)
-            if sd_subclass is not None and module_subclass is not None:
-                # param.module_load_from takes precedence over input.module_load_to
-                weight_type, buf_type = (module_subclass, module_subclass)
+            if m_subclass is not None and sd_subclass is not None:
+                # handler of subclass takes precedence over superclass
+                if issubclass(sd_subclass, m_subclass):
+                    weight_type, buf_type = (sd_subclass, sd_subclass)
+                else:
+                    weight_type, buf_type = (m_subclass, m_subclass)
+            elif m_subclass is not None:
+                weight_type, buf_type = (m_subclass, m_subclass)
             elif sd_subclass is not None:
                 weight_type, buf_type = (sd_subclass, sd_subclass)
-            elif module_subclass is not None:
-                weight_type, buf_type = (module_subclass, module_subclass)
             self.assertTrue(type(m.weight) is weight_type)
             self.assertTrue(type(m.buf) is buf_type)
 
-        subclasses = [None, MyLoadTensor, MyWrapperLoadTensor]
+        # (MyLoadTensor, MyWrapperLoadTensor) tests the behavior of (superclass, subclass)
+        subclasses = [None, MyLoadTensor, MyLoadTensor2, MyWrapperLoadTensor]
         for m_s, sd_s in product(subclasses, subclasses):
             _test(m_s, sd_s)
 
 
-# run tests witsh swap enabled/disabled
-def instantiate_parametrize_with_swap(cls):
-    for attr_name in tuple(dir(cls)):
-        class_attr = getattr(cls, attr_name)
-        if attr_name.startswith('test_'):
-            for swap in (True, False):
-                setattr(cls, f'{attr_name}_swap_{swap}', wrapSwapTensorsTest(swap)(class_attr))
-            delattr(cls, attr_name)
-
-
-instantiate_parametrize_with_swap(TestLoadStateDict)
 instantiate_parametrized_tests(TestLoadStateDict)
 instantiate_parametrized_tests(TestLoadStateDictSwap)
 
