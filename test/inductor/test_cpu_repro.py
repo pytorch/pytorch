@@ -1366,6 +1366,7 @@ class CPUReproTests(TestCase):
             "ndtri",
             "log_ndtr",
             "erfcx",
+            "polygamma",
             "zeta",
             "constant",
             "index_expr",
@@ -1475,7 +1476,7 @@ class CPUReproTests(TestCase):
         with config.patch({"cpp.fallback_scatter_reduce_sum": True}):
             _internal_check(fn, inps, "aten.scatter_reduce_")
 
-        if torch.has_openmp:
+        if "ATen parallel backend: OpenMP" in torch.__config__.parallel_info():
             # Fix https://github.com/pytorch/pytorch/issues/118518
             # which fails to change thread number with native thread pool
             with set_num_threads(1):
