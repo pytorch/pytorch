@@ -714,6 +714,13 @@ void ProcessGroupNCCL::WorkNCCL::abort() {
 
 static std::atomic<size_t> process_group_id = 0;
 
+constexpr const char* MULTI_DEVICE_ERROR_MSG =
+    "Expecting one tensor only but got multiple. You are probably using multiple "
+    "devices under one thread. The support for such usage has been deprecated. "
+    "For details, please refer to "
+    "https://pytorch.org/docs/stable/distributed.html#multi-gpu-collective-functions. "
+    "ProcessGroupNCCL continues supporting multi-process and multi-thread modes.";
+
 ProcessGroupNCCL::ProcessGroupNCCL(
     const c10::intrusive_ptr<Store>& store,
     int rank,
@@ -2833,6 +2840,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
+  TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
 #ifdef IS_NCCL_EXP
   std::vector<at::Tensor> outputTensors(tensors.size());
   for (std::vector<at::Tensor>::size_type i = 0; i < tensors.size(); i++) {
@@ -2936,6 +2944,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
+  TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   if (intraNodeComm_ != nullptr && tensors.size() == 1 &&
       opts.reduceOp == ReduceOp::SUM) {
     using namespace intra_node_comm;
@@ -3002,6 +3011,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
 c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
     std::vector<at::Tensor>& tensors,
     const BroadcastOptions& opts) {
+  TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   check_gpu_tensors_different_devices(tensors);
 
   // @lint-ignore CLANGTIDY
@@ -3112,6 +3122,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_broadcast_oop(
 c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
     std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts) {
+  TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   check_gpu_tensors_different_devices(tensors);
   // @lint-ignore CLANGTIDY
   auto tensor = tensors.back();
@@ -3228,6 +3239,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const AllgatherOptions& opts) {
+  TORCH_CHECK(inputTensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   check_gpu_tensors_different_devices(inputTensors);
   // @lint-ignore CLANGTIDY
   bool same_size = check_same_size(outputTensors.back());
@@ -3372,6 +3384,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ReduceScatterOptions& opts) {
+  TORCH_CHECK(outputTensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   check_gpu_tensors_different_devices(outputTensors);
   // @lint-ignore CLANGTIDY
   bool same_size = check_same_size(inputTensors.back());
@@ -3851,6 +3864,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
     int /* unused */) {
+  TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   check_gpu_tensors_different_devices(tensors, true);
 
   // @lint-ignore CLANGTIDY
@@ -3891,6 +3905,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
     int /* unused */) {
+  TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   check_gpu_tensors_different_devices(tensors, true);
 
   // @lint-ignore CLANGTIDY
@@ -4023,6 +4038,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
   check_gpu_tensors_different_devices(inputTensors, true);
   assertSingleElementInput(invalidArgument, inputTensors);
 
+  TORCH_CHECK(inputTensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   // @lint-ignore CLANGTIDY
   auto tensor = inputTensors.back();
 
@@ -4112,6 +4128,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
   assertSingleElementInput(invalidArgument, outputTensors);
 
   // @lint-ignore CLANGTIDY
+  TORCH_CHECK(outputTensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto tensor = outputTensors.back();
 
   std::vector<at::Tensor> inputs;
