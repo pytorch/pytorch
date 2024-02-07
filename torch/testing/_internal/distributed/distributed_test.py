@@ -7273,10 +7273,7 @@ class DistributedTest:
             for num_early_join_ranks in num_uneven_ranks:
                 for baseline_iter in baseline_num_iters:
                     for offset in iteration_offsets:
-                        mapping = {
-                            rank: baseline_iter
-                            for rank in range(0, num_early_join_ranks)
-                        }
+                        mapping = dict.fromkeys(range(0, num_early_join_ranks), baseline_iter)
                         # if num_early_join_ranks > 1, ranks > 0 that will join early
                         # iterate offset//2 more times than rank 0, to test nodes
                         # depleting inputs at different times.
@@ -7285,12 +7282,7 @@ class DistributedTest:
                                 if rank > 0:
                                     mapping[rank] += offset // 2
                         mapping.update(
-                            {
-                                rank: baseline_iter + offset
-                                for rank in range(
-                                    num_early_join_ranks, dist.get_world_size()
-                                )
-                            }
+                            dict.fromkeys(range(num_early_join_ranks, dist.get_world_size()), baseline_iter + offset)
                         )
                         iteration_mappings.append(mapping)
 

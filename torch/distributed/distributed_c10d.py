@@ -288,17 +288,17 @@ class BackendConfig:
         if backend == Backend.UNDEFINED:
             # default config when backend is not specified
             # supported since PyTorch 2.0
-            for device in Backend.default_device_backend_map:
-                if is_backend_available(Backend.default_device_backend_map[device]):
-                    self.device_backend_map[device] = Backend(Backend.default_device_backend_map[device])
+            for device, default_backend in Backend.default_device_backend_map.items():
+                if is_backend_available(default_backend):
+                    if default_backend == Backend.NCCL and not torch.cuda.is_available():
+                        continue
+                    self.device_backend_map[device] = Backend(default_backend)
         elif backend.lower() in Backend.backend_list:
             # Cases for when backend is a single string (without device types)
             # e.g. "nccl", "gloo", "ucc", "mpi"
             supported_devices = Backend.backend_capability[backend.lower()]
             backend_val = Backend(backend)
-            self.device_backend_map = {
-                device : backend_val for device in supported_devices
-            }
+            self.device_backend_map = dict.fromkeys(supported_devices, backend_val)
         elif ":" in backend.lower():
             # Backend specified in "device:backend" format
             # make sure the backend string is in the correct format
@@ -1945,9 +1945,9 @@ def _coalescing_manager(
         work = group._end_coalescing(device)
 
     if async_ops:
-        cm.append(work)
+        cm.append(work)  # type: ignore[possibly-undefined]
     else:
-        work.wait()
+        work.wait()  # type: ignore[possibly-undefined]
 
 
 def batch_isend_irecv(p2p_op_list):
@@ -2079,25 +2079,26 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
         >>> # xdoctest: +SKIP("no rank")
         >>> # All tensors below are of torch.int64 type.
         >>> # We have 2 process groups, 2 ranks.
-        >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
+        >>> device = torch.device(f'cuda:{rank}')
+        >>> tensor = torch.arange(2, dtype=torch.int64, device=device) + 1 + 2 * rank
         >>> tensor
-        tensor([1, 2]) # Rank 0
-        tensor([3, 4]) # Rank 1
+        tensor([1, 2], device='cuda:0') # Rank 0
+        tensor([3, 4], device='cuda:1') # Rank 1
         >>> dist.all_reduce(tensor, op=ReduceOp.SUM)
         >>> tensor
-        tensor([4, 6]) # Rank 0
-        tensor([4, 6]) # Rank 1
+        tensor([4, 6], device='cuda:0') # Rank 0
+        tensor([4, 6], device='cuda:1') # Rank 1
 
         >>> # All tensors below are of torch.cfloat type.
         >>> # We have 2 process groups, 2 ranks.
-        >>> tensor = torch.tensor([1+1j, 2+2j], dtype=torch.cfloat) + 2 * rank * (1+1j)
+        >>> tensor = torch.tensor([1+1j, 2+2j], dtype=torch.cfloat, device=device) + 2 * rank * (1+1j)
         >>> tensor
-        tensor([1.+1.j, 2.+2.j]) # Rank 0
-        tensor([3.+3.j, 4.+4.j]) # Rank 1
+        tensor([1.+1.j, 2.+2.j], device='cuda:0') # Rank 0
+        tensor([3.+3.j, 4.+4.j], device='cuda:1') # Rank 1
         >>> dist.all_reduce(tensor, op=ReduceOp.SUM)
         >>> tensor
-        tensor([4.+4.j, 6.+6.j]) # Rank 0
-        tensor([4.+4.j, 6.+6.j]) # Rank 1
+        tensor([4.+4.j, 6.+6.j], device='cuda:0') # Rank 0
+        tensor([4.+4.j, 6.+6.j], device='cuda:1') # Rank 1
 
     """
     _check_single_tensor(tensor, "tensor")
@@ -2460,7 +2461,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     # All ranks call gather with equal-sized tensors.
     gather(
         input_tensor,
-        gather_list=output_tensors if my_rank == dst else None,
+        gather_list=output_tensors if my_rank == dst else None,  # type: ignore[possibly-undefined]
         dst=dst,
         group=group,
     )
@@ -2560,7 +2561,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
     # Note: torch.cat will do an extra memory copy to the current device, if the tensor_list
     # has only one element, we can skip the copy.
     if my_rank == src:
-        if len(tensor_list) == 1:
+        if len(tensor_list) == 1:  # type: ignore[possibly-undefined]
             object_tensor = tensor_list[0]
         else:
             object_tensor = torch.cat(tensor_list)
@@ -2663,8 +2664,8 @@ def scatter_object_list(
     # Src rank broadcasts the maximum tensor size. This is because all ranks are
     # expected to call into scatter() with equal-sized tensors.
     if my_rank == src:
-        max_tensor_size = max(tensor_sizes)
-        for tensor in tensor_list:
+        max_tensor_size = max(tensor_sizes)  # type: ignore[possibly-undefined]
+        for tensor in tensor_list:  # type: ignore[possibly-undefined]
             tensor.resize_(max_tensor_size)
     else:
         max_tensor_size = torch.tensor([0], dtype=torch.long, device=pg_device)
@@ -2674,7 +2675,7 @@ def scatter_object_list(
     output_tensor = torch.empty(max_tensor_size.item(), dtype=torch.uint8, device=pg_device)
     scatter(
         output_tensor,
-        scatter_list=None if my_rank != src else tensor_list,
+        scatter_list=None if my_rank != src else tensor_list,  # type: ignore[possibly-undefined]
         src=src,
         group=group,
     )
@@ -2683,7 +2684,7 @@ def scatter_object_list(
     obj_tensor_size = torch.tensor([0], dtype=torch.long, device=pg_device)
     scatter(
         obj_tensor_size,
-        scatter_list=None if my_rank != src else tensor_sizes,
+        scatter_list=None if my_rank != src else tensor_sizes,  # type: ignore[possibly-undefined]
         src=src,
         group=group,
     )
@@ -2715,31 +2716,34 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
         >>> # xdoctest: +SKIP("need process group init")
         >>> # All tensors below are of torch.int64 dtype.
         >>> # We have 2 process groups, 2 ranks.
-        >>> tensor_list = [torch.zeros(2, dtype=torch.int64) for _ in range(2)]
+        >>> device = torch.device(f'cuda:{rank}')
+        >>> tensor_list = [torch.zeros(2, dtype=torch.int64, device=device) for _ in range(2)]
         >>> tensor_list
-        [tensor([0, 0]), tensor([0, 0])] # Rank 0 and 1
-        >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
+        [tensor([0, 0], device='cuda:0'), tensor([0, 0], device='cuda:0')] # Rank 0
+        [tensor([0, 0], device='cuda:0'), tensor([0, 0], device='cuda:1')] # Rank 1
+        >>> tensor = torch.arange(2, dtype=torch.int64, device=device) + 1 + 2 * rank
         >>> tensor
-        tensor([1, 2]) # Rank 0
-        tensor([3, 4]) # Rank 1
+        tensor([1, 2], device='cuda:0') # Rank 0
+        tensor([3, 4], device='cuda:1') # Rank 1
         >>> dist.all_gather(tensor_list, tensor)
         >>> tensor_list
-        [tensor([1, 2]), tensor([3, 4])] # Rank 0
-        [tensor([1, 2]), tensor([3, 4])] # Rank 1
+        [tensor([1, 2], device='cuda:0'), tensor([3, 4], device='cuda:0')] # Rank 0
+        [tensor([1, 2], device='cuda:1'), tensor([3, 4], device='cuda:1')] # Rank 1
 
         >>> # All tensors below are of torch.cfloat dtype.
         >>> # We have 2 process groups, 2 ranks.
-        >>> tensor_list = [torch.zeros(2, dtype=torch.cfloat) for _ in range(2)]
+        >>> tensor_list = [torch.zeros(2, dtype=torch.cfloat, device=device) for _ in range(2)]
         >>> tensor_list
-        [tensor([0.+0.j, 0.+0.j]), tensor([0.+0.j, 0.+0.j])] # Rank 0 and 1
-        >>> tensor = torch.tensor([1+1j, 2+2j], dtype=torch.cfloat) + 2 * rank * (1+1j)
+        [tensor([0.+0.j, 0.+0.j], device='cuda:0'), tensor([0.+0.j, 0.+0.j], device='cuda:0')] # Rank 0
+        [tensor([0.+0.j, 0.+0.j], device='cuda:1'), tensor([0.+0.j, 0.+0.j], device='cuda:1')] # Rank 1
+        >>> tensor = torch.tensor([1+1j, 2+2j], dtype=torch.cfloat, device=device) + 2 * rank * (1+1j)
         >>> tensor
-        tensor([1.+1.j, 2.+2.j]) # Rank 0
-        tensor([3.+3.j, 4.+4.j]) # Rank 1
+        tensor([1.+1.j, 2.+2.j], device='cuda:0') # Rank 0
+        tensor([3.+3.j, 4.+4.j], device='cuda:1') # Rank 1
         >>> dist.all_gather(tensor_list, tensor)
         >>> tensor_list
-        [tensor([1.+1.j, 2.+2.j]), tensor([3.+3.j, 4.+4.j])] # Rank 0
-        [tensor([1.+1.j, 2.+2.j]), tensor([3.+3.j, 4.+4.j])] # Rank 1
+        [tensor([1.+1.j, 2.+2.j], device='cuda:0'), tensor([3.+3.j, 4.+4.j], device='cuda:0')] # Rank 0
+        [tensor([1.+1.j, 2.+2.j], device='cuda:1'), tensor([3.+3.j, 4.+4.j], device='cuda:1')] # Rank 1
 
     """
     _check_tensor_list(tensor_list, "tensor_list")

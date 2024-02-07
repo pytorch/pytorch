@@ -283,7 +283,7 @@ if torch._C._has_mkldnn:
                     L[aten.mul](out, negative_slope),
                 )
                 if lowp_dtype:
-                    out = L[prims.convert_element_type.default](out, dtype=dtype2)
+                    out = L[prims.convert_element_type.default](out, dtype=dtype2)  # type: ignore[possibly-undefined]
                 return out
 
         return fn
@@ -324,7 +324,7 @@ if torch._C._has_mkldnn:
                     out = L[prims.convert_element_type.default](out, dtype=torch.float)
                 out = L[aten.clamp_max](L[aten.clamp_min](out, min_value), max_value)
                 if lowp_dtype:
-                    out = L[prims.convert_element_type.default](out, dtype=dtype2)
+                    out = L[prims.convert_element_type.default](out, dtype=dtype2)  # type: ignore[possibly-undefined]
                 return out
 
         return fn
@@ -341,10 +341,12 @@ if torch._C._has_mkldnn:
         if len(binary_nodes) < 1:
             return False
 
-        def get_meta_value(argument: torch.fx.Argument):
-            if not hasattr(argument, "meta"):
+        def get_meta_value(argument: torch.fx.node.Argument):
+            # returns argument.meta["val"] if it exists, otherwise None
+            meta = getattr(argument, "meta", None)
+            if meta is None:
                 return None
-            return argument.meta.get("val", None)
+            return meta.get("val", None)
 
         if any(
             not isinstance(get_meta_value(n.args[0]), torch.Tensor)

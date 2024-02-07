@@ -344,7 +344,7 @@ void upsample_avx_bilinear_bicubic_uint8(
     int interp_dim = 3;
     auto stride = (skip_unpacking) ? num_channels : 4;
     std::tie(horiz_indices_weights, ksize_horiz, horiz_weights_precision) =
-        F::compute_indices_int16_weights_aa(
+        F::compute_index_ranges_int16_weights(
             /*input_size=*/xin,
             /*output_size=*/xout,
             /*stride=*/stride,
@@ -360,7 +360,7 @@ void upsample_avx_bilinear_bicubic_uint8(
     int interp_dim = 2;
     auto stride = (skip_unpacking) ? num_channels * xout : 4 * xout;
     std::tie(vert_indices_weights, ksize_vert, vert_weights_precision) =
-        F::compute_indices_int16_weights_aa(
+        F::compute_index_ranges_int16_weights(
             /*input_size=*/yin,
             /*output_size=*/yout,
             /*stride=*/stride,

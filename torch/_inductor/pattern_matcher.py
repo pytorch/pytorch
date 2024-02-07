@@ -32,6 +32,7 @@ from torch._dynamo.utils import counters
 from torch._prims_common import is_integer_dtype
 from torch.fx import Node
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
+from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
 from .._functorch import config as functorch_config
@@ -870,7 +871,7 @@ def _return_true(match):
     return True
 
 
-def log_trace_fialure(search_fn, e):
+def log_trace_failure(search_fn, e):
     log.info(
         "Replacement pattern %s failed to apply due to shape mismatch: %s",
         search_fn.__name__,
@@ -924,7 +925,7 @@ def register_replacement(
                 [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]
             )
         )
-        sym_args = []
+        sym_args: List[torch.SymInt] = []
         with torch._dynamo.utils.detect_fake_mode(args):
             for i, grad in enumerate(requires_grad):
                 if isinstance(args[i], torch.Tensor):
@@ -939,7 +940,9 @@ def register_replacement(
                         requires_grad=grad,
                     )
                     for v in itertools.chain(args[i].shape, args[i].stride()):
-                        if isinstance(v, torch.SymInt) and v not in sym_args:
+                        if isinstance(v, torch.SymInt) and all(
+                            guard_size_oblivious(v != a) for a in sym_args
+                        ):
                             sym_args.append(v)
 
             if sym_args:
@@ -956,7 +959,7 @@ def register_replacement(
                 try:
                     specific_graph = trace_fn(search_fn_new, sym_args + args)
                 except RuntimeError as e:
-                    log_trace_fialure(search_fn, e)
+                    log_trace_failure(search_fn, e)
                     return False
 
                 # correct argnames in the graph
@@ -982,7 +985,7 @@ def register_replacement(
                 try:
                     specific_graph = trace_fn(search_fn, args)
                 except RuntimeError as e:
-                    log_trace_fialure(search_fn, e)
+                    log_trace_failure(search_fn, e)
                     return False
 
             specific_pattern = fx_to_pattern(
@@ -1196,7 +1199,7 @@ class PatternMatcherPass:
                     if (
                         self.prevent_match_across_mutations
                         and is_match(m)
-                        and len(set(map(get_mutation_region_id_partial, m.nodes))) != 1
+                        and len(set(map(get_mutation_region_id_partial, m.nodes))) != 1  # type: ignore[possibly-undefined]
                     ):
                         continue
                     if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
