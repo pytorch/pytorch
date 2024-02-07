@@ -48,11 +48,12 @@ def foreach_all_gather(
         g = itertools.groupby(d for ds in param_all_gather_input_dtypes for d in ds)
         if next(g, True) and not next(g, False):  # same dtype
             dtype = param_all_gather_inputs[0][0].dtype
+            all_gather_inputs = [t for ts in param_all_gather_inputs for t in ts]
         else:
-            raise NotImplementedError(
-                f"Mixed dtype not supported yet: {param_all_gather_input_dtypes}"
-            )
-        all_gather_inputs = [t for ts in param_all_gather_inputs for t in ts]
+            dtype = torch.uint8
+            all_gather_inputs = [
+                t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
+            ]
         inp_split_sizes = [t.numel() for t in all_gather_inputs]
         all_gather_input_numel = sum(inp_split_sizes)
         all_gather_output = torch.empty(
@@ -113,11 +114,11 @@ def foreach_all_gather_copy_out(
         )  # no-op after 1st call
         fsdp_param.alloc_all_gather_outputs()
     all_gather_output = all_gather_output.view(world_size, -1)
-    out: List[torch.Tensor] = [
-        t.view(world_size, -1)
-        for fsdp_param in fsdp_params
-        for t in fsdp_param.all_gather_outputs
-    ]
+    gen = (t for fsdp_param in fsdp_params for t in fsdp_param.all_gather_outputs)
+    if all_gather_output.dtype == torch.uint8:
+        out = [t.view(world_size, -1).view(torch.uint8) for t in gen]
+    else:
+        out = [t.view(world_size, -1) for t in gen]
     # TODO: Use `torch.split_with_sizes_copy` fast path once it lands.
     splits = torch.split(all_gather_output, all_gather_input_split_sizes, dim=1)
     with _unsafe_preserve_version_counters(out):
