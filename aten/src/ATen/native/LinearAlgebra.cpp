@@ -2046,6 +2046,19 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_o
     return true;
   }
 
+  // Don't fold in this case, as we would have to call mm on the transposed tensor, the result
+  // would be contiguous, and then we would need to transpose it and call contiguous on it, thus
+  // having to copy the tensor
+  if (tensor1.dim() == 2) {
+    return false;
+  }
+
+  // Can always fold if the tensor is empty
+  // This serves as a precondition for the code below
+  if (t1->numel() == 0) {
+    return true;
+  }
+
   // t1->view(-1, t1->size(-1)) does not copy only when the first n-1 dimensions are contiguous
   // in the sense that t1_stride[i] = t1_stride[i+1]*t1_shape[i+1]
   const auto t1_shape = t1->sizes();
