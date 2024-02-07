@@ -143,9 +143,9 @@ class StorageWriter(abc.ABC):
         """
         pass
 
-    @staticmethod
+    @classmethod
     @abc.abstractmethod
-    def check(checkpoint_id: Union[str, os.PathLike]) -> bool:
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
         """
         Check if the given checkpoint_id is supported by the stroage. This allow
         us to enable automatic storage selection.
@@ -269,9 +269,9 @@ class StorageReader(abc.ABC):
         """
         pass
 
-    @staticmethod
+    @classmethod
     @abc.abstractmethod
-    def check(checkpoint_id: Union[str, os.PathLike]) -> bool:
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
         """
         Check if the given checkpoint_id is supported by the stroage. This allow
         us to enable automatic storage selection.

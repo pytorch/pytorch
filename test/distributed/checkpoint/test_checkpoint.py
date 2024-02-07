@@ -198,8 +198,8 @@ class FaultyStorageWriter(TestStorageBase, StorageWriter):
     def finish(self, metadata: Metadata, results: List[List[WriteResult]]) -> None:
         self._fail_rank("fail_finish")
 
-    @staticmethod
-    def check(checkpoint_id: Union[str, os.PathLike]) -> bool:
+    @classmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
         return True
 
 
@@ -230,8 +230,8 @@ class FaultyStorageReader(TestStorageBase, StorageReader):
         self._fail_rank("fail_read_metadata")
         return self.metadata
 
-    @staticmethod
-    def check(checkpoint_id: Union[str, os.PathLike]) -> bool:
+    @classmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
         return True
 
 
