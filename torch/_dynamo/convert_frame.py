@@ -1,9 +1,13 @@
 import collections
+import dis
 import functools
 import itertools
 import logging
 import os
 import random
+import sys
+import threading
+import traceback
 import types
 import typing
 import weakref
@@ -27,9 +31,11 @@ from torch.fx.experimental.symbolic_shapes import (
     GuardOnDataDependentSymNode,
 )
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
+from torch.nn.parallel.distributed import DistributedDataParallel
+from torch.utils._python_dispatch import _disable_current_modes
 from torch.utils._traceback import format_traceback_short
 
-from . import config, exc
+from . import config, exc, skipfiles
 from .backends.registry import CompilerFn
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
@@ -91,6 +97,8 @@ from .utils import (
 log = logging.getLogger(__name__)
 bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
 GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
+
+compile_lock = threading.RLock()
 
 
 class Tracker:
@@ -276,7 +284,7 @@ def convert_frame_assert(
     reset_graph_break_dup_checker()
 
     def _convert_frame_assert(
-        frame: types.FrameType, cache_entry, hooks: Hooks, frame_state
+        frame: types.FrameType, cache_entry, hooks: Hooks, frame_state, *, skip: int = 0
     ):
         increment_frame()
 
@@ -401,6 +409,7 @@ def convert_frame_assert(
             frame,
             frame_state=frame_state,
             compile_id=compile_id,
+            skip=skip + 1,
         )
 
     _convert_frame_assert._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
@@ -452,6 +461,8 @@ def _compile(
     frame: Optional[types.FrameType] = None,
     frame_state=None,
     compile_id=None,
+    *,
+    skip: int = 0,
 ) -> Optional[GuardedCode]:
     from torch.fx.experimental.validator import (
         bisect,
@@ -645,6 +656,15 @@ def _compile(
         return guarded_code
 
     with compile_context(CompileContext(compile_id)):
+        log.debug(
+            "torchdynamo start compiling %s %s:%s, stack (elided %s frames):\n%s",
+            code.co_name,
+            code.co_filename,
+            code.co_firstlineno,
+            skip + 2,
+            # -2: omit current frame, omit contextlib decorator
+            "".join(traceback.format_list(traceback.extract_stack()[: -2 - skip])),
+        )
         try:
             guarded_code = compile_inner(code, one_graph, hooks, transform)
             return guarded_code
@@ -741,10 +761,14 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
 
-    def _convert_frame(frame: types.FrameType, cache_entry, hooks: Hooks, frame_state):
+    def _convert_frame(
+        frame: types.FrameType, cache_entry, hooks: Hooks, frame_state, skip: int = 0
+    ):
         counters["frames"]["total"] += 1
         try:
-            result = inner_convert(frame, cache_entry, hooks, frame_state)
+            result = inner_convert(
+                frame, cache_entry, hooks, frame_state, skip=skip + 1
+            )
             counters["frames"]["ok"] += 1
             return result
         except Exception as e:
@@ -815,3 +839,69 @@ def replay(filename):
         )
     finally:
         config.replay_record_enabled = original_replay_val
+
+
+def first_real_inst_idx(code):
+    if sys.version_info < (3, 11):
+        return 0
+    for inst in dis.get_instructions(code):
+        if inst.opname == "RESUME":
+            return inst.offset // 2
+    raise RuntimeError("RESUME instruction not found in code")
+
+
+def catch_errors_wrapper(callback, hooks: Hooks):
+    @functools.wraps(callback)
+    def catch_errors(frame, cache_entry, frame_state):
+        assert frame_state is not None
+
+        is_skipfile = skipfiles.check(frame.f_code)
+        if (
+            # TODO: the first condition is not covered by any test
+            frame.f_lasti >= first_real_inst_idx(frame.f_code)
+            or is_skipfile
+            or config.disable
+        ):
+            if log.isEnabledFor(logging.DEBUG):
+                skip_reason = (
+                    "traced frame already"
+                    if frame.f_lasti >= first_real_inst_idx(frame.f_code)
+                    else "in skipfiles"
+                    if skipfiles.check(frame.f_code)
+                    else "dynamo tracing is disabled"
+                )
+                if not is_skipfile or config.verbose:
+                    log.debug(
+                        "skipping: %s (reason: %s, file: %s)",
+                        frame.f_code.co_name,
+                        skip_reason,
+                        frame.f_code.co_filename,
+                    )
+            return None
+        if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
+            # nametuple constructor
+            return None
+        if config.optimize_ddp:
+            ddp_module = DistributedDataParallel._get_active_ddp_module()
+            if ddp_module:
+                with compile_lock:
+                    from torch._dynamo.backends.distributed import DDPOptimizer
+
+                    ddp_optimizer = DDPOptimizer(
+                        bucket_bytes_cap=ddp_module.bucket_bytes_cap,
+                        backend_compile_fn=callback._torchdynamo_orig_callable,
+                    )
+                    assert hasattr(
+                        callback, "_clone_with_backend"
+                    ), "DDPOptimizer only supports callback fns that know how to clone themselves."
+                    hijacked_callback = callback._clone_with_backend(
+                        ddp_optimizer.compile_fn,
+                    )
+                    return hijacked_callback(frame, cache_entry, hooks, frame_state)
+
+        with compile_lock, _disable_current_modes():
+            # skip=1: skip this frame
+            return callback(frame, cache_entry, hooks, frame_state, skip=1)
+
+    catch_errors._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
+    return catch_errors

@@ -135,7 +135,7 @@ class DistMathOpsTest(DTensorTestBase):
 
     @with_comms
     @skip_unless_torch_gpu
-    def test_nll_loss_fwd(self):
+    def test_nll_loss_and_cross_entropy(self):
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
@@ -151,17 +151,23 @@ class DistMathOpsTest(DTensorTestBase):
 
             shard_dims = list(range(input_ndim))
             reductions = ["none", "mean", "sum"]
-            for shard_dim, reduction in itertools.product(shard_dims, reductions):
+            # Compared with nll_loss, cross_entropy additionally calls log_softmax first.
+            # Testing them together as code can be reused.
+            loss_functions = [
+                torch.nn.functional.nll_loss,
+                torch.nn.functional.cross_entropy,
+            ]
+            for shard_dim, reduction, loss_fn in itertools.product(
+                shard_dims, reductions, loss_functions
+            ):
                 dist_x = distribute_tensor(x, device_mesh, [Shard(shard_dim)])
-                y = torch.nn.functional.nll_loss(x, target, reduction=reduction)
+                y = loss_fn(x, target, reduction=reduction)
                 if reduction == "none":
                     y.sum().backward()
                 else:
                     y.backward()
                 with comm_mode:
-                    dist_y = torch.nn.functional.nll_loss(
-                        dist_x, dist_target, reduction=reduction
-                    )
+                    dist_y = loss_fn(dist_x, dist_target, reduction=reduction)
                     if shard_dim == channel_dim:
                         # TODO: currently CommDebugMode cannot log communications within
                         # sharding prop; need to fix it before enabling this check.
