@@ -8542,7 +8542,7 @@ class CommonTemplate:
         elif name == "polygamma":
             args = (
                 1,
-                torch.randn(8, 8, dtype=dtype, device=self.device),
+                torch.empty(8, 8, dtype=dtype, device=self.device).uniform_(1, 10),
             )
 
             def fn(n, x):
