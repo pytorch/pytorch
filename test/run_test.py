@@ -2,7 +2,6 @@
 
 import argparse
 import copy
-import glob
 import json
 import os
 import pathlib
@@ -46,6 +45,13 @@ from tools.stats.import_test_stats import (
     TEST_TIMES_FILE,
 )
 from tools.stats.upload_metrics import add_global_metric, emit_metric
+from tools.testing.discover_tests import (
+    CPP_TEST_PATH,
+    CPP_TEST_PREFIX,
+    CPP_TESTS_DIR,
+    parse_test_module,
+    TESTS,
+)
 from tools.testing.target_determination.determinator import (
     AggregatedHeuristics,
     get_prediction_confidences,
@@ -67,8 +73,6 @@ sys.path.remove(str(REPO_ROOT))
 
 
 RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
-CPP_TEST_PREFIX = "cpp"
-CPP_TEST_PATH = "build/bin"
 DISTRIBUTED_TEST_PREFIX = "distributed"
 INDUCTOR_TEST_PREFIX = "inductor"
 
@@ -99,10 +103,6 @@ def strtobool(s):
     return True
 
 
-def parse_test_module(test):
-    return test.split(".")[0]
-
-
 class TestChoices(list):
     def __init__(self, *args, **kwargs):
         super().__init__(args[0])
@@ -110,131 +110,6 @@ class TestChoices(list):
     def __contains__(self, item):
         return list.__contains__(self, parse_test_module(item))
 
-
-def discover_tests(
-    base_dir: Optional[pathlib.Path] = None,
-    cpp_tests_dir: Optional[pathlib.Path] = None,
-    blocklisted_patterns: Optional[List[str]] = None,
-    blocklisted_tests: Optional[List[str]] = None,
-    extra_tests: Optional[List[str]] = None,
-) -> List[str]:
-    """
-    Searches for all python files starting with test_ excluding one specified by patterns.
-    If cpp_tests_dir is provided, also scan for all C++ tests under that directory. They
-    are usually found in build/bin
-    """
-
-    def skip_test_p(name: str) -> bool:
-        rc = False
-        if blocklisted_patterns is not None:
-            rc |= any(name.startswith(pattern) for pattern in blocklisted_patterns)
-        if blocklisted_tests is not None:
-            rc |= name in blocklisted_tests
-        return rc
-
-    cwd = pathlib.Path(__file__).resolve().parent if base_dir is None else base_dir
-    # This supports symlinks, so we can link domain library tests to PyTorch test directory
-    all_py_files = [
-        pathlib.Path(p) for p in glob.glob(f"{cwd}/**/test_*.py", recursive=True)
-    ]
-
-    cpp_tests_dir = (
-        f"{cwd.parent}/{CPP_TEST_PATH}" if cpp_tests_dir is None else cpp_tests_dir
-    )
-    # CPP test files are located under pytorch/build/bin. Unlike Python test, C++ tests
-    # are just binaries and could have any name, i.e. basic or atest
-    all_cpp_files = [
-        pathlib.Path(p) for p in glob.glob(f"{cpp_tests_dir}/**/*", recursive=True)
-    ]
-
-    rc = [str(fname.relative_to(cwd))[:-3] for fname in all_py_files]
-    # Add the cpp prefix for C++ tests so that we can tell them apart
-    rc.extend(
-        [
-            parse_test_module(f"{CPP_TEST_PREFIX}/{fname.relative_to(cpp_tests_dir)}")
-            for fname in all_cpp_files
-        ]
-    )
-
-    # Invert slashes on Windows
-    if sys.platform == "win32":
-        rc = [name.replace("\\", "/") for name in rc]
-    rc = [test for test in rc if not skip_test_p(test)]
-    if extra_tests is not None:
-        rc += extra_tests
-    return sorted(rc)
-
-
-CPP_TESTS_DIR = os.path.abspath(os.getenv("CPP_TESTS_DIR", default=CPP_TEST_PATH))
-TESTS = discover_tests(
-    cpp_tests_dir=CPP_TESTS_DIR,
-    blocklisted_patterns=[
-        "ao",
-        "bottleneck_test",
-        "custom_backend",
-        "custom_operator",
-        "fx",  # executed by test_fx.py
-        "jit",  # executed by test_jit.py
-        "mobile",
-        "onnx_caffe2",
-        "package",  # executed by test_package.py
-        "quantization",  # executed by test_quantization.py
-        "autograd",  # executed by test_autograd.py
-    ],
-    blocklisted_tests=[
-        "test_bundled_images",
-        "test_cpp_extensions_aot",
-        "test_determination",
-        "test_jit_fuser",
-        "test_jit_simple",
-        "test_jit_string",
-        "test_kernel_launch_checks",
-        "test_nnapi",
-        "test_static_runtime",
-        "test_throughput_benchmark",
-        "distributed/bin/test_script",
-        "distributed/elastic/multiprocessing/bin/test_script",
-        "distributed/launcher/bin/test_script",
-        "distributed/launcher/bin/test_script_init_method",
-        "distributed/launcher/bin/test_script_is_torchelastic_launched",
-        "distributed/launcher/bin/test_script_local_rank",
-        "distributed/test_c10d_spawn",
-        "distributions/test_transforms",
-        "distributions/test_utils",
-        "test/inductor/test_aot_inductor_utils",
-        "onnx/test_pytorch_onnx_onnxruntime_cuda",
-        "onnx/test_models",
-        # These are not C++ tests
-        f"{CPP_TEST_PREFIX}/CMakeFiles",
-        f"{CPP_TEST_PREFIX}/CTestTestfile.cmake",
-        f"{CPP_TEST_PREFIX}/Makefile",
-        f"{CPP_TEST_PREFIX}/cmake_install.cmake",
-        f"{CPP_TEST_PREFIX}/c10_intrusive_ptr_benchmark",
-        f"{CPP_TEST_PREFIX}/example_allreduce",
-        f"{CPP_TEST_PREFIX}/parallel_benchmark",
-        f"{CPP_TEST_PREFIX}/protoc",
-        f"{CPP_TEST_PREFIX}/protoc-3.13.0.0",
-        f"{CPP_TEST_PREFIX}/torch_shm_manager",
-        f"{CPP_TEST_PREFIX}/tutorial_tensorexpr",
-    ],
-    extra_tests=[
-        "test_cpp_extensions_aot_ninja",
-        "test_cpp_extensions_aot_no_ninja",
-        "distributed/elastic/timer/api_test",
-        "distributed/elastic/timer/local_timer_example",
-        "distributed/elastic/timer/local_timer_test",
-        "distributed/elastic/events/lib_test",
-        "distributed/elastic/metrics/api_test",
-        "distributed/elastic/utils/logging_test",
-        "distributed/elastic/utils/util_test",
-        "distributed/elastic/utils/distributed_test",
-        "distributed/elastic/multiprocessing/api_test",
-    ],
-)
-
-# The doctests are a special case that don't correspond to a file that discover
-# tests can enable.
-TESTS = TESTS + ["doctests"]
 
 FSDP_TEST = [test for test in TESTS if test.startswith("distributed/fsdp")]
 
@@ -364,7 +239,6 @@ CI_SERIAL_LIST = [
     "test_utils",  # OOM
     "test_sort_and_select",  # OOM
     "test_backward_compatible_arguments",  # OOM
-    "test_module_init",  # OOM
     "test_autocast",  # OOM
     "test_native_mha",  # OOM
     "test_module_hooks",  # OOM
@@ -559,7 +433,8 @@ def run_test(
         unittest_args.extend(test_module.get_pytest_args())
         unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
 
-    # TODO: These features are not available for C++ test yet
+    # NB: These features are not available for C++ tests, but there is little incentive
+    # to implement it because we have never seen a flaky C++ test before.
     if IS_CI and not is_cpp_test:
         ci_args = ["--import-slow-tests", "--import-disabled-tests"]
         if RERUN_DISABLED_TESTS:
@@ -605,7 +480,7 @@ def run_test(
         argv = [test_file + ".py"] + unittest_args
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
-    if IS_CI:
+    if options.pipe_logs:
         log_fd, log_path = tempfile.mkstemp(
             dir=REPO_ROOT / "test" / "test-reports",
             prefix=f"{sanitize_file_name(str(test_module))}_",
@@ -619,7 +494,9 @@ def run_test(
         "BUILD_ENVRIONMENT", ""
     )
     timeout = (
-        THRESHOLD * 6
+        None
+        if not options.enable_timeout
+        else THRESHOLD * 6
         if is_slow
         else THRESHOLD * 3
         if should_retry
@@ -631,7 +508,7 @@ def run_test(
 
     with ExitStack() as stack:
         output = None
-        if IS_CI:
+        if options.pipe_logs:
             output = stack.enter_context(open(log_path, "w"))
 
         if should_retry:
@@ -664,7 +541,7 @@ def run_test(
             # comes up in the future.
             ret_code = 0 if ret_code == 5 or ret_code == 4 else ret_code
 
-    if IS_CI:
+    if options.pipe_logs:
         handle_log_file(
             test_module, log_path, failed=(ret_code != 0), was_rerun=was_rerun
         )
@@ -716,10 +593,17 @@ def run_test_retries(
         print_to_file(f"Got exit code {ret_code}{signal_name}")
 
         # Read what just failed
-        with open(
-            REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key
-        ) as f:
-            current_failure = f.read()
+        try:
+            with open(
+                REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key
+            ) as f:
+                current_failure = f.read()
+        except FileNotFoundError:
+            print_to_file(
+                "No stepcurrent file found. Either pytest didn't get to run (e.g. import error)"
+                + " or file got deleted (contact dev infra)"
+            )
+            break
 
         num_failures[current_failure] += 1
         if num_failures[current_failure] >= 3:
@@ -742,7 +626,7 @@ def run_test_retries(
     if len(consistent_failures) > 0:
         print_to_file(f"The following tests failed consistently: {consistent_failures}")
         return 1, True
-    return 0, any(x > 0 for x in num_failures.values())
+    return ret_code, any(x > 0 for x in num_failures.values())
 
 
 def run_test_with_subprocess(test_module, test_directory, options):
@@ -1040,30 +924,30 @@ def handle_log_file(
     test: ShardedTest, file_path: str, failed: bool, was_rerun: bool
 ) -> None:
     test = str(test)
-    with open(file_path, "rb") as f:
-        full_text = f.read().decode("utf-8", errors="ignore")
+    with open(file_path, errors="ignore") as f:
+        full_text = f.read()
+
+    new_file = "test/test-reports/" + sanitize_file_name(
+        f"{test}_{os.urandom(8).hex()}_.log"
+    )
+    os.rename(file_path, REPO_ROOT / new_file)
 
     if not failed and not was_rerun and "=== RERUNS ===" not in full_text:
         # If success + no retries (idk how else to check for test level retries
-        # other than reparse xml), print only what tests ran, rename the log
-        # file so it doesn't get printed later, and do not remove logs.
-        new_file = "test/test-reports/" + sanitize_file_name(
-            f"{test}_{os.urandom(8).hex()}_.log"
-        )
-        os.rename(file_path, REPO_ROOT / new_file)
+        # other than reparse xml), print only what tests ran
         print_to_stderr(
             f"\n{test} was successful, full logs can be found in artifacts with path {new_file}"
         )
         for line in full_text.splitlines():
             if re.search("Running .* items in this shard:", line):
-                print_to_stderr(line.strip())
+                print_to_stderr(line.rstrip())
         print_to_stderr("")
         return
-    # otherwise: print entire file and then remove it
-    print_to_stderr(f"\nPRINTING LOG FILE of {test} ({file_path})")
+
+    # otherwise: print entire file
+    print_to_stderr(f"\nPRINTING LOG FILE of {test} ({new_file})")
     print_to_stderr(full_text)
-    print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})\n")
-    os.remove(file_path)
+    print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({new_file})\n")
 
 
 def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
@@ -1248,6 +1132,18 @@ def parse_args():
         action="store_true",
         help="Runs the full test suite despite one of the tests failing",
         default=strtobool(os.environ.get("CONTINUE_THROUGH_ERROR", "False")),
+    )
+    parser.add_argument(
+        "--pipe-logs",
+        action="store_true",
+        help="Print logs to output file while running tests.  True if in CI and env var is not set",
+        default=IS_CI and not strtobool(os.environ.get("VERBOSE_TEST_LOGS", "False")),
+    )
+    parser.add_argument(
+        "--enable-timeout",
+        action="store_true",
+        help="Set a timeout based on the test times json file.  Only works if there are test times available",
+        default=IS_CI and not strtobool(os.environ.get("NO_TEST_TIMEOUT", "False")),
     )
     parser.add_argument(
         "additional_unittest_args",
@@ -1717,7 +1613,7 @@ def main():
     )
 
     with open(
-        REPO_ROOT / "test" / "test-reports" / "td_heuristic_rankings.log", "w"
+        REPO_ROOT / "test" / "test-reports" / "td_heuristic_rankings.log", "a"
     ) as f:
         if IS_CI:
             # downloading test cases configuration to local environment

@@ -1441,6 +1441,13 @@ void initModule(PyObject* module);
 } // namespace torch::cuda
 #endif
 
+#ifdef USE_XPU
+PyMethodDef* THXPModule_methods();
+namespace torch::xpu {
+void initModule(PyObject* module);
+} // namespace torch::xpu
+#endif
+
 #ifdef USE_ITT
 namespace torch::profiler {
 void initIttBindings(PyObject* module);
@@ -1500,6 +1507,9 @@ PyObject* initModule() {
 #ifdef USE_CUDA
   THPUtils_addPyMethodDefs(methods, THCPModule_methods());
 #endif
+#ifdef USE_XPU
+  THPUtils_addPyMethodDefs(methods, THXPModule_methods());
+#endif
 #if defined(USE_DISTRIBUTED) && defined(USE_C10D)
   THPUtils_addPyMethodDefs(
       methods, torch::distributed::c10d::python_functions());
@@ -1558,6 +1568,9 @@ PyObject* initModule() {
 #endif
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
+#endif
+#ifdef USE_XPU
+  torch::xpu::initModule(module);
 #endif
   torch::cpu::initModule(module);
   torch::initVerboseBindings(module);
@@ -1809,7 +1822,9 @@ Call this whenever a new thread is created in order to propagate values from
   py::enum_<sdp::SDPBackend>(
       py_module,
       "_SDPBackend",
-      "Enum class for the scaled dot product attention backends\n\n... warning:: This class is in beta and subject to change.")
+      "An enum-like class that contains the different backends for scaled dot product attention.\n\n... warning:: This class is in beta and subject to change.\n\n"
+      "This backend class is designed to be used with the sdpa_kernel context manager."
+      "See :func: torch.nn.attention.sdpa_kernel for more details.")
       .value("ERROR", sdp::SDPBackend::error)
       .value("MATH", sdp::SDPBackend::math)
       .value("FLASH_ATTENTION", sdp::SDPBackend::flash_attention)
@@ -1886,10 +1901,17 @@ Call this whenever a new thread is created in order to propagate values from
   PyObject* has_mps = Py_False;
 #endif
 
+#ifdef USE_XPU
+  PyObject* has_xpu = Py_True;
+#else
+  PyObject* has_xpu = Py_False;
+#endif
+
   ASSERT_TRUE(set_module_attr("_has_cuda", has_cuda));
   ASSERT_TRUE(
       set_module_attr("_has_magma", at::hasMAGMA() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("_has_mps", has_mps));
+  ASSERT_TRUE(set_module_attr("_has_xpu", has_xpu));
   ASSERT_TRUE(
       set_module_attr("_has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
 

@@ -1498,7 +1498,22 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             qconfig_mapping,
         )
 
-    def _test_move_exported_model_to_eval_dropout(self, inplace=False):
+    def _get_node(self, m: torch.fx.GraphModule, target: torch._ops.OpOverload):
+        """
+        Return the first node matching the specified target, throwing an exception
+        if no such batch norm node is found.
+        """
+        for n in m.graph.nodes:
+            if n.target == target:
+                return n
+        raise ValueError("Did not find node with target ", target)
+
+    def _test_move_exported_model_dropout(self, inplace: bool):
+        """
+        Test switching dropout behavior between train and eval modes using
+        `move_exported_model_to_eval` and `move_exported_model_to_train` APIs.
+        """
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1510,71 +1525,75 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         example_inputs = (torch.randn(1),)
         m = M().train()
         m = capture_pre_autograd_graph(m, example_inputs)
+        if inplace:
+            target = torch.ops.aten.dropout_.default
+        else:
+            target = torch.ops.aten.dropout.default
 
         # Assert that dropout op exists and is in train mode
-        dropout_node = None
-        for n in m.graph.nodes:
-            if n.target == torch.ops.aten.native_dropout.default or n.target == torch.ops.aten.dropout_.default:
-                dropout_node = n
-                break
+        dropout_node = self._get_node(m, target)
         self.assertTrue(dropout_node is not None)
         self.assertTrue(dropout_node.args[2])
 
-        # Do the subgraph rewriting
+        # Move to eval
         torch.ao.quantization.move_exported_model_to_eval(m)
 
-        # Assert that dropout op is now replaced with a clone op
-        targets = [n.target for n in m.graph.nodes]
-        if inplace:
-            dropout_eval_node = None
-            for node in m.graph.nodes:
-                if node.target == torch.ops.aten.dropout_.default:
-                    dropout_eval_node = node
-            self.assertTrue(dropout_eval_node is not None)
-            self.assertFalse(dropout_eval_node.args[2])
-        else:
-            self.assertTrue(torch.ops.aten.clone.default in targets)
-            self.assertTrue(torch.ops.aten.native_dropout.default not in targets)
+        # Assert that dropout op is now in eval mode
+        dropout_node = self._get_node(m, target)
+        self.assertTrue(dropout_node is not None)
+        self.assertTrue(not dropout_node.args[2])
 
-    def test_move_exported_model_to_eval(self):
-        self._test_move_exported_model_to_eval_dropout(inplace=False)
-        self._test_move_exported_model_to_eval_dropout(inplace=True)
+        # Move back to train
+        torch.ao.quantization.move_exported_model_to_train(m)
 
-    def test_bn_move_exported_model_to_eval(self):
+        # Assert that dropout op is now in train mode again
+        dropout_node = self._get_node(m, target)
+        self.assertTrue(dropout_node is not None)
+        self.assertTrue(dropout_node.args[2])
+
+    def test_move_exported_model_dropout(self):
+        self._test_move_exported_model_dropout(inplace=False)
+
+    def test_move_exported_model_dropout_inplace(self):
+        self._test_move_exported_model_dropout(inplace=True)
+
+    def test_move_exported_model_bn(self):
+        """
+        Test switching batch_norm behavior between train and eval modes using
+        `move_exported_model_to_eval` and `move_exported_model_to_train` APIs.
+        """
+
         class M(torch.nn.Module):
-            def __init__(
-                self,
-            ):
+            def __init__(self):
                 super().__init__()
                 self.bn = torch.nn.BatchNorm2d(3)
-                self.conv = torch.nn.Conv2d(3, 3, 3)
 
             def forward(self, x):
-                return self.conv(self.bn(x))
+                return self.bn(x)
 
+        example_inputs = (torch.randn(1, 3, 3, 3),)
         m = M().train()
-        example_inputs = (
-            torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=True).add(1),
-        )
-
         m = capture_pre_autograd_graph(m, example_inputs)
 
-        # Assert that bn op exists and is in train mode
-        batch_norm_node = None
-        for n in m.graph.nodes:
-            if n.target == torch.ops.aten._native_batch_norm_legit.default:
-                batch_norm_node = n
-                break
-        self.assertTrue(batch_norm_node is not None)
-        self.assertTrue(batch_norm_node.args[5])
+        # Assert that batch norm op exists and is in train mode
+        bn_node = self._get_node(m, torch.ops.aten._native_batch_norm_legit.default)
+        self.assertTrue(bn_node is not None)
+        self.assertTrue(bn_node.args[5])
 
-        # Do the subgraph rewriting
+        # Move to eval
         torch.ao.quantization.move_exported_model_to_eval(m)
 
-        # Assert that bn op is now in eval mode
-        targets = [n.target for n in m.graph.nodes]
-        self.assertTrue(torch.ops.aten._native_batch_norm_legit.default not in targets)
-        self.assertTrue(torch.ops.aten._native_batch_norm_legit_no_training.default in targets)
+        # Assert that batch norm op is now in eval mode
+        bn_node = self._get_node(m, torch.ops.aten._native_batch_norm_legit_no_training.default)
+        self.assertTrue(bn_node is not None)
+
+        # Move to train
+        torch.ao.quantization.move_exported_model_to_train(m)
+
+        # Assert that batch norm op is now in train mode again
+        bn_node = self._get_node(m, torch.ops.aten._native_batch_norm_legit.default)
+        self.assertTrue(bn_node is not None)
+        self.assertTrue(bn_node.args[5])
 
     def test_disallow_eval_train(self):
         m = TestHelperModules.ConvWithBNRelu(relu=True)
@@ -1605,6 +1624,78 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             m.eval()
         with self.assertRaises(NotImplementedError):
             m.train()
+
+    def test_allow_exported_model_train_eval(self):
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bn = torch.nn.BatchNorm2d(3)
+                self.dropout = torch.nn.Dropout(0.5)
+
+            def forward(self, x):
+                x = self.bn(x)
+                x = self.dropout(x)
+                return x
+
+        example_inputs = (torch.randn(1, 3, 3, 3),)
+        m = M().train()
+        m = capture_pre_autograd_graph(m, example_inputs)
+
+        def _assert_ops_are_correct(m: torch.fx.GraphModule, train: bool):
+            targets = [n.target for n in m.graph.nodes]
+            bn_train_target = torch.ops.aten._native_batch_norm_legit.default
+            bn_eval_target = torch.ops.aten._native_batch_norm_legit_no_training.default
+            if train:
+                self.assertTrue(bn_train_target in targets)
+                self.assertTrue(bn_eval_target not in targets)
+            else:
+                self.assertTrue(bn_eval_target in targets)
+                self.assertTrue(bn_train_target not in targets)
+            dropout_node = self._get_node(m, torch.ops.aten.dropout.default)
+            self.assertTrue(dropout_node.args[2] == train)
+
+        # Before wrapping: this is not OK
+        with self.assertRaises(NotImplementedError):
+            m.eval()
+        with self.assertRaises(NotImplementedError):
+            m.train()
+
+        # After wrapping: does not error and swaps the ops accordingly
+        torch.ao.quantization.allow_exported_model_train_eval(m)
+        m.eval()
+        _assert_ops_are_correct(m, train=False)
+        m.train()
+        _assert_ops_are_correct(m, train=True)
+
+        # After prepare but before wrapping: this is not OK
+        quantizer = XNNPACKQuantizer()
+        m = prepare_qat_pt2e(m, quantizer)
+        with self.assertRaises(NotImplementedError):
+            m.eval()
+        with self.assertRaises(NotImplementedError):
+            m.train()
+
+        # After prepare and after wrapping: does not error and swaps the ops accordingly
+        torch.ao.quantization.allow_exported_model_train_eval(m)
+        m.eval()
+        _assert_ops_are_correct(m, train=False)
+        m.train()
+        _assert_ops_are_correct(m, train=True)
+
+        # After convert but before wrapping: this is not OK
+        m = convert_pt2e(m, fold_quantize=True)
+        with self.assertRaises(NotImplementedError):
+            m.eval()
+        with self.assertRaises(NotImplementedError):
+            m.train()
+
+        # After convert and after wrapping: does not error and swaps the ops accordingly
+        torch.ao.quantization.allow_exported_model_train_eval(m)
+        m.eval()
+        _assert_ops_are_correct(m, train=False)
+        m.train()
+        _assert_ops_are_correct(m, train=True)
 
     def test_reentrant(self):
         """Test we can safely call quantization apis multiple times"""

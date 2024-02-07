@@ -57,7 +57,7 @@ __all__ = [
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
     'SymBool', 'sym_not', 'unravel_index',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'sym_ite', 'compile', 'vmap',
-    'export', 'autocast', 'cond',
+    'export', 'autocast', 'cond', 'GradScaler',
 ]
 
 ################################################################################
@@ -277,6 +277,12 @@ class SymInt:
         raise AssertionError("type stub not overridden")
 
     def __ge__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __add__(self, other) -> "SymInt":
+        raise AssertionError("type stub not overridden")
+
+    def __mul__(self, other) -> "SymInt":
         raise AssertionError("type stub not overridden")
 
     def __sym_max__(self, other):
@@ -515,7 +521,7 @@ for name in ("sqrt", "cos", "cosh", "sin", "sinh", "tan", "tanh", "asin", "acos"
 sym_sqrt = current_module._sym_sqrt
 __all__.append("sym_sqrt")
 
-del fn, name, sym_name, current_module
+del fn, name, sym_name, current_module  # type: ignore[possibly-undefined]
 
 
 def sym_ite(b, t, f):
@@ -1462,7 +1468,7 @@ def manager_path():
         raise RuntimeError("Unable to find torch_shm_manager at " + path)
     return path.encode('utf-8')
 
-from torch.amp import autocast
+from torch.amp import autocast, GradScaler
 
 # Initializing the extension shadows the built-in python float / int classes;
 # store them for later use by SymInt / SymFloat.
@@ -1507,6 +1513,15 @@ for name in dir(_C._VariableFunctions):
         __all__.append(name)
 
 
+################################################################################
+# Add torch.dtype instances to the public API
+################################################################################
+
+import torch
+
+for attribute in dir(torch):
+    if isinstance(getattr(torch, attribute), torch.dtype):
+        __all__.append(attribute)
 
 ################################################################################
 # Import TorchDynamo's lazy APIs to avoid circular dependenices
@@ -1554,6 +1569,7 @@ def _assert(condition, message):
 from torch import cuda as cuda
 from torch import cpu as cpu
 from torch import mps as mps
+from torch import xpu as xpu
 from torch import autograd as autograd
 from torch.autograd import (
     no_grad as no_grad,
