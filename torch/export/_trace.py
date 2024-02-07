@@ -14,7 +14,11 @@ import torch.fx
 
 import torch.utils._pytree as pytree
 from torch._dynamo.exc import UserError, UserErrorType
-from torch._export.non_strict_utils import make_constraints, make_fake_inputs
+from torch._export.non_strict_utils import (
+    make_constraints,
+    make_fake_inputs,
+    make_fake_params_buffers,
+)
 from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
 )
@@ -712,8 +716,12 @@ def _export(
         fake_mode, fake_args, src_equalities, original_signature = make_fake_inputs(
             f, args, constraints
         )
+
+        fake_params_buffers = make_fake_params_buffers(
+            fake_mode, _get_params_buffers(f)
+        )
         ep_non_strict = _export_non_strict(
-            f, fake_args, {}, f.state_dict(), transform=_tuplify_outputs
+            f, fake_args, {}, fake_params_buffers, transform=_tuplify_outputs
         )
         range_constraints, equality_constraints = make_constraints(
             fake_mode, src_equalities, original_signature, ep_non_strict.gm

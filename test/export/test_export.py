@@ -52,6 +52,7 @@ from torch.utils._pytree import (
     treespec_dumps,
     treespec_loads,
 )
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 try:
     from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
@@ -222,7 +223,7 @@ class TestExport(TestCase):
             def forward(self, x, y):
                 return x[0] + y - self.param
 
-        fake_mode = FakeTensorMode()
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv(tracked_fakes=[]))
         f = Basic()
         with fake_mode:
             args = ([torch.empty(3, 2)], torch.empty(3, 2))
@@ -2977,6 +2978,58 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         for n1, n2 in zip(list(ep.graph.nodes), list(ep2.graph.nodes)):
             self.assertEqual(n1.meta.get("stack_trace"), n2.meta.get("stack_trace"))
+
+    def test_fake_weights(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = torch.nn.Parameter(torch.randn(4, 4))
+                self.register_buffer("bar", torch.randn(4, 4), persistent=False)
+                self.register_buffer("baz", torch.randn(4, 4), persistent=True)
+
+            def forward(self, x):
+                return self.foo + x + self.bar + self.baz
+
+        fake_mode = torch._subclasses.FakeTensorMode(shape_env=ShapeEnv(tracked_fakes=[]))
+        with fake_mode:
+            m = MyModule()
+        inp = torch.randn(4, 4)
+        ep = export(m, (inp,))
+        # Can't compare outputs because the module has fake weights.
+
+    def test_fake_inputs(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = torch.nn.Parameter(torch.randn(4, 4))
+
+            def forward(self, x):
+                return self.foo + x
+
+        fake_mode = torch._subclasses.FakeTensorMode(shape_env=ShapeEnv(tracked_fakes=[]))
+        m = MyModule()
+        with fake_mode:
+            inp = torch.randn(4, 4)
+
+        ep = export(m, (inp,))
+        self.assertEqual(ep.module()(torch.ones(4, 4)), m(torch.ones(4, 4)))
+
+    def test_trace_under_fake(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = torch.nn.Parameter(torch.randn(4, 4))
+
+            def forward(self, x):
+                return self.foo + x
+
+        fake_mode = torch._subclasses.FakeTensorMode(shape_env=ShapeEnv(tracked_fakes=[]))
+        with fake_mode:
+            m = MyModule()
+            inp = torch.randn(4, 4)
+            # Can't use unqualified export() as it will attempt to deserialize
+            # under a new FakeTensorMode.
+            ep = torch.export.export(m, (inp,))
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
