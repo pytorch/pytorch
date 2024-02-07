@@ -237,7 +237,8 @@ def convert_pt2e(
     pm = PassManager([PortNodeMetaForQDQ()])
     model = pm(model).graph_module
 
-    constant_fold(model, _quant_node_constraint)
+    if fold_quantize:
+        constant_fold(model, _quant_node_constraint)
 
     if use_reference_representation:
         model = reference_representation_rewrite(model)
