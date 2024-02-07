@@ -113,9 +113,9 @@ class FSDP(torch.nn.Module):
 
     def __init__(self, modules):
         super().__init__()
-        self.modules = modules
+        self.module = modules
         if True:
-            modules = list(self.modules.modules())
+            modules = list(self.module.modules())
             for mod in modules:
                 self.apply_parametrization(mod)
 
@@ -123,6 +123,6 @@ class FSDP(torch.nn.Module):
         x = args[0]
         assert len(args) == 1
         assert len(kwargs) == 0
-        for module in self.modules:
+        for module in self.module:
             x = torch.utils.checkpoint.checkpoint(module, x, use_reentrant=False, context_fn=context_fn, **kwargs)
         return x
