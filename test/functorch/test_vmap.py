@@ -979,7 +979,6 @@ class TestVmapAPI(TestCase):
         jacobian = vmap(vjp_mul)(batched_v)
         self.assertEqual(jacobian, torch.diagflat(y))
 
-    @xfailIfTorchDynamo
     def test_functools_partial(self):
         x = torch.randn(3)
         y = torch.randn(2, 3)
