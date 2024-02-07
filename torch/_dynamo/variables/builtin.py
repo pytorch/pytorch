@@ -524,7 +524,7 @@ class BuiltinVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import UserDefinedObjectVariable, UserFunctionVariable
+        from . import UserFunctionVariable
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
         args = [v.realize() for v in args]
@@ -717,15 +717,6 @@ class BuiltinVariable(VariableTracker):
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
                 ),
             )
-
-        # Handle `for t in iter(user_obj)`, where user_obj defines a __iter__ method.
-        if self.fn is iter and args and isinstance(args[0], UserDefinedObjectVariable):
-            assert len(args) == 1
-            assert len(kwargs) == 0
-            maybe_iter_method = args[0].var_getattr(tx, "__iter__")
-            if isinstance(maybe_iter_method, variables.UserMethodVariable):
-                return maybe_iter_method.call_function(tx, [], {})
-            unimplemented(f"__iter__ is not implemented for {args[0]} {args[0].value}")
 
         return super().call_function(tx, args, kwargs)
 
