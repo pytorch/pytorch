@@ -9,14 +9,14 @@ import numbers
 import os
 import sys
 from datetime import timedelta
-from typing import Dict, Optional
+from typing import Dict, Optional, Callable, Iterator, Tuple
 
 from torch.distributed import FileStore, PrefixStore, Store, TCPStore
 
 from .constants import default_pg_timeout
 
 
-_rendezvous_handlers = {}
+_rendezvous_handlers: Dict[str, Callable[..., Iterator[Tuple[Store, int, int]]]] = {}
 
 
 def register_rendezvous_handler(scheme, handler):

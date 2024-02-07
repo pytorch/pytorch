@@ -35,6 +35,7 @@ from torch._dynamo.testing import (
     same,
 )
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
+from torch._inductor.fx_passes import pad_mm
 from torch._inductor.utils import (
     add_scheduler_init_hook,
     run_and_get_code,
@@ -72,6 +73,7 @@ from torch.testing._internal.common_utils import (
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
+from torch.utils._triton import has_triton
 from torch.utils.weak import WeakTensorKeyDictionary
 
 if IS_WINDOWS and IS_CI:
@@ -580,6 +582,11 @@ def _run_and_assert_no_indirect_indexing(test_case, func, *args, **kwargs):
 
 
 def assertGeneratedKernelCountEqual(self: TestCase, expected: int):
+    if config.triton.multi_kernel:
+        # when multi_kernel is enabled, we generated both persistent reduction
+        # and non-persistent reduction kernels for the same node schedule.
+        # That will mess up with the kernel count. Just don't check it.
+        return
     if config.cpp_wrapper:
         expected *= 2
     self.assertEqual(torch._inductor.metrics.generated_kernel_count, expected)
@@ -679,21 +686,6 @@ class CommonTemplate:
 
         self.common(fn, (x, y, 2))
 
-    def test_add_complex2(self):
-        @torch.compile
-        def fn(a, b):
-            c = a + b
-            d = a + b
-            return c + d
-
-        x = torch.tensor([1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1])
-        y = torch.tensor([1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1])
-
-        _, code = run_and_get_code(fn, x, y)
-        self.assertEqual(
-            code[0].count("::view_dtype" if config.cpp_wrapper else "aten.view"), 3
-        )
-
     def test_add_complex3(self):
         # fix https://github.com/pytorch/pytorch/issues/115071
         @torch.compile
@@ -707,6 +699,32 @@ class CommonTemplate:
         # should not inplace write to the input
         fn(x)
         self.assertEqual(x, y)
+
+    def test_add_complex4(self):
+        @torch.compile
+        def fn(a, b):
+            c = a + b
+            d = a + b
+            return c + d
+
+        for dtype in [torch.complex32, torch.complex64, torch.complex128]:
+            x = torch.tensor(
+                [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1],
+                dtype=dtype,
+                device=self.device,
+            )
+            y = torch.tensor(
+                [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1],
+                dtype=dtype,
+                device=self.device,
+            )
+            _, code = run_and_get_code(fn, x, y)
+            self.assertEqual(
+                " ".join(code).count(
+                    "::view_dtype" if config.cpp_wrapper else "aten.view"
+                ),
+                3,
+            )
 
     def test_concat_add_inplace(self):
         def fn(x, y, z):
@@ -1178,7 +1196,20 @@ class CommonTemplate:
             z = x * y
             return z.sum((0, 1))
 
-        self.common(fn, (torch.randn(2, 197, 256), torch.randn(2, 1, 256)))
+        atol = None
+        rtol = None
+
+        # By default, inductor generate non-persistent reduction kernels in this
+        # case. But when multi-kernel is enabled, inductor will pick the faster
+        # of persistent reduction and non-persistent-reduction kernel.
+        # In this case, inductor picked the persistent-reduction kernel.
+        # The persistent reduction kernel happens to need looser tolerance.
+        if config.triton.multi_kernel:
+            atol = 1e-5
+            rtol = 1e-5
+        self.common(
+            fn, (torch.randn(2, 197, 256), torch.randn(2, 1, 256)), atol=atol, rtol=rtol
+        )
 
     def test_min_max_reduction(self):
         def fn(a, b):
@@ -1248,6 +1279,20 @@ class CommonTemplate:
 
         # Non-persistent reduction
         self.common(fn, (torch.rand(100, 4000),), check_lowp=not TEST_WITH_ROCM)
+
+    def test_cumsum_zero_dim(self):
+        def fn(x):
+            return x.cumsum(0), x.cumsum(-1)
+
+        a = torch.rand(())
+        self.common(fn, (a,))
+
+    def test_cumprod_zero_dim(self):
+        def fn(x):
+            return x.cumprod(0), x.cumprod(-1)
+
+        a = torch.rand(())
+        self.common(fn, (a,))
 
     def test_clamp(self):
         def fn(a, b):
@@ -1612,8 +1657,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8),))
 
-    # TODO(voz): Re-enable this test ASAP https://github.com/pytorch/pytorch/issues/82763
-    @unittest.skip("Skipping due to op bugs")
     def test_nan_to_num(self):
         def fn(a):
             return (
@@ -2162,6 +2205,7 @@ class CommonTemplate:
             check_lowp=True,
         )
 
+    @with_tf32_off
     @config.patch(use_mixed_mm=True)
     def test_uint4x2_mixed_mm(self):
         def fn(a, b):
@@ -3730,6 +3774,24 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
+    def test_fusing_write_into_disjoint_read(self):
+        def test_flip(a):
+            return a.copy_(torch.flip(a, (0,)))
+
+        self.common(test_flip, (torch.rand([20]),))
+
+        assertGeneratedKernelCountEqual(self, 2)
+
+        # issue only manifests on cuda with large tensors
+        if self.device != "cpu":
+
+            def f(a):
+                a[:, 20:40] = a[:, 20:40] + 1
+                a[:, 2:900025] = a[:, 1:900024] + 2
+
+            a = torch.rand((1, 1000000), device="cuda")
+            self.common(f, (a,))
+
     def test_gather_scatter(self):
         def fn(node_feat, edge_index):
             src_node_feat = node_feat[edge_index[0]]
@@ -5096,10 +5158,7 @@ class CommonTemplate:
         fn(arg1)
         opt_fn = torch._dynamo.optimize_assert(compile_fx)(fn)
         opt_fn(arg2)
-
-        # TODO, fix: See https://github.com/pytorch/pytorch/issues/94693
-        if self.device != "cpu":
-            self.assertTrue(same(arg1, arg2))
+        self.assertTrue(same(arg1, arg2))
 
     def test_slice_mutation3(self):
         def fn(a):
@@ -8382,6 +8441,47 @@ class CommonTemplate:
         res = torch.compile(fn)(20)
         self.assertTrue(torch.all((0 <= res) & (res < 10)).item())
 
+    def test_should_pad_bench_for_bmm(self):
+        B = 2
+        M = 1024
+        N = 1024
+        K = 1024 + 1  # a size that requires padding
+
+        mat1 = torch.rand(B, M, K, device=self.device)
+        mat2 = torch.rand(B, K, N, device=self.device)
+
+        def return_true(*args, **kwargs):
+            return True
+
+        # return value of is_mm_compute_bound depends on flops and membw of
+        # the GPU. Mock it so the test does not becomes flaky when running
+        # on different GPUs.
+        patch1 = patch.object(pad_mm, "is_mm_compute_bound", return_true)
+        # mock get_cached_should_pad so the test does not rely on benchmarking
+        # result.
+        patch2 = patch.object(pad_mm, "get_cached_should_pad", return_true)
+
+        with patch1, patch2:
+            should_pad = pad_mm.should_pad_bench(mat1, mat2, torch.ops.aten.bmm)
+
+        if has_triton():
+            self.assertTrue(should_pad)
+        else:
+            # should_pad_bench always returns False if has_triton returns False
+            self.assertFalse(should_pad)
+
+    def test_bessel_j0(self):
+        def fn(x):
+            return torch.special.bessel_j0(x)
+
+        self.common(fn, (torch.randn(8, 8),))
+
+    def test_bessel_j1(self):
+        def fn(x):
+            return torch.special.bessel_j1(x)
+
+        self.common(fn, (torch.randn(8, 8),))
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -8515,7 +8615,13 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
                 return torch.sum(a)
 
             kernels = self.get_kernels(fn, [torch.randn([256, 256], device=GPU_TYPE)])
-            self.assertTrue(len(kernels) == 2, "SUM should result in two kernels")
+            if config.triton.multi_kernel:
+                self.assertTrue(
+                    len(kernels) == 4,
+                    "SUM should result in four kernels when multi-kernel is enabled",
+                )
+            else:
+                self.assertTrue(len(kernels) == 2, "SUM should result in two kernels")
 
             # kernel0 reduces from 256 to (xnumel=8, rnumel=8192), which means it reduces 256 by 256 into an array of
             # size 8 by accumulating 8192 elements at once note that rnumel is equal to 512 * 16, so rnumel which is
@@ -8526,8 +8632,11 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel0, (0, 1, 3))
 
             # kernel1 reduces from 8 elements to a single scalar.
+            # Since multi-kernel generate 2 variants for each kernel. The second
+            # persistent-reduction has index 2.
+            kernel1_index = 2 if config.triton.multi_kernel else 1
             arguments_that_are_divisible_by_16_in_kernel1 = (
-                kernels[1].triton_meta["configs"][0].divisible_by_16
+                kernels[kernel1_index].triton_meta["configs"][0].divisible_by_16
             )
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
             torch._dynamo.reset()
@@ -8723,7 +8832,9 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
                 torch.randn(1, N, K, device=GPU_TYPE),
             ]
             code = run_and_get_triton_code(fn_opt, *inps)
-            self.assertEqual(code.count("tl.store"), 1)
+            self.assertEqual(
+                code.count("tl.store"), 2 if config.triton.multi_kernel else 1
+            )
             self.assertTrue("out_ptr1" in code)
             self.assertFalse("out_ptr0" in code)
             self.assertEqual(fn_opt(*inps), fn(*inps))
@@ -8851,12 +8962,24 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             )
             code = run_and_get_triton_code(f, *inps)
             lines = [line for line in code.split("\n") if "tl.load" in line]
-            self.assertExpectedInline(
-                "\n".join(lines),
-                """\
+            if config.triton.multi_kernel:
+                # the first 2 lines are generated for the persistent reduction
+                # variant.
+                self.assertExpectedInline(
+                    "\n".join(lines),
+                    """\
+    tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
+    tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, other=0.0)
         tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
         tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, eviction_policy='evict_first', other=0.0)""",
-            )
+                )
+            else:
+                self.assertExpectedInline(
+                    "\n".join(lines),
+                    """\
+        tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
+        tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, eviction_policy='evict_first', other=0.0)""",
+                )
 
         @skipIfRocm
         @config.patch("triton.use_block_ptr", True)
@@ -8872,12 +8995,25 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             )
             code = run_and_get_triton_code(f, *inps)
             lines = [line for line in code.split("\n") if "tl.load" in line]
-            self.assertExpectedInline(
-                "\n".join(lines),
-                """\
+
+            if config.triton.multi_kernel:
+                # the first 2 lines are generated for the persistent reduction
+                # variant.
+                self.assertExpectedInline(
+                    "\n".join(lines),
+                    """\
+    tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
+    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[262144, 512], strides=[1, 262144], block_shape=[XBLOCK, RBLOCK], order=[0, 1], offsets=[xoffset, roffset]), boundary_check=[1], padding_option='zero')
+        tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
+        tmp1 = tl.load(block_ptr0, boundary_check=[1], padding_option='zero', eviction_policy='evict_first')""",  # noqa: B950 line too long
+                )
+            else:
+                self.assertExpectedInline(
+                    "\n".join(lines),
+                    """\
         tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
         tmp1 = tl.load(block_ptr0, boundary_check=[1], padding_option='zero', eviction_policy='evict_first')""",
-            )
+                )
 
         # Disable index propagation, so the indirect indexing isn't optimized away
         @patch.object(config, "constant_and_index_propagation", False)

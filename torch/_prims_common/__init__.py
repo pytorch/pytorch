@@ -130,6 +130,7 @@ def compare_tensor_meta(
     check_strides=False,
     *,
     allow_rhs_unbacked=False,
+    check_conj=True,
 ):
     """
     Checks that two tensor likes have the same shape,
@@ -171,10 +172,11 @@ def compare_tensor_meta(
             msg = f"Storage offset mismatch! Storage offsets are {a.storage_offset()} and {b.storage_offset()}!"
             raise RuntimeError(msg)
 
-    if a.is_conj() != b.is_conj():
-        raise RuntimeError(
-            f"Conj mismatch! is_conj is set to {a.is_conj()} and {b.is_conj()}"
-        )
+    if check_conj:
+        if a.is_conj() != b.is_conj():
+            raise RuntimeError(
+                f"Conj mismatch! is_conj is set to {a.is_conj()} and {b.is_conj()}"
+            )
 
     if a.is_neg() != b.is_neg():
         raise RuntimeError(
@@ -220,13 +222,15 @@ def is_contiguous(a: TensorLikeType) -> bool:
     Tensors are contiguous when they have no elements,
     one element, or when they have "nested" strides.
     """
-    if a.numel() < 2:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+    if guard_size_oblivious(a.numel() < 2):
         return True
 
     expected_stride = 1
     for x, y in reversed(tuple(zip(a.shape, a.stride()))):
         # Skips checking strides when a dimension has length 1
-        if x == 1:
+        if guard_size_oblivious(x == 1):
             continue
 
         if y != expected_stride:
@@ -335,6 +339,8 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
     its dimensions that is contiguous.
     """
 
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     if a.is_sparse:
         return False
 
@@ -355,7 +361,7 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 
     expected_stride = 1
     for length, stride in lengths_and_strides:
-        if length == 1:
+        if guard_size_oblivious(length == 1):
             continue
 
         if stride != expected_stride:

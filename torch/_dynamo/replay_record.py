@@ -3,10 +3,9 @@ from dataclasses import field
 from types import CodeType, ModuleType
 from typing import Any, Dict
 
-try:
-    import dill
-except ImportError:
-    dill = None
+from torch.utils._import_utils import import_dill
+
+dill = import_dill()
 
 
 @dataclasses.dataclass
@@ -19,6 +18,10 @@ class ModuleRecord:
 class DummyModule:
     name: str
     is_torch: bool = False
+
+    @property
+    def __name__(self):
+        return self.name
 
 
 @dataclasses.dataclass
