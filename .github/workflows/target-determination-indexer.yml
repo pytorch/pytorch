@@ -31,8 +31,8 @@ jobs:
       - name: Clone Target Determination Code
         uses: actions/checkout@v3
         with:
-          repository: osalpekar/llm-target-determinator
-          ref: main
+          repository: clee2000/llm-target-determinator
+          ref: csl/testing
           path: llm-target-determinator
 
       - name: Setup Conda
