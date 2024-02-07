@@ -1113,7 +1113,12 @@ def forward(self, y_1, x_1):
 
         r = str(make_fx(f, tracing_mode="symbolic")(torch.tensor([5])).code).strip()
         self.assertExpectedInline(
-            r, """""")
+            r, """\
+def forward(self, x_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
+    randn = torch.ops.aten.randn.default([3, _local_scalar_dense, 3], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    cumsum = torch.ops.aten.cumsum.default(randn, 0);  randn = None
+    return cumsum""")
 
 
     def test_repeat_interleave_unbacked_output_size(self):
