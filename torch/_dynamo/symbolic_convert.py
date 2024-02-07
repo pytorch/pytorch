@@ -17,7 +17,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Type
+from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple, Type
 from unittest.mock import patch
 
 import torch
@@ -588,9 +588,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     inline_depth: int
     inconsistent_side_effects: bool
     current_speculation: Optional[SpeculationEntry]
-    random_calls: List[
-        Tuple[Callable[..., object], Tuple[object, ...], Dict[str, object]]
-    ]
 
     def mark_inconsistent_side_effects(self):
         """
@@ -1975,7 +1972,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.export = export
 
         self.current_speculation = None
-        self.random_calls = []
 
         self.strict_checks_enabled = False
 
@@ -2033,7 +2029,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         _step_logger()(
             logging.INFO,
             f"torchdynamo start tracing {f_code.co_name} {code_options['co_filename']}:{code_options['co_firstlineno']}",
-            stack_info=True,
         )
         super().__init__(
             output=OutputGraph(
@@ -2199,12 +2194,12 @@ class InstructionTranslator(InstructionTranslatorBase):
         # Add original GraphModule context to the resume function to handle
         # the case of a graph break while tracing a GraphModule
         orig_graphmodule_maybe = code_context.get_context(self.f_code).get(
-            "orig_graphmodule", None
-        )
+            "orig_graphmodule", lambda: None
+        )()
         if orig_graphmodule_maybe is not None:
-            code_context.get_context(new_code)[
-                "orig_graphmodule"
-            ] = orig_graphmodule_maybe
+            code_context.get_context(new_code)["orig_graphmodule"] = weakref.ref(
+                orig_graphmodule_maybe
+            )
 
         if new_code.co_freevars:
             cg.make_function_with_closure(name, new_code, True, stack_len)
@@ -2352,7 +2347,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 # but it is enough to add a context for `forward` in case it is called.
                 code_context.get_context(module.forward.__code__)[
                     "orig_graphmodule"
-                ] = module
+                ] = weakref.ref(module)
 
         tracer: InliningInstructionTranslator
         if is_generator(code):
