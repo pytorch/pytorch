@@ -63,6 +63,13 @@ static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPStorage_resizable(PyObject* self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
+  return PyBool_FromLong(THPStorage_Unpack(self).resizable());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPStorage_copy_(
     PyObject* self,
     PyObject* args,
@@ -668,6 +675,7 @@ static PyMethodDef THPStorage_methods[] = {
     {"resize_", THPStorage_resize_, METH_O, nullptr},
     {"nbytes", THPStorage_nbytes, METH_NOARGS, nullptr},
     {"data_ptr", THPStorage_dataPtr, METH_NOARGS, nullptr},
+    {"resizable", THPStorage_resizable, METH_NOARGS, nullptr},
     {"_write_file", THPStorage_writeFile, METH_VARARGS, nullptr},
     {"_new_with_file",
      THPStorage_newWithFile,
