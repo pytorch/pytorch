@@ -627,6 +627,9 @@ class FunctoolsPartialVariable(VariableTracker):
         self.keywords = keywords
         self.original = original
 
+    def get_function(self):
+        return functools.partial(self.func.get_function(), *self.args, **self.keywords)
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":

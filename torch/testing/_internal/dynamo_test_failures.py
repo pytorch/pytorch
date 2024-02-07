@@ -6482,7 +6482,7 @@ dynamo_skips = {
     "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_2_shape0_cpu",  # test_transformers.py
     "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_1_shape3_cpu",  # test_transformers.py
     "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_2_shape2_cpu",  # test_transformers.py
-    "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_1_shape2_cpu",  # test_transformers.py
+    # "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_1_shape2_cpu",  # test_transformers.py
     "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_2_shape1_cpu",  # test_transformers.py
     "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_1_shape1_cpu",  # test_transformers.py
     "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_Q_operation0",
