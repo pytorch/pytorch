@@ -140,8 +140,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     ),
     xfail(
         "_softmax_backward_data",
-        dtypes=(torch.float16,),
-        model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
         reason=onnx_test_common.reason_dynamo_does_not_support("assert all(isinstance(a, KNOWN_TYPES) for a in flat_args)")
     ),
     xfail(
@@ -1356,13 +1354,6 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         "_native_batch_norm_legit",
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="https://github.com/pytorch/pytorch/issues/115106",
-    ),
-    xfail(
-        "_softmax_backward_data",
-        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
-        reason=onnx_test_common.reason_onnx_does_not_support(
-            "assert all(isinstance(a, KNOWN_TYPES) for a in flat_args)"
-        ),
     ),
     xfail(
         "addmm",  # xfail can't only use dtypes to catch all cases
