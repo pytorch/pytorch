@@ -2004,7 +2004,9 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_o
     return false;
   }
 
-  if (autotune && tensor1.dim() <= AUTOTUNE_MAX_DIM && tensor2.dim() <= AUTOTUNE_MAX_DIM
+  if (autotune
+      && tensor1.device().type() == at::kCUDA
+      && tensor1.dim() <= AUTOTUNE_MAX_DIM && tensor2.dim() <= AUTOTUNE_MAX_DIM
       // bail out as we would violate TORCH_INTERNAL_ASSERT(!(transpose && t2_is_matrix));
       && !(has_out && tensor2.dim() > tensor1.dim() && tensor1.dim() == 2)) {
 
