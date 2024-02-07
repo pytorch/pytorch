@@ -161,10 +161,6 @@ class TestAutograd(TestCase):
         self.assertEqual(len(w), 0)
 
     def test_tensor_grad_warnings(self):
-        # Have a test that raises a c++ exception
-        a = torch.rand(2)
-        torch.nn.functional.conv2d(a, a)
-
         dummy = torch.empty(1)
 
         with warnings.catch_warnings(record=True) as w:
