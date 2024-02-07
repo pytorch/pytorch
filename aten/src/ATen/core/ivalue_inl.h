@@ -947,9 +947,11 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     currentDevice_ = impl_.getDevice();
     storages_ = std::move(actualStorages);
     for (const c10::Device& device : usedDevices) {
-      c10::Event event(impl_.type());
-      event.record(impl_.getStream(device));
-      events_.push_back(std::move(event));
+      if (impl_.getDevice() != device) {
+        c10::Event event(impl_.type());
+        event.record(impl_.getStream(device));
+        events_.push_back(std::move(event));
+      }
     }
 
     std::vector<FutureCallback> cbs;
