@@ -505,7 +505,7 @@ def jacrev(func: Callable, argnums: argnums_t = 0, *, has_aux=False,
     if not (chunk_size is None or chunk_size > 0):
         raise ValueError("jacrev: `chunk_size` should be greater than 0.")
 
-    _error_if_not_argnum_t("jarev", "argnums", argnums)
+    _error_if_not_argnum_t("jacrev", "argnums", argnums)
 
     @wraps(func)
     def wrapper_fn(*args):

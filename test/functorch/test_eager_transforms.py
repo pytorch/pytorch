@@ -2081,12 +2081,13 @@ class TestJac(TestCase):
         name = jacapi.__name__
         with self.assertRaisesRegex(
             TypeError,
-            f"{name}: `argnums` should be int or Tuple\[int, \.\.\.\], got: <class 'float'>",
+            f"{name}: `argnums` should be int or Tuple\\[int, \\.\\.\\.\\], got: <class 'float'>",
         ):
             jacapi(torch.sin, argnums=0.0)(x)
         with self.assertRaisesRegex(
             TypeError,
-            f"{name}: `argnums` should be int or Tuple\[int, \.\.\.\], got: Tuple\[<class 'int'>, <class 'float'>\]",
+            f"{name}: `argnums` should be int or Tuple\\[int, \\.\\.\\.\\], got: "
+            f"Tuple\\[<class 'int'>, <class 'float'>\\]",
         ):
             jacapi(torch.multiply, argnums=(1, 0.0))(x, x)
 
