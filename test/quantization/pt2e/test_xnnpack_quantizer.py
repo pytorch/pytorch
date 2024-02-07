@@ -472,7 +472,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
                 output_act = getattr(m, next(iter(n.users)).target)
                 self.assertIs(input_act, output_act)
 
-        m = convert_pt2e(m)
+        m = convert_pt2e(m, fold_quantize=True)
         node_occurrence = {
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
             ns.call_function(
@@ -723,7 +723,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
             quantizer.set_global(quantization_config)
             model_graph = prepare_pt2e(model_graph, quantizer)
             model_graph(*example_inputs)
-            model_graph = convert_pt2e(model_graph)
+            model_graph = convert_pt2e(model_graph, fold_quantize=True)
             self.assertEqual(model_fx(*example_inputs), model_graph(*example_inputs))
 
     def test_linear_gru(self):
@@ -787,7 +787,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
             quantizer.set_global(quantization_config)
             model_graph = prepare_pt2e(model_graph, quantizer)
             model_graph(*example_inputs)
-            model_graph = convert_pt2e(model_graph)
+            model_graph = convert_pt2e(model_graph, fold_quantize=True)
             self.assertEqual(model_fx(*example_inputs), model_graph(*example_inputs))
 
     def test_add_and_inplace_add(self):
@@ -968,7 +968,7 @@ class TestXNNPACKQuantizerModels(PT2EQuantizationTestCase):
                 id(m.activation_post_process_3), id(m.activation_post_process_2)
             )
             after_prepare_result = m(*example_inputs)
-            m = convert_pt2e(m)
+            m = convert_pt2e(m, fold_quantize=True)
 
             after_quant_result = m(*example_inputs)
 

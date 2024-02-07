@@ -94,6 +94,6 @@ class TestGenerateNumericDebugHandle(TestCase):
         debug_handle_map = _extract_conv2d_pattern_debug_handle_map(m)
         self.assertEqual(debug_handle_map, debug_handle_map_ref)
         m(*example_inputs)
-        m = convert_pt2e(m)
+        m = convert_pt2e(m, fold_quantize=True)
         debug_handle_map = _extract_conv2d_pattern_debug_handle_map(m)
         self.assertEqual(debug_handle_map, debug_handle_map_ref)

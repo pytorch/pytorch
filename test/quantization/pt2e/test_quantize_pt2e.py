@@ -676,7 +676,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         assert conv_output_obs[0] == conv_output_obs[1]
 
         m(*example_inputs)
-        m = convert_pt2e(m)
+        m = convert_pt2e(m, fold_quantize=True)
 
         node_occurrence = {
             # two for input of the first conv, one for output for the first conv
@@ -739,7 +739,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         assert conv_output_obs[0] == conv_output_obs[1]
 
         m(*example_inputs)
-        m = convert_pt2e(m)
+        m = convert_pt2e(m, fold_quantize=True)
 
         node_occurrence = {
             # two for input of the first conv, one for output for the first conv
@@ -1202,7 +1202,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         m = prepare_pt2e(m, quantizer)
         m(*example_inputs)
-        m = convert_pt2e(m)
+        m = convert_pt2e(m, fold_quantize=True)
 
         for n in m.graph.nodes:
             if n.op == "get_attr" and "frozen_param" in n.target:
@@ -1619,7 +1619,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             m.train()
 
         # After convert: still not OK
-        m = convert_pt2e(m)
+        m = convert_pt2e(m, fold_quantize=True)
         with self.assertRaises(NotImplementedError):
             m.eval()
         with self.assertRaises(NotImplementedError):
@@ -1706,12 +1706,12 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m.conv_bn_relu = capture_pre_autograd_graph(m.conv_bn_relu, example_inputs)
         m.conv_bn_relu = prepare_qat_pt2e(m.conv_bn_relu, quantizer)
         m(*example_inputs)
-        m.conv_bn_relu = convert_pt2e(m.conv_bn_relu)
+        m.conv_bn_relu = convert_pt2e(m.conv_bn_relu, fold_quantize=True)
 
         quantizer = XNNPACKQuantizer().set_module_type(torch.nn.Linear, get_symmetric_quantization_config(is_per_channel=False))
         m = capture_pre_autograd_graph(m, example_inputs)
         m = prepare_pt2e(m, quantizer)
-        m = convert_pt2e(m)
+        m = convert_pt2e(m, fold_quantize=True)
 
         node_occurrence = {
             ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default): 4,
