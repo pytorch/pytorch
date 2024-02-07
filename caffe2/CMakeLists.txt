@@ -1355,6 +1355,8 @@ if(USE_ROCM)
     )
   if(USE_FLASH_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE USE_FLASH_ATTENTION)
+  else()
+    message(FATAL_ERROR "USE_FLASH_ATTENTION Not Enabled")
   endif()
 endif()
 
