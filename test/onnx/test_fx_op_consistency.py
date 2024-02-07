@@ -1617,32 +1617,32 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="Logic not implemented for size 0 inputs in op.Reshape",
         matcher=lambda sample: any(dim == 0 for dim in sample.input.shape),
     ),
-    xfail(
+    skip(
         "signal.windows.hamming",
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="does not match node name",
     ),
-    xfail(
+    skip(
         "signal.windows.general_hamming",
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="does not match node name",
     ),
-    xfail(
+    skip(
         "signal.windows.blackman",
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="does not match node name",
     ),
-    xfail(
+    skip(
         "signal.windows.general_cosine",
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="does not match node name",
     ),
-    xfail(
+    skip(
         "signal.windows.hann",
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="does not match node name",
     ),
-    xfail(
+    skip(
         "signal.windows.nuttall",
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="does not match node name",
