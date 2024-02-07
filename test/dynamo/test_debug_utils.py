@@ -55,6 +55,7 @@ def forward(self, x_1):
     """,  # NOQA: B950
         )
 
+    @requires_cuda
     def test_aot_graph_parser(self):
         from torch import device
 
