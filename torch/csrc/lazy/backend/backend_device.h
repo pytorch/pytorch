@@ -78,8 +78,6 @@ TORCH_API c10::optional<BackendDevice> GetBackendDevice(
 TORCH_API c10::optional<BackendDevice> GetBackendDevice(
     const at::TensorList tensors);
 TORCH_API c10::optional<BackendDevice> GetBackendDevice(
-    const at::Tensor& tensor);
-TORCH_API c10::optional<BackendDevice> GetBackendDevice(
     const c10::optional<c10::Device>& device);
 
 // For variadic template.
@@ -88,13 +86,7 @@ TORCH_API c10::optional<BackendDevice> GetBackendDevice();
 template <typename T, typename... Args>
 c10::optional<BackendDevice> GetBackendDevice(
     const T& tensor,
-    const Args&... forward_tensors) {
-  auto optional_device = GetBackendDevice(tensor);
-  if (optional_device) {
-    return optional_device;
-  }
-  return GetBackendDevice(forward_tensors...);
-}
+    const Args&... forward_tensors);
 
 } // namespace lazy
 } // namespace torch
