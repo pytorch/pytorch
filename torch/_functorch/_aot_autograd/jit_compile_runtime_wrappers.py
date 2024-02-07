@@ -37,7 +37,6 @@ from .runtime_wrappers import (
 )
 from .schemas import (
     AOTConfig,
-    MutationType,
     OutputType,
     SubclassMeta,
     TensorAlias,
@@ -510,8 +509,8 @@ def aot_dispatch_autograd(
             ]
             raw_returns_meta = [
                 x
-                for x in CompiledFunction.metadata.input_info
-                if x.mutation_type == MutationType.MUTATED_OUT_GRAPH
+                for (i, x) in enumerate(CompiledFunction.metadata.input_info)
+                if i in CompiledFunction.metadata.mutated_inp_runtime_indices
             ] + CompiledFunction.metadata.output_info
 
             fw_outs_not_requiring_grad = [

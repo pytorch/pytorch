@@ -17,20 +17,25 @@ from .utils import strict_zip
 zip = strict_zip
 
 
-def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
+def requires_subclass_dispatch(
+    args, fw_metadata: Optional[ViewAndMutationMeta] = None
+) -> bool:
     args_flattened = pytree.arg_tree_leaves(*args)
     any_subclass_args = any(
         is_traceable_wrapper_subclass(x)
         for x in args_flattened
         if isinstance(x, Tensor)
     )
-    any_subclass_outputs = any(
-        is_traceable_wrapper_subclass(x)
-        for x in fw_metadata.traced_tangents
-        if isinstance(x, Tensor)
-    )
+    requires_subclass = any_subclass_args
+    if fw_metadata is not None:
+        any_subclass_outputs = any(
+            is_traceable_wrapper_subclass(x)
+            for x in fw_metadata.traced_tangents
+            if isinstance(x, Tensor)
+        )
+        requires_subclass = requires_subclass or any_subclass_outputs
     # This tells us whether or not we need to perform any unwrapping/wrapping of tensor subclasses at runtime.
-    return any_subclass_args or any_subclass_outputs
+    return requires_subclass
 
 
 # Given a flat list of arguments, some of which may be tensor subclasses,
