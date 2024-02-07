@@ -1513,6 +1513,15 @@ for name in dir(_C._VariableFunctions):
         __all__.append(name)
 
 
+################################################################################
+# Add torch.dtype instances to the public API
+################################################################################
+
+import torch
+
+for attribute in dir(torch):
+    if isinstance(getattr(torch, attribute), torch.dtype):
+        __all__.append(attribute)
 
 ################################################################################
 # Import TorchDynamo's lazy APIs to avoid circular dependenices
