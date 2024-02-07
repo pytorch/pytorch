@@ -446,7 +446,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.reset()
 
-        with torch.fx.experimental._config.patch(symbol_guard_limit_before_specialize=3):
+        with torch.fx.experimental._config.patch(
+            symbol_guard_limit_before_specialize=3
+        ):
             fn(torch.randn(12))
             fn(torch.randn(13))
             fn(torch.randn(14))

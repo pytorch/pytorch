@@ -3802,7 +3802,11 @@ class ShapeEnv:
                         self.symbol_guard_counter[s] > config.symbol_guard_limit_before_specialize
                     ):
                         # Force specialization
-                        self.log.info("symbol_guard_limit_before_specialize=%s exceeded on %s", config.symbol_guard_limit_before_specialize, s)
+                        self.log.info(
+                            "symbol_guard_limit_before_specialize=%s exceeded on %s",
+                            config.symbol_guard_limit_before_specialize,
+                            s
+                        )
                         self.evaluate_expr(s, forcing_spec=True)
             else:
                 self.log.debug("eval %s [guard suppressed]", g)
