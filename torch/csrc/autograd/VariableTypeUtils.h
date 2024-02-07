@@ -208,12 +208,13 @@ inline at::Tensor as_view(
   c10::optional<ViewInfo> new_fw_info;
 
   if (is_bw_differentiable) {
+    auto bw_view_func = view_func ? view_func->clone_and_set() : nullptr;
     if (diff_view_meta && diff_view_meta->has_bw_view()) {
       const auto& base_bw_info = diff_view_meta->get_backward_view();
       new_bw_info = base_bw_info.chain(
-          base, tensor, view_func->clone_and_set(), rev_view_func);
+          base, tensor, std::move(bw_view_func), rev_view_func);
     } else {
-      new_bw_info = ViewInfo(base, view_func->clone_and_set(), rev_view_func);
+      new_bw_info = ViewInfo(base, std::move(bw_view_func), rev_view_func);
     }
   } else {
     TORCH_CHECK(
