@@ -23,25 +23,25 @@ namespace {
 
 // 1) out = exp(a - val)
 // 2) val = sum(out)
-template <typename T1, typename T2>
+template <typename scalar_t>
 inline void _exp_reduce_sum_fusion_kernel(
-    T1* a,
+    scalar_t* a,
     const int& size,
-    T2* out,
-    T1& val) {
-  auto vec_size = vec::Vectorized<T1>::size();
-  auto vec_max = vec::Vectorized<T1>(val);
-  T1 tmp_sum = 0;
-  auto vec_tmp_sum = vec::Vectorized<T1>(tmp_sum);
+    scalar_t* out,
+    scalar_t& val) {
+  auto vec_size = vec::Vectorized<scalar_t>::size();
+  auto vec_max = vec::Vectorized<scalar_t>(val);
+  scalar_t tmp_sum = 0;
+  auto vec_tmp_sum = vec::Vectorized<scalar_t>(tmp_sum);
   for (long i = 0; i < vec_size * (size / vec_size); i += vec_size) {
-    auto tmp0 = vec::Vectorized<T1>::loadu(a + i);
+    auto tmp0 = vec::Vectorized<scalar_t>::loadu(a + i);
     auto tmp1 = tmp0 - vec_max;
     auto tmp2 = tmp1.exp_u20();
     vec_tmp_sum += tmp2;
     _store(out + i, tmp2);
   }
-  tmp_sum = vec::vec_reduce_all<T1>(
-      [](vec::Vectorized<T1>& x, vec::Vectorized<T1>& y) {
+  tmp_sum = vec::vec_reduce_all<scalar_t>(
+      [](vec::Vectorized<scalar_t>& x, vec::Vectorized<scalar_t>& y) {
         return x + y;
       },
       vec_tmp_sum);
@@ -53,6 +53,27 @@ inline void _exp_reduce_sum_fusion_kernel(
     out[i] = tmp2;
   }
   val = tmp_sum;
+}
+
+// out = a / sum
+template <typename T1, typename T2>
+inline void _normalization_kernel(
+    const T1* a,
+    const T1& sum,
+    const int& size,
+    T2* out) {
+  auto vec_size = vec::Vectorized<T1>::size();
+  auto vec_sum = vec::Vectorized<T1>(sum);
+  for (long i = 0; i < vec_size * (size / vec_size); i += vec_size) {
+    auto tmp0 = vec::Vectorized<T1>::loadu(a + i);
+    auto tmp1 = tmp0 / vec_sum;
+    _store(out + i, tmp1);
+  }
+  for (long i = vec_size * (size / vec_size); i < size; i++) {
+    auto tmp0 = a[i];
+    auto tmp1 = tmp0 / sum;
+    out[i] = tmp1;
+  }
 }
 
 // 1) out = a * scale
@@ -91,7 +112,7 @@ inline void _mul_reduce_max_fusion_kernel(
 
 template <typename scalar_t>
 static inline scalar_t* conditional_data_ptr(scalar_t* ptr, scalar_t* ptr2) {
-  TORCH_CHECK(ptr2 == nullptr);
+  TORCH_INTERNAL_ASSERT(ptr2 == nullptr);
   return ptr;
 }
 
@@ -310,8 +331,9 @@ void cpu_flash_attention(
           }
         }
         // Update coefficients with Softmax
-        accum_t tmp_max = 0, tmp_sum = 0, exp_tmp = 0;
+        accum_t tmp_max = 0, tmp_sum = 0, sum_old = 0, exp_tmp = 0;
         for (int64_t row = 0; row < qBlockSize; ++row) {
+          sum_old = qk_sum_data[row];
           if (has_attn_mask) {
             // max per row
             tmp_max = at::vec::reduce_all<accum_t>(
@@ -330,20 +352,23 @@ void cpu_flash_attention(
           tmp_max = qk_max_data[row] > tmp_max ? qk_max_data[row] : tmp_max;
           // qk <- exp(qk - max) and sum per row
           tmp_sum = tmp_max;
-          _exp_reduce_sum_fusion_kernel(
-              qk_data + row * kvBlockSize, kvBlockSize,
-              conditional_data_ptr(qk_data, qk_reduced_data) + row * kvBlockSize,
-              tmp_sum);
+          _exp_reduce_sum_fusion_kernel(qk_data + row * kvBlockSize, kvBlockSize, qk_data + row * kvBlockSize, tmp_sum);
           // exp_tmp <- exp(max[row] - max)
           exp_tmp = std::exp(qk_max_data[row] - tmp_max);
           // sum[row] <- sum + exp_tmp * sum[row]
           qk_sum_data[row] = tmp_sum + exp_tmp * qk_sum_data[row];
           // max[row] <- max
           qk_max_data[row] = tmp_max;
-          // dst <- dst * exp_tmp
+          // qk <- qk / sum[row]
+          accum_t sum_new = qk_sum_data[row];
+          _normalization_kernel(qk_data + row * kvBlockSize, sum_new, kvBlockSize,
+                conditional_data_ptr(qk_data, qk_reduced_data) + row * kvBlockSize);
+          // dst <- dst * sum_old / sum_new * exp_tmp
           if (n > 0) {
+            accum_t sum_cor = sum_old / sum_new;
             vec::map<accum_t>(
-              [exp_tmp](Vec x) { return x * Vec(exp_tmp); },
+              [sum_cor, exp_tmp](Vec x)
+              { return x * Vec(sum_cor) * Vec(exp_tmp); },
               dst_data + row * headSize, dst_data + row * headSize, headSize);
           }
         }
@@ -364,12 +389,10 @@ void cpu_flash_attention(
             dst_data,
             headSize);
       }
-      // dst <- dst / sum[row]
       // reorder MHA output with strides
       for (int64_t row = 0; row < qBlockSize; ++row) {
-        accum_t sum_reciprocal = 1 / qk_sum_data[row];
         vec::map<scalar_t>(
-          [sum_reciprocal](Vec x) { return x * Vec(sum_reciprocal); },
+          [](Vec x) { return x; },
           out_data + i * oStrideB + j * oStrideH + m * oStrideM + row * oStrideM,
           dst_data + row * headSize,
           headSize);

@@ -491,14 +491,19 @@ def break_graph_if_unsupported(*, push):
                     and not explain
                     and graph_break_dup_warning_checker.add(frame_loc)
                 ):
+                    # This log line is exercised from
+                    #   python test/dynamo/test_exc.py -k test_graph_break_log
                     graph_break_log.debug(
-                        "Graph break from user code at:\n%s",
+                        "Graph break: from user code at:\n%s",
                         user_stack_formatted,
                         exc_info=True,
                     )
                 else:
+                    # This log line MUST NOT contain the string "Graph break",
+                    # exercised by
+                    #   python test/dynamo/test_misc.py -k test_duplicate_graph_break_log
                     log.debug(
-                        "Graph break from user code at %s:%s (details suppressed)",
+                        "Unsupported break in user code at %s:%s (details suppressed)",
                         *frame_loc,
                     )
 
@@ -2036,6 +2041,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         _step_logger()(
             logging.INFO,
             f"torchdynamo start tracing {f_code.co_name} {code_options['co_filename']}:{code_options['co_firstlineno']}",
+            stack_info=True,
         )
         super().__init__(
             output=OutputGraph(
