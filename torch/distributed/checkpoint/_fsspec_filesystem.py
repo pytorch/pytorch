@@ -53,8 +53,8 @@ class FileSystem(FileSystemBase):
     def mkdir(self, path: [str, os.PathLike]) -> None:
         self.fs.makedirs(path, exist_ok=True)
 
-    @staticmethod
-    def check(checkpoint_id: Union[str, os.PathLike]) -> bool:
+    @classmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
         if isinstance(checkpoint_id, Path):
             return False
 
@@ -106,9 +106,9 @@ class FsspecWriter(FileSystemWriter):
         self.fs = FileSystem()
         self.path = self.fs.init_path(path)
 
-    @staticmethod
-    def check(checkpoint_id: Union[str, os.PathLike]) -> bool:
-        return FileSystem.check(checkpoint_id)
+    @classmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        return FileSystem.validate_checkpoint_id(checkpoint_id)
 
 
 class FsspecReader(FileSystemReader):
@@ -117,6 +117,6 @@ class FsspecReader(FileSystemReader):
         self.fs = FileSystem()
         self.path = self.fs.init_path(path)
 
-    @staticmethod
-    def check(checkpoint_id: Union[str, os.PathLike]) -> bool:
+    @classmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
         return FileSystem.check(checkpoint_id)

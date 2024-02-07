@@ -334,9 +334,9 @@ class FileSystemBase(ABC):
     def mkdir(self, path: Union[str, os.PathLike]) -> None:
         ...
 
-    @staticmethod
+    @classmethod
     @abstractmethod
-    def check(checkpoint_id: Union[str, os.PathLike]) -> bool:
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
         ...
 
 
@@ -366,8 +366,8 @@ class FileSystem(FileSystemBase):
     def mkdir(self, path: Union[str, os.PathLike]) -> None:
         cast(Path, path).mkdir(parents=True, exist_ok=True)
 
-    @staticmethod
-    def check(checkpoint_id: Union[str, os.PathLike]) -> bool:
+    @classmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
         if isinstance(checkpoint_id, Path):
             return True
 
@@ -527,9 +527,9 @@ class FileSystemWriter(StorageWriter):
 
         self.fs.rename(tmp_path, meta_path)
 
-    @staticmethod
-    def check(checkpoint_id: Union[str, os.PathLike]) -> bool:
-        return FileSystem.check(checkpoint_id)
+    @classmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        return FileSystem.validate_checkpoint_id(checkpoint_id)
 
 
 class FileSystemReader(StorageReader):
@@ -602,6 +602,6 @@ class FileSystemReader(StorageReader):
     def prepare_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
         return global_plan
 
-    @staticmethod
-    def check(checkpoint_id: Union[str, os.PathLike]) -> bool:
-        return FileSystem.check(checkpoint_id)
+    @classmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        return FileSystem.validate_checkpoint_id(checkpoint_id)
