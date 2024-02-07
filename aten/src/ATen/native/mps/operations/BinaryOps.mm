@@ -58,7 +58,8 @@ static inline bool supportsComplex() {
 }
 
 static inline Tensor legacy_complex_as_view(const Tensor& t) {
-  if (!isComplexType(t.scalar_type())) {
+  // Convert non-complex types (and cdouble CPU scalars) to cfloat
+  if (!isComplexType(t.scalar_type()) || t.scalar_type() == kComplexDouble) {
     return at::view_as_real(t.to(kMPS, kComplexFloat));
   }
   return at::view_as_real(t.dim() != 0 ? t : t.to(kMPS));
