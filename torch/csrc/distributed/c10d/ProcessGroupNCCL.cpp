@@ -1053,8 +1053,8 @@ void ProcessGroupNCCL::waitForDumpOrTimeout(
 
 void ProcessGroupNCCL::waitForFutureOrTimeout(
     std::future<bool>& fut,
-    std::chrono::milliseconds timeOutMilSec,
-    std::string futDescription) {
+    const std::chrono::milliseconds& timeOutMilSec,
+    const std::string& futDescription) {
   TORCH_CHECK(fut.valid(), "Expected a valid future");
   std::future_status status = fut.wait_for(timeOutMilSec);
   if (status == std::future_status::ready) {

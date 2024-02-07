@@ -745,8 +745,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // A helper function to wait for a future to complete or timeout.
   void waitForFutureOrTimeout(
       std::future<bool>& fut,
-      std::chrono::milliseconds timeOutMilSec,
-      std::string futDescription);
+      const std::chrono::milliseconds& timeOutMilSec,
+      const std::string& futDescription);
 
   // When watchdog timeout, this function will be called and return debug info
   // for users. For now we only get information from retrieveDesyncReport.

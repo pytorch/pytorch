@@ -1203,7 +1203,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         # Disable ASYNC_ERROR_HANDLING for this test to ensure we can programmatically
         # abort the process group.
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
-        os.environ["TORCH_NCCL_ABORT_IN_DESTROY_PG"] = "0"
+        os.environ["TORCH_NCCL_ABORT_IN_DESTROY_PG"] = "1"
 
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())
@@ -1252,7 +1252,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_abort_in_destroy_multi_pgs(self):
-        os.environ["TORCH_NCCL_ABORT_IN_DESTROY_PG"] = "0"
+        os.environ["TORCH_NCCL_ABORT_IN_DESTROY_PG"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())
         device = self.rank_to_GPU[self.rank][0]
