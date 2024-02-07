@@ -4189,9 +4189,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         self.assertTrue(hasattr(reload_gm, "dummy_buffer"))
         self.assertTrue(hasattr(reload_gm, "dummy_parameter"))
 
-@unittest.skipIf(
-    sys.version_info >= (3, 12), "Failing on python 3.12+"
-)
+
 class TestFunctionalTracing(JitTestCase):
     def setUp(self):
         super().setUp()
