@@ -59,8 +59,8 @@ std::unique_ptr<ViewFunc> ChainedViewFunc::clone_and_set(
   }
 
   return std::make_unique<ChainedViewFunc>(
-      std::move(first->clone_and_set(first_symints, first_tensors)),
-      std::move(second->clone_and_set(second_symints, second_tensors)));
+      first->clone_and_set(first_symints, first_tensors),
+      second->clone_and_set(second_symints, second_tensors));
 }
 
 namespace generated {
