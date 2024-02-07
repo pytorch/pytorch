@@ -248,7 +248,8 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return c10::nullopt;
   }
 
-  c10::optional<c10::Stream> stream(const c10::optional<c10::DeviceType> opt_device_type) {
+  c10::optional<c10::Stream> stream(
+      const c10::optional<c10::DeviceType> opt_device_type) {
     if (opt_device_type.has_value()) {
       return stream(opt_device_type.value());
     } else {

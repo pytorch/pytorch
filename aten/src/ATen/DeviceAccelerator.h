@@ -19,9 +19,9 @@
 
 namespace at {
 
-    // Ensures that only one accelerator is available (at
-    // compile time if possible) and return it.
-    // When checked is true, the returned optional always has a value.
-    C10_API std::optional<DeviceType> getAccelerator(bool checked = false);
+// Ensures that only one accelerator is available (at
+// compile time if possible) and return it.
+// When checked is true, the returned optional always has a value.
+TORCH_API std::optional<DeviceType> getAccelerator(bool checked = false);
 
 } // namespace at

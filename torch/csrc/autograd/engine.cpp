@@ -47,8 +47,7 @@
 #include <unordered_set>
 #include <utility>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 namespace {
 static bool in_bad_autograd_fork =
@@ -649,6 +648,29 @@ void Engine::thread_on_exception(
     const std::shared_ptr<Node>& fn,
     std::exception& e) {
   graph_task->set_exception(std::current_exception(), fn);
+}
+
+namespace {
+std::atomic<uint64_t> graph_task_id{0};
+}
+
+GraphTask::GraphTask(
+    bool keep_graph,
+    bool grad_mode,
+    int reentrant_depth,
+    std::shared_ptr<ReadyQueue> cpu_ready_queue,
+    c10::SmallVector<Node*, 4> graph_roots,
+    bool exit_on_error)
+    : keep_graph_(keep_graph),
+      graph_roots_(std::move(graph_roots)),
+      owner_(NO_DEVICE),
+      reentrant_depth_(reentrant_depth),
+      exit_on_error_(exit_on_error),
+      cpu_ready_queue_(std::move(cpu_ready_queue)),
+      future_result_(c10::make_intrusive<at::ivalue::Future>(
+          c10::ListType::create(c10::TensorType::get()))),
+      id_(graph_task_id.fetch_add(1, std::memory_order_relaxed)) {
+  thread_locals_.set_grad_mode(grad_mode);
 }
 
 bool GraphTask::completed() {
@@ -1531,7 +1553,6 @@ void GraphTask::stash_current_streams() {
   caller_current_streams_.resize(num_devices);
   if (num_devices > 0) {
     for (c10::DeviceIndex idx = 0; idx < num_devices; idx++) {
-
 #if defined(USE_ROCM) && (ROCM_VERSION < 50000)
       // If the build targets ROCM, stash streams for all visible devices
       // unconditionally, to work around
@@ -1540,10 +1561,10 @@ void GraphTask::stash_current_streams() {
       // https://github.com/pytorch/pytorch/issues/59750 is fixed.
       if (true) {
 #else
-      if (at::globalContext().getAcceleratorHooksInterface().hasPrimaryContext(idx)) {
+      if (at::globalContext().getAcceleratorHooksInterface().hasPrimaryContext(
+              idx)) {
 #endif
-        caller_current_streams_[idx] =
-            guard.getStream({accelerator, idx});
+        caller_current_streams_[idx] = guard.getStream({accelerator, idx});
       } else {
         caller_current_streams_[idx] = c10::nullopt;
       }
@@ -1663,5 +1684,4 @@ void GraphTask::init_to_execute(
   }
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd
