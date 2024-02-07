@@ -724,7 +724,7 @@ void Reducer::autograd_hook(size_t index) {
 void Reducer::all_reduce_local_used_map() {
   // See Note [Skip allreducing local_used_map_dev]
   // H2D from local_used_map_ to local_used_map_dev_
-  if (local_used_map_dev_.is_cuda()) {
+  if (local_used_map_dev_.is_cuda() || local_used_map_dev_.is_privateuseone()) {
     // Note [local_used_map_ -> local_used_map_dev copying]
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     // We do async H2D to avoid the blocking overhead. The async copy and
@@ -734,8 +734,8 @@ void Reducer::all_reduce_local_used_map() {
     // Correct sequencing with respect to host operations is also
     // essential. The H2D copy_ is stream ordered, while the host's
     // changes to local_used_map_ are host ordered. If a large backlog of
-    // cuda-stream work pushes the copy_ far into the future, and if no
-    // blocking calls occur between now and finalize_backward()** such
+    // cuda/privateuseone-stream work pushes the copy_ far into the future, and
+    // if no blocking calls occur between now and finalize_backward()** such
     // that finalize_backward() re-zeroes local_used_map_ on the host
     // before the stream executes the copy_, copy_ will read those zeros
     // instead of the values we thought we told it to read here. Copying
@@ -766,8 +766,8 @@ void Reducer::all_reduce_local_used_map() {
   } else if (local_used_map_dev_.is_mtia()) {
     // MTIA probably will have special logic in the future, following code might
     // be changed drastically. Therefore, a new if case is created for MTIA, for
-    // now, the implementation is similar to the CUDA one, except for
-    // the pin memory step.
+    // now, the implementation is similar to the CUDA/privateuseone one, except
+    // for the pin memory step.
     auto local_used_map_tmp = at::native::empty_like(
         local_used_map_,
         c10::optTypeMetaToScalarType(local_used_map_.options().dtype_opt()),

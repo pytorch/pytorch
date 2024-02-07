@@ -186,11 +186,7 @@ static UniqueCachedGraph* getUniqueGraph(const Tensor& self,
   @autoreleasepool {
     string key = getUniqueKey(self.scalar_type(), self.sizes(), return_inverse, return_counts, consecutive, dim);
     return LookUpOrCreateCachedGraph<UniqueCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      // Workaround for MPSShaderLibrary bug
-      // TODO: Remove once https://github.com/pytorch/pytorch/issues/82305 is resolved
-      auto inputType = getMPSScalarType(self.scalar_type());
-      newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(self.sizes()));
-
+      newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(self), getMPSShape(self));
       auto outputTensors = buildUniqueGraph(self, newCachedGraph, return_inverse, return_counts, consecutive, dim);
 
       newCachedGraph->outputTensor_ = outputTensors[0];

@@ -52,6 +52,7 @@ from ..source import (
     ConvertIntSource,
     GetItemSource,
     is_constant_source,
+    is_from_defaults,
     LocalSource,
     NumpyTensorSource,
     RandomValueSource,
@@ -926,6 +927,7 @@ class VariableBuilder:
                 # specialized (as we don't expect users to be changing the
                 # NN modules on the fly)
                 or self.source.guard_source().is_nn_module()
+                or is_from_defaults(self.source)
             ):
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
                 return ConstantVariable.create(value=value, source=self.source)
