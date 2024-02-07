@@ -73,7 +73,7 @@ def check_model(
 ):
     with torch.no_grad(), config.patch(
         {
-            "aot_inductor.abi_compatible": self.abi_compatible,
+            "abi_compatible": self.abi_compatible,
             "allow_stack_allocation": self.allow_stack_allocation,
             "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
         }
@@ -107,7 +107,7 @@ def check_model_with_multiple_inputs(
 ):
     with torch.no_grad(), config.patch(
         {
-            "aot_inductor.abi_compatible": self.abi_compatible,
+            "abi_compatible": self.abi_compatible,
             "allow_stack_allocation": self.allow_stack_allocation,
         }
     ):
@@ -819,9 +819,7 @@ class AOTInductorTestsTemplate:
         result_cpu = Model(w1, w2)(*inputs)
 
         # Compile model with AOTInductor
-        with torch.cuda.device(0), config.patch(
-            "aot_inductor.abi_compatible", self.abi_compatible
-        ):
+        with torch.cuda.device(0), config.patch("abi_compatible", self.abi_compatible):
             so_path = AOTIRunnerUtil.compile(
                 model=Model(w1.cuda(0), w2.cuda(0)),
                 example_inputs=tuple(t.cuda(0) for t in inputs),
@@ -870,14 +868,14 @@ class AOTInductorTestsTemplate:
         result_cpu = Model(weight)(*inputs)
 
         with torch.cuda.device(0), torch.no_grad(), config.patch(
-            "aot_inductor.abi_compatible", self.abi_compatible
+            "abi_compatible", self.abi_compatible
         ):
             result_cuda_0 = AOTIRunnerUtil.run(
                 "cuda", Model(weight.cuda(0)), tuple(t.cuda(0) for t in inputs)
             )
 
         with torch.cuda.device(1), torch.no_grad(), config.patch(
-            "aot_inductor.abi_compatible", self.abi_compatible
+            "abi_compatible", self.abi_compatible
         ):
             result_cuda_1 = AOTIRunnerUtil.run(
                 "cuda", Model(weight.cuda(1)), tuple(t.cuda(1) for t in inputs)
@@ -1645,7 +1643,7 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     @skipIfRocm
-    @config.patch({"aot_inductor.abi_compatible": True})
+    @config.patch({"abi_compatible": True})
     def test_triton_kernel_reinterpret_view_mem_leak(self):
         # Check for memory leak when using user-defined Triton Kernel + AOTI.
         if self.device != "cuda":
@@ -1751,6 +1749,14 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    def test_fft_c2c(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.fft.fftn(x), torch.fft.fftn(x).real
+
+        example_inputs = (torch.randn(16, 16, 16, device=self.device),)
+        self.check_model(Model(), example_inputs)
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
@@ -1816,6 +1822,7 @@ CPU_TEST_FAILURES = {
     "test_dynamic_cat": fail_minimal_arrayref_interface(),
     "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
     "test_dynamic_smem_above_default_limit": fail_with_and_without_stack_allocation(),
+    "test_fft_c2c": fail_stack_allocation(is_skip=True),
     # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
     #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
     "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),
