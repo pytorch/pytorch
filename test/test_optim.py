@@ -1,5 +1,6 @@
 # Owner(s): ["module: optimizer"]
 import functools
+import math
 import unittest
 from copy import deepcopy
 
@@ -86,9 +87,9 @@ class TestOptimRenewed(TestCase):
                 optimizer.zero_grad()
                 loss = (weight.mv(input) + bias).pow(2).sum()
                 loss.backward()
-                if optim_cls.__name__ == "SparseAdam":
-                    # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
-                    # which we know does NOT represent the expected use case!
+                if optim_info.only_supports_sparse_grads:
+                    # For this test, we naively convert the Tensor layout, which we know does
+                    # NOT represent the expected use case for optims like SparseAdam!
                     weight.grad = weight.grad.to_sparse()
                     bias.grad = bias.grad.to_sparse()
                 return loss
@@ -126,9 +127,9 @@ class TestOptimRenewed(TestCase):
                 optimizer.zero_grad()
                 loss = (weight.mv(input).cuda(1) + bias).pow(2).sum()
                 loss.backward()
-                if optim_cls.__name__ == "SparseAdam":
-                    # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
-                    # which we know does NOT represent the expected use case!
+                if optim_info.only_supports_sparse_grads:
+                    # For this test, we naively convert the Tensor layout, which we know does
+                    # NOT represent the expected use case for optims like SparseAdam!
                     weight.grad = weight.grad.to_sparse()
                     bias.grad = bias.grad.to_sparse()
                 return loss
@@ -566,9 +567,9 @@ class TestOptimRenewed(TestCase):
                 optimizer.zero_grad()
                 loss = (weight.mv(input) + bias).pow(2).sum()
                 loss.backward()
-                if optim_cls.__name__ == "SparseAdam":
-                    # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
-                    # which we know does NOT represent the expected use case!
+                if optim_info.only_supports_sparse_grads:
+                    # For this test, we naively convert the Tensor layout, which we know does
+                    # NOT represent the expected use case for optims like SparseAdam!
                     weight.grad = weight.grad.to_sparse()
                     bias.grad = bias.grad.to_sparse()
                 optimizer.step()
@@ -615,9 +616,9 @@ class TestOptimRenewed(TestCase):
                 loss = (weight.mv(input) + bias).pow(2).sum()
                 loss.backward()
                 irrelevant.grad = torch.rand_like(irrelevant)
-                if optim_cls.__name__ == "SparseAdam":
-                    # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
-                    # which we know does NOT represent the expected use case!
+                if optim_info.only_supports_sparse_grads:
+                    # For this test, we naively convert the Tensor layout, which we know does
+                    # NOT represent the expected use case for optims like SparseAdam!
                     weight.grad = weight.grad.to_sparse()
                     bias.grad = bias.grad.to_sparse()
                     irrelevant.grad = irrelevant.grad.to_sparse()
@@ -686,7 +687,7 @@ class TestOptimRenewed(TestCase):
                 params = [param]
 
             optimizer = optim_cls(params, **kwargs)
-            if optim_cls.__name__ == "SparseAdam":
+            if optim_info.only_supports_sparse_grads:
                 # Intentionally construct a multidimensional empty v for the sparse grad
                 # Single dim v passes the test while multidim correctly repros the issue
                 # https://github.com/pytorch/pytorch/issues/82486
@@ -798,7 +799,7 @@ class TestOptimRenewed(TestCase):
                 return loss
 
             for _ in range(3):
-                if optim_cls.__name__ == "LBFGS":
+                if optim_info.step_requires_closure:
                     optimizer.step(functools.partial(fwd_bwd, optimizer, model, input))
                 else:
                     fwd_bwd(optimizer, model, input)
@@ -815,7 +816,7 @@ class TestOptimRenewed(TestCase):
             optimizer.load_state_dict(old_state_dict)
 
             # Make sure we can still step
-            if optim_cls.__name__ == "LBFGS":
+            if optim_info.step_requires_closure:
                 optimizer.step(functools.partial(fwd_bwd, optimizer, model, input))
             else:
                 fwd_bwd(optimizer, model, input)
@@ -831,16 +832,16 @@ class TestOptimRenewed(TestCase):
         params = [Parameter(torch.randn(2, 3, device=device, dtype=dtype)) for _ in range(2)]
         for p in params:
             p.grad = torch.rand_like(p)
-            # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
-            # which we know does NOT represent the expected use case!
-            if optim_cls.__name__ == "SparseAdam":
+            if optim_info.only_supports_sparse_grads:
+                # For this test, we naively convert the Tensor layout, which we know does
+                # NOT represent the expected use case for optims like SparseAdam!
                 p.grad = p.grad.to_sparse()
 
-        # Needed for LBFGS
-        lbfgs_loss = torch.rand(1, device=device, dtype=dtype)
+        # Needed for second order optims like LBFGS
+        closure_loss = torch.rand(1, device=device, dtype=dtype)
 
         def closure():
-            return lbfgs_loss if optim_cls.__name__ == "LBFGS" else None
+            return closure_loss if optim_info.step_requires_closure else None
 
         for optim_input in all_optim_inputs:
             kwargs = optim_input.kwargs
@@ -868,11 +869,11 @@ class TestOptimRenewed(TestCase):
         # We limit our configs to CPU only, because we will be moving them to CUDA later
         cpu_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs("cpu", dtype, optim_info, skip=("differentiable",))
 
-        # Needed for LBFGS
-        lbfgs_loss = torch.rand(1, device=device, dtype=dtype)
+        # Needed for second order optims like LBFGS
+        closure_loss = torch.rand(1, device=device, dtype=dtype)
 
         def closure():
-            return lbfgs_loss if optim_cls.__name__ == "LBFGS" else None
+            return closure_loss if optim_info.step_requires_closure else None
 
         for optim_input in cpu_optim_inputs:
             if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
@@ -882,9 +883,9 @@ class TestOptimRenewed(TestCase):
             params = [Parameter(torch.randn(2, 3, device="cpu", dtype=dtype)) for _ in range(2)]
             for p in params:
                 p.grad = torch.randn_like(p)
-                # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
-                # which we know does NOT represent the expected use case!
-                if optim_cls.__name__ == "SparseAdam":
+                if optim_info.only_supports_sparse_grads:
+                    # For this test, we naively convert the Tensor layout, which we know does
+                    # NOT represent the expected use case for optims like SparseAdam!
                     p.grad = p.grad.to_sparse()
 
             optimizer = optim_cls(params, **optim_input.kwargs)
@@ -929,14 +930,14 @@ class TestOptimRenewed(TestCase):
         params = [Parameter(torch.randn(2, 3, device=device, dtype=dtype)) for _ in range(2)]
         for p in params:
             p.grad = torch.rand_like(p)
-            if optim_cls.__name__ == "SparseAdam":
-                # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
-                # which we know does NOT represent the expected use case!
+            if optim_info.only_supports_sparse_grads:
+                # For this test, we naively convert the Tensor layout, which we know does
+                # NOT represent the expected use case for optims like SparseAdam!
                 p.grad = p.grad.to_sparse()
 
-        # Needed for LBFGS
+        # Needed for second order optims like LBFGS
         def closure():
-            return 1 if optim_cls.__name__ == "LBFGS" else None
+            return 1 if optim_info.step_requires_closure else None
 
         def getPublicAttrs(obj):
             return {k for k in obj.__dict__ if not k.startswith("_")}
@@ -953,6 +954,29 @@ class TestOptimRenewed(TestCase):
                 optimizer.step(closure)
 
             self.assertEqual(getPublicAttrs(optimizer), getPublicAttrs(deepcopy(optimizer)))
+
+
+    @optims([optim for optim in optim_db if optim.step_requires_closure], dtypes=[torch.float32])
+    def test_second_order_optims_return_consistent_types(self, device, dtype, optim_info):
+        # Motivated by #7586
+        optim_cls = optim_info.optim_cls
+        params = [torch.randn(10, 5, device=device, dtype=dtype), torch.randn(10, device=device, dtype=dtype)]
+
+        def closure():
+            return torch.tensor([10], device=device, dtype=dtype)
+
+        for optim_input in optim_info.optim_inputs_func(device=device):
+            # Currently, the only second order optim is LBFGS, so we just go ahead and modify
+            # "tolerance_grad", but this may not scale if we add second order optims in the future
+            kwargs = optim_input.kwargs
+            kwargs["tolerance_grad"] = math.inf
+            optim_inf = optim_cls(params, **kwargs)
+            kwargs["tolerance_grad"] = -math.inf
+            optim_neg_inf = optim_cls(params, **kwargs)
+
+            res1 = optim_inf.step(closure)
+            res2 = optim_neg_inf.step(closure)
+            self.assertEqual(type(res1), type(res2))
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
