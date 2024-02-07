@@ -1363,11 +1363,12 @@ void ProcessGroupNCCL::heartbeatMonitor() {
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
   try {
-    VLOG(2) << logPrefix() << "NCCL watchdog thread started!";
+    VLOG(2) << logPrefix() << "Process group watchdog thread started!";
     ncclHeartbeatMonitorThread_ =
         std::thread(&ProcessGroupNCCL::heartbeatMonitor, this);
     watchdogHandler();
-    VLOG(2) << logPrefix() << "NCCL watchdog thread terminated normally";
+    VLOG(2) << logPrefix()
+            << "Process group watchdog thread terminated normally";
   } catch (std::exception& e) {
     if (std::string(e.what()).find("driver shutting down") !=
         std::string::npos) {
@@ -1380,7 +1381,7 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
       // Append error message reported from watchdogHandler
       const auto exitMsg = c10::str(
           logPrefix(),
-          "NCCL watchdog thread terminated with exception: ",
+          "Process group watchdog thread terminated with exception: ",
           e.what());
       LOG(ERROR) << exitMsg;
       // TODO(whc) clean up the rethrow - why is it stored in a class var and
@@ -1391,7 +1392,8 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
     }
   } catch (...) {
     const auto exitMsg = c10::str(
-        logPrefix(), "NCCL watchdog thread terminated with exception: unknown");
+        logPrefix(),
+        "Process group watchdog thread terminated with exception: unknown");
     LOG(ERROR) << exitMsg;
     watchDogException_ =
         std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exitMsg));
