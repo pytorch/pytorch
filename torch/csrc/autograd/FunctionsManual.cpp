@@ -927,7 +927,7 @@ Tensor logcumsumexp_backward(
 
   if (!at::is_complex(grad)) {
     auto grad_min = at::scalar_tensor(scalar_min, grad.options());
-    auto log_grad_abs = grad.abs().log();
+    auto log_abs_grad = grad.abs().log();
     auto log_grad_positive = at::where(grad > 0, log_abs_grad, grad_min);
     auto log_grad_negative = at::where(grad < 0, log_abs_grad, grad_min);
 
