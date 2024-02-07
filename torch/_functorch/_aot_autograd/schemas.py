@@ -256,45 +256,6 @@ class ViewAndMutationMeta:
         # When keep_input_mutations is set, we don't need to worry about our epilogue
         # handling data-only mutations, because we keep them directly in the graph.
 
-        # TODO (tmanlaibaatar) Ideally input mutation type should be calculated
-        # based on requires_subclass_dispatch argument but this is not easy to do because you would
-        # have to pass around this argument multiple level down.
-        if not self.requires_subclass_dispatch:
-            mutated_inp_runtime_indices = [
-                i
-                for i, m in enumerate(self.input_info)
-                if (m.mutation_type == MutationType.MUTATED_OUT_GRAPH)
-            ]
-        else:
-            mutated_inp_runtime_indices = [
-                i
-                for i, m in enumerate(self.input_info)
-                if m.mutation_type
-                in (MutationType.MUTATED_IN_GRAPH, MutationType.MUTATED_OUT_GRAPH)
-            ]
-
-        mutated_graph_handled_indices = [
-            i
-            for i, m in enumerate(self.input_info)
-            if m.mutation_type == MutationType.MUTATED_IN_GRAPH
-            and not self.requires_subclass_dispatch
-        ]
-        self.mutated_graph_handled_indices = mutated_graph_handled_indices
-        self.num_mutated_graph_handled_indices = len(self.mutated_graph_handled_indices)
-
-        mutated_graph_handled_indices_seen_by_autograd = [
-            i
-            for i in mutated_graph_handled_indices
-            if not self.input_info[i].mutations_hidden_from_autograd
-        ]
-
-        self.mutated_graph_handled_indices_seen_by_autograd = (
-            mutated_graph_handled_indices_seen_by_autograd
-        )
-        self.num_mutated_graph_handled_indices_seen_by_autograd = len(
-            self.mutated_graph_handled_indices_seen_by_autograd
-        )
-
         aliased_out_indices = [
             i
             for i, m in enumerate(self.output_info)
@@ -310,12 +271,6 @@ class ViewAndMutationMeta:
             for i, m in enumerate(self.output_info)
             if m.output_type is OutputType.unsafe_view_alias
         ]
-
-        # This is pre-computed in post_init for perf.
-        # It contains the index of every element
-        # of input_info that corresponds to a mutation (data or metadata or both)
-        self.mutated_inp_runtime_indices = mutated_inp_runtime_indices
-        self.num_mutated_inp_runtime_indices = len(self.mutated_inp_runtime_indices)
 
         # This is pre-computed for perf.
         # It contains the index of every element
@@ -384,19 +339,10 @@ class ViewAndMutationMeta:
         # separately.
         self.num_outputs_rng_offset = 1 if self.is_rng_op_functionalized else 0
 
-        # Our forward() returns both (mutated_inputs, outputs, output_intermediate_bases, saved_tensors, saved_symints)
-        self.num_forward_returns = (
-            self.num_mutated_inp_runtime_indices
-            + self.num_outputs
-            + self.num_intermediate_bases
-        )
-        # In case of functionalization of rng ops, the fw_module returns one
-        # additional output for rng offset. This rng offset is used right
-        # away to advance the rng state, and is not passed on to the raw
-        # outputs. However, we need to know the exact boundary to identify
-        # which tensors to be saved for the bwd graph.  num_forward captures
-        # this information.
-        self.num_forward = self.num_forward_returns + self.num_outputs_rng_offset
+        # Many parameters dependon requires_subclass_dispatch, and for convenience we
+        # want to be able to modify requires_subclass_dispatch on an already-constructed
+        # ViewAndMutationMeta.
+        self.set_requires_subclass_dispatch(self.requires_subclass_dispatch)
 
     @property
     def tensors_saved_for_backwards_slice(self):
@@ -413,6 +359,68 @@ class ViewAndMutationMeta:
             return slice(-self.num_symints_saved_for_bw, None)
         else:
             return slice(0, 0)  # empty slice
+
+    def set_requires_subclass_dispatch(self, requires_subclass_dispatch):
+        self.requires_subclass_dispatch = requires_subclass_dispatch
+
+        # TODO (tmanlaibaatar) Ideally input mutation type should be calculated
+        # based on requires_subclass_dispatch argument but this is not easy to do because you would
+        # have to pass around this argument multiple level down.
+        if not self.requires_subclass_dispatch:
+            mutated_inp_runtime_indices = [
+                i
+                for i, m in enumerate(self.input_info)
+                if (m.mutation_type == MutationType.MUTATED_OUT_GRAPH)
+            ]
+        else:
+            mutated_inp_runtime_indices = [
+                i
+                for i, m in enumerate(self.input_info)
+                if m.mutation_type
+                in (MutationType.MUTATED_IN_GRAPH, MutationType.MUTATED_OUT_GRAPH)
+            ]
+
+        # This is pre-computed in post_init for perf.
+        # It contains the index of every element
+        # of input_info that corresponds to a mutation (data or metadata or both)
+        self.mutated_inp_runtime_indices = mutated_inp_runtime_indices
+        self.num_mutated_inp_runtime_indices = len(self.mutated_inp_runtime_indices)
+
+        mutated_graph_handled_indices = [
+            i
+            for i, m in enumerate(self.input_info)
+            if m.mutation_type == MutationType.MUTATED_IN_GRAPH
+            and not self.requires_subclass_dispatch
+        ]
+        self.mutated_graph_handled_indices = mutated_graph_handled_indices
+        self.num_mutated_graph_handled_indices = len(self.mutated_graph_handled_indices)
+
+        mutated_graph_handled_indices_seen_by_autograd = [
+            i
+            for i in mutated_graph_handled_indices
+            if not self.input_info[i].mutations_hidden_from_autograd
+        ]
+
+        self.mutated_graph_handled_indices_seen_by_autograd = (
+            mutated_graph_handled_indices_seen_by_autograd
+        )
+        self.num_mutated_graph_handled_indices_seen_by_autograd = len(
+            self.mutated_graph_handled_indices_seen_by_autograd
+        )
+
+        # Our forward() returns both (mutated_inputs, outputs, output_intermediate_bases, saved_tensors, saved_symints)
+        self.num_forward_returns = (
+            self.num_mutated_inp_runtime_indices
+            + self.num_outputs
+            + self.num_intermediate_bases
+        )
+        # In case of functionalization of rng ops, the fw_module returns one
+        # additional output for rng offset. This rng offset is used right
+        # away to advance the rng state, and is not passed on to the raw
+        # outputs. However, we need to know the exact boundary to identify
+        # which tensors to be saved for the bwd graph.  num_forward captures
+        # this information.
+        self.num_forward = self.num_forward_returns + self.num_outputs_rng_offset
 
     def __eq__(self, other):
         if not isinstance(other, ViewAndMutationMeta):

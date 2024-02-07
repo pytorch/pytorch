@@ -506,31 +506,14 @@ def create_aot_dispatcher_function(
             # Patch set_rng_state as set_rng_state with fake tensors is
             # nonsensical. This does not affect the collection of metadata.
             with patch("torch.cuda.set_rng_state", lambda *args: None):
-                req_subclass_dispatch_inp_only = requires_subclass_dispatch(fake_flat_args)
-
                 fw_metadata = run_functionalized_fw_and_collect_metadata(
                     flat_fn,
                     keep_input_mutations=aot_config.keep_inference_input_mutations,
                     is_train=needs_autograd,
                     pre_dispatch=aot_config.pre_dispatch,
-                    requires_subclass_dispatch=req_subclass_dispatch_inp_only,
                 )(*fake_flat_args)
 
                 req_subclass_dispatch = requires_subclass_dispatch(fake_flat_args, fw_metadata)
-
-                # One property of fw_metadata is that, depending on whether requires_subclass_dispatch
-                # is set, you'll get a different set of mutated_inp_runtime_indices; and that will
-                # alter the number of outputs from the forward pass. So, we need this value to be
-                # accurate at this point, otherwise we might end up with a mismatch in downstream
-                # parts of aot_autograd
-                if req_subclass_dispatch_inp_only != req_subclass_dispatch:
-                    fw_metadata = run_functionalized_fw_and_collect_metadata(
-                        flat_fn,
-                        keep_input_mutations=aot_config.keep_inference_input_mutations,
-                        is_train=needs_autograd,
-                        pre_dispatch=aot_config.pre_dispatch,
-                        requires_subclass_dispatch=req_subclass_dispatch,
-                    )(*fake_flat_args)
 
                 if needs_autograd and not any(x.requires_grad for x in fw_metadata.output_info):
                     # We realized that none of the outputs require grad,
@@ -561,6 +544,13 @@ def create_aot_dispatcher_function(
                             is_train=needs_autograd,
                         )
 
+        # One property of fw_metadata is that, depending on whether requires_subclass_dispatch
+        # is set, you'll get a different set of mutated_inp_runtime_indices; and that will
+        # alter the number of outputs from the forward pass. So, we need this value to be
+        # accurate at this point, otherwise we might end up with a mismatch in downstream
+        # parts of aot_autograd.
+        if req_subclass_dispatch and needs_autograd:
+            fw_metadata.set_requires_subclass_dispatch(True)
 
         if fw_metadata.num_intermediate_bases > 0:
             assert not req_subclass_dispatch, f"""\

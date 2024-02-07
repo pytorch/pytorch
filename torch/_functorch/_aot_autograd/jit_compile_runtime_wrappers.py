@@ -170,6 +170,9 @@ def aot_dispatch_autograd(
             if maybe_subclass_meta is None
             else maybe_subclass_meta.fw_metadata
         )
+        # Note: inner_meta.num_mutated_inp_runtime_indices should equal
+        #      fw_metadata.num_mutated_inp_runtime_indices.
+        # We don't assert because downstream error messages are more useful.
         with track_graph_compiling(aot_config, "joint"):
             # See Note: [Partitioner handling for Subclasses, Part 1]
             num_inner_fwd_outputs = (
