@@ -480,8 +480,6 @@ def break_graph_if_unsupported(*, push):
                 if not self.should_compile_partial_graph():
                     raise
 
-                log.debug("break_graph_if_unsupported triggered compile", exc_info=True)
-
                 user_stack = excp.real_stack
                 # TODO: Also report the traceback from the parent frame
                 user_stack_formatted = "".join(traceback.format_list(user_stack))
@@ -494,9 +492,14 @@ def break_graph_if_unsupported(*, push):
                     and graph_break_dup_warning_checker.add(frame_loc)
                 ):
                     graph_break_log.debug(
-                        "Graph break: %s\nFrom user code at:\n%s",
-                        ''.join(traceback.format_exception(excp)),  # NB: yes chaining
+                        "Graph break from user code at:\n%s",
                         user_stack_formatted,
+                        exc_info=True,
+                    )
+                else:
+                    log.debug(
+                        "Graph break from user code at %s:%s (details suppressed)",
+                        *frame_loc,
                     )
 
                 if self.has_backedge():
