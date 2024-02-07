@@ -339,7 +339,6 @@ def sdp_kernel(
     This context manager can be used to temporarily enable or disable any of the three backends for scaled dot product attention.
     Upon exiting the context manager, the previous state of the flags will be restored.
     """
-<<<<<<< HEAD
     warnings.warn(
         (
             "torch.backends.cuda.sdp_kernel() "
