@@ -1037,6 +1037,25 @@ def forward(self, s0_1, s1_1, x_1, y_1):
     empty = torch.ops.aten.empty.memory_format([s0_1], device = device(type='cpu'), pin_memory = False)
     return ((s0_1, s1_1), empty)""")
 
+    def test_non_deduped_shape(self):
+        def f(x, y):
+            return torch.functional.broadcast_shapes(x.size(), y.size()[0]), torch.empty(x.shape[0])
+
+        x = torch.empty(3, 1)
+        y = torch.empty(5)
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        shape_env = ShapeEnv()
+
+        with FakeTensorMode(shape_env=shape_env, static_shapes=False) as fake_mode:
+            x = fake_mode.from_tensor(x)
+            y = fake_mode.from_tensor(y)
+            r = str(make_fx(f, tracing_mode="real")(x, y).code).strip()
+            self.assertExpectedInline(r, """\
+def forward(self, x_1, y_1):
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0);  x_1 = None
+    empty = torch.ops.aten.empty.memory_format([sym_size_int], device = device(type='cpu'), pin_memory = False)
+    sym_size_int_1 = torch.ops.aten.sym_size.int(y_1, 0);  y_1 = None
+    return ((sym_size_int, sym_size_int_1), empty)""")
 
     def test_unary(self):
         def f(x):
@@ -1856,7 +1875,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.fractional_max_pool3d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('nn.functional.interpolate', 'linear'),  # aten.upsample_linear1d.vec - couldn't find symbolic meta function/dec...
     xfail('nn.functional.interpolate', 'trilinear'),  # aten.upsample_trilinear3d.vec - couldn't find symbolic meta functi...
-    xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta function/deco...
     xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
@@ -1899,9 +1917,6 @@ outplace_symbolic_tensor_failures = {
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
 
     xfail('linalg.norm', ''),
-    xfail('round', 'decimals_0'),  # Cannot call numel() on tensor with symbolic sizes/strides
-    xfail('round', 'decimals_3'),  # Cannot call numel() on tensor with symbolic sizes/strides
-    xfail('round', 'decimals_neg_3'),  # Cannot call numel() on tensor with symbolic sizes/strides
 }
 
 inplace_symbolic_tensor_failures = {
@@ -1953,10 +1968,6 @@ out_symbolic_tensor_failures = {
     xfail('nn.functional.avg_pool2d', ''),
     xfail('nn.functional.linear', ''),
     xfail('qr', ''),
-    xfail('round', ''),
-    xfail('round', 'decimals_0'),
-    xfail('round', 'decimals_3'),
-    xfail('round', 'decimals_neg_3'),
     xfail('scatter_add', ''),
     xfail('scatter', ''),
     xfail('sort', ''),

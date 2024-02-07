@@ -438,6 +438,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def python_type(self):
         return self.value_type
 
+    def guard_as_python_constant(self):
+        if self.source:
+            install_guard(self.source.make_guard(GuardBuilder.ID_MATCH))
+            return self.value
+        return super().guard_as_python_constant()
+
     def torch_function_check(self):
         assert has_torch_function(
             self
@@ -510,7 +516,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 assert self.source  # OrderedDict, dict subtypes must always have source
                 keys = list(self.value.keys())
                 assert all(map(ConstantVariable.is_literal, keys))
-                install_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
+                install_guard(self.source.make_guard(GuardBuilder.DICT_CONST_KEYS))
                 return TupleVariable([ConstantVariable.create(k) for k in keys])
 
             if (
@@ -522,7 +528,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ):
                 assert not kwargs
                 assert self.source  # OrderedDict, dict subtypes must always have source
-                install_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
+                install_guard(self.source.make_guard(GuardBuilder.DICT_CONST_KEYS))
                 return ConstantVariable.create(
                     args[0].as_python_constant() in self.value
                 )
@@ -602,10 +608,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ):
             args = [x.as_python_constant() for x in args]
             kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            random_call_index = len(tx.random_calls)
+            random_call_index = len(tx.output.random_calls)
             example_value = self.value(*args, **kwargs)
             source = RandomValueSource(random_call_index)
-            tx.random_calls.append((self.value, args, kwargs))
+            tx.output.random_calls.append((self.value, args, kwargs))
             return VariableBuilder(tx, source).wrap_unspecialized_primitive(
                 example_value
             )
@@ -729,7 +735,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ).call_function(tx, [self], {})
         elif isinstance(subobj, staticmethod):
             func = subobj.__get__(self.value)
-            if trace_rules.lookup(func) is not None:
+            if source is not None and trace_rules.lookup(func) is not None:
                 return trace_rules.lookup(func).create_with_source(func, source=source)
             else:
                 return variables.UserFunctionVariable(func, source=source)
@@ -762,7 +768,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             elif inspect.isfunction(dynamic_subobj):
                 if is_utils_checkpoint(func):
                     return build_checkpoint_variable(source=source)
-                elif trace_rules.lookup(func) is not None:
+                elif source is not None and trace_rules.lookup(func) is not None:
                     return trace_rules.lookup(func).create_with_source(
                         func, source=source
                     )

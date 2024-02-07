@@ -478,8 +478,9 @@ def _reset_warn_typed_storage_removal():
     _warn_typed_storage_removal.__dict__['has_warned'] = False
 
 def _get_device_from_module(module: str):
-    if module.split(".")[-1] in ["cuda", torch._C._get_privateuse1_backend_name()]:
-        return module.split(".")[-1]
+    last_part = module.rsplit(".", 1)[-1]
+    if last_part in ["cuda", torch._C._get_privateuse1_backend_name()]:
+        return last_part
     else:
         return "cpu"
 
@@ -757,8 +758,11 @@ class TypedStorage:
                 _internal=True)._getitem(idx)
 
         idx_wrapped = self._maybe_wrap_index(idx)
-        tmp_tensor = torch.tensor([], dtype=self.dtype, device=self._untyped_storage.device).set_(self)
-        return tmp_tensor[idx_wrapped].item()
+        from torch._subclasses.fake_tensor import unset_fake_temporarily
+
+        with unset_fake_temporarily():
+            tmp_tensor = torch.tensor([], dtype=self.dtype, device=self._untyped_storage.device).set_(self)
+            return tmp_tensor[idx_wrapped].item()
 
     def copy_(self, source: T, non_blocking: _Optional[bool] = None):
         _warn_typed_storage_removal()
