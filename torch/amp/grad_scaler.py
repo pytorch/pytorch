@@ -9,7 +9,7 @@ from typing import Any, cast, Dict, Iterable, List, Optional, overload, Tuple, U
 import torch
 
 
-__all__ = ["OptState", "GradScaler"]
+__all__ = ["OptState", "GradScaler", "registe_gradscaler_device"]
 
 
 class _MultiDeviceReplicator:
@@ -49,6 +49,11 @@ class OptState(Enum):
 def _refresh_per_optimizer_state() -> Dict[str, Any]:
     return {"stage": OptState.READY, "found_inf_per_device": {}}
 
+gradscaler_devices: List[str] = []
+gradscaler_devices.extend(["cuda", "cpu"])
+
+def registe_gradscaler_device(device: str):
+    gradscaler_devices.append(device)
 
 class GradScaler:
     """An instance ``scaler`` of :class:`GradScaler`.
@@ -131,7 +136,7 @@ class GradScaler:
     ) -> None:
         self._device = device
         self._enabled = enabled
-        assert self._device in ["cuda", "cpu"], "GradScaler only supports CUDA and CPU"
+        assert self._device in gradscaler_devices, f"GradScaler only supports {}".format(gradscaler_devices)
         if self._device == "cuda":
             if enabled and torch.cuda.amp.common.amp_definitely_not_available():
                 warnings.warn(
