@@ -786,17 +786,21 @@ dynamo_expected_failures = {
     "TestControlFlowTraced.test_map_functionalized",  # functorch/test_control_flow
     "TestControlFlowTraced.test_nested_map_cond_symbolic",  # functorch/test_control_flow
     "TestControlFlowTraced.test_nested_map_cond_real",  # functorch/test_control_flow
+    "TestJacCPU.test_vmap_on_jac_simple_jacfwd_cpu",  # functorch/test_eager_transforms.py
+    "TestGradTransformCPU.test_no_grad_outside_vjp_cpu",  # functorch/test_eager_transforms.py
+    "TestGradTransformCPU.test_no_grad_outside_vjp_fn_cpu",  # functorch/test_eager_transforms.py
+    "TestGradTransformCPU.test_no_grad_outside_vjp_only_cpu",  # functorch/test_eager_transforms.py
+    "TestGradTransformCPU.test_unrelated_vjp_cpu",  # functorch/test_eager_transforms.py
+    "TestGradTransformCPU.test_unrelated_vjp_multiple_inputs_outputs_cpu",  # functorch/test_eager_transforms.py
+    "TestGradTransformCPU.test_vjp_aux_pytree_cpu",  # functorch/test_eager_transforms.py
     "TestGradTransformCPU.test_vjp_of_grad_composition_cpu",  # functorch/test_eager_transforms.py
     "TestGradTransformCPU.test_vjp_pytree_input_cpu",  # functorch/test_eager_transforms.py
     "TestComposabilityCPU.test_make_fx_vjp_cpu",  # functorch/test_eager_transforms.py
     "TestComposabilityCPU.test_vjp_grad_cpu",  # functorch/test_eager_transforms.py
-    "TestComposabilityCPU.test_vjp_vjp_cpu",  # functorch/test_eager_transforms.py
+    "TestAutogradFunctionCPU.test_once_differentiable_autograd_vjp_cpu",  # functorch/test_eager_transforms.py
     "TestComposabilityCPU.test_vjp_vmap_cpu",  # functorch/test_eager_transforms.py
-    "TestComposabilityCPU.test_vmap_vjp_cpu",  # functorch/test_eager_transforms.py
     "TestFunctionalizeCPU.test_multioutput_view_cpu",  # functorch/test_eager_transforms.py
     "TestFunctionalizeCPU.test_simple_view_cpu",  # functorch/test_eager_transforms.py
-    "TestAutogradFunctionCPU.test_once_differentiable_autograd_vjp_cpu",  # functorch/test_eager_transforms.py
-    "TestFunctionalizeCPU.test_vmap_functionalize_jvp_cpu",  # functorch/test_eager_transforms.py
     "TestMetaKernel.test_addmm_invalid_dtype",  # lazy/test_meta_kernel
     "TestVerifyCorrectness.test_incorrect_verify_true",  # dynamo/test_verify_correctness
     "TestVerifyCorrectness.test_torchscript",  # dynamo/test_verify_correctness
@@ -2086,35 +2090,8 @@ dynamo_expected_failures = {
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_float32",  # test_linalg.py
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_int64",  # test_linalg.py
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_complex64",  # test_linalg.py
-    "TestGradTransformCPU.test_vjp_pytree_output_cpu",  # functorch/test_eager_transforms.py
-    "TestGradTransformCPU.test_vjp_two_outputs_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_argnums_effect_on_return_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_argnums_effect_on_return_jacrev_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_argnums_tuple_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_argnums_tuple_jacrev_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_empty_argnums_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_empty_argnums_jacrev_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_float_argnums_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_float_argnums_jacrev_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_multiple_args_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_multiple_args_jacrev_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_negative_argnums_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_negative_argnums_jacrev_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_out_of_bounds_argnums_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_out_of_bounds_argnums_jacrev_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_repeated_argnums_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_repeated_argnums_jacrev_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_simple_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_simple_jacrev_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_simple_not_flat_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_simple_not_flat_jacrev_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_vmap_on_jac_simple_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_vmap_on_jac_simple_jacrev_cpu",  # functorch/test_eager_transforms.py
-    "TestJvpCPU.test_disable_fwd_grad_outside_cpu",  # functorch/test_eager_transforms.py
-    "TestJvpCPU.test_inputs_are_tuples_of_tensors_cpu",  # functorch/test_eager_transforms.py
-    "TestJvpCPU.test_nonempty_primals_and_tangents_cpu",  # functorch/test_eager_transforms.py
     "TestJvpCPU.test_primals_tangents_length_mismatch_cpu",  # functorch/test_eager_transforms.py
-    "TestJvpCPU.test_simple_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_out_of_bounds_argnums_jacfwd_cpu",  # functorch/test_eager_transforms.py
     "TestVmapJvpInplaceViewCPU.test_all_dual_base_inplace_cpu",  # functorch/test_eager_transforms.py
     "TestVmapJvpInplaceViewCPU.test_all_dual_base_view_inplace_cpu",  # functorch/test_eager_transforms.py
     "TestVmapJvpInplaceViewCPU.test_all_dual_no_view_cpu",  # functorch/test_eager_transforms.py
@@ -2128,33 +2105,56 @@ dynamo_expected_failures = {
     "TestJacCPU.test_unrelated_input_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_inplace_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_multiple_outputs_single_argnums_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_simple_jacrev_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_empty_argnums_jacfwd_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_out_of_bounds_argnums_jacrev_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_against_reference_multi_input_cpu",  # functorch/test_eager_transforms.py
     "TestExamplesCorrectnessCPU.test_resnet18_per_sample_grads_mechanism_functional_call_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_simple_not_flat_jacfwd_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_aux_pytree_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_argnums_tuple_jacfwd_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_argnums_effect_on_return_jacrev_cpu",  # functorch/test_eager_transforms.py
+    "TestGradTransformCPU.test_vjp_cpu",  # functorch/test_eager_transforms.py
+    "TestGradTransformCPU.test_vjp_pytree_output_cpu",  # functorch/test_eager_transforms.py
+    "TestGradTransformCPU.test_vjp_two_outputs_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_repeated_argnums_jacfwd_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_against_reference_unrelated_outputs_cpu",  # functorch/test_eager_transforms.py
+    "TestComposabilityCPU.test_vjp_vjp_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_argnums_defaults_to_zero_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_multiple_inputs_pytree_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_unrelated_output_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_empty_output_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_vmap_on_jac_simple_jacrev_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_dimensionality_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_repeated_argnums_jacrev_cpu",  # functorch/test_eager_transforms.py
     "TestExamplesCorrectnessCPU.test_maml_regression_mechanism_make_functional_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_float_argnums_jacrev_cpu",  # functorch/test_eager_transforms.py
     "TestExamplesCorrectnessCPU.test_resnet18_per_sample_grads_mechanism_make_functional_cpu",  # functorch/test_eager_transforms.py
     "TestGradTransformCPU.test_grad_of_vjp_composition_cpu",  # functorch/test_eager_transforms.py
-    "TestGradTransformCPU.test_no_grad_outside_vjp_cpu",  # functorch/test_eager_transforms.py
-    "TestGradTransformCPU.test_no_grad_outside_vjp_fn_cpu",  # functorch/test_eager_transforms.py
-    "TestGradTransformCPU.test_no_grad_outside_vjp_only_cpu",  # functorch/test_eager_transforms.py
-    "TestGradTransformCPU.test_unrelated_vjp_cpu",  # functorch/test_eager_transforms.py
-    "TestGradTransformCPU.test_unrelated_vjp_multiple_inputs_outputs_cpu",  # functorch/test_eager_transforms.py
-    "TestGradTransformCPU.test_vjp_aux_pytree_cpu",  # functorch/test_eager_transforms.py
-    "TestGradTransformCPU.test_vjp_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_against_reference_correctness_different_devices_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_outputs_can_any_pytree_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_simple_jacfwd_cpu",  # functorch/test_eager_transforms.py
+    "TestJvpCPU.test_nonempty_primals_and_tangents_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_negative_argnums_jacfwd_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_negative_argnums_jacrev_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_against_reference_multi_input_multi_output_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_multiple_outputs_multiple_argnums_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_simple_not_flat_jacrev_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_argnums_effect_on_return_jacfwd_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_against_reference_default_arg_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_against_reference_zero_dim_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_float_argnums_jacfwd_cpu",  # functorch/test_eager_transforms.py
     "TestJvpCPU.test_jvp_inside_autograd_function_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_argnums_tuple_jacrev_cpu",  # functorch/test_eager_transforms.py
+    "TestComposabilityCPU.test_vmap_vjp_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_multiple_args_jacfwd_cpu",  # functorch/test_eager_transforms.py
+    "TestAutogradFunctionCPU.test_needs_input_grads_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_against_reference_simple_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_multiple_args_jacrev_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_empty_argnums_jacrev_cpu",  # functorch/test_eager_transforms.py
+    "TestJvpCPU.test_simple_cpu",  # functorch/test_eager_transforms.py
+    "TestJvpCPU.test_inputs_are_tuples_of_tensors_cpu",  # functorch/test_eager_transforms.py
+    "TestJvpCPU.test_disable_fwd_grad_outside_cpu",  # functorch/test_eager_transforms.py
     "TestAOTDispatch.test_aot_dispatch_simple",  # functorch/test_aotdispatch.py
 }
 
