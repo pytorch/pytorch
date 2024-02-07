@@ -2070,8 +2070,8 @@ class Module:
                                 new_input_param = torch.nn.Parameter(new_input_param, requires_grad=param_requires_grad)
                             elif id(new_input_param) == id(input_param):
                                 # preserve reference in state_dict, in the if-block, Parameter already calls .detach()
-                                # However storage of param and input_param might be the same after the swap
-                                # which differs from the param.copy_(input_param) path
+                                # However param and input_param might have TensorImpls that are shallow copies of one
+                                # another, which differs from the param.copy_(input_param) path
                                 new_input_param = new_input_param.detach()
                             torch.utils.swap_tensors(param, new_input_param)
                             del new_input_param
@@ -2119,9 +2119,9 @@ class Module:
         .. warning::
             If :func:`~torch.__future__.get_swap_module_params_on_conversion` is set
             and parameters or their corresponding values in the ``state_dict`` have a
-            torch function handler for :meth:`~torch.Tensor.module_load`, values in the
-            ``state_dict`` might refer to the same tensors as their corresponding
-            parameters in the ``nn.Module`` after loading.
+            torch function handler for :meth:`~torch.Tensor.module_load`, parameters
+            might be shallow copies of the corresponding values in the ``state_dict``
+            after loading.
 
         Args:
             state_dict (dict): a dict containing parameters and
@@ -2185,9 +2185,6 @@ class Module:
 
         load(self, state_dict)
         del load
-        # print("linear1 weight")
-        # print(self.linear1.weight)
-        # print(id(self.linear1.weight))
 
         if strict:
             if len(unexpected_keys) > 0:
