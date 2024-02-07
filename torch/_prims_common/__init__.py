@@ -96,6 +96,8 @@ CustomOutParamAnnotation = "__custom_out_param__"
 
 
 def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     if len(a) != len(b):
         return False
 
@@ -105,7 +107,13 @@ def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
             # with each other
             if isinstance(y, torch.SymInt):
                 continue
-        if x != y:
+        # NB: Naively, you would not expect to have to do an oblivious guard
+        # here because there is seemingly no broadcasting here, but in fact we
+        # use this in some situations to determine if we need to do an expand
+        # on the tensor because they don't line up, so you can definitely end
+        # up trying to prove u0 != 1 in this situation.  See
+        # python test/test_proxy_tensor.py -k test_cumsum_unbacked
+        if guard_size_oblivious(x != y):
             return False
 
     return True
@@ -383,6 +391,8 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 def compute_elementwise_output_logical_to_physical_perm(
     *tensors, _skip_checks=False
 ) -> List[int]:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     if not _skip_checks and len(tensors) == 0:
         msg = "Can't compute elementwise output strides for zero tensors!"
         raise ValueError(msg)
@@ -429,17 +439,19 @@ def compute_elementwise_output_logical_to_physical_perm(
             stride_a = tensor.stride()[idx_a]
             stride_b = tensor.stride()[idx_b]
 
-            if stride_a == 0 or stride_b == 0:
+            if guard_size_oblivious(stride_a == 0) or guard_size_oblivious(
+                stride_b == 0
+            ):
                 continue
 
-            if stride_a < stride_b:
+            if guard_size_oblivious(stride_a < stride_b):
                 return -1
 
-            if stride_a > stride_b:
+            if guard_size_oblivious(stride_a > stride_b):
                 return 1
 
             # stride_a == stride_b
-            if shape[idx_a] > shape[idx_b]:
+            if guard_size_oblivious(shape[idx_a] > shape[idx_b]):
                 return 1
 
         # Note: this case is hit if all strides are zero,
