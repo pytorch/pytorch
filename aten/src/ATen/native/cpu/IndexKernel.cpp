@@ -54,7 +54,7 @@ template <typename scalar_t, typename func_t>
 void cpu_take_put_kernel(
     TensorIterator& iter,
     const TensorBase& indexed,
-    bool is_indexed_mutated,
+    bool is_indexed_data_mutated,
     const func_t& f,
     bool serial_execution=false) {
   // This kernel follows the same strategy as `cpu_index_kernel`
@@ -71,7 +71,7 @@ void cpu_take_put_kernel(
   const auto numel = indexed.numel();
   const auto offset_indexed = IndexToOffset(indexed);
 
-  auto* indexed_data = is_indexed_mutated ?
+  auto* indexed_data = is_indexed_data_mutated ?
    indexed.data_ptr<scalar_t>()
    : const_cast<scalar_t*>(indexed.const_data_ptr<scalar_t>());
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {

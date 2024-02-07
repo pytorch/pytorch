@@ -1536,8 +1536,6 @@ class TestCompositeCompliance(TestCase):
     def test_cow_input(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
 
-        any_input_materializes = False
-
         def is_strided_tensor(arg):
             return torch.is_tensor(arg) and arg.layout == torch.strided
 

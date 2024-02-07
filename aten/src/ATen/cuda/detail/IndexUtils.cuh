@@ -21,7 +21,7 @@ getTensorInfo(const at::TensorBase &t) {
     st[i] = t.stride(i);
   }
 
-  scalar* data_ptr;
+  scalar* data_ptr = nullptr;
 
   if constexpr (std::is_const<scalar>::value) {
     data_ptr = t.const_data_ptr<std::remove_const_t<scalar>>();
