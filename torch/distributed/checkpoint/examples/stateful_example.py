@@ -6,7 +6,7 @@ import shutil
 
 import torch
 import torch.distributed as dist
-import torch.distributed.checkpoint as DCP
+import torch.distributed.checkpoint as dcp
 import torch.multiprocessing as mp
 import torch.nn as nn
 from torch.distributed._tensor.device_mesh import init_device_mesh
@@ -78,16 +78,16 @@ def run(rank, world_size, device="cuda"):
     model, optim = _init_model(device, world_size)
     _train(model, optim, train_steps=2)
 
-    DCP.save(
+    dcp.save(
         state_dict={"model": model, "optimizer": optim},
-        storage_writer=DCP.FileSystemWriter(CHECKPOINT_DIR),
+        checkpoint_id=CHECKPOINT_DIR,
     )
 
     # presumably do something else
     model, optim = _init_model(device, world_size)
-    DCP.load(
+    dcp.load(
         state_dict={"model": model, "optimizer": optim},
-        storage_reader=DCP.FileSystemReader(CHECKPOINT_DIR),
+        checkpoint_id=CHECKPOINT_DIR,
     )
     _train(model, optim, train_steps=2)
 

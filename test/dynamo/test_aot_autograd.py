@@ -671,6 +671,22 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cc.frame_count, 2)
         self.assertIn("""L['c'] is L['d']""", failure_reason)
 
+    def test_alias_inputs(self):
+        def fn():
+            a = torch.tensor([1])
+            a = a[0:1]
+            b = a.squeeze()
+            a[0] = 0
+            if a[0] < 1e5:
+                pass
+            a[0] = 2
+            return b
+
+        ref_output = fn()
+        aot_fn = torch._dynamo.optimize("aot_eager")(fn)
+        actual_output = aot_fn()
+        self.assertEqual(ref_output, actual_output)
+
     @expectedFailureDynamic  # https://github.com/pytorch/pytorch/issues/103539
     @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     @patch("torch._functorch.config.debug_assert", True)
@@ -833,6 +849,7 @@ SeqNr|OrigAten|SrcFn
 1|aten._native_batch_norm_legit_functional.default|l__self___bn1
 2|aten.relu.default|l__self___relu1
 2|aten.detach.default|l__self___relu1
+2|aten.detach.default|l__self___relu1
 3|aten.add.Tensor|add
 4|aten.view.default|flatten
 5|aten.view.default|l__self___fc1
@@ -859,6 +876,7 @@ SeqNr|OrigAten|SrcFn
 5|aten.view.default|
 4|aten.view.default|
 2|aten.detach.default|
+2|aten.detach.default|
 2|aten.threshold_backward.default|
 1|aten.native_batch_norm_backward.default|
 0|aten.convolution_backward.default|
@@ -866,6 +884,25 @@ SeqNr|OrigAten|SrcFn
 """
             ),
         )
+
+    def test_split_with_sizes_aot_autograd_cleans_up_traceback_meta(self):
+        from torch._functorch.aot_autograd import setup_stacktrace_preservation_hooks
+
+        def fn(result, split_sizes):
+            rs = torch.ops.aten.split_with_sizes(result, split_sizes.tolist())
+            return rs
+
+        example_inputs = (
+            torch.randn(32, requires_grad=True),
+            torch.tensor((7, 16, 9)),
+        )
+        outs = fn(*example_inputs)
+        setup_stacktrace_preservation_hooks([out.grad_fn for out in outs])
+        with fx_traceback.preserve_node_meta():
+            (outs[0].sum() + outs[1].sum() + outs[2].sum()).backward()
+
+        self.assertNotIn("grad_fn_seq_nr", fx_traceback.current_meta)
+        self.assertNotIn("in_grad_fn", fx_traceback.current_meta)
 
     # https://github.com/pytorch/pytorch/issues/110121
     def test_aot_export_joint_simple_repro(self):

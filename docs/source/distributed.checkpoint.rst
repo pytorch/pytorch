@@ -33,7 +33,6 @@ In addition to the above entrypoints, `Stateful` objects, as described below, pr
 
 This `example <https://github.com/pytorch/pytorch/blob/main/torch/distributed/checkpoint/examples/fsdp_checkpoint_example.py>`_ shows how to use Pytorch Distributed Checkpoint to save a FSDP model.
 
-
 The following types define the IO interface used during checkpoint:
 
 .. autoclass:: torch.distributed.checkpoint.StorageReader
@@ -59,7 +58,7 @@ The following types define the planner interface used during checkpoint:
 .. autoclass:: torch.distributed.checkpoint.SavePlan
   :members:
 
-.. autoclass:: torch.distributed.checkpoint.WriteItem
+.. autoclass:: torch.distributed.checkpoint.planner.WriteItem
   :members:
 
 We provide a filesystem based storage layer:

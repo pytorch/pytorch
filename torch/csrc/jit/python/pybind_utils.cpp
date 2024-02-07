@@ -746,7 +746,7 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     }
     if (!found_op) {
       std::stringstream ss;
-      ss << "Overloaded torch operator invoked from Python failed to many any schema:\n";
+      ss << "Overloaded torch operator invoked from Python failed to match any schema:\n";
       for (const auto& err : errors) {
         ss << err.what() << "\n\n";
       }
@@ -762,9 +762,7 @@ py::object invokeOperatorFromPython(
     py::args args,
     const py::kwargs& kwargs,
     c10::optional<c10::DispatchKey> dk) {
-  auto opWithStack = getOpWithStack(operations, args, kwargs);
-  std::shared_ptr<Operator> found_op = std::get<0>(opWithStack);
-  Stack stack = std::get<1>(opWithStack);
+  auto [found_op, stack] = getOpWithStack(operations, args, kwargs);
   {
     pybind11::gil_scoped_release no_gil_guard;
     if (dk) {

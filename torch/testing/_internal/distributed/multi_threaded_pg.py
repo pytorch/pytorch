@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import sys
 import threading
 from dataclasses import dataclass
@@ -356,6 +358,10 @@ class ProcessLocalGroup(dist.ProcessGroup):
         """
         return self._world().pg_names[self]
 
+    @property
+    def group_name(self):
+        return self.pg_name
+
     def getBackendName(self):
         return "threaded"
 
@@ -381,7 +387,7 @@ def _create_threaded_pg(prefix_store, rank, world_size, timeout):
     return pg
 
 
-dist.Backend.register_backend("threaded", _create_threaded_pg)
+dist.Backend.register_backend("threaded", _create_threaded_pg, devices=["cpu", "cuda"])
 
 
 @dataclass

@@ -5,7 +5,7 @@ from typing import List, Optional
 
 import torch
 import torch.distributed._tensor.placement_types as placement_types
-from torch.distributed._tensor.device_mesh import _mesh_resources, DeviceMesh
+from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.distributed_c10d import (
     all_to_all,
     broadcast,

@@ -16,11 +16,6 @@ set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocol
 
 set INSTALLER_DIR=%SCRIPT_HELPERS_DIR%\installation-helpers
 
-
-call %INSTALLER_DIR%\install_mkl.bat
-if errorlevel 1 exit /b
-if not errorlevel 0 exit /b
-
 call %INSTALLER_DIR%\install_magma.bat
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
@@ -32,6 +27,10 @@ if not errorlevel 0 exit /b
 :: Miniconda has been installed as part of the Windows AMI with all the dependencies.
 :: We just need to activate it here
 call %INSTALLER_DIR%\activate_miniconda3.bat
+if errorlevel 1 exit /b
+if not errorlevel 0 exit /b
+
+call pip install mkl-include==2021.4.0 mkl-devel==2021.4.0
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 
@@ -66,6 +65,13 @@ set CUDA_PATH_V%VERSION_SUFFIX%=%CUDA_PATH%
 set CUDNN_LIB_DIR=%CUDA_PATH%\lib\x64
 set CUDA_TOOLKIT_ROOT_DIR=%CUDA_PATH%
 set CUDNN_ROOT_DIR=%CUDA_PATH%
+set NVTOOLSEXT_PATH=C:\Program Files\NVIDIA Corporation\NvToolsExt
+set PATH=%CUDA_PATH%\bin;%CUDA_PATH%\libnvvp;%PATH%
+
+set CUDNN_LIB_DIR=%CUDA_PATH%\lib\x64
+set CUDA_TOOLKIT_ROOT_DIR=%CUDA_PATH%
+set CUDNN_ROOT_DIR=%CUDA_PATH%
+set NVTOOLSEXT_PATH=C:\Program Files\NVIDIA Corporation\NvToolsExt
 set PATH=%CUDA_PATH%\bin;%CUDA_PATH%\libnvvp;%PATH%
 
 :cuda_build_end

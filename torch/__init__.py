@@ -16,6 +16,7 @@ import platform
 import textwrap
 import ctypes
 import inspect
+import threading
 
 # multipy/deploy is setting this import before importing torch, this is the most
 # reliable way we have to detect if we're running within deploy.
@@ -39,7 +40,7 @@ import builtins
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage',
-    'set_default_tensor_type', 'set_default_device',
+    'set_default_tensor_type', 'set_default_device', 'get_default_device',
     'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed', 'seed',
     'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
     'no_grad', 'enable_grad', 'rand', 'randn', 'inference_mode',
@@ -56,8 +57,7 @@ __all__ = [
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
     'SymBool', 'sym_not', 'unravel_index',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'sym_ite', 'compile', 'vmap',
-    'sym_sqrt',
-    'export', 'autocast', 'cond',
+    'export', 'autocast', 'cond', 'GradScaler',
 ]
 
 ################################################################################
@@ -80,6 +80,12 @@ if sys.platform == 'win32':
 
     dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, base_py_dll_path]))
 
+    if all(not os.path.exists(os.path.join(p, 'nvToolsExt64_1.dll')) for p in dll_paths):
+        nvtoolsext_dll_path = os.path.join(
+            os.getenv('NVTOOLSEXT_PATH', os.path.join(pfiles_path, 'NVIDIA Corporation', 'NvToolsExt')), 'bin', 'x64')
+    else:
+        nvtoolsext_dll_path = ''
+
     from .version import cuda as cuda_version
     import glob
     if cuda_version and all(not glob.glob(os.path.join(p, 'cudart64*.dll')) for p in dll_paths):
@@ -90,7 +96,7 @@ if sys.platform == 'win32':
     else:
         cuda_path = ''
 
-    dll_paths.extend(filter(os.path.exists, [cuda_path]))
+    dll_paths.extend(filter(os.path.exists, [nvtoolsext_dll_path, cuda_path]))
 
     kernel32 = ctypes.WinDLL('kernel32.dll', use_last_error=True)
     with_load_library_flags = hasattr(kernel32, 'AddDllDirectory')
@@ -182,8 +188,9 @@ def _load_global_deps() -> None:
             'cusolver': 'libcusolver.so.*[0-9]',
             'cusparse': 'libcusparse.so.*[0-9]',
             'nccl': 'libnccl.so.*[0-9]',
+            'nvtx': 'libnvToolsExt.so.*[0-9]',
         }
-        is_cuda_lib_err = [lib for lib in cuda_libs.values() if(lib.split('.')[0] in err.args[0])]
+        is_cuda_lib_err = [lib for lib in cuda_libs.values() if lib.split('.')[0] in err.args[0]]
         if not is_cuda_lib_err:
             raise err
         for lib_folder, lib_name in cuda_libs.items():
@@ -272,6 +279,12 @@ class SymInt:
     def __ge__(self, other) -> builtins.bool:
         raise AssertionError("type stub not overridden")
 
+    def __add__(self, other) -> "SymInt":
+        raise AssertionError("type stub not overridden")
+
+    def __mul__(self, other) -> "SymInt":
+        raise AssertionError("type stub not overridden")
+
     def __sym_max__(self, other):
         raise AssertionError("type stub not overridden")
 
@@ -334,6 +347,10 @@ class SymFloat:
         raise AssertionError("type stub not overridden")
 
     def __sym_int__(self):
+        raise AssertionError("type stub not overridden")
+
+    def is_integer(self):
+        """Return True if the float is an integer."""
         raise AssertionError("type stub not overridden")
 
     def __repr__(self):
@@ -479,15 +496,33 @@ def sym_min(a, b):
         return b.__sym_min__(a)
     return builtins.min(a, b)  # type: ignore[operator]
 
-# Drop in replacement for math.sqrt
-def sym_sqrt(a):
-    from .overrides import has_torch_function_unary, handle_torch_function
+# Drop in replacement for math.sqrt, math.sin, math.cos etc
+current_module = sys.modules[__name__]
 
-    if has_torch_function_unary(a):
-        return handle_torch_function(sym_sqrt, (a,), a)
-    if hasattr(a, "__sym_sqrt__"):
-        return a.__sym_sqrt__()
-    return math.sqrt(a)
+def _get_sym_math_fn(name):
+    def fn(a):
+        from .overrides import has_torch_function_unary, handle_torch_function
+
+        if has_torch_function_unary(a):
+            return handle_torch_function(fn, (a,), a)
+        if hasattr(a, f"__sym_{name}__"):
+            return getattr(a, f"__sym_{name}__")()
+        return getattr(math, name)(a)
+
+    return fn
+
+for name in ("sqrt", "cos", "cosh", "sin", "sinh", "tan", "tanh", "asin", "acos", "atan"):
+    sym_name = f"_sym_{name}"
+    fn = _get_sym_math_fn(name)
+    fn.__qualname__ = fn.__name__ = sym_name
+    setattr(current_module, sym_name, fn)
+
+# Adding temporary shortcut
+sym_sqrt = current_module._sym_sqrt
+__all__.append("sym_sqrt")
+
+del fn, name, sym_name, current_module  # type: ignore[possibly-undefined]
+
 
 def sym_ite(b, t, f):
     from .overrides import has_torch_function, handle_torch_function
@@ -603,7 +638,23 @@ def is_storage(obj):
     return type(obj) in _storage_classes
 
 
-_GLOBAL_DEVICE_CONTEXT = None
+_GLOBAL_DEVICE_CONTEXT = threading.local()
+
+
+def get_default_device() -> "torch.device":
+    r"""Gets the default ``torch.Tensor`` to be allocated on ``device``"""
+    global _GLOBAL_DEVICE_CONTEXT
+    if hasattr(_GLOBAL_DEVICE_CONTEXT, "device_context"):
+        device = _GLOBAL_DEVICE_CONTEXT.device_context.device
+        if device.index is not None:
+            return device
+        else:
+            # TODO: Call like get_device_index() method corresponding to
+            # each device type
+            return torch.tensor([]).device
+    else:
+        return torch.device("cpu")
+
 
 def set_default_device(device):
     """Sets the default ``torch.Tensor`` to be allocated on ``device``.  This
@@ -626,35 +677,54 @@ def set_default_device(device):
         is causing problems for you, please comment on
         https://github.com/pytorch/pytorch/issues/92701
 
+    .. note::
+
+        This doesn't affect functions that create tensors that share the same memory as the input, like:
+        :func:`torch.from_numpy` and :func:`torch.frombuffer`
+
     Args:
         device (device or string): the device to set as default
 
     Example::
 
         >>> # xdoctest: +SKIP("requires cuda, changes global state")
-        >>> torch.tensor([1.2, 3]).device
+        >>> torch.get_default_device()
         device(type='cpu')
         >>> torch.set_default_device('cuda')  # current device is 0
-        >>> torch.tensor([1.2, 3]).device
+        >>> torch.get_default_device()
         device(type='cuda', index=0)
+        >>> torch.set_default_device('cuda')
+        >>> torch.cuda.set_device('cuda:1')  # current device is 1
+        >>> torch.get_default_device()
+        device(type='cuda', index=1)
         >>> torch.set_default_device('cuda:1')
-        >>> torch.tensor([1.2, 3]).device
+        >>> torch.get_default_device()
         device(type='cuda', index=1)
 
     """
     global _GLOBAL_DEVICE_CONTEXT
-    if _GLOBAL_DEVICE_CONTEXT is not None:
-        _GLOBAL_DEVICE_CONTEXT.__exit__(None, None, None)
+    if hasattr(_GLOBAL_DEVICE_CONTEXT, "device_context"):
+        device_context = _GLOBAL_DEVICE_CONTEXT.device_context
+        if device_context is not None:
+            device_context.__exit__(None, None, None)
+
     if device is None:
-        _GLOBAL_DEVICE_CONTEXT = None
-        return
-    from torch.utils._device import DeviceContext
-    _GLOBAL_DEVICE_CONTEXT = DeviceContext(device)
-    _GLOBAL_DEVICE_CONTEXT.__enter__()
+        device_context = None
+    else:
+        from torch.utils._device import DeviceContext
+        device_context = DeviceContext(device)
+        device_context.__enter__()
+    _GLOBAL_DEVICE_CONTEXT.device_context = device_context
 
 
 def set_default_tensor_type(t):
-    r"""Sets the default ``torch.Tensor`` type to floating point tensor type
+    r"""
+    .. warning::
+
+        This function is deprecated as of PyTorch 2.1, please use :func:`torch.set_default_dtype()` and
+        :func:`torch.set_default_device()` as alternatives.
+
+    Sets the default ``torch.Tensor`` type to floating point tensor type
     ``t``. This type will also be used as default floating point type for
     type inference in :func:`torch.tensor`.
 
@@ -1398,7 +1468,7 @@ def manager_path():
         raise RuntimeError("Unable to find torch_shm_manager at " + path)
     return path.encode('utf-8')
 
-from torch.amp import autocast
+from torch.amp import autocast, GradScaler
 
 # Initializing the extension shadows the built-in python float / int classes;
 # store them for later use by SymInt / SymFloat.
@@ -1420,7 +1490,7 @@ if TYPE_CHECKING:
     from torch._C._VariableFunctions import *  # type: ignore[assignment, misc] # noqa: F403
     # Fixup segment_reduce visibility
     _segment_reduce = segment_reduce
-    del segment_reduce
+    del segment_reduce  # noqa: F821
 
 # Ops not to be exposed in `torch` namespace,
 # mostly helper ops.
@@ -1443,6 +1513,15 @@ for name in dir(_C._VariableFunctions):
         __all__.append(name)
 
 
+################################################################################
+# Add torch.dtype instances to the public API
+################################################################################
+
+import torch
+
+for attribute in dir(torch):
+    if isinstance(getattr(torch, attribute), torch.dtype):
+        __all__.append(attribute)
 
 ################################################################################
 # Import TorchDynamo's lazy APIs to avoid circular dependenices
@@ -1490,6 +1569,7 @@ def _assert(condition, message):
 from torch import cuda as cuda
 from torch import cpu as cpu
 from torch import mps as mps
+from torch import xpu as xpu
 from torch import autograd as autograd
 from torch.autograd import (
     no_grad as no_grad,

@@ -48,7 +48,7 @@ def test_delete_portal_tensor(train, checkpoint, setup_rpc):
             skip_tracker = current_skip_tracker()
 
         # Get the current portal.
-        portal = list(skip_tracker.portals.values())[0]
+        portal = next(iter(skip_tracker.portals.values()))
 
         if tensor_life == 0:
             return portal.tensor_life == 0 and portal.tensor is None

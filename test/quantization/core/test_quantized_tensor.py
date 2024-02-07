@@ -139,6 +139,13 @@ def _compress_uniform_simplified(X, bit_rate, xmin, xmax, fp16_scale_bias=True):
     return Xq, loss
 
 class TestQuantizedTensor(TestCase):
+    def test_qtensor_equal(self):
+        # ASAN regression test reported in https://github.com/pytorch/pytorch/issues/116087
+        x = torch.rand(5)
+        x_q = torch.quantize_per_tensor(x, 0.1, 10, torch.quint4x2)
+        y_q = torch.quantize_per_tensor(x, 0.1, 10, torch.quint4x2)
+        self.assertTrue(torch.equal(x_q, y_q))
+
     def test_per_tensor_qtensor_to_memory_format(self):
         n = np.random.randint(1, 10)
         c = np.random.randint(2, 10)

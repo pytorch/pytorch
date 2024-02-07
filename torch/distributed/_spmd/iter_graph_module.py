@@ -561,7 +561,7 @@ class IterGraph(fx.Graph):
                 delete_user_cb,
                 propagate_meta=propagate_meta,
             )
-        return ret
+        return ret  # type: ignore[possibly-undefined]
 
     def node_add_user(self, node: fx.Node, user: Any) -> None:
         for graph in self._all_graphs:
@@ -607,8 +607,8 @@ class IterGraph(fx.Graph):
                 "_foreach_add_",
             ):
                 step_node = node
-                self.node_add_user(optim_node, output_node)
-                self.node_add_user(step_node, optim_node)
+                self.node_add_user(optim_node, output_node)  # type: ignore[possibly-undefined]
+                self.node_add_user(step_node, optim_node)  # type: ignore[possibly-undefined]
 
     def defunctionalize_optim(self) -> None:
         # TODO: remove this API after DCE is not used with IterGraph
@@ -624,8 +624,8 @@ class IterGraph(fx.Graph):
                     "_foreach_add_",
                 ):
                     step_node = node
-                    optim_node.users.pop(output_node, None)
-                    step_node.users.pop(optim_node, None)
+                    optim_node.users.pop(output_node, None)  # type: ignore[possibly-undefined]
+                    step_node.users.pop(optim_node, None)  # type: ignore[possibly-undefined]
 
     def freeze_cross_iter_movement(self) -> None:
         self._freeze_cross_iter_movement = True
