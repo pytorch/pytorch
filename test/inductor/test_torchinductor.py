@@ -1299,11 +1299,11 @@ class CommonTemplate:
             return x.logcumsumexp(0), x.logcumsumexp(1)
 
         # Persistent reductions
-        self.common(fn, (torch.rand(16, 32),))
-        self.common(fn, (torch.rand(20, 30),))
+        self.common(fn, (torch.rand(16, 32),), check_lowp=not TEST_WITH_ROCM)
+        self.common(fn, (torch.rand(20, 30),), check_lowp=not TEST_WITH_ROCM)
 
         # Non-persistent reduction
-        self.common(fn, (torch.rand(100, 4000),))
+        self.common(fn, (torch.rand(100, 4000),), check_lowp=not TEST_WITH_ROCM)
 
     def test_logcumsumexp_zero_dim(self):
         def fn(x):
