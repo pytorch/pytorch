@@ -663,8 +663,7 @@ static PyObject* get_autocast_xla_dtype(PyObject* _unused, PyObject* arg) {
 }
 
 static PyObject* clear_autocast_cache(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  {
+  HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil;
     at::autocast::clear_cache();
   }
