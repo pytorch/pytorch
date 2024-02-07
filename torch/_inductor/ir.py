@@ -4314,6 +4314,8 @@ class AccumulateGrad(ExternKernel):
         self.python_kernel_name = "inductor_ops.accumulate_grad_"
         self.cpp_kernel_name = "torch::inductor::accumulate_grad_"
         mark_node_as_mutating(self, variable)
+        # never reuse gradient buffers since they might be stolen
+        V.graph.never_reuse_buffers.add(new_grad.data.get_name())
 
 
 class ScatterFallback(ExternKernel):
