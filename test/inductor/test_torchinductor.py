@@ -1211,7 +1211,6 @@ class CommonTemplate:
         self.common(fn, (torch.rand((16, 16, 352, 352), dtype=torch.float16),))
         self.common(fn, (torch.rand((14923), dtype=torch.float16),))
 
-    @skipCUDAIf(TEST_WITH_ROCM, "Numerical issues on ROCm")
     def test_split_cumsum(self):
         def fn(a):
             return torch.cumsum(a, -1)
@@ -1225,11 +1224,11 @@ class CommonTemplate:
             # Use low=0 since when the mean value is 0, cumsum at all points
             # tends towards zero which makes the relative error term blow up
             inp = make_tensor(10, 3, 352, 352, low=0, dtype=dtype, device=self.device)
-            self.common(fn, (inp.view(-1),), rtol=1e-5, atol=1e-5)
-            self.common(fn, (inp.view(10, -1),), rtol=1e-5, atol=1e-5)
+            self.common(fn, (inp.view(-1),), rtol=1e-5, atol=1e-5, check_lowp=False)
+            self.common(fn, (inp.view(10, -1),), rtol=1e-5, atol=1e-5, check_lowp=False)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
-    @skipCUDAIf(TEST_WITH_ROCM, "Numerical issues on ROCm")
+    @skipCUDAIf(TEST_WITH_ROCM, "Computation not done in float on ROCm")
     def test_split_cumsum_low_prec(self):
         if self.device == "cpu":
             raise unittest.SkipTest("ir.Scan nyi on CPU")
@@ -1241,9 +1240,9 @@ class CommonTemplate:
             fn,
             (torch.rand((10, 3, 352, 352), dtype=torch.float16),),
             reference_in_float=True,
+            check_lowp=False,
         )
 
-    @skipCUDAIf(TEST_WITH_ROCM, "Numerical issues on ROCm")
     def test_consecutive_split_cumsum(self):
         def fn(a, b):
             a = a.view(-1)
@@ -1252,9 +1251,8 @@ class CommonTemplate:
 
         a = make_tensor(10, 3, 352, 352, low=0, dtype=torch.float32, device=self.device)
         b = make_tensor(10, 3, 352, 352, low=0, dtype=torch.float64, device=self.device)
-        self.common(fn, (a, b), rtol=1e-5, atol=1e-5)
+        self.common(fn, (a, b), rtol=1e-5, atol=1e-5, check_lowp=False)
 
-    @skipCUDAIf(TEST_WITH_ROCM, "Numerical issues on ROCm")
     def test_split_cumprod(self):
         def fn(a):
             return torch.cumprod(a, -1)
@@ -1263,10 +1261,10 @@ class CommonTemplate:
             inp = _large_cumprod_input(
                 (10, 10000), dim=1, dtype=dtype, device=self.device
             )
-            self.common(fn, (inp,), atol=1e-5, rtol=1e-4)
+            self.common(fn, (inp,), atol=1e-5, rtol=1e-4, check_lowp=False)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
-    @skipCUDAIf(TEST_WITH_ROCM, "Numerical issues on ROCm")
+    @skipCUDAIf(TEST_WITH_ROCM, "Computation not done in float on ROCm")
     def test_split_cumprod_low_prec(self):
         if self.device == "cpu":
             raise unittest.SkipTest("ir.Scan nyi on CPU")
@@ -1282,9 +1280,9 @@ class CommonTemplate:
                 fn,
                 (inp,),
                 reference_in_float=True,
+                check_lowp=False,
             )
 
-    @skipCUDAIf(TEST_WITH_ROCM, "Numerical issues on ROCm")
     def test_consecutive_split_cumprod(self):
         def fn(a, b):
             return torch.cumprod(a, 0) + torch.cumprod(b, 0)
@@ -1295,7 +1293,7 @@ class CommonTemplate:
         b = _large_cumprod_input(
             (10000,), dim=0, dtype=torch.float64, device=self.device
         )
-        self.common(fn, (a, b), atol=1e-5, rtol=1e-5)
+        self.common(fn, (a, b), atol=1e-5, rtol=1e-5, check_lowp=False)
 
     def test_embedding_bag_byte_unpack(self):
         if self.device != "cpu":

@@ -17,6 +17,21 @@ from torch.utils._sympy.functions import CeilDiv
 
 
 class TritonSplitScanKernel(TritonKernel):
+    """Generates a triton kernel that supports ops.scan calls while also splitting
+    the reduction dimension over multiple triton programs.
+
+    For this kernel, loop numels will always take the form ``(xdim, rdim)``
+    and the grid has the shape ``(CeilDiv(rdim, RBLOCK), xdim)``. Communication
+    between blocks occurs within a global memory workspace buffer, which
+    must be zero-filled before launching the kernel.
+
+    Note that generation for ``ops.reduction`` is not supported.
+
+    For details of the communication strategy, see
+    https://research.nvidia.com/publication/2016-03_single-pass-parallel-prefix-scan-decoupled-look-back
+
+    """
+
     def __init__(
         self,
         *groups,
@@ -85,7 +100,6 @@ class TritonSplitScanKernel(TritonKernel):
         cse_compute = functools.partial(self.cse.generate, self.compute)
 
         assert len(self.numels) == 2, "Unexpected tiling"
-        # TODO: Enforce this in split_scan heuristic
         min_rblock = config.triton.min_split_scan_rblock
         max_blocks = prod(self.numels[:-1]) * CeilDiv(self.numels[-1], min_rblock)
         nbytes = scratch_nbytes_per_block * max_blocks

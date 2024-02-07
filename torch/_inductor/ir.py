@@ -1700,6 +1700,10 @@ class Scan(Loops):
         )
         scan_type = Scan if num_splits <= 1 else SplitScan
 
+        if num_splits > 1 and torch.version.hip is not None:
+            # Fallback for split-scan on ROCm
+            return None
+
         def reindex(index, scan_index):
             assert len(scan_index) == len(scan_ranges)
             assert len(index) == len(pointwise_ranges)

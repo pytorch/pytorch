@@ -2904,7 +2904,7 @@ class TritonKernel(Kernel):
         )
 
         if self.args.workspace_arg is not None:
-            wrapper.make_free_by_names(["workspace"])
+            wrapper.writeline(wrapper.make_free_by_names(["workspace"]))
 
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code

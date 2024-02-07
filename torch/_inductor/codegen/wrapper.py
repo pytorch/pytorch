@@ -1107,7 +1107,6 @@ class WrapperCodeGen(CodeGen):
         return SymbolicCallArg(expr, tree.numel)
 
     def generate_workspace_allocation(self, nbytes, device, zero_fill):
-        function = "zeros" if zero_fill else "empty"
         line = self.make_allocation(
             "workspace", device, torch.uint8, shape=(nbytes,), stride=(1,)
         )
