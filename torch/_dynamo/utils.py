@@ -17,6 +17,7 @@ import math
 import operator
 import os
 import pstats
+import re
 import subprocess
 import sys
 import textwrap
@@ -761,10 +762,24 @@ def clone_inputs(example_inputs):
     return res
 
 
+def skip_frame_if_in_functorch_mode(val: torch.Tensor):
+    try:
+        val.data_ptr()  # will throw for functorch tensors
+    except RuntimeError as e:
+        from .exc import SkipFrame
+
+        # This will be GradTrackingTensor/BatchedTensor/etc
+        functorch_subclass_name = re.sub(r"\(.*", "", repr(val))
+        raise SkipFrame(
+            f"torch.compile cannot be run in context: {functorch_subclass_name}"
+        ) from e
+
+
 @contextmanager
 def preserve_rng_state():
     with torch.utils._python_dispatch._disable_current_modes():
         rng_state = torch.clone(torch.random.get_rng_state())
+        skip_frame_if_in_functorch_mode(rng_state)
         if torch.cuda.is_available():
             cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
     try:
@@ -2066,18 +2081,18 @@ def defake(x):
     size: "torch._prims_common.ShapeType"
     stride: "torch._prims_common.StrideType"
     if x._has_symbolic_sizes_strides:
-        size = [
-            s.node.shape_env.size_hint(s.node.expr)
-            if isinstance(s, torch.SymInt)
-            else s
-            for s in x.size()
-        ]
-        stride = [
-            s.node.shape_env.size_hint(s.node.expr)
-            if isinstance(s, torch.SymInt)
-            else s
-            for s in x.stride()
-        ]
+        size = []
+        for s in x.size():
+            if isinstance(s, torch.SymInt):
+                size.append(s.node.shape_env.size_hint(s.node.expr))
+            else:
+                size.append(s)
+        stride = []
+        for s in x.stride():
+            if isinstance(s, torch.SymInt):
+                stride.append(s.node.shape_env.size_hint(s.node.expr))
+            else:
+                stride.append(s)
     else:
         size = x.size()
         stride = x.stride()

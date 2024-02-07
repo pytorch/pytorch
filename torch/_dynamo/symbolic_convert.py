@@ -1493,7 +1493,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             val = seq.unpack_var_sequence(self)
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
-        assert len(val) == inst.argval
+        if len(val) != inst.argval:
+            unimplemented("UNPACK_SEQUENCE length mismatch")
         for i in reversed(val):
             self.push(i)
 
@@ -2032,7 +2033,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         _step_logger()(
             logging.INFO,
             f"torchdynamo start tracing {f_code.co_name} {code_options['co_filename']}:{code_options['co_firstlineno']}",
-            stack_info=True,
         )
         super().__init__(
             output=OutputGraph(
