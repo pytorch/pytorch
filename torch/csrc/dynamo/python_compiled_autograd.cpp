@@ -382,7 +382,8 @@ variable_list compiled_autograd(
       // at::getStepCallbacksUnlessEmpty(at::RecordScope::BACKWARD_FUNCTION);
       // if (C10_UNLIKELY(step_callbacks.has_value())) { ... }
 
-      variable_list inputs = std::move(input_buffers.lookup(call.node.get()).buffer);
+      variable_list inputs =
+          std::move(input_buffers.lookup(call.node.get()).buffer);
       input_buffers.erase(call.node.get());
 
       if (!call.tensor_pre_hooks.empty()) {
