@@ -3957,7 +3957,9 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_BCEWithLogitsLoss,
                skips=(
                    # No channels_last support for loss functions.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   # see #119108: tolerance issue
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float16]),)
                ),
     ModuleInfo(torch.nn.CrossEntropyLoss,
                module_inputs_func=module_inputs_torch_nn_CrossEntropyLoss,
