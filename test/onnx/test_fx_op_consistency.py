@@ -1927,6 +1927,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "linalg.multi_dot": [3e-2, 1e-3],
         "linalg.vecdot": [1e-2, 2e-2],
         "linspace": [2e-2, 2e-3],
+        "masked.var": [2e-2, 1e-3],
         "matmul": [2e-2, 6e-2],
         "nn.functional.batch_norm": [3e-2, 1e-3],
         "nn.functional.binary_cross_entropy": [3e-2, 1e-3],
