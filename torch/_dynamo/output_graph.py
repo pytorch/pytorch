@@ -343,7 +343,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self._current_tx: List[InstructionTranslatorBase] = []
         self.cleanups: List[CleanupHook] = []
         self.should_exit = False
-        self.random_values_var = None
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
         self.torch_function_enabled = torch._C._is_torch_function_enabled()
         # Tracks if the output graph has a user defined allowed function in the
@@ -372,8 +371,16 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # i.e. buffers and parameters.
         self.dynamo_flat_name_to_original_fqn: Dict[str, str] = {}
 
-    # This gets its own helper function so guards DEBUG logs are more
-    # informative
+        # All calls to random() are replaced with a single call to __gen_rand_values
+        # functions that returns a tuple of random values for each original call.
+        # random_calls tracks calls to random() and random_values_var stores the name of
+        # the variable that stores __gen_rand_values results.
+        self.random_calls: List[
+            Tuple[Callable[..., object], Tuple[object, ...], Dict[str, object]]
+        ] = []
+        self.random_values_var = None
+
+    # This gets its own helper function so guards DEBUG logs are more informative
     def init_ambient_guards(self):
         # Register a SHAPE_ENV guard to make sure we setup shape guards
         # that show up in ShapeEnv
@@ -494,6 +501,12 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             out if out is not None else self.tracing_context.global_context.global_state
         )
 
+        # TODO - Consider having a torch level API for torch_function_state. As
+        # of now, we create a ref cycle by passing the
+        # output.set_torch_function_state to
+        # output.tracing_context.global_context.global_state. In the interim,
+        # the problem can be solved by manually set
+        # output.tracing_context.global_context.global_state to None at cleanup.
         global_state["torch_function_enabled"] = (
             self.set_torch_function_state,
             self.torch_function_enabled,
@@ -879,11 +892,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             stack_values.extend([v] * len(val_to_names[v]))
 
         # to handle random calls
-        if len(tx.random_calls) > 0:
+        if len(self.random_calls) > 0:
             append_prefix_insts()
             random_calls_instructions = []
             self.random_values_var = self.new_var("random_values")
-            rand_fn = disable(_get_gen_rand_values_fn(tx.random_calls))
+            rand_fn = disable(_get_gen_rand_values_fn(self.random_calls))
             rand_fn_name = self.install_global("__gen_rand_values", rand_fn)
             codegen = PyCodegen(tx, root)
             random_calls_instructions.extend(
@@ -1412,7 +1425,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     def cleanup(self) -> None:
         # There is a reference cycle between tracer and OutputGraph, causing
         # some of the tensor objects to be held alive for longer than necessary.
-
         self.root_tx = None
         self.nn_modules.clear()
         self.param_name_to_source = None
@@ -1425,6 +1437,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.side_effects.clear()
         self.register_finalizer_fns.clear()
         self.dynamo_flat_name_to_original_fqn.clear()
+        self.tracing_context.clear()
 
     def set_torch_function_state(self, enabled: bool) -> None:
         self.torch_function_enabled = enabled
@@ -1656,8 +1669,8 @@ class SubgraphTracer(fx.Tracer):
         is_retracing = False
         if tx.f_code is not self._cur_code:
             orig_graphmodule_maybe = code_context.get_context(tx.f_code).get(
-                "orig_graphmodule", None
-            )
+                "orig_graphmodule", lambda: None
+            )()
             if isinstance(orig_graphmodule_maybe, torch.fx.GraphModule):
                 is_retracing = True
                 self._orig_gm_meta = [
