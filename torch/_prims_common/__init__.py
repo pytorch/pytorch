@@ -96,6 +96,8 @@ CustomOutParamAnnotation = "__custom_out_param__"
 
 
 def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     if len(a) != len(b):
         return False
 
@@ -105,7 +107,9 @@ def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
             # with each other
             if isinstance(y, torch.SymInt):
                 continue
-        if x != y:
+        # TODO: this is actually kind of weird, why does this one need to be
+        # size oblivious
+        if guard_size_oblivious(x != y):
             return False
 
     return True
