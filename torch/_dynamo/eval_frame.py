@@ -1,9 +1,15 @@
 # mypy: disable-error-code="method-assign"
 
+"""
+Functions in this file are responsible for modifying the eval frame
+handler at RUNTIME.  Therefore, all functions in this file are hot.
+Functions that only execute at compile time should be placed
+in torch._dynamo.convert_frame.
+"""
+
 from __future__ import annotations
 
 import contextlib
-import dis
 import functools
 import inspect
 import logging
@@ -37,6 +43,7 @@ import torch.utils.checkpoint
 from torch import _guards
 from torch._subclasses import fake_tensor
 from torch.export import Constraint
+from torch.export.dynamic_shapes import _process_dynamic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -44,7 +51,6 @@ from torch.fx.experimental.symbolic_shapes import (
     StatelessSymbolicContext,
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
-from torch.nn.parallel.distributed import DistributedDataParallel
 
 from ..fx import GraphModule
 from .backends.registry import CompilerFn, lookup_backend
@@ -75,7 +81,6 @@ from .utils import common_constant_types, compile_times
 log = logging.getLogger(__name__)
 
 from torch._dispatch.python import enable_python_dispatcher
-from torch.utils._python_dispatch import _disable_current_modes
 
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
 null_context = contextlib.nullcontext
@@ -91,7 +96,6 @@ class Unset(Enum):
 
 unset = Unset.token
 
-compile_lock = threading.RLock()
 guarded_backend_cache = threading.local()
 cached_backends: Dict[int, CompilerFn] = {}
 
@@ -182,12 +186,7 @@ def _debug_get_cache_entry_list(
     """
     if callable(code):
         code = code.__code__
-    cache_head = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(code)
-    cache_list = []
-    while cache_head is not None:
-        cache_list.append(cache_head)
-        cache_head = cache_head.next
-    return cache_list
+    return torch._C._dynamo.eval_frame._debug_get_cache_entry_list(code)
 
 
 class OptimizedModule(torch.nn.Module):
@@ -552,71 +551,6 @@ class DisableContext(_TorchDynamoContext):
         super().__init__(callback=None)
 
 
-def first_real_inst_idx(code):
-    if sys.version_info < (3, 11):
-        return 0
-    for inst in dis.get_instructions(code):
-        if inst.opname == "RESUME":
-            return inst.offset // 2
-    raise RuntimeError("RESUME instruction not found in code")
-
-
-def catch_errors_wrapper(callback, hooks: Hooks):
-    @functools.wraps(callback)
-    def catch_errors(frame, cache_entry, frame_state):
-        assert frame_state is not None
-
-        is_skipfile = skipfiles.check(frame.f_code)
-        if (
-            # TODO: the first condition is not covered by any test
-            frame.f_lasti >= first_real_inst_idx(frame.f_code)
-            or is_skipfile
-            or config.disable
-        ):
-            if log.isEnabledFor(logging.DEBUG):
-                skip_reason = (
-                    "traced frame already"
-                    if frame.f_lasti >= first_real_inst_idx(frame.f_code)
-                    else "in skipfiles"
-                    if skipfiles.check(frame.f_code)
-                    else "dynamo tracing is disabled"
-                )
-                if not is_skipfile or config.verbose:
-                    log.debug(
-                        "skipping: %s (reason: %s, file: %s)",
-                        frame.f_code.co_name,
-                        skip_reason,
-                        frame.f_code.co_filename,
-                    )
-            return None
-        if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
-            # nametuple constructor
-            return None
-        if config.optimize_ddp:
-            ddp_module = DistributedDataParallel._get_active_ddp_module()
-            if ddp_module:
-                with compile_lock:
-                    from torch._dynamo.backends.distributed import DDPOptimizer
-
-                    ddp_optimizer = DDPOptimizer(
-                        bucket_bytes_cap=ddp_module.bucket_bytes_cap,
-                        backend_compile_fn=callback._torchdynamo_orig_callable,
-                    )
-                    assert hasattr(
-                        callback, "_clone_with_backend"
-                    ), "DDPOptimizer only supports callback fns that know how to clone themselves."
-                    hijacked_callback = callback._clone_with_backend(
-                        ddp_optimizer.compile_fn,
-                    )
-                    return hijacked_callback(frame, cache_entry, hooks, frame_state)
-
-        with compile_lock, _disable_current_modes():
-            return callback(frame, cache_entry, hooks, frame_state)
-
-    catch_errors._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
-    return catch_errors
-
-
 def _optimize_catch_errors(
     compile_fn,
     hooks: Hooks,
@@ -626,7 +560,7 @@ def _optimize_catch_errors(
     compiler_config=None,
 ):
     return OptimizeContext(
-        catch_errors_wrapper(compile_fn, hooks),
+        convert_frame.catch_errors_wrapper(compile_fn, hooks),
         backend_ctx_ctor=backend_ctx_ctor,
         first_ctx=True,
         export=export,
@@ -1161,6 +1095,7 @@ def export(
     ] = None,
     tracing_mode: str = "symbolic",
     constraints: Optional[List[Constraint]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
     assume_static_by_default: bool = False,
     same_signature: bool = True,
     disable_constraint_solver: bool = False,
@@ -1187,6 +1122,30 @@ def export(
 
         tracing_mode (str): If "symbolic", turn on dynamic shapes support. Default is "symbolic".
 
+        constraints: [DEPRECATED: use ``dynamic_shapes`` instead, see below]
+         An optional list of constraints on the dynamic arguments
+         that specify their possible range of shapes. By default, shapes of
+         input torch.Tensors are assumed to be static. If an input torch.Tensor
+         is expected to have dynamic shapes, please use :func:`dynamic_dim`
+         to define :class:`Constraint` objects that specify the dynamics and the possible
+         range of shapes. See :func:`dynamic_dim` docstring for examples on
+         how to use it.
+
+        dynamic_shapes:
+         An optional argument where the type should either be:
+         1) a dict from argument names of ``f`` to their dynamic shape specifications,
+         2) a tuple that specifies dynamic shape specifications for each input in original order.
+         If you are specifying dynamism on keyword args, you will need to pass them in the order that
+         is defined in the original function signature.
+
+         The dynamic shape of a tensor argument can be specified as either
+         (1) a dict from dynamic dimension indices to :func:`Dim` types, where it is
+         not required to include static dimension indices in this dict, but when they are,
+         they should be mapped to None; or (2) a tuple / list of :func:`Dim` types or None,
+         where the :func:`Dim` types correspond to dynamic dimensions, and static dimensions
+         are denoted by None. Arguments that are dicts or tuples / lists of tensors are
+         recursively specified by using mappings or sequences of contained specifications.
+
         same_signature (bool): If True, rewrite the returned graph's signature to be the same as f.
 
         disable_constraint_solver (bool): Whether the dim constraint solver must be disabled.
@@ -1209,6 +1168,17 @@ def export(
     _assume_static_by_default = assume_static_by_default
 
     def inner(*args, **kwargs):
+        nonlocal constraints
+        if constraints is not None:
+            warnings.warn(
+                "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
+                "and will not be supported in the future. "
+                "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        else:
+            constraints = _process_dynamic_shapes(_f, args, kwargs, dynamic_shapes)
         f = _f
         assume_static_by_default = _assume_static_by_default
         check_if_dynamo_supported()
@@ -1430,7 +1400,7 @@ def export(
                 example_fake_inputs,
                 graph_captured_input,
                 graph_captured_result,
-                result_traced,
+                result_traced,  # type: ignore[possibly-undefined]
                 flat_args_dynamic_dims,
             )
         # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check
@@ -1531,7 +1501,7 @@ class TorchPatcher:
         }
 
         excluded_single_tensor = {
-            radam,  # https://github.com/pytorch/pytorch/issues/117807
+            radam,  # https://github.com/pytorch/pytorch/issues/118230
         }
 
         for opt_mod in optimizer_modules:

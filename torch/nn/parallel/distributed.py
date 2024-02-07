@@ -866,18 +866,19 @@ class DistributedDataParallel(Module, Joinable):
 
         self._lazy_init_ran = False
 
-        # Register the AccumulateGrad post hooks even if DDP is not compiled. This
-        # can avoid compiling the hooks twice. The Python hooks will be
-        # deregistered later if DDP is not compiled.
+        # Register the AccumulateGrad post hooks if optimize_ddp is
+        # True. The hooks will be deregistered if compiled_autograd is not
+        # enabled.
         self._accum_grad_hooks: List[RemovableHandle] = []
-        self._ddp_python_hook = torch._dynamo.config.ddp_python_hook
-        self._force_to_disable_reducer = False
-        if self._ddp_python_hook:
-            if torch._dynamo.config.optimize_ddp:
-                raise RuntimeError(
-                    "Only one of `torch._dynamo.config.optimize_ddp` and "
-                    "`torch._dynamo.config.ddp_python_hook` should be True."
-                )
+        optimize_ddp = torch._dynamo.config._get_optimize_ddp_mode()
+        self._use_python_reducer = optimize_ddp in (
+            "python_reducer",
+            "python_reducer_without_compiled_forward",
+        )
+        self._force_to_disable_cpp_reducer = (
+            optimize_ddp == "python_reducer_without_compiled_forward"
+        )
+        if self._use_python_reducer:
             self._register_accum_grad_hook()
 
     def _register_accum_grad_hook(self):
@@ -1400,7 +1401,7 @@ class DistributedDataParallel(Module, Joinable):
             DistributedDataParallel._active_ddp_module = None
 
     def _run_ddp_forward(self, *inputs, **kwargs):
-        if self._ddp_python_hook:
+        if self._use_python_reducer:
             return self.module(*inputs, **kwargs)  # type: ignore[index]
         else:
             with self._inside_ddp_forward():
@@ -1433,14 +1434,16 @@ class DistributedDataParallel(Module, Joinable):
         self._setup_in_backward_optimizers()
         self._lazy_init_ran = True
 
-    def _should_disable_reducer(self) -> bool:
-        return torch._utils.is_compiling() or self._force_to_disable_reducer
+    def _should_disable_cpp_reducer(self) -> bool:
+        return self._use_python_reducer and (
+            torch._utils.is_compiling() or self._force_to_disable_cpp_reducer
+        )
 
     def _pre_forward(self, *inputs, **kwargs):
-        if self._ddp_python_hook and self._should_disable_reducer():
+        if self._should_disable_cpp_reducer():
             return inputs, kwargs
 
-        # Remove the acc_gradient hooks because we are not compiling DDP.
+        # Disable the python reducer if compiled_autograd is not enabled.
         if self._accum_grad_hooks:
             for index, h in enumerate(self._accum_grad_hooks):
                 h.remove()
@@ -1512,7 +1515,7 @@ class DistributedDataParallel(Module, Joinable):
             return inputs, kwargs
 
     def _post_forward(self, output):
-        if self._ddp_python_hook and self._should_disable_reducer():
+        if self._should_disable_cpp_reducer():
             return output
 
         if self._delay_all_reduce_all_params:

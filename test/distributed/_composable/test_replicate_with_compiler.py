@@ -96,17 +96,16 @@ class ReplicateTest(MultiProcessTestCase):
         else:
             device = torch.device("cpu")
 
-        torch._dynamo.config.ddp_python_hook = True
-        torch._dynamo.config.optimize_ddp = False
+        torch._dynamo.config.optimize_ddp = (
+            "python_reducer_without_compiled_forward"
+            if no_compile_forward
+            else "python_reducer"
+        )
         torch.manual_seed(123)
         model = Net().to(device)
         input = torch.randn([1, DIM], device=device)
 
-        if no_compile_forward:
-            compiled_model = replicate(deepcopy(model))
-            replicate.state(compiled_model)._ddp._force_to_disable_reducer = True
-        else:
-            compiled_model = torch.compile(replicate(deepcopy(model)), fullgraph=True)
+        compiled_model = torch.compile(replicate(deepcopy(model)), fullgraph=True)
         compiled_optim = torch.optim.Adam(compiled_model.parameters())
         model = replicate(model)
         optim = torch.optim.Adam(model.parameters())
