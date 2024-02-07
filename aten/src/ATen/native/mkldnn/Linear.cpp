@@ -190,6 +190,9 @@ static Tensor mkldnn_linear_pointwise(
   auto input = input_t.contiguous();
   auto input_size = input.sizes();
 
+  // Make sure input has default contiguous strides if it's contiguous tensors for better performance.
+  input = may_convert_to_default_contiguous_strides(input);
+
   const int64_t dim = input.dim();
   auto input_reshaped =
       dim == 2 ? input : input.reshape({-1, input.size(input.dim() - 1)});

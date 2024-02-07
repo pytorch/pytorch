@@ -2,7 +2,6 @@
 from typing import List, Tuple
 
 import torch
-from torch.distributed._tensor.device_mesh import DeviceMesh
 
 from torch.distributed._tensor.op_schema import (
     _is_inplace_op,
@@ -30,6 +29,7 @@ from torch.distributed._tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.distributed.device_mesh import DeviceMesh
 
 
 aten = torch.ops.aten
@@ -351,6 +351,8 @@ pointwise_ops = [
     aten.sign_.default,
     aten.signbit.default,
     aten.signbit.out,
+    aten.silu.default,
+    aten.silu.out,
     aten.sin.default,
     aten.sin.out,
     aten.sin_.default,
@@ -395,6 +397,7 @@ pointwise_ops = [
     # please keep the entries below alphabetically sorted
     aten.gelu_backward.default,
     aten.sigmoid_backward.default,
+    aten.silu_backward.default,
     aten.tanh_backward.default,
     aten.threshold_backward.default,
 ]
@@ -487,7 +490,7 @@ def pointwise_strategy(
 
         pointwise_strategy.strategies.append(
             PlacementStrategy(
-                output_spec=DTensorSpec(
+                output_specs=DTensorSpec(
                     mesh=mesh,
                     placements=tuple(out_placements),
                 ),
@@ -527,6 +530,7 @@ for_each_ops = [
     aten._foreach_addcmul_.Scalar,
     aten._foreach_addcmul_.ScalarList,
     aten._foreach_addcmul_.Tensor,
+    aten._foreach_div_.List,
     aten._foreach_div_.ScalarList,
     aten._foreach_lerp_.Scalar,
     aten._foreach_maximum_.List,
@@ -545,7 +549,9 @@ for_each_ops = [
 ]
 
 for_each_linearity_ops = [
+    aten._foreach_add.Scalar,
     aten._foreach_add_.Scalar,
+    aten._foreach_add_.ScalarList,
     aten._foreach_add.List,
     aten._foreach_add_.List,
 ]
@@ -601,7 +607,7 @@ def foreach_list_strategy(
                 )
             strategies.append(
                 PlacementStrategy(
-                    output_spec=spec_to_follow, redistribute_cost=redistribute_costs
+                    output_specs=spec_to_follow, redistribute_cost=redistribute_costs
                 )
             )
 

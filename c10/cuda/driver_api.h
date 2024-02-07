@@ -28,13 +28,14 @@
   _(cuMemCreate)                  \
   _(cuGetErrorString)
 
-#define C10_NVML_DRIVER_API(_)        \
-  _(nvmlInit_v2)                      \
-  _(nvmlDeviceGetHandleByPciBusId_v2) \
+#define C10_NVML_DRIVER_API(_)           \
+  _(nvmlInit_v2)                         \
+  _(nvmlDeviceGetHandleByPciBusId_v2)    \
+  _(nvmlDeviceGetNvLinkRemoteDeviceType) \
+  _(nvmlDeviceGetNvLinkRemotePciInfo_v2) \
   _(nvmlDeviceGetComputeRunningProcesses)
 
-namespace c10 {
-namespace cuda {
+namespace c10::cuda {
 
 struct DriverAPI {
 #define CREATE_MEMBER(name) decltype(&name) name##_;
@@ -45,5 +46,4 @@ struct DriverAPI {
   static void* get_nvml_handle();
 };
 
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda

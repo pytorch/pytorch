@@ -91,9 +91,6 @@ templates_path = ["_templates"]
 coverage_ignore_functions = [
     # torch
     "typename",
-    # torch.autograd
-    "register_py_tensor_class_for_device",
-    "variable",
     # torch.cuda
     "check_error",
     "cudart",
@@ -390,20 +387,6 @@ coverage_ignore_functions = [
     "weight_dtype",
     "weight_is_quantized",
     "weight_is_statically_quantized",
-    # torch.autograd.forward_ad
-    "enter_dual_level",
-    "exit_dual_level",
-    # torch.autograd.function
-    "once_differentiable",
-    "traceable",
-    # torch.autograd.gradcheck
-    "get_analytical_jacobian",
-    "get_numerical_jacobian",
-    "get_numerical_jacobian_wrt_specific_input",
-    # torch.autograd.graph
-    "increment_version",
-    # torch.autograd.profiler
-    "parse_nvprof_trace",
     # torch.backends.cudnn.rnn
     "get_cudnn_mode",
     "init_dropout_state",
@@ -896,7 +879,7 @@ coverage_ignore_functions = [
     "extract_val",
     "fake_signature",
     "fetch_sym_proxy",
-    "fetch_tensor_proxy",
+    "fetch_object_proxy",
     "get_innermost_proxy_mode",
     "get_isolated_graphmodule",
     "get_proxy_slot",
@@ -969,10 +952,12 @@ coverage_ignore_functions = [
     "is_concrete_int",
     "is_contiguous",
     "is_non_overlapping_and_dense_indicator",
+    "is_singleton",
     "is_symbol_binding_fx_node",
     "is_symbolic",
     "parallel_and",
     "parallel_or",
+    "statically_known_true",
     "sym_eq",
     "canonicalize_bool_expr",
     # torch.fx.experimental.unification.core
@@ -1926,7 +1911,6 @@ coverage_ignore_functions = [
     "bundle_randn",
     # torch.utils.checkpoint
     "check_backward_validity",
-    "context_fn_gen",
     "detach_variable",
     "get_device_states",
     "noop_context_fn",
@@ -2529,43 +2513,9 @@ coverage_ignore_classes = [
     "QuantWrapper",
     # torch.ao.quantization.utils
     "MatchAllNode",
-    # torch.autograd.forward_ad
-    "UnpackedDualTensor",
-    # torch.autograd.function
-    "BackwardCFunction",
-    "Function",
-    "FunctionCtx",
-    "FunctionMeta",
-    "InplaceFunction",
-    "NestedIOFunction",
-    # torch.autograd.grad_mode
-    "inference_mode",
-    "set_grad_enabled",
-    "set_multithreading_enabled",
-    # torch.autograd.gradcheck
-    "GradcheckError",
-    # torch.autograd.profiler
-    "EnforceUnique",
-    "KinetoStepTracker",
-    "profile",
-    "record_function",
-    # torch.autograd.profiler_legacy
-    "profile",
-    # torch.autograd.profiler_util
-    "EventList",
-    "FormattedTimesMixin",
-    "FunctionEvent",
-    "FunctionEventAvg",
-    "Interval",
-    "Kernel",
-    "MemRecordsAcc",
-    "StringTable",
-    # torch.autograd.variable
-    "Variable",
-    "VariableMeta",
     # torch.backends.cudnn.rnn
     "Unserializable",
-    # torch.cuda.amp.grad_scaler
+    # torch.amp.grad_scaler
     "GradScaler",
     "OptState",
     # torch.cuda.graphs
@@ -2870,6 +2820,7 @@ coverage_ignore_classes = [
     "SymbolicContext",
     "StatelessSymbolicContext",
     "StatefulSymbolicContext",
+    "SubclassSymbolicContext",
     # torch.fx.experimental.unification.match
     "Dispatcher",
     "VarDispatcher",
@@ -3115,6 +3066,7 @@ coverage_ignore_classes = [
     "FractionalMaxPool3d",
     "LPPool1d",
     "LPPool2d",
+    "LPPool3d",
     "MaxPool1d",
     "MaxPool2d",
     "MaxPool3d",

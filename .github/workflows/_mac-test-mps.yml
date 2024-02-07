@@ -28,11 +28,14 @@ on:
 
 jobs:
   filter:
+    if: github.repository_owner == 'pytorch'
     runs-on: [self-hosted, linux.large]
     outputs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
       is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
       keep-going: ${{ steps.filter.outputs.keep-going }}
+      ci-verbose-test-logs: ${{ steps.filter.outputs.ci-verbose-test-logs }}
+      ci-no-test-timeout: ${{ steps.filter.outputs.ci-no-test-timeout }}
       reenabled-issues: ${{ steps.filter.outputs.reenabled-issues }}
     steps:
       - name: Checkout PyTorch
@@ -58,7 +61,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Print runner OS/HW info
-        shell: arch -arch arm64 bash {0}
         run: |
           sysctl machdep.cpu.brand_string kern.osproductversion
 
@@ -69,7 +71,6 @@ jobs:
           quiet-checkout: true
 
       - name: Clean checkout
-        shell: arch -arch arm64 bash {0}
         run: |
           git clean -fxd
 
@@ -95,12 +96,11 @@ jobs:
           ENV_NAME: conda-test-env-${{ github.run_id }}
           PY_VERS: 3.9
           PR_BODY: ${{ github.event.pull_request.body }}
-          PYTORCH_RETRY_TEST_CASES: 1
-          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
           CONTINUE_THROUGH_ERROR: ${{ needs.filter.outputs.keep-going }}
+          VERBOSE_TEST_LOGS: ${{ needs.filter.outputs.ci-verbose-test-logs }}
+          NO_TEST_TIMEOUT: ${{ needs.filter.outputs.ci-no-test-timeout }}
           PIP_REQUIREMENTS_FILE: .github/requirements/pip-requirements-${{ runner.os }}.txt
           REENABLED_ISSUES: ${{ needs.filter.outputs.reenabled-issues }}
-        shell: arch -arch arm64 bash {0}
         run: |
           # shellcheck disable=SC1090
           set -ex

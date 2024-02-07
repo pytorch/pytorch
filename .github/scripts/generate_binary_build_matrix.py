@@ -16,13 +16,20 @@ from typing import Dict, List, Optional, Tuple
 CUDA_ARCHES = ["11.8", "12.1"]
 
 
-ROCM_ARCHES = ["5.6", "5.7"]
+CUDA_ARCHES_FULL_VERSION = {"11.8": "11.8.0", "12.1": "12.1.1"}
+
+
+CUDA_ARCHES_CUDNN_VERSION = {"11.8": "8", "12.1": "8"}
+
+
+ROCM_ARCHES = ["5.7", "6.0"]
 
 
 CPU_CXX11_ABI_ARCH = ["cpu-cxx11-abi"]
 
 
 CPU_AARCH64_ARCH = ["cpu-aarch64"]
+
 
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "11.8": (
@@ -86,7 +93,9 @@ def get_nccl_wheel_version(arch_version: str) -> str:
     requirements = map(
         str.strip, re.split("[;|]", PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version])
     )
-    return [x for x in requirements if x.startswith("nvidia-nccl-cu")][0].split("==")[1]
+    return next(x for x in requirements if x.startswith("nvidia-nccl-cu")).split("==")[
+        1
+    ]
 
 
 def validate_nccl_dep_consistency(arch_version: str) -> None:
@@ -174,7 +183,7 @@ LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
     ("cpu", CXX11_ABI): f"pytorch/libtorch-cxx11-builder:cpu-{DEFAULT_TAG}",
 }
 
-FULL_PYTHON_VERSIONS = ["3.8", "3.9", "3.10", "3.11"]
+FULL_PYTHON_VERSIONS = ["3.8", "3.9", "3.10", "3.11", "3.12"]
 
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
@@ -288,7 +297,7 @@ def generate_wheels_matrix(
         package_type = "manywheel"
 
     if python_versions is None:
-        python_versions = FULL_PYTHON_VERSIONS + ["3.12"]
+        python_versions = FULL_PYTHON_VERSIONS
 
     if arches is None:
         # Define default compute archivectures

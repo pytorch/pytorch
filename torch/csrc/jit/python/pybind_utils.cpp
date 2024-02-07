@@ -746,7 +746,7 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     }
     if (!found_op) {
       std::stringstream ss;
-      ss << "Overloaded torch operator invoked from Python failed to many any schema:\n";
+      ss << "Overloaded torch operator invoked from Python failed to match any schema:\n";
       for (const auto& err : errors) {
         ss << err.what() << "\n\n";
       }
