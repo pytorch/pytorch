@@ -1055,8 +1055,10 @@ class VariableBuilder:
             )
         )
 
-        # install guards for subclass inner tensors
+        # We install TYPE_MATCH guards for traceable wrapper subclass object,
+        # and recursively install corresponding guard for each inner attribute.
         if is_traceable_wrapper_subclass(value):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
             attrs, _ = value.__tensor_flatten__()
             for attr in attrs:
                 inner_value = getattr(value, attr)

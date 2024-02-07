@@ -1163,6 +1163,8 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.frame_count, 1)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    # Translation validation changes the exception type, don't run with it
+    @torch.fx.experimental._config.patch(translation_validation=False)
     def test_torch_check_is_size(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -1170,15 +1172,13 @@ utils_device.CURRENT_DEVICE == None""".split(
         def f(x):
             y = x.item()
             torch._check_is_size(y)
-            # unsound 0/1 specialization!
+            # Cannot conditional on unbacked SymInt
             if y == 0:
                 assert False
             else:
                 return torch.arange(0, y)
 
-        f(torch.tensor([3]))
-        f(torch.tensor([4]))
-        self.assertEqual(cnts.frame_count, 1)
+        self.assertRaises(torch._dynamo.exc.UserError, lambda: f(torch.tensor([3])))
 
     def test_config_obj(self):
         class Cfg:
@@ -4073,6 +4073,49 @@ def fn():
         opt_f2 = torch._dynamo.optimize(cnts)(f2)
         res2 = opt_f2()
         self.assertTrue(same(res1, res2))
+
+    def test_inline_local_dict_clear(self):
+        def f(d):
+            d.clear()
+            return d
+
+        inp = {"a": torch.randn(2, 2), "b": torch.randn(2, 2)}
+        out = torch.compile(f, backend="eager", fullgraph=True)(inp)
+        self.assertEqual(len(out), 0)
+        self.assertEqual(len(inp), 0)
+
+    def test_inline_module_attr_dict_clear(self):
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = {"a": torch.randn(2, 2), "b": torch.randn(2, 2)}
+
+            def forward(self):
+                self.a.clear()
+                return self.a
+
+        m = MyMod()
+        out = torch.compile(m, backend="eager", fullgraph=True)()
+        self.assertEqual(len(out), 0)
+        self.assertEqual(len(m.a), 0)
+
+    def test_inline_user_defined_dict_attr_clear(self):
+        class MyMod:
+            def __init__(self):
+                self.a = {"a": torch.randn(2, 2), "b": torch.randn(2, 2)}
+
+        def f(obj, inp):
+            ret = len(obj.a) + inp
+            obj.a.clear()
+            return obj.a, ret
+
+        m = MyMod()
+        before_len = len(m.a)
+        t_inp = torch.ones(1)
+        d, ret = torch.compile(f, backend="eager", fullgraph=True)(m, t_inp)
+        self.assertEqual(len(m.a), 0)
+        self.assertEqual(len(d), 0)
+        self.assertEqual(ret, t_inp + before_len)
 
     def test_recursive_inline_list_mutation(self):
         def f1(x, y):
@@ -8917,9 +8960,6 @@ ShapeEnv not equal: field values don't match:
 
 ==> name_to_node: values don't match.
   >  Left: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
-  > Right: {}
-==> runtime_var_to_range: values don't match.
-  >  Left: {s0: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}
   > Right: {}
 ==> source_to_symbol: values don't match.
   >  Left: {x.size()[0]: x.size()[0], x.size()[1]: x.size()[1], x.storage_offset(): x.storage_offset(), x.stride()[0]: x.stride()[0], x.stride()[1]: x.stride()[1]}
