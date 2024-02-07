@@ -88,7 +88,7 @@ void main() {
         // It reads out-of-bound zeros, but trying to avoid them complicates
         // for-loop conditions, which results in worse performance.
         for (int k = 0; k < kernel_size; k += 4) {
-          // Since the weight tensor is width-packed, which is along the kernel
+          // Since the weight tensor is width-packed, which is along the length
           // dimension, we can batch-read four elements at a time.
           const ivec3 w_pos = ivec3(k / 4, in_c % in_group_size, out_c);
           const vec4 weight = texelFetch(uKernel, w_pos, 0);
