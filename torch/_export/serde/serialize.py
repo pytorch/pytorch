@@ -1474,9 +1474,9 @@ class GraphModuleDeserializer:
                         break
 
                 assert spec is not None
-                fake_tensor = self.serialized_name_to_meta[spec.arg.name]
+                fake_tensor = self.serialized_name_to_meta[spec.arg.name]  # type: ignore[union-attr]
                 if spec.kind == ep.InputKind.PARAMETER:
-                    fake_tensor = torch.nn.Parameter(fake_tensor)
+                    fake_tensor = torch.nn.Parameter(fake_tensor)  # type: ignore[assignment,arg-type]
                 artifact[name] = fake_tensor
         return artifact
 
