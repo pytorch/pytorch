@@ -3344,17 +3344,6 @@ def forward(self, arg0_1):
     sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
     return (sin,)""")
 
-    def test_aot_export_simplified_input_mutations_banned(self):
-        def fn(x):
-            x.mul_(2)
-            return (x + x,)
-        inp = torch.randn(2)
-        with self.assertRaisesRegex(
-            RuntimeError, "Found following user inputs located at \\[0\\] are mutated"
-        ):
-            aot_export_joint_simple(fn, [inp], trace_joint=False)
-            aot_export_joint_simple(fn, [inp], trace_joint=True)
-
     def test_aot_export_simplified_pytrees_banned(self):
         def fn(inps):
             return (inps[0] + inps[1],)
