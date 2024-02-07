@@ -519,11 +519,17 @@ class DebugFormatter:
             except Exception as e:
                 pass
             try:
-                node_info["stride"] = str(node.get_stride())
+                node_info["stride"] = str(
+                    V.graph.sizevars.size_hints(node.get_stride())
+                )
             except Exception as e:
                 pass
             try:
-                node_info["numel"] = str(node.get_numel())
+                node_info["size"] = str(V.graph.sizevars.size_hints(node.get_size()))
+            except Exception as e:
+                pass
+            try:
+                node_info["numel"] = str(V.graph.sizevars.size_hint(node.get_numel()))
             except Exception as e:
                 pass
             if hasattr(node, "data") and isinstance(node.data, ir.IRNode):
