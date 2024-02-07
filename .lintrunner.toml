@@ -144,6 +144,7 @@ init_command = [
     'types-pkg-resources==0.1.3',
     'types-Jinja2==2.11.9',
     'types-colorama==0.4.6',
+    'filelock==3.13.1',
     'junitparser==2.1.1',
     'rich==10.9.0',
     'pyyaml==6.0',
