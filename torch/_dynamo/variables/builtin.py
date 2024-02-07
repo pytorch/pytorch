@@ -26,14 +26,12 @@ from ..guards import GuardBuilder, install_guard
 from ..replay_record import DummyModule
 from ..source import AttrSource, GetItemSource, is_constant_source, TypeSource
 from ..utils import (
-    build_checkpoint_variable,
     check_constant_args,
     check_numpy_ndarray_args,
     check_unspec_python_args,
     extract_fake_example_value,
     get_fake_value,
     guard_if_dyn,
-    is_utils_checkpoint,
     istype,
     numpy_operator_wrapper,
     proxy_args_kwargs,
@@ -1321,10 +1319,7 @@ class BuiltinVariable(VariableTracker):
             if config.replay_record_enabled:
                 tx.exec_recorder.record_module_access(obj.value, name, member)
 
-            if is_utils_checkpoint(member):
-                options["source"] = source
-                return build_checkpoint_variable(**options)
-            elif source is not None:
+            if source is not None:
                 return VariableBuilder(tx, source)(member)
             else:
                 return SourcelessBuilder()(tx, member)
@@ -1677,11 +1672,16 @@ class BuiltinVariable(VariableTracker):
         ):
             return ConstantVariable.create(op(left.value, right.value))
 
-        if (
-            (isinstance(left, StreamVariable) and isinstance(right, StreamVariable))
-            or (isinstance(left, EventVariable) and isinstance(right, EventVariable))
-        ) and op is operator.eq:
-            return ConstantVariable(op(left.value, right.value))
+        if isinstance(left, (StreamVariable, EventVariable)) or isinstance(
+            right, (StreamVariable, EventVariable)
+        ):
+            if type(left) == type(right) and op is operator.eq:
+                return ConstantVariable(op(left.value, right.value))
+
+            if isinstance(right, ConstantVariable) or isinstance(
+                left, ConstantVariable
+            ):
+                return ConstantVariable(op(left.value, right.value))
 
         if op.__name__ == "is_":
             # If the two objects are of different type, we can safely return False
