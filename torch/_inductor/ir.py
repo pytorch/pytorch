@@ -4637,7 +4637,7 @@ class FallbackKernel(ExternKernelAlloc):
         # The unsupported cases usually do not show up here (because
         # AOTAutograd functionalized them away); the only way for an in-place
         # op to show up here is if a lowering or pass introduced it.
-        if torch._library.utils.is_inplace_aten_op(self.op_overload):
+        if torch._library.utils.mutates_and_returns_first_arg(self.op_overload):
             self.mutation_names.append(tensor_args[0].get_name())
             return
 
