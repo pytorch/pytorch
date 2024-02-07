@@ -881,7 +881,7 @@ def catch_errors_wrapper(callback, hooks: Hooks):
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
             # nametuple constructor
             return None
-        if config.optimize_ddp:
+        if config._get_optimize_ddp_mode() == "ddp_optimizer":
             ddp_module = DistributedDataParallel._get_active_ddp_module()
             if ddp_module:
                 with compile_lock:
