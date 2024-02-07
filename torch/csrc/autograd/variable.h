@@ -344,10 +344,10 @@ struct TORCH_API ViewInfo {
     return view_fn_ != nullptr;
   }
 
-  const std::unique_ptr<ViewFunc>& view_fn() const {
+  const ViewFunc& view_fn() const {
     TORCH_CHECK(
         has_view_fn(), "Can only access the view function if it exists.");
-    return view_fn_;
+    return *view_fn_;
   }
 
   std::function<Variable(const Variable&)> rev_view_fn() const {
