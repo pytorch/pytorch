@@ -305,8 +305,7 @@ def _vjp_with_argnums(func: Callable, *primals, argnums: Optional[argnums_t] = N
     #
     # Returns the same two elements as :func:`vjp` but the function returned, vjp_fn, returns a tuple of VJPs
     # for only the primal elements given by argnums.
-    level = _grad_increment_nesting()
-    try:
+    with grad_increment_nesting() as level:
         # See NOTE [grad and vjp interaction with no_grad]
         with torch.enable_grad():
             primals = _wrap_all_tensors(primals, level)
@@ -352,9 +351,6 @@ def _vjp_with_argnums(func: Callable, *primals, argnums: Optional[argnums_t] = N
             result = _autograd_grad(flat_primals_out, flat_diff_primals, flat_cotangents,
                                     retain_graph=retain_graph, create_graph=create_graph)
             return tree_unflatten(result, primals_spec)
-
-    finally:
-        _grad_decrement_nesting()
 
     if has_aux:
         return results, wrapper, aux
