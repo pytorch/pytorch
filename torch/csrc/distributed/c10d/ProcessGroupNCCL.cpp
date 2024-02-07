@@ -736,6 +736,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
   logPrefix_ = createLogPrefix();
   blockingWait_ = getCvarBool(TORCH_NCCL_BLOCKING_WAIT, false);
+  abortInDestroyProcessGroup_ =
+      getCvarBool(TORCH_NCCL_ABORT_IN_DESTROY_PG, false);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
       getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
   desyncDebug_ = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
@@ -1049,6 +1051,51 @@ void ProcessGroupNCCL::waitForDumpOrTimeout(
   std::this_thread::sleep_until(wakeUpTime);
 }
 
+void ProcessGroupNCCL::waitForFutureOrTimeout(
+    std::future<bool>& fut,
+    std::chrono::milliseconds timeOutMilSec,
+    std::string futDescription) {
+  TORCH_CHECK(fut.valid(), "Expected a valid future");
+  std::future_status status = fut.wait_for(timeOutMilSec);
+  if (status == std::future_status::ready) {
+    // Calling .get() will re-raise any exception from the future, and we don't
+    // care about the retval
+    try {
+      bool result = fut.get();
+      if (result) {
+        LOG(INFO) << logPrefix()
+                  << "future is successfully executed for: " << futDescription;
+      }
+    } catch (const std::exception& e) {
+      C10_THROW_ERROR(
+          DistBackendError,
+          c10::str(
+              logPrefix(),
+              "Exception thrown when waitng for future ",
+              futDescription,
+              ": ",
+              e.what()));
+    } catch (...) {
+      C10_THROW_ERROR(
+          DistBackendError,
+          c10::str(
+              logPrefix(),
+              "Unknown exception thrown when waitng for future ",
+              futDescription));
+    }
+  } else {
+    C10_THROW_ERROR(
+        DistBackendError,
+        c10::str(
+            logPrefix(),
+            "Future for ",
+            futDescription,
+            " timed out after ",
+            timeOutMilSec.count(),
+            " ms"));
+  }
+}
+
 void ProcessGroupNCCL::abortCommsFromMap(
     std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>&
         ncclCommsMap,
@@ -1090,7 +1137,7 @@ void ProcessGroupNCCL::abortCommsFromMap(
 }
 
 // Abort all communicators on this rank
-void ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
+bool ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
   // Remove record from global ncclCommDevIdxMapMutex before aboarting,
   // so that a new cache segment would not register to already aborded
   // communicators. Note that ncclCommDevIdxMap is a global container which may
@@ -1108,6 +1155,7 @@ void ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
   std::lock_guard<std::mutex> lock(mutex_);
   abortCommsFromMap(devNCCLCommMap_, abortReason);
   abortCommsFromMap(inInitializationCommMap_, abortReason);
+  return true;
 }
 
 void ProcessGroupNCCL::shutdown() {
@@ -1115,18 +1163,28 @@ void ProcessGroupNCCL::shutdown() {
   // communicators and signal the threads to exit. Joining on the threads could
   // potentially block and hence avoid it in this method.
   terminateProcessGroup_.store(true);
-
-  std::string abortReason = c10::str("Process Group shutdown on rank ", rank_);
-  abort(abortReason);
-
   workMetaListCV_.notify_one();
   terminateHeartbeatMonitorThread_.store(true);
   monitorWakeUpCV_.notify_one();
+
+  std::string abortReason = c10::str("Process Group shutdown on rank ", rank_);
+  // lauch abort asynchrounously and wait for it to complete or timeout
+  LOG(INFO) << logPrefix()
+            << "Launching ProcessGroupNCCL abort asynchrounously.";
+  std::future<bool> fut = std::async(std::launch::async, [this, abortReason]() {
+    return this->abort(abortReason);
+  });
+
+  waitForFutureOrTimeout(
+      fut, kProcessGroupNCCLAbortTimeout, "ProcessGroup abort");
+  LOG(INFO) << logPrefix() << "ProcessGroupNCCL aborts successfully.";
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
-  if (!terminateProcessGroup_.load()) {
+  // Only if TORCH_NCCL_ABORT_IN_DESTROY_PG is enabled, terminateProcessGroup_
+  // will be set to true in destroy_process_group
+  if (!terminateProcessGroup_.load() && abortInDestroyProcessGroup_) {
     LOG(WARNING) << c10::str(
         "WARNING: process group has NOT been destroyed before it is being destructed. ",
         "On normal program exit, the application should call destroy_process_group to ",
@@ -1134,9 +1192,8 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
         "In rare cases this process can exit before this point and block the progress of "
         "another member of the process group. This constraint has always been present, "
         " but this warning has only been added since PyTorch 2.3");
-    terminateProcessGroup_.store(true);
   }
-
+  terminateProcessGroup_.store(true);
   workMetaListCV_.notify_one();
 
 #ifdef ENABLE_NCCL_ERROR_CHECKING
@@ -1148,6 +1205,23 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 
   if (onCompletionHookThread_.joinable()) {
     onCompletionHookThread_.join();
+  }
+
+  // This is for safe rollout of the abortInDestroyProcessGroup feature.
+  // if the feature is not enabled, we keep calling abort() in destructor
+  // the old way
+  if (!abortInDestroyProcessGroup_) {
+    // Abort communicators after all threads have exited to avoid having the
+    // threads dying due to aborted communicator and raising a SIGABRT
+    // We need to include PG information in the abort reason so we can tell the
+    // abort order.
+    std::string abortReason =
+        c10::str("Process Group destroyed on rank ", rank_);
+    LOG(INFO)
+        << logPrefix()
+        << "ProcessGroupNCCL aborting communicators, check for 'abort finished' logs or look for abort hang";
+    abort(abortReason);
+    LOG(INFO) << logPrefix() << "ProcessGroupNCCL abort finished.";
   }
 
   // We need to wait for abort to finish before we can safely shut down
