@@ -166,7 +166,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
             if original_tensor.dtype not in _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG:
                 raise RuntimeError(
                     f"Error original_tensor.dtype {original_tensor.dtype} is not a supported dtype! "
-                    "dtype must be one of: {_DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG}"
+                    f"dtype must be one of: {_DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG}"
                 )
 
             # check shape
