@@ -1128,7 +1128,7 @@ class TestDimConstraints(TestCase):
             s % 2,
             ((s / 16) + 2) % 4,
         }
-        congruences = dim_constraints.reduce_congruences()
+        congruences = dim_constraints._reduce_congruences()
         self.assertEqual(congruences[s], {(s + 32) % 64})
 
     def test_dim_constraints_reduce_inequalities_simple(self):
