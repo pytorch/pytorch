@@ -2004,13 +2004,10 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_o
     return false;
   }
 
-  // Can always fold if the tensor is empty
-  // This serves as a precondition for the code below
-  if (t1->numel() == 0) {
-    return true;
-  }
+  if (autotune && tensor1.dim() <= AUTOTUNE_MAX_DIM && tensor2.dim() <= AUTOTUNE_MAX_DIM
+      // bail out as we would violate TORCH_INTERNAL_ASSERT(!(transpose && t2_is_matrix));
+      && !(has_out && tensor2.dim() > tensor1.dim() && tensor1.dim() == 2)) {
 
-  if (autotune && tensor1.sizes().size() <= AUTOTUNE_MAX_DIM && tensor2.sizes().size() <= AUTOTUNE_MAX_DIM) {
     need_profiling = true;
     key = MatmulAutotuneCacheKeyWrapper(tensor1, tensor2, true);
     const auto true_value = matmul_autotune_cache.find(key);
@@ -2047,13 +2044,6 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_o
     // this regresses performance in some cases:
     // https://github.com/pytorch/pytorch/issues/118548#issuecomment-1916022394
     return true;
-  }
-
-  // Don't fold in this case, as we would have to call mm on the transposed tensor, the result
-  // would be contiguous, and then we would need to transpose it and call contiguous on it, thus
-  // having to copy the tensor
-  if (tensor1.dim() == 2) {
-    return false;
   }
 
   // t1->view(-1, t1->size(-1)) does not copy only when the first n-1 dimensions are contiguous

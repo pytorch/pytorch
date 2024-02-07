@@ -345,11 +345,13 @@ def sdp_kernel(
         finally:
             pass
 
+
 def get_matmul_autotune():
     r"""Returns the current value of the matrix multiplication autotuning flag. Refer to
     :func:`torch.set_matmul_autotune` documentation for more details.
     """
     return torch._C._get_matmul_autotune()
+
 
 def set_matmul_autotune(enabled: bool) -> None:
     r"""Sets the autotuning flag for matrix multiplications.
