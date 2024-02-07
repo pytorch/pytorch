@@ -1762,6 +1762,11 @@ class ShapeEnv:
             [ShapeEnvEvent(ShapeEnv, kwargs=kwargs)] if self.should_record_events else []
         )
 
+    # Pro-tip: if you add new field to ShapeEnv, this affects some accept
+    # tests.  Accept their output with:
+    #
+    #   EXPECTTEST_ACCEPT=1 python test/dynamo/test_dynamic_shapes.py -k test_shape_env_equal
+    #
     def _init(
         self, *,
         allow_scalar_outputs=True,
@@ -1865,6 +1870,9 @@ class ShapeEnv:
         self.frozen = False
         self.dim_constraints: Optional[DimConstraints] = None
         self.counter = collections.Counter()
+        # Mapping from sympy.Symbol to the number of guards which mention this
+        # symbol
+        self.symbol_guard_counter = collections.Counter()
         # A selection of important fields on co_field; solely used for
         # signpost_event
         self.co_fields = co_fields if co_fields else {}
@@ -1963,6 +1971,9 @@ class ShapeEnv:
             elif key == "name_to_node":
                 # Compare just the set of keys is the same.
                 return set(value.keys())
+            elif key == "symbol_guard_counter":
+                # Skip this for comparisons
+                return None
             return value
 
         shape_env_check_state_equal(self, other, non_state_variable_names, map_value)
@@ -2612,6 +2623,10 @@ class ShapeEnv:
 
         if isinstance(r, sympy.Symbol):
             self.var_to_sources[r].append(source)
+            # This ensures we get zeros in symbol_guard_counts, which makes
+            # some queries simpler (since we will accumulate mass on 0 this
+            # way)
+            self.symbol_guard_counter[r] = 0
 
         if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
             symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][source_name] = r
@@ -3123,6 +3138,9 @@ class ShapeEnv:
                 **self.counter,
                 "num_guards": len(exprs),
                 "free_symbols": sum(1 for v in symbol_to_source.values() if v),
+                # The keys are meaningless from an aggregate perspective, so
+                # don't include them.  Biggest first.
+                "symbol_guard_counts": sorted(self.symbol_guard_counter.values(), reverse=True),
             },
         )
 
@@ -3820,6 +3838,8 @@ class ShapeEnv:
                 stack = CapturedTraceback.extract(skip=1)
                 guard = ShapeGuard(g, stack)
                 self.guards.append(guard)
+                for s in g.free_symbols:
+                    self.symbol_guard_counter[s] += 1
         except Exception:
             if fresh:
                 self._remove_fx_node(node)
