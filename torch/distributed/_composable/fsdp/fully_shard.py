@@ -69,11 +69,11 @@ def fully_shard(
             - If ``False``, then this keeps the unsharded parameters in memory
             after forward and avoids the all-gather in backward.
             - If an ``int``, then this represents the world size to reshard to
-            after forward. It should be a number between 1 and the ``mesh``
-            shard dimension size, exclusive. A common choice may be the
-            intra-node size (e.g. ``torch.cuda.device_count()``). This allows
-            the all-gather in backward to be over a smaller world size at the
-            cost of higher memory usage than setting to ``True``.
+            after forward. It should be a non-trivial divisor of the ``mesh``
+            shard dim size (i.e. excluding 1 and the dim size itself). A choice
+            may be the intra-node size (e.g. ``torch.cuda.device_count()``).
+            This allows the all-gather in backward to be over a smaller world
+            size at the cost of higher memory usage than setting to ``True``.
             - The root FSDP state has its value specially set to ``False`` as a
             heuristic since its parameters would typically be immediately
             all-gathered for backward.
@@ -141,8 +141,9 @@ class FSDP:
 
     def reshard(self) -> None:
         """
-        Reshards the module's parameters by freeing unsharded parameters if
-        needed. This method is *not* recursive.
+        Reshards the module's parameters, registering the sharded parameters
+        to the module and freeing the unsharded parameters if needed. This
+        method is *not* recursive.
         """
         if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None:
             raise AssertionError(f"No FSDP state found on {self}")
