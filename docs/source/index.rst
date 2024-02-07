@@ -68,6 +68,8 @@ Features described in this documentation are classified by release status:
    cuda
    torch.cuda.memory <torch_cuda_memory>
    mps
+   xpu
+   meta
    torch.backends <backends>
    torch.export <export>
    torch.distributed <distributed>
@@ -119,6 +121,7 @@ Features described in this documentation are classified by release status:
    torch.utils.mobile_optimizer <mobile_optimizer>
    torch.utils.model_zoo <model_zoo>
    torch.utils.tensorboard <tensorboard>
+   torch.fx.experimental.symbolic_shapes <symbolic_shapes>
    type_info
    named_tensor
    name_inference
