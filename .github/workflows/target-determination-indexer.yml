@@ -107,6 +107,6 @@ jobs:
           set -euxo pipefail
           conda activate tdenv
 
-          zip -r indexer-functions.zip "${GITHUB_WORKSPACE}"/llm-target-determinator/assets/indexer-output
+          zip -r indexer-functions.zip "${GITHUB_WORKSPACE}"/llm-target-determinator/assets/indexer-functions
 
           aws s3 cp "indexer-functions.zip" "s3://target-determinator-assets/indexes/indexer-functions.zip"
