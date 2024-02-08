@@ -14,7 +14,7 @@ TEST(XpuGeneratorTest, testGeneratorDynamicCast) {
   }
   auto foo = at::xpu::detail::createXPUGenerator();
   auto result = foo.get<at::XPUGeneratorImpl>();
-  ASSERT_EQ(typeid(at::XPUGeneratorImpl*).hash_code(), typeid(result).hash_code());
+  EXPECT_EQ(typeid(at::XPUGeneratorImpl*).hash_code(), typeid(result).hash_code());
 }
 
 TEST(XpuGeneratorTest, testDefaultGenerator) {
@@ -23,20 +23,20 @@ TEST(XpuGeneratorTest, testDefaultGenerator) {
   }
   auto foo = at::xpu::detail::getDefaultXPUGenerator();
   auto bar = at::xpu::detail::getDefaultXPUGenerator();
-  ASSERT_EQ(foo, bar);
+  EXPECT_EQ(foo, bar);
 
   auto offset = foo.get_offset() << 1;
   foo.set_offset(offset);
-  ASSERT_EQ(foo.get_offset(), offset);
+  EXPECT_EQ(foo.get_offset(), offset);
 
   if (c10::xpu::device_count() >= 2) {
     foo = at::xpu::detail::getDefaultXPUGenerator(0);
     bar = at::xpu::detail::getDefaultXPUGenerator(0);
-    ASSERT_EQ(foo, bar);
+    EXPECT_EQ(foo, bar);
 
     foo = at::xpu::detail::getDefaultXPUGenerator(0);
     bar = at::xpu::detail::getDefaultXPUGenerator(1);
-    ASSERT_NE(foo, bar);
+    EXPECT_NE(foo, bar);
   }
 }
 
@@ -51,8 +51,8 @@ TEST(XpuGeneratorTest, testCloning) {
   auto gen2 = at::xpu::detail::createXPUGenerator();
   gen2 = gen1.clone();
   auto xpu_gen2 = at::check_generator<at::XPUGeneratorImpl>(gen2);
-  ASSERT_EQ(gen1.current_seed(), gen2.current_seed());
-  ASSERT_EQ(
+  EXPECT_EQ(gen1.current_seed(), gen2.current_seed());
+  EXPECT_EQ(
     xpu_gen1->philox_offset_per_thread(),
     xpu_gen2->philox_offset_per_thread()
   );
@@ -78,5 +78,5 @@ TEST(XpuGeneratorTest, testMultithreadingGetSetCurrentSeed) {
   t0.join();
   t1.join();
   t2.join();
-  ASSERT_EQ(gen1.current_seed(), initial_seed+3);
+  EXPECT_EQ(gen1.current_seed(), initial_seed+3);
 }
