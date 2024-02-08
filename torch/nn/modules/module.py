@@ -2114,13 +2114,6 @@ class Module:
             If :attr:`assign` is ``True`` the optimizer must be created after
             the call to :attr:`load_state_dict`.
 
-        .. warning::
-            If :func:`~torch.__future__.get_swap_module_params_on_conversion` is set
-            and parameters or their corresponding values in the ``state_dict`` have a
-            torch function handler for :meth:`~torch.Tensor.module_load`, parameters
-            might be shallow copies of the corresponding values in the ``state_dict``
-            after loading.
-
         Args:
             state_dict (dict): a dict containing parameters and
                 persistent buffers.
