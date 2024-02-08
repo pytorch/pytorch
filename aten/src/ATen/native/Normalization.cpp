@@ -30,7 +30,10 @@
 #include <ATen/ops/_native_batch_norm_legit_no_training.h>
 #include <ATen/ops/_native_batch_norm_legit_no_training_native.h>
 #include <ATen/ops/batch_norm_with_update.h>
+#include <ATen/ops/batch_norm_with_update_native.h>
 #include <ATen/ops/batch_norm_no_update.h>
+#include <ATen/ops/batch_norm_no_update_native.h>
+#include <ATen/ops/batch_norm_backward_native.h>
 #include <ATen/ops/alias.h>
 #include <ATen/ops/batch_norm.h>
 #include <ATen/ops/batch_norm_native.h>
