@@ -553,13 +553,6 @@ class NamedTupleVariable(TupleVariable):
     def python_type(self):
         return self.tuple_cls
 
-    # def as_proxy(self):
-    #     ## args as proxy
-    #     proxy_args = self._as_proxy()
-    #     args = tuple(self.create_arg(elem) for elem in proxy_args)
-
-    #     return self.create_node("call_function", self.python_type(), args, {})
-
     def as_python_constant(self):
         return self.python_type()(*[x.as_python_constant() for x in self.items])
 
