@@ -543,7 +543,7 @@ pointwise_overrides_data: Dict[str, Dict[str, Any]] = dict(
     airy_ai=dict(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="airy_ai_forward({x})",
-        # triton=...,  # libdevice/triton do not provide Airy Ai function
+        # triton=...,  # not impl in libdevice/triton
         # cppvec=...,  # not impl in aten/.../vec
         aten="special_airy_ai",
     ),
@@ -578,7 +578,7 @@ pointwise_overrides_data: Dict[str, Dict[str, Any]] = dict(
     digamma=dict(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="calc_digamma({x})",
-        # triton=...,  # libdevice/triton do not provide digamma function
+        # triton=...,  # not impl in libdevice/triton
         cppvec="{x}.digamma()",
         aten="digamma",
     ),
@@ -595,29 +595,29 @@ pointwise_overrides_data: Dict[str, Dict[str, Any]] = dict(
     igamma=dict(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="calc_igamma({x}, {y})",
-        # triton=...,
-        # cppvec=...,
+        # triton=...,  # not impl in libdevice/triton
+        # cppvec=...,  # not impl in aten/.../vec
         aten="igamma",
     ),
     igammac=dict(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="calc_igammac({x}, {y})",
-        # triton=...,
-        # cppvec=...,
+        # triton=...,  # not impl in libdevice/triton
+        # cppvec=...,  # not impl in aten/.../vec
         aten="igammac",
     ),
     gammainc=dict(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="calc_igamma({x}, {y})",
-        # triton=...,
-        # cppvec=...,
+        # triton=...,  # not impl in libdevice/triton
+        # cppvec=...,  # not impl in aten/.../vec
         aten="special_gammainc",
     ),
     gammaincc=dict(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="calc_igammac({x}, {y})",
-        # triton=...,
-        # cppvec=...,
+        # triton=...,  # not impl in libdevice/triton
+        # cppvec=...,  # not impl in aten/.../vec
         aten="special_gammaincc",
     ),
     i0=dict(
@@ -630,7 +630,7 @@ pointwise_overrides_data: Dict[str, Dict[str, Any]] = dict(
     i0e=dict(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="calc_i0e({x})",
-        # triton=...,  # libdevice/triton do not provide i0e function
+        # triton=...,  # not impl in libdevice/triton
         cppvec="{x}.i0e()",
         aten="special_i0e",
     ),
@@ -644,14 +644,14 @@ pointwise_overrides_data: Dict[str, Dict[str, Any]] = dict(
     i1e=dict(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="calc_i1e({x})",
-        # triton=...,  # libdevice/triton do not provide i1e function
+        # triton=...,  # not impl in libdevice/triton
         # cppvec=...,  # not impl in aten/.../vec
         aten="special_i1e",
     ),
     log_ndtr=dict(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="calc_log_ndtr({x})",
-        # triton=...,  # libdevice/triton do not provide log_ndtr function
+        # triton=...,  # not impl in libdevice/triton
         # cppvec=...,  # not impl in aten/.../vec
         aten="special_log_ndtr",
     ),
@@ -673,14 +673,14 @@ pointwise_overrides_data: Dict[str, Dict[str, Any]] = dict(
     modified_bessel_k0=dict(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="modified_bessel_k0_forward({x})",
-        # triton=...,  # libdevice/triton do not provide modified_bessel_k0 function
+        # triton=...,  # not impl in libdevice/triton
         # cppvec=...,  # not impl in aten/.../vec
         aten="special_modified_bessel_k0",
     ),
     modified_bessel_k1=dict(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="modified_bessel_k1_forward({x})",
-        # triton=...,  # libdevice/triton do not provide modified_bessel_k1 function
+        # triton=...,  # not impl in libdevice/triton
         # cppvec=...,  # not impl in aten/.../vec
         aten="special_modified_bessel_k1",
     ),
@@ -688,21 +688,21 @@ pointwise_overrides_data: Dict[str, Dict[str, Any]] = dict(
     ndtr=dict(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="calc_ndtr({x})",
-        # triton=...,  # libdevice/triton do not provide ndtr function
+        # triton=...,  # not impl in libdevice/triton
         # cppvec=...,  # not impl in aten/.../vec
         aten="special_ndtr",
     ),
     ndtri=dict(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="calc_ndtri({x})",
-        # triton=...,  # libdevice/triton do not provide ndtri function
+        # triton=...,  # not impl in libdevice/triton
         # cppvec=...,  # not impl in aten/.../vec
         aten="special_ndtri",
     ),
     polygamma=dict(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="calc_polygamma({y}, {x})",
-        # triton=...,  # libdevice/triton do not provide polygamma function
+        # triton=...,  # not impl in libdevice/triton
         # cppvec=...,  # not impl in aten/.../vec
         aten="polygamma",
     ),
@@ -711,14 +711,14 @@ pointwise_overrides_data: Dict[str, Dict[str, Any]] = dict(
     scaled_modified_bessel_k0=dict(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="scaled_modified_bessel_k0_forward({x})",
-        # triton=...,  # libdevice/triton do not provide scaled_modified_bessel_k0 function
+        # triton=...,  # not impl in libdevice/triton
         # cppvec=...,  # not impl in aten/.../vec
         aten="special_scaled_modified_bessel_k0",
     ),
     scaled_modified_bessel_k1=dict(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="scaled_modified_bessel_k1_forward({x})",
-        # triton=...,  # libdevice/triton do not provide scaled_modified_bessel_k1 function
+        # triton=...,  # not impl in libdevice/triton
         # cppvec=...,  # not impl in aten/.../vec
         aten="special_scaled_modified_bessel_k1",
     ),
@@ -726,14 +726,14 @@ pointwise_overrides_data: Dict[str, Dict[str, Any]] = dict(
     spherical_bessel_j0=dict(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="spherical_bessel_j0_forward({x})",
-        # triton=None,  # libdevice/triton do not provide spherical_bessel_j0 function
+        # triton=None,  # not impl in libdevice/triton
         # cppvec=...,   # not impl in aten/.../vec
         aten="special_spherical_bessel_j0",
     ),
     zeta=dict(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp="zeta({x}, {y})",
-        # triton=...,  # libdevice/triton do not provide zeta function
+        # triton=...,  # not impl in libdevice/triton
         # cppvec=...,  # not impl in aten/.../vec
         aten="special_zeta",
     ),
