@@ -40,26 +40,17 @@ jobs:
           BRANCH: ${{ github.event.client_payload.branch }}
           CLASSIFICATION: ${{ github.event.client_payload.classification }}
           FIXES: ${{ github.event.client_payload.fixes || '' }}
-          REQUIRES_ISSUE: ${{ github.event.client_payload.requiresIssue || 'false' }}
           ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GH_PYTORCHBOT_CHERRY_PICK_TOKEN }}
         run: |
           set -ex
 
-          if [[ "${REQUIRES_ISSUE}" == "true" ]]; then
-            python .github/scripts/cherry_pick.py \
-              --onto-branch "${BRANCH}" \
-              --classification "${CLASSIFICATION}" \
-              --fixes "${FIXES}" \
-              --github-actor "${ACTOR}" \
-              "${PR_NUM}"
-          else
-            python .github/scripts/cherry_pick.py \
-              --onto-branch "${BRANCH}" \
-              --classification "${CLASSIFICATION}" \
-              --github-actor "${ACTOR}" \
-              "${PR_NUM}"
-          fi
+          python .github/scripts/cherry_pick.py \
+            --onto-branch "${BRANCH}" \
+            --classification "${CLASSIFICATION}" \
+            --fixes "${FIXES}" \
+            --github-actor "${ACTOR}" \
+            "${PR_NUM}"
 
 concurrency:
   group: cherry-pick-pr-${{ github.event.client_payload.pr_num }}

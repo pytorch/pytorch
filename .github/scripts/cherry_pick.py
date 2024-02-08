@@ -13,6 +13,7 @@ from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from trymerge import get_pr_commit_sha, GitHubPR
 
 
+# This is only a suggestion for now, not a strict requirement
 REQUIRES_ISSUE = {
     "regression",
     "critical",
@@ -40,6 +41,7 @@ def parse_args() -> Any:
     parser.add_argument(
         "--fixes",
         type=str,
+        default="",
         help="the GitHub issue that the cherry pick fixes",
     )
     parser.add_argument("--dry-run", action="store_true")
@@ -62,6 +64,8 @@ def cherry_pick(
     pr: GitHubPR,
     commit_sha: str,
     onto_branch: str,
+    classification: str,
+    fixes: str,
     dry_run: bool = False,
 ) -> None:
     """
@@ -74,7 +78,17 @@ def cherry_pick(
 
     try:
         if not dry_run:
-            submit_pr(repo, pr, cherry_pick_branch, onto_branch)
+            org, project = repo.gh_owner_and_name()
+            cherry_pick_pr = submit_pr(repo, pr, cherry_pick_branch, onto_branch)
+
+            msg = f"The cherry pick PR is at {cherry_pick_pr}"
+            if fixes:
+                msg += f" and it is linked with issue {fixes}"
+            elif classification in REQUIRES_ISSUE:
+                msg += f" and it is recommended to link a {classification} cherry pick PR with an issue"
+
+            post_comment(org, project, pr.pr_num, msg)
+
     finally:
         if current_branch:
             repo.checkout(branch=current_branch)
@@ -108,9 +122,9 @@ def submit_pr(
     pr: GitHubPR,
     cherry_pick_branch: str,
     onto_branch: str,
-) -> None:
+) -> str:
     """
-    Submit the cherry pick PR.
+    Submit the cherry pick PR and return the link to the PR
     """
     org, project = repo.gh_owner_and_name()
 
@@ -138,8 +152,7 @@ def submit_pr(
                 f"Fail to find the cherry pick PR: {json.dumps(response)}"
             )
 
-        msg = f"The cherry pick PR is at {cherry_pick_pr}"
-        post_comment(org, project, pr.pr_num, msg)
+        return str(cherry_pick_pr)
 
     except HTTPError as error:
         msg = f"Fail to submit the cherry pick PR: {error}"
@@ -182,13 +195,6 @@ def main() -> None:
     pr = GitHubPR(org, project, pr_num)
 
     try:
-        classification = args.classification
-        if classification in REQUIRES_ISSUE and not args.fixes:
-            raise RuntimeError(
-                f"Refuse to cherry pick #{pr_num} because {classification} "
-                + "category requires an issue. Please provide one with --fixes"
-            )
-
         commit_sha = get_merge_commit_sha(repo, pr)
         if not commit_sha:
             raise RuntimeError(
@@ -196,7 +202,14 @@ def main() -> None:
             )
 
         cherry_pick(
-            args.github_actor, repo, pr, commit_sha, args.onto_branch, args.dry_run
+            args.github_actor,
+            repo,
+            pr,
+            commit_sha,
+            args.onto_branch,
+            args.classification,
+            args.fixes,
+            args.dry_run,
         )
 
     except RuntimeError as error:
