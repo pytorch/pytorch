@@ -379,15 +379,13 @@ class TestBoolScalar(TestCase):
         assert_((t | f) == t)
         assert_((f | f) == f)
 
-    @xpassIfTorchDynamo
     def test_bitwise_or_is(self):
         f = np.False_
         t = np.True_
-        # This deviates from proper python where (t | t) is t
-        assert_((t | t) is not t)
-        assert_((f | t) is not t)
-        assert_((t | f) is not t)
-        assert_((f | f) is not f)
+        assert_(bool(t | t) is bool(t))
+        assert_(bool(f | t) is bool(t))
+        assert_(bool(t | f) is bool(t))
+        assert_(bool(f | f) is bool(f))
 
     def test_bitwise_and_eq(self):
         f = np.False_
@@ -397,15 +395,13 @@ class TestBoolScalar(TestCase):
         assert_((t & f) == f)
         assert_((f & f) == f)
 
-    @xpassIfTorchDynamo
     def test_bitwise_and_is(self):
         f = np.False_
         t = np.True_
-        # This deviates from proper python where (t & t) is t
-        assert_((t & t) is not t)
-        assert_((f & t) is not f)
-        assert_((t & f) is not f)
-        assert_((f & f) is not f)
+        assert_(bool(t & t) is bool(t))
+        assert_(bool(f & t) is bool(f))
+        assert_(bool(t & f) is bool(f))
+        assert_(bool(f & f) is bool(f))
 
     def test_bitwise_xor_eq(self):
         f = np.False_
@@ -415,15 +411,13 @@ class TestBoolScalar(TestCase):
         assert_((t ^ f) == t)
         assert_((f ^ f) == f)
 
-    @xpassIfTorchDynamo
     def test_bitwise_xor_is(self):
         f = np.False_
         t = np.True_
-        # This deviates from proper python where (t ^ t) is t
-        assert_((t ^ t) is not f)
-        assert_((f ^ t) is not t)
-        assert_((t ^ f) is not t)
-        assert_((f ^ f) is not f)
+        assert_(bool(t ^ t) is bool(f))
+        assert_(bool(f ^ t) is bool(t))
+        assert_(bool(t ^ f) is bool(t))
+        assert_(bool(f ^ f) is bool(f))
 
 
 class TestBoolArray(TestCase):
