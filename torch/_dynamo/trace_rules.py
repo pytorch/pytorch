@@ -3195,7 +3195,7 @@ if torch.distributed.is_available():
 def get_legacy_mod_inlinelist():
     inlinelist = set()
     for m in LEGACY_MOD_INLINELIST:
-        inlinelist.add(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
+        inlinelist.add(_module_dir(torch) + m[len("torch.") :].replace(".", os.sep))
     return inlinelist
 
 
@@ -3203,7 +3203,7 @@ def get_legacy_mod_inlinelist():
 def get_mod_inlinelist():
     inlinelist = set()
     for m in MOD_INLINELIST:
-        inlinelist.add(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
+        inlinelist.add(_module_dir(torch) + m[len("torch.") :].replace(".", os.sep))
     return inlinelist
 
 
@@ -3221,9 +3221,9 @@ is_fbcode = importlib.import_module("torch._inductor.config").is_fbcode()
 # Skip fbcode paths(including torch.package paths) containing
 # one of the following strings.
 FBCODE_SKIP_DIRS = {
-    "torchrec/distributed",
-    "torchrec/fb/distributed",
-    "caffe2/torch/fb/sparsenn/pooled_embeddings_modules.py",
+    "torchrec/distributed".replace("/", os.sep),
+    "torchrec/fb/distributed".replace("/", os.sep),
+    "caffe2/torch/fb/sparsenn/pooled_embeddings_modules.py".replace("/", os.sep),
 }
 FBCODE_SKIP_DIRS_RE = re.compile(f".*({'|'.join(map(re.escape, FBCODE_SKIP_DIRS))})")
 
