@@ -266,7 +266,6 @@ class FSDPParam:
             self._all_gather_metadata: Optional[Any] = None
             self._unsharded_inner_tensors: List[torch.Tensor] = []
 
-    @torch.no_grad()
     def init_all_gather_outputs(
         self,
         all_gather_input_numels: List[int],
