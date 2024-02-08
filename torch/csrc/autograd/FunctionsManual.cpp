@@ -917,9 +917,7 @@ Tensor logcumsumexp_backward(
       at::ScalarType::BFloat16,
       at::typeMetaToScalarType(grad.dtype()),
       "logcumsumexp_backward",
-      []() {
-        return c10::Scalar(std::numeric_limits<scalar_t>::lowest());
-      });
+      []() { return c10::Scalar(std::numeric_limits<scalar_t>::lowest()); });
 
   auto reverse_logcumsumexp = [dim](auto x) {
     return at::flip(at::logcumsumexp(at::flip(x, {dim}), dim), {dim});
