@@ -52,8 +52,20 @@ def data_type_logger(msg):
         schedule_log.debug("Data type propagation: %s", msg)
 
 
+class WorkspaceArg(NamedTuple):
+    """A temporary buffer used for a single kernel, then discarded.
+
+    Not registered as a traditional buffer since there are no users,
+    so it would be dead code eliminated.
+    """
+
+    nbytes: sympy.Expr
+    zero_fill: bool
+
+
 TensorArg = namedtuple("TensorArg", ["name", "buffer", "dtype", "check_alignment"])
 SizeArg = namedtuple("SizeArg", ["name", "expr"])
+KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg]
 
 DeviceCodegen = namedtuple("DeviceCodegen", ["scheduling", "wrapper_codegen"])
 device_codegens: Dict[str, DeviceCodegen] = {}
@@ -595,6 +607,7 @@ class KernelArgs:
         self.output_buffers = dict()
         self.inplace_buffers = dict()
         self.sizevars = sizevars or dict()
+        self.workspace_arg = None
 
     def __repr__(self):
         return "KernelArgs({})".format(
@@ -647,6 +660,16 @@ class KernelArgs:
             )
             self.inplace_buffers[input_name] = buf
             self.inplace_buffers[output_name] = buf
+
+    def workspace(self, nbytes: sympy.Expr, zero_fill: bool):
+        if self.workspace_arg is None:
+            self.workspace_arg = WorkspaceArg(nbytes, zero_fill)
+            return "ws_ptr", 0
+
+        offset = self.workspace_arg.nbytes
+        zero_fill = zero_fill or self.workspace_arg.zero_fill
+        self.workspace_arg = WorkspaceArg(offset + nbytes, zero_fill)
+        return "ws_ptr", offset
 
     def seed_offset(self, name, value):
         if value in self.sizevars:
@@ -713,12 +736,13 @@ class KernelArgs:
             arg_types.append(f"const {INDEX_TYPE}")
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
+        assert self.workspace_arg is None, "Workspace not supported on CPU "
         return arg_defs, call_args, arg_types
 
     def python_argdefs(self):
         arg_defs = []
         call_args = []
-        precompile_args: List[Union[TensorArg, SizeArg]] = []
+        precompile_args: List[Union[TensorArg, SizeArg, WorkspaceArg]] = []
         for inplaced in unique(self.inplace_buffers.values()):
             if self._buffer_is_marked_removed(inplaced):
                 continue
@@ -748,6 +772,10 @@ class KernelArgs:
             precompile_args.append(SizeArg(inner, outer))
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
+        if self.workspace_arg is not None:
+            arg_defs.append("ws_ptr")
+            call_args.append("workspace")
+            precompile_args.append(self.workspace_arg)
 
         return arg_defs, call_args, precompile_args
 
