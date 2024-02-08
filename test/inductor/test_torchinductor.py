@@ -8479,7 +8479,7 @@ class CommonTemplate:
         [
             subtest((name, getattr(torch.special, name)), name=name)
             for name in torch.special.__all__
-            if "_polynomial_" not in name
+            if "_polynomial_" not in name and name not in {"softmax", "log_softmax"}
         ],
     )
     def test_pointwise(self, name, op):

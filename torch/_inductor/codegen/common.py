@@ -583,7 +583,31 @@ pointwise_overrides_data: Dict[str, Dict[str, str]] = dict(
         # cppvec=...,  # not impl in aten/.../vec
         aten="special_erfcx",
     ),
-    # erfinv, exp2, expit, gammainc, gammaincc, gammaln
+    # erfinv, exp2, expit, gammaln
+    igamma=dict(
+        cpp="calc_igamma({x}, {y})",
+        # triton=...,
+        # cppvec=...,
+        aten="igamma",
+    ),
+    igammac=dict(
+        cpp="calc_igammac({x}, {y})",
+        # triton=...,
+        # cppvec=...,
+        aten="igammac",
+    ),
+    gammainc=dict(
+        cpp="calc_igamma({x}, {y})",
+        # triton=...,
+        # cppvec=...,
+        aten="special_gammainc",
+    ),
+    gammaincc=dict(
+        cpp="calc_igammac({x}, {y})",
+        # triton=...,
+        # cppvec=...,
+        aten="special_gammaincc",
+    ),
     i0=dict(
         cpp="calc_i0({x})",
         triton="tl.math.cyl_bessel_i0({x})",
@@ -614,7 +638,6 @@ pointwise_overrides_data: Dict[str, Dict[str, str]] = dict(
         # cppvec=...,  # not impl in aten/.../vec
         aten="special_log_ndtr",
     ),
-    # log_softmax
     # logit
     # logsumexp
     modified_bessel_i0=dict(
@@ -681,7 +704,6 @@ pointwise_overrides_data: Dict[str, Dict[str, str]] = dict(
         # cppvec=...,   # not impl in aten/.../vec
         aten="special_spherical_bessel_j0",
     ),
-    # softmax
     zeta=dict(
         cpp="zeta({x}, {y})",
         # triton=...,  # libdevice/triton do not provide zeta function
