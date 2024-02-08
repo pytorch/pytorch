@@ -1188,6 +1188,8 @@ class Module:
                         f"{e} Please use torch.nn.Module.to_empty() instead of torch.nn.Module.to() "
                         f"when moving module from meta to a different device."
                     ) from None
+                else:
+                    raise
 
         return self._apply(convert)
 
