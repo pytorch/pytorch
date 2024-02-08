@@ -3,19 +3,22 @@
 import copy
 import functools
 import getpass
+import inspect
 import itertools
 import logging
 import os
+import re
 import subprocess
 import tempfile
 import textwrap
 from collections import Counter
 from importlib import import_module
-from typing import Callable, Optional, TypeVar
+from typing import Any, Callable, Dict, List, Optional, TypeVar
 
 import torch
 import torch._prims_common as utils
 import torch._subclasses.meta_utils
+from torch import Tensor
 
 from torch._dynamo.testing import rand_strided
 from torch._prims_common import is_float_dtype
@@ -698,3 +701,73 @@ class InputWriter:
         if isinstance(val, torch.SymInt):
             val = val.node.hint
         self._lines.append(f"reader.symint({val!r})  # {name}")
+
+
+def aot_graph_input_parser(
+    func: Callable[[List[Tensor]], List[Tensor]], device="cuda"
+) -> Dict[str, Any]:
+    """
+    Takes in a function which has been printed with print_readable() and constructs kwargs to run it.
+
+    Currently only handles Tensor inputs and a graph module which might have tensor constants.
+
+    Consider a function `forward` defined as follows:
+
+    def forward(self, primals_1: "f32[1001, 6]"):
+        _tensor_constant0: "i64[4190]" = self._tensor_constant0
+        # Further implementation
+
+    kwargs = aot_graph_input_parser(forward)
+    forward(**kwargs)
+    """
+
+    from torch.fx.graph import dtype_abbrs
+
+    dtype_map = {value: key for key, value in dtype_abbrs.items()}
+    dtype_pattern = "|".join(dtype_abbrs.values())
+
+    # Extracting the source code from the function
+    source = inspect.getsource(func)
+
+    # Regular expressions
+    tensor_assignment_regex = rf"(_tensor_constant\d+): \"({dtype_pattern})\[\s*(.*?)\s*\]\" = self\.(_tensor_constant\d+)"
+
+    tensor_regex = rf"({dtype_pattern})\[\s*(.*?)\s*\]"
+
+    class TensorContainer:
+        "Container for tensors as attributes"
+        pass
+
+    container = TensorContainer()
+    # Dictionary for tensors from annotations
+    kwargs: Dict[str, Any] = {}
+
+    def gen_tensor(shape, dtype) -> Tensor:
+        constructor = torch.randn if dtype.is_floating_point else torch.zeros
+        return constructor(shape, dtype=dtype, device=device)
+
+    # Parse function annotations for tensor generation
+    annotations = func.__annotations__
+    for param, annotation in annotations.items():
+        # Skip 'return' annotation
+        if param == "return":
+            continue
+
+        match = re.search(tensor_regex, annotation)
+        if match:
+            data_type, shape_str = match.groups()
+            dtype = dtype_map[data_type]
+            shape = tuple(map(int, shape_str.split(",")))
+            kwargs[param] = gen_tensor(shape, dtype)
+
+    # Parse function body for tensor constant assignments
+    for match in re.finditer(tensor_assignment_regex, source):
+        attr_name, data_type, shape_str, _ = match.groups()
+        shape = tuple(map(int, shape_str.split(",")))
+        dtype = dtype_map[data_type]
+        setattr(container, attr_name, gen_tensor(shape, dtype))
+
+        if "self" not in kwargs:
+            kwargs["self"] = container
+
+    return kwargs
