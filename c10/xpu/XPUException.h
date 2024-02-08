@@ -5,15 +5,18 @@
 
 namespace c10::xpu {
 
-static sycl::async_handler asyncHandler = [](sycl::exception_list el) {
-  for (auto& e : el) {
+static inline sycl::async_handler asyncHandler = [](sycl::exception_list el) {
+  if (el.size() == 0) {
+    return;
+  }
+  for (const auto& e : el) {
     try {
       std::rethrow_exception(e);
     } catch (sycl::exception& e) {
       TORCH_WARN("SYCL Exception: ", e.what());
-      throw;
     }
   }
+  throw;
 };
 
 } // namespace c10::xpu
