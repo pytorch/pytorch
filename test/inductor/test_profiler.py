@@ -118,6 +118,35 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
 
             self._test_profiling_kernel_names(fn, args, "_for_")
 
+    @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
+    def test_inductor_profiling_triton_hooks(self):
+        from triton import CompiledKernel
+
+        launch_enter_hook_called: bool = False
+        launch_exit_hook_called: bool = False
+
+        def launch_enter_hook(*args):
+            launch_enter_hook_called = True
+
+        def launch_exit_hook(*args):
+            launch_exit_hook_called = True
+
+        CompiledKernel.launch_enter_hook = launch_enter_hook
+        CompiledKernel.launch_exit_hook = launch_exit_hook
+
+        def fn(x, y):
+            return torch._foreach_add(x, y)
+
+        x = [torch.rand((4, 4), device="cuda") for _ in range(3)]
+        y = [torch.rand((4, 4), device="cuda") for _ in range(3)]
+
+        args = (x, y)
+        fn_opt = torch.compile(fn)
+        fn_opt(*args)
+
+        self.assertTrue(launch_enter_hook_called)
+        self.assertTrue(launch_exit_hook_called)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

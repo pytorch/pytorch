@@ -399,7 +399,10 @@ class CachingAutotuner(KernelInterface):
 
                 runner(grid_0, grid_1, grid_2, num_warps,
                             *cta_args, shared,
-                            stream, function, None, None, None,
+                            stream, function,
+                            binary.launch_enter_hook,
+                            binary.launch_exit_hook,
+                            binary.metadata,
                             {', '.join(call_args)})
                 return bin
             """.lstrip(),
