@@ -2421,7 +2421,7 @@ class ShapeEnv:
 
     def _log_create_unbacked_symbol(self, prefix: str, symbol, vr: ValueRanges):
         is_debug = config.extended_debug_create_symbol is not None and str(symbol) in config.extended_debug_create_symbol.split(',')
-        fsummary, user_tb, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
+        fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
         log.info(
             "%s %s [%s, %s]%s (%s)%s",
             prefix, symbol, vr.lower, vr.upper, maybe_user_loc, format_frame(fsummary), maybe_extra_debug, stack_info=is_debug
@@ -2616,7 +2616,7 @@ class ShapeEnv:
                 config.extended_debug_create_symbol is not None and
                 str(sympy_expr) in config.extended_debug_create_symbol.split(',')
             )
-            fsummary, user_tb, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
+            fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
             self.log.info(
                 "create_symbol %s = %s for %s %s%s (%s)%s",
                 sympy_expr, val, source.name(), range_str,
@@ -3481,23 +3481,23 @@ class ShapeEnv:
     def _make_data_dependent_error(self, expr, unhinted_expr):
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
+        size_like_symbols = []
         for s in expr.free_symbols:
             stacktrace = ''.join(self.var_to_stack[s].format())
             self.log.debug("Data dependent variable '%s' allocated at:\n%s", s, stacktrace)
-        maybe_cpp_stack = ""
-        if config.extended_debug_cpp:
-            cpp_stack = CapturedTraceback.extract(cpp=True)
-            maybe_cpp_stack = "C++ stack trace:\n" + ''.join(cpp_stack.format()) + "\n\n"
+            if s in self.size_like:
+                size_like_symbols.append(s)
+        fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(True)
         return GuardOnDataDependentSymNode(
-            maybe_cpp_stack +
-            "It appears that you're trying to get a value out of symbolic int/float "
-            "whose value is data-dependent (and thus we do not know the true value.)  "
-            f"The expression we were trying to evaluate is {expr} (unhinted: {unhinted_expr}).\n\n"
-            "For more information, run with TORCH_LOGS=\"dynamic\".\n"
+            f"Could not guard on data-dependent expression {expr} (unhinted: {unhinted_expr}).  (Size-like symbols: {', '.join(map(str, size_like_symbols)) or 'none'})\n\n"
+            "Potential framework code culprit (scroll up for full backtrace):\n"
+            f"{''.join(traceback.StackSummary.from_list([fsummary]).format())}\n"
+            "For more information, run with TORCH_LOGS=\"dynamic\"\n"
             "For extended logs when we create symbols, also add "
-            f"TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL=\"{','.join(map(str, expr.free_symbols))}\".\n"
-            "To get a C++ backtrace for this exception or the extended logs above, also add TORCHDYNAMO_EXTENDED_DEBUG_CPP=1.\n"
-            "For more debugging help, see https://docs.google.com/document/d/1HSuTTVvYH1pTew89Rtpeu84Ht3nQEFTYhAX3Ypa_xJs/edit?usp=sharing"
+            f"TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL=\"{','.join(map(str, expr.free_symbols))}\"\n"
+            "If you suspect the guard was triggered from C++, add TORCHDYNAMO_EXTENDED_DEBUG_CPP=1\n"
+            "For more debugging help, see https://docs.google.com/document/d/1HSuTTVvYH1pTew89Rtpeu84Ht3nQEFTYhAX3Ypa_xJs/edit?usp=sharing\n" +
+            maybe_extra_debug
             # TODO: Help text about how to use our runtime tests to fix this
             # problem
         )
@@ -3816,13 +3816,13 @@ class ShapeEnv:
             cpp_stack = CapturedTraceback.extract(cpp=True)
             maybe_extra_debug += "\nC++ stack trace:\n" + ''.join(cpp_stack.format())
 
-        return fsummary, user_tb, maybe_user_loc, maybe_extra_debug
+        return fsummary, maybe_user_loc, maybe_extra_debug
 
     def _log_guard(self, prefix: str, g):
         if self.log.isEnabledFor(logging.INFO):
             str_g = str(g)
             is_debug = config.extended_debug_guard_added is not None and str_g == config.extended_debug_guard_added
-            fsummary, user_tb, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
+            fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
             self.log.info(
                 "%s %s [guard added]%s (%s)%s",
                 prefix,
