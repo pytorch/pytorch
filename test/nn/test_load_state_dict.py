@@ -57,6 +57,7 @@ class TestLoadStateDict(NNTestCase):
             m.load_state_dict(2)
 
     @swap([True, False])
+    @skipIfTorchDynamo("dynamo installs weakrefs on some params")
     def test_load_state_dict(self):
         l = nn.Linear(5, 5)
         block = nn.Module()
