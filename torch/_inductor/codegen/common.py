@@ -79,7 +79,7 @@ device_codegens: Dict[str, DeviceCodegen] = {}
 #
 # Intel has developed a new backend on top of Triton to support Intel GPUs, leveraging these interfaces.
 # This backend can be used as a reference:
-# https://github.com/intel/intel-extension-for-pytorch/blob/5dcc9d57e5422cf295e1a1ee97896d6b6a554a85/intel_extension_for_pytorch/_inductor/__init__.py#L9  # noqa: B950
+# https://github.com/intel/intel-extension-for-pytorch/blob/5dcc9d57e5422cf295e1a1ee97896d6b6a554a85/intel_extension_for_pytorch/_inductor/__init__.py#L9
 def register_backend_for_device(
     device: str, device_scheduling: type, device_wrapper_codegen: type
 ):
@@ -819,7 +819,7 @@ class CppWrapperKernelArgs(KernelArgs):
     def wrap_ptr_arg(self, buf, dtype):
         from .cpp import DTYPE_TO_CPP
 
-        if config.aot_inductor.abi_compatible:
+        if config.abi_compatible:
             # In the abi_compatible model, we just return the buf here.
             # We will form correct call args later in wrapper.generate_kernel_all.
             return buf

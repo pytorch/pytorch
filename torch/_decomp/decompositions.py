@@ -3848,13 +3848,15 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
 
     t1, t2 = (tensor1, tensor2) if tensor1.ndim >= tensor2.ndim else (tensor2, tensor1)
 
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     if not (t1.ndim >= 3 and t2.ndim <= 2):
         return False
     if t2.requires_grad and not is_out:
         return True
     if tensor1.ndim == 2:
         return False
-    if t1.numel() == 0:
+    if guard_size_oblivious(t1.numel() == 0):
         return True
 
     t1_shape = t1.shape
@@ -4312,16 +4314,9 @@ def scaled_dot_product_flash_attention_for_cpu(
     scale: Optional[float] = None,
 ) -> Tuple[Tensor, Tensor]:
     dtype = query.dtype
-    batchSize, num_head, qSize, headSize = (
-        query.shape[0],
-        query.shape[1],
-        query.shape[2],
-        query.shape[3],
-    )
-
     torch._check(
-        torch.is_floating_point(query) and dtype is not torch.half,
-        lambda: f"query must be FP32, FP64, BF16 but got {query.dtype}",
+        torch.is_floating_point(query),
+        lambda: f"query must be FP32, FP64, BF16, FP16 but got {query.dtype}",
     )
     torch._check(
         query.dim() == 4 and key.dim() == 4 and value.dim() == 4,
