@@ -139,6 +139,8 @@ if [[ "$TEST_CONFIG" == *crossref* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # ROCm 6.0 regression on MI50 CI runners due to hipblaslt; remove for ROCm 6.1.
+  export VALGRIND=OFF
   # Print GPU info
   rocminfo
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
