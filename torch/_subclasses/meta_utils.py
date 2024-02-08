@@ -403,16 +403,11 @@ class MetaConverter:
 
                     if shape_env:
                         if is_traceable_wrapper_subclass(t):
-                            if symbolic_context is None:
-                                base_symbolic_context = None
-                            else:
-                                assert isinstance(
-                                    symbolic_context, SubclassSymbolicContext
-                                )
-                                # TODO: Do this for dense tensors too
-                                base_symbolic_context = symbolic_context.inner_contexts[
-                                    "_base"
-                                ]
+                            assert isinstance(symbolic_context, SubclassSymbolicContext)
+                            # TODO: Do this for dense tensors too
+                            base_symbolic_context = symbolic_context.inner_contexts[
+                                "_base"
+                            ]
                         else:
                             base_symbolic_context = StatelessSymbolicContext(
                                 dynamic_sizes=[DimDynamic.STATIC] * t._base.dim(),
@@ -478,6 +473,10 @@ class MetaConverter:
                         # recreate this situation.
                         def _view_from_base(base, t):
                             if is_traceable_wrapper_subclass(t):
+                                # Covers:
+                                #     Dense -> Subclass views
+                                #     Subclass -> Subclass views
+
                                 # fake-ify t naively; view relationship isn't correct yet
                                 (
                                     sizes,
@@ -530,7 +529,12 @@ class MetaConverter:
                                 )
                                 return fake_t
 
+                            # elif is_traceable_wrapper_subclass(base):
+                            # Covers Subclass -> Dense views
+
                             else:
+                                # Covers Dense -> Dense views
+                                # TODO: Change this logic to use view replay for consistency
                                 (
                                     sizes,
                                     strides,
