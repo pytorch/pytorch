@@ -1820,10 +1820,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(opt_fn(), fn())
 
     def test_rand_tensor_partial(self):
-        from functools import partial
         from collections import namedtuple
+        from functools import partial
 
-        SdpaShape = namedtuple('Sdpa_Shape', ['batch', 'num_heads', 'seq_len', 'head_dim'])
+        SdpaShape = namedtuple(
+            "Sdpa_Shape", ["batch", "num_heads", "seq_len", "head_dim"]
+        )
 
         @torch.compile(backend="eager")
         def func():
@@ -1832,11 +1834,15 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             )
 
             bsz, num_heads, seq_len_q, seq_len_kv, head_dim = (16, 16, 128, 128, 16)
-            make_q_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_q, head_dim))
-            make_kv_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_kv, head_dim))
+            make_q_tensor = partial(
+                make_tensor, SdpaShape(bsz, num_heads, seq_len_q, head_dim)
+            )
+            make_kv_tensor = partial(
+                make_tensor, SdpaShape(bsz, num_heads, seq_len_kv, head_dim)
+            )
             t1 = make_q_tensor()
             t2 = make_kv_tensor()
-            t3 = t1+t2
+            t3 = t1 + t2
 
         func()
 
