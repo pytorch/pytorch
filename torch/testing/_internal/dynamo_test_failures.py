@@ -796,8 +796,8 @@ dynamo_expected_failures = {
     "TestGradTransformCPU.test_vjp_of_grad_composition_cpu",  # functorch/test_eager_transforms.py
     "TestGradTransformCPU.test_vjp_pytree_input_cpu",  # functorch/test_eager_transforms.py
     "TestComposabilityCPU.test_make_fx_vjp_cpu",  # functorch/test_eager_transforms.py
-    "TestComposabilityCPU.test_vjp_grad_cpu",  # functorch/test_eager_transforms.py
     "TestAutogradFunctionCPU.test_once_differentiable_autograd_vjp_cpu",  # functorch/test_eager_transforms.py
+    "TestComposabilityCPU.test_vjp_grad_cpu",  # functorch/test_eager_transforms.py
     "TestComposabilityCPU.test_vjp_vmap_cpu",  # functorch/test_eager_transforms.py
     "TestFunctionalizeCPU.test_multioutput_view_cpu",  # functorch/test_eager_transforms.py
     "TestFunctionalizeCPU.test_simple_view_cpu",  # functorch/test_eager_transforms.py
