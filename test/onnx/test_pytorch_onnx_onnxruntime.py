@@ -7621,6 +7621,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         "FAIL : Non-zero status code returned while running If node. "
         "Name:'/If' Status Message: if.cc:253 Compute "
         "If nodes condition input must have exactly one element"
+        "https://github.com/pytorch/pytorch/issues/119442"
     )
     def test_embedding_bag_2d_per_sample_weights(self):
         class EmbeddingModel(torch.nn.Module):
