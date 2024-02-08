@@ -37,7 +37,7 @@ def _storage_setup(
         pass
 
     for target in targets:
-        if target.check(checkpoint_id):
+        if target.validate_checkpoint_id(checkpoint_id):
             storage = target(checkpoint_id)  # type: ignore[call-arg]
             storage.reset(checkpoint_id)
             return storage
