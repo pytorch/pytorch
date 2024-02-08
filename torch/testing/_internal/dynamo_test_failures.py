@@ -1211,7 +1211,6 @@ dynamo_expected_failures = {
     "TestVmapAPILegacy.test_accepts_nested_inputs",  # test_legacy_vmap
     "TestVmapAPILegacy.test_nested_out_dims",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_inplace_manyview_cpu",  # test_legacy_vmap
-    "TestVmapAPILegacy.test_functools_partial",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_unrelated_output_cpu",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_index_cpu",  # test_legacy_vmap
     "TestVmapAPILegacy.test_non_zero_in_dims",  # test_legacy_vmap
