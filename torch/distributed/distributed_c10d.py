@@ -288,9 +288,11 @@ class BackendConfig:
         if backend == Backend.UNDEFINED:
             # default config when backend is not specified
             # supported since PyTorch 2.0
-            for device in Backend.default_device_backend_map:
-                if is_backend_available(Backend.default_device_backend_map[device]):
-                    self.device_backend_map[device] = Backend(Backend.default_device_backend_map[device])
+            for device, default_backend in Backend.default_device_backend_map.items():
+                if is_backend_available(default_backend):
+                    if default_backend == Backend.NCCL and not torch.cuda.is_available():
+                        continue
+                    self.device_backend_map[device] = Backend(default_backend)
         elif backend.lower() in Backend.backend_list:
             # Cases for when backend is a single string (without device types)
             # e.g. "nccl", "gloo", "ucc", "mpi"
@@ -989,7 +991,8 @@ def _is_barrier_after_init() -> int:
 
 def _abort_in_destroy_pg() -> bool:
     # Environment variable to control whether to abort the communicators when users call destroy_process_group()
-    return os.getenv("TORCH_NCCL_ABORT_IN_DESTROY_PG") is not None
+    env = os.getenv("TORCH_NCCL_ABORT_IN_DESTROY_PG", "0")
+    return env == "1" or env.lower() == "true"
 
 
 def _get_default_group() -> ProcessGroup:
