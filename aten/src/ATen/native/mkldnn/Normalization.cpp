@@ -6,6 +6,8 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/batch_norm_with_update_native.h>
+#include <ATen/ops/batch_norm_backward_native.h>
 #include <ATen/ops/_native_batch_norm_legit_native.h>
 #include <ATen/ops/_to_dense_native.h>
 #include <ATen/ops/empty_native.h>

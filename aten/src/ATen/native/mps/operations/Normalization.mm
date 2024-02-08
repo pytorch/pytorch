@@ -11,6 +11,8 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_native_batch_norm_legit_native.h>
+#include <ATen/ops/batch_norm_backward_native.h>
+#include <ATen/ops/batch_norm_with_update_native.h>
 #include <ATen/ops/native_batch_norm.h>
 #include <ATen/ops/native_batch_norm_backward_native.h>
 #include <ATen/ops/native_batch_norm_native.h>
