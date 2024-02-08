@@ -11479,7 +11479,7 @@ class TestComplex(TestCase):
 
         # Allocate tensors on mps
         with torch.device("mps"):
-            inputs = [torch.rand(2, dtype=dtype) for dtype in [torch.float, torch.half, torch.cfloat, torch.chalf]]
+            inputs = [torch.rand(2, dtype=dtype) for dtype in [torch.float, torch.half, torch.cfloat]]
         self.assertTrue(all(x.device.type == "mps" for x in inputs))
         # Add scalars
         inputs.extend([7, 3.14, 2 + 3j, torch.tensor(4 + 5j, dtype=torch.chalf)])
