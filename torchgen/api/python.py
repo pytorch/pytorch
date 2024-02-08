@@ -1002,8 +1002,9 @@ def returns_named_tuple_pyi(signature: PythonSignature) -> Optional[Tuple[str, s
         # the constructor acts like the constructor of tuple. Using typing.NamedTuple
         # does not allow us to override __init__.
         field_names_str = ", ".join(repr(name) for name in field_names)
+        seq_type = f"Tuple[{', '.join(python_returns)}]"
         namedtuple_def_lines = [
-            f"class {namedtuple_name}(Tuple):",
+            f"class {namedtuple_name}({seq_type}):",
         ]
         for name, typ in zip(field_names, python_returns):
             namedtuple_def_lines.extend(
@@ -1012,7 +1013,6 @@ def returns_named_tuple_pyi(signature: PythonSignature) -> Optional[Tuple[str, s
                     f"    def {name}(self) -> {typ}: ...",
                 ]
             )
-        seq_type = f"Tuple[{', '.join(python_returns)}]"
         namedtuple_def_lines.extend(
             [
                 f"    def __init__(self, sequence: {seq_type}): ...",
@@ -1022,7 +1022,7 @@ def returns_named_tuple_pyi(signature: PythonSignature) -> Optional[Tuple[str, s
         namedtuple_def = "\n".join(namedtuple_def_lines)
         # Example:
         # namedtuple_def = (
-        #     "class max(Tuple):\n"
+        #     "class max(Tuple[Tensor, Tensor]):\n"
         #     "    @property\n
         #     "    def values(self) -> Tensor: ...\n
         #     "    @property\n
