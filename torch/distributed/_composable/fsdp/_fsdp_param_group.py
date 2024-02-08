@@ -117,7 +117,7 @@ class FSDPParamGroup:
         # in forward but not in backward: for each forward, we record a tuple
         # of the output's grad fns and later query the autograd engine whether
         # any grad fn will execute in the current backward to know to prefetch.
-        self.all_forward_grad_fns: Set[Tuple[Node, ...]] = set()
+        self.all_forward_output_grad_fns: Set[Tuple[Node, ...]] = set()
         # Whether to reduce-scatter or all-reduce gradients, respectively
         # (can be set to false to save communication during gradient
         # accumulation); all-reducing without reduce-scatter is disallowed
@@ -274,7 +274,7 @@ class FSDPParamGroup:
             self.unshard()  # no-op if prefetched
             self.wait_for_unshard()
             # Can be already removed if running multiple `backward`s
-            self.all_forward_grad_fns.discard(forward_grad_fns)
+            self.all_forward_output_grad_fns.discard(forward_grad_fns)
             self._prefetch_unshard()
 
     def post_backward(self, *unused: Any):
@@ -314,7 +314,7 @@ class FSDPParamGroup:
             self._reduce_scatter_view_out_event = None
         self._training_state = TrainingState.IDLE
         self._post_forward_indices.clear()
-        self.all_forward_grad_fns.clear()
+        self.all_forward_output_grad_fns.clear()
 
     def _prefetch_unshard(self):
         if self._training_state == TrainingState.PRE_BACKWARD:
@@ -327,8 +327,8 @@ class FSDPParamGroup:
             target_fsdp_param_group = self.comm_ctx.post_forward_order[target_index]
             if any(
                 torch._C._will_engine_execute_node(grad_fn)  # type: ignore[attr-defined]
-                for forward_grad_fns in target_fsdp_param_group.all_forward_grad_fns
-                for grad_fn in forward_grad_fns
+                for grad_fns in target_fsdp_param_group.all_forward_output_grad_fns
+                for grad_fn in grad_fns
             ):
                 with torch.profiler.record_function(
                     "FSDP::backward_prefetch"
