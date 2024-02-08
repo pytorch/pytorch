@@ -1163,6 +1163,8 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.frame_count, 1)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    # Translation validation changes the exception type, don't run with it
+    @torch.fx.experimental._config.patch(translation_validation=False)
     def test_torch_check_is_size(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -1170,15 +1172,13 @@ utils_device.CURRENT_DEVICE == None""".split(
         def f(x):
             y = x.item()
             torch._check_is_size(y)
-            # unsound 0/1 specialization!
+            # Cannot conditional on unbacked SymInt
             if y == 0:
                 assert False
             else:
                 return torch.arange(0, y)
 
-        f(torch.tensor([3]))
-        f(torch.tensor([4]))
-        self.assertEqual(cnts.frame_count, 1)
+        self.assertRaises(torch._dynamo.exc.UserError, lambda: f(torch.tensor([3])))
 
     def test_config_obj(self):
         class Cfg:
@@ -8961,9 +8961,6 @@ ShapeEnv not equal: field values don't match:
 ==> name_to_node: values don't match.
   >  Left: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
   > Right: {}
-==> runtime_var_to_range: values don't match.
-  >  Left: {s0: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}
-  > Right: {}
 ==> source_to_symbol: values don't match.
   >  Left: {x.size()[0]: x.size()[0], x.size()[1]: x.size()[1], x.storage_offset(): x.storage_offset(), x.stride()[0]: x.stride()[0], x.stride()[1]: x.stride()[1]}
   > Right: {}
@@ -9396,6 +9393,145 @@ fn
         result = opt_fn()
         self.assertIn(0, result)
         self.assertTrue(same(result[0], torch.tensor(3)))
+
+    def test_dynamo_reset_clears_cache(self):
+        """Test that dynamo bytecode cache is freed
+        when dynamo reset is called
+        """
+
+        def fn(x):
+            return torch.sin(x)
+
+        opt_fn = torch.compile(backend="eager")(fn)
+        opt_fn(torch.randn(3, 3))
+
+        c1 = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(c1), 1)
+
+        torch._dynamo.reset()
+        c2 = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(c2), 0)
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_module_free(self):
+        """Test that CUDA memory is freed when a model goes out of scope"""
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.fc = torch.nn.Linear(10000, 10000)
+
+            def forward(self, out):
+                return self.fc(out)
+
+        def run(compile):
+            mod = Mod().cuda()
+            if compile:
+                mod = torch.compile(mod, backend="eager")
+            inp = torch.rand(10000, 10000).cuda()
+            mod(inp)
+
+        def clean_and_report_memory():
+            import gc
+
+            gc.collect()
+            return torch.cuda.memory_allocated()
+
+        run(False)
+        # mem1 = clean_and_report_memory()
+        run(True)
+        mem2 = clean_and_report_memory()
+        torch._dynamo.reset_code_caches()
+        mem3 = clean_and_report_memory()
+
+        # it's possible for dynamo to hold on to more memory
+        # even after a _dynamo.reset[_code_caches], so we omit the following check.
+        # self.assertEqual(mem1, mem2)
+
+        self.assertEqual(mem2, mem3)
+
+    def test_dynamo_cache_move_to_front(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.fc = torch.nn.Linear(3, 3)
+
+            def forward(self, out):
+                return self.fc(out)
+
+        def fn(x, mod):
+            return mod(x)
+
+        opt_fn = torch.compile(fn, backend="eager")
+
+        m1 = Mod()
+        m2 = Mod()
+        m3 = Mod()
+        inp = torch.randn(3, 3)
+
+        # NOTE: assumes that each cache entry is guarded
+        # on unique Mod instance
+        opt_fn(inp, m1)
+        opt_fn(inp, m2)
+        opt_fn(inp, m3)
+
+        c1 = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(c1), 3)
+
+        # move cache entry to front
+        opt_fn(inp, m2)
+        c2 = _debug_get_cache_entry_list(fn.__code__)
+        self.assertIs(c1[1], c2[0])
+
+    def test_dynamo_cache_invalidate(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.fc = torch.nn.Linear(3, 3)
+
+            def forward(self, out):
+                return self.fc(out)
+
+        def fn(x, mod):
+            return mod(x)
+
+        opt_fn = torch.compile(fn, backend="eager")
+
+        m1 = Mod()
+        m2 = Mod()
+        m3 = Mod()
+        inp = torch.randn(3, 3)
+
+        # NOTE: assumes that each cache entry is guarded
+        # on unique Mod instance
+        opt_fn(inp, m1)
+        opt_fn(inp, m2)
+        opt_fn(inp, m3)
+
+        c1 = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(c1), 3)
+
+        # move cache entry to front
+        opt_fn(inp, m2)
+        c2 = _debug_get_cache_entry_list(fn.__code__)
+        self.assertIs(c1[1], c2[0])
+
+        # delete center of cache
+        del m3
+        c3 = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(c3), 2)
+        self.assertIs(c3[0], c2[0])
+        self.assertIs(c3[1], c2[2])
+
+        # delete end of cache
+        del m1
+        c4 = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(c4), 1)
+        self.assertIs(c4[0], c3[0])
+
+        del m2
+        c5 = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(c5), 0)
 
 
 class TestTracer(JitTestCase):
