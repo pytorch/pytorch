@@ -1,11 +1,7 @@
 import functools
 import os
 from itertools import chain, count
-from typing import (
-    Any,
-    List,
-    Optional,
-)
+from typing import Any, List, Optional
 
 import sympy
 
@@ -15,10 +11,7 @@ from .. import config
 from ..codecache import CudaKernelParamCache
 from ..triton_heuristics import grid as default_grid
 from ..virtualized import V
-from .wrapper import (
-    CppWrapperCodeGen,
-    SymbolicCallArg,
-)
+from .wrapper import CppWrapperCodeGen, SymbolicCallArg
 
 
 def is_int(s: str) -> bool:
@@ -41,7 +34,6 @@ def is_float(s: str) -> bool:
     except ValueError:
         return False
     return True
-
 
 
 class CudaWrapperCodeGen(CppWrapperCodeGen):
