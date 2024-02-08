@@ -30,8 +30,9 @@ from .codegen.common import (
     get_wrapper_codegen_for_device,
     register_backend_for_device,
 )
+from .codegen.cpp_wrapper import CppWrapperCodeGen
 from .codegen.cuda_wrapper import CudaWrapperCodeGen
-from .codegen.wrapper import CppWrapperCodeGen, WrapperCodeGen
+from .codegen.wrapper import WrapperCodeGen
 from .exc import (
     CppWrapperCodeGenError,
     LoweringException,
