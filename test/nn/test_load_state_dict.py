@@ -10,21 +10,11 @@ import torch.nn as nn
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import TestCase, \
     TEST_NUMPY, IS_WINDOWS, skipIfTorchDynamo, instantiate_parametrized_tests, \
-    run_tests, wrapSwapTensorsTest, skipIfCrossRef, _TestParametrizer
+    run_tests, skipIfCrossRef, swap
 from torch.utils._pytree import tree_map
 
 if TEST_NUMPY:
     import numpy as np
-
-
-class swap(_TestParametrizer):
-    def __init__(self, swap_values):
-        super().__init__()
-        self.swap_values = swap_values
-
-    def _parametrize_test(self, test, generic_cls, device_cls):
-        for swap in self.swap_values:
-            yield wrapSwapTensorsTest(swap)(test), f'swap_{swap}', {}, lambda _: []
 
 
 class TestLoadStateDict(NNTestCase):
@@ -477,7 +467,7 @@ class MyWrapperLoadTensor(MyLoadTensor):
 class TestLoadStateDictSwap(TestCase):
     @skipIfCrossRef
     @skipIfTorchDynamo("Can't swap with dynamo as dynamo installs weakrefs")
-    @wrapSwapTensorsTest(swap=True)
+    @swap([True])
     def test_swap_subclass(self):
 
         def _create_model(subclass=None):

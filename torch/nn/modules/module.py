@@ -2065,9 +2065,9 @@ class Module:
                         elif use_swap_tensors:
                             param_requires_grad = param.requires_grad
                             new_input_param = param.module_load(input_param)
-                            if id(new_input_param) == id(input_param):
-                                raise RuntimeError("module_load returned the original tensor please .detach() "
-                                                   "the result if returning the original tensor in module_load")
+                            if id(new_input_param) == id(input_param) or id(new_input_param) == id(param):
+                                raise RuntimeError("module_load returned one of self or other, please .detach() "
+                                                   "the result if returning one of the inputs in module_load")
                             if (isinstance(param, torch.nn.Parameter) and
                                     not isinstance(new_input_param, torch.nn.Parameter)):
                                 new_input_param = torch.nn.Parameter(new_input_param, requires_grad=param_requires_grad)

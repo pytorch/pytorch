@@ -711,25 +711,18 @@ class Tensor(torch._C.TensorBase):
         return self
 
     def module_load(self, other):
-        r"""Defines how ``other`` should be transformed when loading ``other`` from a state_dict into ``self``.
+        r"""Defines how to transform ``other`` when loading it into ``self`` in :meth:`~nn.Module.load_state_dict`.
 
         Used when :func:`~torch.__future__.get_swap_module_params_on_conversion` is ``True``.
 
-        If ``self`` is a parameter or buffer in an ``nn.Module`` and ``other`` is the
+        It is expected that ``self`` is a parameter or buffer in an ``nn.Module`` and ``other`` is the
         value in the state dictionary with the corresponding key, this method defines
         how ``other`` is remapped before being swapped with ``self`` via
         :func:`~torch.utils.swap_tensors`` in ``module.load_state_dict()``.
 
-        To customize how to load from or to a tensor subclass, one can override this function with
-        ``__torch_function__``.
-
-        ..note::
-            If both ``self`` and ``other`` have ``__torch_function__`` handlers implemented
-            for this method, the handler of ``self`` will take precedence unless ``other``
-            subclasses ``self``, then the handler of ``other`` will take precedence.
-
         .. note::
-            This method is not allowed to return ``other``, return ``other.detach()`` instead.
+            This method should always return a new object that is not ``self`` or ``other``.
+            For example, the default implementation returns ``self.copy_(other).detach()``.
 
         Args:
             other (Tensor): value in state dict with key corresponding to ``self``
