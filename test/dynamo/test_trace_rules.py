@@ -12,10 +12,11 @@ import torch
 import torch._dynamo.config as config
 import torch._dynamo.test_case
 import torch._functorch.deprecated as deprecated_func
-from torch._dynamo.skipfiles import LEGACY_MOD_INLINELIST, MOD_INLINELIST
 from torch._dynamo.trace_rules import (
+    LEGACY_MOD_INLINELIST,
     load_object,
     manual_torch_name_rule_map,
+    MOD_INLINELIST,
     torch_c_binding_in_graph_functions,
     torch_non_c_binding_in_graph_functions,
 )
@@ -32,7 +33,7 @@ ignored_c_binding_in_graph_function_names = {
     # Ignored because they have manual rules defined at `trace_rules.manual_torch_name_rule_map`.
     "torch._nested_tensor_from_mask",
     "torch._nested_from_padded",
-    # Ignored and go through rules defined at `skipfiles.check`.
+    # Ignored and go through rules defined at `trace_rules.check`.
     "torch._functionalize_are_all_mutations_under_no_grad_or_inference_mode",
     "torch._cslt_sparse_mm_search",
     "torch._C._abort",
@@ -303,7 +304,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
         for m in LEGACY_MOD_INLINELIST.union(MOD_INLINELIST):
             self.assertTrue(
                 isinstance(importlib.import_module(m), types.ModuleType),
-                f"{m} from skipfiles.MOD_INLINELIST/LEGACY_MOD_INLINELIST is not a python module, please check and correct it.",
+                f"{m} from trace_rules.MOD_INLINELIST/LEGACY_MOD_INLINELIST is not a python module, please check and correct it.",
             )
 
     def test_torch_name_rule_map_updated(self):
@@ -359,9 +360,9 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
         ]
 
         self.assertTrue(
-            "torch._dynamo" not in torch._dynamo.skipfiles.LEGACY_MOD_INLINELIST
+            "torch._dynamo" not in torch._dynamo.trace_rules.LEGACY_MOD_INLINELIST
         )
-        self.assertTrue("torch._dynamo" not in torch._dynamo.skipfiles.MOD_INLINELIST)
+        self.assertTrue("torch._dynamo" not in torch._dynamo.trace_rules.MOD_INLINELIST)
 
         with unittest.mock.patch(
             "torch._dynamo.trace_rules.torch_name_rule_map",
@@ -402,7 +403,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.trace_rules.get_torch_obj_rule_map.__wrapped__,
         ):
             # First adding the module to SKIP_DIRS so that it will be skipped by default.
-            torch._dynamo.skipfiles.add(mod.__name__)
+            torch._dynamo.trace_rules.add(mod.__name__)
             x = torch.rand(3)
             opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
             ref = fn(x)
