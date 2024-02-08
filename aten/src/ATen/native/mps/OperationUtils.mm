@@ -49,8 +49,7 @@ void runMPSGraph(MPSStream* mpsStream, MPSGraph* mpsGraph, NSDictionary* feeds, 
 }
 
 static inline void checkSupportsComplex() {
-  TORCH_CHECK_TYPE(supportsComplex(),
-                   "MPS complex types are only supported on MacOS 14.0 or newer.");
+  TORCH_CHECK_TYPE(supportsComplex(), "MPS complex types are only supported on MacOS 14.0 or newer.");
 }
 
 MPSDataType getMPSDataType(ScalarType scalar_type) {
