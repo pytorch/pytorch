@@ -798,10 +798,10 @@ dynamo_expected_failures = {
     "TestComposabilityCPU.test_make_fx_vjp_cpu",  # functorch/test_eager_transforms.py
     "TestComposabilityCPU.test_vjp_grad_cpu",  # functorch/test_eager_transforms.py
     "TestAutogradFunctionCPU.test_once_differentiable_autograd_vjp_cpu",  # functorch/test_eager_transforms.py
-    "TestFunctionalizeCPU.test_vmap_functionalize_jvp_cpu",  # functorch/test_eager_transforms.py
     "TestComposabilityCPU.test_vjp_vmap_cpu",  # functorch/test_eager_transforms.py
     "TestFunctionalizeCPU.test_multioutput_view_cpu",  # functorch/test_eager_transforms.py
     "TestFunctionalizeCPU.test_simple_view_cpu",  # functorch/test_eager_transforms.py
+    "TestFunctionalizeCPU.test_vmap_functionalize_jvp_cpu",  # functorch/test_eager_transforms.py
     "TestMetaKernel.test_addmm_invalid_dtype",  # lazy/test_meta_kernel
     "TestVerifyCorrectness.test_incorrect_verify_true",  # dynamo/test_verify_correctness
     "TestVerifyCorrectness.test_torchscript",  # dynamo/test_verify_correctness
@@ -2091,8 +2091,6 @@ dynamo_expected_failures = {
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_float32",  # test_linalg.py
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_int64",  # test_linalg.py
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_complex64",  # test_linalg.py
-    "TestJvpCPU.test_primals_tangents_length_mismatch_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_out_of_bounds_argnums_jacfwd_cpu",  # functorch/test_eager_transforms.py
     "TestVmapJvpInplaceViewCPU.test_all_dual_base_inplace_cpu",  # functorch/test_eager_transforms.py
     "TestVmapJvpInplaceViewCPU.test_all_dual_base_view_inplace_cpu",  # functorch/test_eager_transforms.py
     "TestVmapJvpInplaceViewCPU.test_all_dual_no_view_cpu",  # functorch/test_eager_transforms.py
@@ -2100,6 +2098,8 @@ dynamo_expected_failures = {
     "TestVmapJvpInplaceViewCPU.test_right_dual_view_prop_cpu",  # functorch/test_eager_transforms.py
     "TestVmapJvpInplaceViewCPU.test_vmap_functionalize_jvp_cpu",  # functorch/test_eager_transforms.py
     "TestCompileTransformsCPU.test_compile_vmap_hessian_cpu",  # functorch/test_eager_transforms.py
+    "TestJvpCPU.test_primals_tangents_length_mismatch_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_out_of_bounds_argnums_jacfwd_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_jac_with_non_tensor_args_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_multiple_inputs_outputs_pytree_cpu",  # functorch/test_eager_transforms.py
     "TestExamplesCorrectnessCPU.test_maml_regression_mechanism_functional_call_cpu",  # functorch/test_eager_transforms.py
