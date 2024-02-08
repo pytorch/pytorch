@@ -3,12 +3,6 @@
 #include <ATen/xpu/XPUEvent.h>
 #include <c10/util/irange.h>
 
-#define ASSERT_EQ_XPU(X, Y) \
-  {                         \
-    bool _isEQ = X == Y;    \
-    ASSERT_TRUE(_isEQ);     \
-  }
-
 TEST(XpuEventTest, testXPUEventBehavior) {
   if (!at::xpu::is_available()) {
     return;
@@ -16,11 +10,11 @@ TEST(XpuEventTest, testXPUEventBehavior) {
   auto stream = c10::xpu::getStreamFromPool();
   at::xpu::XPUEvent event;
 
-  ASSERT_TRUE(event.query());
-  ASSERT_TRUE(!event.isCreated());
+  EXPECT_TRUE(event.query());
+  EXPECT_TRUE(!event.isCreated());
 
   event.recordOnce(stream);
-  ASSERT_TRUE(event.isCreated());
+  EXPECT_TRUE(event.isCreated());
 
   auto wait_stream0 = c10::xpu::getStreamFromPool();
   auto wait_stream1 = c10::xpu::getStreamFromPool();
@@ -29,7 +23,7 @@ TEST(XpuEventTest, testXPUEventBehavior) {
   event.block(wait_stream1);
 
   wait_stream0.synchronize();
-  ASSERT_TRUE(event.query());
+  EXPECT_TRUE(event.query());
 }
 
 void eventSync(sycl::event& event) {
@@ -44,7 +38,7 @@ void clearHostData(int* hostData, int numel) {
 
 void validateHostData(int* hostData, int numel) {
   for (const auto i : c10::irange(numel)) {
-    ASSERT_EQ_XPU(hostData[i], i);
+    EXPECT_EQ(hostData[i], i);
   }
 }
 
@@ -68,7 +62,7 @@ TEST(XpuEventTest, testXPUEventFunction) {
   event.record(stream);
   // To validate the implicit conversion of an XPUEvent to sycl::event.
   eventSync(event);
-  ASSERT_TRUE(event.query());
+  EXPECT_TRUE(event.query());
 
   clearHostData(hostData, numel);
 
@@ -85,7 +79,7 @@ TEST(XpuEventTest, testXPUEventFunction) {
   // The event has already been created, so there will be no recording of the
   // stream via recordOnce() here.
   event.recordOnce(stream);
-  ASSERT_TRUE(event.query());
+  EXPECT_TRUE(event.query());
 
   stream.synchronize();
   sycl::free(deviceData, c10::xpu::get_device_context());
