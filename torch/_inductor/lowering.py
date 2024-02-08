@@ -5190,30 +5190,21 @@ from .codegen.common import pointwise_overrides_data
 
 
 def _get_pointwise_overrides(ns, name):
-    impls = pointwise_overrides_data[name]
-    type_promotion_kind = impls.get(
-        "type_promotion_kind", ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-    )
-    op = getattr(ns, impls["aten"], None)
+    data = pointwise_overrides_data[name]
+    op = getattr(ns, data.name, None)
     if op is None:
         return
 
-    if impls.get("triton") is None:
-
-        def make_triton_fallback(op):
+    def make_triton_fallback(op):
+        if data.triton is None:
             return fallback_handler(op)
-
-    else:
-
-        def make_triton_fallback(op):
-            return
 
     if isinstance(op, torch._ops.OpOverloadPacket):
         for olname in op.overloads():
             ol = getattr(op, olname)
-            yield ol, type_promotion_kind, fallback_handler(ol)
+            yield ol, data.type_promotion_kind, make_triton_fallback(ol)
     else:
-        yield op, type_promotion_kind, fallback_handler(op)
+        yield op, data.type_promotion_kind, make_triton_fallback(op)
 
 
 for name in pointwise_overrides_data:
