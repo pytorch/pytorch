@@ -192,7 +192,6 @@ test_failures = {
     "test_topk_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_unbind_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_views5_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_views6_dynamic_shapes": TestFailure(("cpu",)),
     "test_view_detach_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_view_on_aliased_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linear_float64_dynamic_shapes": TestFailure("cpu"),
@@ -293,9 +292,7 @@ test_failures = {
 if TEST_WITH_ROCM:
     test_failures.update(
         {
-            "test_cumprod_zero_dim_dynamic_shapes": TestFailure(("cpu", "cuda")),
             "test_cumsum_dynamic_shapes": TestFailure(("cpu", "cuda")),
-            "test_cumsum_zero_dim_dynamic_shapes": TestFailure(("cpu", "cuda")),
         }
     )
 

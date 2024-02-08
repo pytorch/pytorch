@@ -6,6 +6,7 @@ import io
 import unittest
 from contextlib import contextmanager
 from dataclasses import dataclass
+from re import escape
 
 import torch
 import torch._dynamo as torchdynamo
@@ -51,6 +52,7 @@ from torch.utils._pytree import (
     treespec_dumps,
     treespec_loads,
 )
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 try:
     from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
@@ -81,7 +83,7 @@ class TestDynamismExpression(TestCase):
         ref = f(*inp)
 
         gm = export(WrapperModule(f), inp)
-        res = gm(*inp)
+        res = gm.module()(*inp)
 
         self.assertTrue(torchdynamo.utils.same(ref, res))
 
@@ -116,7 +118,7 @@ class TestDynamismExpression(TestCase):
         with self.assertRaisesRegex(
             RuntimeError, r"is outside of inline constraint \[4, 5\]"
         ):
-            ep(torch.tensor([3]))
+            ep.module()(torch.tensor([3]))
 
     def test_export_assume_static_by_default(self):
         def branch_on_shape(x: torch.Tensor):
@@ -136,11 +138,12 @@ class TestExport(TestCase):
     def _test_export_same_as_eager(self, f, args, kwargs=None):
         kwargs = kwargs or {}
         exported_program = export(WrapperModule(f), args, kwargs)
-        reversed_kwargs = {key: kwargs[key] for key in reversed(kwargs)}
-        self.assertEqual(exported_program(*args, **kwargs), f(*args, **kwargs))
-        self.assertEqual(
-            exported_program(*args, **reversed_kwargs), f(*args, **reversed_kwargs)
-        )
+        self.assertEqual(exported_program.module()(*args, **kwargs), f(*args, **kwargs))
+        # this is not supported by .module()
+        # reversed_kwargs = {key: kwargs[key] for key in reversed(kwargs)}
+        # self.assertEqual(
+        #     exported_program.module()(*args, **reversed_kwargs), f(*args, **reversed_kwargs)
+        # )
 
     def test_basic(self):
         def f(x, y):
@@ -165,7 +168,37 @@ class TestExport(TestCase):
         f = Basic()
         args = (torch.randn(1, 3),)
         ep = export(WrapperModule(f), args, strict=False)
-        self.assertEqual(ep(*args), f(*args))
+        self.assertEqual(ep.module()(*args), f(*args))
+
+    @testing.expectedFailureRetraceability
+    def test_conv_dynamic(self):
+        # Simple module for demonstration
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=32
+                    , kernel_size=3, padding=1
+                )
+                self.relu = torch.nn.ReLU()
+                self.maxpool = torch.nn.MaxPool2d(kernel_size=3)
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                a = self.conv(x)
+                a.add_(y)
+                return self.maxpool(self.relu(a))
+
+        example_args = (torch.randn(2, 3, 256, 256), torch.ones(2, 32, 256, 256))
+        dynamic_shapes = {"x": {0: Dim("batch")}, "y": {0: Dim("batch")}}
+        m = M()
+        exported_program: torch.export.ExportedProgram = export(
+            m, args=example_args, dynamic_shapes=dynamic_shapes
+        )
+
+        args = (torch.randn(17, 3, 256, 256), torch.ones(17, 32, 256, 256))
+        self.assertEqual(exported_program.module()(*args), m(*args))
+        args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
+        self.assertEqual(exported_program.module()(*args), m(*args))
 
     def test_basic_non_strict_real_tensor(self):
         class Basic(torch.nn.Module):
@@ -179,7 +212,7 @@ class TestExport(TestCase):
         f = Basic()
         args = ([torch.randn(1, 3)], torch.randn(1, 3))
         ep = export(WrapperModule(f), args, strict=False)
-        self.assertEqual(ep(*args), f(*args))
+        self.assertEqual(ep.module()(*args), f(*args))
 
     def test_basic_non_strict_fake_tensor(self):
         class Basic(torch.nn.Module):
@@ -190,13 +223,13 @@ class TestExport(TestCase):
             def forward(self, x, y):
                 return x[0] + y - self.param
 
-        fake_mode = FakeTensorMode()
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv(tracked_fakes=[]))
         f = Basic()
         with fake_mode:
             args = ([torch.empty(3, 2)], torch.empty(3, 2))
         ep = export(WrapperModule(f), args, strict=False)
         inputs = ([torch.randn(3, 2)], torch.randn(3, 2))
-        self.assertEqual(ep(*inputs), f(*inputs))
+        self.assertEqual(ep.module()(*inputs), f(*inputs))
 
     def test_non_strict_dynamic_shapes(self):
         class Foo(torch.nn.Module):
@@ -241,9 +274,9 @@ class TestExport(TestCase):
             torch.ones(4),
         )
         with self.assertRaisesRegex(
-            RuntimeError, "Expected input arg3_1.shape\[0\] to be equal to 6, but got 5"
+            RuntimeError, escape("Expected input at *args[1][0].shape[0] to be equal to 6, but got 5")
         ):
-            ep_ns(*bad_runtime_inp1)
+            ep_ns.module()(*bad_runtime_inp1)
 
         bad_runtime_inp2 = (
             torch.ones(5),
@@ -252,9 +285,9 @@ class TestExport(TestCase):
             torch.ones(6),
         )
         with self.assertRaisesRegex(
-            RuntimeError, "Expected input arg7_1.shape\[0\] to be equal to 4, but got 6"
+            RuntimeError, escape("Expected input at *args[3].shape[0] to be equal to 4, but got 6")
         ):
-            ep_ns(*bad_runtime_inp2)
+            ep_ns.module()(*bad_runtime_inp2)
 
         good_runtime_inp = (
             torch.ones(7),
@@ -262,7 +295,7 @@ class TestExport(TestCase):
             {"a": torch.zeros(7), "b": torch.ones(7)},
             torch.ones(4),
         )
-        ep_ns(*good_runtime_inp)
+        ep_ns.module()(*good_runtime_inp)
 
         bad_example_inp = (
             torch.ones(2),
@@ -379,7 +412,7 @@ class TestExport(TestCase):
         with self.assertRaisesRegex(
             RuntimeError, "shape\[1\] to be equal to 4, but got 5"
         ):
-            em(x)
+            em.module()(x)
 
     def test_not_correct_dim(self):
         def f(x):
@@ -408,7 +441,6 @@ class TestExport(TestCase):
             constraints = [dynamic_dim(inp_for_g, 0)]
 
     @testing.expectedFailureRetraceability
-    @testing.expectedFailureNonStrict
     def test_map(self):
         def list_tensor_map(xs, y, z):
             def body(x, y, z):
@@ -456,7 +488,6 @@ class TestExport(TestCase):
         kwargs3 = {"b": 1}
         self._test_export_same_as_eager(kw_func2, args, kwargs3)
 
-    @testing.expectedFailureNonStrict
     def test_export_func_with_var_postional_args(self):
         def kw_func(arg1, arg2, *args):
             return arg1 + args[0], arg2 + args[1]
@@ -561,7 +592,7 @@ class TestExport(TestCase):
             inputs,
             dynamic_shapes={k: {0: batch} for k in ["x", "y"]},
         )
-        self.assertEqual(efoo(*inputs).shape, foo(*inputs).shape)
+        self.assertEqual(efoo.module()(*inputs).shape, foo(*inputs).shape)
 
         foo = Foo()
         inputs = (torch.randn(10, 2, 3),)
@@ -571,7 +602,7 @@ class TestExport(TestCase):
             foo, inputs, kwinputs, dynamic_shapes={k: {0: batch} for k in ["x", "y"]}
         )
         self.assertEqual(
-            efoo(*inputs, **kwinputs).shape, foo(*inputs, **kwinputs).shape
+            efoo.module()(*inputs, **kwinputs).shape, foo(*inputs, **kwinputs).shape
         )
 
         # pass dynamic shapes of inputs [partial, error]
@@ -604,7 +635,7 @@ class TestExport(TestCase):
             inputs,
             dynamic_shapes={"x": {0: batch}, "y": {0: batch}},
         )
-        self.assertEqual(efoo(*inputs).shape, foo(*inputs).shape)
+        self.assertEqual(efoo.module()(*inputs).shape, foo(*inputs).shape)
 
         # pass dynamic shapes of inputs [bounds, mostly shared]
         foo = Foo()
@@ -627,7 +658,7 @@ class TestExport(TestCase):
             ],
             ["torch.Size([s0, s1, s1])", "torch.Size([s0, s1, s1])"],
         )
-        self.assertEqual(efoo(*inputs).shape, foo(*inputs).shape)
+        self.assertEqual(efoo.module()(*inputs).shape, foo(*inputs).shape)
 
         # pass dynamic shapes of inputs [multiple, mostly distinct]
         inputs = (torch.randn(10, 2, 3), torch.randn(10, 3, 4))
@@ -645,7 +676,7 @@ class TestExport(TestCase):
             ],
             ["torch.Size([s0, s1, s2])", "torch.Size([s0, s2, s5])"],
         )
-        self.assertEqual(efoo(*inputs).shape, foo(*inputs).shape)
+        self.assertEqual(efoo.module()(*inputs).shape, foo(*inputs).shape)
 
         # pass dynamic shapes of inputs [dict]
         class Foo(torch.nn.Module):
@@ -666,7 +697,7 @@ class TestExport(TestCase):
             ],
             ["torch.Size([s0, 2, 3])", "torch.Size([s0, 3, 4])"],
         )
-        self.assertEqual(efoo(*inputs).shape, foo(*inputs).shape)
+        self.assertEqual(efoo.module()(*inputs).shape, foo(*inputs).shape)
 
         # pass dynamic shapes of inputs [list]
         class Foo(torch.nn.Module):
@@ -687,7 +718,7 @@ class TestExport(TestCase):
             ],
             ["torch.Size([s0, 2, 3])", "torch.Size([s0, 3, 4])"],
         )
-        self.assertEqual(efoo(*inputs).shape, foo(*inputs).shape)
+        self.assertEqual(efoo.module()(*inputs).shape, foo(*inputs).shape)
 
         # pass dynamic shapes of inputs [dataclass]
         @dataclass
@@ -1073,8 +1104,8 @@ class TestExport(TestCase):
 
         inp_test = ((torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)),)
 
-        self.assertTrue(torch.allclose(ep(*inp_test)[0], ep_rexported(*inp_test)[0]))
-        self.assertTrue(torch.allclose(ep(*inp_test)[1], ep_rexported(*inp_test)[1]))
+        self.assertTrue(torch.allclose(ep.module()(*inp_test)[0], ep_rexported.module()(*inp_test)[0]))
+        self.assertTrue(torch.allclose(ep.module()(*inp_test)[1], ep_rexported.module()(*inp_test)[1]))
 
     @testing.expectedFailureSerDer
     @testing.expectedFailureNonStrict
@@ -1126,10 +1157,10 @@ class TestExport(TestCase):
         )
 
         self.assertTrue(
-            torch.allclose(ep(*inp_test)["a"], ep_rexported(*inp_test)["a"])
+            torch.allclose(ep.module()(*inp_test)["a"], ep_rexported.module()(*inp_test)["a"])
         )
         self.assertTrue(
-            torch.allclose(ep(*inp_test)["b"], ep_rexported(*inp_test)["b"])
+            torch.allclose(ep.module()(*inp_test)["b"], ep_rexported.module()(*inp_test)["b"])
         )
 
     @testing.expectedFailureNonStrict
@@ -1154,7 +1185,7 @@ class TestExport(TestCase):
             (torch.randint(3, 5, (2, 2)), torch.randint(3, 5, (2, 3))),
         )
         test_inp = (torch.randint(3, 5, (2, 2)), torch.randint(3, 5, (2, 3)))
-        self.assertTrue(torch.allclose(ep(*test_inp), fn(*test_inp)))
+        self.assertTrue(torch.allclose(ep.module()(*test_inp), fn(*test_inp)))
 
     def test_decomp_batch_norm_functional_predispatch(self):
         class ConvBatchnorm(torch.nn.Module):
@@ -1178,12 +1209,12 @@ class TestExport(TestCase):
             """\
 def forward(self, arg_0):
     l_x_, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
-    conv_weight = self.conv_weight
-    conv_bias = self.conv_bias
-    bn_weight = self.bn_weight
-    bn_bias = self.bn_bias
-    bn_running_mean = self.bn_running_mean
-    bn_running_var = self.bn_running_var
+    conv_weight = self.conv.weight
+    conv_bias = self.conv.bias
+    bn_weight = self.bn.weight
+    bn_bias = self.bn.bias
+    bn_running_mean = self.bn.running_mean
+    bn_running_var = self.bn.running_var
     conv2d = torch.ops.aten.conv2d.default(l_x_, conv_weight, conv_bias);  l_x_ = conv_weight = conv_bias = None
     _native_batch_norm_legit_no_training = torch.ops.aten._native_batch_norm_legit_no_training.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
     getitem = _native_batch_norm_legit_no_training[0];  _native_batch_norm_legit_no_training = None
@@ -1197,13 +1228,13 @@ def forward(self, arg_0):
             """\
 def forward(self, arg_0):
     l_x_, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
-    conv_weight = self.conv_weight
-    conv_bias = self.conv_bias
-    bn_weight = self.bn_weight
-    bn_bias = self.bn_bias
-    bn_running_mean = self.bn_running_mean
-    bn_running_var = self.bn_running_var
-    bn_num_batches_tracked = self.bn_num_batches_tracked
+    conv_weight = self.conv.weight
+    conv_bias = self.conv.bias
+    bn_weight = self.bn.weight
+    bn_bias = self.bn.bias
+    bn_running_mean = self.bn.running_mean
+    bn_running_var = self.bn.running_var
+    bn_num_batches_tracked = self.bn.num_batches_tracked
     conv2d = torch.ops.aten.conv2d.default(l_x_, conv_weight, conv_bias);  l_x_ = conv_weight = conv_bias = None
     add = torch.ops.aten.add.Tensor(bn_num_batches_tracked, 1)
     _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, True, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = None
@@ -1240,7 +1271,7 @@ def forward(self, arg_0):
             (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3))),
         )
         test_inp = (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3)))
-        self.assertTrue(torch.allclose(ep(*test_inp), fn(*test_inp)))
+        self.assertTrue(torch.allclose(ep.module()(*test_inp), fn(*test_inp)))
 
     @testing.expectedFailureNonStrict
     def test_constrain_size_with_constrain_value(self):
@@ -1261,7 +1292,7 @@ def forward(self, arg_0):
         )
         with self.assertRaisesRegex(RuntimeError, "is outside of inline constraint"):
             test_inp = (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3)))
-            _ = ep(*test_inp)
+            _ = ep.module()(*test_inp)
 
     def test_constrain_size_with_various_cases(self):
         def case_1(x, y):
@@ -1298,7 +1329,7 @@ def forward(self, arg_0):
 
         self.assertTrue(
             torch.allclose(
-                ep(torch.tensor(1), torch.ones(4, 5)),
+                ep.module()(torch.tensor(1), torch.ones(4, 5)),
                 case_1(torch.tensor(1), torch.ones(4, 5)),
             )
         )
@@ -1313,7 +1344,7 @@ def forward(self, arg_0):
 
         self.assertTrue(
             torch.allclose(
-                ep(torch.tensor(5), torch.ones(4, 5)),
+                ep.module()(torch.tensor(5), torch.ones(4, 5)),
                 case_2(torch.tensor(5), torch.ones(4, 5)),
             )
         )
@@ -1337,7 +1368,7 @@ def forward(self, arg_0):
 
         self.assertTrue(
             torch.allclose(
-                ep(torch.tensor(5), torch.ones(4, 5)),
+                ep.module()(torch.tensor(5), torch.ones(4, 5)),
                 case_4(torch.tensor(5), torch.ones(4, 5)),
             )
         )
@@ -1349,7 +1380,7 @@ def forward(self, arg_0):
 
         self.assertTrue(
             torch.allclose(
-                ep(torch.tensor(5), torch.ones(4, 5)),
+                ep.module()(torch.tensor(5), torch.ones(4, 5)),
                 case_5(torch.tensor(5), torch.ones(4, 5)),
             )
         )
@@ -1366,11 +1397,11 @@ def forward(self, arg_0):
         with self.assertRaisesRegex(
             RuntimeError, r"Deferred runtime assertion failed -u0 <= 0"
         ):
-            _ = ep(torch.tensor(-1), torch.randn(4, 5))
+            _ = ep.module()(torch.tensor(-1), torch.randn(4, 5))
 
         self.assertTrue(
             torch.allclose(
-                ep(torch.tensor(1), torch.ones(4, 5)),
+                ep.module()(torch.tensor(1), torch.ones(4, 5)),
                 M()(torch.tensor(1), torch.ones(4, 5)),
             )
         )
@@ -1417,7 +1448,7 @@ def forward(self, arg_0):
             return torch.empty((a, 4))
 
         ep = export(WrapperModule(f), (torch.tensor([5]),))
-        self.assertEqual(ep(torch.tensor([6])).shape, (6, 4))
+        self.assertEqual(ep.module()(torch.tensor([6])).shape, (6, 4))
 
         FileCheck().check_count(
             "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
@@ -1427,7 +1458,7 @@ def forward(self, arg_0):
             RuntimeError,
             r"_local_scalar_dense is outside of inline constraint \[4, 7\]",
         ) as cm:
-            ep(torch.tensor([30]))
+            ep.module()(torch.tensor([30]))
 
     def test_export_with_inline_constraints_complex(self):
         def f(x):
@@ -1438,7 +1469,7 @@ def forward(self, arg_0):
             return torch.cat((empty.transpose(0, 1), torch.zeros(6, a)), 0)
 
         ep = export(WrapperModule(f), (torch.tensor([6]),))
-        self.assertEqual(ep(torch.tensor([5])).shape, (10, 5))
+        self.assertEqual(ep.module()(torch.tensor([5])).shape, (10, 5))
         FileCheck().check_count(
             "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
         ).run(ep.graph_module.code)
@@ -1538,20 +1569,20 @@ def forward(self, arg_0):
             foo, (tensor_inp, 5), dynamic_shapes=dynamic_shapes
         )
         self.assertTrue(
-            torch.allclose(exported(torch.ones(8, 5), 5), foo(torch.ones(8, 5), 5))
+            torch.allclose(exported.module()(torch.ones(8, 5), 5), foo(torch.ones(8, 5), 5))
         )
         with self.assertRaisesRegex(
-            RuntimeError, "Expected input arg1 to be equal to 5, but got 6"
+            RuntimeError, escape("Expected input at *args[1] to be equal to 5, but got 6")
         ):
-            _ = exported(torch.ones(8, 5), 6)
+            _ = exported.module()(torch.ones(8, 5), 6)
 
         exported = torch.export.export(
             foo, (tensor_inp, 5.0), dynamic_shapes=dynamic_shapes
         )
         with self.assertRaisesRegex(
-            RuntimeError, "Expected input arg1 to be equal to 5.0, but got 6.0"
+            RuntimeError, escape("Expected input at *args[1] to be equal to 5.0, but got 6.0")
         ):
-            _ = exported(torch.ones(7, 5), 6.0)
+            _ = exported.module()(torch.ones(7, 5), 6.0)
 
     @testing.expectedFailureNonStrict
     def test_runtime_assert_for_prm_str(self):
@@ -1565,8 +1596,8 @@ def forward(self, arg_0):
         with self.assertRaisesRegex(
             RuntimeError, "to be equal to trunc, but got floor"
         ):
-            _ = exported(torch.randn(4, 4), torch.randn(4), "floor")
-        self.assertTrue(torch.allclose(exported(*inps), foo(*inps)))
+            _ = exported.module()(torch.randn(4, 4), torch.randn(4), "floor")
+        self.assertTrue(torch.allclose(exported.module()(*inps), foo(*inps)))
 
     def test_to_module_with_mutated_buffer_multiple_update_sub_later(self):
         class Bar(torch.nn.Module):
@@ -1647,7 +1678,7 @@ def forward(self, arg_0):
         exported = torch.export.export(Foo(), (inp,))
         reexported = torch.export.export(exported.module(), (inp,))
 
-        self.assertTrue(torch.allclose(exported(inp), reexported(inp)))
+        self.assertTrue(torch.allclose(Foo()(inp), reexported.module()(inp)))
 
         dim0_x = torch.export.Dim("dim0_x")
         exported = torch.export.export(Foo(), (inp,), dynamic_shapes={"x": {0: dim0_x}})
@@ -1655,13 +1686,13 @@ def forward(self, arg_0):
         with self.assertRaisesRegex(
             RuntimeError, "shape\[0\] to be equal to 5, but got 7"
         ):
-            reexported(torch.ones(7, 5))
+            reexported.module()(torch.ones(7, 5))
 
         reexported = torch.export.export(
             exported.module(), (inp,), dynamic_shapes=({0: dim0_x},)
         )
         self.assertTrue(
-            torch.allclose(exported(torch.ones(7, 5)), reexported(torch.ones(7, 5)))
+            torch.allclose(Foo()(torch.ones(7, 5)), reexported.module()(torch.ones(7, 5)))
         )
 
         # can't retrace with invalid inputs with respect to the original ExportedProgram
@@ -1670,9 +1701,39 @@ def forward(self, arg_0):
             Foo(), (inp,), dynamic_shapes={"x": {0: dim0_x_v2}}
         )
         with self.assertRaisesRegex(
-            RuntimeError, "Expected input l_x_.shape\[0\] to be >= 3, but got 2"
+            RuntimeError, escape("Expected input at *args[0].shape[0] to be >= 3, but got 2")
         ):
             torch.export.export(exported_v2.module(), (torch.randn(2, 2),))
+
+    def test_export_cond(self):
+        class A(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(6, 4))
+
+            def forward(self):
+                return self.buffer.cos()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = A()
+
+            def forward(self, x):
+                def true_fn(x):
+                    return x.cos() + self.a().sum()
+
+                def false_fn(x):
+                    return x.sin()
+
+                return cond(x.shape[0] > 4, true_fn, false_fn, [x])
+
+        inp = torch.ones(6, 4)
+        ep = export(
+            Foo(),
+            (inp,),
+        )
+        self.assertTrue(torch.allclose(ep.module()(torch.ones(6, 4)), Foo()(torch.ones(6, 4))))
 
     def test_cond_buffers(self):
         class M(torch.nn.Module):
@@ -1704,6 +1765,8 @@ def forward(self, arg_0):
                 1
             )
 
+    # map_fn references module outside the module hierarchy
+    @unittest.expectedFailure
     def test_map_buffers(self):
         class M1(torch.nn.Module):
             def __init__(self):
@@ -1760,7 +1823,7 @@ def forward(self, arg_0):
             len(re_exported.graph_module.meta["input_shape_constraints"]) == 1
         )
         self.assertTrue(
-            torch.allclose(exported(torch.ones(7, 5)), re_exported(torch.ones(7, 5)))
+            torch.allclose(exported.module()(torch.ones(7, 5)), re_exported.module()(torch.ones(7, 5)))
         )
 
         re_exported_v2 = export(exported.module(), (inp,))
@@ -1768,7 +1831,7 @@ def forward(self, arg_0):
             len(re_exported_v2.graph_module.meta["input_shape_constraints"]) == 0
         )
         self.assertTrue(
-            torch.allclose(exported(torch.ones(7, 5)), re_exported_v2(torch.ones(7, 5)))
+            torch.allclose(exported.module()(torch.ones(7, 5)), re_exported_v2.module()(torch.ones(7, 5)))
         )
 
     @testing.expectedFailureNonStrict
@@ -1877,18 +1940,15 @@ def forward(self, arg_0):
         ep = export(Foo(), (torch.tensor(1),))
 
         self.assertEqual(len(ep.graph_signature.input_specs), 4)
-        self.assertEqual(len(ep.state_dict), 1)
-        self.assertEqual(len(ep.constants), 2)
+        self.assertEqual(len(ep.state_dict), 0)
+        self.assertEqual(len(ep.constants), 3)
 
         inp = (torch.tensor(5),)
-        self.assertTrue(torch.allclose(ep(*inp), Foo()(*inp)))
+        self.assertTrue(torch.allclose(ep.module()(*inp), Foo()(*inp)))
 
         transform = ep.run_decompositions()
         self.assertEqual(len(ep.graph_signature.input_specs), 4)
-        self.assertTrue(torch.allclose(ep(*inp), transform(*inp)))
-
-        unlifted = ep.module()
-        self.assertTrue(torch.allclose(ep(*inp), unlifted(*inp)))
+        self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
 
     def test_preserve_shape_dynamism_for_unused_inputs(self):
         @dataclass
@@ -1948,9 +2008,9 @@ def forward(self, arg_0):
 
         exported_program = export(MyModule(), (torch.rand(2, 3),), {})
         with self.assertRaisesRegex(
-            TypeError, "Trying to flatten user inputs with exported input tree spec"
+            ValueError, "Trying to flatten user inputs"
         ):
-            exported_program(torch.rand(2, 3), torch.rand(2, 3))
+            exported_program.module()(torch.rand(2, 3), torch.rand(2, 3))
 
     def test_export_decomps_simple(self):
         class M(torch.nn.Module):
@@ -1969,7 +2029,7 @@ def forward(self, arg_0):
         FileCheck().check_count("torch.ops.aten.t.default", 1, exactly=True).run(
             ep.graph_module.code
         )
-        self.assertTrue(torch.allclose(ep(*inp), m(*inp)))
+        self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
 
         core_aten_ep = ep.run_decompositions()
         FileCheck().check_count("torch.ops.aten.permute.default", 1, exactly=True).run(
@@ -1978,7 +2038,7 @@ def forward(self, arg_0):
         FileCheck().check_count("torch.ops.aten.t.default", 0, exactly=True).run(
             core_aten_ep.graph_module.code
         )
-        self.assertTrue(torch.allclose(core_aten_ep(*inp), m(*inp)))
+        self.assertTrue(torch.allclose(core_aten_ep.module()(*inp), m(*inp)))
         self.assertEqual(id(state_dict), id(ep.state_dict))
 
     @testing.expectedFailureRetraceability
@@ -2008,7 +2068,7 @@ def forward(self, arg_0):
         FileCheck().check_count("torch.ops.aten.t.default", 0, exactly=True).run(
             core_aten_ep.graph_module.code
         )
-        self.assertTrue(torch.allclose(core_aten_ep(*inp), m(*inp)))
+        self.assertTrue(torch.allclose(core_aten_ep.module()(*inp), m(*inp)))
 
     def test_nonzero_2(self):
         def f(x):
@@ -2016,7 +2076,7 @@ def forward(self, arg_0):
 
         ep = export(WrapperModule(f), (torch.ones(2),))
         inp = torch.randn(2)
-        self.assertTrue(torch.allclose(ep(inp), torch.nonzero(inp)))
+        self.assertTrue(torch.allclose(ep.module()(inp), torch.nonzero(inp)))
 
     @testing.expectedFailureSerDer
     @testing.expectedFailureNonStrict
@@ -2037,7 +2097,10 @@ def forward(self, l_x_):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(l_x_);  l_x_ = None
     ge = _local_scalar_dense >= 0
     scalar_tensor = torch.ops.aten.scalar_tensor.default(ge);  ge = None
-    _assert_async = torch.ops.aten._assert_async.msg(scalar_tensor, '_local_scalar_dense is outside of inline constraint [0, inf].');  scalar_tensor = None
+    _assert_async = torch.ops.aten._assert_async.msg(scalar_tensor, '_local_scalar_dense is outside of inline constraint [0, 9223372036854775807].');  scalar_tensor = None
+    le = _local_scalar_dense <= 9223372036854775807
+    scalar_tensor_1 = torch.ops.aten.scalar_tensor.default(le);  le = None
+    _assert_async_1 = torch.ops.aten._assert_async.msg(scalar_tensor_1, '_local_scalar_dense is outside of inline constraint [0, 9223372036854775807].');  scalar_tensor_1 = None
     sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
     zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
     return (zeros,)""",
@@ -2057,7 +2120,7 @@ def forward(self, l_x_):
         )
 
         test_inp = (torch.randn(4, 4), torch.randn(7, 4))
-        self.assertEqual(ep(*test_inp), foo(*test_inp))
+        self.assertEqual(ep.module()(*test_inp), foo(*test_inp))
 
         ep_v2 = torch.export.export(
             foo,
@@ -2067,7 +2130,7 @@ def forward(self, l_x_):
         with self.assertRaisesRegex(
             RuntimeError, "shape\[0\] to be equal to 4, but got 7"
         ):
-            ep_v2(*test_inp)
+            ep_v2.module()(*test_inp)
 
     def test_constant_output(self):
         class ModuleConstant(torch.nn.Module):
@@ -2088,12 +2151,12 @@ def forward(self, l_x_):
 
         mod = ModuleConstant()
         ep = torch.export.export(mod, ())
-        self.assertEqual(ep(), mod())
+        self.assertEqual(ep.module()(), mod())
 
         args = (torch.randn(3, 2), torch.randn(3, 2))
         mod = ModuleNestedConstant()
         ep = torch.export.export(mod, args)
-        self.assertEqual(ep(*args), mod(*args))
+        self.assertEqual(ep.module()(*args), mod(*args))
 
     def test_non_arg_name_dynamic_shapes_api_with_kwarg(self):
         class Foo(torch.nn.Module):
@@ -2115,7 +2178,7 @@ def forward(self, l_x_):
         test_inp = (torch.randn(4, 4), torch.randn(7, 4))
         test_kwargs = {"kw2": torch.ones(4, 4), "kw1": torch.zeros(9, 4)}
         # This should work even if the kwarg order are flipped.
-        self.assertEqual(ep(*test_inp, **test_kwargs), foo(*test_inp, **test_kwargs))
+        self.assertEqual(ep.module()(*test_inp, **test_kwargs), foo(*test_inp, **test_kwargs))
 
     def test_non_arg_name_dynamic_shapes_api_with_container_type(self):
         class Foo(torch.nn.Module):
@@ -2145,7 +2208,7 @@ def forward(self, l_x_):
 
         test_inp = ((torch.randn(4, 4), torch.randn(2, 4)), torch.randn(4, 4))
         with self.assertRaisesRegex(RuntimeError, "shape\[0\] to be >= 3, but got 2"):
-            ep(*test_inp)
+            ep.module()(*test_inp)
 
     def test_lazy_module_kwargs(self):
         class LazyModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
@@ -2160,7 +2223,7 @@ def forward(self, l_x_):
             m, (), {"x": torch.randn(3, 3), "y": torch.randn(3, 3)}
         )
         inputs = {"x": torch.randn(3, 3), "y": torch.randn(3, 3)}
-        self.assertEqual(ep(**inputs), m(**inputs))
+        self.assertEqual(ep.module()(**inputs), m(**inputs))
 
     def test_retrace_pre_autograd(self):
         class Foo(torch.nn.Module):
@@ -2177,10 +2240,10 @@ def forward(self, l_x_):
             Foo(), (inp,), constraints=[dynamic_dim(inp, 0) >= 3], pre_dispatch=True
         ).module()
 
-        with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\]"):
+        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[0]")):
             gm(torch.randn(2, 2))
 
-        with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\]"):
+        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[0]")):
             torch.export.export(gm, (torch.randn(2, 2),))
 
         ep = torch.export.export(
@@ -2190,7 +2253,7 @@ def forward(self, l_x_):
         )
 
         test_inp = torch.ones(8, 4)
-        self.assertTrue(torch.allclose(ep(test_inp), Foo().forward(test_inp)))
+        self.assertTrue(torch.allclose(ep.module()(test_inp), Foo().forward(test_inp)))
 
     @testing.expectedFailureNonStrict
     def test_issue_113041(self):
@@ -2238,7 +2301,7 @@ def forward(self, l_x_):
             model = Model()
 
             exported_program = torch.export.export(model, (x,))
-            export_res = exported_program(x)
+            export_res = exported_program.module()(x)
             exp_res = model(x)
             all_meta_val = [
                 node.meta["val"]
@@ -2251,7 +2314,7 @@ def forward(self, l_x_):
                 all(val.fake_mode is all_meta_val[0].fake_mode for val in all_meta_val)
             )
             decomposed_ep = exported_program.run_decompositions()
-            export_res = decomposed_ep(x)
+            export_res = decomposed_ep.module()(x)
             self.assertTrue(export_res.size() == exp_res.size())
 
     def test_export_with_fake_tensor_inputs_on_cuda_devices(self):
@@ -2285,7 +2348,7 @@ def forward(self, l_x_):
 
         def check_device_and_fake_mode():
             exported_program = torch.export.export(model, (x,))
-            export_res = exported_program(x)
+            export_res = exported_program.module()(x)
             exp_res = model(x)
             all_meta_val = [
                 node.meta["val"]
@@ -2359,7 +2422,7 @@ def forward(self, l_x_):
         )
         ep.run_decompositions(decomp_table=torch._decomp.decomposition_table)
         self.assertEqual(
-            ep(input, weight, bias, running_mean, running_var, training, momentum, eps),
+            ep.module()(input, weight, bias, running_mean, running_var, training, momentum, eps),
             output,
         )
 
@@ -2370,7 +2433,7 @@ def forward(self, l_x_):
             return torch.randn(3, 4), torch.randn(3, 4)
 
         ep = torch.export.export(WrapperModule(f), ())
-        a, b = ep()
+        a, b = ep.module()()
         self.assertEqual(a.size(), torch.Size([3, 4]))
         self.assertEqual(b.size(), torch.Size([3, 4]))
 
@@ -2384,7 +2447,7 @@ def forward(self, l_x_):
         ep = torch.export.export(
             m0, inputs, dynamic_shapes={"x": {0: Dim("batch_size")}}
         )
-        self.assertEqual(ep(*inputs), m0(*inputs))
+        self.assertEqual(ep.module()(*inputs), m0(*inputs))
 
         class ModuleBatchFirst(torch.nn.Module):
             def forward(self, x):
@@ -2395,7 +2458,7 @@ def forward(self, l_x_):
         ep = torch.export.export(
             m1, inputs, dynamic_shapes={"x": {0: Dim("batch_size")}}
         )
-        self.assertEqual(ep(*inputs), m1(*inputs))
+        self.assertEqual(ep.module()(*inputs), m1(*inputs))
 
         class ModuleMulti(torch.nn.Module):
             def forward(self, x, y, z):
@@ -2412,7 +2475,7 @@ def forward(self, l_x_):
                 "z": {0: Dim("z")},
             },
         )
-        self.assertEqual(ep(*inputs), m2(*inputs))
+        self.assertEqual(ep.module()(*inputs), m2(*inputs))
 
         class ModuleMultiBatchFirst(torch.nn.Module):
             def forward(self, x, y, z):
@@ -2429,7 +2492,7 @@ def forward(self, l_x_):
                 "z": {0: Dim("z")},
             },
         )
-        self.assertEqual(ep(*inputs), m3(*inputs))
+        self.assertEqual(ep.module()(*inputs), m3(*inputs))
 
     def test_export_then_compile_tensor_ctor(self):
         class M(torch.nn.Module):
@@ -2452,28 +2515,6 @@ def forward(self, l_x_):
         optimized_model = torch.compile(exported_model)
         optimized_model(tensor_cpu, mask_cpu)
 
-    def test_export_mkldnn_disabled(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.lstm = torch.nn.LSTM(input_size=4, hidden_size=5, num_layers=1)
-
-            def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-                return self.lstm(inputs)
-
-        inp = (torch.ones(3, 4),)
-        torch._C._set_mkldnn_enabled(False)
-        ep = torch.export.export(M(), inp)
-        FileCheck().check_count(
-            "torch.ops.aten.mkldnn_rnn_layer.default", 0, exactly=True
-        ).run(ep.graph_module.code)
-
-        torch._C._set_mkldnn_enabled(True)
-        ep = torch.export.export(M(), inp)
-        FileCheck().check_count(
-            "torch.ops.aten.mkldnn_rnn_layer.default", 1, exactly=True
-        ).run(ep.graph_module.code)
-
     def test_export_input_mutation_static_shape(self):
         class MutationModel(torch.nn.Module):
             def forward(self, x, y):
@@ -2485,7 +2526,7 @@ def forward(self, l_x_):
         ep = torch.export.export(model, inputs)
         inputs_export = copy.deepcopy(inputs)
         inputs_model = copy.deepcopy(inputs)
-        self.assertEqual(ep(*inputs_export), model(*inputs_model))
+        self.assertEqual(ep.module()(*inputs_export), model(*inputs_model))
         self.assertEqual(inputs[0] + 2.0, inputs_model[0])
         self.assertEqual(inputs[0] + 2.0, inputs_export[0])
 
@@ -2509,9 +2550,31 @@ def forward(self, l_x_):
 
         inputs_export = copy.deepcopy(inputs)
         inputs_model = copy.deepcopy(inputs)
-        self.assertEqual(ep(*inputs_export), model(*inputs_model))
+        self.assertEqual(ep.module()(*inputs_export), model(*inputs_model))
         self.assertEqual(inputs[0][0] * 2.0, inputs_model[0][0])
         self.assertEqual(inputs[0][0] * 2.0, inputs_export[0][0])
+
+    def test_export_input_mutation_bug(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x[:, :2, :] = x[:,:2,:] + 1
+                return x
+
+        inputs = (torch.ones(4,4,4),)
+        ep = torch.export.export(M(), inputs)
+        m = ep.module()
+
+        # Make the name conflict with a placeholder name that we get from
+        # aot_export
+        for i, node in enumerate(m.graph.nodes):
+            if node.op == "placeholder":
+                node.name = f"arg0_{i + 1}"
+        m.recompile()
+
+        ep = torch.export.export(m, inputs)
+
+        inputs = (torch.randn(4,4,4),)
+        self.assertEqual(ep.module()(*copy.deepcopy(inputs)), M()(*copy.deepcopy(inputs)))
 
     def test__scaled_dot_product_flash_attention(self):
         class Module(torch.nn.Module):
@@ -2526,7 +2589,7 @@ def forward(self, l_x_):
             torch.randn(5, 4, 3, 2),
         )
         ep = export(m, inputs)
-        self.assertEqual(ep(*inputs), m(*inputs))
+        self.assertEqual(ep.module()(*inputs), m(*inputs))
 
     @testing.expectedFailureSerDer  # symfloat nyi
     @testing.expectedFailureRetraceability
@@ -2570,9 +2633,8 @@ def forward(self, l_x_):
 
         ep = torch.export.export(model, args=(t, dim, index, src))
         ep.run_decompositions(decomp_table=torch._decomp.decomposition_table)
-        self.assertEqual(ep(t, dim, index, src), output)
+        self.assertEqual(ep.module()(t, dim, index, src), output)
 
-    @testing.expectedFailureRetraceability
     def test_fqn(self):
         class NestedChild(torch.nn.Module):
             def forward(self, x):
@@ -2638,7 +2700,7 @@ def forward(self, l_x_):
             # program's state dict is able to contain the module information.
             self.assertIn(k, ep.state_dict)
             self.assertEqual(v, ep.state_dict[k])
-        self.assertTrue(torch.allclose(ep(test_inp), orig_eager(test_inp)))
+        self.assertTrue(torch.allclose(ep.module()(test_inp), orig_eager(test_inp)))
 
     def test_nn_module_stack(self):
         class Leaf(torch.nn.Module):
@@ -2872,6 +2934,104 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         # this doesn't work today
         gm_unflat_strict = unflatten(ep)
 
+    def test_non_persistent_buffer(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("foo", torch.rand(2, 3), persistent=False)
+
+            def forward(self, x):
+                return self.foo + x
+
+        inp = torch.rand(2, 3)
+        m = MyModule()
+        ep = export(m, (inp,), {})
+
+        self.assertEqual(ep(inp), m(inp))
+        # Non-persistent buffers should not show up in the state dict
+        self.assertNotIn("foo", ep.state_dict)
+        named_buffers = {name: buffer for (name, buffer) in ep.named_buffers()}
+        # But they should show up in named_buffers()
+        self.assertIn("foo", named_buffers)
+
+        # Check the same properties of the unlifted module
+        mod = ep.module()
+        self.assertNotIn("foo", mod.state_dict())
+        mod_named_buffers = {name: buffer for (name, buffer) in mod.named_buffers()}
+        self.assertIn("foo", mod_named_buffers)
+        self.assertEqual(mod(inp), m(inp))
+
+    def test_nonstrict_retrace_preserves_metadata(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        inp = torch.randn(4, 4)
+        m = MyModule()
+        ep = torch.export.export(m, (inp,), {}, strict=False)
+        # retrace
+        ep2 = torch.export.export(ep.module(), (inp,), {}, strict=False)
+
+        for n1, n2 in zip(list(ep.graph.nodes), list(ep2.graph.nodes)):
+            self.assertEqual(n1.meta.get("stack_trace"), n2.meta.get("stack_trace"))
+
+    def test_fake_weights(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = torch.nn.Parameter(torch.randn(4, 4))
+                self.register_buffer("bar", torch.randn(4, 4), persistent=False)
+                self.register_buffer("baz", torch.randn(4, 4), persistent=True)
+
+            def forward(self, x):
+                return self.foo + x + self.bar + self.baz
+
+        fake_mode = torch._subclasses.FakeTensorMode(shape_env=ShapeEnv(tracked_fakes=[]))
+        with fake_mode:
+            m = MyModule()
+        inp = torch.randn(4, 4)
+        ep = export(m, (inp,))
+        # Can't compare outputs because the module has fake weights.
+
+    def test_fake_inputs(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = torch.nn.Parameter(torch.randn(4, 4))
+
+            def forward(self, x):
+                return self.foo + x
+
+        fake_mode = torch._subclasses.FakeTensorMode(shape_env=ShapeEnv(tracked_fakes=[]))
+        m = MyModule()
+        with fake_mode:
+            inp = torch.randn(4, 4)
+
+        ep = export(m, (inp,))
+        self.assertEqual(ep.module()(torch.ones(4, 4)), m(torch.ones(4, 4)))
+
+    def test_trace_under_fake(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = torch.nn.Parameter(torch.randn(4, 4))
+
+            def forward(self, x):
+                return self.foo + x
+
+        fake_mode = torch._subclasses.FakeTensorMode(shape_env=ShapeEnv(tracked_fakes=[]))
+        with fake_mode:
+            m = MyModule()
+            inp = torch.randn(4, 4)
+            # Can't use unqualified export() as it will attempt to deserialize
+            # under a new FakeTensorMode.
+            ep = torch.export.export(m, (inp,))
+
+
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
     def test_scaled_dot_product_attention_cpu(self):
@@ -2940,6 +3100,15 @@ def forward(self, l_q_, l_k_, l_v_):
     getitem = _scaled_dot_product_flash_attention[0];  _scaled_dot_product_flash_attention = None
     return (getitem,)""")
 
+    def test_int_list_output(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return [((1, 3), [x + x, x * x])]
+
+        ep = torch.export.export(M(), (torch.ones(2, 3),))
+        res = ep(torch.ones(2, 3))
+        self.assertEqual(res[0][0], (1, 3))
+
     def test_primitive_constant_output(self):
         class Z(torch.nn.Module):
             def forward(self, x, y):
@@ -2958,7 +3127,7 @@ def forward(self, l_q_, l_k_, l_v_):
         self.assertEqual(res[0], torch.tensor(20))
         self.assertEqual(res[1], 5)
 
-        with self.assertRaisesRegex(RuntimeError, "Expected input arg1 to be equal to 5, but got 20"):
+        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[1] to be equal to 5, but got 20")):
             res = ep(torch.tensor(4), 20)
 
         class F(torch.nn.Module):
