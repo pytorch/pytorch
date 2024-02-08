@@ -29,6 +29,4 @@ from torch.types import (
     Number,
 )
 
-from collections import namedtuple
-
 ${namedtuple_defs}
