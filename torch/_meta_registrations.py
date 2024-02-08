@@ -5139,7 +5139,8 @@ def meta__scaled_dot_product_flash_backward(
 ):
     grad_q = torch.empty_like(query.transpose(1, 2)).transpose(1, 2)
     grad_k = torch.empty_like(key.transpose(1, 2)).transpose(1, 2)
-    grad_v = torch.empty_like(value.transpose(1, 2)).transpose(1, 2)
+    # Mirrors how dv is allocated in pytorch_flash::mha_bwd
+    grad_v = torch.empty_like(key.transpose(1, 2)).transpose(1, 2)
     return grad_q, grad_k, grad_v
 
 
