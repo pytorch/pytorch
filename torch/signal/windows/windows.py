@@ -166,7 +166,7 @@ def exponential(
 Computes a window with a simple cosine waveform, following the same implementation as SciPy.
 This window is also known as the sine window.
 
-The cosine window is defined as:
+The cosine window is defined as follows:
 
 .. math::
     w_n = \sin\left(\frac{\pi (n + 0.5)}{M}\right)
