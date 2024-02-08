@@ -2494,6 +2494,7 @@ def forward(self, l_x_):
         )
         self.assertEqual(ep.module()(*inputs), m3(*inputs))
 
+    @unittest.skipIf(torchdynamo.is_win32(), "no compile support for windows")
     def test_export_then_compile_tensor_ctor(self):
         class M(torch.nn.Module):
             def forward(self, scores, mask):
