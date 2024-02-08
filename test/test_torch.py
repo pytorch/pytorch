@@ -8305,6 +8305,13 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual((sizeof_100 - sizeof_empty) // (sizeof_10 - sizeof_empty), 10)
         self.assertEqual((sizeof_100 - sizeof_empty) % (sizeof_10 - sizeof_empty), 0)
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
+    def test_resizable(self) -> None:
+        x = torch.randn(5)
+        self.assertTrue(x.storage().resizable())
+        x.numpy()
+        self.assertFalse(x.storage().resizable())
+
     def test_iter(self) -> None:
         x = torch.randn(5, 5)
         for i, sub in enumerate(x):

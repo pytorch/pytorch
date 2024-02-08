@@ -168,6 +168,8 @@ test_failures = {
     "test_like_rands_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linspace2_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linspace3_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_logcumsumexp_dynamic_shapes": TestFailure(("cpu",)),
+    "test_logcumsumexp_zero_dim_dynamic_shapes": TestFailure(("cpu",)),
     "test_max_pool2d6_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_max_pool2d8_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_max_pool2d_with_indices_backward5_dynamic_shapes": TestFailure(
@@ -192,7 +194,6 @@ test_failures = {
     "test_topk_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_unbind_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_views5_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_views6_dynamic_shapes": TestFailure(("cpu",)),
     "test_view_detach_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_view_on_aliased_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linear_float64_dynamic_shapes": TestFailure("cpu"),
