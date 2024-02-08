@@ -61,6 +61,20 @@ std::tuple<Tensor, Tensor, Tensor> _mkldnn_batch_norm_legit_no_stats(
   TORCH_CHECK(false, "_mkldnn_batch_norm_legit_no_stats: ATen not compiled with MKLDNN support");
 }
 
+std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_with_update_mkldnn(
+    const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+    Tensor& running_mean, Tensor& running_var, double momentum, double eps, bool cudnn_enabled) {
+  TORCH_CHECK(false, "batch_norm_with_update_mkldnn: ATen not compiled with MKLDNN support");
+}
+
+std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
+    const Tensor& grad_output, const Tensor& input, const Tensor& weight,
+    const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
+    const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_var_opt,
+    bool update, double eps, std::array<bool,3> grad_input_mask, const Tensor& reserve, bool cudnn_enabled) {
+  TORCH_CHECK(false, "_new_batch_norm_backward_mkldnn: ATen not compiled with MKLDNN support");
+}
+
 } // namespace native
 } // namespace at
 
