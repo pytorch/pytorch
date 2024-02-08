@@ -6491,7 +6491,7 @@
   dispatch:
     CPU: batch_norm_with_update_cpu_out
     CUDA: batch_norm_with_update_cuda_out
-    MPS: batch_norm_with_update_mkldnn_out
+    MPS: batch_norm_with_update_mps_out
 
 - func: batch_norm_backward(Tensor grad_output, Tensor input, Tensor weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var, bool update, float eps, bool[3] grad_input_mask, Tensor reserve, bool cudnn_enabled) -> (Tensor, Tensor, Tensor)
   dispatch:
