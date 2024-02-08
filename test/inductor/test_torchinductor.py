@@ -287,6 +287,8 @@ def check_model(
     *,
     atol=None,
     rtol=None,
+    grad_atol=None,
+    grad_rtol=None,
     check_lowp=True,
     exact_dtype=True,
     nopython=True,
@@ -463,8 +465,8 @@ def check_model(
             self.assertEqual(
                 actual_grad,
                 expect_grad,
-                atol=atol,
-                rtol=rtol,
+                atol=grad_atol or atol,
+                rtol=grad_rtol or rtol,
                 equal_nan=True,
                 exact_dtype=exact_dtype,
             )
@@ -481,6 +483,8 @@ def check_model_gpu(
     *,
     atol=None,
     rtol=None,
+    grad_atol=None,
+    grad_rtol=None,
     check_lowp=True,
     exact_dtype=True,
     nopython=True,
@@ -507,6 +511,8 @@ def check_model_gpu(
         kwargs,
         atol=atol,
         rtol=rtol,
+        grad_atol=grad_atol,
+        grad_rtol=grad_rtol,
         exact_dtype=exact_dtype,
         nopython=nopython,
         reference_in_float=reference_in_float,
@@ -1290,6 +1296,24 @@ class CommonTemplate:
     def test_cumprod_zero_dim(self):
         def fn(x):
             return x.cumprod(0), x.cumprod(-1)
+
+        a = torch.rand(())
+        self.common(fn, (a,))
+
+    def test_logcumsumexp(self):
+        def fn(x):
+            return x.logcumsumexp(0), x.logcumsumexp(1)
+
+        # Persistent reductions
+        self.common(fn, (torch.rand(16, 32),), check_lowp=not TEST_WITH_ROCM)
+        self.common(fn, (torch.rand(20, 30),), check_lowp=not TEST_WITH_ROCM)
+
+        # Non-persistent reduction
+        self.common(fn, (torch.rand(100, 4000),), check_lowp=not TEST_WITH_ROCM)
+
+    def test_logcumsumexp_zero_dim(self):
+        def fn(x):
+            return x.logcumsumexp(0), x.logcumsumexp(-1)
 
         a = torch.rand(())
         self.common(fn, (a,))
