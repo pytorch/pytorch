@@ -297,7 +297,10 @@ def _write_files_from_queue(
                     )
 
                 if use_fsync:
-                    os.fsync(stream.fileno())
+                    try:
+                        os.fsync(stream.fileno())
+                    except AttributeError:
+                        os.sync()
             result_queue.put(write_results)
     except queue.Empty:
         pass
@@ -517,7 +520,10 @@ class FileSystemWriter(StorageWriter):
         with self.fs.create_stream(tmp_path, "wb") as metadata_file:
             pickle.dump(metadata, metadata_file)
             if self.sync_files:
-                os.fsync(metadata_file.fileno())
+                try:
+                    os.fsync(metadata_file.fileno())
+                except AttributeError:
+                    os.sync()
 
         self.fs.rename(tmp_path, meta_path)
 
