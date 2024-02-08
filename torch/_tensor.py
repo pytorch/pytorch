@@ -732,6 +732,9 @@ class Tensor(torch._C.TensorBase):
             for this method, the handler of ``self`` will take precedence unless ``other``
             subclasses ``self``, then the handler of ``other`` will take precedence.
 
+        .. note::
+            This method is not allowed to return ``other``, return ``other.detach()`` instead.
+
         Args:
             other (Tensor): value in state dict with key corresponding to ``self``
 
@@ -739,7 +742,7 @@ class Tensor(torch._C.TensorBase):
         if has_torch_function_variadic(self, other):
             return handle_torch_function(Tensor.module_load, (self, other), self, other)
         # In the default case, swap_tensors becomes a no-op
-        return self.copy_(other)
+        return self.copy_(other).detach()
 
     def __reversed__(self):
         r"""Reverses the tensor along dimension 0."""

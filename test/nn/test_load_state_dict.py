@@ -1,6 +1,7 @@
 # Owner(s): ["module: nn"]
 from copy import deepcopy
 from itertools import product
+import re
 from tempfile import NamedTemporaryFile
 import unittest
 
@@ -396,13 +397,13 @@ def load_torch_function_handler(cls, func, types, args=(), kwargs=None):
             if type(src) is torch.Tensor:
                 return cls(src)
             elif type(src) is cls:
-                return src
+                return src.detach()
             else:
                 if isinstance(src, MyWrapperLoadTensor):
                     return cls(src._data)
                 return cls(src)
         else:
-            return src
+            return src.detach()
 
     if func is torch.Tensor.module_load:
         return module_load(*args, **kwargs)
@@ -427,6 +428,21 @@ class MyLoadTensor2(torch.Tensor):
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         return load_torch_function_handler(cls, func, types, args, kwargs)
+
+class MyBrokenLoadTensor(torch.Tensor):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        kwargs = {} if kwargs is None else kwargs
+
+        if func is torch.Tensor.module_load:
+            # wrong as this doesn't detach!
+            return args[1]
+        else:
+            with torch._C.DisableTorchFunctionSubclass():
+                # detach must return instance of same subclass for nn.Parameter()
+                if func == torch.Tensor.detach:
+                    return cls(func(*args, **kwargs))
+                return func(*args, **kwargs)
 
 class MyWrapperLoadTensor(MyLoadTensor):
     @staticmethod
@@ -500,6 +516,10 @@ class TestLoadStateDictSwap(TestCase):
         subclasses = [None, MyLoadTensor, MyLoadTensor2, MyWrapperLoadTensor]
         for m_s, sd_s in product(subclasses, subclasses):
             _test(m_s, sd_s)
+
+        # MyBrokenLoadTensor should error since its module_load doesn't call .detach()
+        with self.assertRaisesRegex(RuntimeError, re.escape("Error(s) in loading state_dict for Linear:")):
+            _test(None, MyBrokenLoadTensor)
 
 
 instantiate_parametrized_tests(TestLoadStateDict)

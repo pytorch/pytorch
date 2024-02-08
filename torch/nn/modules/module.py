@@ -2065,14 +2065,12 @@ class Module:
                         elif use_swap_tensors:
                             param_requires_grad = param.requires_grad
                             new_input_param = param.module_load(input_param)
+                            if id(new_input_param) == id(input_param):
+                                raise RuntimeError("module_load returned the original tensor please .detach() "
+                                                   "the result if returning the original tensor in module_load")
                             if (isinstance(param, torch.nn.Parameter) and
                                     not isinstance(new_input_param, torch.nn.Parameter)):
                                 new_input_param = torch.nn.Parameter(new_input_param, requires_grad=param_requires_grad)
-                            elif id(new_input_param) == id(input_param):
-                                # preserve reference in state_dict, in the if-block, Parameter already calls .detach()
-                                # However param and input_param might have TensorImpls that are shallow copies of one
-                                # another, which differs from the param.copy_(input_param) path
-                                new_input_param = new_input_param.detach()
                             torch.utils.swap_tensors(param, new_input_param)
                             del new_input_param
                         else:
