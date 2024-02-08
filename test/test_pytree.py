@@ -1066,7 +1066,7 @@ TreeSpec(tuple, None, [*,
         all_zeros = py_pytree.tree_map_with_path(
             lambda kp, val: val - kp[1].key + kp[0].idx, tree
         )
-        self.assertEqual(all_zeros, [{i: 0 for i in range(10)}])
+        self.assertEqual(all_zeros, [dict.fromkeys(range(10), 0)])
 
     def test_tree_map_with_path_multiple_trees(self):
         @dataclass
@@ -1213,6 +1213,16 @@ TreeSpec(tuple, None, [*,
 
             self.assertEqual(flat, [x[1] for x in flat_with_path])
             self.assertEqual(spec1, spec2)
+
+    def test_key_access(self):
+        class ANamedTuple(NamedTuple):
+            x: str
+            y: int
+
+        tree = (["hello", [1, 2], {"foo": [(3)], "bar": [ANamedTuple(x="baz", y=10)]}],)
+        flat, _ = py_pytree.tree_flatten_with_path(tree)
+        for kp, val in flat:
+            self.assertEqual(py_pytree.key_get(tree, kp), val)
 
 
 class TestCxxPytree(TestCase):

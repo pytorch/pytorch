@@ -204,12 +204,6 @@ def _is_valid_hybrid_shard_pg_type(process_group: Any) -> bool:
 
 @no_type_check
 def _is_valid_hybrid_shard_device_mesh(device_mesh: DeviceMesh) -> bool:
-    parent_mesh = _mesh_resources.get_parent_mesh(device_mesh)
-    if parent_mesh is not None:
-        raise RuntimeError(
-            f"Found device_mesh {device_mesh} passed in has a parent device_mesh {parent_mesh}.",
-            "Hybrid sharding + TP is not supported yet.",
-        )
     return isinstance(device_mesh, DeviceMesh) and device_mesh.ndim == 2
 
 
@@ -885,7 +879,7 @@ def _materialize_meta_module(
         warnings.warn(
             "Unable to call `reset_parameters()` for module on meta "
             f"device with error {str(e)}. Please ensure that your module of"
-            f"type {type(module)} implements a `reset_parameters()` method."
+            f"type {type(module)} implements a `reset_parameters()` method."  # type: ignore[possibly-undefined]
         )
         raise e
 
@@ -994,7 +988,7 @@ def _move_states_to_device(
                     param.grad.data = param.grad.to(device_from_device_id)
         for buffer in buffers:
             buffer.data = buffer.to(device_from_device_id)
-    elif current_device == cpu_device:
+    elif current_device == cpu_device:  # type: ignore[possibly-undefined]
         _warn_cpu_init()
 
 

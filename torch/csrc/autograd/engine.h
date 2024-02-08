@@ -17,13 +17,10 @@
 
 #include <c10/util/CallOnce.h>
 
-#include <deque>
 #include <exception>
 #include <functional>
 #include <memory>
 #include <queue>
-#include <thread>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 

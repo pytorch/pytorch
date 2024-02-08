@@ -1,4 +1,4 @@
-# Owner(s): ["module: dynamo"]
+# Owner(s): ["oncall: export"]
 import unittest
 
 import torch
@@ -154,7 +154,8 @@ class TestVerifier(TestCase):
         ep.graph_signature.input_specs[0] = InputSpec(
             kind=InputKind.BUFFER,
             arg=TensorArgument(name="arg0_1"),
-            target="bad_buffer"
+            target="bad_buffer",
+            persistent=True,
         )
         with self.assertRaisesRegex(SpecViolationError, "not in the state dict"):
             ep._validate()

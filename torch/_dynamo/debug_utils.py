@@ -46,7 +46,7 @@ if use_buck:
         "//deeplearning/fbgemm/fbgemm_gpu:sparse_ops_cpu",
         "//deeplearning/fbgemm/fbgemm_gpu:sparse_ops",
     ]
-    cur_target = libfb.py.build_info.BuildInfo.get_build_rule().replace("fbcode:", "//")
+    cur_target = libfb.py.build_info.BuildInfo.get_build_rule().replace("fbcode:", "//")  # type: ignore[possibly-undefined]
     extra_imports = "\n".join([f'torch.ops.load_library("{x}")' for x in extra_deps])
 
 
@@ -88,6 +88,7 @@ python_binary(
 {extra_cpp_deps}
     ],
     main_module = "{self.path}",
+    par_style = "xar",
 )
 """
         )
@@ -250,6 +251,7 @@ def generate_config_string(*, stable_output=False):
     if stable_output:
         return "# config omitted due to stable_output=True"
 
+    experimental_config = torch.fx.experimental._config.codegen_config()  # type: ignore[attr-defined]
     return f"""\
 import torch._dynamo.config
 import torch._inductor.config
@@ -258,7 +260,7 @@ import torch.fx.experimental._config
 {torch._dynamo.config.codegen_config()}
 {torch._inductor.config.codegen_config()}
 {torch._functorch.config.codegen_config()}
-{torch.fx.experimental._config.codegen_config()}
+{experimental_config}
 """
 
 

@@ -11,6 +11,8 @@
 #include <ATen/core/PhiloxRNGEngine.h>
 #include <ATen/native/Math.h>
 
+#include <c10/util/Float8_e4m3fn.h>
+#include <c10/util/Float8_e5m2.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
 #include <c10/util/generic_math.h>
@@ -30,6 +32,9 @@
 
 typedef at::Half half;
 typedef at::BFloat16 bfloat16;
+
+typedef at::Float8_e4m3fn float8_e4m3fn;
+typedef at::Float8_e5m2 float8_e5m2;
 
 template <typename T>
 struct Welford {
@@ -87,6 +92,31 @@ Welford<T> welford_combine(const Welford<T> &acc, T data) {
   return result;
 }
 
+// Refer to https://github.com/pytorch/pytorch/blob/b5b36cf0c4e1958f1ff25120f5d4beeef3288187/
+// aten/src/ATen/native/SharedReduceOps.h#L419-L445
+template <typename scalar_t>
+inline bool greater_or_nan(scalar_t a, scalar_t b, int64_t idx_a, int64_t idx_b) {
+  // If (a == b), then choose the one with lower idx, else max(a, b)
+  if (at::_isnan(a)) {
+    if (at::_isnan(b)) {
+      return idx_a < idx_b;
+    }
+    return true;
+  }
+  return (a == b) ? idx_a < idx_b : (a > b);
+}
+
+template <typename scalar_t>
+inline bool less_or_nan(scalar_t a, scalar_t b, int64_t idx_a, int64_t idx_b) {
+  // If (a == b), then choose the one with lower idx, else min(a, b)
+  if (at::_isnan(a)) {
+    if (at::_isnan(b)) {
+      return idx_a < idx_b;
+    }
+    return true;
+  }
+  return (a == b) ? idx_a < idx_b : (a < b);
+}
 
 #if INDUCTOR_USE_VECTOR_TYPES()
 template <typename scalar_t>
@@ -362,6 +392,14 @@ inline at::vec::Vectorized<float> mask_convert_to_float(at::vec::Vectorized<floa
   auto zeros = at::vec::Vectorized<float>(0);
   auto ones = at::vec::Vectorized<float>(1);
   return at::vec::Vectorized<float>::blendv(zeros, ones, src);
+}
+
+template <typename scalar_t>
+inline
+typename std::enable_if<std::is_same<scalar_t, bfloat16>::value || std::is_same<scalar_t, half>::value, at::vec::Vectorized<scalar_t>>::type
+mask_convert_to_lowp(at::vec::Vectorized<float> src) {
+  auto fp_vec = mask_convert_to_float(src);
+  return cvt_fp32_to_lowp_fp<scalar_t>(fp_vec);
 }
 
 template <typename SRC>
