@@ -277,6 +277,8 @@ def mps_ops_modifier(ops):
         'mul',
         'narrow',
         'narrow_copy',
+        'nn.functional.conv1d',
+        'nn.functional.conv_transpose1d',
         'nn.functional.padcircular',
         'nn.functional.feature_alpha_dropoutwithout_train',
         'nn.functional.unfold',
@@ -383,8 +385,6 @@ def mps_ops_modifier(ops):
         'mean',
         'ne',
         'neg',
-        'nn.functional.conv1d',
-        'nn.functional.conv_transpose1d',
         'nn.functional.padconstant',
         'nn.functional.padreflect',
         'nn.functional.padreplicate',
@@ -573,12 +573,6 @@ def mps_ops_modifier(ops):
         'masked.cumprod': [torch.int64],
         'linalg.vander': [torch.int64],
     }
-
-    MACOS_BEFORE_14_0_XFAILLIST = {
-        'cfloat': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8, torch.float16, torch.float32],
-        'chalf': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8, torch.float16, torch.float32],
-    }
-
 
     MACOS_AFTER_13_1_XFAILLIST = {
         # before macOS 13.2 it falls back to cpu and pass the forward pass
@@ -1000,11 +994,6 @@ def mps_ops_modifier(ops):
             addDecorator(op, DecorateInfo(
                          unittest.expectedFailure,
                          dtypes=MACOS_12_3_XFAILLIST[key]))
-
-        if key in MACOS_BEFORE_14_0_XFAILLIST and product_version < 14.0:
-            addDecorator(op, DecorateInfo(
-                         unittest.expectedFailure,
-                         dtypes=MACOS_BEFORE_14_0_XFAILLIST[key]))
 
         # If ops is not supported for complex types, expect it to fail
         if key not in SUPPORTED_COMPLEX_OPS and (key not in AFTER_MACOS_14_0_SUPPORTED_COMPLEX_OPS or product_version < 14.0):
