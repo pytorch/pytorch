@@ -12,7 +12,7 @@ from torch._dynamo.source import (
 )
 from torch._dynamo.variables.builder import TrackedFake
 from torch._export.passes.add_runtime_assertions_for_constraints_pass import InputDim
-from torch._guards import detect_fake_mode, Source
+from torch._guards import Source
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
 from torch.export.graph_signature import CustomObjArgument
@@ -110,12 +110,10 @@ def make_fake_inputs(nn_module, args, constraints):
         "co_firstlineno": code.co_firstlineno,
     }
 
-    # Detect a fake mode, either ambiently or from the inputs/parameters/buffers
-    fake_mode = detect_fake_mode([args, *nn_module.parameters(), *nn_module.buffers()])
-    if fake_mode is None:
-        fake_mode = FakeTensorMode(
-            shape_env=ShapeEnv(tracked_fakes=[], co_fields=co_fields)
-        )
+    fake_mode = FakeTensorMode(
+        shape_env=ShapeEnv(tracked_fakes=[], co_fields=co_fields),
+        allow_non_fake_inputs=True,
+    )
     if fake_mode.shape_env is None or fake_mode.shape_env.tracked_fakes is None:
         raise ValueError(
             "Detected fake_mode does not have a shape_env with tracked fakes. "
