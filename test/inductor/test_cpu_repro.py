@@ -1348,6 +1348,8 @@ class CPUReproTests(TestCase):
                 cpp_op_list.append(k)
 
         diff = [
+            "bessel_j0",
+            "bessel_j1",
             "constant",
             "index_expr",
             "signbit",
@@ -1456,11 +1458,14 @@ class CPUReproTests(TestCase):
         with config.patch({"cpp.fallback_scatter_reduce_sum": True}):
             _internal_check(fn, inps, "aten.scatter_reduce_")
 
-        with set_num_threads(1):
-            _internal_check(fn, inps, _target_code_check_not="aten.scatter_reduce_")
+        if "ATen parallel backend: OpenMP" in torch.__config__.parallel_info():
+            # Fix https://github.com/pytorch/pytorch/issues/118518
+            # which fails to change thread number with native thread pool
+            with set_num_threads(1):
+                _internal_check(fn, inps, _target_code_check_not="aten.scatter_reduce_")
 
-        with config.patch({"cpp.dynamic_threads": True}), set_num_threads(1):
-            _internal_check(fn, inps, "aten.scatter_reduce_")
+            with config.patch({"cpp.dynamic_threads": True}), set_num_threads(1):
+                _internal_check(fn, inps, "aten.scatter_reduce_")
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -1826,14 +1831,14 @@ class CPUReproTests(TestCase):
                 InterpreterShim(_graph, submodules).run(
                     V.get_ops_handler(), i32_iinfo.min - 1, f32_iinfo.min
                 )
-                self.assertFalse(vec_checker.simd_vec)
+                self.assertTrue(vec_checker.simd_vec)
 
                 vec_checker.simd_vec = True
                 set_opt_dtype(_graph)
                 InterpreterShim(_graph, submodules).run(
                     V.get_ops_handler(), i32_iinfo.max + 1, f32_iinfo.max
                 )
-                self.assertFalse(vec_checker.simd_vec)
+                self.assertTrue(vec_checker.simd_vec)
 
                 vec_checker.simd_vec = True
                 set_opt_dtype(_graph)
@@ -2767,8 +2772,7 @@ class CPUReproTests(TestCase):
             with torch.no_grad():
                 metrics.reset()
                 self.common(fn, (x, y, mode))
-                # TODO: support vectorization for int div
-                assert metrics.generated_cpp_vec_kernel_count == 0
+                assert metrics.generated_cpp_vec_kernel_count == 1
 
     def test_uint8_add(self):
         # https://github.com/pytorch/pytorch/issues/113016
@@ -2939,6 +2943,130 @@ class CPUReproTests(TestCase):
             return torch.where(mask, x, -1.0)
 
         x = torch.rand(1000)
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_symbolic_shape_scalar_value_reduction(self):
+        def fn(x, y):
+            return y + torch.ones(x).sum()
+
+        with torch.no_grad():
+            metrics.reset()
+            y = torch.randn(100)
+            self.common(fn, (100, y))
+            assert metrics.generated_cpp_vec_kernel_count == 2
+
+    def test_int32_pointwise_vec(self):
+        def fn(x):
+            return x * x
+
+        x = torch.randint(0, 100, (32, 32), dtype=torch.int32)
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_int32_reduction_vec(self):
+        def fn(x):
+            return x.sum(dim=1)
+
+        x = torch.randint(0, 100, (32, 32), dtype=torch.int32)
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_uint32_pointwise_vec(self):
+        def fn(x):
+            return x * x
+
+        x = torch.randint(0, 100, (32, 32), dtype=torch.uint32)
+        metrics.reset()
+        self.common(fn, (x,))
+        # TODO(jgong5): change to 1 with vectorized uint32 load
+        assert metrics.generated_cpp_vec_kernel_count == 0
+
+    def test_uint32_reduction_vec(self):
+        def fn(x):
+            return x.sum(dim=1)
+
+        x = torch.randint(0, 100, (32, 32), dtype=torch.uint32)
+        metrics.reset()
+        self.common(fn, (x,))
+        # TODO(jgong5): change to 1 with vectorized uint32/uint64 load
+        assert metrics.generated_cpp_vec_kernel_count == 0
+
+    def test_int64_pointwise_vec(self):
+        def fn(x):
+            return x * x
+
+        x = torch.randint(0, 100, (32, 32), dtype=torch.int64)
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_int64_reduction_vec(self):
+        def fn(x):
+            return x.sum(dim=1)
+
+        x = torch.randint(0, 100, (32, 32), dtype=torch.int64)
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_uint64_pointwise_vec(self):
+        def fn(x):
+            return x * x
+
+        x = torch.randint(0, 100, (32, 32), dtype=torch.uint64)
+        metrics.reset()
+        self.common(fn, (x,))
+        # TODO(jgong5): change to 1 with vectorized uint64 load
+        assert metrics.generated_cpp_vec_kernel_count == 0
+
+    def test_uint64_reduction_vec(self):
+        def fn(x):
+            return x.sum(dim=1)
+
+        x = torch.randint(0, 100, (32, 32), dtype=torch.uint64)
+        metrics.reset()
+        self.common(fn, (x,))
+        # TODO(jgong5): change to 1 with vectorized uint64 load
+        assert metrics.generated_cpp_vec_kernel_count == 0
+
+    def test_convert_int32_to_int64_vec(self):
+        def fn(x):
+            return x.to(torch.int64)
+
+        x = torch.randint(0, 100, (32, 32), dtype=torch.int32)
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_convert_int64_to_int32_vec(self):
+        def fn(x):
+            return x.to(torch.int32)
+
+        x = torch.randint(0, 100, (32, 32), dtype=torch.int64)
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_convert_fp32_to_int64_vec(self):
+        def fn(x):
+            return x.to(torch.int64)
+
+        x = torch.rand(32, 32)
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_convert_int64_to_fp32_vec(self):
+        def fn(x):
+            return x.to(torch.float32)
+
+        x = torch.randint(0, 100, (32, 32), dtype=torch.int64)
         metrics.reset()
         self.common(fn, (x,))
         assert metrics.generated_cpp_vec_kernel_count == 1

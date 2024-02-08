@@ -39,6 +39,7 @@ from github_utils import (
     gh_fetch_json_list,
     gh_fetch_merge_base,
     gh_fetch_url,
+    gh_graphql,
     gh_post_commit_comment,
     gh_post_pr_comment,
     gh_update_pr_state,
@@ -460,19 +461,6 @@ HAS_NO_CONNECTED_DIFF_TITLE = (
 IGNORABLE_FAILED_CHECKS_THESHOLD = 10
 
 
-def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
-    rc = gh_fetch_url(
-        "https://api.github.com/graphql",
-        data={"query": query, "variables": kwargs},
-        reader=json.load,
-    )
-    if "errors" in rc:
-        raise RuntimeError(
-            f"GraphQL query {query}, args {kwargs} failed: {rc['errors']}"
-        )
-    return cast(Dict[str, Any], rc)
-
-
 def gh_get_pr_info(org: str, proj: str, pr_no: int) -> Any:
     rc = gh_graphql(GH_GET_PR_INFO_QUERY, name=proj, owner=org, number=pr_no)
     return rc["data"]["repository"]["pullRequest"]
@@ -748,7 +736,7 @@ class GitHubPR:
         # work for ghstack where the base is the custom branch, i.e. gh/USER/ID/base,
         # so let's just use main instead
         self.merge_base = gh_fetch_merge_base(
-            self.org, self.project, last_commit_oid, "main"
+            self.org, self.project, last_commit_oid, self.default_branch()
         )
 
         # Fallback to baseRefOid if the API call fails, i.e. rate limit. Note that baseRefOid
@@ -2307,7 +2295,6 @@ def main() -> None:
             get_ghstack_prs(repo, pr)  # raises error if out of sync
         pr.merge_changes(
             repo,
-            branch="main",
             skip_mandatory_checks=True,
             skip_all_rule_checks=True,
         )
