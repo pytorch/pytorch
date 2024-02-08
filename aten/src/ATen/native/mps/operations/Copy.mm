@@ -272,7 +272,7 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
     // Simulate cast to Complex on older MacOS by initializing real and imag parts
     if (dst_.is_complex() && !is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS)) {
       at::real(dst_) = src;
-      at::imag(dst_) = torch::zeros_like(src);
+      at::imag(dst_) = at::zeros_like(src);
     } else if (dst_byte_offset) {
       auto tmp = at::empty(dst_.sizes(), dst_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
       auto tmpBuffer = getMTLBufferStorage(tmp);
