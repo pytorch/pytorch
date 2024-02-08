@@ -233,6 +233,11 @@ def _chunk_dtensor(
     parent_mesh = _mesh_resources.get_parent_mesh(device_mesh)
     if parent_mesh is None:
         raise RuntimeError("No parent device_mesh is found for FSDP device_mesh.")
+    if parent_mesh.ndim < 2:
+        raise RuntimeError(
+            f"Found parent device_mesh of ndim={parent_mesh.ndim},",
+            "but meshes must be at least 2D.",
+        )
 
     # We need to explicitly call .detach() to return a new tensor detached from the current graph.
     tensor = tensor.clone().detach()
@@ -270,8 +275,7 @@ def _chunk_dtensor(
         replicate_placements = [Replicate() for _ in range(parent_mesh.ndim)]
         replicate_placements[-1] = tp_placement  # type: ignore[call-overload]
         shard_placements = [Replicate() for i in range(parent_mesh.ndim)]  # type: ignore[misc]
-        if len(shard_placements) >= 2:
-            shard_placements[-2] = DShard(0)  # type: ignore[call-overload]
+        shard_placements[-2] = DShard(0)  # type: ignore[call-overload]
         shard_placements[-1] = tp_placement  # type: ignore[call-overload]
 
         return DTensor.from_local(
