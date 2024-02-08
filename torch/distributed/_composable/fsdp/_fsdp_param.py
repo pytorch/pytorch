@@ -224,7 +224,6 @@ class FSDPParam:
             self.sharded_post_forward_size
         )
 
-    @torch.no_grad()
     def init_all_gather_output(
         self,
         all_gather_input_numel: int,
