@@ -650,6 +650,29 @@ void Engine::thread_on_exception(
   graph_task->set_exception(std::current_exception(), fn);
 }
 
+namespace {
+std::atomic<uint64_t> graph_task_id{0};
+}
+
+GraphTask::GraphTask(
+    bool keep_graph,
+    bool grad_mode,
+    int reentrant_depth,
+    std::shared_ptr<ReadyQueue> cpu_ready_queue,
+    c10::SmallVector<Node*, 4> graph_roots,
+    bool exit_on_error)
+    : keep_graph_(keep_graph),
+      graph_roots_(std::move(graph_roots)),
+      owner_(NO_DEVICE),
+      reentrant_depth_(reentrant_depth),
+      exit_on_error_(exit_on_error),
+      cpu_ready_queue_(std::move(cpu_ready_queue)),
+      future_result_(c10::make_intrusive<at::ivalue::Future>(
+          c10::ListType::create(c10::TensorType::get()))),
+      id_(graph_task_id.fetch_add(1, std::memory_order_relaxed)) {
+  thread_locals_.set_grad_mode(grad_mode);
+}
+
 bool GraphTask::completed() {
   return outstanding_tasks_.load() == 0 ||
       (exit_on_error_ && has_error_.load());

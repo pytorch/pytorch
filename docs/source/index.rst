@@ -85,6 +85,7 @@ Features described in this documentation are classified by release status:
    torch.func <func>
    futures
    fx
+   fx.experimental
    torch.hub <hub>
    torch.jit <jit>
    torch.linalg <linalg>
@@ -125,6 +126,7 @@ Features described in this documentation are classified by release status:
    named_tensor
    name_inference
    torch.__config__ <config_mod>
+   torch.__future__ <future_mod>
    logging
 
 .. toctree::
