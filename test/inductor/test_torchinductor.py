@@ -1295,6 +1295,21 @@ class CommonTemplate:
         )
         self.common(fn, (a, b), atol=1e-5, rtol=1e-5, check_lowp=False)
 
+    @skipCUDAIf(TEST_WITH_ROCM, "associative_scan is not supported on ROCm")
+    def test_custom_scan_op(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("associative_scan only supported on GPU")
+
+        def combine_fn(a, b):
+            return a + b
+
+        from torch._higher_order_ops.associative_scan import associative_scan
+
+        a = torch.randn(100, 100, device=self.device)
+        expect = torch.cumsum(a, 0)
+        actual = associative_scan(a, 0, combine_fn, 0)
+        self.assertEqual(expect, equal)
+
     def test_embedding_bag_byte_unpack(self):
         if self.device != "cpu":
             raise unittest.SkipTest(f"No {GPU_TYPE} implementation (it returns empty)")
