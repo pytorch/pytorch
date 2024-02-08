@@ -10,13 +10,11 @@ from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed._tensor import DTensor, Placement, Replicate, Shard
 from torch.distributed._tensor.device_mesh import _mesh_resources
 from torch.distributed._tensor.placement_types import DTensorSpec
-from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import (
     _chunk_with_empty,
     _from_local_no_grad,
     _get_dim0_chunked_size,
     _raise_assert_with_print,
-    _to_dtype_if_needed,
     FSDPMeshInfo,
     HSDPMeshInfo,
 )
@@ -98,8 +96,6 @@ class FSDPParam:
     """
 
     orig_dtype: torch.dtype
-    param_dtype: Optional[torch.dtype]
-    reduce_dtype: Optional[torch.dtype]
     _orig_size: torch.Size  # ND
     _contiguous_orig_stride: Tuple[int, ...]
     sharded_size: torch.Size  # ND
@@ -124,38 +120,20 @@ class FSDPParam:
         mesh_info: FSDPMeshInfo,
         post_forward_mesh_info: Optional[FSDPMeshInfo],
         device: torch.device,
-        mp_policy: MixedPrecisionPolicy,
     ):
         self._module_info: ParamModuleInfo = module_info
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
-        self._init_dtype_attrs(param, mp_policy)
+        self._init_dtype_attrs(param)
         self._init_sharded_param(param, device)
         if self.post_forward_mesh_info:
             self._init_sharded_post_forward_param_metadata(param)
         self.all_gather_output = torch.empty(0)
         self._param_fqn: Optional[str] = None  # prefixed from root module
 
-    def _init_dtype_attrs(self, param: nn.Parameter, mp_policy: MixedPrecisionPolicy):
-        param_dtype, reduce_dtype = (mp_policy.param_dtype, mp_policy.reduce_dtype)
+    def _init_dtype_attrs(self, param: nn.Parameter):
         self.orig_dtype = param.dtype
-        # Each saved dtype attribute should only be not `None` if it affects
-        # behavior (e.g. requiring casting); otherwise, clamp to `None`
-        if param_dtype is not None and param_dtype == self.orig_dtype:
-            # E.g. orig=compute=bf16
-            param_dtype = None
-        # By default, gradients are computed in the compute dtype
-        if reduce_dtype is not None and (
-            # E.g. orig=compute=reduce=bf16
-            (param_dtype is None and reduce_dtype == self.orig_dtype)
-            # E.g. orig=fp32, compute=reduce=bf16
-            or (param_dtype is not None and reduce_dtype == param_dtype)
-        ):
-            reduce_dtype = None
-        self.param_dtype = param_dtype
-        self.reduce_dtype = reduce_dtype
-        # None indicates that the mixed precision is not enabled
 
     @torch.no_grad()
     def _init_sharded_param(self, param: nn.Parameter, device: torch.device):
@@ -385,12 +363,9 @@ class FSDPParam:
     def all_gather_input(self) -> torch.Tensor:  # 1D
         self._assert_in_states(ShardedState.SHARDED, ShardedState.SHARDED_POST_FORWARD)
         if self.sharded_state == ShardedState.SHARDED:
-            return _to_dtype_if_needed(self._sharded_param_data, self.param_dtype)
+            return self._sharded_param_data
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
-            return _to_dtype_if_needed(
-                cast(torch.Tensor, self._sharded_post_forward_param_data),
-                self.param_dtype,
-            )
+            return cast(torch.Tensor, self._sharded_post_forward_param_data)
         return torch.empty(0)  # mypy
 
     @property
