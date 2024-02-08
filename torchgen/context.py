@@ -28,7 +28,6 @@ F2 = TypeVar(
     "F2",
     NativeFunction,
     NativeFunctionsGroup,
-    List[NativeFunction],
     Optional[NativeFunction],
     bool,
     str,

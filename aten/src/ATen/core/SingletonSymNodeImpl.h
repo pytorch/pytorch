@@ -1,10 +1,13 @@
 #pragma once
 
 #include <c10/core/ConstantSymNodeImpl.h>
-#include <c10/core/SymBool.h>
 #include <c10/core/SymNodeImpl.h>
-#include <ATen/core/TensorBody.h>
-#include <optional>
+#include <c10/macros/Export.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
+#include <c10/util/intrusive_ptr.h>
+#include <cstdint>
+#include <string>
 
 namespace c10 {
 
@@ -35,8 +38,8 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
  public:
   // CAUTION: you should probably not be constructing these directly; please
   // the higher-level API in python instead (TODO: actually introduce that).
-  explicit SingletonSymNodeImpl(int64_t val, int64_t coeff, at::Tensor data, int64_t sum_offsets)
-      : val_(val), coeff_(coeff), data_(std::move(data)), sum_offsets_(sum_offsets) {}
+  explicit SingletonSymNodeImpl(int64_t val, int64_t coeff)
+      : val_(val), coeff_(coeff) {}
 
   bool bool_() override {
     return false;
@@ -52,10 +55,6 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
 
   bool is_bool() override {
     return false;
-  }
-
-  bool is_singleton() override {
-    return true;
   }
 
   bool has_hint() override {
@@ -139,14 +138,6 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
     return coeff_;
   }
 
-  const at::Tensor& singleton_data() {
-    return data_;
-  }
-
-  int64_t singleton_sum_offsets() {
-    return sum_offsets_;
-  }
-
   bool is_symbolic() override {
     return false;
   }
@@ -186,13 +177,6 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
  private:
   int64_t val_;
   int64_t coeff_;
-  at::Tensor data_;
-  int64_t sum_offsets_;
 };
-
-TORCH_API std::optional<at::Tensor> try_call_with_dummy(const std::function<at::Tensor(at::Tensor)>& fn, c10::SymIntArrayRef size);
-
-TORCH_API void set_global_singleton_dummy(const at::Tensor& t);
-
 
 } // namespace c10

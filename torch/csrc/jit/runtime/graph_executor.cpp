@@ -53,6 +53,11 @@
 #include <utility>
 #include <vector>
 
+C10_DEFINE_bool(
+    torch_jit_execution_plan_reuse_code_graph,
+    false,
+    "Directly reuse the preprocessed graph in the CodeImpl to reduce the memory consumption. This is aggressive memory saving, and please be cautious!");
+
 namespace torch::jit {
 
 EnableProfilingGuard::EnableProfilingGuard() {

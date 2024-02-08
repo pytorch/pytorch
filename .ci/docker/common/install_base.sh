@@ -61,6 +61,7 @@ install_ubuntu() {
     ${maybe_libiomp_dev} \
     libyaml-dev \
     libz-dev \
+    libjemalloc2 \
     libjpeg-dev \
     libasound2-dev \
     libsndfile-dev \
@@ -74,6 +75,7 @@ install_ubuntu() {
     libtool \
     vim \
     unzip \
+    gpg-agent \
     gdb
 
   # Should resolve issues related to various apt package repository cert issues
@@ -151,7 +153,7 @@ wget https://ossci-linux.s3.amazonaws.com/valgrind-${VALGRIND_VERSION}.tar.bz2
 tar -xjf valgrind-${VALGRIND_VERSION}.tar.bz2
 cd valgrind-${VALGRIND_VERSION}
 ./configure --prefix=/usr/local
-make -j6
+make -j$[$(nproc) - 2]
 sudo make install
 cd ../../
 rm -rf valgrind_build
