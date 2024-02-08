@@ -60,7 +60,7 @@ from ..utils import (
     unique,
     yellow_text,
 )
-from ..virtualized import ops, OpsHandler, ReductionType, StoreMode, V
+from ..virtualized import _ops as ops, OpsHandler, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
 from .common import (
     CSE,
