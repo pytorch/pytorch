@@ -74,13 +74,14 @@ jobs:
           set -euxo pipefail
 
           conda activate tdenv
-          pip install awscli
+          pip install awscli==1.29.40
           cd codellama/
           mkdir "CodeLlama-7b-Python"
           aws s3 cp "s3://target-determinator-assets/CodeLlama-7b-Python" "CodeLlama-7b-Python" --recursive
           ls
 
       - name: Run Indexer
+        id: indexer
         shell: bash -l {0}
         run: |
           set -euxo pipefail
@@ -95,18 +96,17 @@ jobs:
             --nnodes=1 \
             --nproc-per-node=1 \
             indexer.py \
-            --experiment-name indexer-output
+            --experiment-name indexer-functions
 
-          ls -R assets/indexer-output
+          ls -R assets/indexer-functions
 
-      # - name: Upload Index to S3
-      #   shell: bash -l {0}
-      #   run: |
-      #     set -euxo pipefail
+      - name: Upload Index to S3
+        shell: bash -l {0}
+        if: ${{ steps.indexer.outcome == 'success' }}
+        run: |
+          set -euxo pipefail
+          conda activate tdenv
 
-      #     conda activate tdenv
-      #     pip install awscli
-      #     # TODO: Need to create subdirectory in bucket and expand "pkg" path
-      #     for pkg in "${GITHUB_WORKSPACE}"/llm-target-determinator/assets/indexer-output/*; do
-      #       aws s3 cp "$pkg" "s3://target-determinator-assets"
-      #     done
+          zip -r indexer-functions.zip "${GITHUB_WORKSPACE}"/llm-target-determinator/assets/indexer-output
+
+          aws s3 cp "indexer-functions.zip" "s3://target-determinator-assets/indexes/indexer-functions.zip"
