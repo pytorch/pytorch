@@ -352,10 +352,10 @@ class GuardBuilder(GuardBuilderBase):
         # Invalidate functorch code if current level is different than
         # the one when FX graph was generated
         if torch._C._functorch.peek_interpreter_stack() is not None:
-            ci = torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter()
-            state = ci.get_state()
-            code = f"torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter().check_state({state})"
-            self._produce_guard_code(guard, [code])
+            cis = torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters()
+            states = [ci.get_state() for ci in cis]
+            code = [f"torch._functorch.pyfunctorch.compare_functorch_state({states})"]
+            self._produce_guard_code(guard, code)
 
     def EQUALS_MATCH(self, guard: Guard):
         ref = self.arg_ref(guard)
