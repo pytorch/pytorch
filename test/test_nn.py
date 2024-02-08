@@ -12097,6 +12097,17 @@ if __name__ == '__main__':
         m = MyModule(10, 1, device='meta', dtype=dtype)
         m(input)
 
+        # Test empty meta module error with torch.nn.Module.to().
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            re.escape(
+                "Cannot copy out of meta tensor; no data! Please use torch.nn.Module.to_empty() "
+                "instead of torch.nn.Module.to() when moving module from meta to a different "
+                "device."
+            ),
+        ):
+            m.to(device)
+
         # Test materializing meta module on a real device.
         m.to_empty(device=device)
         m(input)
