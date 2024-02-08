@@ -212,8 +212,8 @@ class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
         return var
 
     def enter(self, tx):
-        grad_level = torch._C._functorch._grad_increment_nesting()
         install_guard(self._guards_singleton)
+        grad_level = torch._C._functorch._grad_increment_nesting()
         self.set_cleanup_hook(tx, lambda: torch._C._functorch._grad_decrement_nesting())
         self.state.proxy = tx.output.create_node(
             "call_function",
@@ -253,9 +253,9 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
         return var
 
     def enter(self, tx):
+        install_guard(self._guards_singleton)
         batch_size, randomness = self.target_values
         vmap_level = torch._C._functorch._vmap_increment_nesting(batch_size, randomness)
-        install_guard(self._guards_singleton)
         self.set_cleanup_hook(tx, lambda: torch._C._functorch._vmap_decrement_nesting())
         self.state.proxy = tx.output.create_node(
             "call_function",
