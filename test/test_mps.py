@@ -1038,12 +1038,6 @@ def mps_ops_error_inputs_modifier(ops):
         # unimplemented
         'logcumsumexp',
     }
-    if product_version < 14.0:
-        XFAILLIST.update({
-            # unsupported complex dtypes
-            'fft.hfft',
-            'fft.irfft',
-        })
 
     def addDecorator(op, d) -> None:
         op.decorators = list(op.decorators) if op.decorators is not None else []
