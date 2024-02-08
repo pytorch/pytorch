@@ -718,14 +718,10 @@ class Tensor(torch._C.TensorBase):
         If ``self`` is a parameter or buffer in an ``nn.Module`` and ``other`` is the
         value in the state dictionary with the corresponding key, this method defines
         how ``other`` is remapped before being swapped with ``self`` via
-        :func:`~torch.utils.swap_tensor(self, other)`` in ``module.load_state_dict()``.
+        :func:`~torch.utils.swap_tensors`` in ``module.load_state_dict()``.
 
         To customize how to load from or to a tensor subclass, one can override this function with
         ``__torch_function__``.
-
-        After applying ``result = self.module_load_from(other)``, if ``self`` is an ``nn.Parameter``,
-        ``result`` will be wrapped in a new :class:`~torch.nn.Parameter` instance before
-        being swapped with ``self``.
 
         ..note::
             If both ``self`` and ``other`` have ``__torch_function__`` handlers implemented
