@@ -158,9 +158,12 @@ _SKIP_PYTHON_BINDINGS = [
     "fill.Tensor",  # only used by the functionalization pass
     "fill.Scalar",  # only used by the functionalization pass
     "lift.*",
-    "normal_functional",  # only used by the functionalization pas
+    "normal_functional",  # only used by the functionalization pass
     "nbytes",
     "itemsize",
+    "batch_norm_with_update",
+    "batch_norm_with_update.out",
+    "batch_norm_no_update",
 ]
 
 SKIP_PYTHON_BINDINGS = [

@@ -660,6 +660,7 @@ aten::batch_norm_stats
 aten::batch_norm_stats.out
 aten::batch_norm_update_stats
 aten::batch_norm_update_stats.out
+aten::batch_norm_with_update.out
 aten::bernoulli
 aten::bernoulli.Tensor
 aten::bernoulli.Tensor_out

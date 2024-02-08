@@ -35,6 +35,11 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   AT_ERROR("cudnn_batch_norm_backward: ATen not compiled with cuDNN support");
 }
 
+size_t _get_cudnn_batch_norm_reserve_space_size(const Tensor& input_t) {
+  AT_ERROR(
+      "_get_cudnn_batch_norm_reserve_space_size: ATen not compiled with cuDNN support");
+}
+
 } // namespace native
 } // namespace at
 

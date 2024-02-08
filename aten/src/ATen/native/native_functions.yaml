@@ -6485,6 +6485,7 @@
 - func: batch_norm_no_update(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, float momentum, float eps, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, Tensor)
   dispatch:
     CompositeExplicitAutograd: batch_norm_no_update
+  autogen: batch_norm_no_update.out
 
 - func: batch_norm_with_update.out(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, float momentum, float eps, bool cudnn_enabled, *, Tensor(d!) out, Tensor(e!) save_mean, Tensor(f!) save_invstd, Tensor(g!) reserve) -> (Tensor(d!), Tensor(e!), Tensor(f!), Tensor(g!))
   dispatch:
@@ -6494,10 +6495,10 @@
 
 - func: batch_norm_backward(Tensor grad_output, Tensor input, Tensor weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var, bool update, float eps, bool[3] grad_input_mask, Tensor reserve, bool cudnn_enabled) -> (Tensor, Tensor, Tensor)
   dispatch:
-    CPU: batch_norm_backward_cpu
-    CUDA: batch_norm_backward_cuda
-    MPS: batch_norm_backward_mps
-    MkldnnCPU: batch_norm_backward_mkldnn
+    CPU: _new_batch_norm_backward_cpu
+    CUDA: _new_batch_norm_backward_cuda
+    MPS: _new_batch_norm_backward_mps
+    MkldnnCPU: _new_batch_norm_backward_mkldnn
 
 # TODO: reduce signatures down to one when optional args is available
 - func: _sparse_sum(Tensor self) -> Tensor
