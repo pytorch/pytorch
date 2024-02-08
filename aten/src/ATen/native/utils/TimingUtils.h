@@ -1,8 +1,6 @@
 #pragma once
 
 #include <chrono>
-#include <iostream>
-#include <ATen/cuda/detail/CUDAHooks.h>
 
 namespace at {
 namespace native {
@@ -11,7 +9,7 @@ template<typename F>
 class AutotuneTimer {
   public:
     AutotuneTimer() = delete;
-    AutotuneTimer(F&& callback, const bool is_cuda=false, const bool profile=false) 
+    AutotuneTimer(F&& callback, const bool is_cuda=false, const bool profile=false)
        :  _callback(std::move(callback)),
           _is_cuda(is_cuda),
           _profile(profile)

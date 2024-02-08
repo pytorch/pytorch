@@ -1960,6 +1960,10 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vmapvjpvmap', {
         xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
     })
+    @opsToleranceOverride('TestOperators', 'test_vmapjvpvjp', (
+        tol1('linalg.multi_dot',
+             {torch.float32: tol(atol=1e-04, rtol=1e-05)}),
+    ))
     def test_vmapvjpvmap(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
         B = 2

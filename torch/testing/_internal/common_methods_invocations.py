@@ -16103,6 +16103,9 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack, with_tf32_off,
                        DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03)}),
                                     'TestCommon', 'test_noncontiguous_samples',
+                                    device_type='cuda'),
+                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-05)}),
+                                    'TestOperators', 'test_jvpvjp',
                                     device_type='cuda')],
            skips=(
                # test does not work with passing lambda for op

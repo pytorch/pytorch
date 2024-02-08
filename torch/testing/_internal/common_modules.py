@@ -4064,6 +4064,9 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
                                 'TestModule', 'test_non_contiguous_tensors',
                                 device_type='cpu', active_if=IS_WINDOWS),
+                   DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
+                                'TestModule', 'test_non_contiguous_tensors',
+                                device_type='cuda', active_if=IS_WINDOWS),
                    # Not implemented for SDPA backward derivative
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad',
                                 device_type='cpu'),
