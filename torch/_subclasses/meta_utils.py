@@ -398,14 +398,21 @@ class MetaConverter:
                     from torch.fx.experimental.symbolic_shapes import (
                         DimDynamic,
                         StatelessSymbolicContext,
+                        SubclassSymbolicContext,
                     )
 
                     if shape_env:
                         if is_traceable_wrapper_subclass(t):
-                            # TODO: Do this for dense tensors too
-                            base_symbolic_context = symbolic_context.inner_contexts[
-                                "_base"
-                            ]
+                            if symbolic_context is None:
+                                base_symbolic_context = None
+                            else:
+                                assert isinstance(
+                                    symbolic_context, SubclassSymbolicContext
+                                )
+                                # TODO: Do this for dense tensors too
+                                base_symbolic_context = symbolic_context.inner_contexts[
+                                    "_base"
+                                ]
                         else:
                             base_symbolic_context = StatelessSymbolicContext(
                                 dynamic_sizes=[DimDynamic.STATIC] * t._base.dim(),
@@ -490,12 +497,18 @@ class MetaConverter:
                                     )
 
                                 from torch._dynamo.source import (
-                                    TensorPropertySource, TensorProperty)
+                                    TensorProperty,
+                                    TensorPropertySource,
+                                )
 
                                 def symint_visitor_fn(s):
+                                    if shape_env is None:
+                                        return s
+
                                     # TODO: Fix the source
                                     sym_source = TensorPropertySource(
-                                        source, TensorProperty.SIZE, 0)
+                                        source, TensorProperty.SIZE, 0
+                                    )
                                     val = int(s)
                                     symbol = shape_env.create_symbol(val, sym_source)
                                     sym = shape_env.create_symintnode(
@@ -565,10 +578,6 @@ class MetaConverter:
 
                 else:
                     is_leaf = safe_is_leaf(t)
-
-                    from torch.fx.experimental.symbolic_shapes import (
-                        SubclassSymbolicContext,
-                    )
 
                     (
                         sizes,
