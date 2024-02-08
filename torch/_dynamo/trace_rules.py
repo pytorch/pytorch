@@ -17,9 +17,10 @@ except ModuleNotFoundError:
 
 import torch
 
-from .utils import hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
+from .utils import getfile, hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
 
 from .variables import (
+    BuiltinVariable,
     FunctorchVmapHigherOrderVariable,
     SkipFilesVariable,
     TorchInGraphFunctionVariable,
@@ -151,6 +152,11 @@ manual_torch_name_rule_map = {
     "torch._functorch.vmap.unwrap_batched": UserFunctionVariable,
     "torch._functorch.vmap.vmap_impl": FunctorchVmapHigherOrderVariable,
     "torch._functorch.vmap.wrap_batched": UserFunctionVariable,
+    "torch._constrain_as_size": UserFunctionVariable,
+    "torch._constrain_as_value": UserFunctionVariable,
+    "torch._tensor._convert": UserFunctionVariable,
+    "torch.jit._unwrap_optional": UserFunctionVariable,
+    "torch.backends.mha.get_fastpath_enabled": UserFunctionVariable,
 }
 
 
@@ -2062,8 +2068,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._check_with",
         "torch._check",
         "torch._compile._disable_dynamo",
-        "torch._constrain_as_size",
-        "torch._constrain_as_value",
         "torch._functorch.apis.chunk_vmap",
         "torch._functorch.autograd_function.custom_function_call_functionalize",
         "torch._functorch.autograd_function.custom_function_call_grad",
@@ -2765,8 +2769,7 @@ def load_object(name):
         else:
             assert len(x) == 1, f"Invalid obj name {name}"
             val = _load_obj_from_str(x[0])
-        if hasattr(val, "__wrapped__"):
-            val = val.__wrapped__
+        val = unwrap_if_wrapper(val)
     except (AttributeError, ImportError):
         val = None
     return val
@@ -2970,22 +2973,58 @@ def is_numpy(obj) -> bool:
 
 
 """
+Main entry point for looking up the trace rule (the Dynamo variable) for a given callable object.
+"""
+
+
+def lookup_callable(obj):
+    if not hashable(obj):
+        return None
+    # Custom allow/disallow in graph takes precedence over the general lookup.
+    if is_callable_disallowed(obj):
+        return SkipFilesVariable
+    if is_callable_allowed(obj):
+        return TorchInGraphFunctionVariable
+    if is_builtin_callable(obj):
+        return BuiltinVariable
+
+
+"""
 Main entry point for looking up the trace rule (the Dynamo variable) for a given function object.
 E.g, the lookup result of `torch.sin` is `TorchInGraphFunctionVariable`.
 """
 
 
 def lookup(obj):
-    # Unwrap if it's a functools.lru_cache wrapper
-    obj = unwrap_if_wrapper(obj)
+    return lookup_inner(obj)
+
+
+def lookup_inner(obj, name=None, filename=None, is_direct_call=True):
+    # Step 1: lookup obj's tracing rule in `torch_name_rule_map`.
+    # The rules defined in `torch_name_rule_map` mainly includes two parts:
+    # - Manually defined rules for any functions.
+    # - The list of torch in graph functions.
     if not hashable(obj):
         return None
-    # Custom allow/disallow in graph takes precedence over the `torch_name_rule_map`.
-    if callable(obj) and is_callable_disallowed(obj):
+    if obj is not None:
+        if is_aten_op_or_tensor_method(obj):
+            return TorchInGraphFunctionVariable
+        rule = get_torch_obj_rule_map().get(obj, None)
+        if rule is not None:
+            return rule
+
+    # Step 2: lookup obj's tracing rule by function name.
+    if is_direct_call:
+        if name == "patched_init":
+            return SkipFilesVariable
+        elif name == "__torch_function__":
+            return UserFunctionVariable
+
+    # Step 3: lookup obj's tracing rule by filename.
+    if filename is None:
+        filename = getfile(obj)
+
+    if torch._dynamo.skipfiles.check_file(filename, is_direct_call).skipped:
         return SkipFilesVariable
-    if callable(obj) and is_callable_allowed(obj):
-        return TorchInGraphFunctionVariable
-    if is_aten_op_or_tensor_method(obj):
-        return TorchInGraphFunctionVariable
-    rule = get_torch_obj_rule_map().get(obj, None)
-    return rule
+    else:
+        return UserFunctionVariable

@@ -273,7 +273,6 @@ def softmax_backward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
     softmax_dim = normalize_dim(softmax_dim, grad_out_strategy.output_ndim)
 
     grad_in_strategy = OpStrategy([])
-    decomp_redist_cost = float("inf")
     for grad_out_placement_strat, out_placement_strat in zip(
         grad_out_strategy.strategies, out_strategy.strategies
     ):
@@ -290,7 +289,6 @@ def softmax_backward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
         tgt_spec = DTensorSpec(
             mesh=mesh,
             placements=replicate_reduction_dims(src_spec.placements, [softmax_dim]),
-            tensor_meta=src_spec.tensor_meta,
         )
         redist_grad_out_cost = generate_redistribute_costs(grad_out_strategy, tgt_spec)
         redist_out_cost = generate_redistribute_costs(out_strategy, tgt_spec)
