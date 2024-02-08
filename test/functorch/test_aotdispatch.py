@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     IS_ARM64,
     IS_MACOS,
+    IS_WINDOWS,
     IS_X86,
     compare_equal_outs_and_grads,
     outs_and_grads,
@@ -3261,6 +3262,7 @@ class <lambda>(torch.nn.Module):
         ):
             aot_export_module(mod, [inp], trace_joint=True, output_loss_index=1)
 
+    @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
     @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "Cond needs dynamo to run")
     def test_aot_export_with_torch_cond(self):
         class M(torch.nn.Module):
