@@ -3070,7 +3070,6 @@ def register_meta_foreach(ops):
         aten._foreach_log1p,
         aten._foreach_log2,
         aten._foreach_neg,
-        aten._foreach_norm,
         aten._foreach_reciprocal,
         aten._foreach_round,
         aten._foreach_sigmoid,
@@ -3877,8 +3876,11 @@ def pooling_output_shape(inputSize, kernelSize, pad, stride, dilation, ceil_mode
     torch._check(stride != 0, lambda: "stride should not be zero")
     torch._check(pad >= 0, lambda: f"pad must be non-negative, but got pad: {pad}")
     torch._check(
-        pad <= kernelSize // 2,
-        lambda: f"pad should be at most half of kernel size, but got pad={pad} and kernel_size={kernelSize}",
+        pad <= ((kernelSize - 1) * dilation + 1) // 2,
+        lambda: (
+            f"pad should be at most half of effective kernel size, but got pad={pad}, "
+            f"kernel_size={kernelSize} and dilation={dilation}"
+        ),
     )
     return pooling_output_shape_pad_lr(
         inputSize, kernelSize, pad, pad, stride, dilation, ceil_mode
