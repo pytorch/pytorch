@@ -1743,7 +1743,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(functools.partial(op, reduction='sum'), (y, t), in_dims=(0, None))
         test(functools.partial(op, reduction='none'), (y, t), in_dims=(0, None))
 
-    @xfailIfTorchDynamo
     def test_adaptive_avg_pool2d(self):
         test = self._vmap_test
         op = functools.partial(F.adaptive_avg_pool2d, output_size=(3, 3))
