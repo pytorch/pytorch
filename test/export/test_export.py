@@ -3012,6 +3012,14 @@ def forward(self, l_q_, l_k_, l_v_):
     getitem = _scaled_dot_product_flash_attention_for_cpu[0];  _scaled_dot_product_flash_attention_for_cpu = None
     return (getitem,)""")
 
+        # make sure run_decompositions() decomposes _scaled_dot_product_flash_attention_for_cpu.
+        decomposed = ep.run_decompositions()
+        ops = set(
+            node.target for node in decomposed.graph.nodes if node.op == "call_function"
+        )
+        self.assertFalse(torch.ops.aten._scaled_dot_product_flash_attention_for_cpu in ops)
+
+
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Can't run fused SDPA on this platform",
