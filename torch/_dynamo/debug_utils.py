@@ -713,12 +713,12 @@ def aot_graph_input_parser(
 
     Consider a function `forward` defined as follows:
 
-    >>> def forward(self, primals_1: "f32[1001, 6]"):
-    ...     _tensor_constant0: "i64[4190]" = self._tensor_constant0
-    ...     # Further implementation
+    def forward(self, primals_1: "f32[1001, 6]"):
+        _tensor_constant0: "i64[4190]" = self._tensor_constant0
+        # Further implementation
 
-    >>> kwargs = aot_graph_input_parser(forward)
-    >>> forward(**kwargs)
+    kwargs = aot_graph_input_parser(forward)
+    forward(**kwargs)
     """
 
     from torch.fx.graph import dtype_abbrs
