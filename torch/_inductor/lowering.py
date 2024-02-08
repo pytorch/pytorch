@@ -2283,19 +2283,6 @@ make_fallback(aten.resize_)
 make_fallback(aten.resize_as)
 make_fallback(aten.resize_as_)
 make_fallback(aten.searchsorted)
-make_fallback(
-    aten.special_chebyshev_polynomial_t
-)  # triton/libdevice do not provide chebyshev_polynomial_t
-make_fallback(
-    aten.special_chebyshev_polynomial_u
-)  # triton/libdevice do not provide chebyshev_polynomial_u
-make_fallback(
-    aten.special_hermite_polynomial_h
-)  # triton/libdevice do not provide hermite_polynomial_h
-make_fallback(
-    aten.special_hermite_polynomial_he
-)  # triton/libdevice do not provide hermite_polynomial_he
-make_fallback(aten.special_laguerre_polynomial_l)
 make_fallback(aten._trilinear)
 make_fallback(aten.uniform, warn=False)
 make_fallback(aten._adaptive_avg_pool3d_backward)
@@ -5201,17 +5188,55 @@ register_pointwise_numeric(aten.nextafter)
 
 from .codegen.common import pointwise_overrides_data
 
-for name, impls in pointwise_overrides_data.items():
-    aten_op = getattr(aten, impls["aten"])
-    triton_fallback = None
+
+def _get_pointwise_overrides(ns, name):
+    impls = pointwise_overrides_data[name]
+    type_promotion_kind = impls.get(
+        "type_promotion_kind", ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    op = getattr(ns, impls["aten"], None)
+    if op is None:
+        return
+
     if impls.get("triton") is None:
-        triton_fallback = fallback_handler(aten_op.default)
-    register_pointwise_numeric(aten_op, name=name, triton_fallback=triton_fallback)
-    if hasattr(prims, name):
-        prims_op = getattr(prims, name)
-        if impls.get("triton") is None:
-            triton_fallback = fallback_handler(prims_op.default)
-        register_pointwise_numeric(prims_op, triton_fallback=triton_fallback)
+
+        def make_triton_fallback(op):
+            return fallback_handler(op)
+
+    else:
+
+        def make_triton_fallback(op):
+            return
+
+    if isinstance(op, torch._ops.OpOverloadPacket):
+        for olname in op.overloads():
+            ol = getattr(op, olname)
+            yield ol, type_promotion_kind, fallback_handler(ol)
+    else:
+        yield op, type_promotion_kind, fallback_handler(op)
+
+
+for name in pointwise_overrides_data:
+    for op, type_promotion_kind, triton_fallback in _get_pointwise_overrides(
+        aten, name
+    ):
+        register_pointwise(
+            op,
+            name=name,
+            type_promotion_kind=type_promotion_kind,
+            triton_fallback=triton_fallback,
+        )
+
+    for op, type_promotion_kind, triton_fallback in _get_pointwise_overrides(
+        prims, name
+    ):
+        register_pointwise(
+            op,
+            name=name,
+            type_promotion_kind=type_promotion_kind,
+            triton_fallback=triton_fallback,
+        )
+
 
 foreach_add_list = register_foreach_pointwise(
     aten._foreach_add.List, add, allow_alpha=True

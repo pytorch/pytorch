@@ -8478,8 +8478,7 @@ class CommonTemplate:
         [
             subtest((name, getattr(torch.special, name)), name=name)
             for name in torch.special.__all__
-            if "_polynomial_" not in name
-            and name not in {"softmax", "log_softmax", "logsumexp"}
+            if name not in {"softmax", "log_softmax", "logsumexp"}
         ],
     )
     def test_pointwise(self, name, op):
@@ -8487,6 +8486,10 @@ class CommonTemplate:
         check_lowp = True
         if self.device == "cuda" and name in {
             "airy_ai",
+            "bessel_i0",
+            "bessel_i1",
+            "bessel_j0",
+            "bessel_j1",
             "bessel_y0",
             "bessel_y1",
             "erfcx",
@@ -8494,6 +8497,7 @@ class CommonTemplate:
             "gammaincc",
             "i1",
             "i1e",
+            "modified_bessel_i0",
             "modified_bessel_i1",
             "modified_bessel_k0",
             "modified_bessel_k1",
@@ -8502,6 +8506,18 @@ class CommonTemplate:
             "scaled_modified_bessel_k1",
             "spherical_bessel_j0",
             "zeta",
+            "chebyshev_polynomial_t",
+            "chebyshev_polynomial_v",
+            "chebyshev_polynomial_u",
+            "chebyshev_polynomial_w",
+            "legendre_polynomial_p",
+            "shifted_chebyshev_polynomial_t",
+            "shifted_chebyshev_polynomial_u",
+            "shifted_chebyshev_polynomial_v",
+            "shifted_chebyshev_polynomial_w",
+            "hermite_polynomial_h",
+            "hermite_polynomial_he",
+            "laguerre_polynomial_l",
         }:
             # <func>_cuda not implemented for Half
             check_lowp = False
@@ -8541,6 +8557,15 @@ class CommonTemplate:
 
             def fn(n, x):
                 return op(n, x)
+
+        elif "_polynomial_" in name:
+            args = (
+                torch.randn(8, 8, dtype=dtype, device=self.device),
+                2,
+            )
+
+            def fn(x, n):
+                return op(x, n)
 
         else:
             args = (torch.randn(8, 8, dtype=dtype, device=self.device),)
