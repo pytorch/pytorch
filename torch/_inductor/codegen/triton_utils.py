@@ -1,14 +1,14 @@
-from typing import Dict, List, Union
+from typing import Dict, List
 
 import torch
 
 from .. import config
 from ..utils import instance_descriptor
 from ..virtualized import V
-from .common import SizeArg, TensorArg
+from .common import KernelArgType, SizeArg, TensorArg, WorkspaceArg
 
 
-def signature_of(arg: Union[TensorArg, SizeArg], *, size_dtype: str) -> str:
+def signature_of(arg: KernelArgType, *, size_dtype: str) -> str:
     from triton.runtime.jit import JITFunction
 
     if isinstance(arg, TensorArg):
@@ -46,21 +46,21 @@ def signature_of(arg: Union[TensorArg, SizeArg], *, size_dtype: str) -> str:
             return "i64"
         else:
             raise NotImplementedError(f"unhandled size_dtype {size_dtype}")
+    if isinstance(arg, WorkspaceArg):
+        return "*i8"
     raise NotImplementedError(f"unhandled {type(arg)}: {arg}")
 
 
 def signature_to_meta(
-    signature: List[Union[TensorArg, SizeArg]], *, size_dtype: str
+    signature: List[KernelArgType], *, size_dtype: str
 ) -> Dict[int, str]:
     return {
         i: signature_of(arg, size_dtype=size_dtype) for i, arg in enumerate(signature)
     }
 
 
-def config_of(args: List[Union[TensorArg, SizeArg]]) -> instance_descriptor:
-    def is_aligned(
-        x: Union[TensorArg, SizeArg], alignment: int, include_tensor: bool
-    ) -> bool:
+def config_of(args: List[KernelArgType]) -> instance_descriptor:
+    def is_aligned(x: KernelArgType, alignment: int, include_tensor: bool) -> bool:
         """
         Roughly follow triton code here:
         https://github.com/openai/triton/blob/5282ed890d453e10b9ee30076ef89115dd197761/python/triton/runtime/jit.py#L208-L222
@@ -82,6 +82,8 @@ def config_of(args: List[Union[TensorArg, SizeArg]]) -> instance_descriptor:
             if isinstance(x.expr, float):
                 return False
             return V.graph.sizevars.statically_known_multiple_of(x.expr, alignment)  # type: ignore[arg-type]
+        if isinstance(x, WorkspaceArg):
+            return V.graph.sizevars.statically_known_multiple_of(x.nbytes, alignment)  # type: ignore[arg-type]
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
     if config.triton.divisible_by_16:
