@@ -3184,7 +3184,7 @@ class <lambda>(torch.nn.Module):
             aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
             aot_export_module(mod, [inp], trace_joint=False)
 
-    def test_aot_export_forward_mutation_no_buffer_mut_banned(self):
+    def test_aot_export_forward_mutation_no_buffer_mut(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -3194,10 +3194,20 @@ class <lambda>(torch.nn.Module):
                 x.add_(4)
                 return (x.cos().sum() + self.buffer1.sum(),)
 
-        with self.assertRaisesRegex(RuntimeError, "Found following user inputs located at \\[0\\] are mutated"):
-            aot_export_module(M(), [torch.ones(6, 4)], trace_joint=False)
+        mod = M()
+        inp = torch.ones(6, 4)
+        gm, sig = aot_export_module(mod, [inp], trace_joint=False)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    add = torch.ops.aten.add.Tensor(arg1_1, 4);  arg1_1 = None
+    cos = torch.ops.aten.cos.default(add)
+    sum_1 = torch.ops.aten.sum.default(cos);  cos = None
+    sum_2 = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
+    add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+    return (add, add_1)""")  # noqa: B950
+        self.assertEqual(sig.user_inputs_to_mutate, {"add": "arg1_1"})
 
-    def test_aot_export_forward_mutation_multiple_mut_banned(self):
+    def test_aot_export_forward_mutation_multiple_mut(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -3208,8 +3218,35 @@ class <lambda>(torch.nn.Module):
                 self.buffer1.add_(5)
                 return (x.cos().sum() + y.sin().sum(), self.buffer1.sum(),)
 
-        with self.assertRaisesRegex(RuntimeError, "Found following user inputs located at \\[1\\] are mutated"):
-            aot_export_module(M(), [torch.ones(6, 4), torch.zeros(6, 4)], trace_joint=False)
+        mod = M()
+        inp = [torch.ones(6, 4), torch.zeros(6, 4)]
+        gm, sig = aot_export_module(mod, inp, trace_joint=False)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    add = torch.ops.aten.add.Tensor(arg2_1, 4);  arg2_1 = None
+    add_1 = torch.ops.aten.add.Tensor(arg0_1, 5);  arg0_1 = None
+    cos = torch.ops.aten.cos.default(arg1_1);  arg1_1 = None
+    sum_1 = torch.ops.aten.sum.default(cos);  cos = None
+    sin = torch.ops.aten.sin.default(add)
+    sum_2 = torch.ops.aten.sum.default(sin);  sin = None
+    add_2 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+    sum_3 = torch.ops.aten.sum.default(add_1)
+    return (add_1, add, add_2, sum_3)""")  # noqa: B950
+        self.assertEqual(sig.user_inputs_to_mutate, {"add": "arg2_1"})
+        self.assertEqual(sig.buffers_to_mutate, {"add_1": "buffer1"})
+
+    def test_aot_export_input_mutation_on_input_requiring_grad_banned(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x.add_(4)
+                return (x,)
+
+        mod = M()
+        inp = torch.randn(2, requires_grad=True)
+        with self.assertRaisesRegex(
+            RuntimeError, "Found a graph input that requires gradients, and received a mutation"
+        ):
+            aot_export_module(mod, [inp], trace_joint=False)
 
     def test_aot_export_input_mutation_on_parameter_banned(self):
         def fn(p, x):
@@ -3308,17 +3345,6 @@ def forward(self, arg0_1):
     add_1 = torch.ops.aten.add.Tensor(add, 6);  add = None
     sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
     return (sin,)""")
-
-    def test_aot_export_simplified_input_mutations_banned(self):
-        def fn(x):
-            x.mul_(2)
-            return (x + x,)
-        inp = torch.randn(2)
-        with self.assertRaisesRegex(
-            RuntimeError, "Found following user inputs located at \\[0\\] are mutated"
-        ):
-            aot_export_joint_simple(fn, [inp], trace_joint=False)
-            aot_export_joint_simple(fn, [inp], trace_joint=True)
 
     def test_aot_export_simplified_pytrees_banned(self):
         def fn(inps):
