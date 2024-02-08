@@ -777,12 +777,15 @@ def find_independent_subset_greedy(
     graph_search_options: Dict[str, Any],
 ) -> Iterator[Iterable[torch.fx.Node]]:
     """
-    Returns a list of subsets of `node_list` where no element in the subset
+    Yields a list of subsets of `node_list` where no element in the subset
     depends on any other element in the subset. This results in a set of
     independent nodes which can be fused together.
 
     The order of `node_list` is preserved within each subset so we can benefit
     from split-cat elimination in later passes.
+
+    During iteration it is only safe to mutate the graph by changing the nodes
+    that have been returned.
 
     graph_search_options:
       - min_fuse_set_size: Minimum size of the subset to consider. Subsets below
@@ -818,6 +821,7 @@ def find_independent_subset_greedy(
     # keep the correct order.
     node_list = _OrderedSet(node_list)
 
+    cache = {}
     while node_list:
         subset: List[torch.fx.Node] = []
         subset_deps: Set[torch.fx.Node] = set()
@@ -828,15 +832,23 @@ def find_independent_subset_greedy(
                 next_round_node_list.append(node)
                 continue
 
-            dep_set = find_dependent_nodes(node, node_list)
+            dep_set = cache.pop(node, None)
+            if dep_set is None:
+                dep_set = find_dependent_nodes(node, node_list)
 
             if not dep_set.intersection(subset):
                 subset.append(node)
                 subset_deps.update(dep_set)
             else:
                 next_round_node_list.append(node)
+                cache[node] = dep_set
 
         if len(subset) >= min_fuse_set_size:
+            # Careful here - the caller uses the subsets to fuse nodes together
+            # so we need to clear any cache entry that contains one of the
+            # returned nodes because the dependency list could be different
+            # (larger) after the merge.
+            cache = {k: v for k, v in cache.items() if v.isdisjoint(subset)}
             yield subset
 
         node_list = next_round_node_list

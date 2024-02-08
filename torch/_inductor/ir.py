@@ -4232,6 +4232,58 @@ class InplaceBernoulliFallback(ExternKernel):
         mark_node_as_mutating(self, x)
 
 
+# Used to deal with torch.complex types
+class InplaceCopyFallback(ExternKernel):
+    """
+    This needs to be a custom class to handle mutation properly
+    """
+
+    def codegen(self, wrapper):
+        (dst, src, non_blocking) = self.codegen_args()
+        wrapper.writeline(
+            f"{self.get_kernel_name()}({dst}, {src}, {non_blocking}){wrapper.ending}"
+        )
+
+    def should_allocate(self):
+        return False
+
+    def get_mutation_names(self):
+        return [self.inputs[0].get_name()]
+
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args,
+    ):
+        super().__init__(
+            None,
+            layout,
+            inputs,
+            constant_args,
+            python_kernel_name="aten.copy_",
+            cpp_kernel_name=(
+                "aoti_torch_copy_" if config.abi_compatible else "at::_ops::copy_::call"
+            ),
+        )
+        self.name = V.graph.register_buffer(self)
+
+    @classmethod
+    def create(cls, dst, src, non_blocking: bool = False):
+        inputs = [cls.realize_input(t) for t in [dst, src]]
+        constant_args = (non_blocking,)
+        result = InplaceCopyFallback(
+            NoneLayout(dst.get_device()),  # type: ignore[arg-type]
+            inputs,
+            constant_args,
+        )
+        mark_node_as_mutating(result, dst)
+        return result
+
+
 class AccumulateGrad(ExternKernel):
     """
     This needs to be a custom class to handle mutation properly
@@ -4262,6 +4314,8 @@ class AccumulateGrad(ExternKernel):
         self.python_kernel_name = "inductor_ops.accumulate_grad_"
         self.cpp_kernel_name = "torch::inductor::accumulate_grad_"
         mark_node_as_mutating(self, variable)
+        # never reuse gradient buffers since they might be stolen
+        V.graph.never_reuse_buffers.add(new_grad.data.get_name())
 
 
 class ScatterFallback(ExternKernel):
@@ -4399,7 +4453,9 @@ class IndexPutFallback(ExternKernel):
         )
         self.name = V.graph.register_buffer(self)
         self.python_kernel_name = "aten.index_put_"
-        self.cpp_kernel_name = "at::index_put_out"
+        self.cpp_kernel_name = (
+            "aoti_torch_index_put_out" if config.abi_compatible else "at::index_put_out"
+        )
         mark_node_as_mutating(self, x)
 
 
@@ -4484,15 +4540,18 @@ class ExternKernelNode:
 
 has_c_shim = {
     aten._embedding_bag.default,
+    aten._fft_c2c.default,
     aten._scaled_dot_product_efficient_attention.default,
     aten._scaled_dot_product_flash_attention.default,
+    aten._scaled_mm.default,
     aten.addmm.out,
     aten.bmm.out,
+    aten.copy_.default,
     aten.mm.out,
-    aten._scaled_mm.default,
     aten.repeat_interleave.Tensor,
     aten.nonzero.default,
     aten.view.dtype,
+    aten.view_as_real.default,
 }
 
 
@@ -4504,11 +4563,12 @@ def get_aten_cpp_kernel_name(kernel):
     assert (
         isinstance(kernel, torch._ops.OpOverload) and kernel.namespace == "aten"
     ), "Invalid aten kernel"
-    return (
-        f"at::{kernel.__name__.split('.')[0]}"
+    opname = (
+        kernel.__name__.split(".")[0]
         if kernel._overloadname == "default"
-        else f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
+        else kernel.__name__.replace(".", "_")
     )
+    return f"at::_ops::{opname}::call"
 
 
 class FallbackKernel(ExternKernelAlloc):
@@ -7358,6 +7418,8 @@ class _CollectiveKernel(FallbackKernel):
     def create_inplace(
         cls, kernel, inputs: Union[TensorBox, List[TensorBox]], *args, **kwargs
     ) -> None:
+        cpp_kernel_name = kernel._name
+        python_kernel_name = cpp_kernel_name.replace("::", ".")
         with V.graph.fake_mode:
             (
                 example_output,
@@ -7375,6 +7437,8 @@ class _CollectiveKernel(FallbackKernel):
             non_tensor_args,
             unflatten_args,
         )
+        packed.cpp_kernel_name = cpp_kernel_name
+        packed.python_kernel_name = python_kernel_name
 
         def mark_mutation(x):
             if isinstance(x.data, BaseView):
@@ -7409,6 +7473,8 @@ class _CollectiveKernel(FallbackKernel):
     def create_out_of_place(
         cls, kernel, inputs: Union[TensorBox, List[TensorBox]], *args, **kwargs
     ):
+        cpp_kernel_name = kernel._name
+        python_kernel_name = cpp_kernel_name.replace("::", ".")
         with V.graph.fake_mode:
             (
                 example_output,
@@ -7428,6 +7494,8 @@ class _CollectiveKernel(FallbackKernel):
                 non_tensor_args,
                 unflatten_args,
             )
+            packed.cpp_kernel_name = cpp_kernel_name
+            packed.python_kernel_name = python_kernel_name
             packed.outputs = [
                 MultiOutput(
                     cls.tensor_to_layout(tensor),
@@ -7445,6 +7513,8 @@ class _CollectiveKernel(FallbackKernel):
                 non_tensor_args,
                 unflatten_args,
             )
+            packed.cpp_kernel_name = cpp_kernel_name
+            packed.python_kernel_name = python_kernel_name
             packed.outputs = [packed]
             return packed
 

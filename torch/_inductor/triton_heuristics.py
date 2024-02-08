@@ -730,7 +730,9 @@ class DebugAutotuner(CachingAutotuner):
                     if arg_name.startswith("in_out_ptr")
                 ]
             )
-            num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
+            num_gb = self.inductor_meta.get("kernel_num_gb", None)
+            if num_gb is None:
+                num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
             gb_per_s = num_gb / (ms / 1e3)
             self.cached = (ms, num_gb, gb_per_s, kernel_name)
         else:

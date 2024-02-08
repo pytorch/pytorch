@@ -17,7 +17,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Type
+from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple, Type
 from unittest.mock import patch
 
 import torch
@@ -102,6 +102,7 @@ from .variables.misc import (
     InlinedClosureVariable,
     NullVariable,
     PythonModuleVariable,
+    SkipFilesVariable,
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable
@@ -480,8 +481,6 @@ def break_graph_if_unsupported(*, push):
                 if not self.should_compile_partial_graph():
                     raise
 
-                log.debug("break_graph_if_unsupported triggered compile", exc_info=True)
-
                 user_stack = excp.real_stack
                 # TODO: Also report the traceback from the parent frame
                 user_stack_formatted = "".join(traceback.format_list(user_stack))
@@ -493,10 +492,20 @@ def break_graph_if_unsupported(*, push):
                     and not explain
                     and graph_break_dup_warning_checker.add(frame_loc)
                 ):
+                    # This log line is exercised from
+                    #   python test/dynamo/test_exc.py -k test_graph_break_log
                     graph_break_log.debug(
-                        "Graph break: %s from user code at:\n%s",
-                        excp,
+                        "Graph break: from user code at:\n%s",
                         user_stack_formatted,
+                        exc_info=True,
+                    )
+                else:
+                    # This log line MUST NOT contain the string "Graph break",
+                    # exercised by
+                    #   python test/dynamo/test_misc.py -k test_duplicate_graph_break_log
+                    log.debug(
+                        "Unsupported break in user code at %s:%s (details suppressed)",
+                        *frame_loc,
                     )
 
                 if self.has_backedge():
@@ -588,9 +597,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     inline_depth: int
     inconsistent_side_effects: bool
     current_speculation: Optional[SpeculationEntry]
-    random_calls: List[
-        Tuple[Callable[..., object], Tuple[object, ...], Dict[str, object]]
-    ]
 
     def mark_inconsistent_side_effects(self):
         """
@@ -1493,7 +1499,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             val = seq.unpack_var_sequence(self)
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
-        assert len(val) == inst.argval
+        if len(val) != inst.argval:
+            unimplemented("UNPACK_SEQUENCE length mismatch")
         for i in reversed(val):
             self.push(i)
 
@@ -1974,7 +1981,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.export = export
 
         self.current_speculation = None
-        self.random_calls = []
 
         self.strict_checks_enabled = False
 
@@ -2032,7 +2038,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         _step_logger()(
             logging.INFO,
             f"torchdynamo start tracing {f_code.co_name} {code_options['co_filename']}:{code_options['co_firstlineno']}",
-            stack_info=True,
         )
         super().__init__(
             output=OutputGraph(
@@ -2198,12 +2203,12 @@ class InstructionTranslator(InstructionTranslatorBase):
         # Add original GraphModule context to the resume function to handle
         # the case of a graph break while tracing a GraphModule
         orig_graphmodule_maybe = code_context.get_context(self.f_code).get(
-            "orig_graphmodule", None
-        )
+            "orig_graphmodule", lambda: None
+        )()
         if orig_graphmodule_maybe is not None:
-            code_context.get_context(new_code)[
-                "orig_graphmodule"
-            ] = orig_graphmodule_maybe
+            code_context.get_context(new_code)["orig_graphmodule"] = weakref.ref(
+                orig_graphmodule_maybe
+            )
 
         if new_code.co_freevars:
             cg.make_function_with_closure(name, new_code, True, stack_len)
@@ -2271,13 +2276,14 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
             # _origin marks this as coming from an internal dynamo known function that is safe to
             # trace through.
-            if hasattr(func.fn, "_origin") and func.fn._origin in [
+            if hasattr(getattr(func, "fn", None), "_origin") and func.fn._origin in [
                 produce_trampoline_autograd_apply,
             ]:
                 # Known sound
                 return skipfiles.SkipResult(False, "allowlist in dynamo known function")
+            fn_qualname = func.fn.__qualname__ if hasattr(func, "fn") else ""
             unimplemented(
-                f"'inline in skipfiles: {func.fn.__qualname__} | {func.get_name()} {func.get_filename()}, {result.reason}'"
+                f"'inline in skipfiles: {fn_qualname} | {func.get_name()} {func.get_filename()}, {result.reason}'"
             )
 
         if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
@@ -2293,6 +2299,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def inline_call_(
         parent, func: VariableTracker, args: List[VariableTracker], kwargs
     ):
+        if isinstance(func, SkipFilesVariable):
+            unimplemented("inline with functions in skip files")
         assert isinstance(
             func,
             (UserFunctionVariable, NestedUserFunctionVariable),
@@ -2350,7 +2358,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 # but it is enough to add a context for `forward` in case it is called.
                 code_context.get_context(module.forward.__code__)[
                     "orig_graphmodule"
-                ] = module
+                ] = weakref.ref(module)
 
         tracer: InliningInstructionTranslator
         if is_generator(code):

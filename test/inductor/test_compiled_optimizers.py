@@ -11,6 +11,7 @@ from typing import NamedTuple
 import torch
 
 import torch._inductor
+import torch._inductor.cudagraph_trees
 from torch._inductor import config
 
 # LBFGS, SparseAdam not supported
@@ -74,10 +75,10 @@ KERNEL_COUNTS = {
     SGD: KernelCounts(multitensor=2, singletensor=8),
     RAdam: KernelCounts(
         multitensor=2, singletensor=None
-    ),  # Single tensor eager needs to be refactored to enable tracing
+    ),  # Single tensor eager needs to be refactored to enable tracing (#118230)
     Adamax: KernelCounts(
         multitensor=2, singletensor=None
-    ),  # Single tensor eager needs to be refactored to enable tracing
+    ),  # Single tensor eager needs to be refactored to enable tracing (#117836)
 }
 
 
@@ -87,19 +88,16 @@ def build_compiled_opt_kwarg_db():
         if optim_info.optim_cls not in KERNEL_COUNTS:
             continue
 
-        for optim_inputs in optim_info.optim_inputs_func():
-            for device in ["cpu", "cuda"]:
+        for device in ["cpu", "cuda"]:
+            for optim_inputs in optim_info.optim_inputs_func(device):
                 for foreach in [True, False]:
-                    if device == "cpu" and "capturable" in optim_inputs.kwargs:
-                        continue
-
                     kwargs = dict(optim_inputs.kwargs)
                     name = (
                         f"test_{optim_info.optim_cls.__name__.lower()}"
                         f"{'_foreach' if foreach else ''}"
                     )
 
-                    for key in optim_inputs.kwargs:
+                    for key in kwargs:
                         if key == "lr":
                             continue
                         name += "_" + key
@@ -107,7 +105,12 @@ def build_compiled_opt_kwarg_db():
                     name += f"_{device}"
 
                     # Eager for-loop impl doesn't support capturable ASGD
-                    if name == "test_asgd_capturable_cuda":
+                    if name in [
+                        "test_asgd_capturable_cuda",
+                        "test_asgd_maximize_capturable_cuda",
+                        "test_asgd_weight_decay_capturable_cuda",
+                        "test_asgd_weight_decay_maximize_capturable_cuda",
+                    ]:
                         continue
 
                     kwargs["foreach"] = foreach
@@ -196,6 +199,9 @@ def make_test(
             run_cudagraphs = device == "cuda" and optim_cls not in (Adagrad, SGD)
             if run_cudagraphs:
                 stack.enter_context(config.patch({"triton.cudagraphs": True}))
+
+            if isinstance(kwargs.get("lr", None), torch.Tensor):
+                kwargs["lr"] = kwargs["lr"].to(device)
 
             torch._dynamo.reset()
             torch._inductor.metrics.reset()
@@ -329,8 +335,7 @@ class CompiledOptimizerTests(TestCase):
 
     test_adam_recompile = make_recompile_test(Adam, lr=0.01)
     test_adamw_recompile = make_recompile_test(AdamW, lr=0.01)
-    # Need an impl which does not use python scalars
-    # test_adamax_recompile = make_recompile_test(Adamax, lr=0.01)
+    test_adamax_recompile = make_recompile_test(Adamax, lr=0.01)
     test_nadam_recompile = make_recompile_test(NAdam, lr=0.01)
     test_rprop_recompile = make_recompile_test(Rprop, kernel_count=1, lr=0.01)
     test_rmsprop_recompile = make_recompile_test(RMSprop, kernel_count=1, lr=0.01)
