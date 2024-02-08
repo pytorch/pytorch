@@ -1819,6 +1819,27 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
                 opt_fn = torch._dynamo.optimize(nopython=True)(fn)
                 self.assertEqual(opt_fn(), fn())
 
+    def test_rand_tensor_partial(self):
+        from functools import partial
+        from collections import namedtuple
+
+        SdpaShape = namedtuple('Sdpa_Shape', ['batch', 'num_heads', 'seq_len', 'head_dim'])
+
+        @torch.compile(backend="eager")
+        def func():
+            make_tensor = partial(
+                torch.rand, device="cpu", dtype=torch.float16, requires_grad=True
+            )
+
+            bsz, num_heads, seq_len_q, seq_len_kv, head_dim = (16, 16, 128, 128, 16)
+            make_q_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_q, head_dim))
+            make_kv_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_kv, head_dim))
+            t1 = make_q_tensor()
+            t2 = make_kv_tensor()
+            t3 = t1+t2
+
+        func()
+
     def test_elipsis(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(a, ind, val):
