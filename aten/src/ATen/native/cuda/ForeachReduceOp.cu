@@ -112,7 +112,7 @@ template <
     typename opmath_t = at::opmath_type<T>>
 __global__ void lpnorm_cleanup(
     const opmath_t* output_per_tensor,
-    TensorListMetadata<1> vec_res_meta,
+    const void** dev_vec_res_addresses,
     int max_chunks_per_tensor) {
   __shared__ opmath_t vals[512];
 
@@ -130,7 +130,7 @@ __global__ void lpnorm_cleanup(
       ? at::native::cuda_utils::BlockReduceSum<opmath_t>(val, vals)
       : at::native::cuda_utils::BlockReduceMax(val, vals);
   if (threadIdx.x == 0) {
-    *(T*)vec_res_meta.addresses[0][blockIdx.x] =
+    *(T*)dev_vec_res_addresses[blockIdx.x] =
         norm_type == NormType::L1 || norm_type == NormType::LInf
         ? final_val
         : ::sqrt(final_val);
@@ -205,14 +205,35 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
           const at::cuda::OptionalCUDAGuard device_guard(
               device_of(output_per_tensor));
           auto stream = at::cuda::getCurrentCUDAStream();
-          TensorListMetadata<1> vecResMeta;
+
+          std::vector<const void*> vec_res_addresses;
+          vec_res_addresses.reserve(ntensors);
           for (int i = 0; i < ntensors; i++) {
-            vecResMeta.addresses[0][i] =
-                vec_res[i].mutable_data_ptr<scalar_t>();
+            vec_res_addresses.push_back(
+                vec_res[i].mutable_data_ptr<scalar_t>());
           }
+
+          const long vec_bytes = sizeof(const void*) * ntensors;
+          // const long vec_bytes_aligned = (vec_bytes + 16 - 1) / 16 * 16;
+          at::Tensor packed = at::empty(
+              {vec_bytes},
+              at::TensorOptions().dtype(at::kByte).pinned_memory(true));
+          memcpy(
+              packed.data_ptr<uint8_t>(), vec_res_addresses.data(), vec_bytes);
+          packed = packed.to(tensors[0].device(), /*non_blocking=*/true);
+
+          const void** dev_vec_res_addresses =
+              (const void**)(static_cast<const void*>(
+                  packed.const_data_ptr<uint8_t>()));
+
+          // TensorListMetadata<1> vecResMeta;
+          // for (int i = 0; i < ntensors; i++) {
+          //   vecResMeta.addresses[0][i] =
+          //       vec_res[i].mutable_data_ptr<scalar_t>();
+          // }
           lpnorm_cleanup<scalar_t, NormType::L1><<<ntensors, 512, 0, stream>>>(
               output_per_tensor.const_data_ptr<opmath_t>(),
-              vecResMeta,
+              dev_vec_res_addresses,
               max_chunks_per_tensor);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
@@ -233,14 +254,35 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
           const at::cuda::OptionalCUDAGuard device_guard(
               device_of(output_per_tensor));
           auto stream = at::cuda::getCurrentCUDAStream();
-          TensorListMetadata<1> vecResMeta;
+
+          std::vector<const void*> vec_res_addresses;
+          vec_res_addresses.reserve(ntensors);
           for (int i = 0; i < ntensors; i++) {
-            vecResMeta.addresses[0][i] =
-                vec_res[i].mutable_data_ptr<scalar_t>();
+            vec_res_addresses.push_back(
+                vec_res[i].mutable_data_ptr<scalar_t>());
           }
+
+          const long vec_bytes = sizeof(const void*) * ntensors;
+          // const long vec_bytes_aligned = (vec_bytes + 16 - 1) / 16 * 16;
+          at::Tensor packed = at::empty(
+              {vec_bytes},
+              at::TensorOptions().dtype(at::kByte).pinned_memory(true));
+          memcpy(
+              packed.data_ptr<uint8_t>(), vec_res_addresses.data(), vec_bytes);
+          packed = packed.to(tensors[0].device(), /*non_blocking=*/true);
+
+          const void** dev_vec_res_addresses =
+              (const void**)(static_cast<const void*>(
+                  packed.const_data_ptr<uint8_t>()));
+
+          // TensorListMetadata<1> vecResMeta;
+          // for (int i = 0; i < ntensors; i++) {
+          //   vecResMeta.addresses[0][i] =
+          //       vec_res[i].mutable_data_ptr<scalar_t>();
+          // }
           lpnorm_cleanup<scalar_t, NormType::L2><<<ntensors, 512, 0, stream>>>(
               output_per_tensor.const_data_ptr<opmath_t>(),
-              vecResMeta,
+              dev_vec_res_addresses,
               max_chunks_per_tensor);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
@@ -261,15 +303,36 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
           const at::cuda::OptionalCUDAGuard device_guard(
               device_of(output_per_tensor));
           auto stream = at::cuda::getCurrentCUDAStream();
-          TensorListMetadata<1> vecResMeta;
+
+          std::vector<const void*> vec_res_addresses;
+          vec_res_addresses.reserve(ntensors);
           for (int i = 0; i < ntensors; i++) {
-            vecResMeta.addresses[0][i] =
-                vec_res[i].mutable_data_ptr<scalar_t>();
+            vec_res_addresses.push_back(
+                vec_res[i].mutable_data_ptr<scalar_t>());
           }
+
+          const long vec_bytes = sizeof(const void*) * ntensors;
+          // const long vec_bytes_aligned = (vec_bytes + 16 - 1) / 16 * 16;
+          at::Tensor packed = at::empty(
+              {vec_bytes},
+              at::TensorOptions().dtype(at::kByte).pinned_memory(true));
+          memcpy(
+              packed.data_ptr<uint8_t>(), vec_res_addresses.data(), vec_bytes);
+          packed = packed.to(tensors[0].device(), /*non_blocking=*/true);
+
+          const void** dev_vec_res_addresses =
+              (const void**)(static_cast<const void*>(
+                  packed.const_data_ptr<uint8_t>()));
+
+          // TensorListMetadata<1> vecResMeta;
+          // for (int i = 0; i < ntensors; i++) {
+          //   vecResMeta.addresses[0][i] =
+          //       vec_res[i].mutable_data_ptr<scalar_t>();
+          // }
           lpnorm_cleanup<scalar_t, NormType::LInf>
               <<<ntensors, 512, 0, stream>>>(
                   output_per_tensor.const_data_ptr<opmath_t>(),
-                  vecResMeta,
+                  dev_vec_res_addresses,
                   max_chunks_per_tensor);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
