@@ -46,6 +46,8 @@ struct MPSScalar {
     at::Half h;
     int64_t i;
     bool b;
+    c10::complex<float> cf;
+    c10::complex<at::Half> ch;
   } value {};
 };
 
@@ -373,5 +375,9 @@ inline NSDictionary* dictionaryFromPlaceholders(Placeholder& p1, Placeholder& p2
 
 inline void runMPSGraph(MPSStream* stream, MPSGraph* graph, NSDictionary* feeds, Placeholder& result) {
         runMPSGraph(stream, graph, feeds, dictionaryFromPlaceholders(result));
+}
+
+inline bool supportsComplex() {
+  return is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS);
 }
 } // namespace at::native::mps
