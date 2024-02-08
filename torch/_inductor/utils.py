@@ -868,7 +868,7 @@ def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> 
 
 
 def _use_autotune_backend(backend: str) -> bool:
-    return backend.upper() in [  # noqa: C412
+    return backend.upper() in [
         x.strip() for x in config.max_autotune_gemm_backends.upper().split(",")
     ]
 
@@ -1258,3 +1258,15 @@ def pass_execution_and_save(func, gm, msg):
             t,
             time_elapsed,
         )
+
+
+def is_collective(node):
+    from . import ir
+
+    return isinstance(node, ir.CollectiveKernel) or type(node) == ir._CollectiveKernel
+
+
+def is_wait(node):
+    from . import ir
+
+    return isinstance(node, ir.Wait) or type(node) == ir._WaitKernel
