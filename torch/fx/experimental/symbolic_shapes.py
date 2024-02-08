@@ -3916,6 +3916,7 @@ class ShapeEnv:
 
         if not self._suppress_guards_tls():
             # canonicalise to remove equations that are trivially equal
+            orig_expr = expr
             expr = canonicalize_bool_expr(expr)
             stack = CapturedTraceback.extract(skip=1)
             ra = RuntimeAssert(expr, msg, stack)
@@ -3930,7 +3931,7 @@ class ShapeEnv:
             # in ranges.  For example, i0 <= s0 is un-rangeable, because
             # we can't put s0 in the range.  So this is not very high
             # priority at the moment.
-            self._log_guard("runtime_assert", expr)
+            self._log_guard("runtime_assert", orig_expr)
         else:
             self.log.debug("runtime_assert %s [guard suppressed]", expr)
 
