@@ -239,22 +239,17 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
    * elements are on different devices (across multiple GPUs, for example)
    * they may have different streams.
    */
-  c10::optional<c10::Stream> stream(const c10::DeviceType device_type) {
+  c10::optional<c10::Stream> stream() {
+    auto opt_device_type = at::getAccelerator();
+    if (!opt_device_type.has_value()) {
+      return c10::nullopt;
+    }
     for (const auto& metadata : input_metadata_) {
-      if (metadata.device().type() == device_type)
+      if (metadata.device().type() == opt_device_type.value())
         return metadata.stream();
     }
 
     return c10::nullopt;
-  }
-
-  c10::optional<c10::Stream> stream(
-      const c10::optional<c10::DeviceType> opt_device_type) {
-    if (opt_device_type.has_value()) {
-      return stream(opt_device_type.value());
-    } else {
-      return c10::nullopt;
-    }
   }
 
   void clear_input_metadata() {
