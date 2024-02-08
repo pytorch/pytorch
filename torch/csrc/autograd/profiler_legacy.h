@@ -262,7 +262,7 @@ struct TORCH_API LegacyEvent {
   std::vector<std::vector<int64_t>> shapes_;
   int64_t cpu_memory_usage_ = 0;
   int64_t cuda_memory_usage_ = 0;
-  int device_ = -1;
+  c10::DeviceIndex device_ = -1;
   torch::profiler::impl::ProfilerVoidEventStub cuda_event = nullptr;
   int node_id_ = 0;
   bool is_remote_ = false;

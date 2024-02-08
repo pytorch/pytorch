@@ -84,7 +84,7 @@ std::tuple<Tensor, Tensor, Tensor> compute_unique(
     const dim3 block =
         dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), num_inp));
     dim3 grid;
-    int curDevice = -1;
+    c10::DeviceIndex curDevice = -1;
     c10::cuda::GetDevice(&curDevice);
     cuda::getApplyGrid(num_inp, grid, curDevice);
     adjacent_difference_kernel<<<grid, block, 0, stream>>>(
