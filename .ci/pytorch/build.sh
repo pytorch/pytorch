@@ -82,12 +82,6 @@ if ! which conda; then
   fi
 else
   export CMAKE_PREFIX_PATH=/opt/conda
-
-  # Set Additional library and include path for py3.12
-  if [ "$ANACONDA_PYTHON_VERSION" = "3.12" ]; then
-    export CMAKE_LIBRARY_PATH="/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib/"
-    export CMAKE_INCLUDE_PATH="/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/include/"
-  fi
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
