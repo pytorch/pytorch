@@ -568,15 +568,7 @@ dynamo_expected_failures = {
     "PackedSequenceTest.test_type_casts",  # nn/test_packed_sequence
     "PackedSequenceTest.test_pack_sequence",  # nn/test_packed_sequence
     "PackedSequenceTest.test_total_length",  # nn/test_packed_sequence
-    "TestModuleHooks.test_forward_pre_hooks_named_tuple_True",  # nn/test_module_hooks
-    "TestModuleHooks.test_full_backward_pre_hooks_named_tuple_True",  # nn/test_module_hooks
-    "TestModuleHooks.test_forward_hooks_named_tuple_False",  # nn/test_module_hooks
-    "TestModuleHooks.test_full_backward_hooks_named_tuple_False",  # nn/test_module_hooks
-    "TestModuleHooks.test_forward_hooks_named_tuple_True",  # nn/test_module_hooks
     "TestModuleHookNN.test_hook_inplace",  # nn/test_module_hooks
-    "TestModuleHooks.test_full_backward_hooks_named_tuple_True",  # nn/test_module_hooks
-    "TestModuleHooks.test_forward_pre_hooks_named_tuple_False",  # nn/test_module_hooks
-    "TestModuleHooks.test_full_backward_pre_hooks_named_tuple_False",  # nn/test_module_hooks
     "TestLazyModules.test_lazy_batchnorm2d_state",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv3d",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv_transposed1d",  # nn/test_lazy_modules
@@ -2135,10 +2127,6 @@ dynamo_expected_failures = {
     "LoggingTests.test_dynamo_info",  # dynamo/test_logging
     "LoggingTests.test_graph_breaks",  # dynamo/test_logging
     "LoggingTests.test_aot",  # dynamo/test_logging
-    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape2_cpu",  # test_transformers.py
-    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape3_cpu",  # test_transformers.py
-    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape1_cpu",  # test_transformers.py
-    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape0_cpu",  # test_transformers.py
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_float32",  # test_linalg.py
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_int64",  # test_linalg.py
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_complex64",  # test_linalg.py
