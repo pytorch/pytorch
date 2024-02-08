@@ -72,37 +72,7 @@ c10::SymNode SingletonSymNodeImpl::mul(const c10::SymNode& other) {
   }
   c10::optional<int64_t> c = other->constant_int();
   TORCH_CHECK(c.has_value());
-  return SymNode(c10::make_intrusive<SingletonSymNodeImpl>(val_, coeff_ * *c, data_, sum_offsets_));
-}
-
-namespace {
-at::Tensor dummy_tensor = at::Tensor();
-} // namespace
-
-void set_global_singleton_dummy(const at::Tensor& t) {
-  dummy_tensor = t;
-}
-
-std::optional<at::Tensor> try_call_with_dummy(const std::function<at::Tensor(at::Tensor)>& fn, c10::SymIntArrayRef size) {
-  // See Note [ NestedTensor factory functions ]
-  bool has_singleton = false;
-  for (const auto& s : size) {
-    if (!s.is_heap_allocated()) {
-      continue;
-    }
-    bool _has_singleton = s.toSymNode()->is_singleton();
-    if (_has_singleton) {
-      TORCH_CHECK(!has_singleton, "Only one singleton dimension supported");
-      has_singleton = _has_singleton;
-    }
-  }
-  if (has_singleton) {
-    // Grab the global dummy (in the future we will need to decide which dummy
-    // to use based on information on the singleton.
-    TORCH_CHECK(dummy_tensor.defined(), "Global dummy tensor not defined");
-    return fn(dummy_tensor);
-  }
-  return std::nullopt;  // Return std::nullopt if no singleton dimension is found
+  return SymNode(c10::make_intrusive<SingletonSymNodeImpl>(val_, coeff_ * *c));
 }
 
 } // namespace c10

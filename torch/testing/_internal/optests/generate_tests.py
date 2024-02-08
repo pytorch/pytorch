@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import datetime
 import difflib
 import functools
@@ -711,8 +713,7 @@ def generate_repro(
         unix_timestamp = datetime.datetime.timestamp(now) * 100000
         filepath = os.path.join(path, f"repro_{unix_timestamp}.pt")
         if not dry_run:
-            if not os.path.exists(path):
-                os.makedirs(path)
+            os.makedirs(path, exist_ok=True)
             torch.save((args, kwargs), filepath)
         args_kwargs = f'args, kwargs = torch.load("{filepath}")'
     else:

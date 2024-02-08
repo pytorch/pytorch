@@ -22,9 +22,7 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
-namespace at {
-
-namespace meta {
+namespace at::meta {
 
 TORCH_META_FUNC(reflection_pad1d)(const Tensor& input, IntArrayRef padding) {
   int64_t dim_plane = 0;
@@ -205,9 +203,9 @@ TORCH_META_FUNC(reflection_pad3d_backward)(
 
   set_output_raw_strided(0, input.sizes(), {}, input.options());
 }
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -408,5 +406,4 @@ DEFINE_DISPATCH(reflection_pad2d_backward_kernel);
 DEFINE_DISPATCH(reflection_pad3d_kernel);
 DEFINE_DISPATCH(reflection_pad3d_backward_kernel);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

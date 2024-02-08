@@ -11,8 +11,7 @@
 #include <ATen/ops/adaptive_max_pool2d_native.h>
 #endif
 
-namespace at {
-namespace meta {
+namespace at::meta {
 TORCH_META_FUNC(adaptive_max_pool2d) (const Tensor& input, IntArrayRef output_size) {
   int ndim = input.ndimension();
   TORCH_CHECK(ndim == 3 || ndim == 4,
@@ -67,9 +66,9 @@ TORCH_META_FUNC(adaptive_max_pool2d_backward)
 
   set_output_raw_strided(0, input.sizes(), {}, input.options().memory_format(input.suggest_memory_format()));
 }
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 TORCH_IMPL_FUNC(adaptive_max_pool2d_out_cpu)
 (const Tensor& input, IntArrayRef output_size, const Tensor& output, const Tensor& indices) {
@@ -85,5 +84,4 @@ TORCH_IMPL_FUNC(adaptive_max_pool2d_backward_out_cpu)
 DEFINE_DISPATCH(adaptive_max_pool2d_kernel);
 DEFINE_DISPATCH(adaptive_max_pool2d_backward_kernel);
 
-} // at::native
-} // at
+} // namespace at::native

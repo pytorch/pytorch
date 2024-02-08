@@ -2577,7 +2577,7 @@ class TestBincount(TestCase):
             lambda: np.bincount(x, minlength=-1),
         )
 
-    @skipIfTorchDynamo  # flaky test
+    @skipIfTorchDynamo()  # flaky test
     @skipif(not HAS_REFCOUNT, reason="Python lacks refcounts")
     def test_dtype_reference_leaks(self):
         # gh-6805
