@@ -94,7 +94,7 @@ def create_cherry_pick_branch(
     github_actor = re.sub("[^0-9a-zA-Z]+", "_", github_actor)
 
     cherry_pick_branch = f"cherry-pick-{pr.pr_num}-by-{github_actor}"
-    repo.checkout(branch=cherry_pick_branch, new_branch=True)
+    repo.create_branch_and_checkout(branch=cherry_pick_branch)
 
     # We might want to support ghstack later
     repo._run_git("cherry-pick", "-x", "-X", "theirs", commit_sha)

@@ -162,11 +162,11 @@ class GitRepo:
             # we are in detached HEAD state
             return None
 
-    def checkout(self, branch: str, new_branch: bool = False) -> None:
-        if new_branch:
-            self._run_git("checkout", "-b", branch)
-        else:
-            self._run_git("checkout", branch)
+    def checkout(self, branch: str) -> None:
+        self._run_git("checkout", branch)
+
+    def create_branch_and_checkout(self, branch: str) -> None:
+        self._run_git("checkout", "-b", branch)
 
     def fetch(self, ref: Optional[str] = None, branch: Optional[str] = None) -> None:
         if branch is None and ref is None:
