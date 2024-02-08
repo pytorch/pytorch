@@ -53,10 +53,6 @@ typedef MPSGraphTensor* (^BinaryOpBlock)(BinaryOpCachedGraph*, MPSGraphTensor*, 
 #define BinaryOpFn(graph, primary, secondary) \
   MPSGraphTensor*(mps::BinaryOpCachedGraph * graph, MPSGraphTensor * primary, MPSGraphTensor * secondary)
 
-static inline bool supportsComplex() {
-  return is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS);
-}
-
 static inline Tensor legacy_complex_as_view(const Tensor& t) {
   // Convert non-complex types (and cdouble CPU scalars) to cfloat
   if (!isComplexType(t.scalar_type()) || t.scalar_type() == kComplexDouble) {
