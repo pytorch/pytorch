@@ -12,27 +12,26 @@ jobs:
     env:
         GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
-      # Use UPDATEBOT_TOKEN as this will be used to submit PR similar to the daily
-      # commit hash update
       - name: Checkout repo
         id: checkout
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
-          token: ${{ secrets.UPDATEBOT_TOKEN }}
+          token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
 
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
+          cache: pip
 
       # Not the direct dependencies but the script uses trymerge
       - run: pip install pyyaml==6.0 rockset==1.0.3
 
       - name: Setup committer id
         run: |
-          git config --global user.name "PyTorch UpdateBot"
-          git config --global user.email "pytorchupdatebot@users.noreply.github.com"
+          git config --global user.name "PyTorch Bot"
+          git config --global user.email "pytorchbot@users.noreply.github.com"
 
       - name: Cherry pick the PR
         shell: bash
@@ -43,7 +42,7 @@ jobs:
           FIXES: ${{ github.event.client_payload.fixes || '' }}
           REQUIRES_ISSUE: ${{ github.event.client_payload.requiresIssue || 'false' }}
           ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.UPDATEBOT_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
         run: |
           set -ex
 
