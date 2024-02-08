@@ -880,16 +880,7 @@ class GraphModuleSerializer:
             return None
 
         # Check single value return
-        if _is_single_tensor_return(node.target):
-            # e.g "-> Tensor"
-            return [Argument.create(as_tensor=self.serialize_tensor_output(node.name, meta_val))]
-        elif len(returns) == 1 and isinstance(meta_val, torch.SymInt):
-            # e.g "-> SymInt"
-            return [Argument.create(as_sym_int=self.serialize_sym_int_output(node.name, meta_val))]
-        elif len(returns) == 1 and isinstance(meta_val, torch.SymBool):
-            # e.g "-> SymBool"
-            return [Argument.create(as_sym_bool=self.serialize_sym_bool_output(node.name, meta_val))]
-        elif _is_single_tensor_list_return(node.target):
+        if _is_single_tensor_list_return(node.target):
             # e.g "-> Tensor[]"
             tensor_args = []
             for idx, meta in enumerate(meta_val):
@@ -901,6 +892,8 @@ class GraphModuleSerializer:
                 )
                 tensor_args.append(self.serialize_tensor_output(name, meta))
             return [Argument.create(as_tensors=tensor_args)]
+        elif len(returns) == 1:
+            return [self.serialize_output(node.name, meta_val)]
 
         # There are a two possibilities at this point:
         # - This operator returns a tuple of Tensors, e.g. "-> (Tensor, Tensor)"
@@ -956,51 +949,59 @@ class GraphModuleSerializer:
         """
         meta_val = node.meta["val"]
 
+        if isinstance(meta_val, tuple):
+            # Note: Since we don't have a schema, we just serialize all tuple
+            # outputs to be a list of values. Even if the output is supposed to
+            # be a tensor list (Tensor[]), we will serialize it to be a list of
+            # tensors (Tensor, Tensor, Tensor). An exception is that if there's
+            # a singleton tensor, we will serialize this to be a singleton
+            # tensor list so that the deserializer knows to insert getitem nodes.
+
+            idx_to_name = {}
+            for user in node.users:
+                if user.target is not operator.getitem:
+                    continue
+                idx_to_name[user.args[1]] = user.name
+
+            for idx in range(len(meta_val)):
+                # FX does not emit a getitem node for any outputs that are unused.
+                # However, we need a name for them so that the number of outputs will
+                # correctly match the schema. Just assign a dummy name.
+                if idx not in idx_to_name:
+                    idx_to_name[idx] = f"{node.name}_unused_{idx}"
+
+            if len(meta_val) == 1:
+                tensors = []
+                for i, v in enumerate(meta_val):
+                    assert isinstance(v, torch.Tensor)
+                    tensors.append(self.serialize_tensor_output(idx_to_name[i], v))
+                return [Argument.create(as_tensors=tensors)]
+
+            else:
+                return [
+                    self.serialize_output(idx_to_name[i], element_meta_val)
+                    for i, element_meta_val in enumerate(meta_val)
+                ]
+
+        else:
+            return [self.serialize_output(node.name, meta_val)]
+
+    def serialize_output(self, name: str, meta_val: Any) -> Argument:
         # Check single value return
+        if meta_val is None:
+            return Argument.create(as_none=())
         if isinstance(meta_val, torch.Tensor):
             # e.g "-> Tensor"
-            return [Argument.create(as_tensor=self.serialize_tensor_output(node.name, meta_val))]
+            return Argument.create(as_tensor=self.serialize_tensor_output(name, meta_val))
         elif isinstance(meta_val, torch.SymInt):
             # e.g "-> SymInt"
-            return [Argument.create(as_sym_int=self.serialize_sym_int_output(node.name, meta_val))]
+            return Argument.create(as_sym_int=self.serialize_sym_int_output(name, meta_val))
         elif isinstance(meta_val, torch.SymBool):
             # e.g "-> SymBool"
-            return [Argument.create(as_sym_bool=self.serialize_sym_bool_output(node.name, meta_val))]
+            return Argument.create(as_sym_bool=self.serialize_sym_bool_output(name, meta_val))
 
-        # There are a two possibilities at this point:
-        # - This operator returns a list of Tensors.
-        # - This operator returns multiple Tensors.
-        #
-        # Either way, start by gathering a list of TensorArguments with the correct names.
-        # For consistent naming with FX, consult the downstream `getitem` node and
-        # make sure our outputs have the same name.
-        idx_to_name = {}
-        for user in node.users:
-            if user.target is not operator.getitem:
-                continue
-            idx_to_name[user.args[1]] = user.name
-
-        for idx, _ in enumerate(meta_val):
-            # FX does not emit a getitem node for any outputs that are unused.
-            # However, we need a name for them so that the number of outputs will
-            # correctly match the schema. Just assign a dummy name.
-            if idx not in idx_to_name:
-                idx_to_name[idx] = f"{node.name}_unused_{idx}"
-
-        arg_list = []
-        for i, element_meta_val in enumerate(meta_val):
-            assert isinstance(element_meta_val, torch.Tensor), "Non-tensor outputs NYI"
-            arg_list.append(
-                self.serialize_tensor_output(idx_to_name[i], element_meta_val)
-            )
-
-        if len(meta_val) == 1:
-            # The operator returns a list of tensors
-            return [Argument.create(as_tensors=arg_list)]
-        else:
-            # The operator returns multiple tensors
-            return [Argument.create(as_tensor=arg) for arg in arg_list]
-
+        # list outputs should've been handled earlier
+        raise SerializeError(f"Unable to serialize HOO output {meta_val}")
 
     def _handle_getitem_users(self, node: torch.fx.Node) -> List[TensorArgument]:
         meta_val = node.meta["val"]

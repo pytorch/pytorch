@@ -226,7 +226,6 @@ class TestSerialize(TestCase):
 class TestDeserialize(TestCase):
     def check_graph(self, fn, inputs, dynamic_shapes=None, _check_meta=True) -> None:
         """Export a graph, serialize it, deserialize it, and compare the results."""
-        # TODO(angelayi): test better with some sort of wrapper
         ep = torch.export.export(fn, copy.deepcopy(inputs), {}, dynamic_shapes=dynamic_shapes)
         ep.graph.eliminate_dead_code()
 
@@ -281,8 +280,9 @@ class TestDeserialize(TestCase):
                         # Or both are fake tensors lists with one element and with the
                         # same shape/dtype
                         for v1, v2 in zip(pytree.tree_leaves(val1), pytree.tree_leaves(val2)):
-                            self.assertEqual(v1.shape, v2.shape)
-                            self.assertEqual(v1.dtype, v2.dtype)
+                            if isinstance(v1, FakeTensor):
+                                self.assertEqual(v1.shape, v2.shape)
+                                self.assertEqual(v1.dtype, v2.dtype)
                     else:
                         # For expressions like 's0 < 10' can only compare through string
                         self.assertEqual(str(val1), str(val2))
@@ -339,6 +339,12 @@ class TestDeserialize(TestCase):
                 tags=torch.Tag.pt2_compliant_tag,
                 lib=lib,
             )
+            torch.library.define(
+                "mylib::foo3",
+                "(Tensor(a!) x, Tensor[] y, Tensor(b!) z, SymInt w, Tensor n) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
 
             @torch.library.impl("mylib::foo1", "cpu", lib=lib)
             @torch.library.impl_abstract("mylib::foo1")
@@ -354,9 +360,17 @@ class TestDeserialize(TestCase):
                 z.add_(y[1] + n)
                 return (n + n, n * n)
 
+            @torch.library.impl("mylib::foo3", "cpu", lib=lib)
+            @torch.library.impl_abstract("mylib::foo3")
+            def foo3_impl(x, y, z, w, n):
+                x.add_(y[0] + w)
+                z.add_(y[1] + n)
+                return
+
             class M(torch.nn.Module):
                 def forward(self, x, y, z, n):
                     n = torch.ops.mylib.foo1(x, y, z, 2, n)
+                    torch.ops.mylib.foo3(x, y, z, 2, n)
                     return torch.ops.mylib.foo2(x, y, z, 2, n)
 
             x = torch.randn(3)
