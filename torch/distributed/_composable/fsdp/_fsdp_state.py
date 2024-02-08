@@ -196,14 +196,12 @@ class FSDPState(_State):
         flat_outputs, _ = tree_flatten(output)
         tensors = tuple(t for t in flat_outputs if t.requires_grad)
         if tensors:
-            forward_grad_fns = tuple(
-                t.grad_fn for t in tensors if t.grad_fn is not None
-            )
-            pre_backward = functools.partial(self._pre_backward, forward_grad_fns)
+            grad_fns = tuple(t.grad_fn for t in tensors if t.grad_fn is not None)
+            pre_backward = functools.partial(self._pre_backward, grad_fns)
             handle = register_multi_grad_hook(tensors, pre_backward, mode="any")
             self._pre_backward_hook_handles.append(handle)
             if self._fsdp_param_group:
-                self._fsdp_param_group.all_forward_grad_fns.add(forward_grad_fns)
+                self._fsdp_param_group.all_forward_output_grad_fns.add(grad_fns)
         return output
 
     def _register_root_post_backward_final_callback(self):
