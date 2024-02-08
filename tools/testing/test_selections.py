@@ -216,7 +216,9 @@ def calculate_shards(
     print(
         f"Serial time: {round(serial_time, 2)}, Parallel time: {round(parallel_time, 2)}"
     )
-    estimated_time_limit = total_time % estimated_time_per_shard
+    estimated_time_limit = 0.0
+    if estimated_time_per_shard != 0:
+        estimated_time_limit = total_time % estimated_time_per_shard
     if estimated_time_limit <= 0.01:
         estimated_time_limit = estimated_time_per_shard
     if total_time == 0:

@@ -322,6 +322,9 @@ class TestCalculateShards(unittest.TestCase):
             ),
         )
 
+    def test_zero_tests(self) -> None:
+        self.assertListEqual([(0.0, []), (0.0, [])], calculate_shards(2, [], {}, None))
+
     def test_split_shards_random(self) -> None:
         random.seed(120)
         for _ in range(100):
