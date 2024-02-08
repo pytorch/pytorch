@@ -189,7 +189,9 @@ struct CppNode : public Node {
 };
 
 struct ExtractVariables : IterArgs<ExtractVariables> {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   std::vector<bool>& is_var_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   variable_list& list_;
   ExtractVariables(std::vector<bool>& is_var, variable_list& list)
       : is_var_(is_var), list_(list) {}
@@ -347,17 +349,17 @@ auto Function<T>::apply(Args&&... args)
 // The logic here is the same as PyNode::apply, so changes to it should be done
 // in both the places
 template <class T>
+// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
 variable_list CppNode<T>::apply(variable_list&& inputs) {
   at::OptionalDeviceGuard _device_guard;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int num_inputs = inputs.size();
+  auto num_inputs = inputs.size();
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   variable_list backward_inputs;
   backward_inputs.reserve(num_inputs);
   for (const auto i : c10::irange(num_inputs)) {
     if (inputs[i].defined() || !ctx_.materialize_grads_) {
-      backward_inputs.emplace_back(inputs[i]);
+      backward_inputs.emplace_back(std::move(inputs[i]));
     } else {
       backward_inputs.emplace_back(output_info_[i].zeros(_device_guard));
     }

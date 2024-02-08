@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import inspect
 from typing import Dict, List
 
@@ -103,6 +105,11 @@ class PlacementVariable(DistributedVariable):
     def as_python_constant(self):
         return self.value
 
+    def var_getattr(self, tx, name: str) -> VariableTracker:
+        if name == "dim":
+            return ConstantVariable.create(self.value.dim)
+        return super().var_getattr(tx, name)
+
     def call_method(
         self,
         tx,
@@ -112,10 +119,20 @@ class PlacementVariable(DistributedVariable):
     ) -> "VariableTracker":
         from . import ConstantVariable
 
-        allowed_methods = ["__init__", "__setattr__"]
-        # placement types dynamo tracking allows only __init__
-        # and __setattr__ methods, the latter is for case like `Shard(dim)`
-        if name in allowed_methods:
+        # Placement types dynamo tracking only allows following methods
+        # and __setattr__  is for case like `Shard(dim)` and methods.
+        # Methods in the list must satisfy:
+        #    1. Input arguments are constants and do not need to be guarded on;
+        #    2. Output is constant with respect to their inputs
+        constant_fold_functions = [
+            "__init__",
+            "__setattr__",
+            "is_shard",
+            "is_partial",
+            "is_replicate",
+        ]
+
+        if name in constant_fold_functions:
             try:
                 value_type = type(self.value)
                 assert (
@@ -153,6 +170,24 @@ class DeviceMeshVariable(DistributedVariable):
         if name == "ndim":
             return ConstantVariable.create(self.value.ndim)
         return super().var_getattr(tx, name)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "size":
+            const_args = [x.as_python_constant() for x in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            return ConstantVariable.create(self.value.size(*const_args, **const_kwargs))
+        if name == "get_coordinate":
+            return ConstantVariable.create(self.value.get_coordinate())
+        if name == "get_group":
+            return ConstantVariable.create(self.value.get_group())
+
+        return super().call_method(tx, name, args, kwargs)
 
 
 class ProcessGroupVariable(DistributedVariable):

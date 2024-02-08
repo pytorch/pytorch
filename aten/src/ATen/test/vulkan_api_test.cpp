@@ -1394,20 +1394,15 @@ TEST_F(VulkanAPITest, conv1d_simple) {
   const auto weights_vk = weights_cpu.vulkan();
   const auto bias_vk = bias_cpu.vulkan();
 
-  std::array<int64_t, 1> stride{1};
-  std::array<int64_t, 1> padding{0};
-  std::array<int64_t, 1> dilation{1};
+  int64_t stride = 1;
+  int64_t padding = 0;
+  int64_t dilation = 1;
 
   const auto output_cpu = at::conv1d(
-      input_cpu, weights_cpu, bias_cpu,
-      stride, padding, dilation, channels);
+      input_cpu, weights_cpu, bias_cpu, stride, padding, dilation, channels);
 
   const auto output_vk = at::conv1d(
-      input_vk, weights_vk, bias_vk,
-      stride,
-      padding,
-      dilation,
-      channels);
+      input_vk, weights_vk, bias_vk, stride, padding, dilation, channels);
   const auto output_vk_cpu = output_vk.cpu();
 
   const bool check = almostEqual(output_cpu, output_vk_cpu);
@@ -1418,32 +1413,34 @@ TEST_F(VulkanAPITest, conv1d_simple) {
   ASSERT_TRUE(check);
 }
 
-void test_conv1d(int64_t kernel_size, int64_t channels, int64_t lengths) {
+void test_conv1d(
+    int64_t kernel_size,
+    int64_t groups,
+    int64_t lengths,
+    int64_t stride = 1,
+    int64_t padding = 0,
+    int64_t dilation = 1,
+    int64_t in_group_size = 1,
+    int64_t out_group_size = 1,
+    int64_t batch_size = 1) {
   c10::InferenceMode mode;
 
-  const auto input_cpu = at::rand({1, channels, lengths}, at::kFloat);
-  const auto weights_cpu = at::rand({channels, 1, kernel_size}, at::kFloat);
-  const auto bias_cpu = at::rand({channels,}, at::kFloat);
+  int64_t in_channels = in_group_size * groups;
+  int64_t out_channels = out_group_size * groups;
+
+  const auto input_cpu = at::rand({batch_size, in_channels, lengths}, at::kFloat);
+  const auto weights_cpu = at::rand({out_channels, in_group_size, kernel_size}, at::kFloat);
+  const auto bias_cpu = at::rand({out_channels,}, at::kFloat);
 
   const auto input_vk = input_cpu.vulkan();
   const auto weights_vk = weights_cpu.vulkan();
   const auto bias_vk = bias_cpu.vulkan();
 
-  std::array<int64_t, 1> stride{1};
-  std::array<int64_t, 1> padding{0};
-  std::array<int64_t, 1> dilation{1};
-  int64_t groups = channels;
-
   const auto output_cpu = at::conv1d(
-      input_cpu, weights_cpu, bias_cpu,
-      stride, padding, dilation, groups);
+      input_cpu, weights_cpu, bias_cpu, stride, padding, dilation, groups);
 
   const auto output_vk = at::conv1d(
-      input_vk, weights_vk, bias_vk,
-      stride,
-      padding,
-      dilation,
-      channels);
+      input_vk, weights_vk, bias_vk, stride, padding, dilation, groups);
   const auto output_vk_cpu = output_vk.cpu();
 
   const bool check = almostEqual(output_cpu, output_vk_cpu);
@@ -1460,6 +1457,16 @@ TEST_F(VulkanAPITest, conv1d) {
   test_conv1d(1, 12, 3);
   test_conv1d(1, 12, 1);
   test_conv1d(10, 12, 20);
+  test_conv1d(3, 5, 9, 2, 0, 1);
+  test_conv1d(3, 5, 9, 2, 1, 1);
+  test_conv1d(3, 5, 9, 2, 1, 2);
+  test_conv1d(3, 5, 9, 1, 4, 2);
+  test_conv1d(6, 22, 30, 5, 5, 3);
+  test_conv1d(6, 5, 30, 5, 5, 3, 3, 5);
+  test_conv1d(6, 5, 30, 5, 5, 3, 4, 2);
+  test_conv1d(6, 5, 30, 5, 5, 3, 4, 2, 2);
+  test_conv1d(6, 5, 30, 5, 5, 3, 4, 2, 5);
+  test_conv1d(6, 5, 30, 5, 5, 3, 4, 2, 9);
 }
 
 
@@ -2170,31 +2177,39 @@ TEST_F(VulkanAPITest, copy) {
   ASSERT_TRUE(check);
 }
 
-TEST_F(VulkanAPITest, cumsum) {
-  c10::InferenceMode mode;
+void test_cumsum(const at::IntArrayRef input_shape, const int64_t dim) {
+  const auto in_cpu = at::rand(input_shape, at::TensorOptions(at::kCPU).dtype(at::kFloat));
 
-  const auto in_cpu = at::rand({1, 17, 37, 49}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-  // 0 do nothing
-  // 1 frame
-  // not implemented
-
-  // 2 height
-  const auto out_cpu2 = at::cumsum(in_cpu, 2);
-  const auto out_vulkan2 = at::cumsum(in_cpu.vulkan(), 2);
-  const auto check2 = almostEqual(out_cpu2, out_vulkan2.cpu());
-  if (!check2) {
-    showRtol(out_cpu2, out_vulkan2.cpu());
+  const auto out_cpu = at::cumsum(in_cpu, dim);
+  const auto out_vulkan = at::cumsum(in_cpu.vulkan(), dim);
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
   }
-  ASSERT_TRUE(check2);
+  ASSERT_TRUE(check);
+}
 
-  // 3 width
-  const auto out_cpu3 = at::cumsum(in_cpu, 3);
-  const auto out_vulkan3 = at::cumsum(in_cpu.vulkan(), 3);
-  const auto check3 = almostEqual(out_cpu3, out_vulkan3.cpu());
-  if (!check3) {
-    showRtol(out_cpu3, out_vulkan3.cpu());
+TEST_F(VulkanAPITest, cumsum_1d) {
+  test_cumsum({37}, 0);
+  test_cumsum({37}, -1);
+}
+
+TEST_F(VulkanAPITest, cumsum_2d) {
+  for (int64_t i = -1; i <= 1; i++) {
+    test_cumsum({17, 37}, i);
   }
-  ASSERT_TRUE(check3);
+}
+
+TEST_F(VulkanAPITest, cumsum_3d) {
+  for (int64_t i = -2; i <= 2; i++) {
+    test_cumsum({17, 37, 49}, i);
+  }
+}
+
+TEST_F(VulkanAPITest, cumsum_4d) {
+  for (int64_t i = -3; i <= 3; i++) {
+    test_cumsum({12, 17, 37, 49}, i);
+  }
 }
 
 void test_div(const at::IntArrayRef input_shape, const at::IntArrayRef other_shape) {
@@ -5425,6 +5440,11 @@ void test_unsqueeze(const at::IntArrayRef input_shape, int64_t dim) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, unsqueeze_0dto1d_dim0) {
+  test_unsqueeze({}, 0);
+  test_unsqueeze({}, -1);
+}
+
 TEST_F(VulkanAPITest, unsqueeze_1dto2d_dim0) {
   test_unsqueeze({5}, 0);
   test_unsqueeze({6}, -2);
@@ -6927,6 +6947,12 @@ void test_stack(const at::IntArrayRef input_shape, int64_t dim, int numTensors) 
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, stack_0d) {
+  test_stack({}, 0, 1);
+  test_stack({}, 0, 2);
+  test_stack({}, 0, 3);
+}
+
 TEST_F(VulkanAPITest, stack_1d) {
   test_stack({221}, 0, 2);
   test_stack({193}, 1, 3);
@@ -7814,6 +7840,14 @@ void test_linear(
   }
 
   ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, linear_1d_small) {
+  test_linear({3}, {4, 3}, {4});
+}
+
+TEST_F(VulkanAPITest, linear_1d_large) {
+  test_linear({37}, {23, 37}, {23});
 }
 
 TEST_F(VulkanAPITest, linear_2d_flat) {

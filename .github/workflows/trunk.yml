@@ -95,7 +95,7 @@ jobs:
     with:
       sync-tag: macos-12-py3-arm64-build
       build-environment: macos-12-py3-arm64
-      runner-type: macos-m1-12
+      runner-type: macos-m1-stable
       build-generates-artifacts: true
       # To match the one pre-installed in the m1 runners
       python-version: 3.9.12

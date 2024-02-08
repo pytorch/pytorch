@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import collections
 from enum import Enum
 from typing import Any, Callable, Dict, List
@@ -257,6 +259,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def as_python_constant(self):
         """For constants"""
         raise NotImplementedError(f"{self} is not a constant")
+
+    def guard_as_python_constant(self):
+        """Similar to as_python_constant(), but add ID_MATCH guards to try to force things to become constants"""
+        try:
+            return self.as_python_constant()
+        except NotImplementedError as e:
+            unimplemented(str(e))
 
     def is_python_constant(self):
         try:

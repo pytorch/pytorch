@@ -34,6 +34,8 @@ per-file-ignores =
     torch/utils/cpp_extension.py: B950
     torchgen/api/types/__init__.py: F401,F403
     torchgen/executorch/api/types/__init__.py: F401,F403
+    test/dynamo/test_higher_order_ops.py: B950
+    torch/testing/_internal/dynamo_test_failures.py: B950
 optional-ascii-coding = True
 exclude =
     ./.git,

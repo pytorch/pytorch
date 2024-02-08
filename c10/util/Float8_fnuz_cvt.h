@@ -1,5 +1,7 @@
 #pragma once
 
+#include <c10/util/floating_point_utils.h>
+
 #include <cstdint>
 
 namespace c10::detail {
@@ -20,7 +22,7 @@ inline C10_HOST_DEVICE float fp8_fnuz_to_fp32_value(uint8_t x) {
 
   if (x == 0x80) {
     constexpr uint32_t ifNaN = 0x7F800001;
-    return reinterpret_cast<const float&>(ifNaN);
+    return fp32_from_bits(ifNaN);
   }
 
   uint32_t mantissa = x & ((1 << wm) - 1);
@@ -50,7 +52,7 @@ inline C10_HOST_DEVICE float fp8_fnuz_to_fp32_value(uint8_t x) {
 
   uint32_t sign = x >> 7;
   uint32_t retval = (sign << 31) | (exponent << 23) | mantissa;
-  return reinterpret_cast<const float&>(retval);
+  return fp32_from_bits(retval);
 }
 
 } // namespace c10::detail
