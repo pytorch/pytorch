@@ -75,7 +75,7 @@ class BaseListVariable(VariableTracker):
 
     def as_proxy(self):
         assert self.python_type() is not SizeVariable
-        return self.python_type()(*self._as_proxy())
+        return self.python_type()(self._as_proxy())
 
     def getitem_const(self, arg: VariableTracker):
         from .tensor import SymNodeVariable
@@ -396,6 +396,10 @@ class DequeVariable(CommonListMethodsVariable):
 class TupleVariable(BaseListVariable):
     def python_type(self):
         return tuple
+
+    def as_proxy(self):
+        assert self.python_type() is not SizeVariable
+        return self.python_type()(*self._as_proxy())
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
