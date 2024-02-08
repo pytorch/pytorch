@@ -25,7 +25,6 @@ from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter
 from torch.utils._pytree import tree_map
 from torch import nn
 import re
-import sys
 
 import functools
 import itertools
