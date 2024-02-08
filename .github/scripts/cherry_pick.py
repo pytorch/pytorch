@@ -167,7 +167,7 @@ def post_comment(org: str, project: str, pr_num: int, msg: str) -> None:
         )
 
     comment = "\n".join(
-        (f"## Cherry picking {pr_num}", f"{msg}", "", f"{internal_debugging}")
+        (f"### Cherry picking #{pr_num}", f"{msg}", "", f"{internal_debugging}")
     )
     gh_post_pr_comment(org, project, pr_num, comment)
 
@@ -185,7 +185,8 @@ def main() -> None:
         classification = args.classification
         if classification in REQUIRES_ISSUE and not args.fixes:
             raise RuntimeError(
-                f"Refuse to cherry pick #{pr_num} because {classification} requires an issue"
+                f"Refuse to cherry pick #{pr_num} because {classification} "
+                + "category requires an issue. Please provide one with --fixes"
             )
 
         commit_sha = get_merge_commit_sha(repo, pr)
