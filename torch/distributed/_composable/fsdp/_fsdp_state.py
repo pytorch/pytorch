@@ -46,7 +46,6 @@ class FSDPState(_State):
         self._state_ctx = FSDPStateContext()
         self._comm_ctx = FSDPCommContext()
         self._training_state: TrainingState = TrainingState.IDLE
-        self._pre_forward_hook_handle: Optional[RemovableHandle] = None
         self._pre_backward_hook_handles: List[RemovableHandle] = []
 
     # Define a separate init since `__init__` is called in the contract
