@@ -174,7 +174,9 @@ def backend_cache_manager(callback: DynamoCallback):
 DONT_WRAP_FILES = {
     # For tracing into fx modules
     inspect.getsourcefile(GraphModule),
-    join(dirname(dirname(__file__)), "onnx/_internal/fx/dynamo_graph_extractor.py"),
+    join(
+        dirname(dirname(__file__)), "onnx/_internal/fx/dynamo_graph_extractor.py"
+    ).replace("/", os.sep),
 }
 
 
