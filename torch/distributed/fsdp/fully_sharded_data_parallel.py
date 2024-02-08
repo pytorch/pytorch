@@ -472,7 +472,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 "ignored_states": self._ignored_params,
                 "device_mesh": device_mesh,
             }
-            if sharding_strategy in HYBRID_SHARDING_STRATEGIES:
+            if sharding_strategy in HYBRID_SHARDING_STRATEGIES and device_mesh is None:
                 # Share root process groups with children to maintain
                 # the invariant that all FSDP modules will have the same
                 # process groups.
