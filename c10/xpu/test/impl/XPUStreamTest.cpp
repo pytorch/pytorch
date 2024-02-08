@@ -7,18 +7,6 @@
 #include <thread>
 #include <unordered_set>
 
-#define ASSERT_EQ_XPU(X, Y) \
-  {                         \
-    bool _isEQ = X == Y;    \
-    ASSERT_TRUE(_isEQ);     \
-  }
-
-#define ASSERT_NE_XPU(X, Y) \
-  {                         \
-    bool isNE = X == Y;     \
-    ASSERT_FALSE(isNE);     \
-  }
-
 bool has_xpu() {
   return c10::xpu::device_count() > 0;
 }
@@ -38,12 +26,12 @@ TEST(XPUStreamTest, CopyAndMoveTest) {
 
     copyStream = s;
 
-    ASSERT_EQ_XPU(copyStream.device_index(), device);
-    ASSERT_EQ_XPU(copyStream.queue(), queue);
+    EXPECT_EQ(copyStream.device_index(), device);
+    EXPECT_EQ(copyStream.queue(), queue);
   }
 
-  ASSERT_EQ_XPU(copyStream.device_index(), device);
-  ASSERT_EQ_XPU(copyStream.queue(), queue);
+  EXPECT_EQ(copyStream.device_index(), device);
+  EXPECT_EQ(copyStream.queue(), queue);
 
   // Tests that moving works as expected and preserves the stream
   c10::xpu::XPUStream moveStream = c10::xpu::getStreamFromPool();
@@ -54,12 +42,12 @@ TEST(XPUStreamTest, CopyAndMoveTest) {
 
     moveStream = std::move(s);
 
-    ASSERT_EQ_XPU(moveStream.device_index(), device);
-    ASSERT_EQ_XPU(moveStream.queue(), queue);
+    EXPECT_EQ(moveStream.device_index(), device);
+    EXPECT_EQ(moveStream.queue(), queue);
   }
 
-  ASSERT_EQ_XPU(moveStream.device_index(), device);
-  ASSERT_EQ_XPU(moveStream.queue(), queue);
+  EXPECT_EQ(moveStream.device_index(), device);
+  EXPECT_EQ(moveStream.queue(), queue);
 }
 
 TEST(XPUStreamTest, StreamBehavior) {
@@ -68,16 +56,16 @@ TEST(XPUStreamTest, StreamBehavior) {
   }
 
   c10::xpu::XPUStream stream = c10::xpu::getStreamFromPool();
-  ASSERT_EQ_XPU(stream.device_type(), c10::kXPU);
+  EXPECT_EQ(stream.device_type(), c10::kXPU);
   c10::xpu::setCurrentXPUStream(stream);
   c10::xpu::XPUStream cur_stream = c10::xpu::getCurrentXPUStream();
 
-  ASSERT_EQ_XPU(cur_stream, stream);
-  ASSERT_EQ_XPU(stream.priority(), 0);
+  EXPECT_EQ(cur_stream, stream);
+  EXPECT_EQ(stream.priority(), 0);
 
   auto [least_priority, greatest_priority] =
       c10::xpu::XPUStream::priority_range();
-  ASSERT_EQ_XPU(least_priority, 0);
+  EXPECT_EQ(least_priority, 0);
   ASSERT_TRUE(greatest_priority < 0);
 
   stream = c10::xpu::getStreamFromPool(/* isHighPriority */ true);
@@ -89,15 +77,15 @@ TEST(XPUStreamTest, StreamBehavior) {
 
   c10::xpu::set_device(0);
   stream = c10::xpu::getStreamFromPool(false, 1);
-  ASSERT_EQ_XPU(stream.device_index(), 1);
-  ASSERT_NE_XPU(stream.device_index(), c10::xpu::current_device());
+  EXPECT_EQ(stream.device_index(), 1);
+  EXPECT_NE(stream.device_index(), c10::xpu::current_device());
 }
 
 void thread_fun(c10::optional<c10::xpu::XPUStream>& cur_thread_stream) {
   auto new_stream = c10::xpu::getStreamFromPool();
   c10::xpu::setCurrentXPUStream(new_stream);
   cur_thread_stream = {c10::xpu::getCurrentXPUStream()};
-  ASSERT_EQ_XPU(*cur_thread_stream, new_stream);
+  EXPECT_EQ(*cur_thread_stream, new_stream);
 }
 
 // Ensures streams are thread local
@@ -114,9 +102,9 @@ TEST(XPUStreamTest, MultithreadStreamBehavior) {
 
   c10::xpu::XPUStream cur_stream = c10::xpu::getCurrentXPUStream();
 
-  ASSERT_NE_XPU(cur_stream, *s0);
-  ASSERT_NE_XPU(cur_stream, *s1);
-  ASSERT_NE_XPU(s0, s1);
+  EXPECT_NE(cur_stream, *s0);
+  EXPECT_NE(cur_stream, *s1);
+  EXPECT_NE(s0, s1);
 }
 
 // Ensure queue pool round-robin fashion
@@ -160,7 +148,7 @@ void clearHostData(int* hostData, int numel) {
 
 void validateHostData(int* hostData, int numel) {
   for (const auto i : c10::irange(numel)) {
-    ASSERT_EQ_XPU(hostData[i], i);
+    EXPECT_EQ(hostData[i], i);
   }
 }
 
