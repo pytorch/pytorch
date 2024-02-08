@@ -17,7 +17,7 @@ jobs:
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
-          token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+          token: ${{ secrets.GH_PYTORCHBOT_CHERRY_PICK_TOKEN }}
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -42,7 +42,7 @@ jobs:
           FIXES: ${{ github.event.client_payload.fixes || '' }}
           REQUIRES_ISSUE: ${{ github.event.client_payload.requiresIssue || 'false' }}
           ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_PYTORCHBOT_CHERRY_PICK_TOKEN }}
         run: |
           set -ex
 
