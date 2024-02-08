@@ -100,6 +100,10 @@ class FSDPState(_State):
                     )
                 state._is_root = False
             self._state_ctx.all_states.append(state)
+        if self._fsdp_param_group:
+            # For the root, do not reshard after forward since for training,
+            # the parameters would be freed and all-gathered immediately
+            self._fsdp_param_group.post_forward_mesh_info = None
         self._init_fqns()
         self._init_shared_state()
 
@@ -162,15 +166,17 @@ class FSDPState(_State):
 
     def _root_post_backward_final_callback(self) -> None:
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
-            self._training_state = TrainingState.IDLE
             for state in self._state_ctx.all_states:
-                state._training_state = TrainingState.IDLE
-                if state._fsdp_param_group:
-                    state._fsdp_param_group.finalize_backward()
+                state._finalize_backward()
             self._state_ctx.post_backward_final_callback_queued = False
-            for handle in self._pre_backward_hook_handles:
-                handle.remove()
-            self._pre_backward_hook_handles.clear()
+
+    def _finalize_backward(self) -> None:
+        self._training_state = TrainingState.IDLE
+        for handle in self._pre_backward_hook_handles:
+            handle.remove()
+        self._pre_backward_hook_handles.clear()
+        if self._fsdp_param_group:
+            self._fsdp_param_group.finalize_backward()
 
     def _register_pre_backward_hook(self, output: Any) -> Any:
         if not torch.is_grad_enabled():
