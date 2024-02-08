@@ -462,8 +462,8 @@ def speculate_subgraph(
             f"that Dynamo was unable to prove safety for this API and will "
             f"fall back to eager-mode PyTorch, which could lead to a slowdown."
         )
-        log.warning(msg)
-        log.exception(ex)
+        log.info(msg)
+        log.info(ex)
         raise ex
 
 
@@ -986,7 +986,7 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
             torch.fx.Proxy, lambda a: get_real_value(a.node, tx.output), p_args
         )
 
-        example_res = lowered_module.original_module(*real_sub_args)
+        example_res = lowered_module.original_module.module()(*real_sub_args)
 
         # NOTE [Guaranteeing the 1-1 correspondence of FakeTensors and real tensors]:
         # executorch modules promise not to alias inputs and outputs.
@@ -1577,7 +1577,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         else:
             unimplemented("non-function or method")
 
-        with tx.output.subtracer(fwd_fn, fwd_tracer):
+        with tx.output.subtracer(fwd_fn, fwd_tracer), tx.strict_translation_mode():
             (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
                 tx,
                 bwd_fn,

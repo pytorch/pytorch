@@ -14,7 +14,11 @@ import torch.fx
 
 import torch.utils._pytree as pytree
 from torch._dynamo.exc import UserError, UserErrorType
-from torch._export.non_strict_utils import make_constraints, make_fake_inputs
+from torch._export.non_strict_utils import (
+    make_constraints,
+    make_fake_inputs,
+    make_fake_params_buffers,
+)
 from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
 )
@@ -585,7 +589,7 @@ def _export(
     operations inside and produce a ExportedProgram.
 
     Args:
-        m: the `nn.Module` or callable to trace.
+        f: the `nn.Module` to trace.
 
         args: example positional inputs.
 
@@ -712,8 +716,12 @@ def _export(
         fake_mode, fake_args, src_equalities, original_signature = make_fake_inputs(
             f, args, constraints
         )
+
+        fake_params_buffers = make_fake_params_buffers(
+            fake_mode, _get_params_buffers(f)
+        )
         ep_non_strict = _export_non_strict(
-            f, fake_args, {}, f.state_dict(), transform=_tuplify_outputs
+            f, fake_args, {}, fake_params_buffers, transform=_tuplify_outputs
         )
         range_constraints, equality_constraints = make_constraints(
             fake_mode, src_equalities, original_signature, ep_non_strict.gm
@@ -791,7 +799,7 @@ def _export(
 
     # First, we want to pass through the graph to try populating
     # val field for getattr if there is anything missing.
-    # THis can happen when quantization adds extra params and forgets
+    # This can happen when quantization adds extra params and forgets
     # to update "val"
     for node in gm_torch_level.graph.nodes:
         if node.op == "get_attr" and "val" not in node.meta:
@@ -916,7 +924,7 @@ def _export(
 
     gm.meta["inline_constraints"] = {
         k: v
-        for k, v in dynamo_fake_mode.shape_env.runtime_var_to_range.items()
+        for k, v in dynamo_fake_mode.shape_env.var_to_range.items()
         if free_unbacked_symbols(k)
     }
 

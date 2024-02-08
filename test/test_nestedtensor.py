@@ -2879,7 +2879,7 @@ class TestNestedTensorAutograd(TestCase):
         data = (a, b)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
-    # TODO: OOM https://github.com/pytorch/pytorch/issues/95562
+    # https://github.com/pytorch/pytorch/issues/95562
     @skipIfSlowGradcheckEnv
     @parametrize("size", [1024, 1023, 513, 512, 256, 128, 32, 4, 2])
     def test_layer_norm_backward(self, device, size):
@@ -2896,7 +2896,7 @@ class TestNestedTensorAutograd(TestCase):
         data = (a, b, c)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
-    # TODO: OOM https://github.com/pytorch/pytorch/issues/95562
+    # https://github.com/pytorch/pytorch/issues/95562
     @skipIfSlowGradcheckEnv
     # Could either mark slow or reduce size
     @parametrize("size", [128, 32, 4, 2])
@@ -3182,6 +3182,22 @@ class TestNestedTensorSubclass(TestCase):
         ):
             torch.split(nt, [1, 2], 1)
 
+    def test_softmax(self, device):
+        nt = random_nt_from_dims(
+            [3, None, 5], device=device, dtype=torch.float32, layout=torch.jagged)
+
+        # operate on dim=2
+        output = nt.softmax(dim=2)
+        for in_component, out_component in zip(nt.unbind(), output.unbind()):
+            # dim=2 -> dim=1 after unbind
+            self.assertEqual(in_component.softmax(dim=1), out_component)
+
+        # operate on dim=-1
+        output2 = nt.softmax(dim=-1)
+        self.assertEqual(output, output2)
+        for in_component, out_component in zip(nt.unbind(), output2.unbind()):
+            self.assertEqual(in_component.softmax(dim=-1), out_component)
+
     def test_views_inherit_ragged_dim(self, device):
         # view
         nt = random_nt_from_dims(
@@ -3348,6 +3364,21 @@ class TestNestedTensorSubclass(TestCase):
         for t_size in t_sizes:
             t = torch.rand(t_size, requires_grad=True, device=device, dtype=torch.float64)
             gradcheck(grad_test_func, inputs=(t, *ts), check_batched_grad=False)
+
+    def test_threshold_backward(self, device):
+        ts1 = self._get_list_for_jagged_tensor(((2, 3, 4), 16), device=device, requires_grad=False)
+        ts2 = self._get_list_for_jagged_tensor(((2, 3, 4), 16), device=device, requires_grad=False)
+
+        nt1, offsets = jagged_from_list(ts1, None)
+        nt2, offsets = jagged_from_list(ts2, offsets)
+        buf1 = buffer_from_jagged(nt1).detach().clone()
+        buf2 = buffer_from_jagged(nt2).detach().clone()
+
+        res_nt = torch.ops.aten.threshold_backward(nt1, nt2, 0.0)
+        res_dense = torch.ops.aten.threshold_backward(buf1, buf2, 0.0)
+
+        self.assertEqual(res_dense, buffer_from_jagged(res_nt))
+
 
     @parametrize("keepdim", [False, True])
     def test_sum_int_DimList(self, device, keepdim):
