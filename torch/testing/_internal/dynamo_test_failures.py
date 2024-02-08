@@ -352,24 +352,6 @@ dynamo_expected_failures = {
     "TestSDPACPU.test_fused_sdp_choice_cpu_type_dense_dropout_0_7_float64_cpu_float64",
     "TestSDPACPU.test_fused_sdp_choice_cpu_type_dense_dropout_0_0_float16_cpu_float16",
     "TestSDPACPU.test_fused_sdp_choice_cpu_type_dense_dropout_0_7_bfloat16_cpu_bfloat16",
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape0_cpu",
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape1_cpu",
-    "TestAttnMasksCPU.test_is_causal_and_mask_fails_cpu",
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape2_cpu",
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape3_cpu",
-    "TestAttnMasksCUDA.test_causal_variants_causal_variant_1_shape0_cuda",
-    "TestAttnMasksCUDA.test_causal_variants_causal_variant_1_shape1_cuda",
-    "TestAttnMasksCUDA.test_causal_variants_causal_variant_1_shape2_cuda",
-    "TestAttnMasksCUDA.test_causal_variants_causal_variant_1_shape3_cuda",
-    "TestAttnMasksCUDA.test_causal_variants_causal_variant_2_shape0_cuda",
-    "TestAttnMasksCUDA.test_causal_variants_causal_variant_2_shape1_cuda",
-    "TestAttnMasksCUDA.test_causal_variants_causal_variant_2_shape2_cuda",
-    "TestAttnMasksCUDA.test_causal_variants_causal_variant_2_shape3_cuda",
-    "TestAttnMasksCUDA.test_is_causal_and_mask_fails_cuda",
-    "TestAttnMasksCUDA.test_is_causal_equals_upper_left_shape0_cuda",
-    "TestAttnMasksCUDA.test_is_causal_equals_upper_left_shape1_cuda",
-    "TestAttnMasksCUDA.test_is_causal_equals_upper_left_shape2_cuda",
-    "TestAttnMasksCUDA.test_is_causal_equals_upper_left_shape3_cuda",
     "TestAssertCloseSparseCOO.test_matching_coalesced",  # test_testing
     "TestImports.test_circular_dependencies",  # test_testing
     "TestAssertCloseSparseCSR.test_mismatching_crow_indices_msg",  # test_testing
@@ -2156,7 +2138,6 @@ dynamo_expected_failures = {
     "LoggingTests.test_aot",  # dynamo/test_logging
     "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape2_cpu",  # test_transformers.py
     "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape3_cpu",  # test_transformers.py
-    "TestAttnBiasCPU.test_is_causal_and_mask_fails_cpu",  # test_transformers.py
     "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape1_cpu",  # test_transformers.py
     "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape0_cpu",  # test_transformers.py
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_float32",  # test_linalg.py
