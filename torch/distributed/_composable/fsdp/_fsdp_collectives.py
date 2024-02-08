@@ -68,11 +68,16 @@ def foreach_all_gather_copy_out(
     fsdp_params: List[FSDPParam],
     group: dist.ProcessGroup,
 ) -> None:
-    all_gather_output, _, _, all_gather_input_numels = all_gather_result
-    if (event := all_gather_result.all_gather_event) is not None:  # sync op
-        torch.cuda.current_stream().wait_event(event)
-    if (work := all_gather_result.all_gather_work) is not None:  # async op
-        work.wait()
+    (
+        all_gather_output,
+        all_gather_event,
+        all_gather_work,
+        all_gather_input_numels,
+    ) = all_gather_result
+    if all_gather_event is not None:  # sync op
+        torch.cuda.current_stream().wait_event(all_gather_event)
+    if all_gather_work is not None:  # async op
+        all_gather_work.wait()
     world_size = group.size()
     dtype, device = all_gather_output.dtype, all_gather_output.device
     for all_gather_input_numel, fsdp_param in zip(all_gather_input_numels, fsdp_params):
@@ -134,6 +139,10 @@ def foreach_reduce_scatter(
         # Record to mark the end of the reduce-scatter copy-in in the RS stream
         copy_in_event = torch.cuda.Event()
         copy_in_event.record()
+        # Only after the copy-in finishes can we free the gradients, which were
+        # computed in the default stream
+        current_stream.wait_event(copy_in_event)
+        unsharded_grads.clear()
         reduce_scatter_output = reduce_scatter_input.new_empty(
             (reduce_scatter_output_numel,)
         )
@@ -163,10 +172,6 @@ def foreach_reduce_scatter(
             flat_grad_offset += padded_sharded_numel
         reduce_scatter_view_out_event = torch.cuda.Event()
         reduce_scatter_view_out_event.record()
-    # Only after the copy-in finishes can we free the gradients, which were
-    # computed in the default stream
-    current_stream.wait_event(copy_in_event)
-    unsharded_grads.clear()
     # The RS output is allocated in the RS stream and used in the default
     # stream (for optimizer). To ensure its memory is not reused for later
     # RSs, we do not need extra synchronization since the sharded parameters
