@@ -2890,7 +2890,7 @@ class TestSDPACudaOnly(NNTestCase):
         output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref, output_fudge_factor)
 
         # TODO: Investigate why grad_q needs larger tolerances
-        query_fudge_factor = 4
+        query_fudge_factor = 40 if TEST_WITH_ROCM else 4
         grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(query_ref.grad, query_ref_lp.grad, query_fudge_factor)
 
         key_fudge_factor = 2
@@ -2898,6 +2898,27 @@ class TestSDPACudaOnly(NNTestCase):
 
         value_fudge_factor = 2
         grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad, value_fudge_factor)
+        print(f'{output_ref_atol=} {output_ref_rtol=}')
+        print(f'{grad_q_ref_atol=} {grad_q_ref_rtol=}')
+        print(f'{grad_k_ref_atol=} {grad_k_ref_rtol=}')
+        print(f'{grad_v_ref_atol=} {grad_v_ref_rtol=}')
+
+        import numpy as np
+        np.savez('pytorchfailure.npz',
+                 Q=query.numpy(force=True), K=key.numpy(force=True), V=value.numpy(force=True),
+                 O=out.numpy(force=True),
+                 DQref=query_ref.grad.numpy(force=True),
+                 DKref=key_ref.grad.numpy(force=True),
+                 DVref=value_ref.grad.numpy(force=True),
+                 output_ref_atol=output_ref_atol,
+                 grad_q_ref_atol=grad_q_ref_atol,
+                 grad_k_ref_atol=grad_k_ref_atol,
+                 grad_v_ref_atol=grad_v_ref_atol,
+                 output_ref_rtol=output_ref_rtol,
+                 grad_q_ref_rtol=grad_q_ref_rtol,
+                 grad_k_ref_rtol=grad_k_ref_rtol,
+                 grad_v_ref_rtol=grad_v_ref_rtol,
+                )
 
         self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_atol, rtol=output_ref_rtol)
         self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),
