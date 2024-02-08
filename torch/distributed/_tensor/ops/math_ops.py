@@ -8,11 +8,9 @@ from torch._decomp.decompositions import Reduction
 from torch.distributed._tensor.op_schema import (
     OpSchema,
     OpStrategy,
-    OutputSharding,
     PlacementStrategy,
     RuntimeSchemaInfo,
 )
-from torch.distributed._tensor.ops.common_rules import pointwise_rule
 from torch.distributed._tensor.ops.utils import (
     as_list,
     generate_redistribute_costs,
@@ -21,7 +19,6 @@ from torch.distributed._tensor.ops.utils import (
     normalize_dims,
     normalize_to_torch_size,
     register_op_strategy,
-    register_prop_rule,
 )
 from torch.distributed._tensor.placement_types import (
     _Partial,
@@ -261,25 +258,48 @@ def softmax_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     return output_strategy
 
 
-@register_prop_rule(
+@register_op_strategy(
     [
         aten._log_softmax_backward_data.default,
         aten._softmax_backward_data.default,
     ],
     schema_info=RuntimeSchemaInfo(2),
 )
-def softmax_bwd_rule(op_schema: OpSchema) -> OutputSharding:
-    grad_out_spec, out_spec, softmax_dim, _ = op_schema.args_schema
-    grad_out_spec = cast(DTensorSpec, grad_out_spec)
-    out_spec = cast(DTensorSpec, out_spec)
+def softmax_backward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+    grad_out_strategy, out_strategy, softmax_dim, _ = op_schema.args_schema
+    grad_out_strategy = cast(OpStrategy, grad_out_strategy)
+    out_strategy = cast(OpStrategy, out_strategy)
     softmax_dim = cast(int, softmax_dim)
-    grad_out_dim_map = grad_out_spec.dim_map
-    out_dim_map = out_spec.dim_map
-    if softmax_dim < len(grad_out_dim_map) and (
-        grad_out_dim_map[softmax_dim] >= 0 or out_dim_map[softmax_dim] >= 0
+    softmax_dim = normalize_dim(softmax_dim, grad_out_strategy.output_ndim)
+
+    grad_in_strategy = OpStrategy([])
+    for grad_out_placement_strat, out_placement_strat in zip(
+        grad_out_strategy.strategies, out_strategy.strategies
     ):
-        raise RuntimeError("Cannot run _softmax_backward_data on sharding dimension!")
-    return pointwise_rule(op_schema)
+        # follow the sharding of the grad_out or out depending on which has more shards
+        grad_out_src_spec = grad_out_placement_strat.output_spec
+        out_src_spec = out_placement_strat.output_spec
+        src_spec = (
+            grad_out_src_spec
+            if grad_out_src_spec.num_shards >= out_src_spec.num_shards
+            else out_src_spec
+        )
+
+        # make sure inputs are replicated along the softmax dim
+        tgt_spec = DTensorSpec(
+            mesh=mesh,
+            placements=replicate_reduction_dims(src_spec.placements, [softmax_dim]),
+        )
+        redist_grad_out_cost = generate_redistribute_costs(grad_out_strategy, tgt_spec)
+        redist_out_cost = generate_redistribute_costs(out_strategy, tgt_spec)
+        grad_in_strategy.strategies.append(
+            PlacementStrategy(
+                output_specs=tgt_spec,
+                redistribute_cost=[redist_grad_out_cost, redist_out_cost],
+            )
+        )
+
+    return grad_in_strategy
 
 
 @register_op_strategy(
