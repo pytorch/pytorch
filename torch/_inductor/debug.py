@@ -360,16 +360,6 @@ class DebugContext:
             config.trace.upload_tar(tar_file)
 
     def __enter__(self):
-        if config.debug:
-            log = logging.getLogger("torch._dynamo")
-            prev_level = log.level
-            log.setLevel(logging.DEBUG)
-
-            def reset_log_level(level):
-                log.setLevel(level)
-
-            self._stack.callback(reset_log_level, prev_level)
-
         self._stack.enter_context(V.set_debug_handler(self))
 
         if not config.trace.enabled:

@@ -9,9 +9,6 @@ def is_fbcode():
     return not hasattr(torch.version, "git_version")
 
 
-# add some debug printouts
-debug = False
-
 # add inf and NaN checkers
 debug_check_inf_and_nan = False
 

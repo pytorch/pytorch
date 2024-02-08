@@ -3318,12 +3318,11 @@ class ComputedBuffer(Buffer):
                         pass
             order = list(reversed(pick_loop_order(strides, sizes, priority_idx)))
         except Exception:
-            if config.debug:
-                log.warning(
-                    "Did not simplify complex index:\n%s\n%s",
-                    dict(zip(index_vars, sizes)),
-                    memory_addrs,
-                )
+            log.warning(
+                "Did not simplify complex index:\n%s\n%s",
+                dict(zip(index_vars, sizes)),
+                memory_addrs,
+            )
             order = list(range(len(sizes)))
         sizes = [sizes[i] for i in order]
         return sizes, same_reorder(order), inverse_reorder(order)
