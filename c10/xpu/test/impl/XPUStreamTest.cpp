@@ -66,10 +66,10 @@ TEST(XPUStreamTest, StreamBehavior) {
   auto [least_priority, greatest_priority] =
       c10::xpu::XPUStream::priority_range();
   EXPECT_EQ(least_priority, 0);
-  ASSERT_TRUE(greatest_priority < 0);
+  EXPECT_TRUE(greatest_priority < 0);
 
   stream = c10::xpu::getStreamFromPool(/* isHighPriority */ true);
-  ASSERT_TRUE(stream.priority() < 0);
+  EXPECT_TRUE(stream.priority() < 0);
 
   if (c10::xpu::device_count() <= 1) {
     return;
@@ -126,14 +126,14 @@ TEST(XPUStreamTest, StreamPoolRoundRobinTest) {
     if (!result_pair.second) { // already existed
       hasDuplicates = true;
     } else { // newly inserted
-      ASSERT_TRUE(!hasDuplicates);
+      EXPECT_TRUE(!hasDuplicates);
     }
   }
-  ASSERT_TRUE(hasDuplicates);
+  EXPECT_TRUE(hasDuplicates);
 
   auto stream = c10::xpu::getStreamFromPool(/* isHighPriority */ true);
   auto result_pair = queue_set.insert(stream.queue());
-  ASSERT_TRUE(result_pair.second);
+  EXPECT_TRUE(result_pair.second);
 }
 
 void asyncMemCopy(sycl::queue& queue, int* dst, int* src, size_t numBytes) {
@@ -164,13 +164,13 @@ TEST(XPUStreamTest, StreamFunction) {
   }
 
   auto stream = c10::xpu::getStreamFromPool();
-  ASSERT_TRUE(stream.query());
+  EXPECT_TRUE(stream.query());
   int* deviceData = sycl::malloc_device<int>(numel, stream);
 
   // H2D
   asyncMemCopy(stream, deviceData, hostData, sizeof(int) * numel);
   c10::xpu::syncStreamsOnDevice();
-  ASSERT_TRUE(stream.query());
+  EXPECT_TRUE(stream.query());
 
   clearHostData(hostData, numel);
 
