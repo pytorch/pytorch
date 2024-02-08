@@ -569,7 +569,7 @@ static PyObject* view_func_impl(
       if (view_info.has_view_fn()) {
         auto& view_func = view_info.view_fn();
 
-        // Mutate saved SymInt / tensor state as needed.
+        // Determine new SymInt / tensor state as needed.
         c10::optional<std::vector<c10::SymInt>> new_symints = c10::nullopt;
         if (symint_visitor_fn != Py_None) {
           new_symints = map_py_func(
