@@ -1557,7 +1557,7 @@ def ensure_graph_fake(e, tx):
 
 def get_fake_values_from_nodes(tx, nodes):
     def visit(n: torch.fx.Node):
-        if n.op == "call_function":
+        if n.op == "call_function" and "example_value" not in n.meta:
             return get_fake_value(n, tx)
 
         return n.meta["example_value"]
