@@ -1069,7 +1069,6 @@ class TestExport(TestCase):
                 _ = export(mod, inp)
 
     @testing.expectedFailureSerDer
-    @testing.expectedFailureNonStrict
     def test_module(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
@@ -1108,7 +1107,6 @@ class TestExport(TestCase):
         self.assertTrue(torch.allclose(ep.module()(*inp_test)[1], ep_rexported.module()(*inp_test)[1]))
 
     @testing.expectedFailureSerDer
-    @testing.expectedFailureNonStrict
     def test_module_with_dict_container_inp_out(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
@@ -1918,7 +1916,6 @@ def forward(self, arg_0):
         self.assertEqual(actual_source_fns, exp_source_fns)
 
     @testing.expectedFailureRetraceability
-    @testing.expectedFailureNonStrict
     def test_lifted_constants(self) -> None:
         def f(x):
             return x + torch.tensor(3)
@@ -2255,7 +2252,6 @@ def forward(self, l_x_):
         test_inp = torch.ones(8, 4)
         self.assertTrue(torch.allclose(ep.module()(test_inp), Foo().forward(test_inp)))
 
-    @testing.expectedFailureNonStrict
     def test_issue_113041(self):
         class TestModule(torch.nn.Module):
             def __init__(self):
