@@ -442,11 +442,7 @@ dynamo_expected_failures = {
     "TestSortAndSelectCPU.test_isin_cpu_int16",  # test_sort_and_select
     "TestSortAndSelectCPU.test_isin_cpu_int64",  # test_sort_and_select
     "TestSortAndSelectCPU.test_isin_cpu_float32",  # test_sort_and_select
-    "TestShapeOpsCPU.test_flip_cpu_float64",  # test_shape_ops
     "TestShapeOpsCPU.test_flip_cpu_float32",  # test_shape_ops
-    "TestShapeOpsCPU.test_flip_cpu_complex64",  # test_shape_ops
-    "TestShapeOpsCPU.test_flip_cpu_float16",  # test_shape_ops
-    "TestShapeOpsCPU.test_flip_cpu_complex128",  # test_shape_ops
     "TestShapeOpsCPU.test_clamp_cpu_int64",  # test_shape_ops
     "TestShapeOpsCPU.test_clamp_propagates_nans_cpu",  # test_shape_ops
     "TestShapeOpsCPU.test_clamp_cpu_float32",  # test_shape_ops
@@ -498,9 +494,7 @@ dynamo_expected_failures = {
     "TestNN.test_Sequential_append",  # test_nn
     "TestNNDeviceTypeCPU.test_nll_loss_all_ignored_cpu",  # test_nn
     "TestNN.test_ParameterList_replication",  # test_nn
-    "TestNNDeviceTypeCPU.test_CTCLoss_no_batch_dim_reduction_none_use_module_form_False_cpu",  # test_nn
     "TestNN.test_interpolate_buffer_overflow",  # test_nn
-    "TestNN.test_batchnorm_raises_error_if_running_var_or_running_mean_have_forward_grad",  # test_nn
     "TestNNDeviceTypeCPU.test_nll_loss_byte_target_matches_long_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_module_to_empty_cpu_float32",  # test_nn
     "TestNNDeviceTypeCPU.test_nll_loss_empty_tensor_reduction_none_cpu",  # test_nn
@@ -512,7 +506,6 @@ dynamo_expected_failures = {
     "TestNN.test_Sequential_imul",  # test_nn
     "TestNN.test_upsampling_bfloat16",  # test_nn
     "TestNNDeviceTypeCPU.test_triplet_margin_with_distance_loss_cpu",  # test_nn
-    "TestNNDeviceTypeCPU.test_CTCLoss_no_batch_dim_reduction_sum_use_module_form_False_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_nll_loss_empty_tensor_reduction_sum_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_False_memory_format0_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_False_memory_format1_cpu",  # test_nn
