@@ -668,11 +668,11 @@ Tensor batch_norm(
                                                 training, momentum, eps, cudnn_enabled));
   // TODO: switch to the new stack after the 2 week FC window
   // if (training) {
-  //   return std::get<0>(at::batch_norm_with_update(input, weight, bias, running_mean, running_var,
-  //                                                      momentum, eps, cudnn_enabled));
+  //   return std::get<0>(at::batch_norm_with_update(input, weight, bias, const_cast<Tensor&>(running_mean),
+  //                                                 const_cast<Tensor&>(running_var), momentum, eps, cudnn_enabled));
   // } else {
   //   return std::get<0>(at::batch_norm_no_update(input, weight, bias, running_mean, running_var,
-  //                                                    momentum, eps, cudnn_enabled));
+  //                                               momentum, eps, cudnn_enabled));
   // }
 }
 

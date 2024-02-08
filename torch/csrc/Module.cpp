@@ -19,6 +19,7 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/Normalization.h>
+#include <ATen/native/cudnn/BatchNorm.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
@@ -93,11 +94,7 @@
 #include <sstream>
 
 #ifdef USE_CUDA
-#include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
-#if AT_CUDNN_ENABLED()
-#include <ATen/native/cudnn/BatchNorm.h>
-#endif
 #endif
 
 #ifdef USE_DISTRIBUTED
@@ -2064,16 +2061,12 @@ Call this whenever a new thread is created in order to propagate values from
       },
       "Checks if a tensor's data pointer is COW");
 
-#ifdef USE_CUDA
-#if AT_CUDNN_ENABLED()
   py_module.def(
       "_get_cudnn_batch_norm_reserve_space_size",
       [](const at::Tensor& input) {
         return at::native::_get_cudnn_batch_norm_reserve_space_size(input);
       },
       py::arg("input"));
-#endif
-#endif
 
   py::enum_<at::native::BatchNormBackend>(py_module, "_BatchNormBackend")
       .value("Native", at::native::BatchNormBackend::Native)

@@ -1849,6 +1849,13 @@ def _get_batch_norm_reserve_tensor(
     eps: float,
     cudnn_enabled: bool,
 ) -> Tensor:
+    """
+    Return a reserve tensor for batch norm, used only by cudnn to pass forward state to the
+    backward pass. This is needed for `batch_norm_with_update` and `batch_norm_no_update`,
+    which support a variety of backends including cudnn. We create this tensor here to get
+    the correct shape in the traced graph if we detect that will call the cudnn kernel,
+    and rely on DCE to avoid materializing this tensor.
+    """
     backend = torch._C._select_batch_norm_backend(  # type: ignore[attr-defined]
         input, weight, bias, running_mean, running_var, True, eps, cudnn_enabled
     )
@@ -1858,7 +1865,7 @@ def _get_batch_norm_reserve_tensor(
             reserve_size, dtype=input.dtype, layout=input.layout, device=input.device
         )
     else:
-        return Tensor()
+        return torch.empty(0, dtype=torch.uint8)
 
 
 @register_decomposition(aten.batch_norm_with_update.default)
@@ -1900,21 +1907,16 @@ def batch_norm_with_update_functional(
     eps: float,
     cudnn_enabled: bool,
 ) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
-    output, save_mean, save_rstd, _, _ = native_batch_norm_helper(
+    return batch_norm_with_update(
         input,
         weight,
         bias,
-        running_mean,
-        running_var,
-        True,  # training
+        running_mean.clone(),
+        running_var.clone(),
         momentum,
         eps,
-        True,  # functional
+        cudnn_enabled,
     )
-    reserve = _get_batch_norm_reserve_tensor(
-        input, weight, bias, running_mean, running_var, eps, cudnn_enabled
-    )
-    return output, save_mean, save_rstd, reserve
 
 
 @register_decomposition(aten.batch_norm_no_update.default)
@@ -3953,13 +3955,15 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
 
     t1, t2 = (tensor1, tensor2) if tensor1.ndim >= tensor2.ndim else (tensor2, tensor1)
 
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     if not (t1.ndim >= 3 and t2.ndim <= 2):
         return False
     if t2.requires_grad and not is_out:
         return True
     if tensor1.ndim == 2:
         return False
-    if t1.numel() == 0:
+    if guard_size_oblivious(t1.numel() == 0):
         return True
 
     t1_shape = t1.shape
@@ -4418,8 +4422,8 @@ def scaled_dot_product_flash_attention_for_cpu(
 ) -> Tuple[Tensor, Tensor]:
     dtype = query.dtype
     torch._check(
-        torch.is_floating_point(query) and dtype is not torch.half,
-        lambda: f"query must be FP32, FP64, BF16 but got {query.dtype}",
+        torch.is_floating_point(query),
+        lambda: f"query must be FP32, FP64, BF16, FP16 but got {query.dtype}",
     )
     torch._check(
         query.dim() == 4 and key.dim() == 4 and value.dim() == 4,
