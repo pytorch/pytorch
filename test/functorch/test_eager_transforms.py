@@ -4789,8 +4789,6 @@ class TestCompileTransforms(TestCase):
         actual = opt_fn(params_and_buffers, x)
         self.assertEqual(actual, expected)
 
-    # torch.compile is not supported on Windows
-    @expectedFailureIf(IS_WINDOWS)
     @torch._dynamo.config.patch(suppress_errors=False)
     @torch._dynamo.config.patch(capture_func_transforms=True)
     @skipIfTorchDynamo("Do not test torch.compile on top of torch.compile")
