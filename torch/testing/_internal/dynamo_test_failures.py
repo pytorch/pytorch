@@ -1240,7 +1240,6 @@ dynamo_expected_failures = {
     "TestVmapOperatorsLegacy.test_select",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_binary_pointwise_ops",  # test_legacy_vmap
     "TestVmapAPILegacy.test_non_tensor_output_raises",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_binary_cross_entropy_cpu",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_diagonal",  # test_legacy_vmap
     "TestVmapAPILegacy.test_nonzero_out_dims",  # test_legacy_vmap
     "TestVmapAPILegacy.test_unsupported_op_err_msg",  # test_legacy_vmap
@@ -6313,6 +6312,7 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cat_cpu_float32",  # known py38 fail
     "TestBasicsCPU.test_invalid_sparse_csr_values_cpu",  # known py38 fail
     "TestBasicsCPU.test_invalid_sparse_coo_values_cpu",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_long_tensor_pow_floats_cpu",  # known py38 fail
     "TestBinaryUfuncsCPU.test_add_cpu",  # known py38 fail
     "TestBinaryUfuncsCPU.test_int_tensor_pow_neg_ints_cpu",  # known py38 fail
     "TestBinaryUfuncsCPU.test_shift_limits_cpu_uint8",  # known py38 fail
@@ -6447,7 +6447,6 @@ dynamo_skips = {
     "TestNnapiBackend.test_hardtanh",  # test_jit
     "TestNnapiBackend.test_pointwise_binary_const",  # test_jit
     "TestSlice.test_tuple_slicing",  # test_jit
-    "TestNnapiBackend.test_adaptive_avg_pool2d",  # test_jit
     "TestTensorBuiltins.test_scalar_to_num_conversions",  # test_jit
     "TestNnapiBackend.test_pointwise_binary",  # test_jit
     "TestFrozenOptimizations.test_conv_bn_folding",  # test_jit.py
@@ -6463,7 +6462,6 @@ dynamo_skips = {
     "TestArgmax.test_combinations_data61",  # torch_np/test_ndarray_methods.py
     "TestArgmax.test_combinations_data58",  # torch_np/test_ndarray_methods.py
     "TestCustomOpTestingCPU.test_opcheck_fails_basic_cpu",  # test_custom_ops.py
-    "TestVmapAPI.test_functools_partial",  # functorch/test_vmap.py
     "TestSaveLoadForOpVersion.test_versioned_div_tensor_out",  # test_jit.py
 }
 
