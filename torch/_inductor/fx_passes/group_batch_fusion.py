@@ -821,7 +821,7 @@ def find_independent_subset_greedy(
     # keep the correct order.
     node_list = _OrderedSet(node_list)
 
-    cache = {}
+    cache: Dict[torch.fx.Node, Set[torch.fx.Node]] = {}
     while node_list:
         subset: List[torch.fx.Node] = []
         subset_deps: Set[torch.fx.Node] = set()
