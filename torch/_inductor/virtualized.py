@@ -828,11 +828,7 @@ class OpsValue:
         return ops.pow(self, other)
 
     def __getitem__(self, items):
-        if hasattr(self.value, "__getitem__"):
-            return OpsValue(self.value[items])
-        else:
-            1 / 0
-            return self
+        return OpsValue(self.value[items])
 
 
 class OpsWrapper:
