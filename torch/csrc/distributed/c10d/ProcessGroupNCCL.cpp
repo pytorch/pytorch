@@ -2906,8 +2906,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
     std::vector<at::Tensor>& tensors,
     const BroadcastOptions& opts) {
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
-  check_gpu_tensors_different_devices(tensors);
   auto tensor = tensors.back();
+  check_gpu_single_tensor(tensor);
 
   // @lint-ignore CLANGTIDY
   RECORD_PARAM_COMMS_DATA(
@@ -2993,9 +2993,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
     std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts) {
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
-  check_gpu_tensors_different_devices(tensors);
   // @lint-ignore CLANGTIDY
   auto tensor = tensors.back();
+  check_gpu_single_tensor(tensor);
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
@@ -3086,9 +3086,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
     std::vector<at::Tensor>& inputTensors,
     const AllgatherOptions& opts) {
   TORCH_CHECK(inputTensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
-  check_gpu_tensors_different_devices(inputTensors);
   // @lint-ignore CLANGTIDY
   auto inputTensor = inputTensors.back();
+  check_gpu_single_tensor(inputTensor);
   // @lint-ignore CLANGTIDY
   auto outputTensors_ = outputTensors.back();
 
@@ -3214,9 +3214,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ReduceScatterOptions& opts) {
   TORCH_CHECK(outputTensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
-  check_gpu_tensors_different_devices(outputTensors);
   // @lint-ignore CLANGTIDY
   auto outputTensor = outputTensors.back();
+  check_gpu_single_tensor(outputTensor);
   // @lint-ignore CLANGTIDY
   auto inputTensors_ = inputTensors.back();
 
@@ -3655,9 +3655,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
     int dstRank,
     int /* unused */) {
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
-  check_gpu_tensors_different_devices(tensors, true);
   // @lint-ignore CLANGTIDY
   auto tensor = tensors.back();
+  check_gpu_single_tensor(tensor, true);
 
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
@@ -3696,9 +3696,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
     int srcRank,
     int /* unused */) {
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
-  check_gpu_tensors_different_devices(tensors, true);
   // @lint-ignore CLANGTIDY
   auto tensor = tensors.back();
+  check_gpu_single_tensor(tensor, true);
 
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
