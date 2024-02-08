@@ -10,12 +10,14 @@ C10_API std::optional<DeviceType> getAccelerator(bool checked) {
 #define CHECK_NO_PU1 \
   TORCH_CHECK(!is_privateuse1_backend_registered(), "Cannot have both CUDA and PrivateUse1");
 
-    if (at::hasCUDA()) {
+    if (is_privateuse1_backend_registered()) {
+        // We explicitly allow PrivateUse1 and another device at the same time
+        // as we use this for testing.
+        // Whenever a PrivateUse1 device is registered, use it first.
+        return kPrivateUse1;
+    } else if (at::hasCUDA()) {
         CHECK_NO_PU1
         return kCUDA;
-    } else if (is_privateuse1_backend_registered()) {
-        CHECK_NO_CUDA
-        return kPrivateUse1;
     } else {
         TORCH_CHECK(!checked, "Cannot access accelerator device when none is available.")
         return std::nullopt;
