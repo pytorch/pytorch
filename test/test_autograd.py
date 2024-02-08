@@ -8792,6 +8792,7 @@ get_out().sum().backward()
                     _assert_match_metadata(new_inp, inp)
                     new_out = out._view_func(new_inp)
                     _assert_match_metadata(new_out, out)
+                    self.assertEqual(new_out, out)
 
                     # reverse view_func
                     new_out = out.detach()
@@ -8830,7 +8831,7 @@ get_out().sum().backward()
             _test_fn(
                 lambda x: x.chunk(2, -1)[0].transpose(0, 1).unsqueeze(-1), torch.randn(2, 3, 4))
             _test_fn(
-                lambda x: x.split_with_sizes([1, 3], -1)[0].chunk(2, -1), torch.randn(2, 3, 4))
+                lambda x: x.split_with_sizes([1, 3], -1)[0].chunk(2, 0), torch.randn(2, 3, 4))
 
             # chains with missing view_func()s use as_strided() to cover the gaps
             def chain_with_only_parent_view_func(x):
@@ -8838,7 +8839,7 @@ get_out().sum().backward()
                     x = x.split_with_sizes([1, 3], -1)[0]
 
                 with torch.autograd._force_original_view_tracking(False):
-                    x = x.chunk(2, -1)
+                    x = x.chunk(2, 0)
 
                 return x
 
@@ -8849,11 +8850,49 @@ get_out().sum().backward()
                     x = x.split_with_sizes([1, 3], -1)[0]
 
                 with torch.autograd._force_original_view_tracking(True):
-                    x = x.chunk(2, -1)
+                    x = x.chunk(2, 0)
 
                 return x
 
             _test_fn(chain_with_only_current_view_func, torch.randn(2, 3, 4))
+
+    def test_view_func_replay_with_modified_state(self):
+        with torch.autograd._force_original_view_tracking(True):
+            base = torch.randn(3, 4, 5)
+            view = base.select(1, 2)
+
+            def symint_visitor_fn(x):
+                # modify saved index
+                return x + 1
+
+            # ensure modifying state changes view replay
+            new_base = torch.randn_like(base)
+            new_view = view._view_func(new_base, symint_visitor_fn=symint_visitor_fn)
+            self.assertEqual(new_view, new_base.select(1, 3))
+
+            # ensure saved state reverts back afterwards
+            self.assertEqual(view._view_func(new_base), new_base.select(1, 2))
+
+            # check modifying tensor state. currently, slice_inverse() is the only
+            # view that saves a tensor
+            base = torch.randn(3, 4, 5)
+            sliced = base[:, 2:3, :].detach()
+            view = torch.ops.aten.slice_inverse(sliced, base, 1, 2, 3, 1)
+
+            replacement_shape = (1, 2, 3)
+
+            def tensor_visitor_fn(x):
+                # return tensor with a smaller shape than the saved one
+                return torch.randn(*replacement_shape)
+
+            # ensure modifying state changes view replay
+            new_sliced = torch.ones_like(base)[:, 2:3, :].detach()
+            new_view = view._view_func(new_sliced, tensor_visitor_fn=tensor_visitor_fn)
+            self.assertEqual(new_view.shape, replacement_shape)
+            self.assertEqual(new_view, new_sliced.as_strided(replacement_shape, (6, 3, 1)))
+
+            # ensure saved state reverts back afterwards
+            self.assertEqual(view._view_func(sliced), base)
 
     def test_setup_context_when_forward_has_default_args(self):
         class PowFunction(Function):
