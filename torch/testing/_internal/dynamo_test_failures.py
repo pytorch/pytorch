@@ -2929,28 +2929,11 @@ dynamo_skips = {
     "TestSparseCPU.test_to_dense_with_gradcheck_masked_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_coalesce_transpose_mm_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sum_cpu_int64",  # known py38 fail
-    "TestReductionsCPU.test_argminmax_multiple_cpu_float16",  # known py38 fail
-    "TestReductionsCPU.test_argminmax_multiple_cpu_int16",  # known py38 fail
     "TestReductionsCPU.test_histogramdd_cpu_float32",  # known py38 fail
-    "TestReductionsCPU.test_argminmax_multiple_cpu_int8",  # known py38 fail
     "TestReductionsCPU.test_tensor_compare_ops_empty_cpu",  # known py38 fail
-    "TestReductionsCPU.test_all_any_vs_numpy_cpu_float32",  # known py38 fail
-    "TestReductionsCPU.test_all_any_vs_numpy_cpu_float64",  # known py38 fail
-    "TestReductionsCPU.test_argminmax_multiple_cpu_float64",  # known py38 fail
     "TestReductionsCPU.test_all_any_vs_numpy_cpu_uint8",  # known py38 fail
-    "TestReductionsCPU.test_argminmax_multiple_cpu_uint8",  # known py38 fail
-    "TestReductionsCPU.test_all_any_vs_numpy_cpu_int8",  # known py38 fail
-    "TestReductionsCPU.test_all_any_vs_numpy_cpu_int16",  # known py38 fail
-    "TestReductionsCPU.test_all_any_vs_numpy_cpu_int32",  # known py38 fail
-    "TestReductionsCPU.test_argminmax_multiple_cpu_float32",  # known py38 fail
-    "TestReductionsCPU.test_all_any_vs_numpy_cpu_complex64",  # known py38 fail
-    "TestReductionsCPU.test_all_any_vs_numpy_cpu_int64",  # known py38 fail
-    "TestReductionsCPU.test_all_any_vs_numpy_cpu_complex128",  # known py38 fail
-    "TestReductionsCPU.test_argminmax_multiple_cpu_int64",  # known py38 fail
     "TestReductionsCPU.test_tensor_reduce_ops_empty_cpu",  # known py38 fail
-    "TestReductionsCPU.test_all_any_vs_numpy_cpu_float16",  # known py38 fail
     "TestReductionsCPU.test_all_any_vs_numpy_cpu_bool",  # known py38 fail
-    "TestReductionsCPU.test_argminmax_multiple_cpu_int32",  # known py38 fail
     "TestReductionsCPU.test_tensor_compare_ops_argmax_argmix_kthvalue_dim_empty_cpu",  # known py38 fail
     "TestReductionsCPU.test_histogram_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_broadcast_tensors_cpu_float32",  # known py38 fail
