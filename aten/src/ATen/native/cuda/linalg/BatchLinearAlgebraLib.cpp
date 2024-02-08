@@ -1434,6 +1434,10 @@ static void linalg_eigh_cusolver_syevj_batched(const Tensor& eigenvalues, const 
 }
 
 void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
+  // for ROCm's hipSolver, syevj is fastest.
+#ifdef USE_ROCM
+  linalg_eigh_cusolver_syevj(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+#else
   if (use_cusolver_syevj_batched_ && batchCount(eigenvectors) > 1 && eigenvectors.size(-1) <= 32) {
     // Use syevjBatched for batched matrix opertion when matrix size <= 32
     // See https://github.com/pytorch/pytorch/pull/53040#issuecomment-788264724
@@ -1445,6 +1449,7 @@ void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors,
   } else {
     linalg_eigh_cusolver_syevd(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
   }
+#endif
 }
 
 // The 'apply_' word is used for templated by dtype functions that call an API routine
