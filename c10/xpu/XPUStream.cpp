@@ -57,16 +57,13 @@ enum class StreamIdType : uint8_t {
 inline std::ostream& operator<<(std::ostream& stream, StreamIdType q) {
   switch (q) {
     case StreamIdType::NORMAL:
-      stream << "NORMAL";
-      break;
+      return stream << "NORMAL";
     case StreamIdType::HIGH:
-      stream << "HIGH";
-      break;
+      return stream << "HIGH";
     default:
-      stream << static_cast<int16_t>(q);
       break;
   }
-  return stream;
+  return stream << static_cast<int16_t>(q);
 }
 
 inline StreamIdType streamIdType(StreamId s) {
