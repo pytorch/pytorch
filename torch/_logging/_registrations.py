@@ -132,3 +132,4 @@ register_artifact(
 )
 
 register_artifact("custom_format_test_artifact", "Testing only", log_format="")
+register_artifact("not_implemented", "Logs dispatches not implemented by Fake Tensor")
