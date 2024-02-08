@@ -874,7 +874,12 @@ class CSE:
     def generate(
         self,
         buffer: IndentedBuffer,
-        expr: Union[str, CSEVariable, OpsValue, IndentedBuffer],
+        expr: Union[
+            str,
+            CSEVariable,
+            OpsValue,
+            IndentedBuffer,
+        ],
         *,
         bounds: ValueRanges = ValueRanges.unknown(),
         write=True,
@@ -1127,13 +1132,26 @@ class Kernel(CodeGen):
                             fx_node, ValueRanges.unknown()
                         )
 
-                    csevar = self.cse.generate(
-                        self.compute,
-                        getattr(parent_handler, name)(*args, **kwargs),  # type: ignore[has-type]
-                        bounds=buf_bounds,
-                    )
-                    csevar.update_on_args(name, args, kwargs)
-                    return csevar
+                    value = getattr(parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
+                    if isinstance(value, tuple):
+                        result = []
+                        for v in value:
+                            csevar = self.cse.generate(
+                                self.compute,
+                                v,
+                                bounds=buf_bounds,
+                            )
+                            csevar.update_on_args(name, args, kwargs)
+                            result.append(csevar)
+                        return result
+                    else:
+                        csevar = self.cse.generate(
+                            self.compute,
+                            value,
+                            bounds=buf_bounds,
+                        )
+                        csevar.update_on_args(name, args, kwargs)
+                        return csevar
 
                 return inner
 

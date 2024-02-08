@@ -1023,11 +1023,11 @@ def returns_named_tuple_pyi(signature: PythonSignature) -> Optional[Tuple[str, s
         # Example:
         # namedtuple_def = (
         #     "class max(Tuple[Tensor, Tensor]):\n"
-        #     "    @property\n
-        #     "    def values(self) -> Tensor: ...\n
-        #     "    @property\n
-        #     "    def indices(self) -> Tensor: ...\n
-        #     "    def __init__(self, sequence: Tuple[Tensor, Tensor]): ...\n
+        #     "    @property\n"
+        #     "    def values(self) -> Tensor: ...\n"
+        #     "    @property\n"
+        #     "    def indices(self) -> Tensor: ...\n"
+        #     "    def __init__(self, sequence: Tuple[Tensor, Tensor]): ...\n"
         # )
         return namedtuple_name, namedtuple_def
     return None

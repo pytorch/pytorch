@@ -629,10 +629,17 @@ def register_pointwise(
 def register_frexp():
     """A pointwise function that maps ops.frexp to inputs"""
     name = "frexp"
+    frexp = ops_wrapper("frexp")
+
+    def frexp0(*args, **kwargs):
+        return frexp(*args, **kwargs)[0]
+
+    def frexp1(*args, **kwargs):
+        return frexp(*args, **kwargs)[1]
 
     pw_fns = [
-        make_pointwise(ops_wrapper("frexp0")),
-        make_pointwise(ops_wrapper("frexp1"), override_return_dtype=torch.int32),
+        make_pointwise(frexp0),
+        make_pointwise(frexp1, override_return_dtype=torch.int32),
     ]
 
     def fn(*args, **kwargs):

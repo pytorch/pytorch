@@ -825,23 +825,14 @@ class CppOverrides(OpOverrides):
         return f"std::copysign({x}, {y})"
 
     @staticmethod
-    def frexp0(x):
+    def frexp(x):
         code = BracesBuffer()
         exponent = V.kernel.cse.newvar()
         mantissa = V.kernel.cse.newvar()
         code.writeline(f"int32_t {exponent};")
         code.writeline(f"auto {mantissa} = std::frexp({x}, &{exponent});")
         V.kernel.compute.splice(code)
-        return mantissa
-
-    @staticmethod
-    def frexp1(x):
-        code = BracesBuffer()
-        exponent = V.kernel.cse.newvar()
-        code.writeline(f"int32_t {exponent};")
-        code.writeline(f"std::frexp({x}, &{exponent});")
-        V.kernel.compute.splice(code)
-        return exponent
+        return mantissa, exponent
 
     @staticmethod
     def hypot(x, y):
@@ -1430,6 +1421,7 @@ class CppVecOverrides(CppOverrides):
             csevar = V.kernel.cse.generate(
                 V.kernel.compute, f"{mask} ? {body_code} : {other_code}"
             )
+
         # `result` is explicitly added to the args for correct propagation
         # of relevant itervars and vectorization status.
         csevar.update_on_args("masked", (mask, body, other, result), {})
@@ -2622,6 +2614,8 @@ class CppVecKernelChecker(CppVecKernel):
         self._orig_wrapper_code = V.graph.wrapper_code
         V.graph.wrapper_code = WrapperCodeGen()
 
+        parent_handler = V.MockHandler()
+
         class VecCheckerProxy:
             bin_cmp_ops = ["eq", "ne", "le", "ge", "lt", "gt"]
 
@@ -2640,7 +2634,12 @@ class CppVecKernelChecker(CppVecKernel):
 
                     if name not in self.fast_vec_list:
                         self.disable_vec(f"op: {name}")
-                    return self.simd_vec
+
+                    parent_val = getattr(parent_handler, name)(*args, **kwargs)
+                    try:
+                        return tuple([self.simd_vec] * len(parent_val))
+                    except TypeError:
+                        return self.simd_vec
 
                 return inner
 

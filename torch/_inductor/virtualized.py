@@ -497,10 +497,7 @@ class OpsHandler(Protocol[T]):
     def erfinv(self, x0: T) -> T:
         ...
 
-    def frexp0(self, x0: T) -> T:
-        ...
-
-    def frexp1(self, x0: T) -> T:
+    def frexp(self, x0: T):
         ...
 
     def hypot(self, x0: T, x1: T) -> T:
@@ -719,7 +716,8 @@ class KernelFormatterHandler:
 
     def __getattr__(self, name) -> Callable[..., Any]:
         def inner(*args, **kwargs):
-            line = getattr(self.parent_handler, name)(*args, **kwargs)
+            fn = getattr(self.parent_handler, name)
+            line = fn(*args, **kwargs)
             if name == "indirect_indexing":
                 return line
             # replace line with a new variable name
@@ -828,6 +826,13 @@ class OpsValue:
 
     def __pow__(self, other):
         return ops.pow(self, other)
+
+    def __getitem__(self, items):
+        if hasattr(self.value, "__getitem__"):
+            return OpsValue(self.value[items])
+        else:
+            1 / 0
+            return self
 
 
 class OpsWrapper:

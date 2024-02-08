@@ -661,12 +661,8 @@ class TritonOverrides(OpOverrides):
         return f"tl.math.atanh({x})"
 
     @staticmethod
-    def frexp0(x):
-        return f"tl.math.ldexp({x}, -tl.math.ilogb({x}))"
-
-    @staticmethod
-    def frexp1(x):
-        return f"tl.math.ilogb({x})"
+    def frexp(x):
+        return f"tl.math.ldexp({x}, -tl.math.ilogb({x}))", f"tl.math.ilogb({x})"
 
     @staticmethod
     def copysign(x, y):
@@ -1988,7 +1984,6 @@ class TritonKernel(Kernel):
             self.compute,
             f"triton_helpers.bucketize_binary_search({values}, {offsets_ptr}, {triton_dtype}, {right}, {offsets_size_str}, {block_size})",  # noqa: B950 line too long
         )
-
         return result
 
     def reduction_resize(self, value):
