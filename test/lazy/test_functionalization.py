@@ -9,7 +9,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 torch._lazy.ts_backend.init()
 
-NODE_TYPE_PATTERN = re.compile(r", NodeType=[^ \n]+")
+NODE_TYPE_PATTERN = re.compile(r", NodeType=[^\n]+")
 
 
 class LazyFuncionalizationTest(TestCase):
