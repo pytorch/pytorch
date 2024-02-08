@@ -92,7 +92,7 @@ def build_opt_kwarg_dbs():
     for optim_info in optim_db:
         for device in ["cpu", "cuda"]:
             for optim_inputs in _get_optim_inputs_including_global_cliquey_kwargs(
-                device, None, optim_info, skip=("fused", "differentiable")
+                device, None, optim_info, skip=("differentiable",)
             ):
                 kwargs = dict(optim_inputs.kwargs)
                 # handle disabled optimizers
@@ -109,12 +109,9 @@ def build_opt_kwarg_dbs():
                     name = f"test_{optim_info.optim_cls.__name__.lower()}"
 
                     for key, val in kwargs.items():
-                        if key == "lr":
-                            continue
-                        if isinstance(val, bool):
-                            if val:
-                                name += "_" + key
-                        else:
+                        if not key == "lr" and (
+                            not isinstance(val, bool) or (isinstance(val, bool) and val)
+                        ):
                             name += "_" + key
 
                     name += f"_{device}"
@@ -144,6 +141,10 @@ def build_opt_kwarg_dbs():
 
                     if kwargs["kernel_count"] is None:
                         continue
+
+                    # fused optimizers are disabled
+                    if kwargs.get("fused", False):
+                        kwargs["kernel_count"] = 0
 
                     # Note on tolerances:
                     # test_adadelta_foreach_rho_weight_decay_cuda
@@ -176,7 +177,7 @@ except (unittest.SkipTest, ImportError) as e:
     raise
 
 
-def compile_opt(opt_compiled, closure=None):
+def compile_opt(opt_compiled, closure=None, fullgraph=True):
     # run the patcher so that step has the expected structure
     torch._dynamo.eval_frame.TorchPatcher.patch()
 
@@ -197,7 +198,7 @@ def compile_opt(opt_compiled, closure=None):
         def fn():
             step_fn(opt_compiled)
 
-    return torch.compile(fn, backend="inductor", fullgraph=True)
+    return torch.compile(fn, backend="inductor", fullgraph=fullgraph)
 
 
 def make_disabled_test(optim_cls, device="cuda", **kwargs):
@@ -251,6 +252,11 @@ def make_disabled_test(optim_cls, device="cuda", **kwargs):
         fn()
         fn()
 
+        self.assertEqual(
+            list(model_eager.parameters()),
+            list(model_compiled.parameters()),
+        )
+
         for p_eager, p_compiled in zip(
             model_eager.parameters(), model_compiled.parameters()
         ):
@@ -279,9 +285,14 @@ def make_test(
     def test_fn(self):
         stack = ExitStack()
         try:
+            # we fallback to eager on the fused implementation
+            is_fused = kwargs.get("fused", False)
+
             # https://github.com/pytorch/pytorch/issues/118715 for capturable Adagrad support
             # https://github.com/pytorch/pytorch/issues/118018 for capturable SGD support
-            run_cudagraphs = device == "cuda" and optim_cls not in (Adagrad, SGD)
+            run_cudagraphs = (
+                device == "cuda" and not is_fused and optim_cls not in (Adagrad, SGD)
+            )
             if run_cudagraphs:
                 stack.enter_context(config.patch({"triton.cudagraphs": True}))
 
@@ -302,7 +313,9 @@ def make_test(
 
             opt_eager = optim_cls(model_eager.parameters(), **kwargs)
             opt_compiled = optim_cls(model_compiled.parameters(), **kwargs)
-            compiled_step = compile_opt(opt_compiled, closure=closure)
+            compiled_step = compile_opt(
+                opt_compiled, closure=closure, fullgraph=(not is_fused)
+            )
 
             with torch.set_grad_enabled(False):
                 compiled_step()
