@@ -3,12 +3,6 @@
 #include <c10/util/irange.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 
-#define ASSERT_EQ_XPU(X, Y) \
-  {                         \
-    bool _isEQ = X == Y;    \
-    ASSERT_TRUE(_isEQ);     \
-  }
-
 bool has_xpu() {
   return c10::xpu::device_count() > 0;
 }
@@ -18,10 +12,10 @@ TEST(XPUCachingAllocatorTest, GetXPUAllocator) {
 
   auto _500mb = 500 * 1024 * 1024;
   auto buffer = allocator->allocate(_500mb);
-  ASSERT_TRUE(buffer.get());
+  EXPECT_TRUE(buffer.get());
 
   auto* xpu_allocator = c10::GetAllocator(buffer.device().type());
-  ASSERT_EQ_XPU(allocator, xpu_allocator);
+  EXPECT_EQ(allocator, xpu_allocator);
 }
 
 TEST(XPUCachingAllocatorTest, DeviceCachingAllocate) {
@@ -46,7 +40,7 @@ TEST(XPUCachingAllocatorTest, DeviceCachingAllocate) {
   // reuse our reserved memory. So the offset between ptr0 and ptr1 should equal
   // to ptr0's size (10M).
   auto diff = static_cast<char*>(ptr1) - static_cast<char*>(ptr0);
-  ASSERT_EQ_XPU(diff, _10mb);
+  EXPECT_EQ(diff, _10mb);
   c10::xpu::XPUCachingAllocator::raw_delete(ptr1);
   sycl::free(tmp, c10::xpu::get_device_context());
   c10::xpu::XPUCachingAllocator::emptyCache();
@@ -79,7 +73,7 @@ TEST(XPUCachingAllocatorTest, AllocateMemory) {
   c10::xpu::syncStreamsOnDevice();
 
   for (const auto i : c10::irange(numel)) {
-    ASSERT_EQ_XPU(hostData[i], i);
+    EXPECT_EQ(hostData[i], i);
   }
 }
 
