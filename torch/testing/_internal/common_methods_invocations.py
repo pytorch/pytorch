@@ -12982,6 +12982,7 @@ op_db: List[OpInfo] = [
            )
            ),
     OpInfo('batch_norm_with_update',
+           op=torch.ops.aten.batch_norm_with_update,
            aten_name='batch_norm_with_update',
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
            supports_forward_ad=True,
