@@ -1308,6 +1308,20 @@ class TestOperators(TestCase):
         xfail("_native_batch_norm_legit"),
         xfail('as_strided', 'partial_views'),
     }))
+    @opsToleranceOverride('TestOperators', 'test_vjpvmap', (
+        # TF32
+        tol1('__rmatmul__',
+             {torch.float32: tol(atol=3e-02, rtol=1e-03)}, device_type='cuda'),
+        tol1('addmm',
+             {torch.float32: tol(atol=5e-03, rtol=3e-03)}, device_type='cuda'),
+        tol1('matmul',
+             {torch.float32: tol(atol=3e-02, rtol=5e-03)}, device_type='cuda'),
+        tol1('nn.functional.linear',
+             {torch.float32: tol(atol=3e-03, rtol=3e-03)}, device_type='cuda'),
+        tol1('tensordot',
+             {torch.float32: tol(atol=3e-03, rtol=3e-03)}, device_type='cuda'),
+    ))
+
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
         # certainly redundant with the vmap_has_batch_rule test in test_vmap.py
