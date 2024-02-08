@@ -330,6 +330,13 @@ class MetaConverter:
                         with torch.enable_grad():
                             r = r.clone()
                 elif is_functorch_wrapped_tensor(t):
+                    if t._is_view():
+                        from torch._dynamo.exc import unimplemented
+
+                        unimplemented(
+                            "view functorch tensors are not supported by meta conversion"
+                        )
+
                     # Wraps a functorch tensor class (BatchedTensor, GradTrackingTensor)
                     # in a FakeTensor
                     def _to_fake_tensor(t):
@@ -344,16 +351,6 @@ class MetaConverter:
                                 ft = _to_fake_tensor(get_unwrapped(t))
                             lvl = torch._C._functorch.maybe_get_level(t)
                             r = torch._C._functorch._wrap_for_grad(ft, lvl)
-
-                            if t._is_view():
-                                # is this correct?
-                                # it fails if r is a nested functorch tensor:
-                                # r = GradTrackingTensor(
-                                #       BatchedTensor(
-                                #           Tensor
-                                #       )
-                                #   )
-                                r = r.view_as(r)
 
                             is_leaf = safe_is_leaf(t)
                             if t.requires_grad and safe_is_leaf(r):

@@ -3309,15 +3309,28 @@ class GraphModule(torch.nn.Module):
     @xfailIfTorchDynamo
     @config.patch(capture_func_transforms=True)
     @config.patch(error_on_recompile=True)
+    def test_vmap_recompile_same_config(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            return torch.vmap(lambda x: x.sin())(x)
+
+        x = torch.zeros(3, 3, 4, 5)
+        torch.vmap(torch.vmap(fn, randomness="same"), randomness="same")(x)
+        # should not recompile on second call. See Pytorch issue #118493
+        with self.assertRaises(torch._dynamo.exc.RecompileError):
+            torch.vmap(torch.vmap(fn, randomness="same"), randomness="error")(x)
+
+    @config.patch(capture_func_transforms=True)
+    @config.patch(error_on_recompile=True)
     def test_vmap_recompile_with_randomness(self):
         @torch.compile(backend="eager")
         def fn(x):
             return torch.vmap(lambda x: x.sin())(x)
 
         x = torch.zeros(3, 3, 4, 5)
-        y = torch.vmap(fn, randomness="same")(x)
+        torch.vmap(fn, randomness="same")(x)
         with self.assertRaises(torch._dynamo.exc.RecompileError):
-            y = torch.vmap(fn, randomness="different")(x)
+            torch.vmap(fn, randomness="different")(x)
 
     @config.patch(capture_func_transforms=True)
     def test_vmap_get_wrapped(self):
