@@ -4266,9 +4266,7 @@ class InplaceCopyFallback(ExternKernel):
             constant_args,
             python_kernel_name="aten.copy_",
             cpp_kernel_name=(
-                "aoti_torch_copy_"
-                if config.aot_inductor.abi_compatible
-                else "at::_ops::copy_::call"
+                "aoti_torch_copy_" if config.abi_compatible else "at::_ops::copy_::call"
             ),
         )
         self.name = V.graph.register_buffer(self)
@@ -4316,6 +4314,8 @@ class AccumulateGrad(ExternKernel):
         self.python_kernel_name = "inductor_ops.accumulate_grad_"
         self.cpp_kernel_name = "torch::inductor::accumulate_grad_"
         mark_node_as_mutating(self, variable)
+        # never reuse gradient buffers since they might be stolen
+        V.graph.never_reuse_buffers.add(new_grad.data.get_name())
 
 
 class ScatterFallback(ExternKernel):
@@ -4454,9 +4454,7 @@ class IndexPutFallback(ExternKernel):
         self.name = V.graph.register_buffer(self)
         self.python_kernel_name = "aten.index_put_"
         self.cpp_kernel_name = (
-            "aoti_torch_index_put_out"
-            if config.aot_inductor.abi_compatible
-            else "at::index_put_out"
+            "aoti_torch_index_put_out" if config.abi_compatible else "at::index_put_out"
         )
         mark_node_as_mutating(self, x)
 
@@ -4632,7 +4630,7 @@ class FallbackKernel(ExternKernelAlloc):
 
         self.cpp_kernel_name = kernel._schema.name
         self.cpp_kernel_overload_name = kernel._schema.overload_name
-        self.cpp_kernel_key = f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]  # noqa: B950
+        self.cpp_kernel_key = f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]
 
         self.cpp_op_schema = get_cpp_op_schema(kernel)
         self.init_args_default_value(kernel._schema)
@@ -7403,7 +7401,7 @@ class _CollectiveKernel(FallbackKernel):
 
         self.cpp_kernel_name = kernel._schema.name
         self.cpp_kernel_overload_name = kernel._schema.overload_name
-        self.cpp_kernel_key = f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]  # noqa: B950
+        self.cpp_kernel_key = f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]
 
         self.cpp_op_schema = get_cpp_op_schema(kernel)
         self.ordered_kwargs_for_cpp_kernel = [
@@ -7420,6 +7418,8 @@ class _CollectiveKernel(FallbackKernel):
     def create_inplace(
         cls, kernel, inputs: Union[TensorBox, List[TensorBox]], *args, **kwargs
     ) -> None:
+        cpp_kernel_name = kernel._name
+        python_kernel_name = cpp_kernel_name.replace("::", ".")
         with V.graph.fake_mode:
             (
                 example_output,
@@ -7437,6 +7437,8 @@ class _CollectiveKernel(FallbackKernel):
             non_tensor_args,
             unflatten_args,
         )
+        packed.cpp_kernel_name = cpp_kernel_name
+        packed.python_kernel_name = python_kernel_name
 
         def mark_mutation(x):
             if isinstance(x.data, BaseView):
@@ -7471,6 +7473,8 @@ class _CollectiveKernel(FallbackKernel):
     def create_out_of_place(
         cls, kernel, inputs: Union[TensorBox, List[TensorBox]], *args, **kwargs
     ):
+        cpp_kernel_name = kernel._name
+        python_kernel_name = cpp_kernel_name.replace("::", ".")
         with V.graph.fake_mode:
             (
                 example_output,
@@ -7490,6 +7494,8 @@ class _CollectiveKernel(FallbackKernel):
                 non_tensor_args,
                 unflatten_args,
             )
+            packed.cpp_kernel_name = cpp_kernel_name
+            packed.python_kernel_name = python_kernel_name
             packed.outputs = [
                 MultiOutput(
                     cls.tensor_to_layout(tensor),
@@ -7507,6 +7513,8 @@ class _CollectiveKernel(FallbackKernel):
                 non_tensor_args,
                 unflatten_args,
             )
+            packed.cpp_kernel_name = cpp_kernel_name
+            packed.python_kernel_name = python_kernel_name
             packed.outputs = [packed]
             return packed
 
