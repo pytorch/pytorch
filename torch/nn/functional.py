@@ -5458,7 +5458,7 @@ def multi_head_attention_forward(
 
     if need_weights:
         B, Nt, E = q.shape
-        q_scaled = q / math.sqrt(E)
+        q_scaled = q * math.sqrt(1.0 / float(E))
 
         assert not (is_causal and attn_mask is None), "FIXME: is_causal not implemented for need_weights"
 

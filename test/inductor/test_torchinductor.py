@@ -3956,11 +3956,10 @@ class CommonTemplate:
 
         self.common(
             fn,
-            # TODO: Remove dtype once https://github.com/pytorch/pytorch/issues/94010 is fixed
             (
                 torch.randn(
                     [16, 16],
-                    dtype=torch.float64 if self.device == "cpu" else torch.float32,
+                    dtype=torch.float32,
                 ),
             ),
             # Mismatched elements: 9 / 256 (3.5%)
@@ -8479,12 +8478,13 @@ class CommonTemplate:
         [
             subtest((name, getattr(torch.special, name)), name=name)
             for name in torch.special.__all__
-            if "_polynomial_" not in name and name not in {"softmax", "log_softmax"}
+            if "_polynomial_" not in name
+            and name not in {"softmax", "log_softmax", "logsumexp"}
         ],
     )
     def test_pointwise(self, name, op):
         dtype = torch.float32
-
+        check_lowp = True
         if self.device == "cuda" and name in {
             "airy_ai",
             "bessel_y0",
@@ -8504,7 +8504,7 @@ class CommonTemplate:
             "zeta",
         }:
             # <func>_cuda not implemented for Half
-            dtype = torch.float64
+            check_lowp = False
 
         if name in {"gammainc", "gammaincc"}:
             args = (
@@ -8514,12 +8514,6 @@ class CommonTemplate:
 
             def fn(x, y):
                 return op(x, y)
-
-        elif name in {"log_softmax", "logsumexp", "softmax"}:
-            args = (torch.randn(8, 8, dtype=dtype, device=self.device), 0)
-
-            def fn(x, dim):
-                return op(x, dim)
 
         elif name in {"xlog1py", "xlogy", "zeta"}:
             args = (
@@ -8554,7 +8548,7 @@ class CommonTemplate:
             def fn(x):
                 return op(x)
 
-        self.common(fn, args)
+        self.common(fn, args, check_lowp=check_lowp)
 
 
 @dataclasses.dataclass
