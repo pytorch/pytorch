@@ -3554,7 +3554,12 @@ def error_inputs_max_pool1d(op_info, device, **kwargs):
 
         # error inputs when pad > kernel_size / 2
         yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4, 'return_indices': True}),
-                         error_regex='pad should be at most half of kernel size')
+                         error_regex='pad should be at most half of effective kernel size')
+
+        # error inputs when pad > ((kernel_size - 1) * dilation + 1) / 2, when dilation is not default
+        yield ErrorInput(SampleInput(x,
+                         kwargs={'kernel_size': 3, 'dilation': 2, 'stride': 1, 'padding': 3, 'return_indices': True}),
+                         error_regex='pad should be at most half of effective kernel size')
 
         # error inputs for input tensor
         error_msg = r'Expected 2D or 3D \(batch mode\) tensor with optional 0 dim batch size for input'
@@ -3616,11 +3621,11 @@ def error_inputs_max_pool2d(op_info, device, **kwargs):
 
     # error inputs when pad > kernel_size / 2 (kernel_size : int)
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4, 'return_indices': True}),
-                     error_regex='pad should be at most half of kernel size')
+                     error_regex='pad should be at most half of effective kernel size')
 
     # error inputs when pad > kernel_size / 2 (kernel_size : tuple)
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2), 'stride': 50, 'padding': 4, 'return_indices': True}),
-                     error_regex='pad should be at most half of kernel size')
+                     error_regex='pad should be at most half of effective kernel size')
 
     # error: unbatched input with 0 sized non-batch dims.
     err_msg = r'Expected 3D or 4D \(batch mode\) tensor with optional 0 dim batch size for input'
@@ -3647,12 +3652,12 @@ def error_inputs_max_pool3d(op_info, device, **kwargs):
 
     # error inputs when pad > kernel_size / 2 (kernel_size: int)
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4, 'return_indices': True}),
-                     error_regex='pad should be at most half of kernel size')
+                     error_regex='pad should be at most half of effective kernel size')
 
     # error inputs when pad > kernel_size / 2 (kernel_size: tuple)
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2, 2), 'stride': 50,
                                             'padding': 4, 'return_indices': True}),
-                     error_regex='pad should be at most half of kernel size')
+                     error_regex='pad should be at most half of effective kernel size')
 
     # error: unbatched input with 0 sized non-batch dims.
     err_msg = r'Expected input\'s non-batch dimensions to have positive length'
@@ -4858,7 +4863,7 @@ def error_inputs_avg_pool1d(op_info, device, **kwargs):
 
     # error inputs when pad > kernel_size / 2
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4}),
-                     error_regex='pad should be at most half of kernel size')
+                     error_regex='pad should be at most half of effective kernel size')
 
 def error_inputs_avg_pool2d(op_info, device, **kwargs):
     # error inputs when pad is negative
@@ -4871,10 +4876,10 @@ def error_inputs_avg_pool2d(op_info, device, **kwargs):
 
     # error inputs when pad > kernel_size / 2
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4}),
-                     error_regex='pad should be at most half of kernel size')
+                     error_regex='pad should be at most half of effective kernel size')
     # 2-dimensional kernel
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2), 'stride': 50, 'padding': 4}),
-                     error_regex='pad should be at most half of kernel size')
+                     error_regex='pad should be at most half of effective kernel size')
 
     # error inputs for zero divisor
     x = torch.zeros(3, 3, 3)
@@ -4892,10 +4897,10 @@ def error_inputs_avg_pool3d(op_info, device, **kwargs):
 
     # error inputs when pad > kernel_size / 2
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4}),
-                     error_regex='pad should be at most half of kernel size')
+                     error_regex='pad should be at most half of effective kernel size')
     # 3-dimensional kernel
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2, 2), 'stride': 50, 'padding': 4}),
-                     error_regex='pad should be at most half of kernel size')
+                     error_regex='pad should be at most half of effective kernel size')
 
     # error inputs for zero divisor
     x = torch.zeros(3, 3, 3, 3)

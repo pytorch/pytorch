@@ -7,7 +7,7 @@ import math
 import re
 import sys
 from copy import copy, deepcopy
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
@@ -530,7 +530,7 @@ class CppVecUnsupportedError(Exception):
 
 
 class CppCSEVariable(CSEVariable):
-    def __init__(self, name, bounds: ValueRanges):
+    def __init__(self, name, bounds: ValueRanges[Any]):
         super().__init__(name, bounds)
         self.is_vec = False
         self.dtype: Optional[torch.dtype] = None
@@ -939,6 +939,10 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def bessel_j0(x):
         return f"bessel_j0_forward({x})"
+
+    @staticmethod
+    def bessel_j1(x):
+        return f"bessel_j1_forward({x})"
 
 
 class CppVecOverrides(CppOverrides):
@@ -1819,10 +1823,11 @@ class CppVecKernel(CppKernel):
         load_mask_str = f"to_float_mask({load_mask})" if load_mask else None
         loadbuf = f"{var} + {cexpr_index(index)}" if index != 0 else var
         if dtype == torch.uint8 and opt_ctx.is_load_uint8_as_float:
+            assert self._get_num_vectors(torch.uint8) == 1
             line = (
                 f"masked_load({loadbuf}, {load_mask_str})"
                 if load_mask_str
-                else f"{self._get_vec_type(dtype)}::loadu_one_fourth({loadbuf})"
+                else f"at::vec::Vectorized<uint8_t>::loadu_one_fourth({loadbuf})"
             )
         elif opt_ctx.is_load_as_mask:
             line = f"flag_to_float_vec({loadbuf})"
@@ -2114,6 +2119,9 @@ initializer(omp_priv={{{self.reduction_init_vec(reduction_type, dtype)}}})
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
             if is_welford_reduction(reduction_type):
+                assert (
+                    self._get_num_vectors(dtype) == 1
+                ), "Welford reduction does not support VectorizedN (N>1)"
                 next_value = f"welford_vec_reduce_all({acc_vec})"
             else:
                 reduce_all_body = (
@@ -3139,7 +3147,7 @@ class CppKernelProxy(CppKernel):
                 body: ir.LoopBody = node._body
                 _legalize_lowp_fp(body)
 
-    def codegen_nodes(self, nodes):
+    def codegen_nodes(self, nodes: List[SchedulerNode]):
         # Legalize BF16 node by adding to_dtype explicitly
         self.legalize_lowp_fp_dtype(nodes)
         self.data_type_propagation(nodes)
@@ -3147,10 +3155,10 @@ class CppKernelProxy(CppKernel):
         assert len(nodes) >= 1
         first_node = nodes[0]
         vec_dtype = (
-            first_node._lowp_fp_type
+            first_node._lowp_fp_type  # type: ignore[attr-defined]
             if all(
                 hasattr(_node, "_lowp_fp_type")
-                and _node._lowp_fp_type == first_node._lowp_fp_type
+                and _node._lowp_fp_type == first_node._lowp_fp_type  # type: ignore[attr-defined]
                 for _node in nodes
             )
             else torch.float
@@ -3373,7 +3381,7 @@ class CppScheduling(BaseScheduling):
     def can_fuse_vertical(self, node1, node2):
         return self._can_fuse_horizontal_impl(node1, node2) and not node1.is_reduction()
 
-    def codegen_nodes(self, nodes):
+    def codegen_nodes(self, nodes: List[SchedulerNode]):
         """
         Turn an set of pre-fused nodes into a C++ kernel.
         """
@@ -3477,7 +3485,9 @@ class KernelGroup:
         codecache_str = codecache_str.replace("#pragma CMT", "//")
         wrapper.define_kernel(kernel_name, codecache_str, cuda=False)
         # generate the code to call this
-        wrapper.generate_kernel_call(kernel_name, call_args, cuda=False)
+        wrapper.generate_kernel_call(
+            kernel_name, call_args, cuda=False, arg_types=arg_types
+        )
 
 
 class CppWrapperKernelGroup(KernelGroup):
