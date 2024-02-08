@@ -1725,7 +1725,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
             x = torch.randn(B0, 0, 3)
             vmap(lambda x: x.as_strided([3], [1]))(x)
 
-    @xfailIfTorchDynamo
     def test_nll_loss(self):
         test = self._vmap_test
         op = F.nll_loss
