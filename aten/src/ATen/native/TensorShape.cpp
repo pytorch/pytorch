@@ -410,7 +410,7 @@ Tensor& set_storage_meta__symint(Tensor& result, Storage storage, c10::SymInt st
   result.unsafeGetTensorImpl()->set_sizes_and_strides(size, stride, storage_offset);
 
   // Matches maybe_resize_storage_cpu no-numel behavior
-  if (result.sym_numel() != 0) {
+  if (TORCH_GUARD_SIZE_OBLIVIOUS(result.sym_numel().sym_ne(0))) {
     // maybe_resize_storage_cpu can handle no storage exists at all but
     // that should never be the case here
     TORCH_INTERNAL_ASSERT(storage);
