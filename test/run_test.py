@@ -614,6 +614,9 @@ def run_test_retries(
         else:
             sc_command = f"--sc={stepcurrent_key}"
         print_to_file("Retrying...")
+        # Print full c++ stack traces during retries
+        env = env or {}
+        env["TORCH_SHOW_CPP_STACKTRACES"] = "1"
         print_items = []  # do not continue printing them, massive waste of space
 
     consistent_failures = [x[1:-1] for x in num_failures.keys() if num_failures[x] >= 3]
