@@ -64,6 +64,8 @@ DTYPE_TO_CPP = {
     torch.uint32: "unsigned int",
     torch.uint16: "unsigned short",
     torch.uint8: "unsigned char",
+    torch.uint32: "unsigned int",
+    torch.uint64: "unsigned long",
     torch.bool: "bool",
     torch.bfloat16: "bfloat16",
     torch.complex64: "complex64",
@@ -83,6 +85,8 @@ DTYPE_TO_ATEN = {
     torch.uint32: "at::kUInt32",
     torch.uint16: "at::kUInt16",
     torch.uint8: "at::kByte",
+    torch.uint32: "at::kUInt32",
+    torch.uint64: "at::kUInt64",
     torch.bool: "at::kBool",
     torch.bfloat16: "at::kBFloat16",
     torch.complex32: "at::kComplexHalf",
@@ -187,17 +191,6 @@ def reduction_init(reduction_type, dtype):
     raise AssertionError(reduction_type)
 
 
-def reduction_init_vec(reduction_type, dtype):
-    scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
-    vec_type = f"at::vec::Vectorized<{scalar_type}>"
-
-    if is_welford_reduction(reduction_type):
-        return f"Welford<{vec_type}>()"
-
-    scalar_init = reduction_init(reduction_type, dtype)
-    return f"{vec_type}({scalar_init})"
-
-
 def reduction_acc_type(reduction_type, dtype):
     assert reduction_type not in {"argmin", "argmax"}
     scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
@@ -205,16 +198,6 @@ def reduction_acc_type(reduction_type, dtype):
         return f"Welford<{scalar_type}>"
 
     return scalar_type
-
-
-def reduction_acc_type_vec(reduction_type, dtype):
-    assert reduction_type not in {"argmin", "argmax"}
-    scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
-    vec_type = f"at::vec::Vectorized<{scalar_type}>"
-    if is_welford_reduction(reduction_type):
-        return f"Welford<{vec_type}>"
-
-    return vec_type
 
 
 def reduction_combine(reduction_type, var, next_value):
@@ -237,31 +220,6 @@ def reduction_combine(reduction_type, var, next_value):
             mean, m2, weight = reduction_project(reduction_type, next_value)
         return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
     raise AssertionError(reduction_type)
-
-
-def reduction_combine_vec(reduction_type, var, next_value):
-    if reduction_type == "max":
-        return f"at::vec::maximum({var}, {next_value})"
-    elif reduction_type == "min":
-        return f"at::vec::minimum({var}, {next_value})"
-    elif reduction_type == "sum":
-        return f"{var} + {next_value}"
-    elif reduction_type == "prod":
-        return f"{var} * {next_value}"
-    elif reduction_type == "xor_sum":
-        return f"{var} ^ {next_value}"
-    elif reduction_type == "welford_reduce":
-        return f"welford_combine({var}, {next_value})"
-    elif reduction_type == "welford_combine":
-        if isinstance(next_value, tuple):
-            # When reading a value from Inductor IR we have a tuple of variable names
-            mean, m2, weight = next_value
-        else:
-            # When combining intermediate accumulators we have a Welford<T> struct
-            mean, m2, weight = reduction_project(reduction_type, next_value)
-        return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
-    else:
-        raise NotImplementedError()
 
 
 def reduction_project(reduction_type, acc):
@@ -565,6 +523,10 @@ def get_opt_ctx(node: torch.fx.Node) -> OptimizationContext:
 def get_current_node_opt_ctx() -> OptimizationContext:
     assert V.interpreter.current_node
     return get_opt_ctx(V.interpreter.current_node)
+
+
+class CppVecUnsupportedError(Exception):
+    pass
 
 
 class CppCSEVariable(CSEVariable):
@@ -1003,24 +965,37 @@ class CppVecOverrides(CppOverrides):
             #     needs to further analyze the dependency of the index expression on
             #     the tiling itervar.
             def wrapper(*args, **kwargs):
-                has_scalar = any(
-                    not arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)
-                )
-                has_vector = any(
-                    arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)
-                )
+                scalars = [
+                    arg
+                    for arg in args
+                    if isinstance(arg, CppCSEVariable) and not arg.is_vec
+                ]
+                vectors = [
+                    arg
+                    for arg in args
+                    if isinstance(arg, CppCSEVariable) and arg.is_vec
+                ]
                 new_args = list(args)
-                if has_scalar and has_vector:
+                if scalars and vectors:
                     # broadcast scalar args to vector if needed
                     new_args = []
+                    vec_dtype = vectors[0].dtype
                     for arg in args:
                         if isinstance(arg, CppCSEVariable) and not arg.is_vec:
                             assert isinstance(V.kernel, CppVecKernel)
+                            # align scalar data type to the vector for binary ops
+                            if len(args) == 2 and arg.dtype != vec_dtype:
+                                arg = ops.to_dtype(arg, vec_dtype)
+                                arg = arg.value if isinstance(arg, OpsValue) else arg
+                                # See NOTE [dtype of CppCSEVariable]: we have to fix arg.dtype since
+                                # the dtype from optimization context could be wrong.
+                                assert isinstance(arg, CppCSEVariable)
+                                arg.dtype = vec_dtype
                             new_arg = V.kernel.broadcast(arg)
                             new_args.append(new_arg)
                         else:
                             new_args.append(arg)
-                if has_vector:
+                if vectors:
                     return func(*new_args, **kwargs)
                 else:
                     # fallback to scalar ops
@@ -1281,8 +1256,9 @@ class CppVecOverrides(CppOverrides):
         # a and b are integer type
         _t = f"decltype({a})"
         quot = f"{a} / {b}"
-        rem = f"{a} % {b}"
-        return f"(({a} < {_t}(0)) != ({b} < {_t}(0)) ? ({rem} != {_t}(0) ? {quot} - {_t}(1) : {quot}) : {quot})"
+        has_rem = f"({a} % {b} != {_t}(0))"
+        is_neg = f"(({a} < {_t}(0)) != ({b} < {_t}(0)))"
+        return f"{_t}::blendv({quot}, {quot} - {_t}(1), {has_rem} & {is_neg})"
 
     @staticmethod
     def truncdiv(a, b):
@@ -1303,6 +1279,11 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def where(a, b, c):
+        assert isinstance(b, CppCSEVariable)
+        if b.dtype != torch.float:
+            raise CppVecUnsupportedError(
+                "where with non-float tensor is not supported in vectorized codegen"
+            )
         return f"decltype({b})::blendv({c}, {b}, {a})"
 
     @staticmethod
@@ -1333,6 +1314,7 @@ class CppVecOverrides(CppOverrides):
             torch.float16,
             torch.uint8,
             torch.int32,
+            torch.int64,
         ], f"{__name__} does not support {dtype}"
         node: torch.fx.Node = V.interpreter.current_node
         assert node and isinstance(node, torch.fx.Node)
@@ -1344,6 +1326,8 @@ class CppVecOverrides(CppOverrides):
             return f"mask_convert_to_float({x})"
         if opt_ctx_x.dtype == torch.bool and dtype in DTYPE_LOWP_FP:
             return f"mask_convert_to_lowp<{DTYPE_TO_CPP[dtype]}>({x})"
+        if opt_ctx_x.dtype == torch.bool and dtype == torch.int64:
+            return f"mask_convert_to_int64({x})"
         if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype in DTYPE_LOWP_FP:
             return f"cvt_fp32_to_lowp_fp<{DTYPE_TO_CPP[dtype]}>({x})"
         if opt_ctx_x.dtype in DTYPE_LOWP_FP and dtype in (torch.float, torch.float32):
@@ -1357,6 +1341,18 @@ class CppVecOverrides(CppOverrides):
             # * Pattern match of quantization op in the loop body.
             # * Skip the explicit saturation and clamp inside at::vec::convert_float_to_uint8.
             return f"at::vec::convert_float_to_uint8({x})"
+        if opt_ctx_x.dtype == torch.int32 and dtype == torch.float:
+            return f"at::vec::convert_to_fp_of_same_size<float>({x})"
+        if opt_ctx_x.dtype == torch.float and dtype == torch.int32:
+            return f"at::vec::convert_to_int_of_same_size({x})"
+        if opt_ctx_x.dtype == torch.int64 and dtype == torch.float:
+            return f"cvt_int64_to_fp32({x})"
+        if opt_ctx_x.dtype == torch.float and dtype == torch.int64:
+            return f"cvt_fp32_to_int64({x})"
+        if opt_ctx_x.dtype == torch.int32 and dtype == torch.int64:
+            return f"cvt_int32_to_int64({x})"
+        if opt_ctx_x.dtype == torch.int64 and dtype == torch.int32:
+            return f"cvt_int64_to_int32({x})"
         # TODO(jgong5): support conversion for other types
         # currently we only allow load/store torch.uint8 and handle conversion there
         return f"({x})"
@@ -1375,6 +1371,7 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def masked(mask, body, other):
+        assert isinstance(V.kernel, CppVecKernel)
         code = BracesBuffer()
         var = V.kernel.cse.newvar()
         with V.kernel.masked(mask) as new_mask:
@@ -1387,10 +1384,12 @@ class CppVecOverrides(CppOverrides):
 
         body_code = f"{var}()"
         body_code_vec = (
-            body_code if result.is_vec else f"at::vec::Vectorized<float>({body_code})"
+            body_code
+            if result.is_vec
+            else f"{V.kernel._get_vec_type(torch.float)}({body_code})"
         )
         other_code = value_to_cpp(other, "float")
-        other_code_vec = f"at::vec::Vectorized<float>({other_code})"
+        other_code_vec = f"{V.kernel._get_vec_type(torch.float)}({other_code})"
         assert isinstance(new_mask, CppCSEVariable), new_mask
         if new_mask.is_vec or result.is_vec:
             type = f"decltype({body_code_vec})"
@@ -1782,12 +1781,26 @@ class CppVecKernel(CppKernel):
         tiling_dtype=torch.float,
     ):
         super().__init__(args, num_threads)
-        assert codecache.pick_vec_isa()
+        self.vec_isa = codecache.pick_vec_isa()
+        assert self.vec_isa
         if tiling_factor == 0:
-            tiling_factor = codecache.pick_vec_isa().nelements(dtype=tiling_dtype)
+            tiling_factor = self.vec_isa.nelements(dtype=tiling_dtype)
         self.tiling_factor = tiling_factor
         self.tiling_idx = tiling_idx
-        metrics.generated_cpp_vec_kernel_count += 1
+
+    def _get_num_vectors(self, dtype: torch.dtype) -> int:
+        num_vectors = math.ceil(
+            self.tiling_factor * dtype.itemsize * 8 / self.vec_isa.bit_width()
+        )
+        assert num_vectors >= 1
+        return num_vectors
+
+    def _get_vec_type(self, dtype: torch.dtype) -> str:
+        num_vectors = self._get_num_vectors(dtype)
+        if num_vectors == 1:
+            return f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>"
+        else:
+            return f"at::vec::VectorizedN<{DTYPE_TO_CPP[dtype]},{num_vectors}>"
 
     def _get_vec_load_line(
         self,
@@ -1810,6 +1823,7 @@ class CppVecKernel(CppKernel):
         load_mask_str = f"to_float_mask({load_mask})" if load_mask else None
         loadbuf = f"{var} + {cexpr_index(index)}" if index != 0 else var
         if dtype == torch.uint8 and opt_ctx.is_load_uint8_as_float:
+            assert self._get_num_vectors(torch.uint8) == 1
             line = (
                 f"masked_load({loadbuf}, {load_mask_str})"
                 if load_mask_str
@@ -1821,13 +1835,13 @@ class CppVecKernel(CppKernel):
             line = (
                 f"masked_load({loadbuf}, {load_mask_str})"
                 if load_mask_str
-                else f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>::loadu({loadbuf}, {self.tiling_factor})"
+                else f"{self._get_vec_type(dtype)}::loadu({loadbuf}, {self.tiling_factor})"
             )
         else:
             line = (
                 f"masked_load({loadbuf}, {load_mask_str})"
                 if load_mask_str
-                else f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>::loadu({loadbuf})"
+                else f"{self._get_vec_type(dtype)}::loadu({loadbuf})"
             )
         return line
 
@@ -1856,8 +1870,10 @@ class CppVecKernel(CppKernel):
             buffer = self.loads
 
         def get_result_size(dtype: torch.dtype) -> int:
-            assert dtype.itemsize <= 4
-            return self.tiling_factor * (4 // dtype.itemsize)
+            if dtype.itemsize < 4:
+                return self.tiling_factor * (4 // dtype.itemsize)
+            else:
+                return self.tiling_factor
 
         def vec_to_array(vec_var: CppCSEVariable) -> CppCSEVariable:
             assert vec_var.is_vec
@@ -1987,7 +2003,7 @@ class CppVecKernel(CppKernel):
             isinstance(value, CppCSEVariable) and value.is_vec
         ), value
         tiling_var = self.itervars[self.tiling_idx]
-        assert index.has(tiling_var)
+        assert index.has(tiling_var), f"index: {index}, tiling_var: {tiling_var}"
         var_expr = f"{var} + {cexpr_index(index)}"
         stride = stride_at_vec_range(index, tiling_var, self.tiling_factor)
         non_contiguous = stride != 1 or self.index_indirect_depends_on(
@@ -2041,17 +2057,15 @@ class CppVecKernel(CppKernel):
             "welford_reduce",
             "welford_combine",
         }
-        assert dtype == torch.float
-        assert src_dtype == torch.float
+        assert dtype == src_dtype
+        assert dtype in [torch.float, torch.int64]
         assert isinstance(value, CppCSEVariable), value
 
         if not value.is_vec:
             value = self.broadcast(value)
 
-        vec_ns = "at::vec"
-        vec = f"{vec_ns}::Vectorized<{DTYPE_TO_CPP[dtype]}>"
         acc_type = reduction_acc_type(reduction_type, dtype)
-        acc_type_vec = reduction_acc_type_vec(reduction_type, dtype)
+        acc_type_vec = self.reduction_acc_type_vec(reduction_type, dtype)
 
         if (reduction_type, acc_type) not in self.reduction_omp_dec:
             if RTYPE_TO_CPP[reduction_type] not in NATIVE_OMP_RTYPES:
@@ -2073,8 +2087,8 @@ initializer(omp_priv={{{reduction_init(reduction_type, dtype)}}})
                 f"""\
 #pragma omp declare reduction(\
 {RTYPE_TO_CPP[reduction_type]}:{acc_type_vec}:\
-omp_out = {reduction_combine_vec(reduction_type, "omp_out", "omp_in")}) \
-initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
+omp_out = {self.reduction_combine_vec(reduction_type, "omp_out", "omp_in")}) \
+initializer(omp_priv={{{self.reduction_init_vec(reduction_type, dtype)}}})
             """
             )
             self.reduction_omp_dec[reduction_type, acc_type_vec] = RTYPE_TO_CPP[
@@ -2095,24 +2109,28 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
             f"{acc_type} {acc} = {reduction_init(reduction_type, dtype)};"
         )
         self.reduction_prefix.writeline(
-            f"{acc_type_vec} {acc_vec} = {reduction_init_vec(reduction_type, dtype)};"
+            f"{acc_type_vec} {acc_vec} = {self.reduction_init_vec(reduction_type, dtype)};"
         )
         self.stores.writeline(
-            f"{acc_vec} = {reduction_combine_vec(reduction_type, acc_vec, value)};"
+            f"{acc_vec} = {self.reduction_combine_vec(reduction_type, acc_vec, value)};"
         )
 
         tmpvar: Union[str, CSEVariable]
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
             if is_welford_reduction(reduction_type):
+                assert (
+                    self._get_num_vectors(dtype) == 1
+                ), "Welford reduction does not support VectorizedN (N>1)"
                 next_value = f"welford_vec_reduce_all({acc_vec})"
             else:
                 reduce_all_body = (
                     "{ return "
-                    + reduction_combine_vec(reduction_type, "x", "y")
+                    + self.reduction_combine_vec(reduction_type, "x", "y")
                     + "; }"
                 )
-                vec_reduce_all_func = f"{vec_ns}::vec_reduce_all<{DTYPE_TO_CPP[dtype]}>"
+                vec = f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>"
+                vec_reduce_all_func = f"at::vec::vec_reduce_all<{DTYPE_TO_CPP[dtype]}>"
                 next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {acc_vec})"
 
             self.reduction_suffix.writeline(
@@ -2175,7 +2193,7 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
             assert scalar_var.dtype is not None
             vec_var = self.cse.generate(
                 self.compute,
-                f"at::vec::Vectorized<{DTYPE_TO_CPP[scalar_var.dtype]}>({scalar_var.name})",
+                f"{self._get_vec_type(scalar_var.dtype)}({scalar_var.name})",
             )
         assert isinstance(vec_var, CppCSEVariable)
         vec_var.dtype = scalar_var.dtype
@@ -2192,12 +2210,56 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
             assert isinstance(index, CppCSEVariable)
             assert not index.is_vec
         csevar = self.cse.generate(
-            self.compute, f"at::vec::Vectorized<int32_t>::arange({index}, {stride})"
+            self.compute,
+            f"{self._get_vec_type(torch.int32)}::arange({index}, {stride})",
         )
         assert isinstance(csevar, CppCSEVariable)
         csevar.dtype = torch.int32
         csevar.is_vec = True
         return csevar
+
+    def reduction_init_vec(self, reduction_type, dtype):
+        scalar_type = DTYPE_TO_COMPUTATION_DTYPE[dtype]
+        vec_type = self._get_vec_type(scalar_type)
+
+        if is_welford_reduction(reduction_type):
+            return f"Welford<{vec_type}>()"
+
+        scalar_init = reduction_init(reduction_type, dtype)
+        return f"{vec_type}({scalar_init})"
+
+    def reduction_acc_type_vec(self, reduction_type, dtype):
+        assert reduction_type not in {"argmin", "argmax"}
+        scalar_type = DTYPE_TO_COMPUTATION_DTYPE[dtype]
+        vec_type = self._get_vec_type(scalar_type)
+        if is_welford_reduction(reduction_type):
+            return f"Welford<{vec_type}>"
+
+        return vec_type
+
+    def reduction_combine_vec(self, reduction_type, var, next_value):
+        if reduction_type == "max":
+            return f"at::vec::maximum({var}, {next_value})"
+        elif reduction_type == "min":
+            return f"at::vec::minimum({var}, {next_value})"
+        elif reduction_type == "sum":
+            return f"{var} + {next_value}"
+        elif reduction_type == "prod":
+            return f"{var} * {next_value}"
+        elif reduction_type == "xor_sum":
+            return f"{var} ^ {next_value}"
+        elif reduction_type == "welford_reduce":
+            return f"welford_combine({var}, {next_value})"
+        elif reduction_type == "welford_combine":
+            if isinstance(next_value, tuple):
+                # When reading a value from Inductor IR we have a tuple of variable names
+                mean, m2, weight = next_value
+            else:
+                # When combining intermediate accumulators we have a Welford<T> struct
+                mean, m2, weight = reduction_project(reduction_type, next_value)
+            return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
+        else:
+            raise NotImplementedError()
 
 
 class CppTile2DKernel(CppVecKernel):
@@ -2368,7 +2430,6 @@ class CppVecKernelChecker(CppVecKernel):
         # Since this kernel is only for checker but does not generate any
         # code, so we need to decrease the kernel count.
         metrics.generated_kernel_count -= 1
-        metrics.generated_cpp_vec_kernel_count -= 1
 
         # Used to record the graph wrapper code as the wrapper_code status could be
         # changed during graph run.
@@ -2389,12 +2450,16 @@ class CppVecKernelChecker(CppVecKernel):
             torch.float16,
             torch.bool,
             torch.uint8,
+            torch.int32,
+            torch.int64,
         ]
         self.store_supported_dtypes: List[torch.dtype] = [
             torch.float,
             torch.bfloat16,
             torch.float16,
             torch.uint8,
+            torch.int32,
+            torch.int64,
         ]
         # Cache the dtypes of the store operation. If the store is mixing dtypes, the
         # vectorization would not support it as it is hard to determine the vec dtype
@@ -2549,8 +2614,8 @@ class CppVecKernelChecker(CppVecKernel):
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         if (
-            dtype == torch.float
-            and src_dtype == torch.float
+            (dtype == torch.float and src_dtype == torch.float)
+            or (dtype == torch.int64 and src_dtype == torch.int64)
             and reduction_type in VECTORIZABLE_RTYPES
         ):
             pass
@@ -2673,6 +2738,7 @@ class CppVecKernelChecker(CppVecKernel):
                     supported_dtypes = [
                         torch.float32,
                         torch.int32,
+                        torch.int64,
                         torch.bfloat16,
                         torch.float16,
                         torch.bool,
@@ -2784,21 +2850,11 @@ class CppVecKernelChecker(CppVecKernel):
                                 torch.bfloat16,
                                 torch.float,
                                 torch.uint8,
+                                torch.int32,
+                                torch.int64,
                             ]:
                                 # Convert from dtype to torch.float
                                 pass
-                            elif (
-                                dtype in [torch.int32, torch.int64]
-                                and input_value.target == "load"
-                            ):
-                                buffer = V.graph.get_buffer(input_value.args[1])  # type: ignore[arg-type]
-                                # Check if load of a scalar tensor of integer
-                                if not (
-                                    isinstance(buffer, TensorBox)
-                                    and isinstance(buffer.data, StorageBox)
-                                    and len(buffer.data.layout.size) == 0
-                                ):
-                                    self.disable_vec(f"to_dtype: dtype {dtype}")
                             else:
                                 self.disable_vec(f"to_dtype: dtype {dtype}")
                     elif dtype in DTYPE_LOWP_FP:
@@ -2836,6 +2892,8 @@ class CppVecKernelChecker(CppVecKernel):
                         )
                         if not (is_to_uint8_and_store or is_to_uint8_and_to_float):
                             self.disable_vec(f"to_dtype: dtype {dtype}")
+                    elif dtype in [torch.int64, torch.int32]:
+                        pass
                     else:
                         self.disable_vec(f"to_dtype: dtype {dtype}")
                     return x
@@ -3115,12 +3173,11 @@ class CppKernelProxy(CppKernel):
 
         def codegen_kernel(cls, *args):
             with kernel_group.new_kernel(cls, *args) as kernel:
-                run(kernel)
-
                 # Ugly hack to maintain the metrics kernel count since
                 # we only count in CppKernelProxy, not those contained in it
                 metrics.generated_kernel_count -= 1
 
+                run(kernel)
                 return kernel
 
         def run(kernel):
@@ -3225,46 +3282,52 @@ class CppKernelProxy(CppKernel):
         with torch._inductor.config.patch(inplace_buffers=False):
             tiling_factors, tiling_indices = select_tiling(vec_dtype)
             assert len(tiling_factors) == len(tiling_indices)
-            if len(tiling_indices) == 1:
-                main_loop, tail_loop = self.loop_nest.split_with_tiling(
-                    tiling_indices[0], factor=tiling_factors[0]
-                )
-                main_loop.set_kernel(
-                    codegen_kernel(
+            try:
+                if len(tiling_indices) == 1:
+                    vec_kernel = codegen_kernel(
                         CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
                     )
-                )
-                tail_loop.set_kernel(scalar_kernel)
-                main_loop.simd_vec = True
-                tail_loop.simd_omp = True
-                # We chop the loop into two cubes by the nelements - main loop and tail loop.
-                # Regarding the main loop, it is straightforward that it could be vectorized with
-                # nelements. But for the tail loop, it still could be vectorized. For example,
-                # if the nelements is 8(256bits), then the tail loop still could be vectorized
-                # as 4(128bits).
-                tail_loop.simd_nelements = tiling_factors[0] // 2
-            elif len(tiling_indices) == 2:
-                assert (
-                    tiling_indices[1] == len(self.itervars) - 1
-                    and tiling_factors[0] == tiling_factors[1]
-                )
-                outer_main_loop, outer_tail_loop = self.loop_nest.split_with_tiling(
-                    tiling_indices[0], factor=tiling_factors[0]
-                )
-                outer_tail_loop.set_kernel(scalar_kernel)
-                inner_main_loop, inner_tail_loop = outer_main_loop.split_with_tiling(
-                    tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
-                )
-                inner_main_loop.set_kernel(
-                    codegen_kernel(
+                    metrics.generated_cpp_vec_kernel_count += 1
+                    main_loop, tail_loop = self.loop_nest.split_with_tiling(
+                        tiling_indices[0], factor=tiling_factors[0]
+                    )
+                    main_loop.set_kernel(vec_kernel)
+                    tail_loop.set_kernel(scalar_kernel)
+                    main_loop.simd_vec = True
+                    tail_loop.simd_omp = True
+                    # We chop the loop into two cubes by the nelements - main loop and tail loop.
+                    # Regarding the main loop, it is straightforward that it could be vectorized with
+                    # nelements. But for the tail loop, it still could be vectorized. For example,
+                    # if the nelements is 8(256bits), then the tail loop still could be vectorized
+                    # as 4(128bits).
+                    tail_loop.simd_nelements = tiling_factors[0] // 2
+                elif len(tiling_indices) == 2:
+                    assert (
+                        tiling_indices[1] == len(self.itervars) - 1
+                        and tiling_factors[0] == tiling_factors[1]
+                    )
+                    tile2d_kernel = codegen_kernel(
                         CppTile2DKernel, tiling_factors[0], tiling_indices, vec_dtype
                     )
-                )
-                inner_tail_loop.set_kernel(
-                    codegen_kernel(
+                    vec_kernel = codegen_kernel(
                         CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
                     )
-                )
+                    metrics.generated_cpp_vec_kernel_count += 2
+                    outer_main_loop, outer_tail_loop = self.loop_nest.split_with_tiling(
+                        tiling_indices[0], factor=tiling_factors[0]
+                    )
+                    outer_tail_loop.set_kernel(scalar_kernel)
+                    (
+                        inner_main_loop,
+                        inner_tail_loop,
+                    ) = outer_main_loop.split_with_tiling(
+                        tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
+                    )
+                    inner_main_loop.set_kernel(tile2d_kernel)
+                    inner_tail_loop.set_kernel(vec_kernel)
+            except CppVecUnsupportedError as e:
+                if schedule_log.isEnabledFor(logging.DEBUG):
+                    schedule_log.debug("Disabled vectorization: %s", e)
 
     def codegen_loops(self, code, worksharing):
         self.codegen_loops_impl(self.loop_nest, code, worksharing)
