@@ -3017,7 +3017,7 @@ def forward(self, l_q_, l_k_, l_v_):
         ops = set(
             node.target for node in decomposed.graph.nodes if node.op == "call_function"
         )
-        self.assertFalse(torch.ops.aten._scaled_dot_product_flash_attention_for_cpu in ops)
+        self.assertFalse(torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default in ops)
 
 
     @unittest.skipIf(
