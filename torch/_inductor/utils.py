@@ -1258,15 +1258,3 @@ def pass_execution_and_save(func, gm, msg):
             t,
             time_elapsed,
         )
-
-
-def is_collective(node):
-    from . import ir
-
-    return isinstance(node, ir.CollectiveKernel) or type(node) == ir._CollectiveKernel
-
-
-def is_wait(node):
-    from . import ir
-
-    return isinstance(node, ir.Wait) or type(node) == ir._WaitKernel
