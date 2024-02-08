@@ -1731,7 +1731,7 @@ class CppKernel(Kernel):
     @property
     def assert_function(self) -> str:
         if V.graph.aot_mode:
-            return "AOTI_CHECK"
+            return "AOTI_TORCH_CHECK"
         else:
             return "TORCH_CHECK"
 

@@ -808,7 +808,7 @@ AOTITorchError aoti_torch_proxy_executor_call_function(
   });
 }
 
-void aoti_check(
+void aoti_torch_check(
     bool cond,
     const char* func,
     const char* file,
