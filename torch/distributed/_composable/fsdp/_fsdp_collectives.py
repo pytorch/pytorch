@@ -118,10 +118,10 @@ def foreach_all_gather_copy_out(
         for fsdp_param in fsdp_params
         for t in fsdp_param.all_gather_outputs
     ]
-    # TODO: Use `torch.split_with_sizes_copy` fast path once it lands.
-    splits = torch.split(all_gather_output, all_gather_input_split_sizes, dim=1)
     with _unsafe_preserve_version_counters(out):
-        torch._foreach_copy_(out, splits)  # one `copy_` per parameter
+        torch.split_with_sizes_copy(
+            all_gather_output, all_gather_input_split_sizes, dim=1, out=out
+        )
 
 
 @torch.no_grad()
