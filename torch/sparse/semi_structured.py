@@ -26,6 +26,9 @@ _SEMI_STRUCTURED_SPARSE_CONFIG = namedtuple(
 def to_sparse_semi_structured(
     original_tensor: torch.Tensor,
 ) -> Any:
+    """
+    User entrypoint into semi-structured sparsity
+    """
     sparse_subclass = (
         SparseSemiStructuredTensorCUTLASS
         if SparseSemiStructuredTensor._FORCE_CUTLASS
@@ -51,18 +54,6 @@ class SparseSemiStructuredTensor(torch.Tensor):
     - `from_dense` - backend specific compression scripts
     - `_mm` - calss into _cslt_sparse_mm or _sparse_semi_structured_linear based on backend.
 
-    cuSPARSELt:
-        The cuSPARSELt backend expects the specified elements and the metadata to be stored in a single tensor:
-        packed = [ specified elements of original tensor | metadata ]
-        For an original tensor of size (m, k) we expect the first m * k // 2 elements to be the kept elements
-        The rest of the tensor is metadata. Since there is only one tensor, we only use the packed and packed_t
-        attributes respectively.
-        cusPARELt also supports transposition fusion, which is necessary for performant 2:4 sparse training.
-
-    CUTLASS:
-        For CUTLASS backend, elements of original tensor and metadata are kept in separate tensors.
-        When _FORCE_CUTLASS is set, or when cuSPARSELt is not available, this subclass calls into _sparse_semi_structured_linear
-        and sparse_semi_structured_from_dense for conversion to the compressed format.
     """
 
     _DEFAULT_ALG_ID = 0
@@ -316,6 +307,17 @@ class SparseSemiStructuredTensor(torch.Tensor):
 
 
 class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
+    """
+    This class implements semi-structured sparsity for the CUTLASS backend.
+
+    In this implementation, the specified elements and metadata are stored seprately,
+    in packed and meta respectively.
+
+    When _FORCE_CUTLASS is set, or when cuSPARSELt is not available, this subclass calls into _sparse_semi_structured_linear
+    and sparse_semi_structured_from_dense for conversion to the compressed format.
+    """
+
+
     _DTYPE_SHAPE_CONSTRAINTS = {
         torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 128, 16, 16),
         torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 64, 8, 8),
@@ -324,7 +326,7 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
     }
 
     @classmethod
-    def from_dense(cls, original_tensor):
+    def from_dense(cls, original_tensor : torch.Tensor):
         cls._validate_device_dim_dtype_shape(original_tensor)
         (
             sparse_tensor_cutlass,
@@ -378,6 +380,16 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
 
 
 class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
+    """
+    The cuSPARSELt backend expects the specified elements and the metadata to be stored in a single tensor:
+    packed = [ specified elements of original tensor | metadata ]
+    For an original tensor of size (m, k) we expect the first m * k // 2 elements to be the kept elements
+    The rest of the tensor is metadata. Since there is only one tensor, we only use the packed and packed_t
+    attributes respectively.
+
+    cuSPARSELt also supports transposition fusion, which is necessary for performant 2:4 sparse training, as well
+    as specifying alg_id, a config that affects the performance of the matmul depending on matmul sizes.
+    """
     _DTYPE_SHAPE_CONSTRAINTS = {
         torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 32, 16, 16),
         torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 16, 8, 8),
