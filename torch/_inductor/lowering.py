@@ -448,20 +448,29 @@ def make_pointwise(
 def make_foreach_pointwise(pw_fn, allow_alpha=False):
     def inner(*inputs: List[List[TensorBox]], alpha=1):
         # group by device, whether any of the inputs are dynamic, and whether their types match
-        # (proxy for type promotion)
+        # (proxy for type promotion), and whether they are aliased
+        # we count the number of aliases for a given name to determine alias group number
+        # to ensure that two aliases for the same value are never grouped together
         def group_args(arg_pairs):
             out = defaultdict(list)
+            alias_counts = defaultdict(int)
             for i, args in enumerate(arg_pairs):
                 use_foreach = not is_dynamic(*args)
                 device = None
+                alias_group = 0
                 for t in args:
                     if isinstance(t, TensorBox):
                         device = t.data.get_device()
-                        break
+                        if isinstance(t.data, ir.BaseView):
+                            unaliased = t.data.unwrap_view()
+                            alias_counts[unaliased.get_name()] += 1
+                            alias_group = max(
+                                alias_counts[unaliased.get_name()], alias_group
+                            )
                 assert (
                     device is not None
                 ), "foreach op should have at least one tensor arg"
-                out[(device, use_foreach)].append((i, args))
+                out[(device, use_foreach, alias_group)].append((i, args))
             return out
 
         realize_outputs = (
@@ -493,7 +502,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
         groups = group_args(zip(*broadcast_inputs))
 
         outputs = [None] * len(a_list_input)
-        for (device, use_foreach), group in groups.items():
+        for (device, use_foreach, _), group in groups.items():
             buffer_list = []
             for (
                 output_ind,

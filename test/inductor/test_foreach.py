@@ -708,19 +708,17 @@ class ForeachTests(TestCase):
         inps = [
             input,
             input.view(10, 10),
-            # input.view(10, 10),
-            input,
+            input.view(10, 10),
             input2,
             input2.view(10, 10),
-            # input2.view(10, 10),
-            input2,
+            input2.view(10, 10),
         ]
 
         out_eager = test_foreach_add(*inps)
         out_compiled = torch.compile(test_foreach_add)(*inps)
 
         self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
 
 if __name__ == "__main__":
