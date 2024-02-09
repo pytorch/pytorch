@@ -19,7 +19,7 @@ jobs:
       build-environment: linux-jammy-py3.8-gcc11
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11
 
-#  docs-push: 
+#  docs-push:
 #    name: docs push
 #    uses: ./.github/workflows/_docs.yml
 #    needs: docs-build
