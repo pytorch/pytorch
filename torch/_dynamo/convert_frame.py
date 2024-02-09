@@ -35,7 +35,7 @@ from torch.nn.parallel.distributed import DistributedDataParallel
 from torch.utils._python_dispatch import _disable_current_modes
 from torch.utils._traceback import format_traceback_short
 
-from . import config, exc, trace_rules
+from . import config, exc, skipfiles
 from .backends.registry import CompilerFn
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
@@ -855,7 +855,7 @@ def catch_errors_wrapper(callback, hooks: Hooks):
     def catch_errors(frame, cache_entry, frame_state):
         assert frame_state is not None
 
-        is_skipfile = trace_rules.check(frame.f_code)
+        is_skipfile = skipfiles.check(frame.f_code)
         if (
             # TODO: the first condition is not covered by any test
             frame.f_lasti >= first_real_inst_idx(frame.f_code)
@@ -867,7 +867,7 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                     "traced frame already"
                     if frame.f_lasti >= first_real_inst_idx(frame.f_code)
                     else "in skipfiles"
-                    if trace_rules.check(frame.f_code)
+                    if skipfiles.check(frame.f_code)
                     else "dynamo tracing is disabled"
                 )
                 if not is_skipfile or config.verbose:
