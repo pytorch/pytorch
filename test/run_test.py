@@ -1141,7 +1141,7 @@ def parse_args():
     parser.add_argument(
         "--enable-td",
         action="store_true",
-        help="Set a timeout based on the test times json file.  Only works if there are test times available",
+        help="Enables removing tests based on TD",
         default=IS_CI
         and os.getenv("BRANCH", "") != "main"
         and not strtobool(os.environ.get("NO_TD", "False")),
