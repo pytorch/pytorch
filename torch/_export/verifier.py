@@ -9,7 +9,7 @@ from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.export.exported_program import ExportedProgram
 from torch.export.graph_signature import (
-    ExportGraphSignature,
+    CustomObjArgument,
     InputKind,
     SymIntArgument,
     TensorArgument,
@@ -42,6 +42,8 @@ def _check_val(node: torch.fx.Node) -> None:
         elif isinstance(val, (FakeTensor, torch.Tensor)):  # TODO(zhxchen17) Remove Tensor.
             return True
         elif isinstance(val, (SymInt, SymFloat, SymBool)):
+            return True
+        elif isinstance(val, CustomObjArgument):
             return True
         elif isinstance(val, Iterable):
             return all(_check_correct_val(x) for x in val)
@@ -79,6 +81,15 @@ class _VerifierMeta(type):
         ret = type.__new__(metacls, name, bases, attrs)
         metacls._registry[attrs["dialect"]] = ret  # type: ignore[assignment]
         return ret
+
+def getattr_recursive(obj: Any, target: str) -> Any:
+    target_atoms = target.split('.')
+    attr_itr = obj
+    for i, atom in enumerate(target_atoms):
+        if not hasattr(attr_itr, atom):
+            raise RuntimeError(f"Node referenced nonexistent target {'.'.join(target_atoms[:i])}")
+        attr_itr = getattr(attr_itr, atom)
+    return attr_itr
 
 
 class Verifier(metaclass=_VerifierMeta):
@@ -126,9 +137,6 @@ class Verifier(metaclass=_VerifierMeta):
 
     @final
     def check(self, ep: ExportedProgram) -> None:
-        if not isinstance(ep.graph_signature, ExportGraphSignature):
-            # TODO Enforce type checking in the constructor.
-            return
         self._check_graph_module(ep.graph_module)
         _verify_exported_program_signature(ep)
 
@@ -159,6 +167,11 @@ class Verifier(metaclass=_VerifierMeta):
                 torch.sym_min,
                 torch.sym_not,
                 torch.sym_sqrt,
+                # TODO (tmanlaibaatar)
+                # Predispatch export is able to contain autograd ops.
+                # These will be modeled as HOO later
+                torch._C._set_grad_enabled
+
             )
 
             if not isinstance(op, _allowed_op_types()):
@@ -200,7 +213,7 @@ class Verifier(metaclass=_VerifierMeta):
                             f"Expected get_attr target to be string, but got {type(node.target)}"
                         )
 
-                    attr = getattr(mod, node.target)
+                    attr = getattr_recursive(mod, node.target)
                     if isinstance(attr, torch.nn.Module):
                         def _is_type(name, ty):
                             return isinstance(getattr(attr, name, None), ty)
@@ -293,9 +306,19 @@ def _verify_exported_program_signature(exported_program) -> None:
                 )
 
             buffer = input_spec.target
-            if buffer not in exported_program.state_dict:
+            if input_spec.persistent is None:
+                raise SpecViolationError(
+                    f"Buffer {buffer} is missing a persistence flag"
+                )
+
+            if input_spec.persistent is True and buffer not in exported_program.state_dict:
                 raise SpecViolationError(
                     f"Buffer {buffer} is not in the state dict."
+                )
+
+            if input_spec.persistent is False and buffer in exported_program.state_dict:
+                raise SpecViolationError(
+                    f"Non-persistent buffer {buffer} is in the state dict, it should not be."
                 )
         elif input_spec.kind == InputKind.CONSTANT_TENSOR:
             if not isinstance(input_spec.arg, TensorArgument):
@@ -308,9 +331,24 @@ def _verify_exported_program_signature(exported_program) -> None:
                 )
 
             tensor_const = input_spec.target
-            if tensor_const not in exported_program.tensor_constants:
+            if tensor_const not in exported_program.constants:
                 raise SpecViolationError(
-                    f"Constant tensor {tensor_const} is not in the tensor constants dictionary."
+                    f"Constant tensor {tensor_const} is not in the constants dictionary."
+                )
+        elif input_spec.kind == InputKind.CUSTOM_OBJ:
+            if not isinstance(input_spec.arg, CustomObjArgument):
+                raise SpecViolationError(
+                    f"Custom object {input_spec.name} is not a custom object argument. Found {input_spec.arg} instead."
+                )
+            if input_spec.target is None:
+                raise SpecViolationError(
+                    f"InputSpec for {input_spec.name} has no target."
+                )
+
+            custom_obj = input_spec.target
+            if custom_obj not in exported_program.constants:
+                raise SpecViolationError(
+                    f"Custom object {custom_obj} is not in the constants dictionary."
                 )
         else:
             raise SpecViolationError(
@@ -320,7 +358,10 @@ def _verify_exported_program_signature(exported_program) -> None:
     # Check outputs
     output_node = list(exported_program.graph.nodes)[-1]
     assert output_node.op == "output"
-    output_nodes = [arg.name for arg in output_node.args[0]]
+    output_nodes = [
+        arg.name if isinstance(arg, torch.fx.Node) else arg
+        for arg in output_node.args[0]
+    ]
 
     if len(output_nodes) != len(gs.output_specs):
         raise SpecViolationError(

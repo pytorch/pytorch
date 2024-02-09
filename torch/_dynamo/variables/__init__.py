@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 from .base import VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
@@ -9,6 +11,7 @@ from .ctx_manager import (
     InferenceModeVariable,
     StreamContextVariable,
     StreamVariable,
+    VmapIncrementNestingCtxManagerVariable,
     WithExitFunctionVariable,
 )
 from .dicts import (
@@ -19,11 +22,15 @@ from .dicts import (
     SetVariable,
 )
 from .functions import (
+    FunctoolsPartialVariable,
     NestedUserFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
-from .higher_order_ops import TorchHigherOrderOperatorVariable
+from .higher_order_ops import (
+    FunctorchVmapHigherOrderVariable,
+    TorchHigherOrderOperatorVariable,
+)
 from .iter import (
     CountIteratorVariable,
     CycleIteratorVariable,
@@ -51,6 +58,7 @@ from .misc import (
     GetAttrVariable,
     InspectSignatureVariable,
     LambdaVariable,
+    MethodWrapperVariable,
     NewCellVariable,
     NewGlobalVariable,
     NumpyVariable,
@@ -58,9 +66,11 @@ from .misc import (
     SkipFilesVariable,
     StringFormatVariable,
     SuperVariable,
+    TypingVariable,
     UnknownVariable,
 )
 from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+from .sdpa import SDPAParamsVariable
 from .tensor import (
     FakeItemVariable,
     NumpyNdarrayVariable,
@@ -126,4 +136,5 @@ __all__ = [
     "UserMethodVariable",
     "VariableTracker",
     "WithExitFunctionVariable",
+    "SDPAParamsVariable",
 ]

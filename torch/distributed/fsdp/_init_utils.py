@@ -56,6 +56,8 @@ from torch.distributed.fsdp.api import (
 from torch.distributed.fsdp.wrap import _Policy
 from torch.distributed.tensor.parallel.fsdp import DTensorExtensions
 from torch.distributed.utils import _sync_params_and_buffers
+
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.hooks import RemovableHandle
 
 _TORCHDISTX_AVAIL = True
@@ -883,7 +885,7 @@ def _materialize_meta_module(
         warnings.warn(
             "Unable to call `reset_parameters()` for module on meta "
             f"device with error {str(e)}. Please ensure that your module of"
-            f"type {type(module)} implements a `reset_parameters()` method."
+            f"type {type(module)} implements a `reset_parameters()` method."  # type: ignore[possibly-undefined]
         )
         raise e
 
@@ -992,7 +994,7 @@ def _move_states_to_device(
                     param.grad.data = param.grad.to(device_from_device_id)
         for buffer in buffers:
             buffer.data = buffer.to(device_from_device_id)
-    elif current_device == cpu_device:
+    elif current_device == cpu_device:  # type: ignore[possibly-undefined]
         _warn_cpu_init()
 
 
@@ -1062,8 +1064,25 @@ def _sync_module_params_and_buffers(
         # Avoid re-synchronizing buffers in case of nested wrapping
         if not getattr(buffer, FSDP_SYNCED, False):
             setattr(buffer, FSDP_SYNCED, True)
-            module_states.append(buffer.detach())
-    module_states.extend(param.detach() for param in params)
+            detached_buffer = buffer.detach()
+            if is_traceable_wrapper_subclass(detached_buffer):
+                # NOTE: Here we assume no nested subclasses, at most one level of subclass
+                # in both model's buffers and params
+                attrs, _ = detached_buffer.__tensor_flatten__()  # type: ignore[attr-defined]
+                inner_buffers = [getattr(detached_buffer, attr) for attr in attrs]
+                module_states.extend(inner_buffers)
+            else:
+                module_states.append(detached_buffer)
+
+    for param in params:
+        detached_param = param.detach()
+        if is_traceable_wrapper_subclass(detached_param):
+            attrs, _ = detached_param.__tensor_flatten__()  # type: ignore[attr-defined]
+            inner_params = [getattr(detached_param, attr) for attr in attrs]
+            module_states.extend(inner_params)
+        else:
+            module_states.append(detached_param)
+
     _check_module_states_for_sync_module_states(module_states)
     _sync_params_and_buffers(
         process_group,

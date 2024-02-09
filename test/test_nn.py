@@ -53,7 +53,7 @@ from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, g
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, tf32_off, tf32_on
 from torch.types import _TensorOrTensors
-
+from torch.testing._internal.common_mkldnn import bf32_on_and_off
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
 
@@ -8165,6 +8165,7 @@ class TestNNDeviceType(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @tf32_on_and_off()
+    @bf32_on_and_off()
     def test_affine_2d_rotate0(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -8204,6 +8205,7 @@ class TestNNDeviceType(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @tf32_on_and_off(0.001)
+    @bf32_on_and_off(0.001)
     def test_affine_2d_rotate90(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -8252,6 +8254,7 @@ class TestNNDeviceType(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @tf32_on_and_off(0.005)
+    @bf32_on_and_off(0.005)
     def test_affine_2d_rotate45(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -8307,6 +8310,7 @@ class TestNNDeviceType(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @tf32_on_and_off(0.005)
+    @bf32_on_and_off(0.005)
     def test_affine_2d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -8358,6 +8362,7 @@ class TestNNDeviceType(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @tf32_on_and_off(0.005)
+    @bf32_on_and_off(0.005)
     def test_affine_3d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -9885,7 +9890,12 @@ class TestNNDeviceType(NNTestCase):
 
         torch.manual_seed(0)
 
-        input_ui8 = torch.randint(0, 256, size=(batch_size, num_channels, 400, 400), dtype=torch.uint8, device=device)
+        # - input range is set to [30, 220] for bicubic mode, because the bicubic kernel may create
+        #   [intermediate] values outside of the [0, 255] range, which need
+        #   to be clipped in uint8 path, but not in float path. This isn't
+        #   an issue with bilinear kernel.
+        input_range = (30, 220) if mode == "bicubic" else (0, 256)
+        input_ui8 = torch.randint(*input_range, size=(batch_size, num_channels, 400, 400), dtype=torch.uint8, device=device)
         input_ui8 = input_ui8.contiguous(memory_format=memory_format)
 
         if non_contig == "sliced":
@@ -9919,37 +9929,21 @@ class TestNNDeviceType(NNTestCase):
             self.assertTrue(output_ui8.is_contiguous(memory_format=memory_format))
             self.assertTrue(output_f32.is_contiguous(memory_format=memory_format))
 
-        diff = (output_f32 - output_ui8.float()).abs()
         if mode == "bilinear":
             torch.testing.assert_close(output_f32, output_ui8.float(), rtol=0, atol=1)
         else:
-            # - tolerances for bicubic mode are in general higher than for
-            #   bilinear mode, because the bicubic kernel may create
-            #   [intermediate] values outside of the [0, 255] range, which need
-            #   to be clipped in uint8 path, but not in float path. This isn't
-            #   an issue with bilinear kernel.
-            # - Also in bicubic mode, when antialias=False, we have to use
-            #   bigger tolerances than when antialias=True. This is partially
-            #   due to the fact that when False, the float path uses the -0.75
-            #   constant while the uint8 path uses the -0.5 constant in the
-            #   bicubic kernel (when True, they both use -0.5). This difference
-            #   in constants exists for historical reasons. Should both paths
-            #   use the -0.5 constant, we would have closer results and we would
-            #   be able to lower the tolerances.
-
-            max_diff = 30 if antialias else 44
-            assert diff.max() < max_diff
+            diff = (output_f32 - output_ui8.float()).abs()
+            self.assertLess(diff.max(), 15)
 
             threshold = 2
-            percent = 3 if antialias else 40
-            assert (diff > threshold).float().mean() < (percent / 100)
+            percent = 3
+            self.assertLess((diff > threshold).float().mean(), percent / 100)
 
             threshold = 5
-            percent = 1 if antialias else 20
-            assert (diff > threshold).float().mean() < (percent / 100)
+            percent = 1
+            self.assertLess((diff > threshold).float().mean(), percent / 100)
 
-            mae = .4 if antialias else 3
-            assert diff.mean() < mae
+            self.assertLess(diff.mean(), 0.4)
 
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("align_corners", [True, False])
@@ -10007,31 +10001,41 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(expected_out, t_out)
 
     @parametrize_test("align_corners", [True, False])
-    def test_upsamplingTrilinear3d(self, device, align_corners):
+    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last_3d])
+    def test_upsamplingTrilinear3d(self, device, align_corners, memory_format):
         kwargs = dict(mode='trilinear', align_corners=align_corners)
 
-        for memory_format in [torch.contiguous_format, torch.channels_last_3d]:
-            # test float scale factor up & downsampling
-            for scale_factor in [0.5, 1.5, 2]:
-                m = nn.Upsample(scale_factor=scale_factor, **kwargs)
-                in_t = torch.ones(1, 2, 2, 2, 2, device=device, dtype=torch.double)
-                in_t = in_t.contiguous(memory_format=memory_format).requires_grad_()
-                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                with warnings.catch_warnings(record=True) as w:
-                    out_t = m(in_t)
-                expected_out = torch.ones(1, 2, out_size, out_size, out_size, device=device, dtype=torch.double)
-                self.assertEqual(expected_out, out_t)
-                # Assert that memory format is carried through to the output
-                self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
-                out_t.backward(torch.randn_like(out_t))
-                self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
+        # test float scale factor up & downsampling
+        for scale_factor in [0.5, 1.5, 2]:
+            m = nn.Upsample(scale_factor=scale_factor, **kwargs)
+            in_t = torch.ones(1, 2, 4, 4, 4, device=device, dtype=torch.double)
+            in_t = in_t.contiguous(memory_format=memory_format).requires_grad_()
+            out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+            with warnings.catch_warnings(record=True) as w:
+                out_t = m(in_t)
+            expected_out = torch.ones(1, 2, out_size, out_size, out_size, device=device, dtype=torch.double)
+            self.assertEqual(expected_out, out_t)
+            # Assert that memory format is carried through to the output
+            self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
 
-                input = torch.randn(1, 2, 2, 2, 2, requires_grad=True, dtype=torch.double)
-                self.assertEqual(
-                    F.interpolate(input, (out_size, out_size, out_size), **kwargs),
-                    F.interpolate(input, scale_factor=scale_factor, **kwargs))
-                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
-                gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+            grad_out = torch.randn_like(out_t).contiguous(memory_format=memory_format)
+            in_t.grad = None
+            out_t.backward(grad_out)
+            grad_in = in_t.grad
+            self.assertTrue(grad_in.is_contiguous(memory_format=memory_format))
+
+            if memory_format == torch.channels_last_3d:
+                # check if grad inputs CF and CL match
+                in_t.grad = None
+                out_t.backward(grad_out.contiguous())
+                self.assertEqual(in_t.grad, grad_in)
+
+            input = torch.randn(1, 2, 4, 4, 4, requires_grad=True, dtype=torch.double)
+            self.assertEqual(
+                F.interpolate(input, (out_size, out_size, out_size), **kwargs),
+                F.interpolate(input, scale_factor=scale_factor, **kwargs))
+            gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+            gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
     @onlyCUDA
     @dtypes(torch.half)
@@ -10178,6 +10182,29 @@ class TestNNDeviceType(NNTestCase):
                     native_res.masked_fill(mask_out, 0),
                     exact_dtype=True
                 )
+
+    @dtypes(torch.bfloat16, torch.half)
+    @precisionOverride({torch.bfloat16: 2e-2, torch.half: 3e-3})
+    def test_masked_softmax_lowp(self, dtype):
+        sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
+        for (B, num_heads, L) in sizes:
+            for dim in [0, 3]:
+                input_lowp = torch.randn((B, num_heads, L, L), dtype=dtype).requires_grad_()
+                input_ref = input_lowp.float().detach().requires_grad_()
+                mask = torch.randint(0, 2, (B, L))
+                mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L).bool()
+
+                for mask_type in [1, 2]:
+                    res_ref = torch._masked_softmax(input_ref, mask, dim, mask_type)
+                    res = torch._masked_softmax(input_lowp, mask, dim, mask_type)
+                    self.assertEqual(res_ref.to(dtype), res)
+
+                    grad_lowp = torch.randn_like(res_ref).to(dtype=dtype)
+                    grad_ref = grad_lowp.float()
+
+                    res_ref.backward(grad_ref)
+                    res.backward(grad_lowp)
+                    self.assertEqual(input_ref.grad.to(dtype), input_lowp.grad)
 
     def _test_masked_softmax_helper(self, input, dim, mask, mask_type):
         input_ref = input.detach().clone().requires_grad_()
@@ -11704,6 +11731,47 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(result_long, result_byte)
             self.assertEqual(grad_long, grad_byte)
 
+    @onlyCUDA
+    @skipIfRocm
+    @dtypes(torch.float16, torch.float32)
+    def test_cross_entropy_loss_2d_out_of_bounds_class_index(self, device, dtype):
+        # Test for issue #117532
+        # Run in a different process to prevent the device-side assert from affecting other tests
+        stderr = TestCase.runWithPytorchAPIUsageStderr(f"""\
+#!/usr/bin/env python3
+
+import torch
+import torch.nn.functional as F
+from torch.testing._internal.common_utils import (run_tests, TestCase)
+
+class TestThatContainsCUDAAssert(TestCase):
+    def test_cross_entropy_loss_2d_out_of_bounds_class_index(self):
+        device = '{str(device)}'
+        dtype = {str(dtype).strip("'")}
+        ignore_index = 255
+        b = 10
+        n_classes = 3
+        w = 768
+        h = 1024
+        pred = torch.randn(b, n_classes, w, h, dtype=dtype, device=device)
+        labels = torch.zeros(b, w, h, dtype=torch.int64, device=device)
+        labels[5, 200, 200] = ignore_index
+        # Set invalid class index
+        labels[5, 200, 200] = 254
+
+        x = F.cross_entropy(
+            pred, labels, reduction="none", ignore_index=ignore_index
+        )
+        torch.cuda.synchronize()
+
+
+if __name__ == '__main__':
+    run_tests()
+        """)
+        self.assertIn('CUDA error: device-side assert triggered', stderr)
+
+
+
     def test_cross_entropy_loss_prob_target_all_reductions(self, device):
         # Test with k-dimensional loss.
         for k in range(5):
@@ -12709,7 +12777,6 @@ class TestNNDeviceType(NNTestCase):
             with cm:
                 _test(activation=activation, batch_first=batch_first, training=training)
 
-    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @parametrize_test('foreach', (False, True))
     def test_clip_grad_value(self, foreach, device):
         if torch.device(device).type == 'xla' and foreach:
@@ -12737,7 +12804,6 @@ class TestNNDeviceType(NNTestCase):
         clip_grad_value_([p2], clip_value, foreach=foreach)
         self.assertEqual(p1.grad, p2.grad)
 
-    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @parametrize_test('foreach', (False, True))
     @parametrize_test('norm_type', (0.5, 1.5, 2, 4, 'inf'))
     def test_clip_grad_norm(self, norm_type, foreach, device):

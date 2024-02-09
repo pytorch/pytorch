@@ -1579,6 +1579,18 @@ def forward(self, a_1):
         f(a)
         make_fx(f, tracing_mode="symbolic")(a)
 
+    def test_fake_tensor_as_size(self):
+        def f(x):
+            r = torch.zeros([x])
+            return r
+
+        fx_g = make_fx(f, tracing_mode="symbolic")(torch.tensor(4))
+        self.assertExpectedInline(fx_g.code.strip(), """\
+def forward(self, x_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
+    zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    return zeros""")  # noqa: B950
+
     def test_expand(self):
         def f(a):
             b = torch.mul(a, a)
@@ -1844,7 +1856,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.fractional_max_pool3d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('nn.functional.interpolate', 'linear'),  # aten.upsample_linear1d.vec - couldn't find symbolic meta function/dec...
     xfail('nn.functional.interpolate', 'trilinear'),  # aten.upsample_trilinear3d.vec - couldn't find symbolic meta functi...
-    xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta function/deco...
     xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
@@ -1887,9 +1898,6 @@ outplace_symbolic_tensor_failures = {
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
 
     xfail('linalg.norm', ''),
-    xfail('round', 'decimals_0'),  # Cannot call numel() on tensor with symbolic sizes/strides
-    xfail('round', 'decimals_3'),  # Cannot call numel() on tensor with symbolic sizes/strides
-    xfail('round', 'decimals_neg_3'),  # Cannot call numel() on tensor with symbolic sizes/strides
 }
 
 inplace_symbolic_tensor_failures = {
@@ -1941,10 +1949,6 @@ out_symbolic_tensor_failures = {
     xfail('nn.functional.avg_pool2d', ''),
     xfail('nn.functional.linear', ''),
     xfail('qr', ''),
-    xfail('round', ''),
-    xfail('round', 'decimals_0'),
-    xfail('round', 'decimals_3'),
-    xfail('round', 'decimals_neg_3'),
     xfail('scatter_add', ''),
     xfail('scatter', ''),
     xfail('sort', ''),

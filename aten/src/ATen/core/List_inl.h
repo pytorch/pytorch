@@ -186,8 +186,8 @@ void List<T>::set(size_type pos, value_type&& value) const {
 }
 
 template<class T>
-typename List<T>::value_type List<T>::get(size_type pos) const {
-  return c10::detail::list_element_to<T>(impl_->list.at(pos));
+typename List<T>::internal_const_reference_type List<T>::get(size_type pos) const {
+  return operator[](pos);
 }
 
 template<class T>

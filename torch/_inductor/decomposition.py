@@ -57,6 +57,7 @@ inductor_decompositions = get_decompositions(
         aten.native_batch_norm,
         aten.native_group_norm,
         aten.native_layer_norm,
+        aten.pixel_shuffle,
         aten._softmax,
         aten.sin_,
         aten.sqrt_,
@@ -73,7 +74,7 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 # the Inductor decomp table.
 decomps_to_exclude = [
     aten._unsafe_index,
-    aten._scaled_dot_product_flash_attention.default,  # See comments in torch/_decomp/decompositions.py
+    aten._scaled_dot_product_flash_attention_for_cpu.default,  # See comments in torch/_decomp/decompositions.py
     aten.clamp_max,
     aten.clamp_min,
     aten.glu,  # inductor lowers this directly

@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # Owner(s): ["module: dataloader"]
 
 import copy
@@ -41,7 +43,10 @@ import torch.nn as nn
 import torch.utils.data.datapipes as dp
 import torch.utils.data.graph
 import torch.utils.data.graph_settings
-from torch.testing._internal.common_utils import TestCase, run_tests, suppress_warnings, skipIfTorchDynamo
+from torch.testing._internal.common_utils import (
+    TestCase, run_tests, suppress_warnings, skipIfTorchDynamo, TEST_DILL, skipIfNoDill,
+)
+from torch.utils._import_utils import import_dill
 from torch.utils.data import (
     DataLoader,
     DataChunk,
@@ -65,18 +70,8 @@ from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 from torch.utils.data.datapipes.iter.sharding import SHARDING_PRIORITIES
 import operator
 
-try:
-    import dill
-
-    # XXX: By default, dill writes the Pickler dispatch table to inject its
-    # own logic there. This globally affects the behavior of the standard library
-    # pickler for any user who transitively depends on this module!
-    # Undo this extension to avoid altering the behavior of the pickler globally.
-    dill.extend(use_dill=False)
-    HAS_DILL = True
-except ImportError:
-    HAS_DILL = False
-skipIfNoDill = skipIf(not HAS_DILL, "no dill")
+dill = import_dill()
+HAS_DILL = TEST_DILL
 
 try:
     import pandas  # type: ignore[import] # noqa: F401 F403
@@ -783,6 +778,7 @@ class TestFunctionalIterDataPipe(TestCase):
                 datapipe = dpipe(custom_input, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
                 self._serialization_test_for_single_dp(datapipe)
 
+    @skipIfTorchDynamo("Dict with function as keys")
     def test_serializable_with_dill(self):
         """Only for DataPipes that take in a function as argument"""
         input_dp = dp.iter.IterableWrapper(range(10))

@@ -18,6 +18,11 @@ from torch.testing._internal.common_utils import markDynamoStrictTest, parametri
 
 FP16_REDUCED_PRECISION = {'atol': 1e-5, 'rtol': 1e-4}
 
+
+def _force_capturable_False_for_unsupported_single_tensor(optim_info, kwargs):
+    if optim_info.only_supports_capturable_on_foreach and not kwargs.get("foreach", False) and kwargs.get("capturable", False):
+        kwargs["capturable"] = False
+
 @markDynamoStrictTest
 class TestOptimRenewed(TestCase):
 
@@ -56,6 +61,166 @@ class TestOptimRenewed(TestCase):
                 raise NotImplementedError(f"Unknown error type {error_input.error_on}")
 
 
+    @parametrize("contiguous", [True, False])
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_forloop_goes_right_direction(self, device, dtype, optim_info, contiguous):
+        optim_cls = optim_info.optim_cls
+        optim_inputs = optim_info.optim_inputs_func(device=device)
+        for optim_input in optim_inputs:
+            if "foreach" in optim_info.supported_impls:
+                optim_input.kwargs["foreach"] = False  # force forloop
+
+            _force_capturable_False_for_unsupported_single_tensor(optim_info, optim_input.kwargs)
+
+            if contiguous:
+                weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
+                bias = Parameter(torch.randn((10), device=device, dtype=dtype))
+            else:
+                weight = Parameter(torch.randn((10, 5, 2), device=device, dtype=dtype)[..., 0])
+                bias = Parameter(torch.randn((10, 2), device=device, dtype=dtype)[..., 0])
+            input = torch.randn(5, device=device, dtype=dtype)
+
+            optimizer = optim_cls([weight, bias], **optim_input.kwargs)
+
+            def closure():
+                optimizer.zero_grad()
+                loss = (weight.mv(input) + bias).pow(2).sum()
+                loss.backward()
+                if optim_cls.__name__ == "SparseAdam":
+                    # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
+                    # which we know does NOT represent the expected use case!
+                    weight.grad = weight.grad.to_sparse()
+                    bias.grad = bias.grad.to_sparse()
+                return loss
+
+            initial_value = closure().item()
+            for _ in range(20):
+                optimizer.step(closure)
+
+            if optim_input.kwargs.get("maximize", False):
+                self.assertGreater(closure().item(), initial_value)
+            else:
+                self.assertLess(closure().item(), initial_value)
+
+
+    @onlyCUDA
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_forloop_goes_right_direction_multigpu(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        optim_inputs = optim_info.optim_inputs_func(device=device)
+        for optim_input in optim_inputs:
+            if "foreach" in optim_info.supported_impls:
+                optim_input.kwargs["foreach"] = False  # force forloop
+
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
+            weight = Parameter(torch.randn((10, 5), device="cuda:0", dtype=dtype))
+            bias = Parameter(torch.randn((10), device="cuda:1", dtype=dtype))
+            input = torch.randn(5, device="cuda:0", dtype=dtype)
+            optimizer = optim_cls([weight, bias], **optim_input.kwargs)
+
+            def closure():
+                optimizer.zero_grad()
+                loss = (weight.mv(input).cuda(1) + bias).pow(2).sum()
+                loss.backward()
+                if optim_cls.__name__ == "SparseAdam":
+                    # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
+                    # which we know does NOT represent the expected use case!
+                    weight.grad = weight.grad.to_sparse()
+                    bias.grad = bias.grad.to_sparse()
+                return loss
+
+            initial_value = closure().item()
+            for _ in range(20):
+                optimizer.step(closure)
+
+            if optim_input.kwargs.get("maximize", False):
+                self.assertGreater(closure().item(), initial_value)
+            else:
+                self.assertLess(closure().item(), initial_value)
+
+
+    @skipMPS
+    @optims(optim_db, dtypes=[torch.complex64])
+    def test_complex(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
+        # Also skip fused, since our fused kernels do not support complex
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
+            device, dtype, optim_info, skip=("differentiable", "fused"))
+        for optim_input in all_optim_inputs:
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
+            # Last param is intentionally real to test that we can mix real and complex
+            complex_params = [
+                torch.randn(10, 5, device=device, dtype=dtype, requires_grad=True),
+                torch.randn(10, device=device, dtype=dtype, requires_grad=True),
+                torch.randn(10, 5, device=device, dtype=torch.float32, requires_grad=True),
+            ]
+            real_params = [
+                (
+                    torch.view_as_real(param).detach().clone().requires_grad_()
+                    if param.is_complex()
+                    else param.detach().clone().requires_grad_()
+                )
+                for param in complex_params
+            ]
+
+            complex_optimizer = optim_cls(complex_params, **optim_input.kwargs)
+            real_optimizer = optim_cls(real_params, **optim_input.kwargs)
+            real_steps = []
+            complex_steps = []
+            grads_losses = []
+
+            def real_closure():
+                for param in real_params:
+                    grad = torch.randn_like(param)
+                    param.grad = grad
+                    real_steps.append(param.detach().clone())
+                    grads_losses.append(grad.clone())
+                loss = torch.randn(1)
+                grads_losses.append(loss.clone())
+                return loss
+
+            def complex_closure():
+                for param in complex_params:
+                    if torch.is_complex(param):
+                        grad = torch.view_as_complex(grads_losses.pop(0))
+                        complex_steps.append(torch.view_as_real_copy(param.detach()))
+                    else:
+                        grad = grads_losses.pop(0)
+                        complex_steps.append(param.detach().clone())
+                    param.grad = grad
+                return grads_losses.pop(0)
+
+            for _ in range(3):
+                if optim_info.step_requires_closure:
+                    # LBFGS, for example, requires closure and calls it internally
+                    real_optimizer.step(real_closure)
+                    complex_optimizer.step(complex_closure)
+                else:
+                    # For other optimizers, we call closure explicitly to set the gradients
+                    real_closure()
+                    complex_closure()
+                    real_optimizer.step()
+                    complex_optimizer.step()
+
+            # Final Parameters should be the same
+            complex_params_asreal = [torch.view_as_real(param) if param.is_complex() else param for param in complex_params]
+            self.assertEqual(real_params, complex_params_asreal)
+
+            # All intermediate steps should also be the same
+            # also checks steps taken within for example a line search
+            self.assertEqual(complex_steps, real_steps)
+
+
+
+
     def _test_derived_optimizers(self, device, dtype, optim_info, flag, reduced_precision=False, assert_step_dtype=None):
         """
         Given a flag 'fused' or 'foreach', test for parity of optimizer state
@@ -74,11 +239,14 @@ class TestOptimRenewed(TestCase):
         for optim_input in optim_inputs:
             updated_params, state = [], []
             kwargs = deepcopy(optim_input.kwargs)
-            if (kwargs.get("capturable", False) and str(device) == "cpu"):
+            if kwargs.get("capturable", False) and str(device) == "cpu":
                 # capturable is not supported on CPU
                 continue
             for flag_value in (False, True):
                 kwargs[flag] = flag_value
+
+                _force_capturable_False_for_unsupported_single_tensor(optim_info, kwargs)
+
                 input = torch.tensor(
                     [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=dtype, device=device
                 ).reshape(3, 2)
@@ -180,7 +348,10 @@ class TestOptimRenewed(TestCase):
         for optim_input in optim_inputs:
             updated_params, state = [], []
             kwargs = deepcopy(optim_input.kwargs)
-            if kwargs.get("capturable", False) and str(device) == "cpu":
+
+            _force_capturable_False_for_unsupported_single_tensor(optim_info, kwargs)
+
+            if kwargs.get("capturable", False) and str(device) == "cpu" :
                 # capturable is not supported on CPU
                 continue
             for use_impl in (False, True):
@@ -227,16 +398,18 @@ class TestOptimRenewed(TestCase):
         # default dtype is higher prec float64
         old_default_dtype = torch.get_default_dtype()
         for default_dtype in [torch.float64, torch.float16]:
-            torch.set_default_dtype(default_dtype)
-            self._test_derived_optimizers(
-                device,
-                dtype,
-                optim_info,
-                "foreach",
-                reduced_precision=default_dtype == torch.float16,
-                assert_step_dtype=torch.float64 if default_dtype == torch.float64 else torch.float32,
-            )
-            torch.set_default_dtype(old_default_dtype)
+            try:
+                torch.set_default_dtype(default_dtype)
+                self._test_derived_optimizers(
+                    device,
+                    dtype,
+                    optim_info,
+                    "foreach",
+                    reduced_precision=default_dtype == torch.float16,
+                    assert_step_dtype=torch.float64 if default_dtype == torch.float64 else torch.float32,
+                )
+            finally:
+                torch.set_default_dtype(old_default_dtype)
 
 
 
@@ -265,6 +438,8 @@ class TestOptimRenewed(TestCase):
             for flag_value in (False, True):
                 kwargs["foreach"] = flag_value
 
+                _force_capturable_False_for_unsupported_single_tensor(optim_info, kwargs)
+
                 # The 128 is critical here! Our CUDACachingAllocator allocates in blocks of 512,
                 # meaning any tensor that occupies <512 bytes of memory will allocate a whole
                 # 512 bytes anyway. We use 128 (since datasize would be 4 bytes) so that param
@@ -288,7 +463,7 @@ class TestOptimRenewed(TestCase):
             st_max_mem, mt_max_mem = max_mems
             intermediate_size = nparams * param.nelement() * param.element_size()
             nintermediates = 1  # we expect a budget of 1 intermediate most of the time
-            if kwargs.get('capturable') or optim_cls.__name__ in ["Adadelta", "ASGD"]:
+            if kwargs.get('capturable') or optim_cls.__name__ in ["Adadelta", "ASGD", "RAdam"]:
                 # with capturable in Adam(W), we have 2 extra intermediates for the bias_corrections
                 # with Adadelta, we have 2 extra for (acc_delta + eps) and (square_avg + eps)
                 # ASGD allocates axs, 2x mus, 2x etas, and grads at the same time
@@ -297,6 +472,11 @@ class TestOptimRenewed(TestCase):
                     # with capturable in NAdam, we have 3 extra intermediates for the
                     # bias_correction, mus, and mu_nexts
                     nintermediates = 5
+
+                if optim_cls.__name__ == "RAdam":
+                    # RAdam has four intermediates with capturable
+                    # num, unrect_step_size, buffer, grouped_grads
+                    nintermediates = 4
 
             elif optim_cls.__name__ in ["NAdam", "Adagrad", "RMSprop"]:
                 # NAdam uses two intermediates at the same time (grads & exp_avg_sq_sqrt)
@@ -326,6 +506,133 @@ class TestOptimRenewed(TestCase):
             optimizer.step()
 
 
+    @onlyCUDA
+    @parametrize("impl", ["fused", "capturable"])
+    @optims([optim for optim in optim_db if "fused" in optim.supported_impls], dtypes=[torch.float32])
+    def test_cpu_load_state_dict(self, device, dtype, impl, optim_info):
+        # NOTE: This SIMULATES a fused/capturable optimizer with state moved to CPU, issue 103256
+        # How do we get there? Users typically create CUDA models on fused optimizers and then
+        # store checkpoints on CPU as CUDA memory is limited with torch.load(...map_location="cpu").
+        # Since this is a unit test, it is more expedient to simulate what the state_dict
+        # would look like, which is basically CPU tensors with fused/capturable flag = True.
+        optim_cls = optim_info.optim_cls
+        if optim_cls.__name__ == "SGD" and impl == "capturable":
+            # Capturable SGD does not exist
+            self.skipTest("SGD does not currently support capturable")
+
+        cpu_optim_inputs = optim_info.optim_inputs_func(device="cpu")
+        for optim_input in cpu_optim_inputs:
+            param = torch.tensor([0.1, 0.2], dtype=dtype, device="cpu")
+            optimizer = optim_cls([param], **optim_input.kwargs)
+            param.grad = torch.rand_like(param)
+            optimizer.step()
+            optim_state_dict_cpu = deepcopy(optimizer.state_dict())
+            optim_state_dict_cpu["param_groups"][0][impl] = True
+
+            # load
+            optim_input.kwargs[impl] = True
+            param_cuda = param.clone().detach().to(device="cuda")
+            optimizer_cuda = optim_cls([param_cuda], **optim_input.kwargs)
+            optimizer_cuda.load_state_dict(optim_state_dict_cpu)
+            optimizer_cuda.zero_grad()
+            param_cuda.grad = torch.rand_like(param_cuda)
+            optimizer_cuda.step()
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_param_groups_weight_decay(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info, skip=("differentiable",))
+        for optim_input in all_optim_inputs:
+            # See https://github.com/pytorch/pytorch/issues/117836 and #118230
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
+            weight_kwargs = optim_input.kwargs
+            bias_kwargs = deepcopy(optim_input.kwargs)
+            bias_kwargs["weight_decay"] = 0.0
+
+            weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
+            bias = Parameter(torch.randn((10), device=device, dtype=dtype))
+            input = torch.randn(5, device=device, dtype=dtype)
+
+            optimizer = optim_cls([dict(params=[weight], **weight_kwargs), dict(params=[bias], **bias_kwargs)])
+
+            loss = (weight.mv(input) + bias).pow(2).sum()
+            initial_value = loss.item()
+            for _ in range(20):
+                optimizer.zero_grad()
+                loss = (weight.mv(input) + bias).pow(2).sum()
+                loss.backward()
+                if optim_cls.__name__ == "SparseAdam":
+                    # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
+                    # which we know does NOT represent the expected use case!
+                    weight.grad = weight.grad.to_sparse()
+                    bias.grad = bias.grad.to_sparse()
+                optimizer.step()
+
+            # Test that the direction of loss moved appropriately
+            if optim_input.kwargs.get("maximize", False):
+                self.assertGreater(loss.item(), initial_value)
+            else:
+                self.assertLess(loss.item(), initial_value)
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_param_groups_lr(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info, skip=("differentiable",))
+        for optim_input in all_optim_inputs:
+            # See https://github.com/pytorch/pytorch/issues/117836 and #118230
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
+            # optim_input.kwargs will be the param group kwargs, which should have >0 lr
+            if "lr" not in optim_input.kwargs or optim_input.kwargs["lr"] == 0:
+                optim_input.kwargs["lr"] = 1e-3
+            outer_kwargs = {"lr": 1e-28}
+            if optim_cls.__name__ == "Rprop":
+                # Allow min step size to be 0
+                outer_kwargs["step_sizes"] = (0, 50)
+
+            weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
+            bias = Parameter(torch.randn((10), device=device, dtype=dtype))
+            irrelevant = Parameter(torch.randn(2, device=device, dtype=dtype))
+            irrelevant_clone = irrelevant.clone()
+            input = torch.randn(5, device=device, dtype=dtype)
+            optimizer = optim_cls(
+                [dict(params=[weight, bias], **optim_input.kwargs), dict(params=[irrelevant])],
+                **outer_kwargs)
+
+            loss = (weight.mv(input) + bias).pow(2).sum()
+            initial_value = loss.item()
+            for _ in range(20):
+                optimizer.zero_grad()
+                loss = (weight.mv(input) + bias).pow(2).sum()
+                loss.backward()
+                irrelevant.grad = torch.rand_like(irrelevant)
+                if optim_cls.__name__ == "SparseAdam":
+                    # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
+                    # which we know does NOT represent the expected use case!
+                    weight.grad = weight.grad.to_sparse()
+                    bias.grad = bias.grad.to_sparse()
+                    irrelevant.grad = irrelevant.grad.to_sparse()
+                optimizer.step()
+
+            # Test that the direction of loss moved appropriately
+            if optim_input.kwargs.get("maximize", False):
+                self.assertGreater(loss.item(), initial_value)
+            else:
+                self.assertLess(loss.item(), initial_value)
+
+            # Test that irrelevant parameters were not updated since lr was almost 0
+            self.assertEqual(irrelevant, irrelevant_clone)
+
+
     @optims(optim_db, dtypes=[torch.float32])
     def test_step_is_noop_when_params_have_no_grad(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
@@ -339,9 +646,12 @@ class TestOptimRenewed(TestCase):
             return torch.tensor([1], device=device, dtype=dtype)
 
         for optim_input in all_optim_inputs:
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
             optimizer = optim_cls(params, **optim_input.kwargs)
             optimizer.step(closure)
-            self.assertEqual(old_params, params)
 
 
     @optims(optim_db, dtypes=[torch.float32])
@@ -357,6 +667,10 @@ class TestOptimRenewed(TestCase):
         for optim_input in all_optim_inputs:
             kwargs = optim_input.kwargs
 
+            if (optim_info.only_supports_capturable_on_foreach and kwargs.get("capturable", False)
+                    and not kwargs.get("foreach", False)):
+                continue
+
             # params will decay even if grads are empty if weight_decay != 0,
             # and capturable doesn't work for CPU tensors
             if kwargs.get("weight_decay", 0) != 0:
@@ -364,7 +678,7 @@ class TestOptimRenewed(TestCase):
 
             # AdamW params will be updated regardless of grads due to lr, so make lr smaller
             if optim_cls.__name__ == "AdamW":
-                kwargs["lr"] = torch.tensor(1e-4) if isinstance(kwargs.get("lr", 1e-4), torch.Tensor) else 1e-4
+                kwargs["lr"] = torch.tensor(1e-5) if isinstance(kwargs.get("lr", 1e-5), torch.Tensor) else 1e-5
 
             if kwargs.get("differentiable", False):
                 params = [param.clone()]
@@ -391,6 +705,10 @@ class TestOptimRenewed(TestCase):
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
         params = [Parameter(torch.randn(2, 3, requires_grad=True, device=device, dtype=dtype)) for _ in range(2)]
         for optim_input in all_optim_inputs:
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
             optimizer = optim_cls(params, **optim_input.kwargs)
             optimizer.__repr__()
 
@@ -413,6 +731,10 @@ class TestOptimRenewed(TestCase):
             return loss
 
         for optim_input in all_optim_inputs:
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
             optimizer = optim_cls(params, **optim_input.kwargs)
             closure = functools.partial(fwd_bwd, optimizer, weight, bias, input)
 
@@ -432,7 +754,7 @@ class TestOptimRenewed(TestCase):
             optimizer_c.load_state_dict(deepcopy(optimizer.state_dict()))
 
             # Run both optimizers in parallel
-            for i in range(10):
+            for _ in range(10):
                 optimizer.step(closure)
                 optimizer_c.step(closure_c)
                 self.assertEqual(weight, weight_c)
@@ -456,6 +778,10 @@ class TestOptimRenewed(TestCase):
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info, skip=("differentiable",))
         for optim_input in all_optim_inputs:
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
             torch.manual_seed(1)
             model = torch.nn.Sequential(
                 torch.nn.Conv2d(4, 2, 1, stride=2),
@@ -494,6 +820,139 @@ class TestOptimRenewed(TestCase):
             else:
                 fwd_bwd(optimizer, model, input)
                 optimizer.step()
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_load_nontensor_step(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+
+        # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info, skip=("differentiable",))
+        params = [Parameter(torch.randn(2, 3, device=device, dtype=dtype)) for _ in range(2)]
+        for p in params:
+            p.grad = torch.rand_like(p)
+            # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
+            # which we know does NOT represent the expected use case!
+            if optim_cls.__name__ == "SparseAdam":
+                p.grad = p.grad.to_sparse()
+
+        # Needed for LBFGS
+        lbfgs_loss = torch.rand(1, device=device, dtype=dtype)
+
+        def closure():
+            return lbfgs_loss if optim_cls.__name__ == "LBFGS" else None
+
+        for optim_input in all_optim_inputs:
+            kwargs = optim_input.kwargs
+            if (optim_info.only_supports_capturable_on_foreach and kwargs.get("capturable", False)
+                    and not kwargs.get("foreach", False)):
+                continue
+
+            optimizer = optim_cls(params, **optim_input.kwargs)
+            for _ in range(3):
+                optimizer.step(closure)
+            state_dict = deepcopy(optimizer.state_dict())
+            for p_state in state_dict["state"].values():
+                if "step" in p_state and torch.is_tensor(p_state["step"]):
+                    p_state["step"] = p_state["step"].item()
+            optimizer.load_state_dict(state_dict)
+            optimizer.step(closure)
+
+
+    @onlyCUDA
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_state_dict_with_cuda_params(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+
+        # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
+        # We limit our configs to CPU only, because we will be moving them to CUDA later
+        cpu_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs("cpu", dtype, optim_info, skip=("differentiable",))
+
+        # Needed for LBFGS
+        lbfgs_loss = torch.rand(1, device=device, dtype=dtype)
+
+        def closure():
+            return lbfgs_loss if optim_cls.__name__ == "LBFGS" else None
+
+        for optim_input in cpu_optim_inputs:
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
+            params = [Parameter(torch.randn(2, 3, device="cpu", dtype=dtype)) for _ in range(2)]
+            for p in params:
+                p.grad = torch.randn_like(p)
+                # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
+                # which we know does NOT represent the expected use case!
+                if optim_cls.__name__ == "SparseAdam":
+                    p.grad = p.grad.to_sparse()
+
+            optimizer = optim_cls(params, **optim_input.kwargs)
+
+            for _ in range(3):
+                optimizer.step(closure)
+
+            with torch.no_grad():
+                params_cuda = [p.to(device="cuda") for p in params]
+                for (i, p) in enumerate(params_cuda):
+                    p.grad = params[i].grad.to(device="cuda")
+            optimizer_cuda = optim_cls(params_cuda, **optim_input.kwargs)
+
+            state_dict_cpu = deepcopy(optimizer.state_dict())
+            state_dict_cuda = deepcopy(optimizer.state_dict())
+            optimizer_cuda.load_state_dict(state_dict_cuda)
+
+            # Make sure state_dict_cuda isn't modified by merely calling load_state_dict
+            self.assertEqual(state_dict_cpu, state_dict_cuda)
+
+            # Make sure that device of state['step'] is still CPU _unless_ torch.compile() added a capturable!
+            capturable = state_dict_cpu["param_groups"][0].get("capturable", False)
+            new_state_dict = optimizer_cuda.state_dict()
+            for state_cpu, state_cuda in zip(state_dict_cpu["state"].values(), new_state_dict["state"].values()):
+                if "step" in state_cpu and torch.is_tensor(state_cpu["step"]):
+                    self.assertEqual(state_cuda["step"].device.type, "cuda" if capturable else "cpu")
+
+            for _ in range(5):
+                optimizer.step(closure)
+                optimizer_cuda.step(closure)
+                self.assertEqual(params, params_cuda)
+                self.assertEqual(optimizer.state_dict(), optimizer_cuda.state_dict())
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_deepcopy_copies_all_public_attrs(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+
+        # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info, skip=("differentiable",))
+
+        params = [Parameter(torch.randn(2, 3, device=device, dtype=dtype)) for _ in range(2)]
+        for p in params:
+            p.grad = torch.rand_like(p)
+            if optim_cls.__name__ == "SparseAdam":
+                # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
+                # which we know does NOT represent the expected use case!
+                p.grad = p.grad.to_sparse()
+
+        # Needed for LBFGS
+        def closure():
+            return 1 if optim_cls.__name__ == "LBFGS" else None
+
+        def getPublicAttrs(obj):
+            return {k for k in obj.__dict__ if not k.startswith("_")}
+
+        for optim_input in all_optim_inputs:
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
+            optimizer = optim_cls(params, **optim_input.kwargs)
+
+            # Make some state
+            for _ in range(3):
+                optimizer.step(closure)
+
+            self.assertEqual(getPublicAttrs(optimizer), getPublicAttrs(deepcopy(optimizer)))
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
