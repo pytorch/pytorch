@@ -215,8 +215,52 @@ class TensorVariable(VariableTracker):
         install_guard(attr_source.make_guard(GuardBuilder.HASATTR))
         return VariableBuilder(tx, attr_source)(real_value)
 
+    def _method_ndim(self, tx):
+        if self.ndim is not None:
+            return ConstantVariable.create(self.ndim)
+        else:
+            return self.call_method(tx, "dim", [], {})
+
+    def _method_dtype(self, tx):
+        if self.dtype is not None:
+            return ConstantVariable.create(self.dtype)
+
+    def _method_device(self, tx):
+        if self.device is not None:
+            return ConstantVariable.create(self.device)
+
+    def _method_layout(self, tx):
+        if self.layout is not None:
+            return ConstantVariable.create(self.layout)
+
+    def _method_is_cuda(self, tx):
+        if self.device is not None:
+            return ConstantVariable.create(self.device.type == "cuda")
+
+    def _method_shape(self, tx):
+        if self.size is not None:
+            sizes = [variables.ConstantVariable.create(x) for x in self.size]
+            return SizeVariable(sizes)
+        else:
+            return self.call_method(tx, "size", [], {})
+
+    def _method_requires_grad(self, tx):
+        if self.requires_grad is not None:
+            return ConstantVariable.create(self.requires_grad)
+
+    def _method_is_quantized(self, tx):
+        if self.is_quantized is not None:
+            return ConstantVariable.create(self.is_quantized)
+
+    def _method_is_sparse(self, tx):
+        if self.is_sparse is not None:
+            return ConstantVariable.create(self.is_sparse)
+
+    def _method_data(self, tx):
+        return self.call_method(tx, "detach", [], {})
+
     def var_getattr(self, tx, name):
-        from . import ConstantVariable, UserDefinedClassVariable
+        from . import UserDefinedClassVariable
 
         if tx.strict_checks_enabled:
             if name in self._strict_mode_banned_ops():
@@ -225,52 +269,8 @@ class TensorVariable(VariableTracker):
         if name == "__class__":
             return UserDefinedClassVariable(self.python_type())
 
-        def method_ndim():
-            if self.ndim is not None:
-                return ConstantVariable.create(self.ndim)
-            else:
-                return self.call_method(tx, "dim", [], {})
-
-        def method_dtype():
-            if self.dtype is not None:
-                return ConstantVariable.create(self.dtype)
-
-        def method_device():
-            if self.device is not None:
-                return ConstantVariable.create(self.device)
-
-        def method_layout():
-            if self.layout is not None:
-                return ConstantVariable.create(self.layout)
-
-        def method_is_cuda():
-            if self.device is not None:
-                return ConstantVariable.create(self.device.type == "cuda")
-
-        def method_shape():
-            if self.size is not None:
-                sizes = [variables.ConstantVariable.create(x) for x in self.size]
-                return SizeVariable(sizes)
-            else:
-                return self.call_method(tx, "size", [], {})
-
-        def method_requires_grad():
-            if self.requires_grad is not None:
-                return ConstantVariable.create(self.requires_grad)
-
-        def method_is_quantized():
-            if self.is_quantized is not None:
-                return ConstantVariable.create(self.is_quantized)
-
-        def method_is_sparse():
-            if self.is_sparse is not None:
-                return ConstantVariable.create(self.is_sparse)
-
-        def method_data():
-            return self.call_method(tx, "detach", [], {})
-
-        handler = locals().get(f"method_{name}", None)
-        result = handler() if handler is not None else None
+        handler = getattr(self, f"_method_{name}", None)
+        result = handler(tx) if handler is not None else None
 
         # Add a guard for type matching, these guards are checked before tensor guards
         # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
