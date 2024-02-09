@@ -42,17 +42,27 @@ class SparseSemiStructuredTensor(torch.Tensor):
     depending on the datatype. It is also referred to as 2:4 sparsity or fine-grained
     structured sparsity.
 
+    There are two backends available for semi_structred sparsity, either cuSPARSELt or CUTLASS.
+    This class is meant to serve as a base class for both implementations. SparseSemiStructuredCUTLASS
+    and SparseSemiStructuredCUSPARSELT both inherit from this class and define three backend-specific items.
+    Note that as such, this class cannot be insantiated directly.
+
+    -`_DTYPE_SHAPE_CONSTRAINTS` - A dictionary holding backend specific shape constraints
+    - `from_dense` - backend specific compression scripts
+    - `_mm` - calss into _cslt_sparse_mm or _sparse_semi_structured_linear based on backend.
+
     cuSPARSELt:
         The cuSPARSELt backend expects the specified elements and the metadata to be stored in a single tensor:
-        compressed tensor = [ specified elements of original tensor | metadata ]
+        packed = [ specified elements of original tensor | metadata ]
         For an original tensor of size (m, k) we expect the first m * k // 2 elements to be the kept elements
-        The rest of the tensor is metadata.
+        The rest of the tensor is metadata. Since there is only one tensor, we only use the packed and packed_t
+        attributes respectively.
+        cusPARELt also supports transposition fusion, which is necessary for performant 2:4 sparse training.
+
     CUTLASS:
         For CUTLASS backend, elements of original tensor and metadata are kept in separate tensors.
         When _FORCE_CUTLASS is set, or when cuSPARSELt is not available, this subclass calls into _sparse_semi_structured_linear
         and sparse_semi_structured_from_dense for conversion to the compressed format.
-        When PyTorch is compiled with cuSPARSELt support, this subclass will call into _cslt_sparse_mm for sparse mm and
-        _cslt_compress to convert into the compressed format.
     """
 
     _DEFAULT_ALG_ID = 0
