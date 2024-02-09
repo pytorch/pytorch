@@ -78,6 +78,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         cuda=True,
         triton=True,
         arg_types=None,
+        grid_fn: str = "grid",
     ):
         """
         Generates kernel call code.
@@ -90,7 +91,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
         """
         if cuda:
             return super().generate_kernel_call(
-                name, call_args, grid, device_index, cuda, triton, arg_types
+                name,
+                call_args,
+                grid,
+                device_index,
+                cuda,
+                triton,
+                arg_types,
+                grid_fn,
             )
         else:
             if V.graph.aot_mode and config.abi_compatible:

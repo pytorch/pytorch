@@ -478,7 +478,7 @@ class WrapperCodeGen(CodeGen):
             """
             import triton
             import triton.language as tl
-            from torch._inductor.triton_heuristics import grid, start_graph, end_graph
+            from torch._inductor.triton_heuristics import grid, split_scan_grid, start_graph, end_graph
             {}
             """.format(
                 V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
@@ -993,9 +993,9 @@ class WrapperCodeGen(CodeGen):
             compile_wrapper.splice(TritonKernel.gen_attr_descriptor_import())
         compile_wrapper.newline()
 
-        from .common import SizeArg, TensorArg
+        from .common import KernelArgType, SizeArg, TensorArg
 
-        signature: List[Union[TensorArg, SizeArg]] = []
+        signature: List[KernelArgType] = []
         constants = {}
         for key, arg in kwargs.items():
             idx = kernel.arg_names.index(key)
@@ -1099,6 +1099,14 @@ class WrapperCodeGen(CodeGen):
         # it suffices as a type hint for the purposes of producing the correct code for this type.
         return SymbolicCallArg(expr, tree.numel)
 
+    def generate_workspace_allocation(self, nbytes, device, zero_fill):
+        line = self.make_allocation(
+            "workspace", device, torch.uint8, shape=(nbytes,), stride=(1,)
+        )
+        self.writeline(line)
+        if zero_fill:
+            self.writeline(f"workspace.zero_(){self.ending}")
+
     def wrap_kernel_call(self, name, call_args):
         return f"{name}({', '.join(call_args)}){self.ending}"
 
@@ -1127,6 +1135,7 @@ class WrapperCodeGen(CodeGen):
         cuda=True,
         triton=True,
         arg_types=None,
+        grid_fn: str = "grid",
     ):
         """
         Generates kernel call code.
@@ -1144,8 +1153,9 @@ class WrapperCodeGen(CodeGen):
             )
             if triton:
                 grid_str = ", ".join(pexpr(item) for item in grid)
+                grid_str = f"{grid_fn}({grid_str})"
                 self.writeline(
-                    f"{name}.run({call_args_str}, grid=grid({grid_str}), stream={stream_name})"
+                    f"{name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
                 )
             else:
                 stream_ptr = f"c_void_p({stream_name})"

@@ -11,7 +11,7 @@ from .. import config
 from ..codecache import CudaKernelParamCache
 from ..triton_heuristics import grid as default_grid
 from ..virtualized import V
-from .cpp_wrapper import CppWrapperCodeGen
+from .cpp_wrapper_cpu import CppWrapperCodeGen
 from .wrapper import SymbolicCallArg
 
 
@@ -242,6 +242,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         cuda=True,
         triton=True,
         arg_types=None,
+        grid_fn: str = "grid",
     ):
         if not cuda:
             # Even in CudaWrapperCodeGen, we may see cpp kernels
