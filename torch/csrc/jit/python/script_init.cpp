@@ -1598,7 +1598,10 @@ void initJitScriptBindings(PyObject* module) {
             }
             return std::make_tuple(pp.str(), consts);
           })
-      .def_property_readonly("owner", &Method::owner);
+      .def_property_readonly("owner", &Method::owner)
+      .def_property_readonly("raw_owner", [](const Method& self) {
+        return Object(self.raw_owner());
+      });
   m.def("_generate_upgraders_graph", &generate_upgraders_graph);
   m.def(
       "_calculate_package_version_based_on_upgraders",

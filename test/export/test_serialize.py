@@ -23,9 +23,9 @@ from torch._export.serde.serialize import (
     serialize,
     SerializeError,
 )
-from torch._subclasses.fake_tensor import FakeTensor
-from torch.export import Dim, export, load, save
-from torch.export import WrapperModule
+from torch._higher_order_ops.torchbind import enable_torchbind_tracing
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch.export import Dim, export, load, save, WrapperModule
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 from torch.testing._internal.common_utils import (
     find_library_location,
@@ -846,6 +846,26 @@ class TestSerializeCustomClass(TestCase):
                 self.assertEqual(arg._type(), custom_obj._type())
                 self.assertEqual(arg.__getstate__(), custom_obj.__getstate__())
                 self.assertEqual(arg.top(), 7)
+
+    def test_custom_class_containing_fake_tensor(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.custom_obj = torch.classes._TorchScriptTesting._ContainsTensor(torch.rand(2, 3))
+
+            def forward(self, x):
+                return x + self.custom_obj.get()
+
+        with FakeTensorMode():
+            f = Foo()
+
+        inputs = (torch.zeros(2, 3),)
+        with enable_torchbind_tracing():
+            ep = export(f, inputs, strict=False)
+
+        serialized_vals = serialize(ep)
+        ep = deserialize(serialized_vals)
+        self.assertTrue(isinstance(ep.constants["_lifted_custom_obj0"].get(), FakeTensor))
 
 
 if __name__ == '__main__':
