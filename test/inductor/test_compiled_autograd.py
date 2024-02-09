@@ -636,14 +636,19 @@ class TestCompiledAutograd(TestCase):
 
         self.check_output_and_recompiles(fn, 3)
 
-    def test_mismatch_fake_tensor_mode(self):
+    def test_mismatch_fake_tensor_mode(self, dynamic_shape=False):
         """
         Repro the failure of training nanogpt with both compiled-autograd
         and _LazyGraphModule. Check https://github.com/pytorch/pytorch/pull/118981
         for more context.
         """
-        x = torch.rand(2, 16)
-        y = nn.Parameter(torch.rand(2, 16))
+        B = 8
+        x = torch.rand(B, 16)
+        y = torch.rand(B, 16, requires_grad=True)
+
+        if dynamic_shape:
+            torch._dynamo.mark_dynamic(x, 0)
+            torch._dynamo.mark_dynamic(y, 0)
 
         def f():
             out = x + y
@@ -654,6 +659,27 @@ class TestCompiledAutograd(TestCase):
             return out, y.grad
 
         self.check_output_and_recompiles(f, compile_fn=True)
+
+    def test_mismatch_fake_tensor_mode_dynamic_shape(self):
+        self.test_mismatch_fake_tensor_mode(dynamic_shape=True)
+
+    def test_accumulate_grad_accuracy(self):
+        def fn():
+            model = torch.nn.Sequential(
+                torch.nn.Linear(2, 1, bias=False),
+                torch.nn.Linear(1, 2, bias=False),
+            )
+            x = torch.randn(2, 2)
+
+            out = model(x)
+            loss = out.sum()
+            torch.manual_seed(0)
+            loss.backward()
+
+            yield model[0].weight.grad
+            yield model[1].weight.grad
+
+        self.check_output_and_recompiles(fn, 1)
 
 
 def load_test_module(name):
