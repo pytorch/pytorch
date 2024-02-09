@@ -79,11 +79,7 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
-from .user_defined import (
-    RemovableHandleVariable,
-    UserDefinedClassVariable,
-    UserDefinedObjectVariable,
-)
+from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 __all__ = [
     "AutogradFunctionContextVariable",
@@ -121,10 +117,8 @@ __all__ = [
     "NumpyVariable",
     "PythonModuleVariable",
     "RangeVariable",
-    "RemovableHandleVariable",
     "RepeatIteratorVariable",
     "RestrictedListSubclassVariable",
-    "SDPAParamsVariable",
     "SkipFilesVariable",
     "SliceVariable",
     "StringFormatVariable",
@@ -142,4 +136,5 @@ __all__ = [
     "UserMethodVariable",
     "VariableTracker",
     "WithExitFunctionVariable",
+    "SDPAParamsVariable",
 ]

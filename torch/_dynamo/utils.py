@@ -50,7 +50,6 @@ from typing import (
     ValuesView,
 )
 
-from ..utils.hooks import RemovableHandle
 
 try:
     import numpy as np
@@ -2495,11 +2494,3 @@ def maybe_enable_compiled_autograd(should_enable):
             yield ctx
     else:
         yield
-
-
-def invalid_removeable_handle():
-    # need a subclass so weakref works
-    class Invalid(dict):  # type: ignore[type-arg]
-        pass
-
-    return RemovableHandle(Invalid())
