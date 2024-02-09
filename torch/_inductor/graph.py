@@ -30,7 +30,7 @@ from .codegen.common import (
     get_wrapper_codegen_for_device,
     register_backend_for_device,
 )
-from .codegen.cuda_wrapper import CudaWrapperCodeGen
+from .codegen.cpp_wrapper_cuda import CudaWrapperCodeGen
 from .codegen.wrapper import CppWrapperCodeGen, WrapperCodeGen
 from .exc import (
     CppWrapperCodeGenError,
