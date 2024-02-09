@@ -58,11 +58,6 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS}
   fi
 
-  if [ "$ANACONDA_PYTHON_VERSION" = "3.12" ]; then
-    export CMAKE_LIBRARY_PATH="/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib/"
-    export CMAKE_INCLUDE_PATH="/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/include/"
-  fi
-
   # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
   # and libpython-static for torch deploy
   conda_install llvmdev=8.0.0 "libpython-static=${ANACONDA_PYTHON_VERSION}"
