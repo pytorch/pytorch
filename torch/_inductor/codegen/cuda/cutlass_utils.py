@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 
 # This is a feature flag. If _DISABLE_CUTLASS_BACKEND is set to true,
 # then the CUDA / CUTLASS backend is entirely disabled, including it's unit tests
-_DISABLE_CUTLASS_BACKEND = True
+_DISABLE_CUTLASS_BACKEND = False
 
 
 def _rename_cutlass_import(content: str, cutlass_modules: List[str]) -> str:
