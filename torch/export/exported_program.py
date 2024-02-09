@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import types
 import warnings
+from collections import namedtuple
 from typing import (
     Any,
     Callable,
@@ -243,7 +244,7 @@ class ExportedProgram:
     @property
     @compatibility(is_backward_compatible=False)
     def call_spec(self):
-        from torch._export.exported_program import CallSpec
+        CallSpec = namedtuple("CallSpec", ["in_spec", "out_spec"])
 
         if len(self.module_call_graph) == 0:
             return CallSpec(in_spec=None, out_spec=None)
@@ -684,7 +685,7 @@ def _get_updated_range_constraints(
     # Only when we have an unbacked symint, and it's used as constructor inputs,
     # runtime_var_to_range will make a difference compated to var_to_range.
     # e.g. [2, oo) -> [0, oo)
-    for k, v in shape_env.runtime_var_to_range.items():
+    for k, v in shape_env.var_to_range.items():
         if k not in shape_env.replacements:
             range_constraints[k] = v
     return range_constraints
