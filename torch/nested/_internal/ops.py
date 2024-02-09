@@ -194,7 +194,7 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
             check_schema("self: jt_all, ...", func, *args, **kwargs)
             return functools.partial(jagged_unary_pointwise, func)
         elif num_tensor_args == 2:
-            check_schema("lhs: any, rhs: any", func, *args, **kwargs)
+            check_schema("lhs: any, rhs: any, ...", func, *args, **kwargs)
             return functools.partial(jagged_binary_pointwise, func)
 
     return None
@@ -447,9 +447,19 @@ register_jagged_func(
 )(jagged_unary_pointwise)
 
 
-register_jagged_func(
+@register_jagged_func(
     torch.ops.aten._softmax.default, "self: jt, dim: any, half_to_float: any"
-)(jagged_unary_pointwise)
+)
+def _softmax_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    dim = new_kwargs["dim"]
+    new_kwargs["dim"] = _wrap_jagged_dim(len(inp._size), dim, "softmax")
+
+    return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
 
 @register_jagged_func(

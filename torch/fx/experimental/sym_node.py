@@ -978,7 +978,7 @@ def _make_node_magic(method, func):
 
         # Create a FX node that corresponds to the operation being applied to
         # this node.
-        fx_node, _ = self.shape_env.create_fx_call_function(
+        fx_node, _ = self.shape_env._create_fx_call_function(
             op, (self.fx_node, other.fx_node)
         )
         return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
@@ -1014,7 +1014,7 @@ def _make_node_magic(method, func):
         else:
             pytype = self.pytype
 
-        fx_node, _ = self.shape_env.create_fx_call_function(op, (self.fx_node,))
+        fx_node, _ = self.shape_env._create_fx_call_function(op, (self.fx_node,))
         return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
 
     if method in unary_methods:
@@ -1052,7 +1052,7 @@ def _make_node_magic(method, func):
                 raise
 
             out = safe_expand(out)
-            fx_node, _ = pred_node.shape_env.create_fx_call_function(
+            fx_node, _ = pred_node.shape_env._create_fx_call_function(
                 sym_ite, (pred_node.fx_node, then_node.fx_node, else_node.fx_node)
             )
             return SymNode(
@@ -1094,7 +1094,7 @@ def _make_node_magic(method, func):
             args = [self.fx_node]
             if ndigits is not None:
                 args.append(ndigits)
-            fx_node, _ = self.shape_env.create_fx_call_function(op, tuple(args))
+            fx_node, _ = self.shape_env._create_fx_call_function(op, tuple(args))
             return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
 
         setattr(SymNode, f"_{method_attr}", round_impl)
