@@ -443,7 +443,10 @@ def _init_core_state(
     elif sharding_strategy == ShardingStrategy.NO_SHARD:
         warnings.warn(
             "The `NO_SHARD` sharding strategy is deprecated. If having issues, "
-            "please use DistributedDataParallel instead."
+            "please use DistributedDataParallel instead.",
+            # Level 1 is here, level 2 is from `FullyShardedDataParallel`, and
+            # level 3 is from the true caller
+            stacklevel=3,
         )
     state.sharding_strategy = sharding_strategy or ShardingStrategy.FULL_SHARD
     state.mixed_precision = mixed_precision or MixedPrecision()
