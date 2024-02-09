@@ -859,12 +859,10 @@ class CPUReproTests(TestCase):
                 self.common(fn, (x,))
                 assert metrics.generated_cpp_vec_kernel_count == 1
 
-    @unittest.skipIf(
-        not codecache.valid_vec_isa_list(), "Does not support vectorization"
-    )
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_decomposed_dequant_relu_quant(self):
-        def fn(x, scale, zero_point, use_dequant, use_quant):
+    def _test_decomposed_dequant_relu_quant_helper(self, dtype):
+        def fn(
+            x, scale, zero_point, use_dequant, use_quant, quant_min, quant_max, dtype
+        ):
             # For quantized_decomposed.dequantize_per_tensor
             # Refer to torch/ao/quantization/fx/_decomposed.py
             if use_dequant:
@@ -876,10 +874,14 @@ class CPUReproTests(TestCase):
             # Refer to torch/ao/quantization/fx/_decomposed.py
             if use_quant:
                 inv_scale = 1.0 / scale
-                x = torch.clamp(torch.round(x * inv_scale) + zero_point, 0, 255).to(
-                    torch.uint8
-                )
+                x = torch.clamp(
+                    torch.round(x * inv_scale) + zero_point, quant_min, quant_max
+                ).to(dtype)
             return x
+
+        assert dtype in [torch.uint8, torch.int8]
+        quant_min = 0 if dtype == torch.uint8 else -128
+        quant_max = 255 if dtype == torch.uint8 else 127
 
         use_dequant_list = [False, True]
         use_quant_list = [False, True]
@@ -887,48 +889,79 @@ class CPUReproTests(TestCase):
             use_dequant_list, use_quant_list
         ):
             x = torch.clamp(
-                torch.randn((1, 7, 7, 9), dtype=torch.float32) * 100, 0, 255
+                torch.randn((1, 7, 7, 9), dtype=torch.float32) * 100,
+                quant_min,
+                quant_max,
             )
             if use_dequant:
-                x = x.to(torch.uint8)
+                x = x.to(dtype)
             zero_point = 100
             scale = 0.01
             with config.patch({"cpp.simdlen": None}):
                 torch._dynamo.reset()
                 metrics.reset()
-                self.common(fn, (x, scale, zero_point, use_dequant, use_quant))
+                self.common(
+                    fn,
+                    (
+                        x,
+                        scale,
+                        zero_point,
+                        use_dequant,
+                        use_quant,
+                        quant_min,
+                        quant_max,
+                        dtype,
+                    ),
+                )
                 assert metrics.generated_cpp_vec_kernel_count == 1
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_dequant_quant_lowering(self):
-        def fn(x, scale, zero_point, use_dequant, use_quant):
+    def test_decomposed_dequant_relu_quant_uint8(self):
+        self._test_decomposed_dequant_relu_quant_helper(torch.uint8)
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_decomposed_dequant_relu_quant_int8(self):
+        self._test_decomposed_dequant_relu_quant_helper(torch.int8)
+
+    def _test_dequant_quant_lowering_helper(self, dtype):
+        def fn(
+            x, scale, zero_point, use_dequant, use_quant, quant_min, quant_max, dtype
+        ):
             if use_dequant:
                 x = torch.ops.quantized_decomposed.dequantize_per_tensor(
-                    x, scale, zero_point, 0, 255, torch.uint8
+                    x, scale, zero_point, quant_min, quant_max, dtype
                 )
 
             x = torch.relu(x)
 
             if use_quant:
                 x = torch.ops.quantized_decomposed.quantize_per_tensor(
-                    x, scale, zero_point, 0, 255, torch.uint8
+                    x, scale, zero_point, quant_min, quant_max, dtype
                 )
             return x
 
         use_dequant_list = [False, True]
         use_quant_list = [False, True]
         use_tensor_overload_list = [False, True]
+
+        assert dtype in [torch.uint8, torch.int8]
+        quant_min = 0 if dtype == torch.uint8 else -128
+        quant_max = 255 if dtype == torch.uint8 else 127
+
         for use_dequant, use_quant, use_tensor_overload in itertools.product(
             use_dequant_list, use_quant_list, use_tensor_overload_list
         ):
             x = torch.clamp(
-                torch.randn((1, 7, 7, 9), dtype=torch.float32) * 100, 0, 255
+                torch.randn((1, 7, 7, 9), dtype=torch.float32) * 100,
+                quant_min,
+                quant_max,
             )
             if use_dequant:
-                x = x.to(torch.uint8)
+                x = x.to(dtype)
             zero_point = 100
             scale = 0.01
             if use_tensor_overload:
@@ -937,17 +970,37 @@ class CPUReproTests(TestCase):
             with config.patch({"cpp.simdlen": None}):
                 torch._dynamo.reset()
                 metrics.reset()
-                self.common(fn, (x, scale, zero_point, use_dequant, use_quant))
+                self.common(
+                    fn,
+                    (
+                        x,
+                        scale,
+                        zero_point,
+                        use_dequant,
+                        use_quant,
+                        quant_min,
+                        quant_max,
+                        dtype,
+                    ),
+                )
                 assert metrics.generated_cpp_vec_kernel_count == 1
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_dequant_maxpool2d_lowering(self):
-        def fn(x, scale, zero_point):
+    def test_dequant_quant_lowering_uint8(self):
+        self._test_dequant_quant_lowering_helper(torch.uint8)
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_dequant_quant_lowering_int8(self):
+        self._test_dequant_quant_lowering_helper(torch.int8)
+
+    def _test_dequant_maxpool2d_lowering_helper(self, dtype):
+        def fn(x, scale, zero_point, quant_min, quant_max, dtype):
             x = torch.ops.quantized_decomposed.dequantize_per_tensor(
-                x, scale, zero_point, 0, 255, torch.uint8
+                x, scale, zero_point, quant_min, quant_max, dtype
             )
             max_pool2d_with_indices_default = (
                 torch.ops.aten.max_pool2d_with_indices.default(
@@ -956,13 +1009,19 @@ class CPUReproTests(TestCase):
             )
             return max_pool2d_with_indices_default
 
+        assert dtype in [torch.uint8, torch.int8]
+        quant_min = 0 if dtype == torch.uint8 else -128
+        quant_max = 255 if dtype == torch.uint8 else 127
+
         use_tensor_overload_list = [False, True]
         for use_tensor_overload in use_tensor_overload_list:
             x = (
                 torch.clamp(
-                    torch.randn((3, 16, 8, 8), dtype=torch.float32) * 100, 0, 255
+                    torch.randn((3, 16, 8, 8), dtype=torch.float32) * 100,
+                    quant_min,
+                    quant_max,
                 )
-                .to(torch.uint8)
+                .to(dtype)
                 .contiguous(memory_format=torch.channels_last)
             )
             zero_point = 100
@@ -973,14 +1032,22 @@ class CPUReproTests(TestCase):
             with config.patch({"cpp.simdlen": None}):
                 torch._dynamo.reset()
                 metrics.reset()
-                self.common(fn, (x, scale, zero_point))
+                self.common(fn, (x, scale, zero_point, quant_min, quant_max, dtype))
                 assert metrics.generated_cpp_vec_kernel_count == 1
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_tile2d_load_decomposed_dequant_add_relu_quant(self):
+    def test_dequant_maxpool2d_lowering_uint8(self):
+        self._test_dequant_maxpool2d_lowering_helper(torch.uint8)
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_dequant_maxpool2d_lowering_int8(self):
+        self._test_dequant_maxpool2d_lowering_helper(torch.int8)
+
+    def _test_tile2d_load_decomposed_dequant_add_relu_quant_helper(self, dtype):
         def fn(
             x,
             scale,
@@ -993,40 +1060,52 @@ class CPUReproTests(TestCase):
             use_dequant,
             use_dequant2,
             use_quant,
+            quant_min,
+            quant_max,
+            dtype,
         ):
             if use_dequant:
                 x = torch.ops.quantized_decomposed.dequantize_per_tensor(
-                    x, scale, zero_point, 0, 255, torch.uint8
+                    x, scale, zero_point, quant_min, quant_max, dtype
                 )
             if use_dequant2:
                 x2 = torch.ops.quantized_decomposed.dequantize_per_tensor(
-                    x2, scale2, zero_point2, 0, 255, torch.uint8
+                    x2, scale2, zero_point2, quant_min, quant_max, dtype
                 )
             temp = x + x2
             y = torch.relu(temp)
 
             if use_quant:
                 y = torch.ops.quantized_decomposed.quantize_per_tensor(
-                    y, output_scale, output_zero_point, 0, 255, torch.uint8
+                    y, output_scale, output_zero_point, quant_min, quant_max, dtype
                 )
             return y.contiguous()
+
+        assert dtype in [torch.uint8, torch.int8]
+        quant_min = 0 if dtype == torch.uint8 else -128
+        quant_max = 255 if dtype == torch.uint8 else 127
 
         use_dequant_list = [False, True]
         use_dequant_list2 = [False, True]
         use_quant_list = [False, True]
+
         for use_dequant, use_dequant2, use_quant in itertools.product(
             use_dequant_list, use_dequant_list2, use_quant_list
         ):
             x = torch.clamp(
-                torch.randn((1, 1024, 14, 14), dtype=torch.float32) * 100, 0, 255
+                torch.randn((1, 1024, 14, 14), dtype=torch.float32) * 100,
+                quant_min,
+                quant_max,
             ).contiguous(memory_format=torch.channels_last)
             x2 = torch.clamp(
-                torch.randn((1, 1024, 14, 14), dtype=torch.float32) * 100, 0, 255
+                torch.randn((1, 1024, 14, 14), dtype=torch.float32) * 100,
+                quant_min,
+                quant_max,
             ).contiguous(memory_format=torch.channels_last)
             if use_dequant:
-                x = x.to(torch.uint8).contiguous(memory_format=torch.channels_last)
+                x = x.to(dtype).contiguous(memory_format=torch.channels_last)
             if use_dequant2:
-                x2 = x2.to(torch.uint8).contiguous(memory_format=torch.channels_last)
+                x2 = x2.to(dtype).contiguous(memory_format=torch.channels_last)
             zero_point = 1
             scale = 0.01
             zero_point2 = 2
@@ -1050,6 +1129,9 @@ class CPUReproTests(TestCase):
                         use_dequant,
                         use_dequant2,
                         use_quant,
+                        quant_min,
+                        quant_max,
+                        dtype,
                     ),
                 )
                 assert metrics.generated_cpp_vec_kernel_count == 2
@@ -1057,34 +1139,95 @@ class CPUReproTests(TestCase):
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_non_contiguous_load_buf_quant(self):
+    def test_tile2d_load_decomposed_dequant_add_relu_quant_uint8(self):
+        self._test_tile2d_load_decomposed_dequant_add_relu_quant_helper(torch.uint8)
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_tile2d_load_decomposed_dequant_add_relu_quant_int8(self):
+        self._test_tile2d_load_decomposed_dequant_add_relu_quant_helper(torch.int8)
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def _test_per_tensor_fake_quant_helper(self, dtype):
+        def fn(input, scales, zero_points, quant_min, quant_max, dtype):
+            input = torch.ops.quantized_decomposed.quantize_per_tensor(
+                input, scales, zero_points, quant_min, quant_max, dtype
+            )
+            input = torch.ops.quantized_decomposed.dequantize_per_tensor(
+                input, scales, zero_points, quant_min, quant_max, dtype
+            )
+            return input
+
+        use_tensor_overload_list = [False, True]
+        for use_tensor_overload in use_tensor_overload_list:
+            assert dtype in [torch.uint8, torch.int8]
+            quant_min = 0 if dtype == torch.uint8 else -128
+            quant_max = 255 if dtype == torch.uint8 else 127
+            x = torch.clamp(
+                torch.randn((1, 7, 7, 9), dtype=torch.float32) * 100,
+                quant_min,
+                quant_max,
+            )
+            zero_point = 100
+            scale = 0.01
+            if use_tensor_overload:
+                zero_point = torch.tensor(zero_point, dtype=torch.int64)
+                scale = torch.tensor(scale)
+            with config.patch({"cpp.simdlen": None}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(fn, (x, scale, zero_point, quant_min, quant_max, dtype))
+                assert metrics.generated_cpp_vec_kernel_count == 1
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_per_tensor_fake_quant_uint8(self):
+        self._test_per_tensor_fake_quant_helper(torch.uint8)
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_per_tensor_fake_quant_int8(self):
+        self._test_per_tensor_fake_quant_helper(torch.int8)
+
+    def _test_non_contiguous_load_buf_quant_helper(self, dtype):
         def fn(
             x1,
             x2,
             groups,
+            quant_min,
+            quant_max,
+            dtype,
         ):
             x = torch.cat((x1, x2), dim=1)
             batchsize, num_channels, height, width = x.size()
             channels_per_group = num_channels // groups
             x = torch.ops.quantized_decomposed.dequantize_per_tensor(
-                x, 1.0, 0, 0, 255, torch.uint8
+                x, 1.0, 0, quant_min, quant_max, dtype
             )
             x = x.view(batchsize, groups, channels_per_group, height, width)
             x = torch.ops.quantized_decomposed.quantize_per_tensor(
-                x, 1.0, 0, 0, 255, torch.uint8
+                x, 1.0, 0, quant_min, quant_max, dtype
             )
             x = torch.ops.quantized_decomposed.dequantize_per_tensor(
-                x, 1.0, 0, 0, 255, torch.uint8
+                x, 1.0, 0, quant_min, quant_max, dtype
             )
             x = torch.transpose(x, 1, 2).contiguous()
             x = x.view(batchsize, num_channels, height, width)
             return x
 
-        x = torch.randint(0, 8, (1, 116, 28, 28), dtype=torch.uint8).contiguous(
+        assert dtype in [torch.uint8, torch.int8]
+        quant_min = 0 if dtype == torch.uint8 else -128
+        quant_max = 255 if dtype == torch.uint8 else 127
+
+        x = torch.randint(0, 8, (1, 116, 28, 28), dtype=dtype).contiguous(
             memory_format=torch.channels_last
         )
-        x2 = torch.randint(0, 8, (1, 116, 28, 28), dtype=torch.uint8).contiguous(
+        x2 = torch.randint(0, 8, (1, 116, 28, 28), dtype=dtype).contiguous(
             memory_format=torch.channels_last
         )
 
@@ -1097,6 +1240,9 @@ class CPUReproTests(TestCase):
                     x,
                     x2,
                     2,
+                    quant_min,
+                    quant_max,
+                    dtype,
                 ),
             )
             assert metrics.generated_cpp_vec_kernel_count == 2
@@ -1104,18 +1250,32 @@ class CPUReproTests(TestCase):
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_tile2d_store_channel_shuffle_cl_quant_output(self):
-        def channel_shuffle(x, groups, output_scale, output_zero_point):
+    def test_non_contiguous_load_buf_quant_uint8(self):
+        self._test_non_contiguous_load_buf_quant_helper(torch.uint8)
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_non_contiguous_load_buf_quant_int8(self):
+        self._test_non_contiguous_load_buf_quant_helper(torch.int8)
+
+    def _test_tile2d_store_channel_shuffle_cl_quant_output_helper(self, dtype):
+        def channel_shuffle(
+            x, groups, output_scale, output_zero_point, quant_min, quant_max, dtype
+        ):
             batchsize, num_channels, height, width = x.size()
             channels_per_group = num_channels // groups
             x = x.view(batchsize, groups, channels_per_group, height, width)
             x = torch.transpose(x, 1, 2).contiguous()
             x = x.view(batchsize, -1, height, width)
             x = torch.ops.quantized_decomposed.quantize_per_tensor(
-                x, output_scale, output_zero_point, 0, 255, torch.uint8
+                x, output_scale, output_zero_point, quant_min, quant_max, dtype
             )
             return x.contiguous(memory_format=torch.channels_last)
+
+        assert dtype in [torch.uint8, torch.int8]
+        quant_min = 0 if dtype == torch.uint8 else -128
+        quant_max = 255 if dtype == torch.uint8 else 127
 
         with config.patch({"cpp.simdlen": None}):
             torch._dynamo.reset()
@@ -1123,35 +1283,63 @@ class CPUReproTests(TestCase):
             x = torch.randn(64, 58, 28, 28)
             output_zero_point = 3
             output_scale = 0.03
-            self.common(channel_shuffle, (x, 2, output_scale, output_zero_point))
+            self.common(
+                channel_shuffle,
+                (x, 2, output_scale, output_zero_point, quant_min, quant_max, dtype),
+            )
             assert metrics.generated_cpp_vec_kernel_count == 2
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_dequant_relu_quant_dequant_relu_quant_lowering(self):
-        def fn(x, scale, zero_point, scale2, zero_point2, scale3, zero_point3):
+    def test_tile2d_store_channel_shuffle_cl_quant_output_uint8(self):
+        self._test_tile2d_store_channel_shuffle_cl_quant_output_helper(torch.uint8)
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_tile2d_store_channel_shuffle_cl_quant_output_int8(self):
+        self._test_tile2d_store_channel_shuffle_cl_quant_output_helper(torch.int8)
+
+    def _test_dequant_relu_quant_dequant_relu_quant_lowering_helper(self, dtype):
+        def fn(
+            x,
+            scale,
+            zero_point,
+            scale2,
+            zero_point2,
+            scale3,
+            zero_point3,
+            quant_min,
+            quant_max,
+            dtype,
+        ):
             x = torch.ops.quantized_decomposed.dequantize_per_tensor(
-                x, scale, zero_point, 0, 255, torch.uint8
+                x, scale, zero_point, quant_min, quant_max, dtype
             )
             x = torch.relu(x)
             x = torch.ops.quantized_decomposed.quantize_per_tensor(
-                x, scale2, zero_point2, 0, 255, torch.uint8
+                x, scale2, zero_point2, quant_min, quant_max, dtype
             )
             x = torch.ops.quantized_decomposed.dequantize_per_tensor(
-                x, scale2, zero_point2, 0, 255, torch.uint8
+                x, scale2, zero_point2, quant_min, quant_max, dtype
             )
             x = torch.relu(x)
             x = torch.ops.quantized_decomposed.quantize_per_tensor(
-                x, scale3, zero_point3, 0, 255, torch.uint8
+                x, scale3, zero_point3, quant_min, quant_max, dtype
             )
             return x
 
+        assert dtype in [torch.uint8, torch.int8]
+        quant_min = 0 if dtype == torch.uint8 else -128
+        quant_max = 255 if dtype == torch.uint8 else 127
+
         for use_tensor_overload in [True, False]:
             x = torch.clamp(
-                torch.randn((1, 7, 7, 9), dtype=torch.float32) * 100, 0, 255
-            ).to(torch.uint8)
+                torch.randn((1, 7, 7, 9), dtype=torch.float32) * 100,
+                quant_min,
+                quant_max,
+            ).to(dtype)
             zero_point_list = [100, 101, 102]
             scale_list = [0.01, 0.02, 0.03]
             if use_tensor_overload:
@@ -1167,11 +1355,34 @@ class CPUReproTests(TestCase):
                 metrics.reset()
                 self.common(
                     fn,
-                    (x, scale, zero_point, scale2, zero_point2, scale3, zero_point3),
+                    (
+                        x,
+                        scale,
+                        zero_point,
+                        scale2,
+                        zero_point2,
+                        scale3,
+                        zero_point3,
+                        quant_min,
+                        quant_max,
+                        dtype,
+                    ),
                     rtol=1e-2,
                     atol=1e-2,
                 )
                 assert metrics.generated_cpp_vec_kernel_count == 1
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_dequant_relu_quant_dequant_relu_quant_lowering_uint8(self):
+        self._test_dequant_relu_quant_dequant_relu_quant_lowering_helper(torch.uint8)
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_dequant_relu_quant_dequant_relu_quant_lowering_int8(self):
+        self._test_dequant_relu_quant_dequant_relu_quant_lowering_helper(torch.int8)
 
     def test_inplace_add_alpha(self):
         def fn(x, y):
