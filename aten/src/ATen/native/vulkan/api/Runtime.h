@@ -2,10 +2,13 @@
 
 // @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
 
+#include <functional>
+#include <memory>
 #ifdef USE_VULKAN_API
 
+#include <ATen/native/vulkan/api/vk_api.h>
+
 #include <ATen/native/vulkan/api/Adapter.h>
-#include <ATen/native/vulkan/api/Common.h>
 
 namespace at {
 namespace native {
@@ -67,14 +70,14 @@ class Runtime final {
   }
 
   inline Adapter* get_adapter_p() {
-    TORCH_CHECK(
+    VK_CHECK_COND(
         default_adapter_i_ >= 0 && default_adapter_i_ < adapters_.size(),
         "Pytorch Vulkan Runtime: Default device adapter is not set correctly!");
     return adapters_[default_adapter_i_].get();
   }
 
   inline Adapter* get_adapter_p(uint32_t i) {
-    TORCH_CHECK(
+    VK_CHECK_COND(
         i >= 0 && i < adapters_.size(),
         "Pytorch Vulkan Runtime: Adapter at index ",
         i,

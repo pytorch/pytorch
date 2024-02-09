@@ -15,7 +15,6 @@ aten::_native_batch_norm_legit
 aten::_native_batch_norm_legit.no_stats
 aten::_native_batch_norm_legit_functional
 aten::_native_batch_norm_legit_no_training
-aten::_scaled_dot_product_flash_attention_for_cpu
 aten::_softmax
 aten::_softmax.out
 aten::_to_copy
@@ -387,6 +386,8 @@ aten::normal.float_float_out
 aten::normal.out
 aten::normal_
 aten::permute
+aten::pixel_shuffle
+aten::pixel_shuffle.out
 aten::polar
 aten::polar.out
 aten::pow.Scalar
@@ -420,6 +421,10 @@ aten::repeat
 aten::repeat.out
 aten::roll
 aten::roll.out
+aten::round
+aten::round.decimals
+aten::round.decimals_out
+aten::round.out
 aten::round_
 aten::round_.decimals
 aten::rrelu_with_noise_backward

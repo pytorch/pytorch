@@ -151,6 +151,7 @@
 #include <ATen/ops/slice.h>
 #include <ATen/ops/slice_backward_native.h>
 #include <ATen/ops/slice_copy_native.h>
+#include <ATen/ops/slice_inverse_native.h>
 #include <ATen/ops/slice_native.h>
 #include <ATen/ops/slice_scatter_native.h>
 #include <ATen/ops/sparse_coo_tensor.h>
@@ -2559,6 +2560,17 @@ Tensor slice(
   return result;
 }
 
+Tensor slice_inverse_symint(
+    const Tensor& self,
+    const Tensor& base,
+    int64_t /* dim */,
+    c10::optional<SymInt> /* start */,
+    c10::optional<SymInt> /* end */,
+    SymInt /* step */) {
+  // assume self has enough to storage to be viewed with base's metadata
+  return self.as_strided_symint(base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
+}
+
 Tensor slice_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) {
   auto grad_input = at::zeros(input_sizes, grad.options());
   grad_input.slice(dim, start, end, step).copy_(grad);
@@ -4012,6 +4024,13 @@ void split_with_sizes_copy_out(const at::Tensor & self, at::IntArrayRef split_si
 
   TORCH_CHECK(out.size() == tmp.size(), "split_with_sizes_copy_out() expected an out= argument of size ", tmp.size(), ", got size ", out.size());
   for (const auto i : c10::irange(out.size())) {
+    if (resize_output_check(out[i], tmp[i].sizes())) {
+      out[i].resize_(tmp[i].sizes());
+    }
+    TORCH_CHECK(out[i].dtype() == tmp[i].dtype(),
+        "Expected out tensor to have dtype ", tmp[i].dtype(), ", but got ", out[i].dtype(), " instead");
+    TORCH_CHECK(out[i].device() == tmp[i].device(),
+        "Expected out tensor to have device ", tmp[i].device(), ", but got ", out[i].device(), " instead");
     out[i].copy_(tmp[i]);
   }
 }

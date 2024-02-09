@@ -199,7 +199,7 @@ def wrap_outputs_maintaining_identity(
             result.append(unwrapped_input_to_orig_input[id(output)])
             continue
         if out_dims_specified:
-            result.append(wrap_fn(output, flat_out_dims[i]))  # type: ignore[index]
+            result.append(wrap_fn(output, flat_out_dims[i]))  # type: ignore[possibly-undefined, index]
         else:
             result.append(wrap_fn(output))
 
@@ -633,3 +633,27 @@ def reductify_leaf(grad_input, grad_input_bdim, input_bdim, batch_size,
     if input_bdim != grad_input_bdim:
         grad_input = grad_input.movedim(grad_input_bdim, input_bdim)
     return grad_input
+
+
+class AutogradFunctionApply(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("autograd_function_apply")
+
+    def __call__(self, fwd, bwd, *fwd_args):
+        saved_values = None
+
+        class ApplyTemplate(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, *args):
+                nonlocal saved_values
+                output, saved_values = fwd(None, *args)
+                return output
+
+            @staticmethod
+            def backward(ctx, *grad):
+                return bwd(None, *grad, *saved_values)
+
+        return ApplyTemplate.apply(*fwd_args)
+
+
+autograd_function_apply = AutogradFunctionApply()

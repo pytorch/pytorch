@@ -37,6 +37,8 @@ quantized 8-bit integer (unsigned)      ``torch.quint8``
 quantized 8-bit integer (signed)        ``torch.qint8``
 quantized 32-bit integer (signed)       ``torch.qint32``
 quantized 4-bit integer (unsigned) [3]_ ``torch.quint4x2``
+8-bit floating point, e4m3 [5]_         ``torch.float8_e4m3fn`` (limited support)
+8-bit floating point, e5m2 [5]_         ``torch.float8_e5m2`` (limited support)
 ======================================= ===========================================
 
 .. [1]
@@ -54,6 +56,11 @@ quantized 4-bit integer (unsigned) [3]_ ``torch.quint4x2``
   torch.compile); if you need eager support and the extra range is not needed,
   we recommend using their signed variants instead.  See
   https://github.com/pytorch/pytorch/issues/58734 for more details.
+.. [5]
+  ``torch.float8_e4m3fn`` and ``torch.float8_e5m2`` implement the spec for 8-bit
+  floating point types from https://arxiv.org/abs/2209.05433. The op support
+  is very limited.
+
 
 For backwards compatibility, we support the following alternate class names
 for these data types:

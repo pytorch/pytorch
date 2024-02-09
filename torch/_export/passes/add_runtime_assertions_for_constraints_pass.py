@@ -10,6 +10,7 @@ import torch
 import torch.fx
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse, ProxyValue, PassResult
 from torch.utils._sympy.value_ranges import ValueRanges
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
 
 __all__ = ["InputDim"]
@@ -92,14 +93,14 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBaseDeprecatedDoN
             call_backs: List[Callable] = []
             messages: List[str] = []
             if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-                symbol = val.node._expr
+                symbol = val.node.expr
                 if symbol in self.existing_inline_assertions:
                     return call_backs, messages
-                if isinstance(symbol, sympy.Symbol) and symbol.name.startswith("i"):
+                if isinstance(symbol, sympy.Symbol) and free_unbacked_symbols(symbol):
                     if symbol in self._asserts_generated_unbacked_symbols:
                         return call_backs, messages
                     # We only care about unbacked symints for these inline
-                    # constraints, which are prefixed with 'i'
+                    # constraints, which are prefixed with 'u'
                     constraint = self.range_constraints[symbol]
                     min_val, max_val = _convert_range_to_int(constraint)
                     assert_msg = f" is outside of inline constraint [{min_val}, {max_val}]."
@@ -209,7 +210,7 @@ def _get_existing_inline_assertions(
             ):
                 continue
 
-            symint = maybe_symint_arg.meta["val"].node._expr
+            symint = maybe_symint_arg.meta["val"].node.expr
             if not isinstance(symint, sympy.Symbol):
                 continue
 

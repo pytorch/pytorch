@@ -148,6 +148,7 @@ def aot_dispatch_autograd(
     *,
     fw_metadata: ViewAndMutationMeta,
 ):
+    fw_metadata.deterministic = torch.are_deterministic_algorithms_enabled()
     fx_g, joint_inputs, maybe_subclass_meta = aot_dispatch_autograd_graph(  # type: ignore[misc]
         flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
     )
@@ -181,6 +182,19 @@ def aot_dispatch_autograd(
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
+
+            # Compiled autograd will run the bw_module in the backward pass,
+            # so recompilation need happen anyway if the backward pass is ever
+            # called.
+            #
+            # The reason we do the GraphModule recompilation here is because
+            # the lazy recompilation will cause issue in the backward pass
+            # with compiled autograd.
+            if torch._dynamo.compiled_autograd.compiled_autograd_enabled_count:
+                from torch.fx._lazy_graph_module import _LazyGraphModule
+
+                _LazyGraphModule.force_recompile(bw_module)
+
             fw_outs = next(n for n in fw_module.graph.nodes if n.op == "output").args[0]
             # we only need to bookkeep the symints that are saved for bw, not any symints
             # the user forward might have returned in its own output
@@ -528,7 +542,7 @@ def aot_dispatch_autograd(
             # and we filter them out here before passing the remaining grad_outputs into the compiled backward.
             num_intermediate_bases = CompiledFunction.metadata.num_intermediate_bases
             num_graph_handled_inputs = (
-                CompiledFunction.metadata.num_mutated_graph_handled_indices
+                CompiledFunction.metadata.num_mutated_graph_handled_indices_seen_by_autograd
             )
             num_mutated_runtime_inps = (
                 CompiledFunction.metadata.num_mutated_inp_runtime_indices
@@ -538,6 +552,18 @@ def aot_dispatch_autograd(
                 + num_mutated_runtime_inps
                 + num_intermediate_bases
             )
+            deterministic = CompiledFunction.metadata.deterministic
+            global_deterministic = torch.are_deterministic_algorithms_enabled()
+            if deterministic is not None:
+                torch._check(
+                    not (not deterministic and global_deterministic),
+                    lambda: (
+                        "This compiled backward function is being run with "
+                        "torch.use_deterministic_algorithms(True), "
+                        "but it was previously generated during the forward function while "
+                        "torch.use_deterministic_algorithms(False) was set."
+                    ),
+                )
 
             if num_graph_handled_inputs > 0:
                 flat_args = flat_args[:-num_graph_handled_inputs]

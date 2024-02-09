@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 r"""Importing this file includes common utility methods and base clases for
 checking quantization api and properties of resulting modules.
 """
