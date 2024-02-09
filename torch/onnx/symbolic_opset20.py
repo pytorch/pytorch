@@ -65,9 +65,9 @@ def grid_sampler(
 @_beartype.beartype
 def affine_grid(
     g: jit_utils.GraphContext,
-    theta,
-    size,
-    align_corners,
+    theta: _C.Value,
+    size: _C.Value,
+    align_corners: bool,
 ):
     return g.op(
         "AffineGrid",
