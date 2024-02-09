@@ -1,4 +1,5 @@
 #pragma once
+#include <ATen/ceil_div.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -57,8 +58,8 @@ template <int n>
 struct TensorListMetadata {
   const void** addresses[n];
   int64_t* numel_for_tensor;
-  uint32_t* block_to_tensor;
-  uint32_t* block_to_chunk;
+  size_t* block_to_tensor;
+  size_t* block_to_chunk;
   int start_tensor_this_launch;
 };
 
@@ -120,7 +121,7 @@ bool can_use_static_tensor_list_meta(
   int64_t num_blocks = 0;
   for (const auto t : c10::irange(n_tensors)) {
     const auto numel = tensor_lists[0][t].numel();
-    const auto chunks = numel / kChunkSize + (numel % kChunkSize != 0);
+    const auto chunks = at::ceil_div(numel, kChunkSize);
     num_blocks += chunks;
     if (num_blocks > depth_to_max_blocks[depth - 1]) {
       return false;
@@ -132,14 +133,23 @@ bool can_use_static_tensor_list_meta(
 // Helper for transfering multiple std::vector<T> onto device with a single
 // page-locked cudaMemcpyAsync.
 struct VecPacker {
+  std::vector<const void*> ptrs;
+  std::vector<size_t> sizes;
+  std::vector<size_t> offsets;
+  int64_t packed_numel = 0;
+  at::Tensor packed;
+
   template <typename T>
   // Add a vector to be copied to device
   // NOTE: VecPacker doesn't make copies of the added vectors. They have to be
   // kept alive by the caller until .pack() is called.
   void add(const std::vector<T>& vec) {
+    // 16 would cover alignment for the largest known T (c10::complex)
+    static const size_t alignment = 16;
+    static_assert(alignment % sizeof(T) == 0);
     ptrs.push_back(vec.data());
     const auto vec_bytes = sizeof(T) * vec.size();
-    const auto vec_bytes_aligned = (vec_bytes + 16 - 1) / 16 * 16;
+    const auto vec_bytes_aligned = at::round_up(vec_bytes, alignment);
     sizes.push_back(vec_bytes);
     offsets.push_back(packed_numel);
     packed_numel += vec_bytes_aligned;
@@ -148,7 +158,7 @@ struct VecPacker {
   // Copy all previously added vectors onto device and return their device
   // pointers in the order they are added. We leverage the stream awareness of
   // CUDACachingAllocator to manage the lifetime of the device arguments - the
-  // device memory is guaranteed to be alive as long as VecPacker is destoryed
+  // device memory is guaranteed to be alive as long as VecPacker is destroyed
   // after the kernel that consumes it.
   std::vector<void*> pack(const at::Device& device) {
     packed = at::empty(
@@ -166,12 +176,6 @@ struct VecPacker {
     }
     return dev_ptrs;
   }
-
-  std::vector<const void*> ptrs;
-  std::vector<size_t> sizes;
-  std::vector<size_t> offsets;
-  int64_t packed_numel = 0;
-  at::Tensor packed;
 };
 
 template <typename T, typename U, typename... ArgTypes>
@@ -373,17 +377,10 @@ void multi_tensor_apply(
       "Number of tensor lists has to match the depth.");
   const size_t n_tensors = tensor_lists[0].size();
 
-  TORCH_CHECK(
-      n_tensors < static_cast<size_t>(std::numeric_limits<int>::max()),
-      "multi_tensor_apply: exceeded the maximum supported number of tensors: ",
-      n_tensors,
-      " > ",
-      std::numeric_limits<int>::max());
-
   std::vector<const void*> addresses[depth];
   std::vector<int64_t> numel_for_tensor;
-  std::vector<uint32_t> block_to_tensor;
-  std::vector<uint32_t> block_to_chunk;
+  std::vector<size_t> block_to_tensor;
+  std::vector<size_t> block_to_chunk;
 
   for (int d = 0; d < depth; ++d) {
     addresses[d].reserve(n_tensors);
@@ -393,26 +390,16 @@ void multi_tensor_apply(
   block_to_chunk.reserve(n_tensors); // reserve for lowerbound
 
   for (size_t t = 0; t < n_tensors; t++) {
+    const auto numel = tensor_lists[0][t].numel();
     // short-circuit to avoid adding empty tensors to tensorListMeta
-    if (tensor_lists[0][t].numel() == 0) {
+    if (numel == 0) {
       continue;
     }
-    numel_for_tensor.push_back(tensor_lists[0][t].numel());
+    numel_for_tensor.push_back(numel);
     for (int d = 0; d < depth; d++) {
       addresses[d].push_back(tensor_lists[d][t].const_data_ptr());
     }
-
-    const auto numel = tensor_lists[0][t].numel();
-    const auto chunks = numel / kChunkSize + (numel % kChunkSize != 0);
-    // Using float32 as example, hitting this limit requires rougly 2^32 *
-    // 65536 * 4 bytes == 1 petabyte of data. Practically speaking we won't hit
-    // it anytime soon.
-    TORCH_CHECK(
-        block_to_tensor.size() <
-            static_cast<size_t>(std::numeric_limits<uint32_t>::max() - chunks),
-        "multi_tensor_apply: exceeded the maximum supported number of chunks: ",
-        std::numeric_limits<int>::max());
-
+    const auto chunks = at::ceil_div(numel, kChunkSize);
     block_to_tensor.insert(block_to_tensor.end(), chunks, t);
     block_to_chunk.resize(block_to_chunk.size() + chunks);
     std::iota(block_to_chunk.end() - chunks, block_to_chunk.end(), 0);
@@ -434,8 +421,8 @@ void multi_tensor_apply(
     tl.addresses[d] = static_cast<const void**>(dev_ptrs[d]);
   }
   tl.numel_for_tensor = static_cast<int64_t*>(dev_ptrs[depth]);
-  tl.block_to_tensor = static_cast<uint32_t*>(dev_ptrs[depth + 1]);
-  tl.block_to_chunk = static_cast<uint32_t*>(dev_ptrs[depth + 2]);
+  tl.block_to_tensor = static_cast<size_t*>(dev_ptrs[depth + 1]);
+  tl.block_to_chunk = static_cast<size_t*>(dev_ptrs[depth + 2]);
   tl.start_tensor_this_launch = 0;
 
   if (block_to_tensor.size() > 0) {
