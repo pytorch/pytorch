@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import csv
 import pathlib
 
 from common import (
@@ -13,9 +14,9 @@ from common import (
 )
 
 """
-Usage: update_failures.py /path/to/dynamo_test_failures.py commit_sha
+Usage: update_failures.py /path/to/dynamo_test_failures.csv commit_sha
 
-Best-effort updates the xfail and skip lists in dynamo_test_failures.py
+Best-effort updates the xfail and skip lists in dynamo_test_failures.csv
 by parsing test reports.
 
 You'll need to provide the commit_sha for the latest commit on a PR
@@ -36,101 +37,72 @@ https://docs.github.com/en/github-cli/github-cli/quickstart
 
 
 def patch_file(filename, unexpected_successes, new_xfails, new_skips, unexpected_skips):
-    with open(filename, "r") as f:
-        text = f.readlines()
+    header = None
+    test_failures = {}
+    with open(filename) as f:
+        reader = csv.reader(f)
+        for i, row in enumerate(reader):
+            # There should be 3 lines in between everything in dynamo_test_failures.csv!
+            if i % 4 != 0:
+                assert len(row) == 0
+                continue
+            if i == 0:
+                header = row
+                continue
+            assert len(row) >= 2
+            test_failures[row[0]] = row[1:]
 
-    new_text = []
-
-    i = 0
-    while True:
-        line = text[i]
-        if line.startswith("dynamo_expected_failures"):
-            break
-        new_text.append(line)
-        i += 1
-
-    def format(testcase):
+    def as_key(testcase):
         classname = testcase.attrib["classname"]
         name = testcase.attrib["name"]
         return f"{classname}.{name}"
 
-    formatted_unexpected_successes = {
-        f"{format(test)}" for test in unexpected_successes.values()
-    }
-    formatted_unexpected_skips = {
-        f"{format(test)}" for test in unexpected_skips.values()
-    }
-    formatted_new_xfails = [
-        f'    "{format(test)}",  # {test.attrib["file"]}\n'
-        for test in new_xfails.values()
-    ]
-    formatted_new_skips = [
-        f'    "{format(test)}",  # {test.attrib["file"]}\n'
-        for test in new_skips.values()
-    ]
+    # remove unexpected_successes
+    for test in unexpected_successes.values():
+        key = as_key(test)
+        if key not in test_failures:
+            print(
+                f"WARNING: we were unable to remove {test} from the expected failures list"
+            )
+        assert test_failures[key][0] == "xfail"
+        del test_failures[key]
 
-    def is_in(lst, line):
-        splits = line.split('"')
-        if len(splits) < 3:
-            return None
-        test_name = splits[1]
-        if test_name in lst:
-            return test_name
-        return None
+    # add in new_xfails
+    for test in new_xfails.values():
+        key = as_key(test)
+        assert key not in test_failures
+        test_failures[key] = ["xfail", test.attrib["file"]]
 
-    covered_unexpected_successes = set({})
+    # add in new_skips
+    for test in new_skips.values():
+        key = as_key(test)
+        assert key not in test_failures
+        test_failures[key] = ["skip", test.attrib["file"]]
 
-    # dynamo_expected_failures
-    while True:
-        line = text[i]
-        match = is_in(formatted_unexpected_successes, line)
-        if match is not None:
-            covered_unexpected_successes.add(match)
-            i += 1
-            continue
-        if line == "}\n":
-            new_text.extend(formatted_new_xfails)
-            new_text.append(line)
-            i += 1
-            break
-        new_text.append(line)
-        i += 1
+    # remove unexpected_skips
+    for test in unexpected_skips.values():
+        key = as_key(test)
+        assert test_failures[key][0] == "skip"
+        del test_failures[key]
 
-    leftover_unexpected_successes = (
-        formatted_unexpected_successes - covered_unexpected_successes
-    )
-    if len(leftover_unexpected_successes) > 0:
-        print(
-            "WARNING: we were unable to remove these "
-            f"{len(leftover_unexpected_successes)} expectedFailures:"
-        )
-        for stuff in leftover_unexpected_successes:
-            print(stuff)
-
-    # dynamo_skips
-    while True:
-        line = text[i]
-        match = is_in(formatted_unexpected_skips, line)
-        if match is not None:
-            i += 1
-            continue
-        if line == "}\n":
-            new_text.extend(formatted_new_skips)
-            break
-        if line == "dynamo_skips = {}\n":
-            new_text.extend("dynamo_skips = {\n")
-            new_text.extend(new_skips)
-            new_text.extend("}\n")
-            i += 1
-            break
-        new_text.append(line)
-        i += 1
-
-    for j in range(i, len(text)):
-        new_text.append(text[j])
-
+    # Write test_failures out to disk
     with open(filename, "w") as f:
-        f.writelines(new_text)
+        writer = csv.writer(f)
+        sorted_keys = sorted(list(test_failures.keys()))
+        empty_rows = 3
+
+        # write header
+        writer.writerow(header)
+        for _ in range(empty_rows):
+            writer.writerow([])
+
+        # write everything else
+        for k in sorted_keys:
+            v = test_failures[k]
+            writer.writerow([k, *v])
+            if k != sorted_keys[-1]:
+                for _ in range(empty_rows):
+                    writer.writerow([])
 
 
 def get_intersection_and_outside(a_dict, b_dict):
@@ -152,6 +124,8 @@ def get_intersection_and_outside(a_dict, b_dict):
 
 
 def update(filename, py38_dir, py311_dir, also_remove_skips):
+    return patch_file(filename, {}, {}, {}, {})
+
     def read_test_results(directory):
         xmls = open_test_results(directory)
         testcases = get_testcases(xmls)
@@ -207,9 +181,9 @@ if __name__ == "__main__":
         nargs="?",
         default=str(
             pathlib.Path(__file__).absolute().parent.parent.parent
-            / "torch/testing/_internal/dynamo_test_failures.py"
+            / "torch/testing/_internal/dynamo_test_failures.csv"
         ),
-        help="Optional path to dynamo_test_failures.py",
+        help="Optional path to dynamo_test_failures.csv",
     )
     parser.add_argument(
         "commit",
@@ -225,5 +199,6 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     assert pathlib.Path(args.filename).exists(), args.filename
-    dynamo38, dynamo311 = download_reports(args.commit, ("dynamo38", "dynamo311"))
-    update(args.filename, dynamo38, dynamo311, args.also_remove_skips)
+    # dynamo38, dynamo311 = download_reports(args.commit, ("dynamo38", "dynamo311"))
+    # update(args.filename, dynamo38, dynamo311, args.also_remove_skips)
+    update(args.filename, None, None, args.also_remove_skips)

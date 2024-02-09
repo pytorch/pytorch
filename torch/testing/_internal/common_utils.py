@@ -80,8 +80,7 @@ from torch.nn import (
     Sequential,
 )
 from .dynamo_test_failures import (
-    dynamo_expected_failures,
-    dynamo_skips,
+    get_config,
     FIXME_inductor_non_strict,
 )
 from torch.onnx import (
@@ -2786,6 +2785,8 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 # TorchDynamo optimize annotation
                 super_run = torch._dynamo.optimize("eager", nopython=nopython)(super_run)
                 key = f"{self.__class__.__name__}.{self._testMethodName}"
+
+                dynamo_expected_failures, dynamo_skips = get_config()
 
                 def expect_failure(f):
                     @wraps(f)
