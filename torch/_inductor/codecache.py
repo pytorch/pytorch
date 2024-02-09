@@ -201,6 +201,7 @@ class CacheBase:
     def update_local_cache(self, local_cache: Dict[str, Any]) -> None:
         if not os.path.exists(self.local_cache_path.parent):
             os.makedirs(self.local_cache_path.parent, exist_ok=True)
+
         write_atomic(
             str(self.local_cache_path),
             json.dumps({"system": self.system, "cache": local_cache}, indent=4),
@@ -1342,11 +1343,11 @@ def get_include_and_linking_paths(
 
             # check the `OMP_PREFIX` environment first
             if os.getenv("OMP_PREFIX") is not None:
-                header_path = os.path.join(os.getenv("OMP_PREFIX"), "include", "omp.h")
+                header_path = os.path.join(os.getenv("OMP_PREFIX"), "include", "omp.h")  # type: ignore[arg-type]
                 valid_env = os.path.exists(header_path)
                 if valid_env:
-                    ipaths.append(os.path.join(os.getenv("OMP_PREFIX"), "include"))
-                    lpaths.append(os.path.join(os.getenv("OMP_PREFIX"), "lib"))
+                    ipaths.append(os.path.join(os.getenv("OMP_PREFIX"), "include"))  # type: ignore[arg-type]
+                    lpaths.append(os.path.join(os.getenv("OMP_PREFIX"), "lib"))  # type: ignore[arg-type]
                 else:
                     warnings.warn("environment variable `OMP_PREFIX` is invalid.")
                 omp_available = omp_available or valid_env
@@ -1357,8 +1358,8 @@ def get_include_and_linking_paths(
             if not omp_available and os.getenv("CONDA_PREFIX") is not None:
                 omp_available = is_conda_llvm_openmp_installed()
                 if omp_available:
-                    conda_lib_path = os.path.join(os.getenv("CONDA_PREFIX"), "lib")
-                    ipaths.append(os.path.join(os.getenv("CONDA_PREFIX"), "include"))
+                    conda_lib_path = os.path.join(os.getenv("CONDA_PREFIX"), "lib")  # type: ignore[arg-type]
+                    ipaths.append(os.path.join(os.getenv("CONDA_PREFIX"), "include"))  # type: ignore[arg-type]
                     lpaths.append(conda_lib_path)
                     # Prefer Intel OpenMP on x86 machine
                     if os.uname().machine == "x86_64" and os.path.exists(
@@ -2168,6 +2169,7 @@ def _nvcc_compiler_options() -> List[str]:
         config.cuda.compile_opt_level,
         "-std=c++17",
         "--expt-relaxed-constexpr",
+        "-DNDEBUG",
     ]
     if config.cuda.enable_debug_info:
         options.extend(["-lineinfo", "-g", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"])

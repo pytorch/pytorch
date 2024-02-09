@@ -1066,7 +1066,7 @@ def pointwise_cat(inputs, dim=0):
 
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
-    if all(input.get_dtype() is torch.uint8 for input in inputs):
+    if all(input.get_dtype() in [torch.int8, torch.uint8] for input in inputs):
         # TODO <leslie> Remove this fallback when we support vectorization
         # code gen with uint8 data type directly.
         for input in inputs:
@@ -2267,6 +2267,7 @@ make_fallback(aten._linalg_slogdet)
 make_fallback(aten._linalg_solve_ex)
 make_fallback(aten.linalg_solve_triangular)
 make_fallback(aten._linalg_svd)
+make_fallback(aten.logcumsumexp)
 make_fallback(aten.lu_unpack)
 make_fallback(aten.max_pool3d_with_indices)
 make_fallback(aten.max_unpool2d)
@@ -4984,7 +4985,6 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
 
 fallback_cumsum = fallback_handler(aten.cumsum.default)
 fallback_cumprod = fallback_handler(aten.cumprod.default)
-fallback_logcumsumexp = fallback_handler(aten.logcumsumexp.default)
 
 
 @register_lowering(aten.cumsum)
@@ -5022,26 +5022,6 @@ def cumprod(x, axis=None, dtype=None):
     result = ir.Scan.create(**kwargs, combine_fn=ops.mul, init=1)
     if result is None:
         return fallback_cumprod(x, dim=axis, dtype=dtype)
-    return result
-
-
-@register_lowering(aten.logcumsumexp)
-def logcumsumexp(x, dim):
-    def log_add_exp_helper(a, b):
-        min_v = ops.minimum(a, b)
-        max_v = ops.maximum(a, b)
-        mask = (min_v != max_v) | (~ops.isinf(min_v))
-        return ops.where(mask, ops.log1p(ops.exp(min_v - max_v)) + max_v, a)
-
-    dtype = x.get_dtype()
-    if len(x.get_size()) == 0:
-        assert dim in [0, -1]
-        return clone(x)
-
-    kwargs = _make_scan_inner(x, axis=dim, dtype=dtype)
-    result = ir.Scan.create(**kwargs, combine_fn=log_add_exp_helper, init=float("-inf"))
-    if result is None:
-        return fallback_logcumsumexp(x, dim=dim)
     return result
 
 
@@ -5361,7 +5341,7 @@ register_inplace(aten.__ixor__, aten.__xor__)
 
 
 @register_lowering(aten.sym_constrain_range)
-def sym_constrain_range(a, min, max):
+def sym_constrain_range(a, min=None, max=None):
     tracing_context = torch._guards.TracingContext.get()
     assert a in tracing_context.fake_mode.shape_env.var_to_range
     return a
