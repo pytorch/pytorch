@@ -780,24 +780,6 @@ def trunc(x):
     return make_pointwise(fn)(x)
 
 
-@register_lowering(
-    [aten.special_bessel_j0, prims.bessel_j0],
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
-def bessel_j0(x):
-    fn = ops_wrapper("bessel_j0")
-    return make_pointwise(fn)(x)
-
-
-@register_lowering(
-    [aten.special_bessel_j1, prims.bessel_j1],
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
-def bessel_j1(x):
-    fn = ops_wrapper("bessel_j1")
-    return make_pointwise(fn)(x)
-
-
 @register_lowering(aten.expand, type_promotion_kind=None)
 def expand(x, sizes):
     (x,) = promote_constants([x])
@@ -2282,7 +2264,6 @@ make_fallback(aten._linalg_slogdet)
 make_fallback(aten._linalg_solve_ex)
 make_fallback(aten.linalg_solve_triangular)
 make_fallback(aten._linalg_svd)
-make_fallback(aten.logcumsumexp)
 make_fallback(aten.lu_unpack)
 make_fallback(aten.max_pool3d_with_indices)
 make_fallback(aten.max_unpool2d)
@@ -2311,7 +2292,6 @@ make_fallback(aten.special_i0e, warn=False)
 make_fallback(aten.special_i1, warn=False)
 make_fallback(aten.special_i1e, warn=False)
 make_fallback(aten.special_laguerre_polynomial_l)
-make_fallback(aten.special_modified_bessel_i0)
 make_fallback(aten.special_modified_bessel_i1)
 make_fallback(aten.special_modified_bessel_k0)
 make_fallback(aten.special_modified_bessel_k1)
@@ -5022,6 +5002,7 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
 
 fallback_cumsum = fallback_handler(aten.cumsum.default)
 fallback_cumprod = fallback_handler(aten.cumprod.default)
+fallback_logcumsumexp = fallback_handler(aten.logcumsumexp.default)
 
 
 @register_lowering(aten.cumsum)
@@ -5059,6 +5040,26 @@ def cumprod(x, axis=None, dtype=None):
     result = ir.Scan.create(**kwargs, combine_fn=ops.mul, init=1)
     if result is None:
         return fallback_cumprod(x, dim=axis, dtype=dtype)
+    return result
+
+
+@register_lowering(aten.logcumsumexp)
+def logcumsumexp(x, dim):
+    def log_add_exp_helper(a, b):
+        min_v = ops.minimum(a, b)
+        max_v = ops.maximum(a, b)
+        mask = (min_v != max_v) | (~ops.isinf(min_v))
+        return ops.where(mask, ops.log1p(ops.exp(min_v - max_v)) + max_v, a)
+
+    dtype = x.get_dtype()
+    if len(x.get_size()) == 0:
+        assert dim in [0, -1]
+        return clone(x)
+
+    kwargs = _make_scan_inner(x, axis=dim, dtype=dtype)
+    result = ir.Scan.create(**kwargs, combine_fn=log_add_exp_helper, init=float("-inf"))
+    if result is None:
+        return fallback_logcumsumexp(x, dim=dim)
     return result
 
 
@@ -5116,9 +5117,11 @@ add = register_pointwise(
 )
 
 
-def register_pointwise_numeric(op):
+def register_pointwise_numeric(op, name=None):
     return register_pointwise(
-        op, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+        op,
+        name=name,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     )
 
 
@@ -5219,6 +5222,12 @@ register_pointwise_numeric(aten.erfinv)
 register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
+
+register_pointwise_numeric(aten.special_bessel_j0, name="bessel_j0")
+register_pointwise_numeric(prims.bessel_j0, name="bessel_j0")
+register_pointwise_numeric(aten.special_bessel_j1, name="bessel_j1")
+register_pointwise_numeric(prims.bessel_j1, name="bessel_j1")
+register_pointwise_numeric(aten.special_modified_bessel_i0, name="modified_bessel_i0")
 
 foreach_add_list = register_foreach_pointwise(
     aten._foreach_add.List, add, allow_alpha=True
