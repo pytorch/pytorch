@@ -60,7 +60,7 @@ from ..utils import (
     unique,
     yellow_text,
 )
-from ..virtualized import ops, OpsHandler, ReductionType, StoreMode, V
+from ..virtualized import _ops as ops, OpsHandler, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
 from .common import (
     CSE,
@@ -844,6 +844,10 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def bessel_j1(x):
         return f"tl.math.j1({x})"
+
+    @staticmethod
+    def modified_bessel_i0(x):
+        return f"tl.math.cyl_bessel_i0({x})"
 
 
 # Use mypy to check protocol implemented correctly
@@ -3142,7 +3146,7 @@ class TritonScheduling(BaseScheduling):
 
         return node_schedule
 
-    def codegen_nodes(self, nodes):
+    def codegen_nodes(self, nodes: List[scheduler.SchedulerNode]):
         """
         Given a set of pre-fused nodes, generate a Triton kernel.
         """

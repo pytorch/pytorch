@@ -14,10 +14,6 @@ struct ReadyQueue;
 static constexpr int NO_DEVICE = -2;
 static constexpr int CPU_DEVICE = -1;
 
-namespace {
-std::atomic<uint64_t> graph_task_id{0};
-}
-
 // GraphTask holds metadata needed for a single execution of backward()
 struct GraphTask : std::enable_shared_from_this<GraphTask> {
   std::atomic<uint64_t> outstanding_tasks_{0};
@@ -202,18 +198,7 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
       int reentrant_depth,
       std::shared_ptr<ReadyQueue> cpu_ready_queue,
       c10::SmallVector<Node*, 4> graph_roots,
-      bool exit_on_error = false)
-      : keep_graph_(keep_graph),
-        graph_roots_(std::move(graph_roots)),
-        owner_(NO_DEVICE),
-        reentrant_depth_(reentrant_depth),
-        exit_on_error_(exit_on_error),
-        cpu_ready_queue_(std::move(cpu_ready_queue)),
-        future_result_(c10::make_intrusive<at::ivalue::Future>(
-            c10::ListType::create(c10::TensorType::get()))),
-        id_(graph_task_id.fetch_add(1, std::memory_order_relaxed)) {
-    thread_locals_.set_grad_mode(grad_mode);
-  }
+      bool exit_on_error = false);
 
  private:
   // run GraphTask post processing
