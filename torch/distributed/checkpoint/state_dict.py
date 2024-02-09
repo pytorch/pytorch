@@ -201,7 +201,7 @@ def _verify_options(
         Union[str, torch.Tensor], Union[Set[str], torch.Tensor]
     ] = {}
     all_fqns = set()
-    for name, param in model.named_parameters():
+    for name, param in chain(model.named_parameters(), model.named_buffers()):
         fqns = _get_fqns(model, name)
         fqn_param_mapping[param] = fqns
         for fqn in fqns:
@@ -402,7 +402,7 @@ def _load_model_state_dict(
     if not info.handle_model or not state_dict:
         return _IncompatibleKeys({}, {})
 
-    for key, _ in model.named_parameters():
+    for key, _ in chain(model.named_parameters(), model.named_buffers()):
         fqns = _get_fqns(model, key)
         fqns_with_ddp_prefix = _get_fqns(model, key, skip_ddp_prefix=False)
         for fqn, fqn_with_ddp_prefix in zip(fqns, fqns_with_ddp_prefix):
