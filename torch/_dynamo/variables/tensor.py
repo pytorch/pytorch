@@ -722,55 +722,14 @@ class TensorVariable(VariableTracker):
             "register_post_accumulate_grad_hook", *args, **kwargs
         )
 
-    def _method_register_hook(self, name, *args, **kwargs):
+    def _method_register_hook(self, name, hook):
+        # Note - do not arbitrarily add hooks here - make sure they match the same contract
+        # see [On tensor.register_hook]
         from ..symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()
-        # Note - do not arbitrarily add hooks here - make sure they match the same contract
-        # see [On tensor.register_hook]
-        assert len(args) == 1 and not kwargs
-        fn_var = args[0]
-        if not isinstance(
-            fn_var,
-            (
-                variables.functions.FunctoolsPartialVariable,
-                variables.UserFunctionVariable,
-                variables.TorchInGraphFunctionVariable,
-                variables.NNModuleVariable,
-            ),
-        ):
-            unimplemented("Unexpected callable type passed to register_hook")
-
-        if isinstance(fn_var, variables.NestedUserFunctionVariable):
-            # NestedUserFunctionVariable don't carry their fn, but reconstruction builds it
-            # This should not be onerous to support when needed.
-            unimplemented("NYI - lambda variables as hooks")
-        elif isinstance(fn_var, variables.functions.FunctoolsPartialVariable):
-            # TODO(jansel): this is kind of sketch since it will lead to recompiles
-            # we should remove it in a future PR
-            fn = fn_var.guard_as_python_constant()
-        else:
-            fn = fn_var.fn
-
-        handle_variable = variables.user_defined.RemovableHandleVariable(
-            mutable_local=variables.base.MutableLocal(),
-        )
 
         if not self.source:
-            # Intermediary
-            src = fn_var.source
-            if (
-                not src
-                and isinstance(fn_var, variables.functions.FunctoolsPartialVariable)
-                and fn_var.func.source
-            ):
-                src = fn_var.func.source
-
-            if not src:
-                unimplemented("No source for register_hook target fn")
-
-            tx.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
-
             if not compiled_autograd.compiled_autograd_enabled:
                 # TODO(voz):
                 # We can relax this by speculating the callable and ensuring that it doesn't modify arbitrary
@@ -793,7 +752,7 @@ class TensorVariable(VariableTracker):
 
             # This wraps our user provided fn with a function that intercedes and
             # uses our `invoke` higher order op to record a hook invocation in bwd graph.
-            fn = functools.partial(trace_wrapped, fn=fn)
+            fn = functools.partial(trace_wrapped, fn=hook.guard_as_python_constant())
 
             def _register_hook_trampoline(tensor):
                 hook_callable = getattr(tensor, name)
@@ -812,7 +771,10 @@ class TensorVariable(VariableTracker):
                 ),
             )
 
-        tx.output.side_effects.register_hook(self, fn_var, handle_variable, name)
+        handle_variable = variables.RemovableHandleVariable(
+            mutable_local=variables.base.MutableLocal(),
+        )
+        tx.output.side_effects.register_hook(self, hook, handle_variable, name)
         return handle_variable
 
     def method_requires_grad_(self, requires_grad=True):

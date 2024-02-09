@@ -386,7 +386,17 @@ class SideEffects:
             )
 
     def register_hook(self, tensor, hook, handle, name):
+        assert isinstance(tensor, variables.TensorVariable)
+        assert isinstance(hook, variables.VariableTracker)
+        assert (
+            isinstance(handle, variables.RemovableHandleVariable)
+            and handle.mutable_local
+        )
+        assert hasattr(torch.Tensor, name)
         idx = len(self.tensor_hooks.keys())
+        # duplicate index possible because of self.remove_hook()
+        while idx in self.tensor_hooks:
+            idx += 1
         self.tensor_hooks[idx] = (tensor, hook, handle, name)
         assert not handle.idx
         handle.idx = idx
@@ -439,27 +449,10 @@ class SideEffects:
             cg.extend_output([cg.create_load_attr(name)])
             cg(hook)
             cg.extend_output(create_call_function(1, True))
-            # Let's go over how handles work.
-            #
-            # A handle is created from invoking `register_hook` on a tensor. A handle can be referenced at any
-            # time after that, or never. In dynamo, we track and associate a name with a handle (user_code_variable_name) to
-            # determine if a handle is accessed. If a handle has no user_code_variable_name, we just pop the produced value
-            # off the top of the stack, discarding the handle.
-            #
-            # If a handle is seen, we store it under that name. This is extremely important, because, the handle
-            # can be generated at any time after this point, and can be generated multiple times! If we were to defer
-            # actual codegen of the handle object until we saw a codegen call to it - then we would end up generating multiple
-            # register_hook calls, which is incorrect. This turns the codegen reconstruct(handle) call for the handle into
-            # essentially a lookup.
-            if (
-                hasattr(handle, "user_code_variable_name")
-                and handle.user_code_variable_name
-            ):
-                # register_hook stored with variable name assigned to the handle
-                cg.extend_output([cg.create_store(handle.user_code_variable_name)])
-            else:
-                # register_hook stored w/o a variable name assigned to the handle
-                cg.extend_output([create_instruction("POP_TOP")])
+
+            # Adding the handle to the cache means RemovableHandleVariable().reconstruct() will
+            # be associated with the return value of register_hook().  This consumes the top of stack.
+            cg.add_cache(handle)
 
     def codegen_update_mutated(self, cg: PyCodegen):
         suffixes = []
