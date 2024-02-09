@@ -280,7 +280,6 @@ class FSDPParam:
             for numel, dtype in zip(all_gather_input_numels, all_gather_input_dtypes)
         ]
 
-    @torch.no_grad()
     def init_unsharded_param(self):
         if hasattr(self, "_unsharded_param"):
             if not self._use_all_gather_extensions:

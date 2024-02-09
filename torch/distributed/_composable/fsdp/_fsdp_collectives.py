@@ -4,7 +4,6 @@ from typing import List, NamedTuple, Optional, Tuple
 
 import torch
 import torch.distributed as dist
-from torch.utils._contextlib import _DecoratorContextManager
 from ._fsdp_common import (
     _get_dim0_padded_size,
     _raise_assert_with_print,
@@ -88,6 +87,7 @@ def foreach_all_gather(
         )
 
 
+@torch.no_grad()
 def foreach_all_gather_copy_out(
     all_gather_result: AllGatherResult,
     fsdp_params: List[FSDPParam],
@@ -119,10 +119,9 @@ def foreach_all_gather_copy_out(
         out = [t.view(world_size, -1).view(torch.uint8) for t in gen]
     else:
         out = [t.view(world_size, -1) for t in gen]
-    with _unsafe_preserve_version_counters(out):
-        torch.split_with_sizes_copy(
-            all_gather_output, all_gather_input_split_sizes, dim=1, out=out
-        )
+    torch.split_with_sizes_copy(
+        all_gather_output, all_gather_input_split_sizes, dim=1, out=out
+    )
 
 
 @torch.no_grad()
@@ -245,23 +244,3 @@ def _get_all_gather_input_metadatas(
 def _div_if_needed(tensor: torch.Tensor, div_factor: float) -> None:
     if div_factor > 1:
         tensor.div_(div_factor)
-
-
-# We need this context for the backward all-gather, which would otherwise
-# raise an error when writing to the all-gather output tensors in-place, e.g.:
-# RuntimeError: one of the variables needed for gradient computation has been
-# modified by an inplace operation: [torch.cuda.FloatTensor [15, 3]], which is
-# output 0 of AsStridedBackward0, is at version 3; expected version 2 instead.
-class _unsafe_preserve_version_counters(_DecoratorContextManager):
-    # Same as `_unsafe_preserve_version_counter` but only entering/exiting the
-    # context manager once for a list of tensors to reduce CPU overhead
-    def __init__(self, tensors: List[torch.Tensor]) -> None:
-        self.tensors = tensors
-        self.prev_versions = [t._version for t in tensors]
-
-    def __enter__(self) -> None:
-        pass
-
-    def __exit__(self, *args) -> None:
-        for tensor, prev_version in zip(self.tensors, self.prev_versions):
-            torch._C._autograd._unsafe_set_version_counter(tensor, prev_version)
