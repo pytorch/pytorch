@@ -4,8 +4,13 @@ set -ex
 
 # Mirror jenkins user in container
 # jenkins user as ec2-user should have the same user-id
-echo "jenkins:x:1000:1000::/var/lib/jenkins:" >> /etc/passwd
-echo "jenkins:x:1000:" >> /etc/group
+if [ "$IS_ARC" = "true" ]; then
+  echo "jenkins:x:1001:1001::/var/lib/jenkins:" >> /etc/passwd
+  echo "jenkins:x:1001:" >> /etc/group
+else
+  echo "jenkins:x:1000:1000::/var/lib/jenkins:" >> /etc/passwd
+  echo "jenkins:x:1000:" >> /etc/group
+fi
 # Needed on focal or newer
 echo "jenkins:*:19110:0:99999:7:::" >>/etc/shadow
 

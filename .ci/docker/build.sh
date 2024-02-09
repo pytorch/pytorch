@@ -361,7 +361,6 @@ fi
 # Build image
 DOCKER_BUILDKIT=1 docker build \
        --no-cache \
-       --progress=plain \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "PROTOBUF=${PROTOBUF:-}" \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \
@@ -398,6 +397,7 @@ DOCKER_BUILDKIT=1 docker build \
        --build-arg "EXECUTORCH=${EXECUTORCH}" \
        --build-arg "BASEKIT_VERSION=${BASEKIT_VERSION}" \
        --build-arg "ACL=${ACL:-}" \
+       --build-arg "IS_ARC=${IS_ARC}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \
