@@ -827,7 +827,7 @@ def bsr_dense_addmm(
         original_batch_dims_broadcasted = broadcast_batch_dims(f_name, bsr, dense)
         out = dense.new_empty(original_batch_dims_broadcasted + (M, N))
 
-    if bsr._nnz() == 0 or alpha == 0:
+    if bsr._nnz() == 0 or alpha == 0 or N == 0 or M == 0 or K == 0:
         if beta == 0:
             out.zero_()
         else:

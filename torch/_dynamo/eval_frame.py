@@ -20,6 +20,7 @@ import threading
 import traceback
 import types
 import warnings
+import weakref
 from enum import Enum
 from os.path import dirname, join
 from typing import (
@@ -71,7 +72,7 @@ else:
             continue
         globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
 
-from . import config, convert_frame, external_utils, skipfiles, utils
+from . import config, convert_frame, external_utils, trace_rules, utils
 from .code_context import code_context
 from .exc import CondOpArgsMismatchError, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
@@ -186,12 +187,7 @@ def _debug_get_cache_entry_list(
     """
     if callable(code):
         code = code.__code__
-    cache_head = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(code)
-    cache_list = []
-    while cache_head is not None:
-        cache_list.append(cache_head)
-        cache_head = cache_head.next
-    return cache_list
+    return torch._C._dynamo.eval_frame._debug_get_cache_entry_list(code)
 
 
 class OptimizedModule(torch.nn.Module):
@@ -212,10 +208,10 @@ class OptimizedModule(torch.nn.Module):
 
     def _initialize(self):
         # Do this stuff in constructor to lower overhead slightly
-        if isinstance(self._orig_mod.forward, types.MethodType) and skipfiles.check(
+        if isinstance(self._orig_mod.forward, types.MethodType) and trace_rules.check(
             self._orig_mod.forward
         ):
-            # This may be a torch.nn.* instance in skipfiles.py which
+            # This may be a torch.nn.* instance in trace_rules.py which
             # won't trigger a frame evaluation workaround to add an extra
             # frame we can capture
             self.forward = self.dynamo_ctx(external_utils.wrap_inline(self._orig_mod))
@@ -389,7 +385,9 @@ class _TorchDynamoContext:
             # Assume that the underlying node metadata of `fn`,
             # a GraphModule instance, accurately represents
             # all instances of type(fn).
-            code_context.get_context(fn.forward.__code__)["orig_graphmodule"] = fn
+            code_context.get_context(fn.forward.__code__)[
+                "orig_graphmodule"
+            ] = weakref.ref(fn)
 
         # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):
@@ -412,7 +410,7 @@ class _TorchDynamoContext:
         except TypeError:
             filename = None
         if (
-            (filename is None or skipfiles.check(fn))
+            (filename is None or trace_rules.check(fn))
             and (
                 getattr(fn, "__name__", "") not in ["_call_impl", "_wrapped_call_impl"]
             )
@@ -594,8 +592,6 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
 
 
 def check_if_dynamo_supported():
-    if sys.platform == "win32":
-        raise RuntimeError("Windows not yet supported for torch.compile")
     if sys.version_info >= (3, 12):
         raise RuntimeError("Python 3.12+ not yet supported for torch.compile")
 
@@ -603,6 +599,21 @@ def check_if_dynamo_supported():
 def is_dynamo_supported():
     try:
         check_if_dynamo_supported()
+        return True
+    except Exception:
+        return False
+
+
+def check_if_inductor_supported():
+    check_if_dynamo_supported()
+
+    if sys.platform == "win32":
+        raise RuntimeError("Windows not yet supported for inductor")
+
+
+def is_inductor_supported():
+    try:
+        check_if_inductor_supported()
         return True
     except Exception:
         return False
@@ -1304,7 +1315,7 @@ def export(
             not disable_constraint_solver
             and (shape_env := getattr(fake_mode, "shape_env", None)) is not None
             and (dim_constraints := shape_env.dim_constraints) is not None
-            and not skipfiles.check(call_to_inspect)
+            and not trace_rules.check(call_to_inspect)
         ):
             dim_constraints.solve()
             dim_constraints.remove_redundant_dynamic_results()
