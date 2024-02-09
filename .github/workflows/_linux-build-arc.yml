@@ -1,4 +1,4 @@
-name: linux-build
+name: linux-build-arc
 
 on:
   workflow_call:
@@ -51,7 +51,7 @@ on:
         description: A flag indicating that we are using an arc runner.
         type: boolean
         required: false
-        default: false
+        default: true
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
@@ -71,7 +71,8 @@ jobs:
   build:
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
-    runs-on: ${{ inputs.runner }}
+    runs-on:
+      group: ${{ inputs.runner }}
     timeout-minutes: 240
     outputs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
@@ -82,7 +83,18 @@ jobs:
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
-      # [pytorch repo ref]
+      - name: Install packages
+        run: |
+          set -eux
+
+          sudo apt-get update
+          sudo apt-get install -y git curl unzip build-essential dnsutils python3-pip zip
+
+          python3 -m pip --version
+          docker --version
+        shell: bash
+
+      # [pytorch repo ref] 
       # Use a pytorch/pytorch reference instead of a reference to the local
       # checkout because when we run this action we don't *have* a local
       # checkout. In other cases you should prefer a local checkout.
@@ -91,13 +103,15 @@ jobs:
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
+        with:
+          is_arc: true
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@DanilBaibak/Build-Docker-Image-for-ARC
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@DanilBaibak/Build-Docker-Image-for-ARC # TODO - clean it before merge
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
-          is-arc: inputs.is_arc
+          is-arc: ${{ inputs.is_arc }}
 
       - name: Use following to pull public copy of the image
         id: print-ghcr-mirror
@@ -133,12 +147,13 @@ jobs:
           test-matrix: ${{ inputs.test-matrix }}
           job-name: ${{ steps.get-job-id.outputs.job-name }}
 
-      - name: Download pytest cache
-        uses: ./.github/actions/pytest-cache-download
-        continue-on-error: true
-        with:
-          cache_dir: .pytest_cache
-          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
+#      TODO - rollback it after we're done with S3 setup
+#      - name: Download pytest cache
+#        uses: ./.github/actions/pytest-cache-download
+#        continue-on-error: true
+#        with:
+#          cache_dir: .pytest_cache
+#          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
 
       - name: Build
         if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
@@ -160,7 +175,7 @@ jobs:
           DEBUG: ${{ inputs.build-with-debug && '1' || '0' }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
-          IS_ARC: inputs.is_arc
+          IS_ARC: ${{ inputs.is_arc }}
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
@@ -195,7 +210,7 @@ jobs:
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
         run: |
-          zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .additional_ci_files
+          sudo zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .additional_ci_files
 
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@v5

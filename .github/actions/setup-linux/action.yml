@@ -2,11 +2,19 @@ name: Setup Linux
 
 description: Set up Docker workspace on EC2
 
+inputs:
+  is_arc:
+    description: A flag indicating that we are using an arc runner.
+    type: boolean
+    required: false
+    default: false
+
 runs:
   using: composite
   steps:
     - name: Display EC2 information
       shell: bash
+      if: ${{ inputs.is_arc == 'false' }}
       run: |
         set -euo pipefail
         function get_ec2_metadata() {
@@ -28,12 +36,32 @@ runs:
 
     - name: Start docker if docker deamon is not running
       shell: bash
+      env:
+        IS_ARC: ${{ inputs.is_arc }}
       run: |
-        if systemctl is-active --quiet docker; then
-            echo "Docker daemon is running...";
+        if [ "$IS_ARC" = "true" ]; then
+          docker info > /dev/null 2>&1
+            if [ $? -eq 0 ]; then
+                echo "Docker is running."
+            else
+                echo "Docker is not running."
+            fi
         else
-            echo "Starting docker deamon..." && sudo systemctl start docker;
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
         fi
+
+    - name: Install AWS CLI v2
+      if: ${{ inputs.is_arc == 'true' }}
+      run: |
+        curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+        unzip awscliv2.zip
+        sudo ./aws/install
+        aws --version
+      shell: bash
 
     - name: Log in to ECR
       uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
