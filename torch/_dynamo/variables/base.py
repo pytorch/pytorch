@@ -371,6 +371,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         raise unimplemented(f"call_method {self} {name} {args} {kwargs}")
 
     def rename(self, tx, name):
+        self.user_code_variable_name = tx.output.new_var(name)
         return self
 
     def realize(self) -> "VariableTracker":
@@ -394,11 +395,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         *,
         source: Source = None,
         mutable_local: MutableLocal = None,
+        user_code_variable_name: str = None,
         parents_tracker: ParentsTracker = None,
     ):
         super().__init__()
         self.source = source
         self.mutable_local = mutable_local
+        self.user_code_variable_name = user_code_variable_name
         self.parents_tracker = parents_tracker
 
     def __post_init__(self, *args, **kwargs):
