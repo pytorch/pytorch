@@ -4474,7 +4474,7 @@ def isin_sorting(elements, test_elements, *, assume_unique=False, invert=False):
         sorted_elements, sorted_order = torch.sort(all_elements, stable=True)
 
         duplicate_mask = sorted_elements[1:] == sorted_elements[:-1]
-        duplicate_mask = torch.constant_pad(duplicate_mask, [0, 1], False)
+        duplicate_mask = torch.constant_pad_nd(duplicate_mask, [0, 1], False)
 
         if invert:
             duplicate_mask = duplicate_mask.logical_not()
