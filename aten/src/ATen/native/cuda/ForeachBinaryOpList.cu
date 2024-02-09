@@ -3,6 +3,7 @@
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/cuda/ForeachMinMaxFunctors.cuh>
+#include <functional>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -10,6 +11,7 @@
 #include <ATen/ops/_foreach_add_native.h>
 #include <ATen/ops/_foreach_clamp_max_native.h>
 #include <ATen/ops/_foreach_clamp_min_native.h>
+#include <ATen/ops/_foreach_copy_native.h>
 #include <ATen/ops/_foreach_div_native.h>
 #include <ATen/ops/_foreach_mul_native.h>
 #include <ATen/ops/_foreach_pow_native.h>
@@ -247,5 +249,45 @@ FOREACH_BINARY_OP_LIST(
     pow,
     power_functor,
     /*division_op*/ true);
+
+template <typename T>
+struct Identity {
+  __device__ __forceinline__ T operator()(const T& x) {
+    return x;
+  }
+};
+
+void foreach_tensor_copy_list_kernel_cuda_(
+    TensorList self,
+    TensorList src,
+    const bool non_blocking) {
+  check_foreach_api_restrictions(self, src);
+  if (!can_use_fast_route(
+          self, src, /* does_op_promote_integer_inputs_to_float */ false)) {
+    return at::native::foreach_tensor_copy_list_kernel_slow_(
+        self, src, non_blocking);
+  }
+
+  std::vector<std::vector<at::Tensor>> tensor_lists{src.vec(), self.vec()};
+
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      ScalarType::Half,
+      ScalarType::BFloat16,
+      ScalarType::Bool,
+      self[0].scalar_type(),
+      "foreach_tensor_copy",
+      [&]() {
+        using opmath_t = at::opmath_type<scalar_t>;
+        multi_tensor_apply<2>(
+            tensor_lists,
+            UnaryOpFunctor<
+                scalar_t,
+                /* depth */ 2,
+                /* r_args_depth */ 1,
+                /* res_arg_index */ 1>(),
+            Identity<opmath_t>());
+      });
+  increment_version(self);
+}
 
 } // namespace at::native

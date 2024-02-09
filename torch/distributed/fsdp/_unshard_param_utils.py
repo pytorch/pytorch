@@ -22,7 +22,8 @@ from torch.distributed.fsdp._runtime_utils import (
     _unshard_grads,
 )
 from torch.distributed.utils import _p_assert
-from .flat_param import FlatParamHandle
+
+from ._flat_param import FlatParamHandle
 
 FLAT_PARAM = "_flat_param"
 

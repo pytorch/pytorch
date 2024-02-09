@@ -8,6 +8,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/TypeSafeSignMath.h>
+#include <c10/util/generic_math.h>
 #include <ATen/native/cuda/BinaryInternal.h>
 #include <ATen/native/cuda/JitLoops.cuh>
 #include <ATen/native/cuda/Loops.cuh>
@@ -29,7 +30,7 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
     AT_DISPATCH_INTEGRAL_TYPES(dtype, "div_floor_cuda", [&]() {
       gpu_kernel_with_scalars(
           iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-            return div_floor_integer(a, b);
+            return c10::div_floor_integer(a, b);
       });
     });
   } else if (iter.is_cpu_scalar(2)) {
@@ -70,7 +71,7 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
         kHalf, kBFloat16, dtype, "div_floor_cuda", [&]() {
           gpu_kernel_with_scalars(
               iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-                return div_floor_floating(a, b);
+                return c10::div_floor_floating(a, b);
               });
         });
   }

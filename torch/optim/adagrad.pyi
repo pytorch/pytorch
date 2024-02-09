@@ -1,9 +1,9 @@
-from .optimizer import _params_t, Optimizer
+from .optimizer import Optimizer, ParamsT
 
 class Adagrad(Optimizer):
     def __init__(
         self,
-        params: _params_t,
+        params: ParamsT,
         lr: float = ...,
         lr_decay: float = ...,
         weight_decay: float = ...,

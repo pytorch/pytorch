@@ -258,7 +258,10 @@ void checkProfiledEvents(
   }
 }
 
-void testAllreduce(const std::string& path, const at::DeviceType b) {
+void testAllreduce(
+    const std::string& path,
+    const at::DeviceType b,
+    const at::ScalarType dtype = at::kFloat) {
   const auto size = 4;
   auto tests = CollectiveTest::initialize(path, size);
 
@@ -267,7 +270,7 @@ void testAllreduce(const std::string& path, const at::DeviceType b) {
   std::vector<std::vector<int64_t>> allShapes;
   std::vector<int64_t> shapes = {16, 16};
   for (const auto i : c10::irange(size)) {
-    auto tensor = at::ones(shapes, b) * i;
+    auto tensor = at::ones(shapes, at::dtype(dtype).device(b)) * i;
     std::vector<int64_t> shapesVec = shapes;
     allShapes.emplace_back(std::move(shapesVec));
     inputs[i] = std::vector<at::Tensor>({tensor});
@@ -291,7 +294,7 @@ void testAllreduce(const std::string& path, const at::DeviceType b) {
   // Verify outputs
   const auto expected = (size * (size - 1)) / 2;
   for (const auto i : c10::irange(size)) {
-    auto& tensor = outputs[i][0];
+    auto tensor = outputs[i][0].to(at::kFloat);
     auto data = tensor.data_ptr<float>();
     for (const auto j : c10::irange(tensor.numel())) {
       EXPECT_EQ(data[j], expected);
@@ -303,7 +306,8 @@ void testAllreduce(const std::string& path, const at::DeviceType b) {
 // This should go away as we deprecate it.
 void testAllreduceUsingWorkAPI(
     const std::string& path,
-    const at::DeviceType b) {
+    const at::DeviceType b,
+    const at::ScalarType dtype = at::kFloat) {
   const auto size = 4;
   auto tests = CollectiveTest::initialize(path, size);
 
@@ -312,7 +316,7 @@ void testAllreduceUsingWorkAPI(
   std::vector<std::vector<int64_t>> allShapes;
   std::vector<int64_t> shapes = {16, 16};
   for (const auto i : c10::irange(size)) {
-    auto tensor = at::ones(shapes, b) * i;
+    auto tensor = at::ones(shapes, at::dtype(dtype).device(b)) * i;
     std::vector<int64_t> shapesVec = shapes;
     allShapes.emplace_back(std::move(shapesVec));
     inputs[i] = std::vector<at::Tensor>({tensor});
@@ -336,7 +340,7 @@ void testAllreduceUsingWorkAPI(
   // Verify outputs
   const auto expected = (size * (size - 1)) / 2;
   for (const auto i : c10::irange(size)) {
-    auto& tensor = outputs[i][0];
+    auto tensor = outputs[i][0].to(at::kFloat);
     auto data = tensor.data_ptr<float>();
     for (const auto j : c10::irange(tensor.numel())) {
       EXPECT_EQ(data[j], expected);
@@ -344,7 +348,10 @@ void testAllreduceUsingWorkAPI(
   }
 }
 
-void testBroadcast(const std::string& path, const at::DeviceType b) {
+void testBroadcast(
+    const std::string& path,
+    const at::DeviceType b,
+    const at::ScalarType dtype = at::kFloat) {
   const auto size = 2;
   const auto stride = 2;
   auto tests = CollectiveTest::initialize(path, size);
@@ -366,7 +373,8 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
           if (b == at::DeviceType::CUDA) {
             deviceGuard.reset_device(at::Device(at::kCUDA, l));
           }
-          inputs[k][l] = at::ones(shapes, b) * (k * stride + l);
+          inputs[k][l] =
+              at::ones(shapes, at::dtype(dtype).device(b)) * (k * stride + l);
         }
       }
 
@@ -395,7 +403,7 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
       const auto expected = (i * stride + j);
       for (const auto k : c10::irange(size)) {
         for (const auto l : c10::irange(stride)) {
-          auto& tensor = outputs[k][l];
+          auto tensor = outputs[k][l].to(at::kFloat);
           auto data = tensor.data_ptr<float>();
           for (const auto n : c10::irange(tensor.numel())) {
             EXPECT_EQ(data[n], expected);
@@ -743,10 +751,25 @@ TEST(ProcessGroupGlooTest, testAllReduceCPU) {
   }
 }
 
+TEST(ProcessGroupGlooTest, testAllReduceBfloatCPU) {
+  {
+    TemporaryFile file;
+    testAllreduce(file.path, at::DeviceType::CPU, at::kBFloat16);
+    testAllreduceUsingWorkAPI(file.path, at::DeviceType::CPU);
+  }
+}
+
 TEST(ProcessGroupGlooTest, testBroadcastCPU) {
   {
     TemporaryFile file;
     testBroadcast(file.path, at::DeviceType::CPU);
+  }
+}
+
+TEST(ProcessGroupGlooTest, testBroadcastBfloatCPU) {
+  {
+    TemporaryFile file;
+    testBroadcast(file.path, at::DeviceType::CPU, at::kBFloat16);
   }
 }
 

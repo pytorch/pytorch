@@ -2,8 +2,6 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
-#include <iostream>
-
 namespace py = pybind11;
 
 namespace torch {
@@ -25,6 +23,9 @@ static std::mutex to_free_frames_mutex;
 static std::vector<CapturedTraceback::PyFrame> to_free_frames;
 struct PythonTraceback : public CapturedTraceback::Python {
   std::vector<CapturedTraceback::PyFrame> gather() override {
+    if (!Py_IsInitialized()) {
+      return {};
+    }
     std::vector<CapturedTraceback::PyFrame> frames;
     py::gil_scoped_acquire acquire;
     {
@@ -48,6 +49,22 @@ struct PythonTraceback : public CapturedTraceback::Python {
   void release(std::vector<CapturedTraceback::PyFrame>& frames) override {
     std::lock_guard<std::mutex> lock(to_free_frames_mutex);
     to_free_frames.insert(to_free_frames.end(), frames.begin(), frames.end());
+  }
+  using void_visitproc = int (*)(void* self, void* arg);
+  int traverse(
+      std::vector<CapturedTraceback::PyFrame>& frames,
+      void_visitproc visit,
+      void* arg) override {
+    for (auto& f : frames) {
+      Py_VISIT(f.code);
+    }
+    return 0;
+  }
+  int clear(std::vector<CapturedTraceback::PyFrame>& frames) override {
+    for (auto& f : frames) {
+      Py_CLEAR(f.code);
+    }
+    return 0;
   }
   void appendSymbolized(
       const std::vector<CapturedTraceback::PyFrame>& to_symbolize,
@@ -135,10 +152,19 @@ std::vector<py::object> py_symbolize(
   }
 
   std::vector<py::object> result;
+  result.reserve(to_symbolize.size());
   for (const auto& sc : to_symbolize) {
     result.push_back(py_unique_frames.at(cached_frames.at(sc)));
   }
   return result;
+}
+
+void freeDeadCapturedTracebackFrames() {
+  std::lock_guard<std::mutex> lock(to_free_frames_mutex);
+  for (CapturedTraceback::PyFrame f : to_free_frames) {
+    Py_XDECREF(f.code);
+  }
+  to_free_frames.clear();
 }
 
 void installCapturedTracebackPython() {

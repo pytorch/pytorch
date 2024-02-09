@@ -1,6 +1,4 @@
-r"""
-Weight Normalization from https://arxiv.org/abs/1602.07868
-"""
+r"""Weight Normalization from https://arxiv.org/abs/1602.07868."""
 from torch.nn.parameter import Parameter, UninitializedParameter
 from torch import _weight_norm, norm_except_dim
 from typing import Any, TypeVar
@@ -70,7 +68,7 @@ class WeightNorm:
 T_module = TypeVar('T_module', bound=Module)
 
 def weight_norm(module: T_module, name: str = 'weight', dim: int = 0) -> T_module:
-    r"""Applies weight normalization to a parameter in the given module.
+    r"""Apply weight normalization to a parameter in the given module.
 
     .. math::
          \mathbf{w} = g \dfrac{\mathbf{v}}{\|\mathbf{v}\|}
@@ -134,7 +132,7 @@ def weight_norm(module: T_module, name: str = 'weight', dim: int = 0) -> T_modul
 
 
 def remove_weight_norm(module: T_module, name: str = 'weight') -> T_module:
-    r"""Removes the weight normalization reparameterization from a module.
+    r"""Remove the weight normalization reparameterization from a module.
 
     Args:
         module (Module): containing module

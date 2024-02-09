@@ -6,8 +6,7 @@
 #include <ATen/cpu/vec/vec256/vec256.h>
 #endif
 
-namespace at {
-namespace vec {
+namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
@@ -45,4 +44,4 @@ struct VecHoldType<Vectorized<Half>> {using hold_type = Half; };
 template <typename VT>
 using vechold_type = typename VecHoldType<VT>::hold_type;
 
-}}} // namespace at::vec::CPU_CAPABILITY
+}} // namespace at::vec::CPU_CAPABILITY

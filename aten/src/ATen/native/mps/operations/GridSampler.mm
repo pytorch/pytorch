@@ -8,16 +8,17 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/grid_sampler_2d.h>
+#include <ATen/ops/grid_sampler_2d_native.h>
 #endif
 
 namespace at::native {
 namespace mps {
-void grid_sampler_2d_mps_impl(Tensor& output,
-                              const Tensor& input,
-                              const Tensor& grid,
-                              int64_t interpolation_mode,
-                              int64_t padding_mode,
-                              bool align_corners) {
+static void grid_sampler_2d_mps_impl(Tensor& output,
+                                     const Tensor& input,
+                                     const Tensor& grid,
+                                     int64_t interpolation_mode,
+                                     int64_t padding_mode,
+                                     bool align_corners) {
   // Grid Sampler support has been added in macOS 13.2
   using namespace mps;
   check_grid_sampler_common(input, grid);
@@ -115,14 +116,8 @@ void grid_sampler_2d_mps_impl(Tensor& output,
     Placeholder gridPlaceholder = Placeholder(cachedGraph->gridTensor_, grid);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-      gridPlaceholder.getMPSGraphTensor() : gridPlaceholder.getMPSGraphTensorData()
-    };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder, gridPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 } // namespace mps

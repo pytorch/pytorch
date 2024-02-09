@@ -74,7 +74,7 @@ class TestRearrange(TestCase):
 
     def test_rearrange_consistency(self) -> None:
         shape = [1, 2, 3, 5, 7, 11]
-        x = torch.arange(np.prod(shape, dtype=int)).reshape(shape)
+        x = torch.arange(int(np.prod(shape, dtype=int))).reshape(shape)
         for pattern in [
             'a b c d e f -> a b c d e f',
             'b a c d e f -> a b d e f c',

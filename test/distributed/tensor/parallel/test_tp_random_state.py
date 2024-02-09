@@ -1,14 +1,11 @@
 # Owner(s): ["oncall: distributed"]
 import torch
+import torch.distributed._functional_collectives as funcol
 import torch.distributed._tensor.random as random
 
-from torch.distributed._tensor import DeviceMesh
+from torch.distributed._tensor import DeviceMesh, Replicate
 from torch.distributed.tensor.parallel.api import parallelize_module
-from torch.distributed.tensor.parallel.style import (
-    ColwiseParallel,
-    make_input_replicate_1d,
-    make_output_replicate_1d,
-)
+from torch.distributed.tensor.parallel.style import ColwiseParallel
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -54,12 +51,8 @@ class TensorParallelRandomStateTests(DTensorTestBase):
                 model,
                 device_mesh,
                 {
-                    "net1": ColwiseParallel(
-                        make_input_replicate_1d, make_output_replicate_1d
-                    ),
-                    "net2": ColwiseParallel(
-                        make_input_replicate_1d, make_output_replicate_1d
-                    ),
+                    "net1": ColwiseParallel(output_layouts=Replicate()),
+                    "net2": ColwiseParallel(output_layouts=Replicate()),
                 },
             )
             # in most cases, the random number generator states is set by data loader
@@ -82,10 +75,13 @@ class TensorParallelRandomStateTests(DTensorTestBase):
                 assert _1d_mesh.ndim == 1
 
                 tensor_local = dtensor.to_local()
-                local_shape = tensor_local.shape
 
                 # all-gather local shards
-                tensor_gather = _1d_mesh.all_gather(tensor_local, gather_dim=0)
+                tensor_gather = funcol.all_gather_tensor(
+                    tensor_local,
+                    gather_dim=0,
+                    group=(_1d_mesh, 0)
+                )
                 self.assertEqual(_1d_mesh.get_coordinate()[0], tp_rank)
 
                 # compare local shards within the TP group
@@ -102,16 +98,20 @@ class TensorParallelRandomStateTests(DTensorTestBase):
 
                 # check across TP groups
                 # all-gather local shards
-                tensor_gather = device_mesh.all_gather(tensor_local, mesh_dim=1, gather_dim=0)
+                tensor_gather = funcol.all_gather_tensor(
+                    tensor_local,
+                    gather_dim=0,
+                    group=(_1d_mesh, 1)
+                )
 
                 # compare local shards across TP groups
                 def dp_weights_assert(tensor1, tensor2):
                     if enable_distribute_flag:
-                        # local weights shall be initialized the same acorss TP groups
+                        # local weights shall be initialized the same across TP groups
                         self.assertEqual(tensor1, tensor2)
                     else:
                         # without the parallel RNG, weight initialization violates the TP setup:
-                        # local weights are initialized differently acorss TP groups due to different
+                        # local weights are initialized differently across TP groups due to different
                         # random seeds set in data loading.
                         self.assertNotEqual(tensor1, tensor2)
 

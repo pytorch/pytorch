@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import functools
 import logging
-from typing import List
+from typing import cast, List, Optional, Sequence, Tuple, TypedDict
 
 import torch
 from .. import config, ir
@@ -42,18 +44,35 @@ def conv_grid(n, c, h, w, meta):
     )
 
 
+# List of dictionaries to store the kernel configs. Configs that evaluate to true
+# will be utilised on the target platform
+kernel_configs = [
+    # "BLOCK_M", "BLOCK_N", "BLOCK_K", "num_stages", "num_warps"
+    {"config": (64, 256, 16, 2, 4), "cond": True},
+    {"config": (256, 64, 16, 2, 4), "cond": True},
+    {"config": (1024, 16, 16, 1, 8), "cond": True},
+    {"config": (128, 128, 32, 2, 8), "cond": True},
+    {"config": (64, 64, 32, 2, 4), "cond": True},
+    {"config": (64, 256, 32, 2, 8), "cond": True},
+    {"config": (256, 64, 32, 2, 8), "cond": True},
+]
+
+# Create filtered list of configs based on conv
+platform_configs = tuple(
+    cast(Tuple[int, int, int, int, int], config["config"])
+    for config in kernel_configs
+    if config["cond"]
+)
+
+# On ROCm convert num_stages to 1 as pipelining provides no benefit
+if torch.version.hip:
+    platform_configs = tuple(
+        (config[0], config[1], config[2], 1, config[4]) for config in platform_configs
+    )
+
 conv_configs = functools.partial(
     filtered_configs,
-    configs=(
-        # "BLOCK_M", "BLOCK_N", "BLOCK_K", "num_stages", "num_warps"
-        (64, 256, 16, 2, 4),
-        (256, 64, 16, 2, 4),
-        (1024, 16, 16, 1, 8),
-        (128, 128, 32, 2, 8),
-        (64, 64, 32, 2, 4),
-        (64, 256, 32, 2, 8),
-        (256, 64, 32, 2, 8),
-    ),
+    configs=platform_configs,
 )
 
 LOOP_BODY = """
@@ -197,15 +216,24 @@ def conv1x1_via_mm(x, w, *, out):
 aten_conv1x1_via_mm = ExternKernelChoice(conv1x1_via_mm, None)
 
 
+class ConvLayoutParams(TypedDict):
+    stride: tuple[int, ...]
+    padding: tuple[int, ...]
+    dilation: tuple[int, ...]
+    transposed: bool
+    output_padding: tuple[int, ...]
+    groups: int
+
+
 def conv_layout(
-    x: "TensorBox",
-    weight: "TensorBox",
-    bias: "TensorBox",
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
+    x: TensorBox,
+    weight: TensorBox,
+    bias: Optional[TensorBox],
+    stride: Sequence[int],
+    padding: tuple[int, ...],
+    dilation: tuple[int, ...],
     transposed: bool,
-    output_padding: List[int],
+    output_padding: tuple[int, ...],
     groups: int,
 ) -> ir.Layout:
     """Determine output layout for a convolution"""
@@ -215,14 +243,14 @@ def conv_layout(
             ir.ir_node_to_tensor(weight, guard_shape=True),
             ir.ir_node_to_tensor(bias, guard_shape=True),
             stride,
-            tuple(V.graph.sizevars.size_hint(p) for p in padding),
+            tuple(V.graph.sizevars.size_hint(p) for p in padding),  # type: ignore[arg-type]
             dilation,
             transposed,
-            tuple(V.graph.sizevars.size_hint(p) for p in output_padding),
+            tuple(V.graph.sizevars.size_hint(p) for p in output_padding),  # type: ignore[arg-type]
             groups,
         )
         sizes = ir.convert_shape_to_inductor(output.size())
-        stride = ir.convert_shape_to_inductor(output.stride())
+        stride = ir.convert_shape_to_inductor(output.stride())  # type: ignore[assignment]
 
     return ir.FixedLayout(
         x.get_device(),
@@ -282,8 +310,10 @@ def convolution(
     padding = tuple(padding)
     dilation = tuple(dilation)
     output_padding = tuple(output_padding)
+    if not isinstance(groups, int):
+        groups = V.graph.sizevars.evaluate_static_shape(groups)
     assert isinstance(groups, int)
-    kwargs = {
+    kwargs: ConvLayoutParams = {
         "stride": stride,
         "padding": padding,
         "dilation": dilation,
@@ -308,8 +338,20 @@ def convolution(
     dilation = pad_listlike(dilation, ndim)
     output_padding = pad_listlike(output_padding, ndim)
 
+    def channels_last_conv():
+        if V.graph.layout_opt and ndim == 2:
+            return True
+
+        layout = conv_layout(x, weight, None, **kwargs)
+        req_stride_order = ir.get_stride_order(
+            V.graph.sizevars.size_hints(layout.stride)
+        )
+        return req_stride_order == ir.NHWC_STRIDE_ORDER
+
+    autotuning_gemm = config.max_autotune or config.max_autotune_gemm
+
     if (
-        config.conv_1x1_as_mm
+        (config.conv_1x1_as_mm or (autotuning_gemm and channels_last_conv()))
         and is_ones(kernel_shape)
         and is_ones(stride)
         and is_zeros(padding)
@@ -357,11 +399,11 @@ def convolution(
         "groups",
     ]
     if bias is None:
-        args = (x, weight)
-        kwargs["bias"] = None
+        args = [x, weight]
+        kwargs["bias"] = None  # type: ignore[typeddict-unknown-key]
         ordered_kwargs_for_cpp_kernel.insert(0, "bias")
     else:
-        args = (x, weight, bias)
+        args = [x, weight, bias]
         bias.realize()
         bias.freeze_layout()
         V.graph.sizevars.evaluate_static_shapes(bias.get_size())
@@ -377,7 +419,7 @@ def convolution(
         and not transposed
         and is_zeros(output_padding)
         # there are some odd models where this check fails (e.g. shufflenet_v2_x1_0)
-        and V.graph.sizevars.statically_known_equals(in_chan, x.get_size()[1])
+        and V.graph.sizevars.statically_known_equals(in_chan, x.get_size()[1])  # type: ignore[arg-type]
     ):
         if (
             is_ones(kernel_shape)
@@ -394,8 +436,8 @@ def convolution(
         ):
             conv2d_template.maybe_append_choice(
                 choices,
-                (x, weight),
-                layout,
+                input_nodes=(x, weight),
+                layout=layout,
                 KERNEL_H=kernel_shape[0],
                 KERNEL_W=kernel_shape[1],
                 STRIDE_H=stride[0],

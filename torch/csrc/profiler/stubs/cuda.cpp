@@ -3,6 +3,7 @@
 #include <nvToolsExt.h>
 
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/ApproximateClock.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/profiler/stubs/base.h>
 #include <torch/csrc/profiler/util.h>
@@ -36,20 +37,21 @@ static inline void cudaCheck(cudaError_t result, const char* file, int line) {
 #define TORCH_CUDA_CHECK(result) cudaCheck(result, __FILE__, __LINE__);
 
 struct CUDAMethods : public ProfilerStubs {
-  void record(int* device, ProfilerVoidEventStub* event, int64_t* cpu_ns)
-      const override {
+  void record(
+      c10::DeviceIndex* device,
+      ProfilerVoidEventStub* event,
+      int64_t* cpu_ns) const override {
     if (device) {
       TORCH_CUDA_CHECK(c10::cuda::GetDevice(device));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    CUevent_st* cuda_event_ptr;
+    CUevent_st* cuda_event_ptr{nullptr};
     TORCH_CUDA_CHECK(cudaEventCreate(&cuda_event_ptr));
     *event = std::shared_ptr<CUevent_st>(cuda_event_ptr, [](CUevent_st* ptr) {
       TORCH_CUDA_CHECK(cudaEventDestroy(ptr));
     });
     auto stream = at::cuda::getCurrentCUDAStream();
     if (cpu_ns) {
-      *cpu_ns = torch::profiler::impl::getTime();
+      *cpu_ns = c10::getTime();
     }
     TORCH_CUDA_CHECK(cudaEventRecord(cuda_event_ptr, stream));
   }
@@ -61,20 +63,17 @@ struct CUDAMethods : public ProfilerStubs {
     auto event2 = (const ProfilerEventStub*)(event2_);
     TORCH_CUDA_CHECK(cudaEventSynchronize(event->get()));
     TORCH_CUDA_CHECK(cudaEventSynchronize(event2->get()));
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    float ms;
+    float ms = 0;
     TORCH_CUDA_CHECK(cudaEventElapsedTime(&ms, event->get(), event2->get()));
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
     return ms * 1000.0;
   }
 
   void mark(const char* name) const override {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ::nvtxMark(name);
   }
 
   void rangePush(const char* name) const override {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ::nvtxRangePushA(name);
   }
 

@@ -1,4 +1,5 @@
 #include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/vulkan/ops/Utils.h>
 #include <torch/library.h>
 #include <vector>
 
@@ -10,79 +11,11 @@ namespace {
 
 using namespace api::utils;
 
-void check_inputs(const Tensor& input1, const Tensor& input2) {
-  TORCH_CHECK(
-      input1.dim() <= 4 && input2.dim() <= 4,
-      "Vulkan only supports tensors <= 4 dimensions");
-
-  // check if the shapes of input tensors are broadcastable
-  // see https://pytorch.org/docs/stable/notes/broadcasting.html
-  // for broadcasting semantics
-  const std::string broadcast_error_msg =
-      "The shapes of input and mask are not broadcastable!";
-  TORCH_CHECK(
-      get_dim<Dim4D::Batch>(input1) == get_dim<Dim4D::Batch>(input2) ||
-          get_dim<Dim4D::Batch>(input1) == 1 ||
-          get_dim<Dim4D::Batch>(input2) == 1,
-      broadcast_error_msg);
-  TORCH_CHECK(
-      get_dim<Dim4D::Channel>(input1) == get_dim<Dim4D::Channel>(input2) ||
-          get_dim<Dim4D::Channel>(input1) == 1 ||
-          get_dim<Dim4D::Channel>(input2) == 1,
-      broadcast_error_msg);
-  TORCH_CHECK(
-      get_dim<Dim4D::Height>(input1) == get_dim<Dim4D::Height>(input2) ||
-          get_dim<Dim4D::Height>(input1) == 1 ||
-          get_dim<Dim4D::Height>(input2) == 1,
-      broadcast_error_msg);
-  TORCH_CHECK(
-      get_dim<Dim4D::Width>(input1) == get_dim<Dim4D::Width>(input2) ||
-          get_dim<Dim4D::Width>(input1) == 1 ||
-          get_dim<Dim4D::Width>(input2) == 1,
-      broadcast_error_msg);
-}
-
-// compute the output shape by broadcasting the shapes of t1 and t2
-std::vector<int64_t> broadcast_size(const Tensor& t1, const Tensor& t2) {
-  int64_t t1_size = t1.dim();
-  int64_t t2_size = t2.dim();
-
-  std::vector<int64_t> out;
-  if (t1_size > t2_size) {
-    for (int64_t i = 0; i < t1_size; i++) {
-      out.push_back(t1.sizes()[i]);
-    }
-  } else {
-    for (int64_t i = 0; i < t2_size; i++) {
-      out.push_back(t2.sizes()[i]);
-    }
-  }
-
-  if (!out.empty()) {
-    out[out.size() - 1] =
-        std::max(get_dim<Dim4D::Width>(t1), get_dim<Dim4D::Width>(t2));
-  }
-  if (out.size() > 1) {
-    out[out.size() - 2] =
-        std::max(get_dim<Dim4D::Height>(t1), get_dim<Dim4D::Height>(t2));
-  }
-  if (out.size() > 2) {
-    out[out.size() - 3] =
-        std::max(get_dim<Dim4D::Channel>(t1), get_dim<Dim4D::Channel>(t2));
-  }
-  if (out.size() > 3) {
-    out[out.size() - 4] =
-        std::max(get_dim<Dim4D::Batch>(t1), get_dim<Dim4D::Batch>(t2));
-  }
-
-  return out;
-}
-
 Tensor masked_fill_scalar(
     const Tensor& self_arg,
     const Tensor& mask_arg,
     const Scalar& value) {
-  check_inputs(self_arg, mask_arg);
+  utils::is_broadcastable(self_arg, mask_arg);
 
   api::Context* const context = api::context();
 
@@ -95,7 +28,7 @@ Tensor masked_fill_scalar(
   auto in_ndims = safe_downcast<uint32_t>(self_arg.dim());
   auto in_sizes = self_arg.sizes();
   auto mask_sizes = mask_arg.sizes();
-  std::vector<int64_t> out_sizes = broadcast_size(self_arg, mask_arg);
+  std::vector<int64_t> out_sizes = utils::broadcast_size(self_arg, mask_arg);
   TORCH_INTERNAL_ASSERT(!out_sizes.empty(), "output shape is empty!");
 
   // generalize the shape of output and mask to 4D

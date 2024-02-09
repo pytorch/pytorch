@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <ATen/ATen.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/jit.h>

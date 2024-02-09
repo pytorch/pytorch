@@ -1,16 +1,16 @@
-ir_version: 7
+ir_version: 8
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
     input: "onnx::Shape_0"
     output: "onnx::Slice_1"
-    name: "Shape_0"
+    name: "Shape_4"
     op_type: "Shape"
   }
   node {
     output: "onnx::Slice_2"
-    name: "Constant_1"
+    name: "Constant_5"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -24,7 +24,7 @@ graph {
   }
   node {
     output: "onnx::Slice_3"
-    name: "Constant_2"
+    name: "Constant_6"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -38,7 +38,7 @@ graph {
   }
   node {
     output: "onnx::Slice_4"
-    name: "Constant_3"
+    name: "Constant_7"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -56,12 +56,12 @@ graph {
     input: "onnx::Slice_4"
     input: "onnx::Slice_2"
     output: "onnx::Concat_5"
-    name: "Slice_4"
+    name: "Slice_8"
     op_type: "Slice"
   }
   node {
     output: "onnx::Concat_6"
-    name: "Constant_5"
+    name: "Constant_9"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -77,7 +77,7 @@ graph {
     input: "onnx::Concat_5"
     input: "onnx::Concat_6"
     output: "onnx::Reshape_7"
-    name: "Concat_6"
+    name: "Concat_10"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -89,7 +89,7 @@ graph {
     input: "onnx::Shape_0"
     input: "onnx::Reshape_7"
     output: "8"
-    name: "Reshape_7"
+    name: "Reshape_11"
     op_type: "Reshape"
     attribute {
       name: "allowzero"
@@ -97,7 +97,7 @@ graph {
       type: INT
     }
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Shape_0"
     type {
@@ -135,5 +135,5 @@ graph {
   }
 }
 opset_import {
-  version: 14
+  version: 17
 }

@@ -5,7 +5,7 @@
 
 #include <ATen/cpu/vec/vec.h>
 
-namespace at { namespace vec {
+namespace at::vec {
 
 // BFloat16 specification
 template <typename scalar_t> struct VecScalarType { using type = scalar_t; };
@@ -45,6 +45,34 @@ inline Vectorized<Half> convert_from_float<Half>(const Vectorized<float>& a, con
   return convert_float_half(a, b);
 }
 
+template <typename scalar_t,
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
+inline void load_to_float(const scalar_t *data, Vectorized<float> &out1, Vectorized<float> &out2);
+
+template <>
+inline void load_to_float<BFloat16> (const BFloat16 *data, Vectorized<float> &out1, Vectorized<float> &out2) {
+  load_fp32_from_bf16(data, out1, out2);
+}
+
+template <>
+inline void load_to_float<Half> (const Half *data, Vectorized<float> &out1, Vectorized<float> &out2) {
+  load_fp32_from_fp16(data, out1, out2);
+}
+
+template <typename scalar_t,
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
+inline void load_to_float(const scalar_t *data, Vectorized<float> &out);
+
+template <>
+inline void load_to_float<BFloat16> (const BFloat16 *data, Vectorized<float> &out) {
+  load_fp32_from_bf16(data, out);
+}
+
+template <>
+inline void load_to_float<Half> (const Half *data, Vectorized<float> &out) {
+  load_fp32_from_fp16(data, out);
+}
+
 // Note that we already have specialized member of Vectorized<scalar_t> for BFloat16
 // so the following functions would run smoothly:
 //   using Vec = Vectorized<BFloat16>;
@@ -69,7 +97,7 @@ inline Vectorized<Half> convert_from_float<Half>(const Vectorized<float>& a, con
 //
 template <typename scalar_t, typename Op,
           typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
-inline scalar_t reduce_all(const Op& vec_fun, const scalar_t* data, int64_t size) {
+inline float reduce_all(const Op& vec_fun, const scalar_t* data, int64_t size) {
   using bVec = vec::Vectorized<scalar_t>;
   using fVec = vec::Vectorized<float>;
   if (size < bVec::size()) {
@@ -111,7 +139,7 @@ inline scalar_t reduce_all(const Op& vec_fun, const scalar_t* data, int64_t size
 
 template <typename scalar_t, typename Op1, typename Op2,
           typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
-inline std::pair<scalar_t, scalar_t> reduce2_all(const Op1& vec_fun1, const Op2& vec_fun2,
+inline std::pair<float, float> reduce2_all(const Op1& vec_fun1, const Op2& vec_fun2,
     const scalar_t* data, int64_t size) {
   using bVec = vec::Vectorized<scalar_t>;
   using fVec = vec::Vectorized<float>;
@@ -169,7 +197,7 @@ inline std::pair<scalar_t, scalar_t> reduce2_all(const Op1& vec_fun1, const Op2&
 
 template <typename scalar_t, typename MapOp, typename ReduceOp,
           typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
-inline scalar_t map_reduce_all(
+inline float map_reduce_all(
     const MapOp& map_fun,
     const ReduceOp& red_fun,
     const scalar_t* data,
@@ -225,7 +253,7 @@ inline scalar_t map_reduce_all(
 
 template <typename scalar_t, typename MapOp, typename ReduceOp,
           typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
-inline scalar_t map2_reduce_all(
+inline float map2_reduce_all(
     const MapOp& map_fun,
     const ReduceOp& red_fun,
     const scalar_t* data,
@@ -294,7 +322,7 @@ inline scalar_t map2_reduce_all(
 
 template <typename scalar_t, typename MapOp, typename ReduceOp,
           typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
-inline scalar_t map3_reduce_all(
+inline float map3_reduce_all(
     const MapOp& map_fun,
     const ReduceOp& red_fun,
     const scalar_t* data,
@@ -397,6 +425,41 @@ inline void map(
     bVec data_bvec = bVec::loadu(input_data + d, size - d);
     fVec data_fvec0, data_fvec1;
     std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+    fVec output_fvec0 = vec_fun(data_fvec0);
+    fVec output_fvec1 = vec_fun(data_fvec1);
+    bVec output_bvec = convert_from_float<scalar_t>(output_fvec0, output_fvec1);
+    output_bvec.store(output_data + d, size - d);
+  }
+}
+
+template <typename scalar_t, typename Op,
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
+inline void map(
+    const Op& vec_fun,
+    scalar_t* output_data,
+    const float* input_data,
+    int64_t size) {
+  using bVec = vec::Vectorized<scalar_t>;
+  using fVec = vec::Vectorized<float>;
+  int64_t d = 0;
+  for (; d < size - (size % bVec::size()); d += bVec::size()) {
+    fVec data_fvec0 = fVec::loadu(input_data + d);
+    fVec data_fvec1 = fVec::loadu(input_data + d + fVec::size());
+    fVec output_fvec0 = vec_fun(data_fvec0);
+    fVec output_fvec1 = vec_fun(data_fvec1);
+    bVec output_bvec = convert_from_float<scalar_t>(output_fvec0, output_fvec1);
+    output_bvec.store(output_data + d);
+  }
+  if (size - d > 0) {
+    fVec data_fvec0, data_fvec1;
+    if (size - d > fVec::size()) {
+      data_fvec0 = fVec::loadu(input_data + d);
+      data_fvec1 = fVec::loadu(input_data + d + fVec::size(), size - d - fVec::size());
+    } else {
+      // choose to align with behaviour of bVec::loadu(ptr, size),
+      // which leaves data_fvec1 uninitialized
+      data_fvec0 = fVec::loadu(input_data + d, size - d);
+    }
     fVec output_fvec0 = vec_fun(data_fvec0);
     fVec output_fvec1 = vec_fun(data_fvec1);
     bVec output_bvec = convert_from_float<scalar_t>(output_fvec0, output_fvec1);
@@ -536,4 +599,4 @@ inline void map4(
   }
 }
 
-}} // namespace at::vec
+} // namespace at::vec

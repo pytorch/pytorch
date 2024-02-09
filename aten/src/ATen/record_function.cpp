@@ -10,6 +10,8 @@
 
 namespace at {
 
+extern const std::string kParamCommsCallName = "record_param_comms";
+
 namespace {
 
 // Used to generate unique callback handles
@@ -554,7 +556,7 @@ void RecordFunction::end() {
 }
 
 const char* RecordFunction::name() const {
-  return c10::visit(
+  return std::visit(
       c10::overloaded(
           [](const std::string& name) { return name.c_str(); },
           [](const schema_ref_t schema) {
@@ -564,7 +566,7 @@ const char* RecordFunction::name() const {
 }
 
 size_t RecordFunction::num_inputs() const {
-  return c10::visit(
+  return std::visit(
       c10::overloaded(
           [&](const std::string&) { return inputs_.size(); },
           [](const schema_ref_t schema) {
@@ -574,7 +576,7 @@ size_t RecordFunction::num_inputs() const {
 }
 
 size_t RecordFunction::num_outputs() const {
-  return c10::visit(
+  return std::visit(
       c10::overloaded(
           [&](const std::string&) { return outputs_.size(); },
           [](const schema_ref_t schema) {
@@ -584,7 +586,7 @@ size_t RecordFunction::num_outputs() const {
 }
 
 c10::optional<OperatorName> RecordFunction::operator_name() const {
-  return c10::visit(
+  return std::visit(
       c10::overloaded(
           [&](const std::string&) -> c10::optional<OperatorName> {
             return c10::nullopt;
@@ -596,7 +598,7 @@ c10::optional<OperatorName> RecordFunction::operator_name() const {
 }
 
 c10::optional<c10::FunctionSchema> RecordFunction::operator_schema() const {
-  return c10::visit(
+  return std::visit(
       c10::overloaded(
           [&](const std::string&) -> c10::optional<c10::FunctionSchema> {
             return c10::nullopt;
@@ -712,6 +714,7 @@ uint64_t RecordFunction::currentThreadId() {
 void RecordFunction::before(const char* name, int64_t sequence_nr) {
   fn_ = name;
   sequence_nr_ = sequence_nr;
+  is_nccl_meta_ = (std::strcmp(name, kParamCommsCallName.c_str()) == 0);
 
 #ifndef NDEBUG
     inputs_valid_ = true;
@@ -721,6 +724,7 @@ void RecordFunction::before(const char* name, int64_t sequence_nr) {
 }
 
 void RecordFunction::before(std::string name, int64_t sequence_nr) {
+  is_nccl_meta_ = (name == kParamCommsCallName);
   fn_ = std::move(name);
   sequence_nr_ = sequence_nr;
 
@@ -736,6 +740,7 @@ void RecordFunction::before(
     int64_t sequence_nr) {
   sequence_nr_ = sequence_nr;
   fn_ = schema;
+  is_nccl_meta_ = (schema.get().name() == kParamCommsCallName);
 
 #ifndef NDEBUG
     inputs_valid_ = true;

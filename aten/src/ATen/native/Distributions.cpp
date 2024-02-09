@@ -4,7 +4,6 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
 #include <c10/util/Exception.h>
-#include <c10/util/math_compat.h>
 #include <c10/util/Optional.h>
 
 #include <ATen/CPUGeneratorImpl.h>
@@ -142,8 +141,7 @@ int64_t sample_poisson(double lambda, at::CPUGeneratorImpl* generator) {
 
 } // namespace
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(bernoulli_tensor_stub);
 DEFINE_DISPATCH(bernoulli_scalar_stub);
@@ -470,7 +468,7 @@ Tensor _s_poisson_cpu(const Tensor& lambda, c10::optional<Generator> gen) {
     .add_output(ret)
     .add_input(lambda)
     .build();
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, ret.scalar_type(), "poisson_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Half, ret.scalar_type(), "poisson_cpu", [&] {
     CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
@@ -600,10 +598,6 @@ Tensor& multinomial_out(const Tensor& self,
   // Fast-path for no replacement or if only one sample is drawn.
   // Reference:
   // https://github.com/pytorch/pytorch/issues/11931#issuecomment-625882503
-  // Half is not supported on CPU.
-  TORCH_CHECK(
-      !(self.device().is_cpu() && self.scalar_type() == ScalarType::Half),
-      "multinomial is not implemented for half on CPU");
   if (!with_replacement || n_sample == 1) {
     // Sanity checks on `self`.
     auto is_valid = ((self.max() < INFINITY) & (self.min() >= 0)).item();
@@ -659,4 +653,4 @@ Tensor multinomial(
   return result;
 }
 
-}} // namespace at::native
+} // namespace at::native

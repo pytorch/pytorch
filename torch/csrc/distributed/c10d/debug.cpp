@@ -42,8 +42,8 @@ DebugLevel loadDebugLevelFromEnvironment() {
   } else if (level_str == "DETAIL") {
     level = DebugLevel::Detail;
   } else {
-    throw C10dError{
-        "The value of TORCH_DISTRIBUTED_DEBUG must be OFF, INFO, or DETAIL."};
+    throw std::invalid_argument(
+        "The value of TORCH_DISTRIBUTED_DEBUG must be OFF, INFO, or DETAIL.");
   }
 
   C10D_INFO("The debug level is set to {}.", level_str);

@@ -53,7 +53,10 @@ class TryMergeExplainer:
         if self.force:
             return (
                 "Your change will be merged immediately since you used the force (-f) flag, "
-                + "**bypassing any CI checks** (ETA: 1-5 minutes)."
+                + "**bypassing any CI checks** (ETA: 1-5 minutes).  "
+                + "Please use `-f` as last resort and instead consider `-i/--ignore-current` "
+                + "to continue the merge ignoring current failures.  This will allow "
+                + "currently pending tests to finish and report signal before the merge."
             )
         elif self.ignore_current and ignore_current_checks is not None:
             msg = f"Your change will be merged while ignoring the following {len(ignore_current_checks)} checks: "

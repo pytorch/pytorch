@@ -60,12 +60,14 @@ static PyObject* MPSModule_isAvailable(PyObject* _unused, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* MPSModule_isMacOS13orNewer(PyObject* _unused, PyObject* args) {
+static PyObject* MPSModule_isMacOSorNewer(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
-      THPUtils_checkLong(args), "invalid argument to isOnMacOS13orNewer()");
-  auto minor = THPUtils_unpackUInt32(args);
-  if (at::detail::getMPSHooks().isOnMacOS13orNewer(minor)) {
+  size_t major = 0;
+  size_t minor = 0;
+  if (!PyArg_ParseTuple(args, "LL", &major, &minor)) {
+    return nullptr;
+  }
+  if (at::detail::getMPSHooks().isOnMacOSorNewer(major, minor)) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -93,7 +95,7 @@ static PyObject* MPSModule_setMemoryFraction(
     PyObject* _unused,
     PyObject* args) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
+  TORCH_CHECK(
       THPUtils_checkDouble(args), "invalid argument to setMemoryFraction()");
   double fraction = THPUtils_unpackDouble(args);
   at::detail::getMPSHooks().setMemoryFraction(fraction);
@@ -105,7 +107,7 @@ static PyObject* MPSModule_currentAllocatedMemory(
     PyObject* _unused,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  return PyLong_FromUnsignedLongLong(
+  return THPUtils_packUInt64(
       at::detail::getMPSHooks().getCurrentAllocatedMemory());
   END_HANDLE_TH_ERRORS
 }
@@ -114,7 +116,7 @@ static PyObject* MPSModule_driverAllocatedMemory(
     PyObject* _unused,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  return PyLong_FromUnsignedLongLong(
+  return THPUtils_packUInt64(
       at::detail::getMPSHooks().getDriverAllocatedMemory());
   END_HANDLE_TH_ERRORS
 }
@@ -146,6 +148,74 @@ static PyObject* MPSModule_profilerStopTrace(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* MPSModule_acquireEvent(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
+  const bool enable_timing = THPUtils_unpackBool(args);
+  return THPUtils_packUInt32(
+      at::detail::getMPSHooks().acquireEvent(enable_timing));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* MPSModule_releaseEvent(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
+  const uint32_t event_id = THPUtils_unpackUInt32(args);
+  at::detail::getMPSHooks().releaseEvent(event_id);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* MPSModule_recordEvent(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
+  const uint32_t event_id = THPUtils_unpackUInt32(args);
+  at::detail::getMPSHooks().recordEvent(event_id);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* MPSModule_waitForEvent(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
+  const uint32_t event_id = THPUtils_unpackUInt32(args);
+  at::detail::getMPSHooks().waitForEvent(event_id);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* MPSModule_synchronizeEvent(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
+  const uint32_t event_id = THPUtils_unpackUInt32(args);
+  at::detail::getMPSHooks().synchronizeEvent(event_id);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* MPSModule_queryEvent(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
+  const uint32_t event_id = THPUtils_unpackUInt32(args);
+
+  if (at::detail::getMPSHooks().queryEvent(event_id)) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* MPSModule_elapsedTimeOfEvents(
+    PyObject* _unused,
+    PyObject* args) {
+  HANDLE_TH_ERRORS
+  PyObject* start_event_o = nullptr;
+  PyObject* end_event_o = nullptr;
+  if (!PyArg_ParseTuple(args, "OO", &start_event_o, &end_event_o)) {
+    return nullptr;
+  }
+  const uint32_t start_event_id = THPUtils_unpackUInt32(start_event_o);
+  const uint32_t end_event_id = THPUtils_unpackUInt32(end_event_o);
+  return PyFloat_FromDouble(at::detail::getMPSHooks().elapsedTimeOfEvents(
+      start_event_id, end_event_id));
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,
 // cppcoreguidelines-avoid-non-const-global-variables,
 // cppcoreguidelines-avoid-c-arrays)
@@ -156,9 +226,9 @@ static struct PyMethodDef _MPSModule_methods[] = {
      nullptr},
     {"_mps_is_in_bad_fork", MPSModule_isInBadFork, METH_NOARGS, nullptr},
     {"_mps_is_available", MPSModule_isAvailable, METH_NOARGS, nullptr},
-    {"_mps_is_on_macos_13_or_newer",
-     MPSModule_isMacOS13orNewer,
-     METH_O,
+    {"_mps_is_on_macos_or_newer",
+     MPSModule_isMacOSorNewer,
+     METH_VARARGS,
      nullptr},
     {"_mps_get_default_generator",
      MPSModule_getDefaultMPSGenerator,
@@ -181,6 +251,16 @@ static struct PyMethodDef _MPSModule_methods[] = {
     {"_mps_profilerStopTrace",
      MPSModule_profilerStopTrace,
      METH_NOARGS,
+     nullptr},
+    {"_mps_acquireEvent", MPSModule_acquireEvent, METH_O, nullptr},
+    {"_mps_releaseEvent", MPSModule_releaseEvent, METH_O, nullptr},
+    {"_mps_recordEvent", MPSModule_recordEvent, METH_O, nullptr},
+    {"_mps_waitForEvent", MPSModule_waitForEvent, METH_O, nullptr},
+    {"_mps_synchronizeEvent", MPSModule_synchronizeEvent, METH_O, nullptr},
+    {"_mps_queryEvent", MPSModule_queryEvent, METH_O, nullptr},
+    {"_mps_elapsedTimeOfEvents",
+     MPSModule_elapsedTimeOfEvents,
+     METH_VARARGS,
      nullptr},
     {nullptr}};
 

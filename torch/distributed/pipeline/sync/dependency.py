@@ -37,7 +37,7 @@ class Fork(torch.autograd.Function):
 
 
 def join(input: Tensor, phony: Tensor) -> Tensor:
-    """Merges two autograd lanes."""
+    """Merge two autograd lanes."""
     if torch.is_grad_enabled() and (input.requires_grad or phony.requires_grad):
         input = Join.apply(input, phony)
 

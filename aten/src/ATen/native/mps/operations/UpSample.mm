@@ -34,14 +34,14 @@ namespace mps {
 
 // Upsampling operations (1D/2D forward and backward)
 // supported resize_mode: 'nearest' | 'bilinear' | 'nearest-exact'
-void upsample_out_template(const Tensor& input,
-                           IntArrayRef output_size,
-                           c10::optional<IntArrayRef> input_size_opt, // only used for backward pass
-                           c10::optional<double> scale_h_opt,
-                           c10::optional<double> scale_w_opt,
-                           const Tensor& output,
-                           bool align_corners,
-                           const c10::string_view resize_mode_str) {
+static void upsample_out_template(const Tensor& input,
+                                  IntArrayRef output_size,
+                                  c10::optional<IntArrayRef> input_size_opt, // only used for backward pass
+                                  c10::optional<double> scale_h_opt,
+                                  c10::optional<double> scale_w_opt,
+                                  const Tensor& output,
+                                  bool align_corners,
+                                  const c10::string_view resize_mode_str) {
   if (input.numel() == 0) {
     return;
   }
@@ -225,9 +225,7 @@ void upsample_out_template(const Tensor& input,
       inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
       cachedGraph->outputSizeTensor : sizeTensorData,
     };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
 
     if (out.has_storage()) {
       output.copy_(out);

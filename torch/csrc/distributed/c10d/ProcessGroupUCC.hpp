@@ -279,9 +279,11 @@ class TORCH_API ProcessGroupUCC : public Backend {
   uint32_t comm_id;
   ucc_team_h team{nullptr};
   ucc_ee_h cuda_ee{nullptr};
+  ucc_ee_h cuda_ee_p2p[2]{nullptr, nullptr};
 
 #ifdef USE_CUDA
   std::unique_ptr<at::cuda::CUDAStream> stream = nullptr;
+  std::unique_ptr<at::cuda::CUDAStream> stream_p2p[2] = {nullptr, nullptr};
   event_pool_t ep;
 #endif
   c10::intrusive_ptr<ProcessGroupUCCLogger> logger;

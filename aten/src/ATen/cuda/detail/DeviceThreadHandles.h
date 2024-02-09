@@ -23,7 +23,7 @@
 
 #include <c10/util/Exception.h>
 
-namespace at { namespace cuda { namespace {
+namespace at::cuda { namespace {
 
 template <typename Handle_t, void Create(Handle_t *), void Destroy(Handle_t)>
 struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThreadHandlePool<Handle_t, Create, Destroy>> {
@@ -148,4 +148,4 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
     }
 };
 
-}}}  // namespace at::cuda::detail::<anonymous>
+}}  // namespace at::cuda::detail::<anonymous>

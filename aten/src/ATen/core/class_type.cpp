@@ -87,9 +87,11 @@ std::string ClassType::getForwardPreHookErrorMessage(int pre_hook_idx) const {
       pre_hook_name + "(self, input: Tuple[" + input_types + "])";
   std::string return_string =
       "This error occurred while scripting the forward pre-hook '" +
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       pre_hook_name + "' on module '" + name()->name() +
       "'. If you did not want to script this pre-hook remove it from the "
       "original NN module before scripting. Pre-hooks for module '" +
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       name()->name() + "' are expected to have the following signature: "
       + pre_hook_schema + " with a return type of either 'None'" +
       single_output + " or 'Tuple[" + input_types + "]'.";
@@ -112,6 +114,7 @@ std::string ClassType::getForwardHookErrorMessage(int hook_idx) const {
                             input_types + "], output: " + output_types + ")";
   std::string return_string =
       "This error occurred while scripting the forward hook '"
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       + hook_name + "' on module " + name()->name() +
       ". If you did not want to script this hook remove it from" +
       " the original NN module before scripting. This hook was" +
@@ -191,6 +194,7 @@ void ClassType::checkForwardPreHookSchema(
     const FunctionSchema& pre_hook_schema) const {
   const torch::jit::Function* pre_hook = forward_pre_hooks_[pre_hook_idx];
   std::string hook_id =
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       "Pre-hook '" + pre_hook->name() + "' on module '" + name()->name() + "' ";
   std::string pre_hook_err_msg = getForwardPreHookErrorMessage(pre_hook_idx) + "\n";
 
@@ -287,6 +291,7 @@ void ClassType::checkForwardHookSchema(
       const FunctionSchema& hook_schema) const {
   const torch::jit::Function* hook = forward_hooks_[hook_idx];
   std::string hook_id =
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       "Hook '" + hook->name() + "' on module '" + name()->name() + "' ";
   std::string hook_err_msg = getForwardHookErrorMessage(hook_idx) + "\n";
   // Hooks are expecting three inputs: self, a Tuple containing the non-self
@@ -390,7 +395,7 @@ void ClassType::unsafeRemoveMethod(const std::string& name) {
   size_t slot = 0;
   for (auto method : methods_) {
     if (method->name() == name) {
-      methods_.erase(methods_.begin() + slot);
+      methods_.erase(methods_.begin() + static_cast<std::ptrdiff_t>(slot));
       return;
     }
     slot++;
@@ -573,12 +578,12 @@ size_t ClassType::addAttribute(
 
 void ClassType::unsafeRemoveAttribute(const std::string& name) {
   auto slot = getAttributeSlot(name);
-  attributes_.erase(attributes_.begin() + slot);
-  attributeTypes_.erase(attributeTypes_.begin() + slot);
+  attributes_.erase(attributes_.begin() + static_cast<std::ptrdiff_t>(slot));
+  attributeTypes_.erase(attributeTypes_.begin() + static_cast<std::ptrdiff_t>(slot));
   AT_ASSERT(attributes_.size() == attributeTypes_.size());
 }
 
-void ClassType::unsafeChangeAttributeType(const std::string& name, TypePtr new_ty) {
+void ClassType::unsafeChangeAttributeType(const std::string& name, const TypePtr& new_ty) {
   auto slot = getAttributeSlot(name);
   auto old_attr_info = attributes_[slot];
   AT_ASSERT(old_attr_info.getKind() == AttributeKind::REGULAR_ATTRIBUTE);
@@ -633,8 +638,8 @@ c10::optional<IValue> ClassType::findConstant(const std::string& name) const {
 
 void ClassType::unsafeRemoveConstant(const std::string& name) {
   auto slot = getConstantSlot(name);
-  constantNames_.erase(constantNames_.begin() + slot);
-  constantValues_.erase(constantValues_.begin() + slot);
+  constantNames_.erase(constantNames_.begin() + static_cast<std::ptrdiff_t>(slot));
+  constantValues_.erase(constantValues_.begin() + static_cast<std::ptrdiff_t>(slot));
 }
 
 std::shared_ptr<CompilationUnit> ClassType::compilation_unit() {

@@ -57,6 +57,12 @@ class DTensorAPITest(DTensorTestBase):
                 self.assertTrue(dist_tensor.requires_grad)
                 self.assertTrue(dist_tensor.is_leaf)
 
+        # test negative dim
+        shard_minus_spec = [Shard(-1)]
+        tensor_to_shard = torch.randn(3, 3 * self.world_size)
+        dist_tensor = distribute_tensor(tensor_to_shard, device_mesh, shard_minus_spec)
+        self.assertEqual(dist_tensor.placements[0].dim, 1)
+
     @with_comms
     def test_distribute_tensor_errors(self):
         device_mesh = DeviceMesh(
@@ -212,7 +218,7 @@ class DTensorAPITest(DTensorTestBase):
         input = torch.randn(10, 10, requires_grad=True)
         output = replica_model(input)
         output.sum().backward()
-        param_grad = list(replica_model.parameters())[0].grad
+        param_grad = next(iter(replica_model.parameters())).grad
         self.assertTrue(isinstance(param_grad, DTensor))
         self.assertTrue(isinstance(param_grad.placements[0], Replicate))
 

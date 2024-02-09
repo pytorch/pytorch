@@ -48,8 +48,7 @@ C10_DEFINE_bool(
     "If on, static runtime may use use optimizations that cause accuracy loss "
     "vs the jit interpreter");
 
-namespace at {
-namespace native {
+namespace at::native {
 
 static void repeat_out(
     at::Tensor& result,
@@ -265,7 +264,7 @@ static Tensor& linear_out(
 
   auto bias = bias_opt.has_value()
       ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
-      : c10::MaybeOwned<Tensor>::owned(c10::in_place);
+      : c10::MaybeOwned<Tensor>::owned(std::in_place);
 
   if (input.dim() == 2 && bias->defined()) {
     // Fused op is marginally faster.
@@ -375,11 +374,9 @@ static at::Tensor& dequantize_copy_out(Tensor& out, const Tensor& self) {
   }
   return get_qtensorimpl(self)->quantizer()->dequantize_out(out, self);
 }
-} // namespace native
-} // namespace at
+} // namespace at::native
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 C10_DEFINE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
 
@@ -2078,7 +2075,7 @@ namespace {
 c10::MaybeOwned<at::Tensor> borrow_from_optional_tensor_ivalue(
     const IValue& iv) {
   if (iv.isNone()) {
-    return c10::MaybeOwned<at::Tensor>::owned(c10::in_place);
+    return c10::MaybeOwned<at::Tensor>::owned(std::in_place);
   }
   return c10::MaybeOwned<at::Tensor>::borrowed(iv.toTensor());
 }
@@ -2862,5 +2859,4 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

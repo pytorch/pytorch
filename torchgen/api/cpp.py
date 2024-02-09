@@ -124,7 +124,7 @@ def valuetype_type(
         raise AssertionError(f"unrecognized type {repr(t)}")
 
 
-# Translation of types occuring in JIT arguments to a C++ argument type.
+# Translation of types occurring in JIT arguments to a C++ argument type.
 # If remove_non_owning_ref_types is set, we'll guarantee that the outputed CType is not a non-owning reference type.
 # For example, we'll return std::vector<int> instead of IntArrayRef.
 # See Note [translation from C++ reference to value types]
@@ -254,6 +254,10 @@ def returntype_type(t: Type, *, mutable: bool, symint: bool = False) -> CType:
         elem = returntype_type(t.elem, mutable=False)
         assert t.size is None, f"fixed size list returns not supported: {t}"
         return VectorCType(elem)
+    elif isinstance(t, OptionalType):
+        elem = returntype_type(t.elem, mutable=mutable)
+        if str(t.elem) == "Tensor":
+            return OptionalCType(elem)
 
     raise AssertionError(f"unrecognized return type {t}")
 

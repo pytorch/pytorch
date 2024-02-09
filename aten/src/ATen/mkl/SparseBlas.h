@@ -14,9 +14,7 @@
 
 #include <mkl_spblas.h>
 
-namespace at {
-namespace mkl {
-namespace sparse {
+namespace at::mkl::sparse {
 
 #define MKL_SPARSE_CREATE_CSR_ARGTYPES(scalar_t)                              \
   sparse_matrix_t *A, const sparse_index_base_t indexing, const MKL_INT rows, \
@@ -225,6 +223,4 @@ void trsm<c10::complex<float>>(MKL_SPARSE_TRSM_ARGTYPES(c10::complex<float>));
 template <>
 void trsm<c10::complex<double>>(MKL_SPARSE_TRSM_ARGTYPES(c10::complex<double>));
 
-} // namespace sparse
-} // namespace mkl
-} // namespace at
+} // namespace at::mkl::sparse

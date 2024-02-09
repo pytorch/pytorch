@@ -4,10 +4,8 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <unordered_set>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -62,5 +60,4 @@ void ensure_c10_registerer_defined() {
   registerer();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

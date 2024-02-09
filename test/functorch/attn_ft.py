@@ -55,7 +55,7 @@ class BertSelfAttention(nn.Module):
         v = self.value(hidden_states)
 
         # introduce values that represent each dimension. dimensions are 'first class'
-        # becaue they are actual python values introduced here
+        # because they are actual python values introduced here
         batch, query_sequence, key_sequence, heads, features = dims()
         heads.size = self.num_attention_heads
 
@@ -72,12 +72,12 @@ class BertSelfAttention(nn.Module):
 
 
         # this option allows the model to attend to not just the elements of the current sequence
-        # but the previouse elements as well as additional tokens.
+        # but the previous elements as well as additional tokens.
         if past_key_value is not None:
             extended_key_sequence = dims()
             key_past = past_key_value[0][batch, heads, key_sequence, features]
             value_past = past_key_value[1][batch, heads, key_sequence, features]
-            # cat introduces a new dimension exteneded_key_sequence, becuase it is twice as long
+            # cat introduces a new dimension extended_key_sequence, because it is twice as long
             # as the original key_sequence
             k = cat([key_past, k], key_sequence, extended_key_sequence)
             v = cat([value_past, v], key_sequence, extended_key_sequence)
@@ -109,7 +109,7 @@ class BertSelfAttention(nn.Module):
             # this is just a `gather` primitive op. The resulting tensor will
             # have all the dimensions of embeddeding_idx (query_sequence x key_sequence),
             # plus all the dimensions of `embed` that were not indirectly accessed (`embedding_range`).
-            # this form of indirect indexing is more strainghtforward than either advanced indexing or torch.gather which both
+            # this form of indirect indexing is more straightforward than either advanced indexing or torch.gather which both
             # have a lot of dependencies on the positions of indexing tensors.
 
             positional_embedding = self.distance_embedding.weight[self.max_position_embeddings - 1 + distance, features]

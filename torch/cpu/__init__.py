@@ -3,23 +3,29 @@ This package implements abstractions found in ``torch.cuda``
 to facilitate writing device-agnostic code.
 """
 
-from typing import Any, Optional, Union
 from contextlib import AbstractContextManager
-from . import amp
-from .. import device as _device
+from typing import Any, Optional, Union
+
 import torch
+
+from .. import device as _device
+from . import amp
 
 __all__ = [
     "is_available",
     "synchronize",
+    "current_device",
     "current_stream",
     "stream",
+    "set_device",
     "device_count",
     "Stream",
-    "StreamContext"
+    "StreamContext",
+    "Event",
 ]
 
 _device_t = Union[_device, str, int, None]
+
 
 def _is_cpu_support_vnni() -> bool:
     r"""Returns a bool indicating if CPU supports VNNI."""
@@ -34,6 +40,7 @@ def is_available() -> bool:
     """
     return True
 
+
 def synchronize(device: _device_t = None) -> None:
     r"""Waits for all kernels in all streams on the CPU device to complete.
 
@@ -44,14 +51,36 @@ def synchronize(device: _device_t = None) -> None:
     """
     pass
 
+
 class Stream:
     """
     N.B. This class only exists to facilitate device-agnostic code
     """
-    pass
+
+    def __init__(self, priority: int = -1):
+        pass
+
+    def wait_stream(self, stream) -> None:
+        pass
+
+
+class Event:
+    def query(self) -> bool:
+        return True
+
+    def record(self, stream=None):
+        pass
+
+    def synchronize(self):
+        pass
+
+    def wait(self, stream=None):
+        pass
+
 
 _default_cpu_stream = Stream()
 _current_stream = _default_cpu_stream
+
 
 def current_stream(device: _device_t = None) -> Stream:
     r"""Returns the currently selected :class:`Stream` for a given device.
@@ -64,13 +93,14 @@ def current_stream(device: _device_t = None) -> Stream:
     """
     return _current_stream
 
+
 class StreamContext(AbstractContextManager):
     r"""Context-manager that selects a given stream.
 
     N.B. This class only exists to facilitate device-agnostic code
 
     """
-    cur_stream : Optional[Stream]
+    cur_stream: Optional[Stream]
 
     def __init__(self, stream):
         self.stream = stream
@@ -93,6 +123,7 @@ class StreamContext(AbstractContextManager):
         global _current_stream
         _current_stream = self.prev_stream
 
+
 def stream(stream: Stream) -> AbstractContextManager:
     r"""Wrapper around the Context-manager StreamContext that
     selects a given stream.
@@ -101,9 +132,26 @@ def stream(stream: Stream) -> AbstractContextManager:
     """
     return StreamContext(stream)
 
+
 def device_count() -> int:
     r"""Returns number of CPU devices (not cores). Always 1.
 
     N.B. This function only exists to facilitate device-agnostic code
     """
     return 1
+
+
+def set_device(device: _device_t) -> None:
+    r"""Sets the current device, in CPU we do nothing.
+
+    N.B. This function only exists to facilitate device-agnostic code
+    """
+    pass
+
+
+def current_device() -> str:
+    r"""Returns current device for cpu. Always 'cpu'.
+
+    N.B. This function only exists to facilitate device-agnostic code
+    """
+    return "cpu"

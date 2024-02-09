@@ -7,10 +7,9 @@
  */
 #pragma once
 
-#include <ATen/cuda/CUDAGeneratorImpl.h>
-#include <ATen/cuda/CUDAGraphsUtils.cuh>
+#include <ATen/cuda/PhiloxUtils.cuh>
+#include <c10/util/Exception.h>
 
-#include <ATen/ATen.h>
 #include <curand_kernel.h>
 #include <cmath>
 #include <vector>
@@ -173,12 +172,12 @@ struct AttentionKernel {
     int32_t q_strideH;
     int32_t k_strideH;
     int32_t v_strideH;
-    int32_t bias_strideH = 0;
+    int64_t bias_strideH = 0;
 
     int64_t q_strideB;
     int64_t k_strideB;
     int64_t v_strideB;
-    int32_t bias_strideB = 0;
+    int64_t bias_strideB = 0;
 
     int32_t num_batches;
     int32_t num_heads;
@@ -298,10 +297,13 @@ struct AttentionKernel {
       // 15/16th of tensor core compute In that case :
       //  - we only launch kernels for head_id % kQueriesPerBlock == 0
       //  - we iterate over heads instead of queries (strideM = strideH)
-      if (num_queries == 1 && k_strideH == 0 && v_strideH == 0) {
-        if (head_id % kQueriesPerBlock != 0)
+      if (num_queries == 1 && k_strideH == 0 && v_strideH == 0 &&
+          logsumexp_ptr == nullptr) {
+        if (head_id % kQueriesPerBlock != 0) {
           return false;
+        }
         q_strideM = q_strideH;
+        bias_strideM = bias_strideH;
         num_queries = num_heads;
         num_heads = 1; // unused but here for intent
         // remove causal since n_query = 1
@@ -576,13 +578,19 @@ struct AttentionKernel {
       CHECK_ALIGNED_PTR(p.attn_bias_ptr, kAlignmentQ);
       TORCH_CHECK(
           p.num_batches <= 1 || p.bias_strideB % kAlignmentQ == 0,
-          "attn_bias is not correctly aligned (strideB)");
+          "attn_bias is not correctly aligned (strideB). ",
+          "attn_bias.stride( 0) = ", p.bias_strideB, ", and should be a "
+          "multiple of ", kAlignmentQ, ".");
       TORCH_CHECK(
           p.num_heads <= 1 || p.bias_strideH % kAlignmentQ == 0,
-          "attn_bias is not correctly aligned (strideH)");
+          "attn_bias is not correctly aligned (strideH). "
+          "attn_bias.stride(1) = ", p.bias_strideH, ", and should be a "
+          "multiple of ", kAlignmentQ, ".");
       TORCH_CHECK(
-          p.bias_strideM % kAlignmentQ == 0,
-          "attn_bias is not correctly aligned");
+          p.num_queries <= 1 || p.bias_strideM % kAlignmentQ == 0,
+          "attn_bias is not correctly aligned (strideM). "
+          "attn_bias.stride(2) = ", p.bias_strideM, ", and should be a "
+          "multiple of ", kAlignmentQ, ".");
     }
     TORCH_CHECK(
         p.q_strideM % kAlignmentQ == 0,

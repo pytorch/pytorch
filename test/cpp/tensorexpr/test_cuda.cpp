@@ -2119,7 +2119,7 @@ TEST(Cuda, MaskMultiDimMultiAxis_CUDA) {
   std::ostringstream oss;
   oss << *cuda_cg.stmt();
 
-  // Both stores masked agaist the other thread dim < 1.
+  // Both stores masked against the other thread dim < 1.
   const std::string& verification_pattern =
       R"IR(
 # CHECK: if (threadIdx.y<1

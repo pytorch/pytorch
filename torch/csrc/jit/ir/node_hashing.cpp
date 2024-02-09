@@ -142,6 +142,9 @@ bool ivaluesEqual(const IValue& a1, const IValue& a2) {
   if (a1.isObject()) {
     return &a1.toObjectRef() == &a2.toObjectRef();
   }
+  if (a1.isGenerator()) {
+    return a1.toGenerator() == a2.toGenerator();
+  }
   TORCH_INTERNAL_ASSERT(false);
 }
 

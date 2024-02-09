@@ -5,6 +5,9 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Repeat.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/ops/permute_native.h>
+#include <ATen/ops/repeat_interleave_native.h>
+#include <ATen/ops/repeat_native.h>
 #include <fmt/format.h>
 
 #ifdef __OBJC__
@@ -37,6 +40,7 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
 
   TORCH_CHECK(repeats.size() >= (size_t)self.dim(),
               "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
+  TORCH_CHECK(!self.is_complex(), "repeat(): Not supported for complex yet!");
 
   // Add new leading dimensions to the tensor if the
   // number of target dimensions is larger than the
@@ -86,12 +90,8 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
     Placeholder outputPlaceholder =
         Placeholder(cachedGraph->outputTensor_, result, /*mpsShape=*/nil, /*gatherTensorData*/ false, outputDataType);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
-        @{selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()};
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return result;

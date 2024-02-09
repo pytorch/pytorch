@@ -15,29 +15,32 @@ class SparseAdam(Optimizer):
         if not 0.0 <= betas[1] < 1.0:
             raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
 
-        params = list(params)
+        defaults = dict(lr=lr, betas=betas, eps=eps, maximize=maximize)
+        super().__init__(params, defaults)
 
         sparse_params = []
-        for index, param in enumerate(params):
-            if isinstance(param, dict):
-                # given param group, convert given params to a list first before iterating
-                param['params'] = list(param.get("params", []))
-                for d_index, d_param in enumerate(param['params']):
-                    if d_param.is_sparse:
-                        sparse_params.append([index, d_index])
-            elif param.is_sparse:
-                sparse_params.append(index)
+        complex_params = []
+        for index, param_group in enumerate(self.param_groups):
+            assert isinstance(param_group, dict), f"param_groups must be a list of dicts, but got {type(param_group)}"
+            # given param group, convert given params to a list first before iterating
+            for d_index, d_param in enumerate(param_group['params']):
+                if d_param.is_sparse:
+                    sparse_params.append([index, d_index])
+                if d_param.is_complex():
+                    complex_params.append([index, d_index])
         if sparse_params:
             raise ValueError(
                 f"Sparse params at indices {sparse_params}: SparseAdam requires dense parameter tensors"
             )
+        if complex_params:
+            raise ValueError(
+                f"Complex params at indices {complex_params}: SparseAdam does not support complex parameters"
+            )
 
-        defaults = dict(lr=lr, betas=betas, eps=eps, maximize=maximize)
-        super().__init__(params, defaults)
 
     @torch.no_grad()
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model

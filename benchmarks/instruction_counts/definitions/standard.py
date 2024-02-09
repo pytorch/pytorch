@@ -15,23 +15,23 @@ Parser notes:
 from core.api import GroupedModules, GroupedStmts, GroupedVariants
 from core.types import FlatIntermediateDefinition
 from core.utils import flatten, parse_stmts
+
 from definitions.setup import Setup
 
 
-BENCHMARKS: FlatIntermediateDefinition = flatten({
-    "Empty": {
-        "no allocation": GroupedStmts(
-            r"torch.empty(())",
-            r"torch::empty({0});",
-        ),
-
-        "with allocation": GroupedStmts(
-            r"torch.empty((1,))",
-            r"torch::empty({1});",
-        ),
-
-        "overloads": GroupedVariants(
-            cpp_block=r"""
+BENCHMARKS: FlatIntermediateDefinition = flatten(
+    {
+        "Empty": {
+            "no allocation": GroupedStmts(
+                r"torch.empty(())",
+                r"torch::empty({0});",
+            ),
+            "with allocation": GroupedStmts(
+                r"torch.empty((1,))",
+                r"torch::empty({1});",
+            ),
+            "overloads": GroupedVariants(
+                cpp_block=r"""
                 // @Setup
                 auto options_empty = c10::TensorOptions();
                 auto options_full = c10::TensorOptions().dtype(at::kFloat).device(at::kCPU);
@@ -47,11 +47,12 @@ BENCHMARKS: FlatIntermediateDefinition = flatten({
                 at::empty({0}, at::kFloat, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
                 at::empty({0}, optional_float, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
             """
-        ),
-    },
-
-    "Pointwise": {
-        "Math": GroupedVariants(*parse_stmts(r"""
+            ),
+        },
+        "Pointwise": {
+            "Math": GroupedVariants(
+                *parse_stmts(
+                    r"""
             Python                                   | C++
             ---------------------------------------- | ----------------------------------------
             # @setup                                 | // @setup
@@ -83,9 +84,12 @@ BENCHMARKS: FlatIntermediateDefinition = flatten({
             # @equality                              | // @equality
             x == y_float                             | x == y_float;
             x == 1.0                                 | x == 1.0;
-        """)),
-
-        "Data movement": GroupedVariants(*parse_stmts(r"""
+        """
+                )
+            ),
+            "Data movement": GroupedVariants(
+                *parse_stmts(
+                    r"""
             Python                                   | C++
             ---------------------------------------- | ----------------------------------------
             # @setup                                 | // @setup
@@ -110,10 +114,13 @@ BENCHMARKS: FlatIntermediateDefinition = flatten({
                                                      |
             # @RNG                                   | // @RNG
             x.uniform_()                             | x.uniform_();
-        """)),
-    },
-
-    "Reduction": GroupedVariants(*parse_stmts(r"""
+        """
+                )
+            ),
+        },
+        "Reduction": GroupedVariants(
+            *parse_stmts(
+                r"""
         Python                                   | C++
         ---------------------------------------- | ----------------------------------------
         # @setup                                 | // @setup
@@ -127,9 +134,12 @@ BENCHMARKS: FlatIntermediateDefinition = flatten({
                                                  |
         # @variance                              | // @variance
         x.var(0)                                 | x.var(0);
-    """)),
-
-    "Indexing": GroupedVariants(*parse_stmts(r"""
+    """
+            )
+        ),
+        "Indexing": GroupedVariants(
+            *parse_stmts(
+                r"""
         Python                                   | C++
         ---------------------------------------- | ----------------------------------------
         # @setup                                 | // @setup
@@ -162,9 +172,12 @@ BENCHMARKS: FlatIntermediateDefinition = flatten({
         x[None] = y[None]                        | x.index_put_({None}, y.index({None}));
         x[False] = y[False]                      | x.index_put_({false}, y.index({false}));
         x[True] = y[True]                        | x.index_put_({true}, y.index({true}));
-    """)),
-
-    "Metadata and views": GroupedVariants(*parse_stmts(r"""
+    """
+            )
+        ),
+        "Metadata and views": GroupedVariants(
+            *parse_stmts(
+                r"""
         Python                                   | C++
         ---------------------------------------- | ----------------------------------------
         # @setup                                 | // @setup
@@ -193,53 +206,54 @@ BENCHMARKS: FlatIntermediateDefinition = flatten({
                                                  |
         # @reshape                               | // @reshape
         x.reshape((16, 1))                       | x.reshape({16, 1});
-    """)),
-
-    "nn Modules": {
-        py_constructor.split("(")[0]: GroupedModules(
-            f"model = torch.nn.{py_constructor}",
-            f"auto model = torch::nn::{cpp_constructor};",
-            setup=setup.value,
-            signature="f(x) -> y",
-            torchscript=torchscript,
-        )
-
-        for setup, torchscript, (py_constructor, cpp_constructor) in (
-            (Setup.TRIVIAL_4D, True, ("BatchNorm2d(4)",) * 2),
-            (Setup.TRIVIAL_4D, True, ("GroupNorm(2, 4)",) * 2),
-            (Setup.TRIVIAL_4D, True, (
-                "LayerNorm(4)",
-                "LayerNorm(torch::nn::LayerNormOptions({4}))"
-            )),
-            (Setup.TRIVIAL_3D, True, ("Conv1d(4, 4, 1)",) * 2),
-            (Setup.TRIVIAL_4D, True, ("Conv2d(4, 4, 1)",) * 2),
-            (Setup.TRIVIAL_4D, True, ("MaxPool2d(2)",) * 2),
-            (Setup.TRIVIAL_2D, True, ("ReLU()",) * 2),
-            (Setup.TRIVIAL_2D, True, ("Sigmoid()",) * 2),
-            (Setup.TRIVIAL_4D, True, ("Linear(4, 2)",) * 2),
-
-            # TODO: LSTM can't be TorchScript'd
-            (Setup.TRIVIAL_3D, False, ("LSTM(4, 2)",) * 2),
-        )
-    },
-
-    "training": {
-        "simple": GroupedStmts(
-            *parse_stmts(r"""
+    """
+            )
+        ),
+        "nn Modules": {
+            py_constructor.split("(")[0]: GroupedModules(
+                f"model = torch.nn.{py_constructor}",
+                f"auto model = torch::nn::{cpp_constructor};",
+                setup=setup.value,
+                signature="f(x) -> y",
+                torchscript=torchscript,
+            )
+            for setup, torchscript, (py_constructor, cpp_constructor) in (
+                (Setup.TRIVIAL_4D, True, ("BatchNorm2d(4)",) * 2),
+                (Setup.TRIVIAL_4D, True, ("GroupNorm(2, 4)",) * 2),
+                (
+                    Setup.TRIVIAL_4D,
+                    True,
+                    ("LayerNorm(4)", "LayerNorm(torch::nn::LayerNormOptions({4}))"),
+                ),
+                (Setup.TRIVIAL_3D, True, ("Conv1d(4, 4, 1)",) * 2),
+                (Setup.TRIVIAL_4D, True, ("Conv2d(4, 4, 1)",) * 2),
+                (Setup.TRIVIAL_4D, True, ("MaxPool2d(2)",) * 2),
+                (Setup.TRIVIAL_2D, True, ("ReLU()",) * 2),
+                (Setup.TRIVIAL_2D, True, ("Sigmoid()",) * 2),
+                (Setup.TRIVIAL_4D, True, ("Linear(4, 2)",) * 2),
+                # TODO: LSTM can't be TorchScript'd
+                (Setup.TRIVIAL_3D, False, ("LSTM(4, 2)",) * 2),
+            )
+        },
+        "training": {
+            "simple": GroupedStmts(
+                *parse_stmts(
+                    r"""
                 Python                                   | C++
                 ---------------------------------------- | ----------------------------------------
                 a0 = torch.nn.functional.relu(x * w0)    | auto a0 = torch::nn::functional::relu(x * w0);
                 y = a0 * w1                              | auto y = a0 * w1;
-            """),
-            Setup.TRAINING.value,
-            num_threads=(1, 2),
-            signature=r"f(x, w0, w1) -> y",
-            torchscript=True,
-            autograd=True,
-        ),
-
-        "ensemble": GroupedStmts(
-            *parse_stmts(r"""
+            """
+                ),
+                Setup.TRAINING.value,
+                num_threads=(1, 2),
+                signature=r"f(x, w0, w1) -> y",
+                torchscript=True,
+                autograd=True,
+            ),
+            "ensemble": GroupedStmts(
+                *parse_stmts(
+                    r"""
                 Python                                   | C++
                 ---------------------------------------- | ----------------------------------------
                 a0 = torch.nn.functional.gelu(x * w0)    | auto a0 = torch::nn::functional::gelu(x * w0);
@@ -248,19 +262,19 @@ BENCHMARKS: FlatIntermediateDefinition = flatten({
                     torch.cat([a0, a1]),                 |     torch::cat({a0, a1}),
                     p=2.0, dim=0,                        |     torch::nn::functional::NormalizeFuncOptions().p(2).dim(0)
                 ).dot(w2)                                | ).dot(w2);
-            """),
-            Setup.TRAINING.value,
-            num_threads=(1, 2),
-            signature=r"f(x, y, w0, w1, w2) -> z",
-            torchscript=True,
-            autograd=True,
-        ),
-    },
-
-    "InferenceMode": GroupedVariants(
-        # In general, the mixed input scenario is less common so its
-        # perf can be less important than pure inference tensor inputs.
-        cpp_block=r"""
+            """
+                ),
+                Setup.TRAINING.value,
+                num_threads=(1, 2),
+                signature=r"f(x, y, w0, w1, w2) -> z",
+                torchscript=True,
+                autograd=True,
+            ),
+        },
+        "InferenceMode": GroupedVariants(
+            # In general, the mixed input scenario is less common so its
+            # perf can be less important than pure inference tensor inputs.
+            cpp_block=r"""
             // @Setup
             auto s = torch::ones({3, 3});  // Normal Tensor
             c10::InferenceMode guard;
@@ -275,5 +289,6 @@ BENCHMARKS: FlatIntermediateDefinition = flatten({
             // @Mixed
             torch::Tensor y = x + s;
         """
-    ),
-})
+        ),
+    }
+)

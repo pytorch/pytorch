@@ -6,16 +6,24 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/binary_cross_entropy_backward_native.h>
+#include <ATen/ops/binary_cross_entropy_native.h>
+#include <ATen/ops/huber_loss_backward_native.h>
+#include <ATen/ops/huber_loss_native.h>
+#include <ATen/ops/mse_loss_backward_native.h>
 #include <ATen/ops/mse_loss_native.h>
+#include <ATen/ops/nll_loss2d_backward_native.h>
+#include <ATen/ops/nll_loss2d_forward_native.h>
 #include <ATen/ops/nll_loss_backward_native.h>
 #include <ATen/ops/nll_loss_forward_native.h>
+#include <ATen/ops/smooth_l1_loss_backward_native.h>
 #include <ATen/ops/smooth_l1_loss_native.h>
 #endif
 
 namespace at::native {
 namespace mps {
 
-string reductionToString(int64_t reduction) {
+static string reductionToString(int64_t reduction) {
   switch (reduction) {
     case Reduction::Mean:
       return "Mean";
@@ -26,7 +34,10 @@ string reductionToString(int64_t reduction) {
   }
 }
 
-MPSGraphTensor* reduceTensor(MPSGraphTensor* tensor, int64_t reduction, MPSGraph* mpsGraph, NSUInteger axesCount) {
+static MPSGraphTensor* reduceTensor(MPSGraphTensor* tensor,
+                                    int64_t reduction,
+                                    MPSGraph* mpsGraph,
+                                    NSUInteger axesCount) {
   NSMutableArray<NSNumber*>* axes = [NSMutableArray<NSNumber*> arrayWithCapacity:axesCount];
   for (NSUInteger i = 0; i < axesCount; i++)
     axes[i] = @(i);
@@ -42,12 +53,12 @@ MPSGraphTensor* reduceTensor(MPSGraphTensor* tensor, int64_t reduction, MPSGraph
   }
 }
 
-Tensor& mse_loss_backward_out_impl(const Tensor& grad_output,
-                                   const Tensor& input,
-                                   const Tensor& target,
-                                   int64_t reduction,
-                                   Tensor& grad_input,
-                                   const string op_name) {
+static Tensor& mse_loss_backward_out_impl(const Tensor& grad_output,
+                                          const Tensor& input,
+                                          const Tensor& target,
+                                          int64_t reduction,
+                                          Tensor& grad_input,
+                                          const string op_name) {
   TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
   auto norm = reduction == Reduction::Mean ? 2. / static_cast<double>(input.numel()) : 2.;
 
@@ -81,15 +92,8 @@ Tensor& mse_loss_backward_out_impl(const Tensor& grad_output,
     Placeholder gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor, grad_input);
     Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor, grad_output);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-      targetPlaceholder.getMPSGraphTensor() : targetPlaceholder.getMPSGraphTensorData(),
-      gradOutputPlaceholder.getMPSGraphTensor() : gradOutputPlaceholder.getMPSGraphTensorData()
-    };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{gradInputPlaceholder.getMPSGraphTensor() : gradInputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder, targetPlaceholder, gradOutputPlaceholder);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, gradInputPlaceholder);
   }
 
   return grad_input;
@@ -110,7 +114,7 @@ struct CachedGraph : public MPSCachedGraph {
   };
 };
 
-MPSGraphTensor* bce_forward_mps(CachedGraph* bceGraph) {
+static MPSGraphTensor* bce_forward_mps(CachedGraph* bceGraph) {
   MPSGraph* mpsGraph = bceGraph->graph();
 
   // Forward BCE: L = -w (y ln(x) + (1-y) ln(1-x))
@@ -148,7 +152,7 @@ MPSGraphTensor* bce_forward_mps(CachedGraph* bceGraph) {
   return bceLoss;
 }
 
-MPSGraphTensor* bce_backward_mps(CachedGraph* bceGraph) {
+static MPSGraphTensor* bce_backward_mps(CachedGraph* bceGraph) {
   MPSGraph* mpsGraph = bceGraph->graph();
 
   // Backward BCE: d(L)/d(x) = -w (y - x) / (x - x^2)
@@ -184,13 +188,13 @@ MPSGraphTensor* bce_backward_mps(CachedGraph* bceGraph) {
 
 // Binary Cross Enropy (Forward/Backward BCELoss)
 // NOTE: "loss" tensor would be "grad_input" if it's a backward pass
-Tensor& bce_loss_out_impl(const Tensor& input,
-                          const Tensor& target,
-                          const c10::optional<Tensor>& weight_opt,
-                          int64_t reduction,
-                          Tensor& loss,
-                          const c10::optional<Tensor>& grad_output_opt,
-                          const string op_name) {
+static Tensor& bce_loss_out_impl(const Tensor& input,
+                                 const Tensor& target,
+                                 const c10::optional<Tensor>& weight_opt,
+                                 int64_t reduction,
+                                 Tensor& loss,
+                                 const c10::optional<Tensor>& grad_output_opt,
+                                 const string op_name) {
   // TODO: add sanity check for the elements of input tensor to be within [0..1]
   TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
 
@@ -262,10 +266,7 @@ Tensor& bce_loss_out_impl(const Tensor& input,
       feeds[gradOutputPlaceholder.getMPSGraphTensor()] = gradOutputPlaceholder.getMPSGraphTensorData();
     }
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{lossPlaceholder.getMPSGraphTensor() : lossPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, lossPlaceholder);
   }
 
   return loss;
@@ -273,16 +274,25 @@ Tensor& bce_loss_out_impl(const Tensor& input,
 
 } // namespace BCELoss
 
+static inline MPSGraphTensor* divisionNoNaN(MPSGraph* mpsGraph, MPSGraphTensor* divident, MPSGraphTensor* divisor) {
+  auto* div = [mpsGraph divisionWithPrimaryTensor:divident secondaryTensor:divisor name:@"divisionTensor"];
+  // Replace NaNs with 0 for divident elements equal to 0
+  return [mpsGraph selectWithPredicateTensor:castMPSTensor(mpsGraph, divisor, MPSDataTypeBool)
+                         truePredicateTensor:div
+                        falsePredicateTensor:[mpsGraph constantWithScalar:0.0 dataType:div.dataType]
+                                        name:nil];
+}
+
 // NLLLoss
-void nllnd_loss_backward_impl(Tensor& grad_input_arg,
-                              const Tensor& grad_output_arg,
-                              const Tensor& input_arg,
-                              const Tensor& target_arg,
-                              const Tensor& weight_arg,
-                              int64_t reduction,
-                              int64_t ignore_index,
-                              const Tensor& total_weight,
-                              bool is2D) {
+static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
+                                     const Tensor& grad_output_arg,
+                                     const Tensor& input_arg,
+                                     const Tensor& target_arg,
+                                     const Tensor& weight_arg,
+                                     int64_t reduction,
+                                     int64_t ignore_index,
+                                     const Tensor& total_weight,
+                                     bool is2D) {
   if (grad_input_arg.numel() == 0) {
     return;
   }
@@ -296,6 +306,7 @@ void nllnd_loss_backward_impl(Tensor& grad_input_arg,
     MPSGraphTensor* gradOutputTensor_ = nil;
   };
   bool isWeightsArrayValid = weight_arg.defined() && weight_arg.numel() > 0;
+  bool isTargetCasted = target_arg.scalar_type() != ScalarType::Long;
   int64_t channel_dim = grad_input_arg.dim() < 2 ? 0 : 1;
   auto input = input_arg.dim() == 1 ? input_arg.view({1, input_arg.size(0)}) : input_arg;
   auto target = target_arg.dim() == 0 ? target_arg.view({1}) : target_arg;
@@ -315,11 +326,13 @@ void nllnd_loss_backward_impl(Tensor& grad_input_arg,
   @autoreleasepool {
     string key = "nllnd_loss_backward" + getTensorsStringKey({input, grad_output, target, weight, total_weight}) +
         to_string(numClasses) + ":" + to_string(ignore_index) + ":" + to_string(isWeightsArrayValid) + ":" +
-        reductionToString(reduction);
+        to_string(isTargetCasted) + ":" + reductionToString(reduction);
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
       MPSGraphTensor* targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target);
+      MPSGraphTensor* castedTargetTensor =
+          isTargetCasted ? castMPSTensor(mpsGraph, targetTensor, MPSDataTypeInt64) : targetTensor;
       MPSGraphTensor* weightTensor = nil;
       if (isWeightsArrayValid) {
         weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, weight);
@@ -327,36 +340,36 @@ void nllnd_loss_backward_impl(Tensor& grad_input_arg,
       MPSGraphTensor* totalWeightTensor = mpsGraphRankedPlaceHolder(mpsGraph, total_weight);
       MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
 
-      MPSGraphTensor* udpatedTargetTensor = targetTensor;
+      MPSGraphTensor* updatedTargetTensor = castedTargetTensor;
 
       // Replace ignored_index with length depth + 1 so that oneHotAPI ignores it
-      if (ignore_index != -100) {
-        MPSGraphTensor* ignoreIndexTensor = [mpsGraph constantWithScalar:ignore_index dataType:MPSDataTypeInt64];
-        MPSGraphTensor* numClassesTensor = [mpsGraph constantWithScalar:(numClasses + 1) dataType:MPSDataTypeInt64];
-        MPSGraphTensor* isEqualTensor = [mpsGraph equalWithPrimaryTensor:targetTensor
-                                                         secondaryTensor:ignoreIndexTensor
-                                                                    name:@"isEqualTensor"];
-        udpatedTargetTensor = [mpsGraph selectWithPredicateTensor:isEqualTensor
-                                              truePredicateTensor:numClassesTensor
-                                             falsePredicateTensor:targetTensor
-                                                             name:@"predicateTensor"];
-      }
-      MPSGraphTensor* oneHotTensor = [mpsGraph oneHotWithIndicesTensor:udpatedTargetTensor
-                                                                 depth:numClasses
-                                                                  axis:1
-                                                              dataType:inputTensor.dataType
-                                                               onValue:-1.0f
-                                                              offValue:0.0f
-                                                                  name:nil];
+      MPSGraphTensor* ignoreIndexTensor = [mpsGraph constantWithScalar:ignore_index dataType:MPSDataTypeInt64];
+      MPSGraphTensor* numClassesTensor = [mpsGraph constantWithScalar:(numClasses + 1) dataType:MPSDataTypeInt64];
+      MPSGraphTensor* isEqualTensor = [mpsGraph equalWithPrimaryTensor:castedTargetTensor
+                                                       secondaryTensor:ignoreIndexTensor
+                                                                  name:@"isEqualTensor"];
+      updatedTargetTensor = [mpsGraph selectWithPredicateTensor:isEqualTensor
+                                            truePredicateTensor:numClassesTensor
+                                           falsePredicateTensor:castedTargetTensor
+                                                           name:@"predicateTensor"];
+
+      // oneHotWithIndicesTensor only works for Float32 dtype
+      // cast it explicitly later if needed
+      auto* oneHotTensor = [mpsGraph oneHotWithIndicesTensor:updatedTargetTensor
+                                                       depth:numClasses
+                                                        axis:1
+                                                    dataType:MPSDataTypeFloat32
+                                                     onValue:-1.0f
+                                                    offValue:0.0f
+                                                        name:nil];
+      oneHotTensor = castMPSTensor(mpsGraph, oneHotTensor, inputTensor.dataType);
       if (isWeightsArrayValid) {
         oneHotTensor = [mpsGraph multiplicationWithPrimaryTensor:oneHotTensor
                                                  secondaryTensor:weightTensor
                                                             name:@"scaleByWeightTensor"];
       }
       if (reduction == Reduction::Mean) {
-        oneHotTensor = [mpsGraph divisionNoNaNWithPrimaryTensor:oneHotTensor
-                                                secondaryTensor:totalWeightTensor
-                                                           name:@"divisionTensor"];
+        oneHotTensor = divisionNoNaN(mpsGraph, oneHotTensor, totalWeightTensor);
       }
       MPSGraphTensor* gradInputTensor = [mpsGraph multiplicationWithPrimaryTensor:oneHotTensor
                                                                   secondaryTensor:gradOutputTensor
@@ -388,21 +401,18 @@ void nllnd_loss_backward_impl(Tensor& grad_input_arg,
     if (isWeightsArrayValid) {
       feeds[weightPlaceholder.getMPSGraphTensor()] = weightPlaceholder.getMPSGraphTensorData();
     }
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{gradInputPlaceholder.getMPSGraphTensor() : gradInputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, gradInputPlaceholder);
   }
 }
 
-void nllnd_loss_forward_impl(Tensor& output,
-                             Tensor& total_weight,
-                             const Tensor& input_arg,
-                             const Tensor& target_arg,
-                             const Tensor& weight,
-                             int64_t reduction,
-                             int64_t ignore_index,
-                             bool is2D) {
+static void nllnd_loss_forward_impl(Tensor& output,
+                                    Tensor& total_weight,
+                                    const Tensor& input_arg,
+                                    const Tensor& target_arg,
+                                    const Tensor& weight,
+                                    int64_t reduction,
+                                    int64_t ignore_index,
+                                    bool is2D) {
   std::vector<long long> reshapedTarget(target_arg.sizes().begin(), target_arg.sizes().end());
   reshapedTarget.push_back(1);
 
@@ -442,6 +452,7 @@ void nllnd_loss_forward_impl(Tensor& output,
 
   @autoreleasepool {
     bool isWeightsArrayValid = (weight.numel() > 0);
+    bool isTargetCasted = target.scalar_type() != ScalarType::Long;
 
     MPSShape* input_shape = getMPSShape(input);
     MPSShape* target_shape = getMPSShape(target);
@@ -452,10 +463,12 @@ void nllnd_loss_forward_impl(Tensor& output,
     // TODO: Make the key
     string key = "nllnd_loss_forward_impl:" + to_string(ignore_index) + ":" + to_string(isWeightsArrayValid) + ":" +
         reductionToString(reduction) + ":" + [ns_shape_key UTF8String] + ":" + getMPSTypeString(input) + ":" +
-        getMPSTypeString(target) + ":" + getMPSTypeString(weight);
+        getMPSTypeString(target) + ":" + to_string(isTargetCasted) + ":" + getMPSTypeString(weight);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(input), input_shape);
       MPSGraphTensor* targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(target), target_shape);
+      MPSGraphTensor* castedTargetTensor =
+          isTargetCasted ? castMPSTensor(mpsGraph, targetTensor, MPSDataTypeInt64) : targetTensor;
       MPSGraphTensor* weightTensor = nil;
       if (isWeightsArrayValid)
         weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(weight), weight_shape);
@@ -477,69 +490,40 @@ void nllnd_loss_forward_impl(Tensor& output,
       }
 
       MPSGraphTensor* mpsGatherTensor = [mpsGraph gatherWithUpdatesTensor:mpsTransposeTensor
-                                                            indicesTensor:targetTensor
+                                                            indicesTensor:castedTargetTensor
                                                                      axis:lastDim
                                                           batchDimensions:lastDim
                                                                      name:@"gatherTensor"];
 
-      bool isIgnoreIndexValid = (ignore_index != -100);
-      MPSGraphTensor* weightGatherTensor;
+      MPSGraphTensor* mpsGraphZeroTensor = [mpsGraph constantWithScalar:0.0 dataType:mpsGatherTensor.dataType];
+      MPSGraphTensor* mpsGraphOneTensor = [mpsGraph constantWithScalar:1.0 dataType:mpsGatherTensor.dataType];
+      MPSGraphTensor* mpsGraphIndexTensor = [mpsGraph constantWithScalar:ignore_index dataType:MPSDataTypeInt64];
+      MPSGraphTensor* mpsGraphIsEqualTensor = [mpsGraph equalWithPrimaryTensor:castedTargetTensor
+                                                               secondaryTensor:mpsGraphIndexTensor
+                                                                          name:@"isEqualTensor"];
+      // Zero out loss
+      mpsGatherTensor = [mpsGraph selectWithPredicateTensor:mpsGraphIsEqualTensor
+                                        truePredicateTensor:mpsGraphZeroTensor
+                                       falsePredicateTensor:mpsGatherTensor
+                                                       name:@"predicateTensor"];
 
       if (isWeightsArrayValid) {
-        weightGatherTensor = [mpsGraph gatherWithUpdatesTensor:weightTensor
-                                                 indicesTensor:targetTensor
-                                                          axis:0
-                                               batchDimensions:0
-                                                          name:@"weightGatherTensor"];
-        MPSGraphTensor* mpsGatherCopyTensor = [mpsGraph identityWithTensor:mpsGatherTensor name:@"identityTensor"];
+        MPSGraphTensor* weightGatherTensor = [mpsGraph gatherWithUpdatesTensor:weightTensor
+                                                                 indicesTensor:castedTargetTensor
+                                                                          axis:0
+                                                               batchDimensions:0
+                                                                          name:@"weightGatherTensor"];
         mpsGatherTensor = [mpsGraph multiplicationWithPrimaryTensor:weightGatherTensor
-                                                    secondaryTensor:mpsGatherCopyTensor
+                                                    secondaryTensor:mpsGatherTensor
                                                                name:@"scaledLossTensor"];
+        mpsGraphOneTensor = weightGatherTensor;
       }
 
-      // Both these cases need recomputation of denominator when reductionMode == mean
-      if (isIgnoreIndexValid || isWeightsArrayValid) {
-        // Setup tensors
-        MPSGraphTensor* mpsGraphZeroTensor = [mpsGraph constantWithScalar:0.0 dataType:mpsGatherTensor.dataType];
-        MPSGraphTensor* mpsGraphOneTensor = [mpsGraph constantWithScalar:1.0 dataType:mpsGatherTensor.dataType];
-        // @TODO: Remove this identity call with ToT StarSky MPSGraph
-        MPSGraphTensor* mpsGraphOneTensorCopy = [mpsGraph identityWithTensor:mpsGraphOneTensor
-                                                                        name:@"IdentityHackTensor"];
-
-        MPSGraphTensor* mpsGraphIsEqualTensor;
-
-        if (isIgnoreIndexValid) {
-          MPSGraphTensor* mpsGraphIndexTensor = [mpsGraph constantWithScalar:ignore_index dataType:MPSDataTypeInt64];
-          // Equal tensor
-          mpsGraphIsEqualTensor = [mpsGraph equalWithPrimaryTensor:targetTensor
-                                                   secondaryTensor:mpsGraphIndexTensor
-                                                              name:@"isEqualTensor"];
-          // Zero out loss
-          MPSGraphTensor* mpsGatherCopyTensor = [mpsGraph identityWithTensor:mpsGatherTensor name:@"identityTensor"];
-          mpsGatherTensor = [mpsGraph selectWithPredicateTensor:mpsGraphIsEqualTensor
-                                            truePredicateTensor:mpsGraphZeroTensor
-                                           falsePredicateTensor:mpsGatherCopyTensor
-                                                           name:@"predicateTensor"];
-        }
-
-        if (isWeightsArrayValid) {
-          mpsGraphOneTensorCopy = weightGatherTensor;
-          if (!isIgnoreIndexValid) {
-            mpsGraphIsEqualTensor = [mpsGraph constantWithScalar:0.0
-                                                           shape:targetTensor.shape
-                                                        dataType:targetTensor.dataType];
-          }
-        }
-
-        // Compute new batch size
-        MPSGraphTensor* mpsSelectOneTensor = [mpsGraph selectWithPredicateTensor:mpsGraphIsEqualTensor
-                                                             truePredicateTensor:mpsGraphZeroTensor
-                                                            falsePredicateTensor:mpsGraphOneTensorCopy
-                                                                            name:@"predicateOneTensor"];
-        mpsGraphBatchSizeTensor = [mpsGraph reductionSumWithTensor:mpsSelectOneTensor
-                                                              axes:nil
-                                                              name:@"batchSizeReductionTensor"];
-      }
+      // Compute new batch size
+      MPSGraphTensor* mpsSelectOneTensor = [mpsGraph selectWithPredicateTensor:mpsGraphIsEqualTensor
+                                                           truePredicateTensor:mpsGraphZeroTensor
+                                                          falsePredicateTensor:mpsGraphOneTensor
+                                                                          name:@"predicateOneTensor"];
 
       MPSGraphTensor* mpsGraphNegTensor = [mpsGraph negativeWithTensor:mpsGatherTensor name:@"negativeTensor"];
 
@@ -548,9 +532,10 @@ void nllnd_loss_forward_impl(Tensor& output,
       if (!(reduction == Reduction::None)) {
         mpsGraphReducedTensor = [mpsGraph reductionSumWithTensor:mpsGraphNegTensor axes:nil name:@"reductionSumTensor"];
         if (reduction == Reduction::Mean) {
-          mpsGraphReducedTensor = [mpsGraph divisionNoNaNWithPrimaryTensor:mpsGraphReducedTensor
-                                                           secondaryTensor:mpsGraphBatchSizeTensor
-                                                                      name:@"divisionTensor"];
+          mpsGraphBatchSizeTensor = [mpsGraph reductionSumWithTensor:mpsSelectOneTensor
+                                                                axes:nil
+                                                                name:@"batchSizeReductionTensor"];
+          mpsGraphReducedTensor = divisionNoNaN(mpsGraph, mpsGraphReducedTensor, mpsGraphBatchSizeTensor);
         }
       }
 
@@ -583,24 +568,20 @@ void nllnd_loss_forward_impl(Tensor& output,
     if (isWeightsArrayValid)
       feeds[weightPlaceholder.getMPSGraphTensor()] = weightPlaceholder.getMPSGraphTensorData();
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData(),
-      totalWeightsPlaceholder.getMPSGraphTensor() : totalWeightsPlaceholder.getMPSGraphTensorData()
-    };
-
+    auto results = dictionaryFromPlaceholders(outputPlaceholder, totalWeightsPlaceholder);
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
 
   return;
 }
 
-void smooth_l1_loss_impl(const Tensor& input,
-                         const Tensor& target,
-                         const int64_t reduction,
-                         double beta,
-                         const Tensor& output,
-                         MPSShape* mpsInputShape,
-                         MPSShape* mpsOutputShape) {
+static void smooth_l1_loss_impl(const Tensor& input,
+                                const Tensor& target,
+                                const int64_t reduction,
+                                double beta,
+                                const Tensor& output,
+                                MPSShape* mpsInputShape,
+                                MPSShape* mpsOutputShape) {
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor* inputTensor_ = nil;
@@ -682,22 +663,16 @@ void smooth_l1_loss_impl(const Tensor& input,
     Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor_, target, mpsInputShape);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output, mpsOutputShape);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-      targetPlaceholder.getMPSGraphTensor() : targetPlaceholder.getMPSGraphTensorData()
-    };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder, targetPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 
-void smooth_l1_loss_template(const Tensor& input,
-                             const Tensor& target,
-                             const int64_t reduction,
-                             double beta,
-                             const Tensor& output) {
+static void smooth_l1_loss_template(const Tensor& input,
+                                    const Tensor& target,
+                                    const int64_t reduction,
+                                    double beta,
+                                    const Tensor& output) {
   TORCH_CHECK(beta >= 0, "smooth_l1_loss does not support negative values for beta.");
   TORCH_CHECK(input.is_mps());
   TORCH_CHECK(target.is_mps());
@@ -736,12 +711,12 @@ void smooth_l1_loss_template(const Tensor& input,
   smooth_l1_loss_impl(input, target, reduction, beta, output, mpsInputShape, mpsOutputShape);
 }
 
-void smooth_l1_loss_backward_impl(const Tensor& grad_output,
-                                  const Tensor& input,
-                                  const Tensor& target,
-                                  int64_t reduction,
-                                  double beta,
-                                  Tensor& grad_input) {
+static void smooth_l1_loss_backward_impl(const Tensor& grad_output,
+                                         const Tensor& input,
+                                         const Tensor& target,
+                                         int64_t reduction,
+                                         double beta,
+                                         Tensor& grad_input) {
   if (grad_input.numel() == 0) {
     return;
   }
@@ -806,15 +781,8 @@ void smooth_l1_loss_backward_impl(const Tensor& grad_output,
     Placeholder gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input);
     Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-      targetPlaceholder.getMPSGraphTensor() : targetPlaceholder.getMPSGraphTensorData(),
-      gradOutputPlaceholder.getMPSGraphTensor() : gradOutputPlaceholder.getMPSGraphTensorData()
-    };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{gradInputPlaceholder.getMPSGraphTensor() : gradInputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder, targetPlaceholder, gradOutputPlaceholder);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, gradInputPlaceholder);
   }
 }
 
@@ -889,15 +857,8 @@ Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t re
     Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor_, target);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
-    // Create dictionary of inputs and outputs
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-      targetPlaceholder.getMPSGraphTensor() : targetPlaceholder.getMPSGraphTensorData()
-    };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder, targetPlaceholder);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
   }
   return output;
 }
@@ -1004,15 +965,8 @@ Tensor& huber_loss_backward_out_mps(const Tensor& grad_output,
     Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor_, target);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, grad_input);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      gradOutputPlaceholder.getMPSGraphTensor() : gradOutputPlaceholder.getMPSGraphTensorData(),
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-      targetPlaceholder.getMPSGraphTensor() : targetPlaceholder.getMPSGraphTensorData()
-    };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(gradOutputPlaceholder, inputPlaceholder, targetPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
   return grad_input;
 }
@@ -1047,14 +1001,8 @@ TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int
     Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor, target);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-      targetPlaceholder.getMPSGraphTensor() : targetPlaceholder.getMPSGraphTensorData()
-    };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder, targetPlaceholder);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 
@@ -1181,13 +1129,13 @@ inline void check_inputs_nll_loss2d(const Tensor& input, const Tensor& target, c
               target.sizes());
 }
 
-void nll_loss2d_forward_out_mps_template(Tensor& output,
-                                         Tensor& total_weight,
-                                         const Tensor& input,
-                                         const Tensor& target,
-                                         const Tensor& weight,
-                                         int64_t reduction,
-                                         int64_t ignore_index) {
+static void nll_loss2d_forward_out_mps_template(Tensor& output,
+                                                Tensor& total_weight,
+                                                const Tensor& input,
+                                                const Tensor& target,
+                                                const Tensor& weight,
+                                                int64_t reduction,
+                                                int64_t ignore_index) {
   check_inputs_nll_loss2d(input, target, weight);
   total_weight.resize_({});
 
@@ -1226,14 +1174,14 @@ std::tuple<Tensor, Tensor> nll_loss2d_forward_mps(const Tensor& self,
   return std::make_tuple(output, total_weight);
 }
 
-void nll_loss2d_backward_out_mps_template(Tensor& grad_input,
-                                          const Tensor& grad_output,
-                                          const Tensor& input,
-                                          const Tensor& target,
-                                          const Tensor& weight,
-                                          int64_t reduction,
-                                          int64_t ignore_index,
-                                          const Tensor& total_weight) {
+static void nll_loss2d_backward_out_mps_template(Tensor& grad_input,
+                                                 const Tensor& grad_output,
+                                                 const Tensor& input,
+                                                 const Tensor& target,
+                                                 const Tensor& weight,
+                                                 int64_t reduction,
+                                                 int64_t ignore_index,
+                                                 const Tensor& total_weight) {
   check_inputs_nll_loss2d(input, target, weight);
   grad_input.resize_as_(input);
   grad_input.zero_();

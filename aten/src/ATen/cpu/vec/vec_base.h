@@ -21,7 +21,6 @@
 #include <functional>
 #include <cmath>
 #include <type_traits>
-#include <bitset>
 #include <climits>
 
 #include <ATen/cpu/vec/intrinsics.h>
@@ -32,7 +31,6 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
 #include <c10/util/copysign.h>
-#include <c10/util/math_compat.h>
 #include <ATen/native/cpu/zmath.h>
 #include <c10/util/TypeCast.h>
 #include <c10/macros/Macros.h>
@@ -62,8 +60,7 @@
 #define int_vector __m256i
 #endif // CPU_CAPABILITY_AVX512
 
-namespace at {
-namespace vec {
+namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 // at::Half and at::BFloat16 should be treated as floating point
@@ -72,9 +69,7 @@ struct is_floating_point:
     std::integral_constant<bool,
       std::is_floating_point<T>::value ||
       std::is_same<T, at::Half>::value ||
-      std::is_same<T, at::BFloat16>::value ||
-      std::is_same<T, at::Float8_e5m2>::value ||
-      std::is_same<T, at::Float8_e4m3fn>::value> {
+      std::is_same<T, at::BFloat16>::value> {
 };
 
 template<typename T>
@@ -151,9 +146,8 @@ public:
   // versions GCC/Clang have buggy determinations on whether or not an
   // identifier is odr-used or not, and in any case it's hard to tell if
   // a variable is odr-used or not.  So best to just cut the problem at the root.
-  static constexpr size_type size_T = sizeof(T);  // Workaround to compile with VS2022.
   static constexpr size_type size() {
-    return VECTOR_WIDTH / size_T;
+    return VECTOR_WIDTH / sizeof(T);
   }
   Vectorized() : values{static_cast<T>(0)} {}
   Vectorized(T val) {
@@ -259,6 +253,14 @@ public:
     }
     return vector;
   }
+  bool has_inf_nan() const {
+    for (int64_t i = 0; i != size(); i++) {
+      if(_isnan(values[i]) || _isinf(values[i])) {
+        return true;
+      }
+    }
+    return false;
+  }
   Vectorized<T> map(T (*const f)(T)) const {
     Vectorized<T> ret;
     for (int64_t i = 0; i != size(); i++) {
@@ -363,11 +365,17 @@ public:
   Vectorized<T> acos() const {
     return map(std::acos);
   }
+  Vectorized<T> acosh() const {
+    return map(std::acosh);
+  }
   Vectorized<T> asin() const {
     return map(std::asin);
   }
   Vectorized<T> atan() const {
     return map(std::atan);
+  }
+  Vectorized<T> atanh() const {
+    return map(std::atanh);
   }
   Vectorized<T> atan2(const Vectorized<T> &exp) const {
     Vectorized<T> ret;
@@ -403,6 +411,9 @@ public:
   }
   Vectorized<T> expm1() const {
     return map(std::expm1);
+  }
+  Vectorized<T> exp_u20() const {
+    return map(std::exp);
   }
   Vectorized<T> frac() const {
     return *this - this->trunc();
@@ -467,6 +478,9 @@ public:
   }
   Vectorized<T> i0e() const {
     return map(calc_i0e);
+  }
+  Vectorized<T> digamma() const {
+    return map(calc_digamma);
   }
   Vectorized<T> igamma(const Vectorized<T> &x) const {
     Vectorized<T> ret;
@@ -606,6 +620,12 @@ template <class T> Vectorized<T> inline operator/(const Vectorized<T> &a, const 
     c[i] = a[i] / b[i];
   }
   return c;
+}
+
+template <class T,
+          typename std::enable_if<!is_floating_point_v<T>, int>::type = 0>
+Vectorized<T> inline operator%(const Vectorized<T> &a, const Vectorized<T> &b) __ubsan_ignore_float_divide_by_zero__ {
+  return a - a / b * b;
 }
 
 template <class T> Vectorized<T> inline operator||(
@@ -975,6 +995,19 @@ inline Vectorized<IntType> convert_to_int_of_same_size(const Vectorized<T>& src)
   return Vectorized<IntType>::loadu(static_cast<const void*>(buffer.data()));
 }
 
+template <typename T, typename IntType = int_same_size_t<T>>
+inline Vectorized<T> convert_to_fp_of_same_size(const Vectorized<IntType>& src) {
+  static_assert(sizeof(T) == sizeof(IntType));
+  static constexpr int size = Vectorized<T>::size();
+
+  std::array<IntType, size> src_arr;
+  src.store(static_cast<void*>(src_arr.data()));
+  std::array<T, size> buffer;
+  std::transform(src_arr.cbegin(), src_arr.cend(), buffer.begin(),
+                 [](const IntType& x) { return static_cast<T>(x); });
+  return Vectorized<T>::loadu(static_cast<const void*>(buffer.data()));
+}
+
 // Example inputs for AVX512:
 // a   Vectorized<float>   = {a0, b0, a1, b1, a2, b2, a3, b3, a4, b4, a5, b5, a6, b6, a7, b7}
 // b   Vectorized<float>   = {a8, b8, a9, b9, a10, b10, a11, b11, a12, b12, a13, b13, a14, b14, a15, b15}
@@ -1043,8 +1076,7 @@ inline void convert(const src_T *src, dst_T *dst, int64_t n) {
 #ifndef _MSC_VER
 # pragma unroll
 #endif
-  for (const auto i : c10::irange(n)) {
-    (void)i; //Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(n)) {
     *dst = c10::convert<dst_T>(c10::load(src));
     src++;
     dst++;
@@ -1074,4 +1106,4 @@ inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) 
   }
 }
 
-}}}
+}} // namespace at::vec::CPU_CAPABILITY

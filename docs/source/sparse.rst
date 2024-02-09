@@ -15,7 +15,7 @@ torch.sparse
 Why and when to use sparsity
 ++++++++++++++++++++++++++++
 
-By default PyTorch stores :class:`torch.Tensor` stores elements contiguously
+By default, PyTorch stores :class:`torch.Tensor` elements contiguously in
 physical memory. This leads to efficient implementations of various array
 processing algorithms that require fast access to elements.
 
@@ -176,7 +176,7 @@ Sparse Semi-Structured Tensors
 
 .. warning::
 
-   Sparse semi-sturctured tensors are currently a prototype feature and subject to change. Please feel free to open an issue to report a bug or if you have feedback to share.
+   Sparse semi-structured tensors are currently a prototype feature and subject to change. Please feel free to open an issue to report a bug or if you have feedback to share.
 
 Semi-Structured sparsity is a sparse data layout that was first introduced in NVIDIA's Ampere architecture. It is also referred to as **fine-grained structured sparsity** or **2:4 structured sparsity**.
 
@@ -1331,6 +1331,15 @@ To manage checking sparse tensor invariants, see:
     :nosignatures:
 
     sparse.check_sparse_tensor_invariants
+
+To use sparse tensors with :func:`~torch.autograd.gradcheck` function,
+see:
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    sparse.as_sparse_gradcheck
 
 Unary functions
 ---------------

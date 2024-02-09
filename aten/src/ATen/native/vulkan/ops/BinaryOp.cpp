@@ -1,6 +1,7 @@
 #include <ATen/ArrayRef.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/QuantizedFunctions.h>
+#include <ATen/native/vulkan/ops/Utils.h>
 #include <torch/library.h>
 #include <vector>
 
@@ -8,73 +9,7 @@ namespace at {
 namespace native {
 namespace vulkan {
 namespace ops {
-namespace {
 
-void check_inputs(const Tensor& input1, const Tensor& input2) {
-  const std::string broadcast_error_msg =
-      "Incompatible dimensions for broadcasting for binary elementwise op!";
-  if (get_dim<Dim4D::Batch>(input1) != get_dim<Dim4D::Batch>(input2)) {
-    TORCH_CHECK(
-        get_dim<Dim4D::Batch>(input1) == 1 ||
-            get_dim<Dim4D::Batch>(input2) == 1,
-        broadcast_error_msg);
-  }
-  if (get_dim<Dim4D::Channel>(input1) != get_dim<Dim4D::Channel>(input2)) {
-    TORCH_CHECK(
-        get_dim<Dim4D::Channel>(input1) == 1 ||
-            get_dim<Dim4D::Channel>(input2) == 1,
-        broadcast_error_msg);
-  }
-  if (get_dim<Dim4D::Height>(input1) != get_dim<Dim4D::Height>(input2)) {
-    TORCH_CHECK(
-        get_dim<Dim4D::Height>(input1) == 1 ||
-            get_dim<Dim4D::Height>(input2) == 1,
-        broadcast_error_msg);
-  }
-  if (get_dim<Dim4D::Width>(input1) != get_dim<Dim4D::Width>(input2)) {
-    TORCH_CHECK(
-        get_dim<Dim4D::Width>(input1) == 1 ||
-            get_dim<Dim4D::Width>(input2) == 1,
-        broadcast_error_msg);
-  }
-}
-
-std::vector<int64_t> broadcast_size(const Tensor& t1, const Tensor& t2) {
-  int64_t t1_size = t1.dim();
-  int64_t t2_size = t2.dim();
-
-  std::vector<int64_t> out;
-  if (t1_size > t2_size) {
-    for (int64_t i = 0; i < t1_size; i++) {
-      out.push_back(t1.sizes()[i]);
-    }
-  } else {
-    for (int64_t i = 0; i < t2_size; i++) {
-      out.push_back(t2.sizes()[i]);
-    }
-  }
-
-  if (!out.empty()) {
-    out[out.size() - 1] =
-        std::max(get_dim<Dim4D::Width>(t1), get_dim<Dim4D::Width>(t2));
-  }
-  if (out.size() > 1) {
-    out[out.size() - 2] =
-        std::max(get_dim<Dim4D::Height>(t1), get_dim<Dim4D::Height>(t2));
-  }
-  if (out.size() > 2) {
-    out[out.size() - 3] =
-        std::max(get_dim<Dim4D::Channel>(t1), get_dim<Dim4D::Channel>(t2));
-  }
-  if (out.size() > 3) {
-    out[out.size() - 4] =
-        std::max(get_dim<Dim4D::Batch>(t1), get_dim<Dim4D::Batch>(t2));
-  }
-
-  return out;
-}
-
-} // namespace
 using namespace api::utils;
 
 Tensor binary_op_scalar(
@@ -90,7 +25,7 @@ Tensor binary_op_scalar(
   vTensor v_output{
       context,
       v_self.sizes(),
-      self_arg.scalar_type(),
+      v_self.dtype(),
   };
 
   const float other_val = alpha_arg ? other.to<float>() * alpha_arg->to<float>()
@@ -129,6 +64,39 @@ Tensor binary_op_scalar(
       params.buffer());
 
   return convert(v_output);
+}
+
+Tensor binary_op_preprocess_other_arg(const Tensor& other_arg) {
+  // Similar to binary_op_scalar where tensors is mapped to float, we
+  // also map known integer types (but not quant types) tensor to float.
+
+  // Such conversion can only to be done before moving to vulkan, since vulkan
+  // doesn't yet support integer types.
+  Tensor other = other_arg;
+  if (!other.is_vulkan()) {
+    switch (other.scalar_type()) {
+      case at::kByte:
+      case at::kChar:
+      case at::kShort:
+      case at::kInt:
+      case at::kLong:
+      case at::kDouble:
+        other = other.to(kFloat);
+        break;
+      case at::kFloat:
+        // No op for expected type.
+        break;
+      default:
+        TORCH_CHECK(
+            false,
+            "binary_op_tensor, doesn't support type %s",
+            other.scalar_type());
+        break;
+    }
+    other = other.vulkan();
+  }
+
+  return other;
 }
 
 Tensor& binary_op_scalar_(
@@ -186,19 +154,20 @@ Tensor binary_op_tensor(
     const Tensor& other_arg,
     const c10::optional<Scalar>& alpha_arg,
     const api::ShaderInfo& shader_descriptor) {
-  check_inputs(self_arg, other_arg);
+  utils::is_broadcastable(self_arg, other_arg);
   api::Context* const context = api::context();
 
   const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
   const vTensor& v_self = convert(self);
 
-  const Tensor other = other_arg.is_vulkan() ? other_arg : other_arg.vulkan();
+  Tensor other = binary_op_preprocess_other_arg(other_arg);
+
   const vTensor& v_other = convert(other);
 
   vTensor v_output{
       context,
-      broadcast_size(self_arg, other_arg),
-      self_arg.scalar_type(),
+      utils::broadcast_size(self_arg, other_arg),
+      v_self.dtype(),
   };
 
   const double alpha = alpha_arg ? alpha_arg->to<double>() : 1.0;
@@ -259,7 +228,7 @@ Tensor quantized_binary_op_tensor(
     const double scale,
     const int64_t zero_point,
     const api::ShaderInfo& shader_descriptor) {
-  check_inputs(self_arg, other_arg);
+  utils::is_broadcastable(self_arg, other_arg);
   api::Context* const context = api::context();
 
   const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
@@ -272,10 +241,10 @@ Tensor quantized_binary_op_tensor(
 
   vTensor v_output{
       context,
-      broadcast_size(self_arg, other_arg),
+      utils::broadcast_size(self_arg, other_arg),
       scale,
       zero_point,
-      c10::kQUInt8,
+      api::kQUInt8,
   };
 
   const double scale1 = v_self.get_scale();
@@ -356,7 +325,7 @@ Tensor& binary_op_tensor_(
       "Dimensions of input tensor to Vulkan in-place binary elementwise op "
       "must be less than or equal the dimensions of the underlying tensor.");
 
-  check_inputs(self_arg, other_arg);
+  utils::is_broadcastable(self_arg, other_arg);
 
   TORCH_CHECK(
       self_arg.is_vulkan(),
@@ -366,7 +335,8 @@ Tensor& binary_op_tensor_(
 
   vTensor& v_self = convert(self_arg);
 
-  const Tensor other = other_arg.is_vulkan() ? other_arg : other_arg.vulkan();
+  Tensor other = binary_op_preprocess_other_arg(other_arg);
+
   const vTensor& v_other = convert(other);
 
   const double alpha = alpha_arg ? alpha_arg->to<double>() : 1.0;
@@ -424,7 +394,7 @@ Tensor add_scalar(
 
 Tensor& add_scalar_(Tensor& self, const Scalar& other, const Scalar& alpha) {
   return binary_op_scalar_(
-      self, other, c10::optional<Scalar>(alpha), VK_KERNEL(add_scalar_));
+      self, other, c10::optional<Scalar>(alpha), VK_KERNEL(add_scalar_inplace));
 }
 
 Tensor quantized_add(
@@ -476,7 +446,7 @@ Tensor& add_tensor_(
     const Tensor& other_arg,
     const Scalar& alpha) {
   return binary_op_tensor_(
-      self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add_));
+      self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add_inplace));
 }
 
 Tensor sub_scalar(
@@ -495,7 +465,7 @@ Tensor& sub_scalar_(Tensor& self, const Scalar& other, const Scalar& alpha) {
       self,
       other,
       c10::optional<Scalar>(-1 * alpha.to<float>()),
-      VK_KERNEL(add_scalar_));
+      VK_KERNEL(add_scalar_inplace));
 }
 
 Tensor sub_tensor(
@@ -511,7 +481,7 @@ Tensor& sub_tensor_(
     const Tensor& other_arg,
     const Scalar& alpha) {
   return binary_op_tensor_(
-      self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub_));
+      self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub_inplace));
 }
 
 Tensor mul_scalar(const Tensor& self_arg, const Scalar& other) {
@@ -521,7 +491,7 @@ Tensor mul_scalar(const Tensor& self_arg, const Scalar& other) {
 
 Tensor& mul_scalar_(Tensor& self, const Scalar& other) {
   return binary_op_scalar_(
-      self, other, c10::optional<Scalar>(), VK_KERNEL(mul_scalar_));
+      self, other, c10::optional<Scalar>(), VK_KERNEL(mul_scalar_inplace));
 }
 
 Tensor mul_tensor(const Tensor& self_arg, const Tensor& other_arg) {
@@ -531,7 +501,7 @@ Tensor mul_tensor(const Tensor& self_arg, const Tensor& other_arg) {
 
 Tensor& mul_tensor_(Tensor& self, const Tensor& other_arg) {
   return binary_op_tensor_(
-      self, other_arg, c10::optional<Scalar>(), VK_KERNEL(mul_));
+      self, other_arg, c10::optional<Scalar>(), VK_KERNEL(mul_inplace));
 }
 
 Tensor div_scalar(const Tensor& self_arg, const Scalar& other) {
@@ -547,7 +517,7 @@ Tensor& div_scalar_(Tensor& self, const Scalar& other) {
       self,
       1.0 / other.to<float>(),
       c10::optional<Scalar>(),
-      VK_KERNEL(mul_scalar_));
+      VK_KERNEL(mul_scalar_inplace));
 }
 
 Tensor div_tensor(const Tensor& self_arg, const Tensor& other_arg) {
@@ -557,7 +527,7 @@ Tensor div_tensor(const Tensor& self_arg, const Tensor& other_arg) {
 
 Tensor& div_tensor_(Tensor& self, const Tensor& other_arg) {
   return binary_op_tensor_(
-      self, other_arg, c10::optional<Scalar>(), VK_KERNEL(div_));
+      self, other_arg, c10::optional<Scalar>(), VK_KERNEL(div_inplace));
 }
 
 Tensor pow(const Tensor& self, const Tensor& other) {
@@ -566,7 +536,7 @@ Tensor pow(const Tensor& self, const Tensor& other) {
 
 Tensor& pow_(Tensor& self, const Tensor& other) {
   return binary_op_tensor_(
-      self, other, c10::optional<Scalar>(), VK_KERNEL(pow_));
+      self, other, c10::optional<Scalar>(), VK_KERNEL(pow_inplace));
 }
 
 Tensor pow_tensor_scalar(const Tensor& self, const Scalar& other) {
@@ -576,12 +546,48 @@ Tensor pow_tensor_scalar(const Tensor& self, const Scalar& other) {
 
 Tensor& pow_tensor_scalar_(Tensor& self, const Scalar& other) {
   return binary_op_scalar_(
-      self, other, c10::optional<Scalar>(), VK_KERNEL(pow_tensor_scalar_));
+      self,
+      other,
+      c10::optional<Scalar>(),
+      VK_KERNEL(pow_tensor_scalar_inplace));
 }
 
 Tensor pow_scalar_tensor(const Scalar& self, const Tensor& other) {
   return binary_op_scalar(
       other, self, c10::optional<Scalar>(), VK_KERNEL(pow_scalar_tensor));
+}
+
+Tensor floor_divide_scalar(const Tensor& self, const Scalar& other) {
+  TORCH_CHECK(
+      other.to<float>() != 0.0f, "floor_divide_scalar: can't divide by zero");
+  return binary_op_scalar(
+      self,
+      1.0 / other.to<float>(),
+      c10::optional<Scalar>(),
+      VK_KERNEL(floor_mul_scalar));
+}
+
+Tensor& floor_divide_scalar_(Tensor& self, const Scalar& other) {
+  TORCH_CHECK(
+      other.to<float>() != 0.0f, "floor_divide_scalar_: can't divide by zero");
+  return binary_op_scalar_(
+      self,
+      1.0 / other.to<float>(),
+      c10::optional<Scalar>(),
+      VK_KERNEL(floor_mul_scalar_inplace));
+}
+
+Tensor floor_divide_tensor(const Tensor& self, const Tensor& other) {
+  return binary_op_tensor(
+      self, other, c10::optional<Scalar>(), VK_KERNEL(floor_divide));
+}
+
+Tensor& floor_divide_tensor_(Tensor& self, const Tensor& other_arg) {
+  return binary_op_tensor_(
+      self,
+      other_arg,
+      c10::optional<Scalar>(),
+      VK_KERNEL(floor_divide_inplace));
 }
 
 #ifdef USE_VULKAN_API
@@ -611,6 +617,18 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("aten::pow_.Scalar"), TORCH_FN(pow_tensor_scalar_));
   m.impl(TORCH_SELECTIVE_NAME("aten::pow.Scalar"), TORCH_FN(pow_scalar_tensor));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::floor_divide.Scalar"),
+      TORCH_FN(floor_divide_scalar));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::floor_divide_.Scalar"),
+      TORCH_FN(floor_divide_scalar_));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::floor_divide"),
+      TORCH_FN(floor_divide_tensor));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::floor_divide_.Tensor"),
+      TORCH_FN(floor_divide_tensor_));
 }
 
 #endif /* USE_VULKAN_API */

@@ -19,8 +19,7 @@
 #include <ATen/ops/true_divide.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor cov(
     const Tensor& self,
@@ -114,7 +113,7 @@ Tensor cov(
   }
 
   if (at::is_scalar_tensor_true(norm_factor.le(0))) {
-    TORCH_WARN("cov(): degrees of freedom is <= 0");
+    TORCH_WARN("cov(): degrees of freedom is <= 0. Correction should be strictly less than the number of observations.");
     norm_factor.zero_();
   }
 
@@ -151,5 +150,4 @@ Tensor corrcoef(const Tensor& self) {
       : c.clip(-1, 1);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

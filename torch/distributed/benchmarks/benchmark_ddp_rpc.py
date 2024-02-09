@@ -32,14 +32,15 @@ WARMUP_CYCLES = 5
 
 class HybridModel(torch.nn.Module):
     r"""
-   The model consists of a sparse part and a dense part. The dense part is an
-   nn.Linear module that is replicated across all trainers using
-   DistributedDataParallel. The sparse part has nn.EmbeddingBags stored on multiple
-   parameter servers.
+    The model consists of a sparse part and a dense part.
 
-   The model holds a Remote Reference to the embedding tables on the parameter
-   servers.
-   """
+    The dense part is an nn.Linear module that is replicated across all trainers using
+    DistributedDataParallel. The sparse part has nn.EmbeddingBags stored on multiple
+    parameter servers.
+
+    The model holds a Remote Reference to the embedding tables on the parameter
+    servers.
+    """
 
     def __init__(self, emb_rref_list, device):
         super().__init__()
@@ -68,7 +69,7 @@ class HybridModel(torch.nn.Module):
         # Make sure combined PS dimension is always bigger or equal than the FC input
         assert NUM_PS * EMBEDDING_DIM >= 512
         dim_normalizer = int(NUM_PS * EMBEDDING_DIM / 512)
-        emb_lookups_reshaped = emb_lookups_cat.reshape(
+        emb_lookups_reshaped = emb_lookups_cat.reshape(  # type: ignore[possibly-undefined]
             [emb_lookups_cat.shape[0] * dim_normalizer, 512]
         )
 
@@ -101,7 +102,7 @@ def _print_cont(msg):
 
 
 def _run_printable(cmd):
-    proc = subprocess.run(shlex.split(cmd), capture_output=True)  # type: ignore[call-overload]
+    proc = subprocess.run(shlex.split(cmd), capture_output=True, check=False)  # type: ignore[call-overload]
     assert proc.returncode == 0
 
     buffer = io.BytesIO()
@@ -117,13 +118,13 @@ def _run_printable(cmd):
 
 def _run_trainer(emb_rref_list, rank):
     r"""
-   Each trainer runs a forward pass which involves an embedding lookup on the
-   8 parameter servers and running nn.Linear locally. During the backward pass,
-   DDP is responsible for aggregating the gradients for the dense part
-   (nn.Linear) and distributed autograd ensures gradients updates are
-   propagated to the parameter servers.
-   """
+    Each trainer runs a forward pass which involves an embedding lookup on the 8 parameter servers,
+    and running nn.Linear locally.
 
+    During the backward pass, DDP is responsible for aggregating the gradients for the dense part
+    (nn.Linear) and distributed autograd ensures gradients updates are
+    propagated to the parameter servers.
+    """
     # Setup the model.
     model = HybridModel(emb_rref_list, rank)
 
@@ -194,15 +195,13 @@ def _run_trainer(emb_rref_list, rank):
 
     # Throw away warm-up measurements
     measurements = measurements[WARMUP_CYCLES:]
-    return rank, measurements, batch_size
+    return rank, measurements, batch_size  # type: ignore[possibly-undefined]
 
 
 def run_worker(rank, world_size):
     r"""
-   A wrapper function that initializes RPC, calls the function, and shuts down
-   RPC.
-   """
-
+    Initialize RPC, calls the function, and shuts down RPC.
+    """
     # Using different port numbers in TCP init_method for init_rpc and
     # init_process_group to avoid port conflicts.
     rpc_backend_options = TensorPipeRpcBackendOptions()

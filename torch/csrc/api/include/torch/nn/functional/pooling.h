@@ -637,7 +637,9 @@ inline std::vector<int64_t> _unpool_output_size(
   std::vector<int64_t> default_size;
   for (const auto d : c10::irange(kernel_size.size())) {
     default_size.push_back(
-        (input_size[d + 2] - 1) * stride[d] + kernel_size[d] - 2 * padding[d]);
+        (input_size[input_size.size() - kernel_size.size() + d] - 1) *
+            stride[d] +
+        kernel_size[d] - 2 * padding[d]);
   }
   if (!output_size) {
     return default_size;
@@ -691,8 +693,8 @@ inline Tensor max_unpool1d(
       _unpool_output_size(input, kernel_size, stride, padding, output_size);
   output_size_.push_back(1);
   return torch::max_unpool2d(
-             input.unsqueeze(3), indices.unsqueeze(3), output_size_)
-      .squeeze(3);
+             input.unsqueeze(-1), indices.unsqueeze(-1), output_size_)
+      .squeeze(-1);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
@@ -828,8 +830,10 @@ inline std::tuple<Tensor, Tensor> fractional_max_pool2d_with_indices(
   if (output_size_ == c10::nullopt) {
     TORCH_INTERNAL_ASSERT(output_ratio != c10::nullopt);
     output_size_ = {
-        (int64_t)(static_cast<double>(input.size(-2)) * (*output_ratio.value())[0]),
-        (int64_t)(static_cast<double>(input.size(-1)) * (*output_ratio.value())[1])};
+        (int64_t)(static_cast<double>(input.size(-2)) *
+                  (*output_ratio.value())[0]),
+        (int64_t)(static_cast<double>(input.size(-1)) *
+                  (*output_ratio.value())[1])};
   }
 
   Tensor _random_samples_ = _random_samples;
@@ -920,9 +924,12 @@ inline std::tuple<Tensor, Tensor> fractional_max_pool3d_with_indices(
   if (output_size_ == c10::nullopt) {
     TORCH_INTERNAL_ASSERT(output_ratio != c10::nullopt);
     output_size_ = {
-        (int64_t)(static_cast<double>(input.size(-3)) * (*output_ratio.value())[0]),
-        (int64_t)(static_cast<double>(input.size(-2)) * (*output_ratio.value())[1]),
-        (int64_t)(static_cast<double>(input.size(-1)) * (*output_ratio.value())[2])};
+        (int64_t)(static_cast<double>(input.size(-3)) *
+                  (*output_ratio.value())[0]),
+        (int64_t)(static_cast<double>(input.size(-2)) *
+                  (*output_ratio.value())[1]),
+        (int64_t)(static_cast<double>(input.size(-1)) *
+                  (*output_ratio.value())[2])};
   }
 
   Tensor _random_samples_ = _random_samples;
@@ -1084,6 +1091,56 @@ inline Tensor lp_pool2d(
     const Tensor& input,
     const LPPool2dFuncOptions& options) {
   return detail::lp_pool2d(
+      input,
+      options.norm_type(),
+      options.kernel_size(),
+      options.stride(),
+      options.ceil_mode());
+}
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+namespace detail {
+inline Tensor lp_pool3d(
+    const Tensor& input,
+    double norm_type,
+    ExpandingArray<3> kernel_size,
+    ExpandingArray<3> stride,
+    bool ceil_mode) {
+  int kd = (*kernel_size)[0];
+  int kw = (*kernel_size)[1];
+  int kh = (*kernel_size)[2];
+  Tensor out = detail::avg_pool3d(
+      input.pow(norm_type),
+      kernel_size,
+      stride,
+      /*padding=*/0,
+      ceil_mode,
+      /*count_include_pad=*/true,
+      /*divisor_override=*/c10::nullopt);
+
+  return (torch::sign(out) * relu(torch::abs(out)))
+      .mul(kd * kw * kh)
+      .pow(1. / norm_type);
+}
+} // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
+
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.lp_pool3d
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::LPPool3dFuncOptions` class
+/// to learn what optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::lp_pool3d(x, F::LPPool3dFuncOptions(3, {3, 3, 5}).stride(3));
+/// ```
+inline Tensor lp_pool3d(
+    const Tensor& input,
+    const LPPool3dFuncOptions& options) {
+  return detail::lp_pool3d(
       input,
       options.norm_type(),
       options.kernel_size(),

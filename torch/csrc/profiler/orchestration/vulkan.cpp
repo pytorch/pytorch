@@ -1,5 +1,7 @@
 #include <torch/csrc/profiler/orchestration/vulkan.h>
 
+#include <utility>
+
 namespace torch {
 namespace profiler {
 namespace impl {
@@ -12,7 +14,8 @@ GetShaderNameAndDurationNsFn get_shader_name_and_duration_ns_fn;
 
 void registerGetShaderNameAndDurationNs(
     GetShaderNameAndDurationNsFn get_shader_name_and_duration_ns) {
-  get_shader_name_and_duration_ns_fn = get_shader_name_and_duration_ns;
+  get_shader_name_and_duration_ns_fn =
+      std::move(get_shader_name_and_duration_ns);
 }
 
 void deregisterGetShaderNameAndDurationNs() {

@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/WrapDimUtils.h>
-#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
@@ -180,8 +179,8 @@ NestedTensorImpl::NestedTensorImpl(
       "in the near future.");
   auto storage_device = storage_.device();
   TORCH_INTERNAL_ASSERT(
-      storage_device.is_cpu() || storage_device.is_cuda() || storage_device.is_privateuseone(),
-      "NestedTensorImpl storage must be either CUDA, CPU or ", get_privateuse1_backend(), " but got ",
+      storage_device.is_cpu() || storage_device.is_cuda() || storage_device.is_xpu() || storage_device.is_privateuseone(),
+      "NestedTensorImpl storage must be either CUDA, CPU, XPU or ", get_privateuse1_backend(), " but got ",
       storage_device);
   validate_nested_tensor_metadata(nested_sizes_, nested_strides_, storage_offsets_);
   refresh_dim();

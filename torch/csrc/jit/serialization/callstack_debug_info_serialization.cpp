@@ -155,12 +155,11 @@ InlinedCallStackPtr InlinedCallStackDeserializer::deserialize(
   InlinedCallStackPtr cs_ptr;
   if (callee) {
     cs_ptr = c10::make_intrusive<InlinedCallStack>(
-        callee, nullptr, source_range, module_instance_info);
+        callee, nullptr, source_range, module_instance_info, function_name);
   } else {
     cs_ptr = c10::make_intrusive<InlinedCallStack>(
-        nullptr, source_range, module_instance_info);
+        nullptr, source_range, module_instance_info, function_name);
   }
-  cs_ptr->set_function_name(function_name);
   cached_inlined_callstacks_[tup] = cs_ptr;
   // Invoking move constructor
   // It is not clear if copy-ellision can happen since

@@ -3,36 +3,19 @@
 import copy
 
 import torch.distributed as dist
+from torch.distributed._shard.sharded_tensor import Shard, ShardedTensor, ShardMetadata
+from torch.distributed._shard.sharded_tensor.metadata import ShardedTensorMetadata
+from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 from torch.distributed.remote_device import _remote_device
 
-from torch.distributed.checkpoint.metadata import (
-    STATE_DICT_TYPE,
-)
-from torch.distributed._shard.sharded_tensor import (
-    Shard,
-    ShardMetadata,
-    ShardedTensor,
-)
-
-from torch.distributed._shard.sharded_tensor.metadata import (
-    ShardedTensorMetadata,
-)
-
-
-from ._traverse import (
-    OBJ_PATH,
-    traverse_state_dict,
-    set_element,
-    STATE_DICT_ITEM,
-)
-
-from .utils import _element_wise_add
+from ._traverse import OBJ_PATH, set_element, STATE_DICT_ITEM, traverse_state_dict
+from .utils import _element_wise_add, _normalize_device_info
 
 
 # TODO: We need to refactor this code.
 def _flatten_sharded_tensors(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
     r"""
-    Transforms ``state_dict`` by flattening all nested ShardedTensor instances found.
+    Transform ``state_dict`` by flattening all nested ShardedTensor instances found.
 
     The resulting ShardedTensor instances are only correct regarding the local shard and
     MUST not be used for any other purpose but checkpointing, as no operator will work with them.
@@ -62,9 +45,7 @@ def _flatten_sharded_tensors(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
             return
 
         if len(inner_st.local_shards()) != 1:
-            raise ValueError(
-                "Cannot handle inner tensor with more than 1 shard"
-            )
+            raise ValueError("Cannot handle inner tensor with more than 1 shard")
         inner_shard = inner_st.local_shards()[0]
 
         local_shards = [
@@ -83,6 +64,7 @@ def _flatten_sharded_tensors(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
 
         st_meta: ShardedTensorMetadata = copy.deepcopy(value.metadata())
         other_rank = 0 if dist.get_rank() > 0 else 1
+        device_info = _normalize_device_info(inner_shard.tensor.device.type, 0)
 
         # Remove the outer ST shard the inner ST covers
         for i, shard_md in enumerate(st_meta.shards_metadata):
@@ -92,7 +74,7 @@ def _flatten_sharded_tensors(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
 
         # Attribute other rank for the other shards
         for shard_md in st_meta.shards_metadata:
-            shard_md.placement = _remote_device(f"rank:{other_rank}/cuda:0")
+            shard_md.placement = _remote_device(f"rank:{other_rank}/{device_info}")
 
         # Add other inner shards from the inner tensor
         for inner_md in inner_st.metadata().shards_metadata:
@@ -104,7 +86,7 @@ def _flatten_sharded_tensors(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
                             inner_md.shard_offsets,
                         ),
                         shard_sizes=inner_md.shard_sizes,
-                        placement=f"rank:{other_rank}/cuda:0",
+                        placement=f"rank:{other_rank}/{device_info}",
                     )
                 )
 

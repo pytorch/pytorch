@@ -36,6 +36,7 @@ enum CheckType {
   CHECK_COUNT,
   CHECK_DAG,
   CHECK_SOURCE_HIGHLIGHTED,
+  CHECK_REGEX,
 };
 
 struct Check {
@@ -81,6 +82,9 @@ std::ostream& operator<<(std::ostream& out, const Check& c) {
     case CHECK_SOURCE_HIGHLIGHTED:
       out << "CHECK-SOURCE-HIGHLIGHTED";
       break;
+    case CHECK_REGEX:
+      out << "CHECK-REGEX";
+      break;
   }
   out << ": " << c.search_str_;
   return out;
@@ -125,6 +129,47 @@ size_t assertFind(
     size_t start,
     const Check& check) {
   return assertFind(SourceRange(source, start, source->size()), sub, check);
+}
+
+size_t assertFindRegex(
+    const SourceRange& search_range,
+    const std::string& sub,
+    const std::function<void(std::ostream& out)>& extra_msg = nullptr) {
+  auto pos =
+      search_range.source()->text_str().find_regex(sub, search_range.start());
+
+  if (pos == std::string::npos) {
+    std::stringstream ss;
+    ss << "Expected to find regex ";
+    c10::printQuotedString(ss, sub);
+    ss << " but did not find it" << std::endl;
+    ss << "Searched string:" << std::endl;
+    if (extra_msg) {
+      extra_msg(ss);
+    }
+    throw std::runtime_error(ss.str());
+
+    return std::string::npos;
+  }
+  return pos;
+}
+
+size_t assertFindRegex(
+    const SourceRange& search_range,
+    const std::string& sub,
+    const Check& check) {
+  return assertFindRegex(search_range, sub, [&](std::ostream& out) {
+    out << "From " << check << "\n";
+  });
+}
+
+size_t assertFindRegex(
+    const std::shared_ptr<Source>& source,
+    const std::string& sub,
+    size_t start,
+    const Check& check) {
+  return assertFindRegex(
+      SourceRange(source, start, source->size()), sub, check);
 }
 
 void assertNotFind(
@@ -208,6 +253,7 @@ struct FileCheckImpl {
         {CHECK_DAG, "-DAG: "},
         {CHECK_COUNT, "-COUNT-"}, // needs special parsing
         {CHECK_SOURCE_HIGHLIGHTED, "-SOURCE-HIGHLIGHTED: "},
+        {CHECK_REGEX, "-REGEX: "},
     };
 
     for (const auto& check_pair : check_pairs) {
@@ -233,7 +279,7 @@ struct FileCheckImpl {
         auto count_view = source->text_str()
                               .substr(end_check_string, end - end_check_string)
                               .str();
-        count = c10::stoll(std::string(count_view.begin(), count_view.end()));
+        count = std::stoll(std::string(count_view.begin(), count_view.end()));
         end_check_string = end + 2; // add ':' and the space
       }
       auto check = Check(
@@ -453,6 +499,12 @@ struct FileCheckImpl {
         doCheckSourceHighlighted(check, source, start_range);
         break;
       }
+      case CHECK_REGEX: {
+        start_range =
+            assertFindRegex(source, check.search_str_, start_range, check);
+        end_range = start_range + check.search_str_.size();
+        break;
+      }
       case CHECK_DAG: {
         AT_ERROR();
       } break;
@@ -575,6 +627,11 @@ FileCheck* FileCheck::check_dag(const std::string& str) {
 
 FileCheck* FileCheck::check_source_highlighted(const std::string& str) {
   fcImpl->addCheck(CHECK_SOURCE_HIGHLIGHTED, str);
+  return this;
+}
+
+FileCheck* FileCheck::check_regex(const std::string& str) {
+  fcImpl->addCheck(CHECK_REGEX, str);
   return this;
 }
 

@@ -386,6 +386,7 @@ Example::
 
         @staticmethod
         def backward(ctx, grad_output, _0, _1):
+            ind, ind_inv = ctx.saved_tensors
             return NumpyTake.apply(grad_output, ind_inv, ind, ctx.dim), None
 
         # The signature of the vmap staticmethod is:

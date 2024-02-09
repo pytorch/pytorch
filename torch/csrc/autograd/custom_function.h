@@ -8,11 +8,11 @@
 #include <torch/csrc/autograd/variable.h>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 using optional_variable_list = std::vector<c10::optional<Variable>>;
 using _jvp_fn_t = std::function<variable_list(variable_list, variable_list)>;
+using _view_as_self_fn_t = std::function<at::Tensor(at::Tensor)>;
 
 TORCH_API std::vector<c10::optional<Variable>> _wrap_outputs(
     const variable_list& input_vars,
@@ -20,13 +20,14 @@ TORCH_API std::vector<c10::optional<Variable>> _wrap_outputs(
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
     const at::ArrayRef<c10::optional<Variable>> raw_outputs,
     const std::shared_ptr<Node>& cdata,
-    _jvp_fn_t jvp_user_function,
-    const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context);
+    const _jvp_fn_t& jvp_user_function,
+    const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
+    const _view_as_self_fn_t& view_as_self_fn);
 
 TORCH_API void check_variable_result(
     const at::TensorBase& original,
     const at::TensorBase& result,
-    std::string hook_name);
+    const std::string& hook_name);
 
 // Get the return type of the forward function of the custom Function class X
 template <typename X, typename... Args>
@@ -95,7 +96,7 @@ struct TORCH_API Function {
   // the parameter X.
   template <typename X = T, typename... Args>
   static auto apply(Args&&... args)
-      -> std::enable_if_t<std::is_same<X, T>::value, forward_t<X, Args...>>;
+      -> std::enable_if_t<std::is_same_v<X, T>, forward_t<X, Args...>>;
 };
 
 /// Context to save information during `forward` that can be accessed in
@@ -188,7 +189,9 @@ struct CppNode : public Node {
 };
 
 struct ExtractVariables : IterArgs<ExtractVariables> {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   std::vector<bool>& is_var_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   variable_list& list_;
   ExtractVariables(std::vector<bool>& is_var, variable_list& list)
       : is_var_(is_var), list_(list) {}
@@ -226,8 +229,8 @@ inline void extract_vars(
 }
 
 template <typename T>
-typename std::enable_if<std::is_same<T, variable_list>::value, T>::type
-to_output_type(std::vector<c10::optional<Variable>>& output_list) {
+std::enable_if_t<std::is_same_v<T, variable_list>, T> to_output_type(
+    std::vector<c10::optional<Variable>>& output_list) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   variable_list result;
   std::transform(
@@ -239,8 +242,8 @@ to_output_type(std::vector<c10::optional<Variable>>& output_list) {
 }
 
 template <typename T>
-typename std::enable_if<std::is_same<T, Variable>::value, T>::type
-to_output_type(std::vector<c10::optional<Variable>>& output_list) {
+std::enable_if_t<std::is_same_v<T, Variable>, T> to_output_type(
+    std::vector<c10::optional<Variable>>& output_list) {
   return *output_list[0];
 }
 
@@ -262,7 +265,7 @@ inline std::vector<c10::optional<Variable>> to_optional(variable_list& output) {
 template <class T>
 template <typename X, typename... Args>
 auto Function<T>::apply(Args&&... args)
-    -> std::enable_if_t<std::is_same<X, T>::value, forward_t<X, Args...>> {
+    -> std::enable_if_t<std::is_same_v<X, T>, forward_t<X, Args...>> {
   const auto& functorch_tls = at::functorch::functorchTLSAccessor();
   if (functorch_tls) {
     // Function support for functorch is handled in Python.
@@ -303,12 +306,16 @@ auto Function<T>::apply(Args&&... args)
     outputs = T::forward(&node->ctx_, std::forward<Args>(args)...);
   }
 
-  _jvp_fn_t jvp_fn = [](variable_list inputs,
-                        variable_list gI) -> variable_list {
+  _jvp_fn_t jvp_fn = [](const variable_list& inputs,
+                        const variable_list& gI) -> variable_list {
     TORCH_CHECK(
         false,
         "jvp is not implemented for the c++ API of custom Function yet.",
         "Please open a feature request on GitHub if you need this.");
+  };
+
+  auto view_as_self_fn = [](const at::Tensor& x) -> at::Tensor {
+    return x.view_as(x);
   };
 
   auto wrapped_outputs = _wrap_outputs(
@@ -318,7 +325,8 @@ auto Function<T>::apply(Args&&... args)
       to_optional(outputs),
       is_executable ? node : nullptr,
       jvp_fn,
-      {});
+      {},
+      view_as_self_fn);
 
   node->output_info_.reserve(wrapped_outputs.size());
   for (auto& output : wrapped_outputs) {
@@ -341,17 +349,17 @@ auto Function<T>::apply(Args&&... args)
 // The logic here is the same as PyNode::apply, so changes to it should be done
 // in both the places
 template <class T>
+// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
 variable_list CppNode<T>::apply(variable_list&& inputs) {
   at::OptionalDeviceGuard _device_guard;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int num_inputs = inputs.size();
+  auto num_inputs = inputs.size();
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   variable_list backward_inputs;
   backward_inputs.reserve(num_inputs);
   for (const auto i : c10::irange(num_inputs)) {
     if (inputs[i].defined() || !ctx_.materialize_grads_) {
-      backward_inputs.emplace_back(inputs[i]);
+      backward_inputs.emplace_back(std::move(inputs[i]));
     } else {
       backward_inputs.emplace_back(output_info_[i].zeros(_device_guard));
     }
@@ -427,5 +435,4 @@ void CppNode<T>::set_ctx_grad_fn(const std::shared_ptr<Node>& node) {
   ctx_.grad_fn_ = node;
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

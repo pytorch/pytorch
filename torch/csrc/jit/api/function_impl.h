@@ -3,10 +3,8 @@
 #include <ATen/core/function.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
-#include <torch/csrc/utils/memory.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct TORCH_API GraphFunction : public Function {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -39,18 +37,7 @@ struct TORCH_API GraphFunction : public Function {
     return graph_;
   }
 
-  std::shared_ptr<Graph> optimized_graph() const {
-    std::lock_guard<std::recursive_mutex> lock(compile_mutex);
-    auto& optimized_graph = optimized_graphs_[currentSpecialization()];
-    if (optimized_graph) {
-      return *optimized_graph;
-    }
-    optimized_graph = graph_->copy();
-    if (getGraphExecutorOptimize()) {
-      preoptimizeGraph(*optimized_graph, force_no_amp_);
-    }
-    return *optimized_graph;
-  }
+  std::shared_ptr<Graph> optimized_graph() const;
 
   const c10::QualifiedName& qualname() const override {
     return name_;
@@ -77,7 +64,7 @@ struct TORCH_API GraphFunction : public Function {
   }
 
   Function& setSchema(FunctionSchema schema) override {
-    schema_ = make_unique<FunctionSchema>(std::move(schema));
+    schema_ = std::make_unique<FunctionSchema>(std::move(schema));
     return *this;
   }
 
@@ -128,7 +115,7 @@ struct TORCH_API GraphFunction : public Function {
   }
 
   void clear_optimized_graphs() {
-    optimized_graphs_.fill(c10::nullopt);
+    optimized_graphs_.fill(nullptr);
   }
 
  private:
@@ -158,9 +145,7 @@ struct TORCH_API GraphFunction : public Function {
   // don't invoke amp pass
   mutable bool force_no_amp_ = false;
   // Optimized graph, computed lazily. Used for inlining.
-  mutable std::array<
-      c10::optional<std::shared_ptr<Graph>>,
-      SpecializationKey::TotalCount>
+  mutable std::array<std::shared_ptr<Graph>, SpecializationKey::TotalCount>
       optimized_graphs_;
 
   // GraphFunctions are invokable from multiple threads, so this lock needs to
@@ -193,5 +178,4 @@ TORCH_API GraphFunction* tryToGraphFunction(Function&) noexcept;
 TORCH_API GraphFunction& toGraphFunction(Function&);
 TORCH_API const GraphFunction& toGraphFunction(const Function&);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

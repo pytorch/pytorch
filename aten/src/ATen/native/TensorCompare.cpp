@@ -22,6 +22,8 @@
 #include <ATen/ops/_aminmax_native.h>
 #include <ATen/ops/_assert_async_native.h>
 #include <ATen/ops/_functional_assert_async_native.h>
+#include <ATen/ops/_assert_scalar_native.h>
+#include <ATen/ops/_functional_assert_scalar_native.h>
 #include <ATen/ops/_make_per_tensor_quantized_tensor.h>
 #include <ATen/ops/_unique.h>
 #include <ATen/ops/allclose_native.h>
@@ -72,8 +74,7 @@
 #include <utility>
 #endif
 
-namespace at {
-namespace meta {
+namespace at::meta {
 
 static inline void check_for_unsupported_isin_dtype(const ScalarType type) {
   // Bail out for dtypes unsupported by the sorting algorithm to keep the interface consistent.
@@ -127,17 +128,17 @@ const OptionalTensorRef max) {
     TensorIteratorConfig()                  \
       .set_check_mem_overlap(true)          \
       .add_output(maybe_get_output())       \
-      .add_input(self)                      \
+      .add_const_input(self)                \
       .promote_inputs_to_common_dtype(true) \
       .cast_common_dtype_to_outputs(true)   \
       .enforce_safe_casting_to_output(true)
 
   if (min && max) {
-    build(CLAMP_CONFIG().add_input(*min).add_input(*max));
+    build(CLAMP_CONFIG().add_const_input(*min).add_const_input(*max));
   } else if (min) {
-    build(CLAMP_CONFIG().add_input(*min));
+    build(CLAMP_CONFIG().add_const_input(*min));
   } else if (max) {
-    build(CLAMP_CONFIG().add_input(*max));
+    build(CLAMP_CONFIG().add_const_input(*max));
   }
 }
 
@@ -261,9 +262,9 @@ TORCH_PRECOMPUTE_META_FUNC2(min, dim)(const Tensor& self, int64_t dim, bool keep
       .set_dim(maybe_wrap_dim(dim, self.dim()));
 }
 
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(where_kernel); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(max_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -422,6 +423,15 @@ void _assert_async_msg_cpu(const Tensor& self, c10::string_view assert_msg) {
   TORCH_CHECK(native::is_nonzero(self), assert_msg != "" ? assert_msg : "Assertion is failed");
 }
 
+void _assert_scalar(const Scalar& scalar, c10::string_view assert_msg) {
+  TORCH_SYM_CHECK(scalar.toSymBool(), assert_msg != "" ? assert_msg : "Assertion is failed");
+}
+
+Tensor _functional_assert_scalar(const Scalar& scalar, c10::string_view assert_msg, const Tensor& dep_token) {
+  _assert_scalar(scalar, assert_msg);
+  return dep_token.clone();
+}
+
 Tensor _functional_assert_async_msg_cpu(
   const Tensor& self,
   c10::string_view assert_msg,
@@ -525,9 +535,9 @@ Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor
   auto iter = at::TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(out)
-    .add_input(condition_)
-    .add_input(self_)
-    .add_input(other_)
+    .add_const_input(condition_)
+    .add_const_input(self_)
+    .add_const_input(other_)
     .build();
   where_kernel(iter.device_type(), iter);
   return out;
@@ -851,5 +861,4 @@ TORCH_IMPL_FUNC(isneginf_out) (const Tensor& self, const Tensor& result) {
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

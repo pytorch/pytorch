@@ -3,23 +3,34 @@ from numbers import Number
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property
+from torch.distributions.utils import (
+    broadcast_all,
+    lazy_property,
+    logits_to_probs,
+    probs_to_logits,
+)
 from torch.nn.functional import binary_cross_entropy_with_logits
 
-__all__ = ['Geometric']
+__all__ = ["Geometric"]
+
 
 class Geometric(Distribution):
     r"""
     Creates a Geometric distribution parameterized by :attr:`probs`,
     where :attr:`probs` is the probability of success of Bernoulli trials.
-    It represents the probability that in :math:`k + 1` Bernoulli trials, the
-    first :math:`k` trials failed, before seeing a success.
 
-    Samples are non-negative integers [0, :math:`\inf`).
+    .. math::
+
+        P(X=k) = (1-p)^{k} p, k = 0, 1, ...
+
+    .. note::
+        :func:`torch.distributions.geometric.Geometric` :math:`(k+1)`-th trial is the first success
+        hence draws samples in :math:`\{0, 1, \ldots\}`, whereas
+        :func:`torch.Tensor.geometric_` `k`-th trial is the first success hence draws samples in :math:`\{1, 2, \ldots\}`.
 
     Example::
 
-        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> m = Geometric(torch.tensor([0.3]))
         >>> m.sample()  # underlying Bernoulli has 30% chance 1; 70% chance 0
         tensor([ 2.])
@@ -28,17 +39,18 @@ class Geometric(Distribution):
         probs (Number, Tensor): the probability of sampling `1`. Must be in range (0, 1]
         logits (Number, Tensor): the log-odds of sampling `1`.
     """
-    arg_constraints = {'probs': constraints.unit_interval,
-                       'logits': constraints.real}
+    arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
     support = constraints.nonnegative_integer
 
     def __init__(self, probs=None, logits=None, validate_args=None):
         if (probs is None) == (logits is None):
-            raise ValueError("Either `probs` or `logits` must be specified, but not both.")
+            raise ValueError(
+                "Either `probs` or `logits` must be specified, but not both."
+            )
         if probs is not None:
-            self.probs, = broadcast_all(probs)
+            (self.probs,) = broadcast_all(probs)
         else:
-            self.logits, = broadcast_all(logits)
+            (self.logits,) = broadcast_all(logits)
         probs_or_logits = probs if probs is not None else logits
         if isinstance(probs_or_logits, Number):
             batch_shape = torch.Size()
@@ -61,9 +73,9 @@ class Geometric(Distribution):
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Geometric, _instance)
         batch_shape = torch.Size(batch_shape)
-        if 'probs' in self.__dict__:
+        if "probs" in self.__dict__:
             new.probs = self.probs.expand(batch_shape)
-        if 'logits' in self.__dict__:
+        if "logits" in self.__dict__:
             new.logits = self.logits.expand(batch_shape)
         super(Geometric, new).__init__(batch_shape, validate_args=False)
         new._validate_args = self._validate_args
@@ -71,7 +83,7 @@ class Geometric(Distribution):
 
     @property
     def mean(self):
-        return 1. / self.probs - 1.
+        return 1.0 / self.probs - 1.0
 
     @property
     def mode(self):
@@ -79,7 +91,7 @@ class Geometric(Distribution):
 
     @property
     def variance(self):
-        return (1. / self.probs - 1.) / self.probs
+        return (1.0 / self.probs - 1.0) / self.probs
 
     @lazy_property
     def logits(self):
@@ -110,4 +122,7 @@ class Geometric(Distribution):
         return value * (-probs).log1p() + self.probs.log()
 
     def entropy(self):
-        return binary_cross_entropy_with_logits(self.logits, self.probs, reduction='none') / self.probs
+        return (
+            binary_cross_entropy_with_logits(self.logits, self.probs, reduction="none")
+            / self.probs
+        )

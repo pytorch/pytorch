@@ -11,6 +11,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/as_strided_native.h>
 #include <ATen/ops/view_as_real.h>
 #endif
 
@@ -90,13 +91,13 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
     MPSGraphTensorData* outputTensorData = [[[MPSGraphTensorData alloc] initWithMTLBuffer:outputBuffer
                                                                                     shape:outputShape
                                                                                  dataType:outputType] autorelease];
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{cachedGraph->outputTensor : outputTensorData};
+    auto results = @{cachedGraph->outputTensor : outputTensorData};
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
   return output;
 }
 
-MPSGraphTensor* permuteTensor(MPSGraph* graph, MPSGraphTensor* inputTensor, NSArray* permuteOrder) {
+static MPSGraphTensor* permuteTensor(MPSGraph* graph, MPSGraphTensor* inputTensor, NSArray* permuteOrder) {
   NSUInteger srcRank = [[inputTensor shape] count];
   if (srcRank != [permuteOrder count]) {
     return nil;
@@ -119,7 +120,7 @@ MPSGraphTensor* permuteTensor(MPSGraph* graph, MPSGraphTensor* inputTensor, NSAr
   return outputTensor;
 }
 
-NSDictionary* getStrideToDimLengthOffsetDict(MPSGraphTensor* tensor, NSUInteger rank, NSUInteger offset) {
+static NSDictionary* getStrideToDimLengthOffsetDict(MPSGraphTensor* tensor, NSUInteger rank, NSUInteger offset) {
   // Assuming input tensor has default strides
   NSInteger stride = 1;
   NSMutableDictionary* strideToDimLengthOffset = [[NSMutableDictionary alloc] init];
@@ -138,12 +139,12 @@ NSDictionary* getStrideToDimLengthOffsetDict(MPSGraphTensor* tensor, NSUInteger 
 }
 
 // Detect only expand dims, allows for duplicate strides
-MPSGraphTensor* asStridedLayer_expandDimsPattern(MPSGraph* graph,
-                                                 MPSGraphTensor* inputTensor,
-                                                 size_t dstRank,
-                                                 const IntArrayRef& dstSizes,
-                                                 const IntArrayRef& dstStrides,
-                                                 int offset) {
+static MPSGraphTensor* asStridedLayer_expandDimsPattern(MPSGraph* graph,
+                                                        MPSGraphTensor* inputTensor,
+                                                        size_t dstRank,
+                                                        const IntArrayRef& dstSizes,
+                                                        const IntArrayRef& dstStrides,
+                                                        int offset) {
   NSUInteger srcRank = [[inputTensor shape] count];
   // Not an expand dims
   if (srcRank >= dstRank)
@@ -190,12 +191,12 @@ MPSGraphTensor* asStridedLayer_expandDimsPattern(MPSGraph* graph,
 }
 
 // Detect contiguous reshapes, no slicing
-MPSGraphTensor* asStridedLayer_reshapePattern(MPSGraph* graph,
-                                              MPSGraphTensor* inputTensor,
-                                              size_t dstRank,
-                                              const IntArrayRef& dstSizes,
-                                              const IntArrayRef& dstStrides,
-                                              int offset) {
+static MPSGraphTensor* asStridedLayer_reshapePattern(MPSGraph* graph,
+                                                     MPSGraphTensor* inputTensor,
+                                                     size_t dstRank,
+                                                     const IntArrayRef& dstSizes,
+                                                     const IntArrayRef& dstStrides,
+                                                     int offset) {
   NSUInteger srcRank = [[inputTensor shape] count];
   // Not a reshape
   if (srcRank <= dstRank)
@@ -233,12 +234,12 @@ MPSGraphTensor* asStridedLayer_reshapePattern(MPSGraph* graph,
   return outputTensor;
 }
 
-MPSGraphTensor* asStridedLayer_genericPattern(MPSGraph* graph,
-                                              MPSGraphTensor* inputTensor,
-                                              size_t dstRank,
-                                              const IntArrayRef& dstSizes,
-                                              const IntArrayRef& dstStrides,
-                                              int offset) {
+static MPSGraphTensor* asStridedLayer_genericPattern(MPSGraph* graph,
+                                                     MPSGraphTensor* inputTensor,
+                                                     size_t dstRank,
+                                                     const IntArrayRef& dstSizes,
+                                                     const IntArrayRef& dstStrides,
+                                                     int offset) {
   // Duplicate strides cannot be done
   {
     BOOL allUnique = YES;
@@ -413,12 +414,12 @@ MPSGraphTensor* asStridedLayer_genericPattern(MPSGraph* graph,
   return broadcastTensor;
 }
 
-MPSGraphTensor* asStridedLayer_pattern(MPSGraph* graph,
-                                       MPSGraphTensor* inputTensor,
-                                       size_t dstRank,
-                                       const IntArrayRef& dstSizes,
-                                       const IntArrayRef& dstStrides,
-                                       int offset) {
+static MPSGraphTensor* asStridedLayer_pattern(MPSGraph* graph,
+                                              MPSGraphTensor* inputTensor,
+                                              size_t dstRank,
+                                              const IntArrayRef& dstSizes,
+                                              const IntArrayRef& dstStrides,
+                                              int offset) {
   if (!dstRank)
     return nil;
 
@@ -467,7 +468,7 @@ static std::vector<int64_t> getViewShape(const Tensor& src, MPSShape* mpsShape, 
   return src_view_shape;
 }
 
-std::vector<int64_t> getSqueezedBaseShape(const Tensor& src, IntArrayRef shape) {
+static std::vector<int64_t> getSqueezedBaseShape(const Tensor& src, IntArrayRef shape) {
   std::vector<int64_t> src_base_shape;
   for (const auto i : c10::irange(shape.size())) {
     if (shape[i] == 1)
@@ -726,7 +727,7 @@ static std::string getGatherScatterFunctionName(ScalarType scalarType, int64_t d
   return kernelName + "_kernel_" + std::to_string(dim == 0 ? 1 : dim);
 }
 
-const std::string& getGatherScatterScalarType(const Tensor& t) {
+static const std::string& getGatherScatterScalarType(const Tensor& t) {
   auto scalar_type = t.scalar_type();
   static std::unordered_map<c10::ScalarType, std::string> scalarToMetalType = {
       {c10::ScalarType::Float, "float"},
@@ -737,11 +738,25 @@ const std::string& getGatherScatterScalarType(const Tensor& t) {
       {c10::ScalarType::Char, "char"},
       {c10::ScalarType::Byte, "uchar"},
       {c10::ScalarType::Bool, "bool"},
+      {c10::ScalarType::ComplexFloat, "float2"},
+      {c10::ScalarType::ComplexHalf, "half2"},
   };
 
   auto it = scalarToMetalType.find(scalar_type);
   TORCH_CHECK(it != scalarToMetalType.end(), "Unsupported type byte size: ", scalar_type);
   return it->second;
+}
+
+static std::string genScatterGatherCvtFunc(const std::string& dtypeSrc, const std::string& dtypeDst) {
+  const bool srcComplex = dtypeSrc[dtypeSrc.size() - 1] == '2';
+  const bool dstComplex = dtypeDst[dtypeDst.size() - 1] == '2';
+  if (dstComplex) {
+    return dtypeDst + (srcComplex ? "(x.x, x.y)" : "(x,  0.0)");
+  }
+  if (srcComplex) {
+    return "x.x";
+  }
+  return "x";
 }
 
 static id<MTLLibrary> compileGatherScatterOpsLibrary(id<MTLDevice> device,
@@ -757,14 +772,13 @@ static id<MTLLibrary> compileGatherScatterOpsLibrary(id<MTLDevice> device,
   NSError* error = nil;
   MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
   [options setLanguageVersion:MTLLanguageVersion2_3];
-  auto gatherScatterLib =
-      [device newLibraryWithSource:[NSString stringWithUTF8String:fmt::format(needsScatter ? SCATTER_OPS_TEMPLATE
-                                                                                           : GATHER_OPS_TEMPLATE,
-                                                                              dtypeSrc,
-                                                                              dtypeDst)
-                                                                      .c_str()]
-                           options:options
-                             error:&error];
+  const auto shaderStr = fmt::format(needsScatter ? SCATTER_OPS_TEMPLATE : GATHER_OPS_TEMPLATE,
+                                     dtypeSrc,
+                                     dtypeDst,
+                                     genScatterGatherCvtFunc(dtypeSrc, dtypeDst));
+  auto gatherScatterLib = [device newLibraryWithSource:[NSString stringWithUTF8String:shaderStr.c_str()]
+                                               options:options
+                                                 error:&error];
   TORCH_CHECK(gatherScatterLib != nil && error == nil,
               "Failed to compile gather-scatter library, error: ",
               [[error description] UTF8String]);
@@ -811,12 +825,10 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
     return runViewGraph(cachedGraph, src, dst.has_storage() ? dst : output, /*needsScatter*/ false);
   }
 
-  id<MTLBuffer> outputBuffer = dst.has_storage() ? getMTLBufferStorage(dst) : getMTLBufferStorage(output);
-  int64_t outputStorageOffset = output.storage_offset() * output.element_size();
   uint32_t numThreads = output.numel();
 
   MPSStream* mpsStream = getCurrentMPSStream();
-  dispatch_sync(mpsStream->queue(), ^() {
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
     std::string functionName = getGatherScatterFunctionName(output.scalar_type(), output.dim(), /*needsScatter=*/false);
     id<MTLComputePipelineState> gatherPSO = getPipelineState(MPSDevice::getInstance()->device(),
@@ -842,20 +854,12 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
     }
 
     [computeEncoder setComputePipelineState:gatherPSO];
-    [computeEncoder setBuffer:getMTLBufferStorage(src) offset:src.storage_offset() * src.element_size() atIndex:0];
-    [computeEncoder setBuffer:outputBuffer offset:outputStorageOffset atIndex:1];
+    mtl_setBuffer(computeEncoder, src, 0);
+    mtl_setBuffer(computeEncoder, dst.has_storage() ? dst : output, 1);
     [computeEncoder setBytes:&src_sizes[0] length:sizeof(uint32_t) * kernel_size atIndex:2];
     [computeEncoder setBytes:&src_strides[0] length:sizeof(uint32_t) * kernel_size atIndex:3];
     [computeEncoder setBytes:&numThreads length:sizeof(uint32_t) atIndex:4];
-
-    MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
-    NSUInteger threadsPerThreadgroup_ = gatherPSO.maxTotalThreadsPerThreadgroup;
-    if (threadsPerThreadgroup_ > numThreads) {
-      threadsPerThreadgroup_ = numThreads;
-    }
-
-    MTLSize threadsPerThreadgroup = MTLSizeMake(threadsPerThreadgroup_, 1, 1);
-    [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadsPerThreadgroup];
+    mtl_dispatch1DJob(computeEncoder, gatherPSO, numThreads);
 
     getMPSProfiler().endProfileKernel(gatherPSO);
   });
@@ -877,12 +881,9 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
     return output;
   }
 
-  id<MTLBuffer> outputBuffer = getMTLBufferStorage(output);
-  id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
   uint32_t numThreads = src.numel();
-  int64_t outputStorageOffset = output.storage_offset() * output.element_size();
   MPSStream* mpsStream = getCurrentMPSStream();
-  dispatch_sync(mpsStream->queue(), ^() {
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       std::string functionName =
@@ -909,20 +910,12 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
       }
 
       [computeEncoder setComputePipelineState:scatterPSO];
-      [computeEncoder setBuffer:sourceBuffer offset:src.storage_offset() * src.element_size() atIndex:0];
-      [computeEncoder setBuffer:outputBuffer offset:outputStorageOffset atIndex:1];
+      mtl_setBuffer(computeEncoder, src, 0);
+      mtl_setBuffer(computeEncoder, output, 1);
       [computeEncoder setBytes:&output_sizes[0] length:sizeof(uint32_t) * kernel_size atIndex:2];
       [computeEncoder setBytes:&output_strides[0] length:sizeof(uint32_t) * kernel_size atIndex:3];
       [computeEncoder setBytes:&numThreads length:sizeof(uint32_t) atIndex:4];
-
-      MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
-      NSUInteger threadsPerThreadgroup_ = scatterPSO.maxTotalThreadsPerThreadgroup;
-      if (threadsPerThreadgroup_ > numThreads) {
-        threadsPerThreadgroup_ = numThreads;
-      }
-
-      MTLSize threadsPerThreadgroup = MTLSizeMake(threadsPerThreadgroup_, 1, 1);
-      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadsPerThreadgroup];
+      mtl_dispatch1DJob(computeEncoder, scatterPSO, numThreads);
 
       getMPSProfiler().endProfileKernel(scatterPSO);
     }

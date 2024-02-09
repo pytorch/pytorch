@@ -191,8 +191,8 @@ class TestFSDPMemory(FSDPTest):
                 # sharded model size + sharded grad size + 1M temp memory
                 expected[f"iter {iteration}: after bwd"] = 2 * sharded_model_size_mb + 1
             else:
-                # after optimizer step in the first iteraiton, memory usage increased by
-                # sharded_model_size_mb becasue of increased optimizer states memory usage
+                # after optimizer step in the first iteration, memory usage increased by
+                # sharded_model_size_mb because of increased optimizer states memory usage
                 expected[f"iter {iteration}: start"] = 2 * sharded_model_size_mb + 1
                 if ckpt == "ckpt":
                     expected[f"iter {iteration}: after fwd"] = (

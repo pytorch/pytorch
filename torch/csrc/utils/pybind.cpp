@@ -19,6 +19,18 @@ bool type_caster<c10::SymInt>::load(py::handle src, bool) {
   }
 
   auto raw_obj = src.ptr();
+
+  if (THPVariable_Check(raw_obj)) {
+    auto& var = THPVariable_Unpack(raw_obj);
+    if (var.numel() == 1 &&
+        at::isIntegralType(var.dtype().toScalarType(), /*include_bool*/ true)) {
+      auto scalar = var.item();
+      TORCH_INTERNAL_ASSERT(scalar.isIntegral(/*include bool*/ false));
+      value = scalar.toSymInt();
+      return true;
+    }
+  }
+
   if (THPUtils_checkIndex(raw_obj)) {
     value = c10::SymInt{THPUtils_unpackIndex(raw_obj)};
     return true;
@@ -27,12 +39,10 @@ bool type_caster<c10::SymInt>::load(py::handle src, bool) {
 }
 
 py::handle type_caster<c10::SymInt>::cast(
-    c10::SymInt si,
+    const c10::SymInt& si,
     return_value_policy /* policy */,
     handle /* parent */) {
-  if (auto m = si.maybe_as_int()) {
-    return py::cast(*m).release();
-  } else {
+  if (si.is_symbolic()) {
     auto* py_node = dynamic_cast<torch::impl::PythonSymNodeImpl*>(
         si.toSymNodeImplUnowned());
     if (py_node) {
@@ -46,6 +56,10 @@ py::handle type_caster<c10::SymInt>::cast(
       }
       return torch::get_symint_class()(inner).release();
     }
+  } else {
+    auto m = si.maybe_as_int();
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return py::cast(*m).release();
   }
 }
 
@@ -65,7 +79,7 @@ bool type_caster<c10::SymFloat>::load(py::handle src, bool) {
 }
 
 py::handle type_caster<c10::SymFloat>::cast(
-    c10::SymFloat si,
+    const c10::SymFloat& si,
     return_value_policy /* policy */,
     handle /* parent */) {
   if (si.is_symbolic()) {
@@ -95,17 +109,17 @@ bool type_caster<c10::SymBool>::load(py::handle src, bool) {
 }
 
 py::handle type_caster<c10::SymBool>::cast(
-    c10::SymBool si,
+    const c10::SymBool& si,
     return_value_policy /* policy */,
     handle /* parent */) {
-  if (si.is_symbolic()) {
+  if (auto m = si.maybe_as_bool()) {
+    return py::cast(*m).release();
+  } else {
     // TODO: generalize this to work with C++ backed class
     auto* py_node =
         dynamic_cast<torch::impl::PythonSymNodeImpl*>(si.toSymNodeImpl().get());
     TORCH_INTERNAL_ASSERT(py_node);
     return torch::get_symbool_class()(py_node->getPyObj()).release();
-  } else {
-    return py::cast(si.as_bool_unchecked()).release();
   }
 }
 
@@ -125,7 +139,11 @@ py::handle type_caster<c10::Scalar>::cast(
     if (scalar.isSymbolic()) {
       return py::cast(scalar.toSymInt()).release();
     } else {
-      return py::cast(scalar.toLong()).release();
+      if (scalar.type() == at::ScalarType::UInt64) {
+        return py::cast(scalar.toUInt64()).release();
+      } else {
+        return py::cast(scalar.toLong()).release();
+      }
     }
   } else if (scalar.isFloatingPoint()) {
     // This isn't strictly necessary but we add it for symmetry

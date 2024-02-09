@@ -51,6 +51,8 @@ void initializeLayouts() {
     throw python_error();
   }
   registerLayoutObject((THPLayout*)mkldnn_layout, at::Layout::Mkldnn);
+
+  REGISTER_LAYOUT(jagged, Jagged);
 }
 
 } // namespace utils

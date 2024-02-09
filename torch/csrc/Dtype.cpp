@@ -11,8 +11,6 @@
 #include <torch/csrc/utils/tensor_types.h>
 #include <cstring>
 
-#include <torch/csrc/Exceptions.h>
-
 PyObject* THPDtype_New(at::ScalarType scalar_type, const std::string& name) {
   HANDLE_TH_ERRORS
   AT_ASSERT(name.length() < DTYPE_NAME_LEN);
@@ -39,7 +37,8 @@ PyObject* THPDtype_is_floating_point(THPDtype* self, PyObject* noargs) {
 
 PyObject* THPDtype_itemsize(THPDtype* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  return THPUtils_packInt64(scalarTypeToTypeMeta(self->scalar_type).itemsize());
+  return THPUtils_packUInt64(
+      scalarTypeToTypeMeta(self->scalar_type).itemsize());
   END_HANDLE_TH_ERRORS
 }
 
@@ -115,8 +114,7 @@ static PyMethodDef THPDtype_methods[] = {
 };
 
 PyObject* THPDtype_repr(THPDtype* self) {
-  std::string name = self->name;
-  return THPUtils_packString("torch." + name);
+  return THPUtils_packString(std::string("torch.") + self->name);
 }
 
 PyTypeObject THPDtypeType = {

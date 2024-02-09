@@ -1,7 +1,7 @@
 #ifdef USE_KINETO
+#include <ATen/Context.h>
 #include <libkineto.h>
 #include <torch/csrc/autograd/profiler_kineto.h>
-#include <cstdlib>
 
 // Ondemand tracing is not supported on Apple or edge platform
 #if defined(__APPLE__) || defined(EDGE_PROFILER_USE_KINETO)
@@ -78,7 +78,9 @@ struct RegisterLibKinetoClient {
     static profiler::impl::LibKinetoClient client;
 
     if (std::getenv("KINETO_USE_DAEMON") != nullptr) {
-      libkineto_init(/*cpuOnly=*/false, /*logOnError=*/true);
+      libkineto_init(
+          /*cpuOnly=*/!(at::hasCUDA() || at::hasXPU() || at::hasMTIA()),
+          /*logOnError=*/true);
       libkineto::api().suppressLogMessages();
     }
 

@@ -9,10 +9,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace c10 {
-namespace cuda {
-namespace CUDACachingAllocator {
-namespace CudaMallocAsync {
+namespace c10::cuda::CUDACachingAllocator::CudaMallocAsync {
 
 #if CUDA_VERSION >= 11040
 // CUDA device allocator that uses cudaMallocAsync to implement
@@ -410,7 +407,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         OutOfMemoryError,
         size < one_exa_bytes,
         "CUDA out of memory. Tried to allocate more than 1EB memory.");
-    int device = 0;
+    c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     if (size != 0) {
@@ -618,7 +615,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
       bool enabled,
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
-      bool alloc_trace_record_context) override {
+      RecordContext when) override {
     TORCH_CHECK(
         false,
         "cudaMallocAsync does not yet support recordHistory. "
@@ -629,6 +626,13 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     TORCH_CHECK(
         false,
         "cudaMallocAsync does not yet support attachOutOfMemoryObserver. "
+        "If you need it, please file an issue describing your use case.");
+  }
+
+  void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) override {
+    TORCH_CHECK(
+        false,
+        "cudaMallocAsync does not yet support attachAllocatorTraceTracker. "
         "If you need it, please file an issue describing your use case.");
   }
 
@@ -751,10 +755,10 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   }
 
   // CUDAGraph interactions
-  void beginAllocateStreamToPool(
+  void beginAllocateToPool(
       int device,
-      cudaStream_t stream,
-      MempoolId_t mempool_id) override {
+      MempoolId_t mempool_id,
+      std::function<bool(cudaStream_t)>) override {
     std::lock_guard<std::mutex> lk(general_mutex);
 
     TORCH_INTERNAL_ASSERT(capture_free_streams.empty());
@@ -764,7 +768,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     capture_underway = true;
   }
 
-  void endAllocateStreamToPool(int device, cudaStream_t) override {
+  void endAllocateToPool(int device, MempoolId_t mempool_id) override {
     assertValidDevice(device);
 
     std::lock_guard<std::mutex> lk(general_mutex);
@@ -817,7 +821,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     if (nbytes == 0) {
       return nullptr;
     }
-    int device = 0;
+    c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     mallocAsync(&r, device, nbytes, cuda::getCurrentCUDAStream(device));
@@ -828,7 +832,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     if (nbytes == 0) {
       return nullptr;
     }
-    int device = 0;
+    c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     mallocAsync(&r, device, nbytes, stream);
@@ -837,7 +841,8 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   void raw_delete(void* ptr) override {
     freeAsync(ptr);
   }
-  void enablePeerAccess(int dev, int dev_to_access) override {
+  void enablePeerAccess(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access)
+      override {
     // Double-checks allocator backend hasn't changed, which would definitely be
     // an error. cudaMallocAsync pools are unaffected by
     // cudaDeviceEnablePeerAccess. We need pool-specific enablement. See
@@ -868,6 +873,10 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   std::string name() override {
     return "cudaMallocAsync";
   }
+  void copy_data(void* dest, const void* src, std::size_t count) const final {
+    C10_CUDA_CHECK(
+        cudaMemcpy(dest, src, count, cudaMemcpyKind::cudaMemcpyDeviceToDevice));
+  }
 };
 
 CudaMallocAsyncAllocator device_allocator;
@@ -887,7 +896,4 @@ CUDAAllocator* allocator() {
 
 #endif
 
-} // namespace CudaMallocAsync
-} // namespace CUDACachingAllocator
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda::CUDACachingAllocator::CudaMallocAsync

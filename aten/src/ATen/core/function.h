@@ -36,6 +36,11 @@ TORCH_API void preoptimizeGraph(std::shared_ptr<Graph>& graph, bool disable_auto
 // execution of the function. Method is a wrapper around an
 // underlying Function that also provides a `self` object.
 struct TORCH_API Function {
+  Function() = default;
+  Function(const Function&) = default;
+  Function& operator=(const Function&) = default;
+  Function(Function&&) noexcept = default;
+  Function& operator=(Function&&) noexcept = default;
   virtual c10::string_view doc_string() const {
     static constexpr c10::string_view no_doc_string = "";
     return no_doc_string;
@@ -49,8 +54,7 @@ struct TORCH_API Function {
 
   virtual c10::intrusive_ptr<c10::ivalue::Future> runAsync(
       Stack& /*stack*/,
-      TaskLauncher taskLauncher = at::launch) {
-    (void)taskLauncher; // Suppress unused variable warning
+      C10_UNUSED TaskLauncher taskLauncher = at::launch) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
     return {};
   }

@@ -3,6 +3,7 @@
 #include <c10/core/Backend.h>
 #include <c10/util/Exception.h>
 
+#include <cstdint>
 #include <ostream>
 
 namespace c10 {
@@ -14,6 +15,7 @@ enum class Layout : int8_t {
   SparseCsc,
   SparseBsr,
   SparseBsc,
+  Jagged,
   NumOptions
 };
 
@@ -24,6 +26,7 @@ constexpr auto kMkldnn = Layout::Mkldnn;
 constexpr auto kSparseCsc = Layout::SparseCsc;
 constexpr auto kSparseBsr = Layout::SparseBsr;
 constexpr auto kSparseBsc = Layout::SparseBsc;
+constexpr auto kJagged = Layout::Jagged;
 
 inline Layout layout_from_backend(Backend backend) {
   switch (backend) {
@@ -61,6 +64,8 @@ inline std::ostream& operator<<(std::ostream& stream, at::Layout layout) {
       return stream << "SparseBsc";
     case at::kMkldnn:
       return stream << "Mkldnn";
+    case at::kJagged:
+      return stream << "Jagged";
     default:
       TORCH_CHECK(false, "Unknown layout");
   }

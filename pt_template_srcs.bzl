@@ -131,6 +131,8 @@ def get_generate_code_bin_outs():
         "autograd/generated/VariableType_3.cpp": ["autograd/generated/VariableType_3.cpp"],
         "autograd/generated/VariableType_4.cpp": ["autograd/generated/VariableType_4.cpp"],
         "autograd/generated/variable_factories.h": ["autograd/generated/variable_factories.h"],
+        "autograd/generated/ViewFuncs.cpp": ["autograd/generated/ViewFuncs.cpp"],
+        "autograd/generated/ViewFuncs.h": ["autograd/generated/ViewFuncs.h"],
     }
 
     if is_arvr_mode():
@@ -146,6 +148,7 @@ def get_generate_code_bin_outs():
             "autograd/generated/python_linalg_functions.cpp": ["autograd/generated/python_linalg_functions.cpp"],
             "autograd/generated/python_nested_functions.cpp": ["autograd/generated/python_nested_functions.cpp"],
             "autograd/generated/python_nn_functions.cpp": ["autograd/generated/python_nn_functions.cpp"],
+            "autograd/generated/python_return_types.h": ["autograd/generated/python_return_types.h"],
             "autograd/generated/python_return_types.cpp": ["autograd/generated/python_return_types.cpp"],
             "autograd/generated/python_sparse_functions.cpp": ["autograd/generated/python_sparse_functions.cpp"],
             "autograd/generated/python_special_functions.cpp": ["autograd/generated/python_special_functions.cpp"],

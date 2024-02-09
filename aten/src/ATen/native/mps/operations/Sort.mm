@@ -29,6 +29,10 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
   bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
   MPS_CHECK_INT64_OP_SUPPORTED(self, macOS13_3_plus, "sort_stable_out");
 
+  if (self.numel() == 0) {
+    return;
+  }
+
   values.copy_(self);
   // check if self is scalar
   dim = maybe_wrap_dim(dim, self.dim(), true);
@@ -85,14 +89,10 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
     Placeholder valuesPlaceholder = Placeholder(cachedGraph->valuesTensor, values);
     Placeholder indicesPlaceholder = Placeholder(cachedGraph->indicesTensor, indices);
     // Create dictionary of inputs and outputs
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = nil;
-    feeds = @{inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData()};
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      valuesPlaceholder.getMPSGraphTensor() : valuesPlaceholder.getMPSGraphTensorData(),
-      indicesPlaceholder.getMPSGraphTensor() : indicesPlaceholder.getMPSGraphTensorData()
-    };
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
+    auto results = dictionaryFromPlaceholders(valuesPlaceholder, indicesPlaceholder);
 
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
 }
-}
+} // namespace at::native

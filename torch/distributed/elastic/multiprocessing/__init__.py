@@ -7,8 +7,7 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-Library that launches and manages ``n`` copies of worker subprocesses
-either specified by a function or a binary.
+Library that launches and manages ``n`` copies of worker subprocesses either specified by a function or a binary.
 
 For functions, it uses ``torch.multiprocessing`` (and therefore python
 ``multiprocessing``) to spawn/fork worker processes. For binaries it uses python
@@ -64,20 +63,32 @@ implementations of the parent :class:`api.PContext` class.
 """
 
 import os
-from typing import Callable, Dict, Tuple, Union
+from typing import Callable, Dict, Optional, Tuple, Union, Set
 
 from torch.distributed.elastic.multiprocessing.api import (  # noqa: F401
+    _validate_full_rank,
     MultiprocessContext,
     PContext,
     ProcessFailure,
     RunProcsResult,
-    Std,
     SignalException,
+    Std,
     SubprocessContext,
-    _validate_full_rank,
     to_map,
 )
 from torch.distributed.elastic.utils.logging import get_logger
+
+__all__ = [
+    "start_processes",
+    "MultiprocessContext",
+    "PContext",
+    "ProcessFailure",
+    "RunProcsResult",
+    "SignalException",
+    "Std",
+    "SubprocessContext",
+    "to_map",
+]
 
 log = get_logger(__name__)
 
@@ -88,12 +99,15 @@ def start_processes(
     args: Dict[int, Tuple],
     envs: Dict[int, Dict[str, str]],
     log_dir: str,
+    log_line_prefixes: Optional[Dict[int, str]] = None,
     start_method: str = "spawn",
     redirects: Union[Std, Dict[int, Std]] = Std.NONE,
     tee: Union[Std, Dict[int, Std]] = Std.NONE,
+    local_ranks_filter: Optional[Set[int]] = None,
 ) -> PContext:
     """
-    Starts ``n`` copies of ``entrypoint`` processes with the provided options.
+    Start ``n`` copies of ``entrypoint`` processes with the provided options.
+
     ``entrypoint`` is either a ``Callable`` (function) or a ``str`` (binary).
     The number of copies is determined by the number of entries for ``args`` and
     ``envs`` arguments, which need to have the same key set.
@@ -129,7 +143,6 @@ def start_processes(
     .. note:: It is expected that the ``log_dir`` exists, is empty, and is a directory.
 
     Example:
-
     ::
 
      log_dir = "/tmp/test"
@@ -182,9 +195,9 @@ def start_processes(
                       ignored for binaries
         redirects: which std streams to redirect to a log file
         tee: which std streams to redirect + print to console
+        local_ranks_filter: which ranks' logs to print to console
 
     """
-
     # listdir raises FileNotFound or NotADirectoryError so no need to check manually
     if log_dir != os.devnull and os.listdir(log_dir):
         raise RuntimeError(
@@ -212,8 +225,9 @@ def start_processes(
         redirect_std = redirs[local_rank]
         redirs[local_rank] = redirect_std | tee_std
 
-    stdouts = {local_rank: "" for local_rank in range(nprocs)}
-    stderrs = {local_rank: "" for local_rank in range(nprocs)}
+    SYS_STREAM = ""  # special case to indicate to output to console
+    stdouts = dict.fromkeys(range(nprocs), SYS_STREAM)
+    stderrs = dict.fromkeys(range(nprocs), SYS_STREAM)
     tee_stdouts: Dict[int, str] = {}
     tee_stderrs: Dict[int, str] = {}
     error_files = {}
@@ -240,6 +254,19 @@ def start_processes(
             if t & Std.ERR == Std.ERR:
                 tee_stderrs[local_rank] = stderrs[local_rank]
 
+            if local_ranks_filter and local_rank not in local_ranks_filter:
+                # If stream is tee'd, only write to file, but don't tail
+                if local_rank in tee_stdouts:
+                    tee_stdouts.pop(local_rank, None)
+                if local_rank in tee_stderrs:
+                    tee_stderrs.pop(local_rank, None)
+
+                # If stream is not redirected, don't print
+                if stdouts[local_rank] == SYS_STREAM:
+                    stdouts[local_rank] = os.devnull
+                if stderrs[local_rank] == SYS_STREAM:
+                    stderrs[local_rank] = os.devnull
+
             error_file = os.path.join(clogdir, "error.json")
             error_files[local_rank] = error_file
             log.info("Setting worker%s reply file to: %s", local_rank, error_file)
@@ -257,6 +284,7 @@ def start_processes(
             tee_stdouts=tee_stdouts,
             tee_stderrs=tee_stderrs,
             error_files=error_files,
+            log_line_prefixes=log_line_prefixes,
         )
     else:
         context = MultiprocessContext(
@@ -269,6 +297,7 @@ def start_processes(
             tee_stdouts=tee_stdouts,
             tee_stderrs=tee_stderrs,
             error_files=error_files,
+            log_line_prefixes=log_line_prefixes,
             start_method=start_method,
         )
 

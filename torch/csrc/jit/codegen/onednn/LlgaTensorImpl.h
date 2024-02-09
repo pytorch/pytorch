@@ -20,7 +20,7 @@ namespace onednn {
 // Ref: https://spec.oneapi.io/onednn-graph/latest/programming_model.html#engine
 struct Engine {
   // CPU engine singleton
-  static dnnl::graph::engine& getEngine();
+  static dnnl::engine& getEngine();
   Engine(const Engine&) = delete;
   void operator=(const Engine&) = delete;
 };
@@ -30,7 +30,7 @@ struct Engine {
 // stream for execution.
 struct Stream {
   // CPU stream singleton
-  static dnnl::graph::stream& getStream();
+  static dnnl::stream& getStream();
   Stream(const Stream&) = delete;
   void operator=(const Stream&) = delete;
 };

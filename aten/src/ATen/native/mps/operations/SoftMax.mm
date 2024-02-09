@@ -17,10 +17,10 @@
 
 namespace at::native {
 
-void get_shapes(MPSShape* input_shape_readonly,
-                NSMutableArray<NSNumber*>*& input_shape,
-                int num_input_dims,
-                c10::MemoryFormat memory_format) {
+static void get_shapes(MPSShape* input_shape_readonly,
+                       NSMutableArray<NSNumber*>*& input_shape,
+                       int num_input_dims,
+                       c10::MemoryFormat memory_format) {
   // Modify the shape
   if (memory_format == at::MemoryFormat::Contiguous) {
     for (int i = 0; i < num_input_dims; i++)
@@ -122,12 +122,8 @@ TORCH_IMPL_FUNC(softmax_mps_out)
     // This must be the Contiguous shape
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
-        @{inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData()};
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 
@@ -186,14 +182,8 @@ TORCH_IMPL_FUNC(softmax_backward_mps_out)
     Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad, grad_shape);
     Placeholder gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      softmaxPlaceholder.getMPSGraphTensor() : softmaxPlaceholder.getMPSGraphTensorData(),
-      gradOutputPlaceholder.getMPSGraphTensor() : gradOutputPlaceholder.getMPSGraphTensorData()
-    };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{gradInputPlaceholder.getMPSGraphTensor() : gradInputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(softmaxPlaceholder, gradOutputPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, gradInputPlaceholder);
   }
 }
 

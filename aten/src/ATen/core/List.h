@@ -78,7 +78,7 @@ public:
   ListElementReference& operator=(const T& new_value) &&;
 
   // assigning another ref to this assigns the underlying value
-  ListElementReference& operator=(ListElementReference&& rhs) &&;
+  ListElementReference& operator=(ListElementReference&& rhs) && noexcept;
 
   const IValue& get() const& {
     return *iterator_;
@@ -124,7 +124,7 @@ class ListIterator final {
   ListIterator(const ListIterator&) = default;
   ListIterator(ListIterator&&) noexcept = default;
   ListIterator& operator=(const ListIterator&) = default;
-  ListIterator& operator=(ListIterator&&) = default;
+  ListIterator& operator=(ListIterator&&) noexcept = default;
 
   ListIterator& operator++() {
       ++iterator_;
@@ -285,7 +285,7 @@ public:
    * Returns the element at specified location pos, with bounds checking.
    * If pos is not within the range of the container, an exception of type std::out_of_range is thrown.
    */
-  value_type get(size_type pos) const;
+  internal_const_reference_type get(size_type pos) const;
 
   /**
    * Moves out the element at the specified location pos and returns it, with bounds checking.

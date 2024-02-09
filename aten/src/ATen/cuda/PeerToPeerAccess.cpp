@@ -1,5 +1,7 @@
 #include <ATen/cuda/PeerToPeerAccess.h>
 
+#include <ATen/cuda/CUDAContext.h>
+
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
@@ -7,8 +9,7 @@
 
 #include <vector>
 
-namespace at {
-namespace cuda {
+namespace at::cuda {
 
 static std::vector<int8_t> p2pAccessEnabled_;
 static int64_t num_devices_ = -1;
@@ -33,6 +34,8 @@ void init_p2p_access_cache(int64_t num_devices) {
 }  // namespace detail
 
 bool get_p2p_access(int dev, int dev_to_access) {
+  at::globalContext().lazyInitCUDA();
+
   TORCH_CHECK(dev >= 0 || dev < num_devices_,
               dev, " is not a device");
   TORCH_CHECK(dev_to_access >= 0 || dev_to_access < num_devices_,
@@ -55,4 +58,4 @@ bool get_p2p_access(int dev, int dev_to_access) {
   return cache;
 }
 
-}}  // namespace at::cuda::detail
+}  // namespace at::cuda::detail

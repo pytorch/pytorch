@@ -56,8 +56,7 @@ namespace {
   const int MODE_MAX = 2;
 }
 
-namespace at {
-namespace native {
+namespace at::native {
 
 template<typename scalar_t>
 scalar_t dot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy);
@@ -234,7 +233,7 @@ index_select_add(
       offsets_data = offsets_include_last.data();
     }
 #if defined(USE_FBGEMM)
-    constexpr bool isbf16 = std::is_same<data_t, at::Half>::value ? false : true;
+    constexpr bool isbf16 = std::is_same_v<data_t, at::Half> ? false : true;
     auto kernel_16bit_index_t = fbgemm_kernel_cache
         ? fbgemm_kernel_cache
               ->getCallback</* has_weight */ false, index_t, uint16_t>(ddim)
@@ -245,7 +244,8 @@ index_select_add(
               /* prefetch */ 16,
               /* is_weight_positional */ false,
               /* use_offsets */ true,
-              /* isbf16*/ isbf16);
+              /* is_bf16_out */ isbf16,
+              /* is_bf16_in */ isbf16);
     at::parallel_for(
         0, output_size, 1, [&](index_t start_idx, index_t end_idx) {
           bool success = kernel_16bit_index_t(
@@ -607,7 +607,7 @@ index_select_scale_add(
     auto* scale_data_fp32 = scale_fp32.mutable_data_ptr<float>();
 
 #if defined(USE_FBGEMM)
-    constexpr bool isbf16 = std::is_same<data_t, at::Half>::value ? false : true;
+    constexpr bool isbf16 = std::is_same_v<data_t, at::Half> ? false : true;
     if constexpr (isbf16) {
       fbgemm::Bfloat16ToFloat_simd(
           reinterpret_cast<const fbgemm::bfloat16*>(scale_data),
@@ -629,7 +629,8 @@ index_select_scale_add(
               /* prefetch */ 16,
               /* is_weight_positional */ false,
               /* use_offsets */ true,
-              /* isbf16*/ isbf16);
+              /* is_bf16_out */ isbf16,
+              /* is_bf16_in */ isbf16);
     at::parallel_for(
         0, output_size, 1, [&](index_t start_idx, index_t end_idx) {
           bool success = kernel_16bit_index_t(
@@ -1780,6 +1781,5 @@ Tensor _embedding_bag_sparse_backward_symint(
   }
   return native::embedding_backward_symint(index_grad, indices, std::move(num_weights), padding_idx,
                                     scale_grad_by_freq, true);
-}
 }
 } // namespace at::native

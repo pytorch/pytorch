@@ -30,7 +30,7 @@ static C10_UNUSED std::vector<Tensor> expandTensors(const Tensor & self, IOptTen
         // The sizes of the ByteTensor mask or bool tensor must match the sizes of the
         // corresponding dimensions in self
         for (const auto j : c10::irange(index.dim())) {
-          int64_t srcIdx = result.size() + j;
+          int64_t srcIdx = static_cast<int64_t>(result.size() + j);
           if (index.size(j) != self.size(srcIdx)) {
             invalid_mask(self, srcIdx, index, j);
           }
@@ -41,7 +41,7 @@ static C10_UNUSED std::vector<Tensor> expandTensors(const Tensor & self, IOptTen
           result.emplace_back(nonzero.select(1, j));
         }
       } else {
-        result.emplace_back(std::move(index));
+        result.emplace_back(index);
       }
     }
   }
@@ -101,7 +101,7 @@ static C10_UNUSED bool hasContiguousSubspace(TensorList tl) {
 // returns
 // tensor.permute([1, 3, 0, 2]), {a, b, nullptr, nullptr}
 static C10_UNUSED std::tuple<Tensor, std::vector<Tensor>>
-transposeToFront(Tensor self, TensorList indices) {
+transposeToFront(const Tensor& self, TensorList indices) {
   std::vector<int64_t> dims;
   std::vector<Tensor> transposedIndices;
   dims.reserve(self.dim());
@@ -121,7 +121,7 @@ transposeToFront(Tensor self, TensorList indices) {
 }
 
 inline std::tuple<Tensor, std::vector<Tensor>, std::vector<int64_t>>
-transposeToFrontAndInvPerm(Tensor self, TensorList indices) {
+transposeToFrontAndInvPerm(const Tensor& self, TensorList indices) {
   std::vector<int64_t> dims;
   std::vector<int64_t> invPerm;
   std::vector<Tensor> transposedIndices;

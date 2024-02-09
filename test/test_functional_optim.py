@@ -74,6 +74,10 @@ class TestFunctionalOptimParity(TestCase):
         for p1, p2 in zip(params_1, params_2):
             self.assertEqual(p1, p2)
 
+    # Dynamo fails at compiling this for python 3.8/3.11
+    # Since it passes while compiling the actual code under test
+    # we disable dynamo here.
+    @torch._disable_dynamo(recursive=False)
     def _test_functional_optim_parity(self, optim_cls, *args, **kwargs):
         module_optim = MyModule()
         module_functional = MyModule()

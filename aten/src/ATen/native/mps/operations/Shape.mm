@@ -20,7 +20,7 @@ namespace at::native {
 namespace mps {
 
 // Produces a shape with the `dim` dimension set to 0.
-std::vector<int64_t> getTopK0Shape(IntArrayRef sizes, const int64_t dim_) {
+static std::vector<int64_t> getTopK0Shape(IntArrayRef sizes, const int64_t dim_) {
   const int sz = sizes.size();
   if (sz == 0) {
     return {0};
@@ -35,7 +35,7 @@ std::vector<int64_t> getTopK0Shape(IntArrayRef sizes, const int64_t dim_) {
   return numbers;
 }
 
-void check_shape_except_dim(const Tensor& first, const Tensor& second, int dimension, int index) {
+static void check_shape_except_dim(const Tensor& first, const Tensor& second, int dimension, int index) {
   int first_dims = first.dim();
   int second_dims = second.dim();
   TORCH_CHECK(
@@ -198,13 +198,8 @@ TORCH_IMPL_FUNC(topk_out_mps)
     Placeholder valuesPlaceholder = Placeholder(cachedGraph->valuesTensor, values);
     Placeholder indicesPlaceholder = Placeholder(cachedGraph->indicesTensor, indices);
     // Create dictionary of inputs and outputs
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = nil;
-    feeds = @{inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData()};
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      valuesPlaceholder.getMPSGraphTensor() : valuesPlaceholder.getMPSGraphTensorData(),
-      indicesPlaceholder.getMPSGraphTensor() : indicesPlaceholder.getMPSGraphTensorData()
-    };
-
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
+    auto results = dictionaryFromPlaceholders(valuesPlaceholder, indicesPlaceholder);
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
 }
@@ -390,10 +385,7 @@ TORCH_IMPL_FUNC(cat_out_mps)
     for (auto& inputPlaceholder : inputPlaceholders) {
       feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
     }
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 

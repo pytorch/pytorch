@@ -22,11 +22,11 @@ version_tuple getCompileVersion() {
 
 version_tuple getRuntimeVersion() {
 #ifndef USE_STATIC_CUDNN
-  auto version = cudnnGetVersion();
-  auto major = version / 1000;
-  auto minor = (version % 1000) / 100;
-  auto patch = version % 10;
-  return version_tuple(major, minor, patch);
+  int major, minor, patch;
+  cudnnGetProperty(MAJOR_VERSION, &major);
+  cudnnGetProperty(MINOR_VERSION, &minor);
+  cudnnGetProperty(PATCH_LEVEL, &patch);
+  return version_tuple((size_t)major, (size_t)minor, (size_t)patch);
 #else
   return getCompileVersion();
 #endif
@@ -74,9 +74,7 @@ size_t getVersionInt() {
 } // namespace
 #endif
 
-namespace torch {
-namespace cuda {
-namespace shared {
+namespace torch::cuda::shared {
 
 void initCudnnBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
@@ -101,7 +99,5 @@ void initCudnnBindings(PyObject* module) {
   cudnn.def("getVersionInt", getVersionInt);
 }
 
-} // namespace shared
-} // namespace cuda
-} // namespace torch
+} // namespace torch::cuda::shared
 #endif

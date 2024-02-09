@@ -75,7 +75,7 @@ namespace detail {
       }
     }
     // Structured Tensor[] translates to this case
-    void operator()(at::ITensorListRef xs) {
+    void operator()(const at::ITensorListRef& xs) {
       for (const auto& x : xs) {
         ts = ts | x.key_set();
       }

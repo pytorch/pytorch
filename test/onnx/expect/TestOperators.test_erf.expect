@@ -1,4 +1,4 @@
-ir_version: 7
+ir_version: 8
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
@@ -8,7 +8,7 @@ graph {
     name: "Erf_0"
     op_type: "Erf"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Erf_0"
     type {
@@ -55,5 +55,5 @@ graph {
   }
 }
 opset_import {
-  version: 14
+  version: 17
 }

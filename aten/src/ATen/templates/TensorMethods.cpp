@@ -26,6 +26,12 @@ void check_type(const TensorBase& tensor, ScalarType type, c10::string_view type
    }                                                                 \
                                                                      \
    template <>                                                       \
+   TORCH_API const T* TensorBase::const_data_ptr<const T>() const {  \
+     check_type(*this, ScalarType::name, #name);                     \
+     return this->unsafeGetTensorImpl()->data_ptr_impl<std::remove_const_t<T>>(); \
+   }                                                                 \
+                                                                     \
+   template <>                                                       \
    TORCH_API T* TensorBase::mutable_data_ptr() const {               \
      check_type(*this, ScalarType::name, #name);                     \
      return this->unsafeGetTensorImpl()->mutable_data_ptr_impl<T>(); \
@@ -38,6 +44,9 @@ void check_type(const TensorBase& tensor, ScalarType type, c10::string_view type
 
  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CAST)
  AT_FORALL_QINT_TYPES(DEFINE_CAST)
+ DEFINE_CAST(uint16_t, UInt16)
+ DEFINE_CAST(uint32_t, UInt32)
+ DEFINE_CAST(uint64_t, UInt64)
  #undef DEFINE_CAST
 
  #define DEFINE_ITEM(T, name)      \

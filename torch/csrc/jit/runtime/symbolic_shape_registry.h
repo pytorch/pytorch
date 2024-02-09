@@ -5,8 +5,7 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 /*
 ADDING A NEW SHAPE GRAPH:
@@ -67,5 +66,4 @@ TORCH_API void LintShapeComputeGraph(
     const FunctionSchema* schema,
     const std::shared_ptr<Graph>& graph);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

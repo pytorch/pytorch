@@ -451,7 +451,6 @@ additional_op_db.extend([
                # RuntimeError: attribute lookup is not defined on builtin
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
            )),
     OpInfo('bool',
            op=lambda x, *args, **kwargs: x.bool(*args, **kwargs),

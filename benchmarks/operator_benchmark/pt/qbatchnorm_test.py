@@ -1,6 +1,6 @@
+import torch
 
 import operator_benchmark as op_bench
-import torch
 
 
 """Microbenchmarks for quantized batchnorm operator."""
@@ -11,10 +11,10 @@ batchnorm_configs_short = op_bench.config_list(
         [1, 256, 3136],
     ],
     cross_product_configs={
-        'device': ['cpu'],
-        'dtype': (torch.qint8,),
+        "device": ["cpu"],
+        "dtype": (torch.qint8,),
     },
-    tags=["short"]
+    tags=["short"],
 )
 
 
@@ -25,14 +25,15 @@ class QBatchNormBenchmark(op_bench.TorchBenchmarkBase):
         x_zero_point = 0
         self.inputs = {
             "q_input_one": torch.quantize_per_tensor(
-                self.input_one, scale=x_scale, zero_point=x_zero_point, dtype=dtype),
+                self.input_one, scale=x_scale, zero_point=x_zero_point, dtype=dtype
+            ),
             "mean": torch.rand(N),
             "var": torch.rand(N),
             "weight": torch.rand(N),
             "bias": torch.rand(N),
             "eps": 1e-5,
             "Y_scale": 0.1,
-            "Y_zero_point": 0
+            "Y_zero_point": 0,
         }
 
     def _init(self, M, N, K, device):
@@ -45,7 +46,9 @@ class QBatchNormBenchmark(op_bench.TorchBenchmarkBase):
 class QBatchNorm1dBenchmark(QBatchNormBenchmark):
     def _init(self, M, N, K, device):
         self.set_module_name("QBatchNorm1d")
-        self.input_one = torch.rand(M, N, K, device=device, requires_grad=self.auto_set())
+        self.input_one = torch.rand(
+            M, N, K, device=device, requires_grad=self.auto_set()
+        )
 
     def forward(
         self,
@@ -56,11 +59,11 @@ class QBatchNorm1dBenchmark(QBatchNormBenchmark):
         var,
         eps: float,
         Y_scale: float,
-        Y_zero_point: int
+        Y_zero_point: int,
     ):
         return torch.ops.quantized.batch_norm1d(
-            q_input_one, weight, bias, mean, var, eps,
-            Y_scale, Y_zero_point)
+            q_input_one, weight, bias, mean, var, eps, Y_scale, Y_zero_point
+        )
 
 
 class QBatchNorm2dBenchmark(QBatchNormBenchmark):
@@ -68,7 +71,9 @@ class QBatchNorm2dBenchmark(QBatchNormBenchmark):
         self.set_module_name("QBatchNorm2d")
         # Note: quantized implementation requires rank 4, which is why we
         # add a 1 as the last dimension
-        self.input_one = torch.rand(M, N, K, 1, device=device, requires_grad=self.auto_set())
+        self.input_one = torch.rand(
+            M, N, K, 1, device=device, requires_grad=self.auto_set()
+        )
 
     def forward(
         self,
@@ -79,11 +84,11 @@ class QBatchNorm2dBenchmark(QBatchNormBenchmark):
         var,
         eps: float,
         Y_scale: float,
-        Y_zero_point: int
+        Y_zero_point: int,
     ):
         return torch.ops.quantized.batch_norm2d(
-            q_input_one, weight, bias, mean, var, eps,
-            Y_scale, Y_zero_point)
+            q_input_one, weight, bias, mean, var, eps, Y_scale, Y_zero_point
+        )
 
 
 op_bench.generate_pt_test(batchnorm_configs_short, QBatchNorm1dBenchmark)

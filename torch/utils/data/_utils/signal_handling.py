@@ -1,4 +1,4 @@
-r""""Signal handling for multiprocessing data loading.
+r"""Signal handling for multiprocessing data loading.
 
 NOTE [ Signal handling in multiprocessing data loading ]
 

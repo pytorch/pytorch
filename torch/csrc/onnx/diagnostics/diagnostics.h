@@ -3,9 +3,7 @@
 #include <torch/csrc/utils/pybind.h>
 #include <string>
 
-namespace torch {
-namespace onnx {
-namespace diagnostics {
+namespace torch::onnx::diagnostics {
 
 /**
  * @brief Level of a diagnostic.
@@ -61,6 +59,4 @@ inline void Diagnose(
       py_rule, py_level, py_message, "cpp_stack"_a = true);
 }
 
-} // namespace diagnostics
-} // namespace onnx
-} // namespace torch
+} // namespace torch::onnx::diagnostics

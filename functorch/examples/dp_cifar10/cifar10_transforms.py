@@ -17,11 +17,11 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data
 import torchvision.transforms as transforms
+
+from torch.func import functional_call, grad_and_value, vmap
 from torchvision import models
 from torchvision.datasets import CIFAR10
 from tqdm import tqdm
-
-from torch.func import vmap, grad_and_value, functional_call
 
 logging.basicConfig(
     format="%(asctime)s:%(levelname)s:%(message)s",
@@ -44,12 +44,16 @@ def accuracy(preds, labels):
 
 def compute_norms(sample_grads):
     batch_size = sample_grads[0].shape[0]
-    norms = [sample_grad.view(batch_size, -1).norm(2, dim=-1) for sample_grad in sample_grads]
+    norms = [
+        sample_grad.view(batch_size, -1).norm(2, dim=-1) for sample_grad in sample_grads
+    ]
     norms = torch.stack(norms, dim=0).norm(2, dim=0)
     return norms, batch_size
 
 
-def clip_and_accumulate_and_add_noise(model, max_per_sample_grad_norm=1.0, noise_multiplier=1.0):
+def clip_and_accumulate_and_add_noise(
+    model, max_per_sample_grad_norm=1.0, noise_multiplier=1.0
+):
     sample_grads = tuple(param.grad_sample for param in model.parameters())
 
     # step 0: compute the norms
@@ -60,18 +64,21 @@ def clip_and_accumulate_and_add_noise(model, max_per_sample_grad_norm=1.0, noise
     clip_factor = clip_factor.clamp(max=1.0)
 
     # step 2: clip
-    grads = tuple(torch.einsum('i,i...', clip_factor, sample_grad)
-                  for sample_grad in sample_grads)
+    grads = tuple(
+        torch.einsum("i,i...", clip_factor, sample_grad) for sample_grad in sample_grads
+    )
 
     # step 3: add gaussian noise
     stddev = max_per_sample_grad_norm * noise_multiplier
-    noises = tuple(torch.normal(0, stddev, grad_param.shape, device=grad_param.device)
-                   for grad_param in grads)
+    noises = tuple(
+        torch.normal(0, stddev, grad_param.shape, device=grad_param.device)
+        for grad_param in grads
+    )
     grads = tuple(noise + grad_param for noise, grad_param in zip(noises, grads))
 
     # step 4: assign the new grads, delete the sample grads
     for param, param_grad in zip(model.parameters(), grads):
-        param.grad = param_grad/batch_size
+        param.grad = param_grad / batch_size
         del param.grad_sample
 
 
@@ -84,7 +91,6 @@ def train(args, model, train_loader, optimizer, epoch, device):
     top1_acc = []
 
     for i, (images, target) in enumerate(tqdm(train_loader)):
-
         images = images.to(device)
         target = target.to(device)
 
@@ -120,8 +126,9 @@ def train(args, model, train_loader, optimizer, epoch, device):
         # detaching weights since we don't need to track gradients outside of transforms
         # and this is more performant
         detached_weights = {k: v.detach() for k, v in weights.items()}
-        sample_grads, (sample_loss, output) = \
-            vmap(grads_loss_output, (None, 0, 0))(detached_weights, images, target)
+        sample_grads, (sample_loss, output) = vmap(grads_loss_output, (None, 0, 0))(
+            detached_weights, images, target
+        )
         loss = sample_loss.mean()
 
         for name, grad_sample in sample_grads.items():
@@ -129,7 +136,8 @@ def train(args, model, train_loader, optimizer, epoch, device):
 
         # Step 2: Clip the per-sample-grads, sum them to form grads, and add noise
         clip_and_accumulate_and_add_noise(
-            model, args.max_per_sample_grad_norm, args.sigma)
+            model, args.max_per_sample_grad_norm, args.sigma
+        )
 
         preds = np.argmax(output.detach().cpu().numpy(), axis=1)
         labels = target.detach().cpu().numpy()
@@ -270,9 +278,7 @@ def main():
             for param_group in optimizer.param_groups:
                 param_group["lr"] = lr
 
-        train_duration = train(
-            args, model, train_loader, optimizer, epoch, device
-        )
+        train_duration = train(args, model, train_loader, optimizer, epoch, device)
         top1_acc = test(args, model, test_loader, device)
 
         # remember best acc@1 and save checkpoint
@@ -308,6 +314,7 @@ def main():
     )
     logger.info(metrics)
 
+
 def parse_args():
     parser = argparse.ArgumentParser(description="PyTorch CIFAR10 DP Training")
     parser.add_argument(
@@ -338,7 +345,7 @@ def parse_args():
         default=256,
         type=int,
         metavar="N",
-        help="mini-batch size for test dataset (default: 256)"
+        help="mini-batch size for test dataset (default: 256)",
     )
     parser.add_argument(
         "--sample-rate",

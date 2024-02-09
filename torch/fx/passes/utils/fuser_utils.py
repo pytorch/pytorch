@@ -13,7 +13,7 @@ from torch.fx._compatibility import compatibility
 @compatibility(is_backward_compatible=False)
 def topo_sort(nodes: NodeList) -> NodeList:
     # sort nodes according to the topological order
-    indegree_map = {node : 0 for node in nodes}
+    indegree_map = dict.fromkeys(nodes, 0)
     candidates: SimpleQueue = SimpleQueue()
 
     for node in nodes:
@@ -173,8 +173,8 @@ def fuse_as_graphmodule(gm: GraphModule,
 
     # lint to ensure correctness
     subgraph.lint()
-
-    fused_gm: GraphModule = lift_subgraph_as_module(gm, subgraph, class_name=module_name)
+    fused_gm: GraphModule
+    fused_gm, _ = lift_subgraph_as_module(gm, subgraph, comp_name="", class_name=module_name)
 
     # sub_gm's input nodes in the original module
     original_inputs: Tuple[Node, ...] = tuple(node_to_placeholder.keys())

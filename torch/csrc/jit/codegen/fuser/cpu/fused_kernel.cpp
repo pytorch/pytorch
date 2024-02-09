@@ -6,12 +6,9 @@
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 #include <torch/csrc/jit/codegen/fuser/cpu/temp_file.h>
-#include <torch/csrc/utils/memory.h>
 
 #include <cstdlib>
 #include <iostream>
-#include <sstream>
-#include <stdexcept>
 #include <string>
 
 namespace torch {
@@ -333,7 +330,7 @@ FusedKernelCPU::FusedKernelCPU(
   runCompiler(cpp_file.name(), so_file.name());
   if (debugFuser() >= 2)
     disas(so_file.name());
-  so_lib = make_unique<at::DynamicLibrary>(so_file.name().c_str());
+  so_lib = std::make_unique<at::DynamicLibrary>(so_file.name().c_str());
 #pragma GCC diagnostic ignored "-Wpedantic"
   kernel =
       reinterpret_cast<void (*)(uint32_t, void**)>(so_lib->sym(name_.c_str()));

@@ -86,11 +86,13 @@ if __name__ == "__main__":
         version = tagged_version
 
     with open(version_path, "w") as f:
+        f.write("from typing import Optional\n\n")
+        f.write("__all__ = ['__version__', 'debug', 'cuda', 'git_version', 'hip']\n")
         f.write(f"__version__ = '{version}'\n")
         # NB: This is not 100% accurate, because you could have built the
         # library code with DEBUG, but csrc without DEBUG (in which case
         # this would claim to be a release build when it's not.)
         f.write(f"debug = {repr(bool(args.is_debug))}\n")
-        f.write(f"cuda = {repr(args.cuda_version)}\n")
+        f.write(f"cuda: Optional[str] = {repr(args.cuda_version)}\n")
         f.write(f"git_version = {repr(sha)}\n")
-        f.write(f"hip = {repr(args.hip_version)}\n")
+        f.write(f"hip: Optional[str] = {repr(args.hip_version)}\n")

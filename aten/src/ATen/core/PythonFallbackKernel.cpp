@@ -31,6 +31,7 @@ constexpr c10::DispatchKeySet after_Python_keyset = c10::DispatchKeySet(c10::Dis
 // This guard assumes that tls_on_entry has a value.
 struct StashTLSOnEntryGuard {
 public:
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   StashTLSOnEntryGuard(): saved_(tls_on_entry.value()) {
     tls_on_entry = c10::nullopt;
   }

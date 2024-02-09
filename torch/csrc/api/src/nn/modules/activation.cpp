@@ -432,7 +432,7 @@ void ThresholdImpl::pretty_print(std::ostream& stream) const {
 
 MultiheadAttentionImpl::MultiheadAttentionImpl(
     const MultiheadAttentionOptions& options_)
-    : Module("torch::nn::MultiheadAttention"), options(options_) {
+    : Cloneable("torch::nn::MultiheadAttention"), options(options_) {
   // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }

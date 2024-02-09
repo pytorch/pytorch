@@ -74,7 +74,7 @@ void cpu_pixel_shuffle_channels_last(
   using Vec = vec::Vectorized<scalar_t>;
   at::parallel_for(0, nbatch * height, 0, [&](int64_t begin, int64_t end) {
     // temp buffer holding each channel lane
-    std::unique_ptr<scalar_t []> buffer(new scalar_t[channels]);
+    auto buffer = std::make_unique<scalar_t []>(channels);
     scalar_t* buffer_ptr = buffer.get();
 
     int64_t n{0}, h{0};

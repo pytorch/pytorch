@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/stmt.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
 
 #include <functional>
@@ -29,7 +30,6 @@ class TORCH_API Reducer {
   template <typename RI>
   Reducer(ExprHandle init, RI interaction)
       : init_(init.node()), interaction_(std::move(interaction)) {}
-  virtual ~Reducer() = default;
 
   ExprPtr initializer() const {
     return init_;

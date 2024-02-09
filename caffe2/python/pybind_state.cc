@@ -192,7 +192,7 @@ py::object fetchBlob(Workspace* ws, const std::string& name) {
     // If there is no fetcher registered, return a metainfo string.
     // If all branches failed, we will return a metainfo string.
     std::stringstream ss;
-    ss << caffe2::string(name) << ", a C++ native class of type "
+    ss << std::string(name) << ", a C++ native class of type "
        << blob.TypeName() << ".";
     return py::bytes(ss.str());
   }
@@ -1029,7 +1029,7 @@ void addGlobalMethods(py::module& m) {
   );
 
   // if the binary is built with USE_ROCM, this is a ROCm build
-  // and therefore we need to ignore dyndep failures (because the the module
+  // and therefore we need to ignore dyndep failures (because the module
   // may not have a ROCm equivalent yet e.g. nccl)
   m.attr("use_rocm") = py::bool_(
 #if defined(USE_ROCM)

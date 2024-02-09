@@ -1,18 +1,27 @@
-import torch
 import os
-from .grad_mode import _DecoratorContextManager
 from collections import namedtuple
 
 from typing import Any
 
-__all__ = ["UnpackedDualTensor", "enter_dual_level", "exit_dual_level", "make_dual", "unpack_dual", "dual_level"]
+import torch
+from .grad_mode import _DecoratorContextManager
+
+__all__ = [
+    "UnpackedDualTensor",
+    "enter_dual_level",
+    "exit_dual_level",
+    "make_dual",
+    "unpack_dual",
+    "dual_level",
+]
 
 # Global variable used to make the python API simpler to use
 _current_level = -1
 
 
 def enter_dual_level():
-    r"""Function that can be used to enter a new forward grad level.
+    r"""Enter a new forward grad level.
+
     This level can be used to make and unpack dual Tensors to compute
     forward gradients.
 
@@ -22,14 +31,17 @@ def enter_dual_level():
     global _current_level
     new_level = torch._C._enter_dual_level()
     if new_level != _current_level + 1:
-        raise RuntimeError("Entering a new forward AD level but the current level "
-                           "is not valid. Make sure you did not modified it directly.")
+        raise RuntimeError(
+            "Entering a new forward AD level but the current level "
+            "is not valid. Make sure you did not modified it directly."
+        )
     _current_level = new_level
     return new_level
 
 
 def exit_dual_level(*, level=None):
-    r"""Function that can be used to exit a forward grad level.
+    r"""Exit a forward grad level.
+
     This function deletes all the gradients associated with this
     level. Only deleting the latest entered level is allowed.
 
@@ -40,15 +52,17 @@ def exit_dual_level(*, level=None):
     if level is None:
         level = _current_level
     if level != _current_level:
-        raise RuntimeError("Trying to exit a forward AD level that was not the last one "
-                           "that was created. This is not supported.")
+        raise RuntimeError(
+            "Trying to exit a forward AD level that was not the last one "
+            "that was created. This is not supported."
+        )
     torch._C._exit_dual_level(level=level)
     _current_level = level - 1
 
 
 def make_dual(tensor, tangent, *, level=None):
-    r"""Associates a tensor value with a forward gradient, the tangent, to create a
-    "dual tensor", which is used to compute forward AD gradients.
+    r"""Associate a tensor value with its tangent to create a "dual tensor" for forward AD gradient computation.
+
     The result is a new tensor aliased to :attr:`tensor` with :attr:`tangent` embedded
     as an attribute as-is if it has the same storage layout or copied otherwise.
     The tangent attribute can be recovered with :func:`unpack_dual`.
@@ -93,26 +107,38 @@ def make_dual(tensor, tangent, *, level=None):
         level = _current_level
 
     if level < 0:
-        raise RuntimeError("Trying to create a dual Tensor for forward AD but no level "
-                           "exists, make sure to enter_dual_level() first.")
+        raise RuntimeError(
+            "Trying to create a dual Tensor for forward AD but no level "
+            "exists, make sure to enter_dual_level() first."
+        )
     if not (tensor.is_floating_point() or tensor.is_complex()):
-        raise ValueError(f"Expected primal to be floating point or complex, but got: {tensor.dtype}")
+        raise ValueError(
+            f"Expected primal to be floating point or complex, but got: {tensor.dtype}"
+        )
     if not (tangent.is_floating_point() or tangent.is_complex()):
-        raise ValueError(f"Expected tangent to be floating point or complex, but got: {tangent.dtype}")
+        raise ValueError(
+            f"Expected tangent to be floating point or complex, but got: {tangent.dtype}"
+        )
 
     return torch._VF._make_dual(tensor, tangent, level=level)
 
-_UnpackedDualTensor = namedtuple('_UnpackedDualTensor', ['primal', 'tangent'])
+
+_UnpackedDualTensor = namedtuple("_UnpackedDualTensor", ["primal", "tangent"])
 
 
 class UnpackedDualTensor(_UnpackedDualTensor):
     r"""Namedtuple returned by :func:`unpack_dual` containing the primal and tangent components of the dual tensor.
-    See :func:`unpack_dual` for more details."""
+
+    See :func:`unpack_dual` for more details.
+
+    """
+
     pass
 
 
 def unpack_dual(tensor, *, level=None):
-    r"""Unpacks a "dual tensor" to get both its Tensor value and its forward AD gradient.
+    r"""Unpack a "dual tensor" to get both its Tensor value and its forward AD gradient.
+
     The result is a namedtuple ``(primal, tangent)`` where ``primal`` is a view of
     :attr:`tensor`'s primal and ``tangent`` is :attr:`tensor`'s tangent as-is.
     Neither of these tensors can be dual tensor of level :attr:`level`.
@@ -143,8 +169,7 @@ def unpack_dual(tensor, *, level=None):
 
 
 class dual_level(_DecoratorContextManager):
-    r"""Context-manager that enables forward AD. All forward AD computation must
-    be performed in a ``dual_level`` context.
+    r"""Context-manager for forward AD, where all forward AD computation must occur within the ``dual_level`` context.
 
     .. Note::
 
@@ -176,14 +201,17 @@ class dual_level(_DecoratorContextManager):
     Please see the `forward-mode AD tutorial <https://pytorch.org/tutorials/intermediate/forward_ad_usage.html>`__
     for detailed steps on how to use this API.
     """
+
     def __enter__(self):
         return enter_dual_level()
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         exit_dual_level()
 
+
 # Private helper functions
 _is_fwd_grad_enabled = torch._C._is_fwd_grad_enabled
+
 
 # Private helper function to enable or disable fwd grad.
 # If you're a user and want to use this, please file an issue to discuss the use case.

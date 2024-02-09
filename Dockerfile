@@ -63,18 +63,18 @@ RUN --mount=type=cache,target=/opt/ccache \
 
 FROM conda as conda-installs
 ARG PYTHON_VERSION=3.8
-ARG CUDA_VERSION=11.7
+ARG CUDA_VERSION=12.1
 ARG CUDA_CHANNEL=nvidia
 ARG INSTALL_CHANNEL=pytorch-nightly
 # Automatically set by buildx
-RUN /opt/conda/bin/conda update -y conda
-RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y python=${PYTHON_VERSION}
+# Note conda needs to be pinned to 23.5.2 see: https://github.com/pytorch/pytorch/issues/106470
+RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y python=${PYTHON_VERSION} conda=23.5.2
 ARG TARGETPLATFORM
 
 # On arm64 we can only install wheel packages.
 RUN case ${TARGETPLATFORM} in \
-         "linux/arm64")  pip install --extra-index-url https://download.pytorch.org/whl/cpu/ torch torchvision torchaudio torchtext ;; \
-         *)              /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -c "${CUDA_CHANNEL}" -y "python=${PYTHON_VERSION}" pytorch torchvision torchaudio torchtext "pytorch-cuda=$(echo $CUDA_VERSION | cut -d'.' -f 1-2)"  ;; \
+         "linux/arm64")  pip install --extra-index-url https://download.pytorch.org/whl/cpu/ torch torchvision torchaudio ;; \
+         *)              /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -c "${CUDA_CHANNEL}" -y "python=${PYTHON_VERSION}" pytorch torchvision torchaudio "pytorch-cuda=$(echo $CUDA_VERSION | cut -d'.' -f 1-2)"  ;; \
     esac && \
     /opt/conda/bin/conda clean -ya
 RUN /opt/conda/bin/pip install torchelastic
@@ -99,6 +99,7 @@ ENV PATH /opt/conda/bin:$PATH
 ENV NVIDIA_VISIBLE_DEVICES all
 ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
 ENV LD_LIBRARY_PATH /usr/local/nvidia/lib:/usr/local/nvidia/lib64
+ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
 ENV PYTORCH_VERSION ${PYTORCH_VERSION}
 WORKDIR /workspace
 

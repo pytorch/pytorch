@@ -1,4 +1,5 @@
 import argparse
+
 import torch
 import torch.nn as nn
 
@@ -8,6 +9,7 @@ from .runner import get_nn_runners
 
 def barf():
     import pdb
+
     pdb.set_trace()
 
 
@@ -24,12 +26,28 @@ def filter_requires_grad(tensors):
     return [t for t in tensors if t.requires_grad]
 
 
-def test_rnns(experim_creator, control_creator, check_grad=True, verbose=False,
-              seqLength=100, numLayers=1, inputSize=512, hiddenSize=512,
-              miniBatch=64, device='cuda', seed=17):
-    creator_args = dict(seqLength=seqLength, numLayers=numLayers,
-                        inputSize=inputSize, hiddenSize=hiddenSize,
-                        miniBatch=miniBatch, device=device, seed=seed)
+def test_rnns(
+    experim_creator,
+    control_creator,
+    check_grad=True,
+    verbose=False,
+    seqLength=100,
+    numLayers=1,
+    inputSize=512,
+    hiddenSize=512,
+    miniBatch=64,
+    device="cuda",
+    seed=17,
+):
+    creator_args = dict(
+        seqLength=seqLength,
+        numLayers=numLayers,
+        inputSize=inputSize,
+        hiddenSize=hiddenSize,
+        miniBatch=miniBatch,
+        device=device,
+        seed=seed,
+    )
 
     print("Setting up...")
     control = control_creator(**creator_args)
@@ -61,7 +79,7 @@ def test_rnns(experim_creator, control_creator, check_grad=True, verbose=False,
 
     if verbose:
         print(experim.forward.graph_for(*experim.inputs))
-    print('')
+    print("")
 
 
 def test_vl_py(**test_args):
@@ -69,12 +87,17 @@ def test_vl_py(**test_args):
     # It's done this way because those two don't give the same outputs so
     # the result isn't an apples-to-apples comparison right now.
     control_creator = varlen_pytorch_lstm_creator
-    name, experim_creator, context = get_nn_runners('vl_py')[0]
+    name, experim_creator, context = get_nn_runners("vl_py")[0]
     with context():
-        print(f'testing {name}...')
+        print(f"testing {name}...")
         creator_keys = [
-            'seqLength', 'numLayers', 'inputSize',
-            'hiddenSize', 'miniBatch', 'device', 'seed'
+            "seqLength",
+            "numLayers",
+            "inputSize",
+            "hiddenSize",
+            "miniBatch",
+            "device",
+            "seed",
         ]
         creator_args = {key: test_args[key] for key in creator_keys}
 
@@ -103,9 +126,11 @@ def test_vl_py(**test_args):
         assert control.backward is not None
         assert experim.backward is not None
         control_backward_inputs = control.backward_setup(
-            (control_out, control_hiddens), test_args['seed'])
+            (control_out, control_hiddens), test_args["seed"]
+        )
         experim_backward_inputs = experim.backward_setup(
-            (experim_out, experim_hiddens), test_args['seed'])
+            (experim_out, experim_hiddens), test_args["seed"]
+        )
 
         control.backward(*control_backward_inputs)
         experim.backward(*experim_backward_inputs)
@@ -114,45 +139,44 @@ def test_vl_py(**test_args):
         experim_grads = [p.grad for p in experim.params]
         assertEqual(experim_grads, control_grads)
 
-        if test_args['verbose']:
+        if test_args["verbose"]:
             print(experim.forward.graph_for(*experim.inputs))
-        print('')
+        print("")
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Test lstm correctness')
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Test lstm correctness")
 
-    parser.add_argument('--seqLength', default='100', type=int)
-    parser.add_argument('--numLayers', default='1', type=int)
-    parser.add_argument('--inputSize', default='512', type=int)
-    parser.add_argument('--hiddenSize', default='512', type=int)
-    parser.add_argument('--miniBatch', default='64', type=int)
-    parser.add_argument('--device', default='cuda', type=str)
-    parser.add_argument('--check-grad', '--check_grad', default='True', type=bool)
-    parser.add_argument('--variable-lstms', '--variable_lstms', action='store_true')
-    parser.add_argument('--seed', default='17', type=int)
-    parser.add_argument('--verbose', action='store_true')
-    parser.add_argument('--rnns', nargs='*',
-                        help='What to run. jit_premul, jit, etc')
+    parser.add_argument("--seqLength", default="100", type=int)
+    parser.add_argument("--numLayers", default="1", type=int)
+    parser.add_argument("--inputSize", default="512", type=int)
+    parser.add_argument("--hiddenSize", default="512", type=int)
+    parser.add_argument("--miniBatch", default="64", type=int)
+    parser.add_argument("--device", default="cuda", type=str)
+    parser.add_argument("--check-grad", "--check_grad", default="True", type=bool)
+    parser.add_argument("--variable-lstms", "--variable_lstms", action="store_true")
+    parser.add_argument("--seed", default="17", type=int)
+    parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--rnns", nargs="*", help="What to run. jit_premul, jit, etc")
     args = parser.parse_args()
     if args.rnns is None:
-        args.rnns = ['jit_premul', 'jit']
+        args.rnns = ["jit_premul", "jit"]
     print(args)
 
-    if 'cuda' in args.device:
+    if "cuda" in args.device:
         assert torch.cuda.is_available()
 
     rnn_runners = get_nn_runners(*args.rnns)
 
     should_test_varlen_lstms = args.variable_lstms
     test_args = vars(args)
-    del test_args['rnns']
-    del test_args['variable_lstms']
+    del test_args["rnns"]
+    del test_args["variable_lstms"]
 
     if should_test_varlen_lstms:
         test_vl_py(**test_args)
 
     for name, creator, context in rnn_runners:
         with context():
-            print(f'testing {name}...')
+            print(f"testing {name}...")
             test_rnns(creator, pytorch_lstm_creator, **test_args)

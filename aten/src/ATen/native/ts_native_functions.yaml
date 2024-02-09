@@ -168,6 +168,9 @@ full_codegen:
   - slice_scatter
   - diagonal_scatter
   - as_strided_scatter
+  # random ops
+  - normal_functional
+  - uniform
 ir_gen:
   - selu
 supported:
@@ -177,7 +180,6 @@ supported:
   - empty.memory_format
   - empty_strided
   - fill_.Scalar
-  - normal_
   - max_pool3d_with_indices
   - max_pool3d_with_indices_backward
   - _to_copy

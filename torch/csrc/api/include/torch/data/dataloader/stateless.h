@@ -3,8 +3,6 @@
 #include <torch/data/dataloader/base.h>
 #include <torch/data/worker_exception.h>
 
-#include <torch/csrc/utils/memory.h>
-
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
@@ -52,7 +50,7 @@ class StatelessDataLoader : public DataLoaderBase<
     }
     if (this->options_.workers == 0) {
       this->main_thread_dataset_ =
-          torch::make_unique<Dataset>(std::move(dataset));
+          std::make_unique<Dataset>(std::move(dataset));
     }
   }
 

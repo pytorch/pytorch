@@ -1,4 +1,4 @@
-r"""Functional interface"""
+r"""Functional interface."""
 import math
 from torch import Tensor
 from typing import List

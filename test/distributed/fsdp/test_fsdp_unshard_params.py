@@ -16,7 +16,7 @@ from torch.distributed.fsdp import (
     ShardingStrategy,
 )
 from torch.distributed.fsdp._common_utils import clean_tensor_name
-from torch.distributed.fsdp.flat_param import FlatParameter
+from torch.distributed.fsdp._flat_param import FlatParameter
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -258,6 +258,11 @@ class TestUnshardParams(TestUnshardParamsBase):
         """
         Tests that unsharding parameters respects the expected reshard behavior
         between forward and backward as well as after backward.
+
+        For mixed precision, we should *not* respect the reshard behavior
+        because the ``summon_full_params()`` forces full precision, which uses
+        a different all-gather tensor than the one already in memory and will
+        not persist any modifications correctly.
         """
         self.run_subtests(
             {
@@ -321,6 +326,12 @@ class TestUnshardParams(TestUnshardParamsBase):
             offload_to_cpu=offload_to_cpu,
         ):
             pass
+        if mixed_precision is not None:
+            # After forcing full precision, we must invalidate the existing
+            # unsharded low-precision flat parameter since it will not persist
+            # changes from the `summon_full_params()` context, so we cannot
+            # respect the reshard behavior
+            expected_outer_flat_param_unsharded_numel = 0
         self.assertEqual(
             expected_outer_flat_param_unsharded_numel,
             _get_unsharded_storage_size(outer_flat_param),

@@ -4,6 +4,9 @@
 #include <ATen/Dispatch.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/ops/arange_native.h>
+#include <ATen/ops/linspace_native.h>
+#include <ATen/ops/range_native.h>
 #include <cmath>
 #include <limits>
 
@@ -50,7 +53,7 @@ struct RangeCachedGraph : public mps::MPSCachedGraph {
 
 Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
   AT_DISPATCH_MPS_TYPES(result.scalar_type(), "arange_mps", [&]() {
-    using accscalar_t = at::acc_type<scalar_t, true>;
+    using accscalar_t = at::acc_type_device<scalar_t, kMPS>;
     auto xstart = start.to<accscalar_t>();
     auto xend = end.to<accscalar_t>();
     auto xstep = step.to<accscalar_t>();
@@ -118,9 +121,7 @@ Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& ste
       MPSScalar stepScalar = getMPSScalar(step, result.scalar_type());
       feeds[cachedGraph->multiplyTensor] = getMPSGraphTensorFromScalar(stream, stepScalar);
 
-      NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-          @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-      runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+      runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
     }
 
     if (!is_contiguous) {
@@ -133,7 +134,7 @@ Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& ste
 
 Tensor& range_mps_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
   AT_DISPATCH_MPS_TYPES(result.scalar_type(), "arange_mps", [&]() {
-    using accscalar_t = at::acc_type<scalar_t, true>;
+    using accscalar_t = at::acc_type_device<scalar_t, kMPS>;
     auto xstart = start.to<accscalar_t>();
     auto xend = end.to<accscalar_t>();
     auto xstep = step.to<accscalar_t>();
@@ -187,9 +188,7 @@ Tensor& range_mps_out(const Scalar& start, const Scalar& end, const Scalar& step
       MPSScalar stepScalar = getMPSScalar(step, result.scalar_type());
       feeds[cachedGraph->multiplyTensor] = getMPSGraphTensorFromScalar(stream, stepScalar);
 
-      NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-          @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-      runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+      runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
     }
 
     if (!is_contiguous) {
@@ -256,9 +255,7 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
       MPSScalar multiplyScalar = getMPSScalar(multiply, ScalarType::Float);
       feeds[cachedGraph->multiplyTensor] = getMPSGraphTensorFromScalar(stream, multiplyScalar);
 
-      NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-          @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-      runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+      runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
     }
 
     if (!result.is_contiguous()) {
