@@ -82,7 +82,7 @@ at::Tensor InputMetadata::maybe_expand(
     const auto& target = desired[target_dim - i - 1];
     // The conditions here are written carefully so that we are able to
     // infer deferred runtime asserts
-    if (TORCH_GUARD_SIZE_OBLIVIOUS(size.sym_ne(1))) {
+    if (TORCH_GUARD_SIZE_OBLIVIOUS(size.sym_eq(1))) {
       // NB: we could short circuit this once needs_reduce is true but there's
       // no point since the reduction function will guard on this anyway
       if (!definitely_true(size.sym_eq(target))) {
