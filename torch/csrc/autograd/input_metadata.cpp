@@ -53,17 +53,53 @@ at::Tensor InputMetadata::zeros_like() const {
   return at::zeros_symint(shape_as_dim_vector(), options_);
 }
 
+static bool definitely_true(const c10::SymBool& b) {
+  return b.has_hint() && b.guard_bool(__FILE__, __LINE__);
+}
+
 at::Tensor InputMetadata::maybe_expand(
     const size_t i,
     at::Tensor grad,
     const std::function<std::string(const std::string&)>& format_error) const {
-  if (!is_same_shape(grad)) {
-    if (is_expandable_to_shape(grad)) {
-      return reduce_grad(grad);
+  // TODO: NT shenanigans
+
+  auto fail = [&]() {
+    const auto message = incompatible_shape_error_message(i, grad);
+    TORCH_CHECK(false, format_error(message.str()));
+  };
+
+  auto shape = shape_as_dim_vector();
+  auto desired = grad.sym_sizes();
+
+  size_t ndim = shape.size();
+  size_t target_dim = desired.size();
+  if (ndim > target_dim) {
+    fail();
+  }
+  bool needs_reduce = false;
+  for (const auto i : c10::irange(ndim)) {
+    const auto& size = shape[ndim - i - 1];
+    const auto& target = desired[target_dim - i - 1];
+    // The conditions here are written carefully so that we are able to
+    // infer deferred runtime asserts
+    if (TORCH_GUARD_SIZE_OBLIVIOUS(size.sym_ne(1))) {
+      // NB: we could short circuit this once needs_reduce is true but there's
+      // no point since the reduction function will guard on this anyway
+      if (!definitely_true(size.sym_eq(target))) {
+        needs_reduce = true;
+      }
     } else {
-      const auto message = incompatible_shape_error_message(i, grad);
-      TORCH_CHECK(false, format_error(message.str()));
+      if (!size.sym_eq(target).expect_true(__FILE__, __LINE__)) {
+        fail();
+      }
     }
+  }
+  if (ndim != target_dim) {
+    needs_reduce = true;
+  }
+
+  if (needs_reduce) {
+    return reduce_grad(grad);
   } else {
     return grad;
   }
