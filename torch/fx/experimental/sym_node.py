@@ -371,7 +371,9 @@ class SymNode:
             raise
 
     def expect_true(self, file, line):
-        if self.has_hint():
+        from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+        if self.has_hint() and not free_unbacked_symbols(self.expr):
             # OK to generate guards
             return self.guard_bool(file, line)
         # Generate a deferred runtime assert (this might actually end up doing
