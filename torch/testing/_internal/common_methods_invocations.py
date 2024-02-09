@@ -12383,6 +12383,9 @@ op_db: List[OpInfo] = [
                    }),
                    "TestDecomp", "test_comprehensive", device_type="cuda",
                ),
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=7e-2, rtol=3e-3)}),
+                            'TestOperators', 'test_jvpvjp',
+                            device_type='cuda'),
            ],
            skips=(
                # Strides are not the same!

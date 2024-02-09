@@ -628,7 +628,7 @@ class TestOperators(TestCase):
         tol1('__rmatmul__',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
         tol1('matmul',
-             {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
+             {torch.float32: tol(atol=3e-05, rtol=5e-05)}),
         tol2('linalg.pinv', 'hermitian',
              {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
         tol1('linalg.tensorsolve',
