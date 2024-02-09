@@ -158,12 +158,14 @@ struct UniqueCub {
     } else {
       sorted = at::empty(self.sizes(), self.options());
     }
-    scalar_t* sorted_data = sorted.mutable_data_ptr<scalar_t>();
 
     Tensor sorted_indices;
     if (!return_inverse) {
       if (!consecutive) {
-        cuda::cub::radix_sort_keys(self.const_data_ptr<scalar_t>(), sorted_data, num_inp);
+        cuda::cub::radix_sort_keys(
+          self.const_data_ptr<scalar_t>(),
+          sorted.mutable_data_ptr<scalar_t>(),
+          num_inp);
       }
     } else {
       if (!consecutive) {
@@ -172,7 +174,7 @@ struct UniqueCub {
         sorted_indices = at::empty({num_inp}, options);
         cuda::cub::radix_sort_pairs(
             self.const_data_ptr<scalar_t>(),
-            sorted_data,
+            sorted.mutable_data_ptr<scalar_t>(),
             range.const_data_ptr<int64_t>(),
             sorted_indices.mutable_data_ptr<int64_t>(),
             num_inp);
