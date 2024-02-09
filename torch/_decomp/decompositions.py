@@ -4473,18 +4473,11 @@ def isin_sorting(elements, test_elements, *, assume_unique=False, invert=False):
         all_elements = torch.cat([elements_flat, test_elements_flat])
         sorted_elements, sorted_order = torch.sort(all_elements, stable=True)
 
-        duplicate_mask = torch.empty_like(sorted_elements, dtype=torch.bool)
-        sorted_except_first = sorted_elements[1:]
-        sorted_except_last = sorted_elements[:-1]
+        duplicate_mask = sorted_elements[1:] == sorted_elements[:-1]
+        duplicate_mask = torch.constant_pad(duplicate_mask, [0, 1], False)
+
         if invert:
-            duplicate_mask = duplicate_mask.slice_scatter(sorted_except_first !=
-                                                           sorted_except_last,
-                                                           start=0, end=-1)
-        else:
-            duplicate_mask = duplicate_mask.slice_scatter(sorted_except_first ==
-                                                           sorted_except_last,
-                                                           start=0, end=-1)
-        duplicate_mask = duplicate_mask.index_put([torch.tensor(-1)], torch.tensor(invert))
+            duplicate_mask = duplicate_mask.logical_not()
 
         mask = torch.empty_like(duplicate_mask)
         mask = mask.index_copy(0, sorted_order, duplicate_mask)
