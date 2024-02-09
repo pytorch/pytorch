@@ -238,7 +238,6 @@ class FSDPParam:
             all_gather_output_size, dtype=dtype, device=device
         )
 
-    @torch.no_grad()
     def init_unsharded_param(self):
         if hasattr(self, "_unsharded_param"):
             return  # already initialized
