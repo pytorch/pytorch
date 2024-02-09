@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -ex
 
 # The generic Linux job chooses to use base env, not the one setup by the image
 CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
@@ -16,7 +17,9 @@ fi
 lintrunner init 2> /dev/null
 
 # Do build steps necessary for linters
-python3 -m tools.linter.clang_tidy.generate_build_files
+if [[ ${CLANG} == "1" ]]; then
+    python3 -m tools.linter.clang_tidy.generate_build_files
+fi
 python3 -m tools.generate_torch_version --is_debug=false
 python3 -m tools.pyi.gen_pyi \
     --native-functions-path aten/src/ATen/native/native_functions.yaml \
