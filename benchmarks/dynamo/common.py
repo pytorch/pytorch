@@ -655,7 +655,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             maybe_mark_step(args)
 
             # interleave the runs to handle frequency scaling and load changes
-            with maybe_mark_profile(p=p, mark="expected"):
+            with maybe_mark_profile(p=p, mark="expected"), maybe_snapshot_memory(
+                args.snapshot_memory, "eager"
+            ):
                 timings[rep, 0], expected_output = timed(
                     model,
                     model_iter_fn,
@@ -670,7 +672,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
             with maybe_mark_profile(p=p, mark="actual"), maybe_enable_compiled_autograd(
                 args.compiled_autograd
-            ):
+            ), maybe_snapshot_memory(args.snapshot_memory, "compiled"):
                 timings[rep, 1], actual_output = timed(
                     model,
                     frozen_model_iter_fn,
@@ -1964,6 +1966,28 @@ def maybe_init_distributed(should_init_distributed, rank, world_size, port="6789
             torch.distributed.destroy_process_group()
 
 
+@contextmanager
+def maybe_snapshot_memory(should_snapshot_memory, name):
+    # Enables Memory Snapshot tool for memory deep dives:
+    # https://pytorch.org/blog/understanding-gpu-memory-1/
+    try:
+        if should_snapshot_memory:
+            torch.cuda.memory._record_memory_history(max_entries=100000)
+        yield
+    finally:
+        if should_snapshot_memory:
+            try:
+                torch.cuda.memory._dump_snapshot(
+                    os.path.join(
+                        torch._dynamo.config.base_dir, f"{name}_memory_snapshot.pickle"
+                    )
+                )
+            except Exception as e:
+                logging.error("Failed to save memory snapshot, %s", e)
+
+            torch.cuda.memory._record_memory_history(enabled=None)
+
+
 class BenchmarkRunner:
     def __init__(self):
         self.model_iter_fn = None
@@ -3190,6 +3214,12 @@ def parse_args(args=None):
         "--compiled-autograd",
         action="store_true",
         help="Enables compiled autograd on compiled benchmark",
+    )
+
+    parser.add_argument(
+        "--snapshot-memory",
+        action="store_true",
+        help="Enables Memory Snapshot tool for memory deep dives: https://pytorch.org/blog/understanding-gpu-memory-1/",
     )
 
     group_fuser = parser.add_mutually_exclusive_group()
