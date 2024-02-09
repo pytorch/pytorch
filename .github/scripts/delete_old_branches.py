@@ -234,14 +234,14 @@ def delete_branches() -> None:
     # updated in 90 days and the branch hasn't been updated in 1.5 years
     for base_branch, (date, sub_branches) in branches.items():
         print(f"[{base_branch}] Updated {(now - date) / SEC_IN_DAY} days ago")
+        if base_branch in keep_branches:
+            print(f"[{base_branch}] Has magic label or open PR, skipping")
+            continue
         pr = prs_by_branch.get(base_branch)
         if pr:
             print(
                 f"[{base_branch}] Has PR {pr['number']}: {pr['state']}, updated {(now - pr['updatedAt']) / SEC_IN_DAY} days ago"
             )
-            if base_branch in keep_branches:
-                print(f"[{base_branch}] Has magic label or open PR, skipping")
-                continue
             if (
                 now - pr["updatedAt"] < CLOSED_PR_RETENTION
                 or (now - date) < CLOSED_PR_RETENTION
