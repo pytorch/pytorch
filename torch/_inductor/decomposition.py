@@ -250,10 +250,12 @@ def mm(self, input2):
 
 @register_decomposition([aten.cat.default])
 def cat(tensors, dim=0):
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     def non_empty_tensor(x):
         # special case for cat'ing with an empty tensor -
         # just drop the 'empty' inputs so they don't confuse the logic below.
-        return len(x.shape) > 1 or x.shape[0] > 0
+        return len(x.shape) > 1 or guard_size_oblivious(x.shape[0] > 0)
 
     filtered_tensors = list(filter(non_empty_tensor, tensors))
 
