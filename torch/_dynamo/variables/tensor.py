@@ -876,7 +876,14 @@ class SymNodeVariable(VariableTracker):
         return self.proxy
 
     def evaluate_expr(self, output_graph=None):
-        return guard_scalar(self.sym_num)
+        try:
+            return guard_scalar(self.sym_num)
+        except GuardOnDataDependentSymNode as e:
+            raise UserError(  # noqa: TRY200
+                UserErrorType.ANTI_PATTERN,
+                f"Consider annotating your code using torch._constrain_as_*(). {str(e)}",
+                case_name="constrain_as_size_example",
+            )
 
     def call_method(
         self,
