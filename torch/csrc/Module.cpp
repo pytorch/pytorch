@@ -2064,16 +2064,20 @@ Call this whenever a new thread is created in order to propagate values from
       },
       "Checks if a tensor's data pointer is COW");
 
-#ifdef USE_CUDA
-#if AT_CUDNN_ENABLED()
   py_module.def(
       "_get_cudnn_batch_norm_reserve_space_size",
       [](const at::Tensor& input) {
+#ifdef USE_CUDA
+#if AT_CUDNN_ENABLED()
         return at::native::_get_cudnn_batch_norm_reserve_space_size(input);
+#else
+        TORCH_CHECK(false, "PyTorch was not built with cudnn");
+#endif
+#else
+        TORCH_CHECK(false, "PyTorch was not built with cuda");
+#endif
       },
       py::arg("input"));
-#endif
-#endif
 
   py::enum_<at::native::BatchNormBackend>(py_module, "_BatchNormBackend")
       .value("Native", at::native::BatchNormBackend::Native)

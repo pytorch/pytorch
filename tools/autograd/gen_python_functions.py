@@ -164,6 +164,7 @@ _SKIP_PYTHON_BINDINGS = [
     "batch_norm_with_update",
     "batch_norm_with_update.out",
     "batch_norm_no_update",
+    "batch_norm_backward",
 ]
 
 SKIP_PYTHON_BINDINGS = [

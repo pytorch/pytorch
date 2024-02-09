@@ -76,6 +76,10 @@ aten::atanh
 aten::atanh.out
 aten::atanh_
 aten::baddbmm_
+aten::batch_norm_backward
+aten::batch_norm_no_update
+aten::batch_norm_with_update
+aten::batch_norm_with_update_functional
 aten::bitwise_and.Scalar
 aten::bitwise_and.Scalar_Tensor
 aten::bitwise_and.Scalar_Tensor_out
