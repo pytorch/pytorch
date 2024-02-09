@@ -196,6 +196,9 @@ class set_grad_enabled(_DecoratorContextManager):
         torch._C._set_grad_enabled(self.prev)
 
     def clone(self) -> "set_grad_enabled":
+        r"""
+        Create a copy of this class
+        """
         return self.__class__(self.mode)
 
 
@@ -272,6 +275,9 @@ class inference_mode(_DecoratorContextManager):
         self._inference_mode_context.__exit__(exc_type, exc_value, traceback)
 
     def clone(self) -> "inference_mode":
+        r"""
+        Create a copy of this class
+        """
         return self.__class__(self.mode)
 
 
@@ -315,6 +321,9 @@ class set_multithreading_enabled(_DecoratorContextManager):
         torch._C._set_multithreading_enabled(self.prev)
 
     def clone(self) -> "set_multithreading_enabled":
+        r"""
+        Create a copy of this class
+        """
         return self.__class__(self.mode)
 
 

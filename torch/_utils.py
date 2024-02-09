@@ -4,7 +4,6 @@ import sys
 import traceback
 import warnings
 from collections import defaultdict
-from contextlib import nullcontext
 from typing import Any, DefaultDict, List, Optional
 
 import torch
@@ -178,7 +177,7 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
 # be a TypedStorage
 def _rebuild_tensor(storage, storage_offset, size, stride):
     # first construct a tensor with the correct dtype/device
-    t = torch.tensor([], dtype=storage.dtype, device=storage._untyped_storage.device)
+    t = torch.empty((), dtype=storage.dtype, device=storage._untyped_storage.device)
     return t.set_(storage._untyped_storage, storage_offset, size, stride)
 
 
@@ -491,22 +490,6 @@ def _import_dotted_name(name):
     for component in components[1:]:
         obj = getattr(obj, component)
     return obj
-
-
-# Taken from python 3.5 docs
-def _accumulate(iterable, fn=lambda x, y: x + y):
-    "Return running totals"
-    # _accumulate([1,2,3,4,5]) --> 1 3 6 10 15
-    # _accumulate([1,2,3,4,5], operator.mul) --> 1 2 6 24 120
-    it = iter(iterable)
-    try:
-        total = next(it)
-    except StopIteration:
-        return
-    yield total
-    for element in it:
-        total = fn(total, element)
-        yield total
 
 
 def _flatten_dense_tensors(tensors):
@@ -873,16 +856,8 @@ def is_compiling():
 def _functionalize_sync(t):
     # This code lives in python instead of C++ since conditioning on a certain python subclass
     # is much more of a pain in C++.
-    from torch._subclasses.functional_tensor import (
-        FunctionalTensor,
-        maybe_disable_functional_mode,
-    )
+    from torch._subclasses.functional_tensor import FunctionalTensor
 
-    ctx = (
-        maybe_disable_functional_mode
-        if isinstance(t, FunctionalTensor)
-        else nullcontext
-    )
     if isinstance(t, FunctionalTensor):
         # If a FunctionalTensorMode is active while syncing, we don't want it to intercept any ops that get called
         # when we sync our inner tensor.

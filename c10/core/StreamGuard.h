@@ -1,6 +1,11 @@
 #pragma once
 
+#include <c10/core/Device.h>
+#include <c10/core/Stream.h>
 #include <c10/core/impl/InlineStreamGuard.h>
+#include <c10/core/impl/VirtualGuardImpl.h>
+#include <c10/util/ArrayRef.h>
+#include <c10/util/Optional.h>
 
 namespace c10 {
 

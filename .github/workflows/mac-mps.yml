@@ -10,6 +10,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
+permissions: read-all
+
 jobs:
   macos-12-py3-arm64-build:
     name: macos-12-py3-arm64
@@ -17,7 +19,7 @@ jobs:
     with:
       sync-tag: macos-12-py3-arm64-build
       build-environment: macos-12-py3-arm64
-      runner-type: macos-m1-12
+      runner-type: macos-m1-stable
       build-generates-artifacts: true
       # To match the one pre-installed in the m1 runners
       python-version: 3.9.12
@@ -28,8 +30,7 @@ jobs:
       test-matrix: |
         { include: [
           { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-12" },
-          # TODO: Revert me when those runners are back online
-          # { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-13" },
+          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m2-14" },
         ]}
 
   macos-12-py3-arm64-mps-test:

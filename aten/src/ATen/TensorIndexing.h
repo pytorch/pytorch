@@ -246,8 +246,13 @@ static inline Tensor applySelect(
     }
 
     auto size = (*self_sizes)[dim];
+    // Note: `size >= -index` is not equivalent to `size > -1 - index` if index
+    // is INT64_MIN For std::numeric_limits<int64_t>::min() result of unary
+    // minus is undefined by the standard but in practice is equal to self. On
+    // the other hand, indexing wraping is valid for all negative int64_t
+    // values, as x[INT64_MIN] is the same as x[INT64_MAX]
     TORCH_CHECK_INDEX(
-        size >= -index && size > index,
+        size > -1 - index && size > index,
         "index ",
         index,
         " is out of bounds for dimension ",
@@ -268,9 +273,9 @@ static inline Tensor boolToIndexingTensorCPUOrCUDA(
   // booleans add a dimension of size 1. true indexes this dimension as if 0:,
   // false as empty.
   if (value) {
-    return at::empty({1}, {}, self.options().dtype(kLong)).fill_(0.);
+    return at::empty({1}, self.options().dtype(kLong)).fill_(0.);
   } else {
-    return at::empty({0}, {}, self.options().dtype(kLong));
+    return at::empty({0}, self.options().dtype(kLong));
   }
 }
 
@@ -280,9 +285,9 @@ static inline Tensor boolToIndexingTensorNonNativeDeviceType(
   // booleans add a dimension of size 1. true indexes this dimension as if 0:,
   // false as empty.
   if (value) {
-    return at::zeros({1}, {}, self.options().dtype(kLong));
+    return at::zeros({1}, self.options().dtype(kLong));
   } else {
-    return at::empty({0}, {}, self.options().dtype(kLong));
+    return at::empty({0}, self.options().dtype(kLong));
   }
 }
 
