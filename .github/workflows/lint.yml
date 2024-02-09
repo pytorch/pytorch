@@ -22,6 +22,7 @@ jobs:
       runner: linux.2xlarge
       docker-image: pytorch-linux-jammy-cuda11.8-cudnn8-py3.9-linter
       fetch-depth: 0
+      submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
         export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT"
@@ -35,6 +36,7 @@ jobs:
       runner: linux.2xlarge
       docker-image: pytorch-linux-jammy-cuda11.8-cudnn8-py3.9-linter
       fetch-depth: 0
+      submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
         export ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT"
