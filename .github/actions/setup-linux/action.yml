@@ -5,35 +5,49 @@ description: Set up Docker workspace on EC2
 runs:
   using: composite
   steps:
-    - name: Display EC2 information
-      shell: bash
-      run: |
-        set -euo pipefail
-        function get_ec2_metadata() {
-          # Pulled from instance metadata endpoint for EC2
-          # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-          category=$1
-          # If it is GCP runner (runner name contains gcp), do not run this
-          runner_name_str=${{ runner.name }}
-          if [[ $runner_name_str != *"gcp"* ]]; then
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          else
-            echo "Runner is from Google Cloud Platform, No info on ec2 metadata"
-          fi
-        }
-        echo "ami-id: $(get_ec2_metadata ami-id)"
-        echo "instance-id: $(get_ec2_metadata instance-id)"
-        echo "instance-type: $(get_ec2_metadata instance-type)"
-        echo "system info $(uname -a)"
+#    - name: Display EC2 information
+#      shell: bash
+#      run: |
+#        set -euo pipefail
+#        function get_ec2_metadata() {
+#          # Pulled from instance metadata endpoint for EC2
+#          # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
+#          category=$1
+#          # If it is GCP runner (runner name contains gcp), do not run this
+#          runner_name_str=${{ runner.name }}
+#          if [[ $runner_name_str != *"gcp"* ]]; then
+#            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+#          else
+#            echo "Runner is from Google Cloud Platform, No info on ec2 metadata"
+#          fi
+#        }
+#        echo "ami-id: $(get_ec2_metadata ami-id)"
+#        echo "instance-id: $(get_ec2_metadata instance-id)"
+#        echo "instance-type: $(get_ec2_metadata instance-type)"
+#        echo "system info $(uname -a)"
 
     - name: Start docker if docker deamon is not running
       shell: bash
       run: |
-        if systemctl is-active --quiet docker; then
-            echo "Docker daemon is running...";
+        docker info > /dev/null 2>&1
+        if [ $? -eq 0 ]; then
+            echo "Docker is running."
         else
-            echo "Starting docker deamon..." && sudo systemctl start docker;
+            echo "Docker is not running."
         fi
+#        if systemctl is-active --quiet docker; then
+#            echo "Docker daemon is running...";
+#        else
+#            echo "Starting docker deamon..." && sudo systemctl start docker;
+#        fi
+
+    - name: Install AWS CLI v2
+      run: |
+        curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+        unzip awscliv2.zip
+        sudo ./aws/install
+        aws --version
+      shell: bash
 
     - name: Log in to ECR
       uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
