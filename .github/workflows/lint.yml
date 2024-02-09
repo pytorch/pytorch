@@ -39,6 +39,17 @@ jobs:
         export ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT"
         .github/scripts/lintrunner.sh
 
+  lintrunner:
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    with:
+      timeout: 120
+      runner: linux.2xlarge
+      docker-image: pytorch-linux-jammy-cuda11.8-cudnn8-py3.9-linter
+      fetch-depth: 0
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      script: |
+        .github/scripts/lintrunner.sh
+
   quick-checks:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     with:
