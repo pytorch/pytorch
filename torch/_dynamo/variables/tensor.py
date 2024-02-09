@@ -222,34 +222,55 @@ class TensorVariable(VariableTracker):
             if name in self._strict_mode_banned_ops():
                 unimplemented(f"Illegal getattr invocation {name} in strict mode")
 
-        result = None
-        if name == "ndim" and self.ndim is not None:
-            result = ConstantVariable.create(self.ndim)
-        elif name == "dtype" and self.dtype is not None:
-            result = ConstantVariable.create(self.dtype)
-        elif name == "device" and self.device is not None:
-            result = ConstantVariable.create(self.device)
-        elif name == "layout" and self.layout is not None:
-            result = ConstantVariable.create(self.layout)
-        elif name == "is_cuda" and self.device is not None:
-            result = ConstantVariable.create(self.device.type == "cuda")
-        elif name == "shape" and self.size is not None:
-            sizes = [variables.ConstantVariable.create(x) for x in self.size]
-            result = SizeVariable(sizes)
-        elif name == "requires_grad" and self.requires_grad is not None:
-            result = ConstantVariable.create(self.requires_grad)
-        elif name == "is_quantized" and self.is_quantized is not None:
-            result = ConstantVariable.create(self.is_quantized)
-        elif name == "is_sparse" and self.is_sparse is not None:
-            result = ConstantVariable.create(self.is_sparse)
-        elif name == "shape" and self.size is None:
-            result = self.call_method(tx, "size", [], {})
-        elif name == "ndim" and self.ndim is None:
-            result = self.call_method(tx, "dim", [], {})
-        elif name == "data":
-            result = self.call_method(tx, "detach", [], {})
         if name == "__class__":
             return UserDefinedClassVariable(self.python_type())
+
+        def method_ndim():
+            if self.ndim is not None:
+                return ConstantVariable.create(self.ndim)
+            else:
+                return self.call_method(tx, "dim", [], {})
+
+        def method_dtype():
+            if self.dtype is not None:
+                return ConstantVariable.create(self.dtype)
+
+        def method_device():
+            if self.device is not None:
+                return ConstantVariable.create(self.device)
+
+        def method_layout():
+            if self.layout is not None:
+                return ConstantVariable.create(self.layout)
+
+        def method_is_cuda():
+            if self.device is not None:
+                return ConstantVariable.create(self.device.type == "cuda")
+
+        def method_shape():
+            if self.size is not None:
+                sizes = [variables.ConstantVariable.create(x) for x in self.size]
+                return SizeVariable(sizes)
+            else:
+                return self.call_method(tx, "size", [], {})
+
+        def method_requires_grad():
+            if self.requires_grad is not None:
+                return ConstantVariable.create(self.requires_grad)
+
+        def method_is_quantized():
+            if self.is_quantized is not None:
+                return ConstantVariable.create(self.is_quantized)
+
+        def method_is_sparse():
+            if self.is_sparse is not None:
+                return ConstantVariable.create(self.is_sparse)
+
+        def method_data():
+            return self.call_method(tx, "detach", [], {})
+
+        handler = getattr(self, f"method_{name}", None)
+        result = handler() if handler is not None else None
 
         # Add a guard for type matching, these guards are checked before tensor guards
         # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
