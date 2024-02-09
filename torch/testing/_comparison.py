@@ -291,6 +291,13 @@ def make_tensor_mismatch_msg(
     # Ensure that only mismatches are used for the max_rel_diff computation
     rel_diff[matches_flat] = 0
     max_rel_diff, max_rel_diff_flat_idx = torch.max(rel_diff, 0)
+
+    extra += f"\nactual[{unravel_flat_index(int(max_abs_diff_flat_idx))}] = {actual_flat[int(max_abs_diff_flat_idx)]}"
+    extra += f"\nexpected[{unravel_flat_index(int(max_abs_diff_flat_idx))}] = {expected_flat[int(max_abs_diff_flat_idx)]}"
+    if max_abs_diff_flat_idx != max_rel_diff_flat_idx:
+        extra += f"\nactual[{unravel_flat_index(int(max_rel_diff_flat_idx))}] = {actual_flat[int(max_rel_diff_flat_idx)]}"
+        extra += f"\nexpected[{unravel_flat_index(int(max_rel_diff_flat_idx))}] = {expected_flat[int(max_rel_diff_flat_idx)]}"
+
     return _make_mismatch_msg(
         default_identifier="Tensor-likes",
         identifier=identifier,
