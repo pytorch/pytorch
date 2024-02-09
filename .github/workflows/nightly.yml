@@ -15,11 +15,11 @@ jobs:
     name: docs build
     uses: ./.github/workflows/_linux-build.yml
     with:
-      runner: arc-lf-linux.2xlarge.arc-dind-rootless.canary
+      runner: arc-lf-linux.2xlarge.arc.canary
       build-environment: linux-jammy-py3.8-gcc11
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11
 
-#  docs-push: 
+#  docs-push:
 #    name: docs push
 #    uses: ./.github/workflows/_docs.yml
 #    needs: docs-build
