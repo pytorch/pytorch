@@ -386,7 +386,7 @@ struct ExpandableSegment {
       c10::DeviceIndex device,
       cudaStream_t stream,
       size_t size,
-      std::vector<int> peers)
+      std::vector<c10::DeviceIndex> peers)
       : device_(device),
         stream_(stream),
         max_handles_(0),
@@ -553,7 +553,7 @@ struct ExpandableSegment {
   std::vector<c10::optional<CUmemGenericAllocationHandle>> handles_;
   // devices on which this memory should be mapped in addition
   // to the device where the physical memory lives (device_).
-  std::vector<int> peers_;
+  std::vector<c10::DeviceIndex> peers_;
 };
 #else
 struct ExpandableSegment {
@@ -561,7 +561,7 @@ struct ExpandableSegment {
       c10::DeviceIndex device,
       cudaStream_t stream,
       size_t size,
-      const std::vector<int>& peers) {
+      const std::vector<c10::DeviceIndex>& peers) {
     TORCH_INTERNAL_ASSERT(false, "expandable segment not supported");
   }
   SegmentRange map(SegmentRange range) {
@@ -584,7 +584,7 @@ struct ExpandableSegment {
 // needed to reconstruct a private pool to a previous state. See note
 // [Checkpointing PrivatePoolState]
 struct BlockState {
-  int device = 0;
+  c10::DeviceIndex device = 0;
   cudaStream_t stream = nullptr;
   stream_set stream_uses = {};
   size_t size = 0;
@@ -650,7 +650,7 @@ struct AllocParams {
         block(nullptr),
         err(cudaSuccess) {}
 
-  int device() const {
+  c10::DeviceIndex device() const {
     return search_key.device;
   }
   cudaStream_t stream() const {
@@ -902,7 +902,7 @@ class DeviceCachingAllocator {
 
   // all live expandable segments
   std::vector<ExpandableSegment*> expandable_segments_;
-  std::vector<int> devices_with_peer_access_;
+  std::vector<c10::DeviceIndex> devices_with_peer_access_;
 
   bool set_fraction = false;
 
@@ -1863,7 +1863,7 @@ class DeviceCachingAllocator {
     }
   }
 
-  void addPeerAccess(int dev_to_access) {
+  void addPeerAccess(c10::DeviceIndex dev_to_access) {
     if (std::find(
             devices_with_peer_access_.begin(),
             devices_with_peer_access_.end(),
@@ -2663,7 +2663,7 @@ class DeviceCachingAllocator {
     }
   }
 
-  EventPool::Event create_event_internal(int idx) {
+  EventPool::Event create_event_internal(c10::DeviceIndex idx) {
     // Leak the event pool to avoid shutdown issues.
     static auto* event_pool = new EventPool();
     return event_pool->get(idx);
@@ -2704,8 +2704,7 @@ class DeviceCachingAllocator {
     for (auto& stream : streams) {
       C10_CUDA_CHECK(c10::cuda::SetDevice(stream.device_index()));
 
-      EventPool::Event event =
-          create_event_internal(static_cast<int>(stream.device_index()));
+      EventPool::Event event = create_event_internal(stream.device_index());
       C10_CUDA_CHECK(cudaEventRecord(*event, stream.stream()));
 
       block->event_count++;
