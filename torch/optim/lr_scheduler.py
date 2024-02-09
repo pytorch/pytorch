@@ -1037,6 +1037,7 @@ class ReduceLROnPlateau(LRScheduler):
         self.mode_worse = None  # the worse value for the chosen mode
         self.eps = eps
         self.last_epoch = 0
+        self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
         self._init_is_better(mode=mode, threshold=threshold,
                              threshold_mode=threshold_mode)
         self._reset()
