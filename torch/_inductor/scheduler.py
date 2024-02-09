@@ -306,6 +306,9 @@ class BaseSchedulerNode:
     def is_reduction(self):
         return False
 
+    def is_split_scan(self):
+        return False
+
     def is_template(self):
         return False
 
@@ -734,6 +737,14 @@ class SchedulerNode(BaseSchedulerNode):
         ), f"{type(self.node)=}"
         return bool(self.node.get_reduction_type())
 
+    def is_split_scan(self):
+        assert isinstance(
+            self.node, (ir.ComputedBuffer, ir.TemplateBuffer)
+        ), f"{type(self.node)=}"
+        return isinstance(self.node, ir.ComputedBuffer) and isinstance(
+            self.node.data, ir.SplitScan
+        )
+
     def is_template(self):
         return isinstance(self.node, ir.TemplateBuffer)
 
@@ -901,6 +912,10 @@ class FusedSchedulerNode(BaseSchedulerNode):
     @cache_on_self
     def is_reduction(self):
         return any(x.is_reduction() for x in self.snodes)
+
+    @cache_on_self
+    def is_split_scan(self):
+        return any(x.is_split_scan() for x in self.snodes)
 
     @cache_on_self
     def is_template(self):
@@ -2374,7 +2389,7 @@ class BaseScheduling:
         """
         raise NotImplementedError()
 
-    def codegen_nodes(self, nodes: List[BaseSchedulerNode]):
+    def codegen_nodes(self, nodes: List[SchedulerNode]):
         """
         Generate a kernel given a list of pre-fused nodes.
         """
