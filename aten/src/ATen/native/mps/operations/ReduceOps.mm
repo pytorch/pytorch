@@ -969,7 +969,7 @@ static void cum_max_min_helper_mps(const Tensor& input,
   }
 
   struct CumMaxMinCachedGraph : public MPSCachedGraph {
-    CumMaxMinCachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+    explicit CumMaxMinCachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor* inputTensor_ = nil;
     MPSGraphTensor* valuesTensor_ = nil;
     MPSGraphTensor* indicesTensor_ = nil;
@@ -978,7 +978,7 @@ static void cum_max_min_helper_mps(const Tensor& input,
   @autoreleasepool {
     string key = "cum_max_min_helper_mps:" + getTensorsStringKey({input, values, indices}) + ":" + to_string(dim) +
         ":" + to_string(reduction_type);
-    CumMaxMinCachedGraph* cumMaxMinCachedGraph =
+    auto* cumMaxMinCachedGraph =
         LookUpOrCreateCachedGraph<CumMaxMinCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
           MPSGraph* graph = newCachedGraph->graph();
           newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, input);
@@ -1005,7 +1005,6 @@ static void cum_max_min_helper_mps(const Tensor& input,
           indicesTensor = [graph cumulativeMaximumWithTensor:indicesTensor axis:dim name:nil];
           indicesTensor = [graph castTensor:indicesTensor toType:MPSDataTypeInt64 name:nil];
 
-          newCachedGraph->inputTensor_ = inputTensor;
           newCachedGraph->valuesTensor_ = valuesTensor;
           newCachedGraph->indicesTensor_ = indicesTensor;
         });
