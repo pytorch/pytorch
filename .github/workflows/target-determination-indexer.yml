@@ -96,9 +96,16 @@ jobs:
             --nnodes=1 \
             --nproc-per-node=1 \
             indexer.py \
-            --experiment-name indexer-functions
+            --experiment-name indexer-files \
+            --file
 
-          ls -R assets/indexer-functions
+          torchrun \
+            --standalone \
+            --nnodes=1 \
+            --nproc-per-node=1 \
+            indexer.py \
+            --experiment-name indexer-functions \
+            --function
 
       - name: Upload Index to S3
         shell: bash -l {0}
@@ -107,6 +114,8 @@ jobs:
           set -euxo pipefail
           conda activate tdenv
 
-          zip -r indexer-functions.zip "${GITHUB_WORKSPACE}"/llm-target-determinator/assets/indexer-functions
+          zip -r indexer-files.zip "${GITHUB_WORKSPACE}"/llm-target-determinator/assets/indexer-files
+          aws s3 cp "indexer-files.zip" "s3://target-determinator-assets/indexes/indexer-files.zip"
 
+          zip -r indexer-functions.zip "${GITHUB_WORKSPACE}"/llm-target-determinator/assets/indexer-functions
           aws s3 cp "indexer-functions.zip" "s3://target-determinator-assets/indexes/indexer-functions.zip"
