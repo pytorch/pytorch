@@ -42,6 +42,7 @@ from torch._inductor.utils import (
     run_and_get_triton_code,
 )
 from torch._inductor.virtualized import V
+from torch._prims_common import is_integer_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
@@ -57,7 +58,7 @@ from torch.testing._internal.common_device_type import (
     _has_sufficient_memory,
     get_desired_device_type_test_bases,
 )
-from torch.testing._internal.common_dtype import all_types
+from torch.testing._internal.common_dtype import all_types, get_all_dtypes
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     IS_CI,
@@ -120,6 +121,44 @@ vec_dtypes = [torch.float, torch.bfloat16, torch.float16]
 
 libtest = torch.library.Library("test", "FRAGMENT")
 ids = set()
+
+
+def _large_cumprod_input(shape, dim, dtype, device):
+    # Construct a cumprod input which guaruntees not to overflow or underflow
+    if is_integer_dtype(dtype):
+        # Large products don't fit in integers, the best we can do
+        # is random +/-1 values to test the sign of the result
+        x = torch.randint(0, 1, shape, dtype=dtype, device=device)
+        return x * 2 - 1
+
+    comp_dtype = torch._prims_common.get_computation_dtype(dtype)
+    batch_size = 256
+    if comp_dtype != dtype:
+        batch_size = math.floor(math.log2(torch.finfo(dtype).max) / 3)
+
+    # Create random values with a uniform magnitude and uniform exponent
+    num_batches = (shape[dim] + 2 * batch_size - 1) // (2 * batch_size)
+    batch_shape = (
+        shape[:dim]
+        + (
+            num_batches,
+            batch_size,
+        )
+        + shape[dim + 1 :]
+    )
+    magnitude = 1 + torch.rand(batch_shape, dtype=comp_dtype, device=device)
+    exponent = torch.randint(-1, 1, batch_shape, device=device).to(comp_dtype)
+    batch = magnitude * exponent.exp2()
+
+    # Alternate each batch of values with their reciprocals so the product
+    # never gets too far away from 1
+    t = torch.cat((batch, batch.reciprocal()), dim=dim + 1)
+    t = t.flatten(dim, dim + 1)
+    t = aten.slice(t, dim=dim, start=0, end=shape[dim])
+
+    # Randomize sign
+    sign = torch.randint(0, 1, shape, device=device) * 2 - 1
+    return (t * sign).to(dtype)
 
 
 def define_custom_op_for_test(id_, fn_cpu, fn_cuda, fn_meta, tags=()):
@@ -582,6 +621,11 @@ def _run_and_assert_no_indirect_indexing(test_case, func, *args, **kwargs):
 
 
 def assertGeneratedKernelCountEqual(self: TestCase, expected: int):
+    if config.triton.multi_kernel:
+        # when multi_kernel is enabled, we generated both persistent reduction
+        # and non-persistent reduction kernels for the same node schedule.
+        # That will mess up with the kernel count. Just don't check it.
+        return
     if config.cpp_wrapper:
         expected *= 2
     self.assertEqual(torch._inductor.metrics.generated_kernel_count, expected)
@@ -681,21 +725,6 @@ class CommonTemplate:
 
         self.common(fn, (x, y, 2))
 
-    def test_add_complex2(self):
-        @torch.compile
-        def fn(a, b):
-            c = a + b
-            d = a + b
-            return c + d
-
-        x = torch.tensor([1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1])
-        y = torch.tensor([1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1])
-
-        _, code = run_and_get_code(fn, x, y)
-        self.assertEqual(
-            code[0].count("::view_dtype" if config.cpp_wrapper else "aten.view"), 3
-        )
-
     def test_add_complex3(self):
         # fix https://github.com/pytorch/pytorch/issues/115071
         @torch.compile
@@ -709,6 +738,32 @@ class CommonTemplate:
         # should not inplace write to the input
         fn(x)
         self.assertEqual(x, y)
+
+    def test_add_complex4(self):
+        @torch.compile
+        def fn(a, b):
+            c = a + b
+            d = a + b
+            return c + d
+
+        for dtype in [torch.complex32, torch.complex64, torch.complex128]:
+            x = torch.tensor(
+                [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1],
+                dtype=dtype,
+                device=self.device,
+            )
+            y = torch.tensor(
+                [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1],
+                dtype=dtype,
+                device=self.device,
+            )
+            _, code = run_and_get_code(fn, x, y)
+            self.assertEqual(
+                " ".join(code).count(
+                    "::view_dtype" if config.cpp_wrapper else "aten.view"
+                ),
+                3,
+            )
 
     def test_concat_add_inplace(self):
         def fn(x, y, z):
@@ -743,6 +798,7 @@ class CommonTemplate:
 
         self.common(fn, [torch.linspace(-10, 10, 41)])
 
+    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     def test_scatter_bf16(self):
         def fn(inp, src, index):
             return inp.scatter_add(0, index, src)
@@ -1156,6 +1212,90 @@ class CommonTemplate:
         self.common(fn, (torch.rand((16, 16, 352, 352), dtype=torch.float16),))
         self.common(fn, (torch.rand((14923), dtype=torch.float16),))
 
+    def test_split_cumsum(self):
+        def fn(a):
+            return torch.cumsum(a, -1)
+
+        for dtype in get_all_dtypes(
+            include_bfloat16=False,
+            include_bool=True,
+            include_complex=False,
+            include_half=False,
+        ):
+            # Use low=0 since when the mean value is 0, cumsum at all points
+            # tends towards zero which makes the relative error term blow up
+            inp = make_tensor(10, 3, 352, 352, low=0, dtype=dtype, device=self.device)
+            self.common(fn, (inp.view(-1),), rtol=1e-5, atol=1e-5, check_lowp=False)
+            self.common(fn, (inp.view(10, -1),), rtol=1e-5, atol=1e-5, check_lowp=False)
+
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(TEST_WITH_ROCM, "Computation not done in float on ROCm")
+    def test_split_cumsum_low_prec(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("ir.Scan nyi on CPU")
+
+        def fn(a):
+            return torch.cumsum(a.view(-1), 0)
+
+        self.common(
+            fn,
+            (torch.rand((10, 3, 352, 352), dtype=torch.float16),),
+            reference_in_float=True,
+            check_lowp=False,
+        )
+
+    def test_consecutive_split_cumsum(self):
+        def fn(a, b):
+            a = a.view(-1)
+            b = b.view(-1)
+            return torch.cumsum(a, 0) + torch.cumsum(b, 0)
+
+        a = make_tensor(10, 3, 352, 352, low=0, dtype=torch.float32, device=self.device)
+        b = make_tensor(10, 3, 352, 352, low=0, dtype=torch.float64, device=self.device)
+        self.common(fn, (a, b), rtol=1e-5, atol=1e-5, check_lowp=False)
+
+    def test_split_cumprod(self):
+        def fn(a):
+            return torch.cumprod(a, -1)
+
+        for dtype in [torch.float32, torch.float64, torch.int32, torch.int64]:
+            inp = _large_cumprod_input(
+                (10, 10000), dim=1, dtype=dtype, device=self.device
+            )
+            self.common(fn, (inp,), atol=1e-5, rtol=1e-4, check_lowp=False)
+
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(TEST_WITH_ROCM, "Computation not done in float on ROCm")
+    def test_split_cumprod_low_prec(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("ir.Scan nyi on CPU")
+
+        def fn(a):
+            return torch.cumprod(a.view(-1), 0)
+
+        for dtype in [torch.float16, torch.bfloat16]:
+            inp = _large_cumprod_input(
+                (10, 10000), dim=1, dtype=dtype, device=self.device
+            )
+            self.common(
+                fn,
+                (inp,),
+                reference_in_float=True,
+                check_lowp=False,
+            )
+
+    def test_consecutive_split_cumprod(self):
+        def fn(a, b):
+            return torch.cumprod(a, 0) + torch.cumprod(b, 0)
+
+        a = _large_cumprod_input(
+            (10000,), dim=0, dtype=torch.float32, device=self.device
+        )
+        b = _large_cumprod_input(
+            (10000,), dim=0, dtype=torch.float64, device=self.device
+        )
+        self.common(fn, (a, b), atol=1e-5, rtol=1e-5, check_lowp=False)
+
     def test_embedding_bag_byte_unpack(self):
         if self.device != "cpu":
             raise unittest.SkipTest(f"No {GPU_TYPE} implementation (it returns empty)")
@@ -1180,7 +1320,20 @@ class CommonTemplate:
             z = x * y
             return z.sum((0, 1))
 
-        self.common(fn, (torch.randn(2, 197, 256), torch.randn(2, 1, 256)))
+        atol = None
+        rtol = None
+
+        # By default, inductor generate non-persistent reduction kernels in this
+        # case. But when multi-kernel is enabled, inductor will pick the faster
+        # of persistent reduction and non-persistent-reduction kernel.
+        # In this case, inductor picked the persistent-reduction kernel.
+        # The persistent reduction kernel happens to need looser tolerance.
+        if config.triton.multi_kernel:
+            atol = 1e-5
+            rtol = 1e-5
+        self.common(
+            fn, (torch.randn(2, 197, 256), torch.randn(2, 1, 256)), atol=atol, rtol=rtol
+        )
 
     def test_min_max_reduction(self):
         def fn(a, b):
@@ -1628,8 +1781,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8),))
 
-    # TODO(voz): Re-enable this test ASAP https://github.com/pytorch/pytorch/issues/82763
-    @unittest.skip("Skipping due to op bugs")
     def test_nan_to_num(self):
         def fn(a):
             return (
@@ -3747,6 +3898,24 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
+    def test_fusing_write_into_disjoint_read(self):
+        def test_flip(a):
+            return a.copy_(torch.flip(a, (0,)))
+
+        self.common(test_flip, (torch.rand([20]),))
+
+        assertGeneratedKernelCountEqual(self, 2)
+
+        # issue only manifests on cuda with large tensors
+        if self.device != "cpu":
+
+            def f(a):
+                a[:, 20:40] = a[:, 20:40] + 1
+                a[:, 2:900025] = a[:, 1:900024] + 2
+
+            a = torch.rand((1, 1000000), device="cuda")
+            self.common(f, (a,))
+
     def test_gather_scatter(self):
         def fn(node_feat, edge_index):
             src_node_feat = node_feat[edge_index[0]]
@@ -3907,11 +4076,10 @@ class CommonTemplate:
 
         self.common(
             fn,
-            # TODO: Remove dtype once https://github.com/pytorch/pytorch/issues/94010 is fixed
             (
                 torch.randn(
                     [16, 16],
-                    dtype=torch.float64 if self.device == "cpu" else torch.float32,
+                    dtype=torch.float32,
                 ),
             ),
             # Mismatched elements: 9 / 256 (3.5%)
@@ -5113,10 +5281,7 @@ class CommonTemplate:
         fn(arg1)
         opt_fn = torch._dynamo.optimize_assert(compile_fx)(fn)
         opt_fn(arg2)
-
-        # TODO, fix: See https://github.com/pytorch/pytorch/issues/94693
-        if self.device != "cpu":
-            self.assertTrue(same(arg1, arg2))
+        self.assertTrue(same(arg1, arg2))
 
     def test_slice_mutation3(self):
         def fn(a):
@@ -8366,6 +8531,7 @@ class CommonTemplate:
         actual = torch.compile(fn)(x)
         self.assertEqual(ref, actual)
 
+    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     def test_bfloat16_to_int16(self):
         def fn(a, b):
             x = a + b
@@ -8431,6 +8597,18 @@ class CommonTemplate:
     def test_bessel_j0(self):
         def fn(x):
             return torch.special.bessel_j0(x)
+
+        self.common(fn, (torch.randn(8, 8),))
+
+    def test_bessel_j1(self):
+        def fn(x):
+            return torch.special.bessel_j1(x)
+
+        self.common(fn, (torch.randn(8, 8),))
+
+    def test_modified_bessel_i0(self):
+        def fn(x):
+            return torch.special.modified_bessel_i0(x)
 
         self.common(fn, (torch.randn(8, 8),))
 
@@ -8567,7 +8745,13 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
                 return torch.sum(a)
 
             kernels = self.get_kernels(fn, [torch.randn([256, 256], device=GPU_TYPE)])
-            self.assertTrue(len(kernels) == 2, "SUM should result in two kernels")
+            if config.triton.multi_kernel:
+                self.assertTrue(
+                    len(kernels) == 4,
+                    "SUM should result in four kernels when multi-kernel is enabled",
+                )
+            else:
+                self.assertTrue(len(kernels) == 2, "SUM should result in two kernels")
 
             # kernel0 reduces from 256 to (xnumel=8, rnumel=8192), which means it reduces 256 by 256 into an array of
             # size 8 by accumulating 8192 elements at once note that rnumel is equal to 512 * 16, so rnumel which is
@@ -8578,8 +8762,11 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel0, (0, 1, 3))
 
             # kernel1 reduces from 8 elements to a single scalar.
+            # Since multi-kernel generate 2 variants for each kernel. The second
+            # persistent-reduction has index 2.
+            kernel1_index = 2 if config.triton.multi_kernel else 1
             arguments_that_are_divisible_by_16_in_kernel1 = (
-                kernels[1].triton_meta["configs"][0].divisible_by_16
+                kernels[kernel1_index].triton_meta["configs"][0].divisible_by_16
             )
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
             torch._dynamo.reset()
@@ -8775,7 +8962,9 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
                 torch.randn(1, N, K, device=GPU_TYPE),
             ]
             code = run_and_get_triton_code(fn_opt, *inps)
-            self.assertEqual(code.count("tl.store"), 1)
+            self.assertEqual(
+                code.count("tl.store"), 2 if config.triton.multi_kernel else 1
+            )
             self.assertTrue("out_ptr1" in code)
             self.assertFalse("out_ptr0" in code)
             self.assertEqual(fn_opt(*inps), fn(*inps))
@@ -8903,12 +9092,24 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             )
             code = run_and_get_triton_code(f, *inps)
             lines = [line for line in code.split("\n") if "tl.load" in line]
-            self.assertExpectedInline(
-                "\n".join(lines),
-                """\
+            if config.triton.multi_kernel:
+                # the first 2 lines are generated for the persistent reduction
+                # variant.
+                self.assertExpectedInline(
+                    "\n".join(lines),
+                    """\
+    tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
+    tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, other=0.0)
         tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
         tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, eviction_policy='evict_first', other=0.0)""",
-            )
+                )
+            else:
+                self.assertExpectedInline(
+                    "\n".join(lines),
+                    """\
+        tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
+        tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, eviction_policy='evict_first', other=0.0)""",
+                )
 
         @skipIfRocm
         @config.patch("triton.use_block_ptr", True)
@@ -8924,12 +9125,25 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             )
             code = run_and_get_triton_code(f, *inps)
             lines = [line for line in code.split("\n") if "tl.load" in line]
-            self.assertExpectedInline(
-                "\n".join(lines),
-                """\
+
+            if config.triton.multi_kernel:
+                # the first 2 lines are generated for the persistent reduction
+                # variant.
+                self.assertExpectedInline(
+                    "\n".join(lines),
+                    """\
+    tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
+    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[262144, 512], strides=[1, 262144], block_shape=[XBLOCK, RBLOCK], order=[0, 1], offsets=[xoffset, roffset]), boundary_check=[1], padding_option='zero')
+        tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
+        tmp1 = tl.load(block_ptr0, boundary_check=[1], padding_option='zero', eviction_policy='evict_first')""",  # noqa: B950 line too long
+                )
+            else:
+                self.assertExpectedInline(
+                    "\n".join(lines),
+                    """\
         tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
         tmp1 = tl.load(block_ptr0, boundary_check=[1], padding_option='zero', eviction_policy='evict_first')""",
-            )
+                )
 
         # Disable index propagation, so the indirect indexing isn't optimized away
         @patch.object(config, "constant_and_index_propagation", False)

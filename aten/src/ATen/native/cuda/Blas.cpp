@@ -311,7 +311,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     // That requires some fixing some internal build dependencies though.
     return at::mul_out(
         result,
-        self,
+        self.expand(result.sizes()),
         at::native::scalar_tensor(
             beta,
             self.scalar_type(),
@@ -771,6 +771,23 @@ Tensor _int_mm_cuda(const Tensor& self, const Tensor& mat2) {
   return _int_mm_out_cuda(self, mat2, result);
 }
 
+static bool _scaled_mm_allowed_device() {
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+#ifdef USE_ROCM
+    std::string device_arch = dprops->gcnArchName;
+    static const std::vector<std::string> archs = {"gfx940", "gfx941", "gfx942"};
+    for (std::string arch : archs) {
+        size_t substring = device_arch.find(arch);
+        if (substring != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+#else
+    return dprops->major >= 9 || (dprops->major == 8 && dprops->minor == 9);
+#endif
+}
+
 // Computes matrix multiply + bias while applying scaling to input and output matrices and computes amax
 // Scales are only applicable when matrices are of Float8 type and assumbed to be equal to 1.0 by default.
 // If output matrix type is 16 or 32-bit type, neither scale_result is applied nor amax is computed.
@@ -800,8 +817,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
           bool use_fast_accum,
           Tensor& out, Tensor& amax) {
   // Check sizes
-  auto dprops = at::cuda::getCurrentDeviceProperties();
-  TORCH_CHECK(dprops->major >= 9, "torch._scaled_mm is only supported on devices with compute capability >= 9.0)");
+  bool allowed_device = _scaled_mm_allowed_device();
+  TORCH_CHECK(allowed_device, "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   TORCH_CHECK(

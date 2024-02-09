@@ -9,6 +9,7 @@
 #include <c10/util/ScopeExit.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/flat_hash_map.h>
+#include <c10/util/hash.h>
 #include <c10/util/irange.h>
 #include <c10/util/llvmMathExtras.h>
 #include <c10/util/static_tracepoint.h>
@@ -40,8 +41,7 @@ namespace c10 {
 
 C10_DEFINE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
 
-namespace cuda {
-namespace CUDACachingAllocator {
+namespace cuda::CUDACachingAllocator {
 
 // Included here as this is externally used in CUDAAllocatorConfig
 const size_t kLargeBuffer =
@@ -2693,7 +2693,7 @@ class DeviceCachingAllocator {
   }
 
   void insert_events(Block* block) {
-    int prev_device = 0;
+    c10::DeviceIndex prev_device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&prev_device));
 
     stream_set streams(std::move(block->stream_uses));
@@ -2837,14 +2837,28 @@ void local_raw_delete(void* ptr);
 
 class NativeCachingAllocator : public CUDAAllocator {
  private:
-  std::mutex mutex;
+  // Shard allocation region to have independent mutexes to reduce contention.
+  static constexpr size_t kNumMutexShard = 67;
+
+  // TODO: use std::hardware_destructive_interference_size once available
+  struct alignas(64) AlignedMutex {
+    std::mutex m;
+  };
+
+  std::array<AlignedMutex, kNumMutexShard> mutex;
 
   // allocated blocks by device pointer
-  ska::flat_hash_map<void*, Block*> allocated_blocks;
+  std::array<ska::flat_hash_map<void*, Block*>, kNumMutexShard>
+      allocated_blocks;
+
+  static size_t get_mutex_shard_id(void* ptr) {
+    return twang_mix64((size_t)ptr) % kNumMutexShard;
+  }
 
   void add_allocated_block(Block* block) {
-    std::lock_guard<std::mutex> lock(mutex);
-    allocated_blocks[block->ptr] = block;
+    const auto mutex_shard_id = get_mutex_shard_id(block->ptr);
+    std::lock_guard<std::mutex> lock(mutex[mutex_shard_id].m);
+    allocated_blocks[mutex_shard_id][block->ptr] = block;
   }
 
   c10::ApproximateClockToUnixTimeConverter clock_converter;
@@ -2853,14 +2867,15 @@ class NativeCachingAllocator : public CUDAAllocator {
   std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocator;
 
   Block* get_allocated_block(void* ptr, bool remove = false) {
-    std::lock_guard<std::mutex> lock(mutex);
-    auto it = allocated_blocks.find(ptr);
-    if (it == allocated_blocks.end()) {
+    const auto mutex_shard_id = get_mutex_shard_id(ptr);
+    std::lock_guard<std::mutex> lock(mutex[mutex_shard_id].m);
+    auto it = allocated_blocks[mutex_shard_id].find(ptr);
+    if (it == allocated_blocks[mutex_shard_id].end()) {
       return nullptr;
     }
     Block* block = it->second;
     if (remove) {
-      allocated_blocks.erase(it);
+      allocated_blocks[mutex_shard_id].erase(it);
     }
     return block;
   }
@@ -2939,7 +2954,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
 
   bool isHistoryEnabled() override {
-    int device = 0;
+    c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     return device_allocator[device]->isHistoryEnabled();
   }
@@ -3064,7 +3079,7 @@ class NativeCachingAllocator : public CUDAAllocator {
         OutOfMemoryError,
         size < one_exa_bytes,
         "CUDA out of memory. Tried to allocate more than 1EB memory.");
-    int device = 0;
+    c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* devPtr = nullptr;
     void (*deleteFunc)(void*) = &local_raw_delete;
@@ -3152,7 +3167,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     if (nbytes == 0) {
       return nullptr;
     }
-    int device = 0;
+    c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     malloc(&r, device, nbytes, cuda::getCurrentCUDAStream(device));
@@ -3163,14 +3178,15 @@ class NativeCachingAllocator : public CUDAAllocator {
     if (nbytes == 0) {
       return nullptr;
     }
-    int device = 0;
+    c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     malloc(&r, device, nbytes, stream);
     return r;
   }
 
-  void enablePeerAccess(int dev, int dev_to_access) override {
+  void enablePeerAccess(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access)
+      override {
     c10::cuda::CUDAGuard device_guard(dev);
     cudaError_t err = cudaDeviceEnablePeerAccess(dev_to_access, 0);
     if (err == cudaErrorPeerAccessAlreadyEnabled) {
@@ -3240,7 +3256,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     C10_CUDA_CHECK(cudaIpcOpenMemHandle(
         &dev, *ipc_handle, cudaIpcMemLazyEnablePeerAccess));
     // devPtr has to be deleted in same device when created.
-    int curr_device = 0;
+    c10::DeviceIndex curr_device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&curr_device));
     auto sp =
         std::shared_ptr<void>(dev, [handle, curr_device, this](void* ptr) {
@@ -3347,6 +3363,6 @@ struct BackendStaticInitializer {
 std::atomic<CUDAAllocator*> allocator;
 BackendStaticInitializer backend_static_initializer;
 
-} // namespace CUDACachingAllocator
-} // namespace cuda
+} // namespace cuda::CUDACachingAllocator
+
 } // namespace c10

@@ -8,6 +8,7 @@ import math
 import operator
 import unittest
 from typing import List, Set
+from re import escape
 
 import torch
 from functorch.experimental.control_flow import cond
@@ -25,7 +26,7 @@ from torch.export import export, WrapperModule
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo
+from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo, IS_WINDOWS
 from torch.utils import _pytree as pytree
 
 
@@ -77,7 +78,7 @@ class TestPasses(TestCase):
         dim1_x = torch.export.Dim("dim1_x", min=2, max=6)
         ep = torch.export.export(M(), (x,), dynamic_shapes={"x": {1: dim1_x}})
 
-        with self.assertRaisesRegex(RuntimeError, r"Expected input l_x_.shape\[1\] to be <= 6, but got 7"):
+        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[1] to be <= 6, but got 7")):
             ep.module()(torch.zeros(2, 7, 3))
 
         self.assertEqual(ep.module()(torch.ones(2, 4, 3)), M().forward(torch.ones(2, 4, 3)))
@@ -100,10 +101,10 @@ class TestPasses(TestCase):
             M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": {0: dim0_y}}
         )
 
-        with self.assertRaisesRegex(RuntimeError, r"Expected input l_x_.shape\[1\] to be <= 6, but got 7"):
+        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[1] to be <= 6, but got 7")):
             ep.module()(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
-        with self.assertRaisesRegex(RuntimeError, r"Expected input l_y_.shape\[0\] to be >= 3, but got 2"):
+        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[1].shape[0] to be >= 3, but got 2")):
             ep.module()(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
     def test_runtime_assert_some_dims_not_specified(self) -> None:
@@ -124,12 +125,12 @@ class TestPasses(TestCase):
             M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": None}
         )
 
-        with self.assertRaisesRegex(RuntimeError, r"Expected input l_x_.shape\[1\] to be <= 6, but got 7"):
+        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[1] to be <= 6, but got 7")):
             ep.module()(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
         with self.assertRaisesRegex(
-            RuntimeError, r"Expected input l_y_.shape\[0\] to be equal to 5, but got 2"
+            RuntimeError, escape("Expected input at *args[1].shape[0] to be equal to 5, but got 2")
         ):
             ep.module()(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
@@ -153,12 +154,12 @@ class TestPasses(TestCase):
         dim1_y = torch.export.Dim("dim1_y", min=3, max=6)
         ep = torch.export.export(M(), (x, y), dynamic_shapes={"x": None, "y": {1: dim1_y}})
 
-        with self.assertRaisesRegex(RuntimeError, r"shape\[1\] to be equal to 2"):
+        with self.assertRaisesRegex(RuntimeError, escape("shape[1] to be equal to 2")):
             ep.module()(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
         with self.assertRaisesRegex(
-            RuntimeError, r"Expected input l_y_.shape\[0\] to be equal to 5, but got 2"
+            RuntimeError, escape("Expected input at *args[1].shape[0] to be equal to 5, but got 2")
         ):
             ep.module()(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
@@ -275,6 +276,7 @@ class TestPasses(TestCase):
         new_inp = torch.tensor([1, 1, 1, 1])
         self.assertEqual(mod(new_inp), ep.module()(new_inp))
 
+    @unittest.skipIf(IS_WINDOWS, "Windows not supported")
     def test_runtime_assert_inline_constraints_for_cond(self) -> None:
         class M(torch.nn.Module):
             def __init__(self):
@@ -304,12 +306,15 @@ class TestPasses(TestCase):
             ep.module()(torch.tensor(False), torch.tensor([6]), torch.tensor([6]))
 
     def test_functionalize_inline_constraints(self) -> None:
-        def f(x):
-            a = x.item()
-            torch._constrain_as_value(a, 4, 7)
-            return torch.empty((a, 4))
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                a = x.item()
+                torch._constrain_as_value(a, 4, 7)
+                return torch.empty((a, 4))
 
-        ep = torch._export.export(f, (torch.tensor([7]),))
+        f = Foo()
+
+        ep = torch.export.export(f, (torch.tensor([7]),))
         gm = ep.graph_module
         FileCheck().check_count(
             "torch.ops.aten.sym_constrain_range.default",

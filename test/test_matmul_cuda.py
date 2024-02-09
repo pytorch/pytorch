@@ -204,17 +204,8 @@ class TestMatmulCuda(TestCase):
         self.assertEqual(out1_gpu, out2_gpu[0])
 
 
-def is_gpu_f8_available():
-    if torch.cuda.is_available():
-        if torch.version.hip is not None:
-            if 'gfx94' in torch.cuda.get_device_properties(0).gcnArchName:
-                return True
-        else:
-            if torch.cuda.get_device_capability() >= (9, 0):
-                return True
-    return False
 
-f8_msg = "FP8 is only supported on H100+ and MI300+"
+f8_msg = "FP8 is only supported on H100+ and sm_89 and MI300+ devices"
 
 if torch.version.hip:
     e4m3_type = torch.float8_e4m3fnuz
@@ -223,9 +214,21 @@ else:
     e4m3_type = torch.float8_e4m3fn
     e5m2_type = torch.float8_e5m2
 
+def scaled_mm_supported_device():
+    if torch.cuda.is_available():
+        if torch.version.hip:
+            return 'gfx94' in torch.cuda.get_device_properties(0).gcnArchName
+        else:
+            return torch.cuda.get_device_capability() >= (9, 0) or torch.cuda.get_device_capability() == (8, 9)
+    return False
+
+
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
 class TestFP8MatmulCuda(TestCase):
-    @unittest.skipIf(not is_gpu_f8_available(), f8_msg)
+
+
+
+    @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
     def _test_tautological_mm(self, device: str = "cuda",
                               x_dtype: torch.dtype = e4m3_type,
                               y_dtype: torch.dtype = e4m3_type,
@@ -241,7 +244,7 @@ class TestFP8MatmulCuda(TestCase):
             self.assertEqual(out_fp32.amax(), amax_fp8)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
-    @unittest.skipIf(not is_gpu_f8_available(), f8_msg)
+    @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
     def test_float8_basics(self, device) -> None:
         self._test_tautological_mm(device, e4m3_type, e4m3_type, size=16)
         self._test_tautological_mm(device, e4m3_type, e5m2_type, size=32)
@@ -250,15 +253,13 @@ class TestFP8MatmulCuda(TestCase):
         with self.assertRaises(RuntimeError):
             self._test_tautological_mm(device, e5m2_type, e5m2_type)
 
-    @unittest.skipIf(not is_gpu_f8_available(), f8_msg)
-    def test_float8_out_dtype(self, device) -> None:
         self._test_tautological_mm(device, size=64, out_dtype=torch.float16)
         self._test_tautological_mm(device, size=96, out_dtype=torch.float32)
         self._test_tautological_mm(device, size=80, out_dtype=torch.bfloat16)
         with self.assertRaises(RuntimeError):
             self._test_tautological_mm(device, out_dtype=e5m2_type)
 
-    @unittest.skipIf(not is_gpu_f8_available(), f8_msg)
+    @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
     def test_float8_scale(self, device) -> None:
         size = (16, 16)
         x = torch.full(size, .5, device=device, dtype=e4m3_type)
@@ -270,7 +271,7 @@ class TestFP8MatmulCuda(TestCase):
         out_fp8_s, amax_fp8_s = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8, out_fp8_s)
 
-    @unittest.skipIf(not is_gpu_f8_available(), f8_msg)
+    @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
     def test_float8_bias(self, device) -> None:
         (k, l, m) = (16, 48, 32)
         x = torch.rand((k, l), device=device).to(e4m3_type)
@@ -280,7 +281,7 @@ class TestFP8MatmulCuda(TestCase):
         outb_fp8, amaxb_fp8 = torch._scaled_mm(x, y, bias=bias)
         self.assertEqual((amaxb_fp8 - amax_fp8).item(), 4.0)
 
-    @unittest.skipIf(not is_gpu_f8_available(), f8_msg)
+    @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
     @parametrize("bias", [True, False])
     def test_non_divisible_leading_dim(self, device, bias: torch.bool) -> None:
         x = torch.rand((17, 16), device=device).to(e4m3_type)
@@ -290,7 +291,7 @@ class TestFP8MatmulCuda(TestCase):
             input_bias = torch.rand((16,), device=device).to(torch.half)
         out_fp8, amax_fp8 = torch._scaled_mm(x, y, bias=input_bias)
 
-    @unittest.skipIf(not is_gpu_f8_available(), f8_msg)
+    @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
     def test_float8_bias_relu_edgecase(self, device) -> None:
         (k, l, m) = (16, 48, 32)
         x = torch.full((k, l), 0.0, device=device).to(e4m3_type)
@@ -299,7 +300,7 @@ class TestFP8MatmulCuda(TestCase):
         outb_fp8, amaxb_fp8 = torch._scaled_mm(x, y, bias=bias)
         self.assertEqual(amaxb_fp8.item(), 3.0)
 
-    @unittest.skipIf(not is_gpu_f8_available(), f8_msg)
+    @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
     def test_float32_output_errors_with_bias(self, device) -> None:
         (k, l, m) = (16, 48, 32)
         x = torch.rand((k, l), device=device).to(e4m3_type)
@@ -311,19 +312,19 @@ class TestFP8MatmulCuda(TestCase):
             lambda: torch._scaled_mm(x, y, bias=bias, out_dtype=torch.float32),
         )
 
-    @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability() >= (9, 0),
-                     "This test is only for devices with compute capability < 9.0")
-    def test_error_message_fp8_non_h100(self, device) -> None:
+    @unittest.skipIf(scaled_mm_supported_device(),
+                     "This test is only for devices with compute capability < 8.9")
+    def test_error_message_fp8_pre_sm89(self, device) -> None:
         (k, l, m) = (16, 48, 32)
         x = torch.rand((k, l), device=device).to(e4m3_type)
         y = torch.rand((m, l), device=device).to(e4m3_type).t()
         self.assertRaisesRegex(
             RuntimeError,
-            r"torch\.\_scaled\_mm is only supported on devices with compute capability \>\= 9\.0",
+            r"torch\.\_scaled\_mm is only supported on CUDA devices with compute capability \>\= 9\.0 or 8\.9, or ROCm MI300\+",
             lambda: torch._scaled_mm(x, y, out_dtype=torch.float32),
         )
 
-    @unittest.skipIf(not is_gpu_f8_available(), f8_msg)
+    @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
     def test_float8_scale_fast_accum(self, device) -> None:
         size = (16, 16)
         x = torch.full(size, .5, device=device, dtype=e4m3_type)
