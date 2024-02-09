@@ -18,7 +18,7 @@ static PyObject* THXPStream_pynew(
 
   const auto current_device = c10::xpu::current_device();
 
-  int priority = 0;
+  int32_t priority = 0;
   int64_t stream_id = 0;
   int64_t device_index = 0;
   int64_t device_type = 0;
