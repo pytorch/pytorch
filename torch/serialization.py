@@ -1330,6 +1330,8 @@ class StorageType:
 
 
 def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall_storage=None, **pickle_load_args):
+    if torch._guards.detect_fake_mode(None) is not None:
+        map_location = None
     restore_location = _get_restore_location(map_location)
 
     loaded_storages = {}

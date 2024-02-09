@@ -1303,8 +1303,8 @@ class FakeTensorPropTest(TestCase):
 
             fake_mode = FakeTensorMode()
             with fake_mode:
-                # This is where the bug is triggered
-                torch.load(state_dict_file)
+                torch.load(state_dict_file)  # scenario 1
+                torch.load(state_dict_file, map_location="cpu")  # scenario 2
 
 
 class FakeTensorDispatchCache(TestCase):
