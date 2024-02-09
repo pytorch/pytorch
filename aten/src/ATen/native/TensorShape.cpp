@@ -554,7 +554,7 @@ static void fastCatOutDim0(const Tensor& out, const MaterializedITensorListRef& 
   for (const Tensor& input : inputs) {
     TORCH_CHECK(outBytes >= totalBytes);
     if (input.nbytes() > 0) {
-      std::memcpy(dataPtr + totalBytes, input.data_ptr(), input.nbytes());
+      std::memcpy(dataPtr + totalBytes, input.const_data_ptr(), input.nbytes());
     }
     totalBytes += input.nbytes();
   }
@@ -609,7 +609,7 @@ TORCH_IMPL_FUNC(cat_out_cpu)
       .set_check_mem_overlap(false)
       .resize_outputs(false)
       .add_output(result_slice)
-      .add_input(source_slice)
+      .add_const_input(source_slice)
       .enforce_safe_casting_to_output(true)
       .build();
 
@@ -617,10 +617,10 @@ TORCH_IMPL_FUNC(cat_out_cpu)
       if (cat_should_skip_tensor(tensor)) {
         continue;
       }
-      auto source_data = static_cast<char*>(tensor.data_ptr());
+      auto source_data = static_cast<const char*>(tensor.const_data_ptr());
       auto result_data = static_cast<char*>(result_slice_data) + offset * result_stride_bytes;
       iter.unsafe_replace_operand(0, result_data);
-      iter.unsafe_replace_operand(1, source_data);
+      iter.unsafe_replace_operand(1, const_cast<char*>(source_data));
       copy_stub(iter.device_type(), iter, false);
       offset += slice_dim_size;
     }
@@ -636,7 +636,7 @@ TORCH_IMPL_FUNC(cat_out_cpu)
         .set_check_mem_overlap(false)  // Already checked above
         .resize_outputs(false)
         .add_output(result_slice)
-        .add_input(tensor)
+        .add_const_input(tensor)
         .promote_inputs_to_common_dtype(true)
         .cast_common_dtype_to_outputs(true)
         .enforce_safe_casting_to_output(true)
@@ -1004,7 +1004,7 @@ std::vector<Tensor> tensor_split(const Tensor& self, const Tensor& tensor_indice
     int64_t sections = tensor_indices_or_sections.item<int64_t>();
     return self.tensor_split(sections, dim);
   } else {
-    auto indices_data = tensor_indices_or_sections.data_ptr<int64_t>();
+    auto indices_data = tensor_indices_or_sections.const_data_ptr<int64_t>();
     auto stride = tensor_indices_or_sections.stride(0);
     auto numel = tensor_indices_or_sections.numel();
     std::vector<int64_t> indices(numel);
@@ -1344,22 +1344,22 @@ Tensor& narrow_copy_dense_cpu_out(
     return output;
   }
 
-  char* src_bytes = static_cast<char*>(self_contig->data_ptr());
+  const char* src_bytes = static_cast<const char*>(self_contig->const_data_ptr());
   char* dst_bytes = static_cast<char*>(output.data_ptr());
 
   size_t src_block_size_bytes = itemsize * src_block_size;
   size_t dst_block_size_bytes = itemsize * dst_block_size;
   size_t src_offset = unit * start;
 
-  char* src_offset_bytes = src_bytes + itemsize * src_offset;
+  const char* src_offset_bytes = src_bytes + itemsize * src_offset;
   char* dst_offset_bytes = dst_bytes;
 
   for (const auto i : c10::irange(num_blocks)) {
-    char* local_src_offset_bytes = src_offset_bytes + i * src_block_size_bytes;
+    const char* local_src_offset_bytes = src_offset_bytes + i * src_block_size_bytes;
     char* local_dst_offset_bytes = dst_offset_bytes + i * dst_block_size_bytes;
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        static_cast<void*>(local_src_offset_bytes + dst_block_size_bytes) <=
-        static_cast<void*>(src_bytes + src_nbytes));
+        static_cast<const void*>(local_src_offset_bytes + dst_block_size_bytes) <=
+        static_cast<const void*>(src_bytes + src_nbytes));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         static_cast<void*>(local_dst_offset_bytes + dst_block_size_bytes) <=
         static_cast<void*>(dst_bytes + dst_nbytes));

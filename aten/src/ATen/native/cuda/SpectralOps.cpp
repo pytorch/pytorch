@@ -315,7 +315,7 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
     at::globalContext().getNVRTC().cuCtxSetCurrent(pctx);
   }
 #endif /* !defined(USE_ROCM) */
-  exec_cufft_plan(*config, input.data_ptr(), out.data_ptr(), forward);
+  exec_cufft_plan(*config, const_cast<void*>(input.const_data_ptr()), out.data_ptr(), forward);
 
   // Inplace reshaping to original batch shape and inverting the dimension permutation
   DimVector out_strides(ndim);
@@ -387,7 +387,7 @@ Tensor _fft_r2c_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
   // CuFFT requires real input to be over-aligned, as if it were complex
   const auto complex_size = 2 * self.element_size();
   const bool complex_aligned = (
-      reinterpret_cast<std::uintptr_t>(self.data_ptr()) % complex_size == 0);
+      reinterpret_cast<std::uintptr_t>(self.const_data_ptr()) % complex_size == 0);
   auto working_tensor = self;
   if (!complex_aligned) {
     working_tensor = self.movedim(last_dim, -1)
