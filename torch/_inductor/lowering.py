@@ -531,6 +531,17 @@ def to_dtype(x: TensorBox, dtype: torch.dtype, copy=False):
 
 @register_lowering(prims.convert_element_type, type_promotion_kind=None)
 def _convert_element_type(x: TensorBox, dtype: torch.dtype):
+    if dtype.is_complex or x.get_dtype().is_complex:
+        if x.get_size():
+            # Decompose since aa aten fallback is more friendly for c++ codegen.
+            # This decompostion doesn't work for empty tensor, which needs more investigation.
+            dst = empty_like(x, dtype=dtype)
+            ir.InplaceCopyFallback.create(dst, x)
+            return dst
+        else:
+            return fallback_handler(
+                prims.convert_element_type.default, add_to_fallback_set=False
+            )(x, dtype)
     return to_dtype(x, dtype, copy=True)
 
 
@@ -766,24 +777,6 @@ def trunc(x):
     if is_integer_type(x):
         return clone(x)
     fn = ops_wrapper("trunc")
-    return make_pointwise(fn)(x)
-
-
-@register_lowering(
-    [aten.special_bessel_j0, prims.bessel_j0],
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
-def bessel_j0(x):
-    fn = ops_wrapper("bessel_j0")
-    return make_pointwise(fn)(x)
-
-
-@register_lowering(
-    [aten.special_bessel_j1, prims.bessel_j1],
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
-def bessel_j1(x):
-    fn = ops_wrapper("bessel_j1")
     return make_pointwise(fn)(x)
 
 
@@ -1712,7 +1705,10 @@ def unsupported_input_tensor(t: torch._subclasses.FakeTensor, parent=None):
     "Do not support reading or writing to this tensor"
     if t.is_complex():
         # Complex views are supported with IR ComplexView
-        if parent and parent.target == torch.ops.aten.view.dtype:
+        if parent and parent.target in (
+            torch.ops.aten.view.dtype,
+            torch.ops.prims.convert_element_type.default,
+        ):
             return False
         _warn_complex_not_supported()
         return True
@@ -2297,7 +2293,6 @@ make_fallback(aten.special_i0e, warn=False)
 make_fallback(aten.special_i1, warn=False)
 make_fallback(aten.special_i1e, warn=False)
 make_fallback(aten.special_laguerre_polynomial_l)
-make_fallback(aten.special_modified_bessel_i0)
 make_fallback(aten.special_modified_bessel_i1)
 make_fallback(aten.special_modified_bessel_k0)
 make_fallback(aten.special_modified_bessel_k1)
@@ -5102,9 +5097,11 @@ add = register_pointwise(
 )
 
 
-def register_pointwise_numeric(op):
+def register_pointwise_numeric(op, name=None):
     return register_pointwise(
-        op, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+        op,
+        name=name,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     )
 
 
@@ -5205,6 +5202,12 @@ register_pointwise_numeric(aten.erfinv)
 register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
+
+register_pointwise_numeric(aten.special_bessel_j0, name="bessel_j0")
+register_pointwise_numeric(prims.bessel_j0, name="bessel_j0")
+register_pointwise_numeric(aten.special_bessel_j1, name="bessel_j1")
+register_pointwise_numeric(prims.bessel_j1, name="bessel_j1")
+register_pointwise_numeric(aten.special_modified_bessel_i0, name="modified_bessel_i0")
 
 foreach_add_list = register_foreach_pointwise(
     aten._foreach_add.List, add, allow_alpha=True

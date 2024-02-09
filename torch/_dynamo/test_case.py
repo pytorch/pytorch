@@ -42,9 +42,11 @@ def run_tests(needs=()):
 
 
 class TestCase(TorchTestCase):
+    _exit_stack: contextlib.ExitStack
+
     @classmethod
     def tearDownClass(cls):
-        cls._exit_stack.close()  # type: ignore[attr-defined]
+        cls._exit_stack.close()
         super().tearDownClass()
 
     @classmethod
