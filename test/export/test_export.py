@@ -3025,6 +3025,23 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             # under a new FakeTensorMode.
             ep = torch.export.export(m, (inp,))
 
+    def test_user_input_and_buffer_mutation(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("foo", torch.randn(4, 4))
+
+            def forward(self, x):
+                self.foo.add_(1)
+                x.add_(1)
+                return self.foo + x
+
+        mod = MyModule()
+        mod_copy = copy.deepcopy(mod)
+        ep = export(mod_copy, (torch.rand(4, 4),))
+
+        self.assertEqual(mod.foo, ep.module().foo)
+        self.assertEqual(mod(torch.ones(4, 4)), ep.module()(torch.ones(4, 4)))
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):

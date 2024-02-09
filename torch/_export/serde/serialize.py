@@ -2277,17 +2277,17 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
         idx, (arg, spec) = out
         assert isinstance(spec, OutputSpec)
         if spec.type == "user_output":
-            return 2, None, idx
+            return 3, None, idx
         elif spec.type == "loss_output":
-            return 2, None, idx
+            return 3, None, idx
         elif spec.type == "buffer_mutation":
             return 1, spec.buffer_mutation.buffer_name, idx
         elif spec.type == "gradient_to_parameter":
-            return 3, spec.gradient_to_parameter.parameter_name, idx
+            return 4, spec.gradient_to_parameter.parameter_name, idx
         elif spec.type == "gradient_to_user_input":
-            return 4, None, idx
+            return 5, None, idx
         elif spec.type == "user_input_mutation":
-            return 1, None, idx
+            return 2, None, idx
         else:
             raise AssertionError(f"Unknown output type: {spec}")
 
