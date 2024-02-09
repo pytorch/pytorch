@@ -22,6 +22,7 @@ from torch import nn
 from torch._subclasses import fake_tensor
 from torch.onnx._internal import _beartype, exporter
 from torch.onnx._internal.fx import (
+    diagnostics,
     fx_symbolic_graph_extractor,
     patcher,
     serialization as fx_serialization,
@@ -1058,6 +1059,17 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 )
 
             onnx_test_common.assert_dynamic_shapes(onnx_program, self.dynamic_shapes)
+
+            if diagnostics.is_onnx_diagnostics_log_artifact_enabled():
+                onnx_program.save_diagnostics(
+                    f"test_report_{self._testMethodName}"
+                    f"_op_level_debug_{self.op_level_debug}"
+                    f"_dynamic_axes_{self.dynamic_shapes}"
+                    f"_load_checkpoint_{self.load_checkpoint_during_init}"
+                    f"_export_within_fake_mode_{self.export_within_fake_mode}"
+                    f"model_type_{self.model_type}"
+                    ".sarif"
+                )
 
             with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
                 onnx_program.save(
