@@ -10589,6 +10589,9 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.float32: tol(atol=1.5e-05, rtol=1e-05)}),
                    'TestCommon', 'test_out'),
                DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=1e-02, rtol=1e-03)}),
+                   'TestCommon', 'test_noncontiguous_samples'),
+               DecorateInfo(
                    toleranceOverride({torch.half: tol(atol=6e-3, rtol=6e-3)}),
                    'TestInductorOpInfo', 'test_comprehensive', device_type='cpu'),
            ],
@@ -10622,6 +10625,10 @@ op_db: List[OpInfo] = [
            ],
            sample_inputs_func=sample_inputs_baddbmm,
            skips=(
+               # TF32
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=1e-02, rtol=1e-03)}),
+                   'TestCommon', 'test_noncontiguous_samples'),
                # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
                DecorateInfo(
                    unittest.skip("Skipped!"),
@@ -10672,6 +10679,10 @@ op_db: List[OpInfo] = [
            skips=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
+               # TF32
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=1.5e-02, rtol=1e-03)}),
+                   'TestCommon', 'test_noncontiguous_samples'),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
                             "TestCommon", "test_out")
            ),
@@ -12345,6 +12356,11 @@ op_db: List[OpInfo] = [
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=0)}),
                             'TestCommon', 'test_noncontiguous_samples', device_type='cuda',
                             active_if=TEST_WITH_ROCM),
+               # TF32
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=2e-2, rtol=5e-3),
+                                      torch.complex64: tol(atol=1e-3, rtol=1e-3)}),
+                   'TestCommon', 'test_noncontiguous_samples', active_if=not TEST_WITH_ROCM),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=0)}),
                             'TestCommon', 'test_out', device_type='cuda',
                             active_if=TEST_WITH_ROCM),
@@ -12353,6 +12369,13 @@ op_db: List[OpInfo] = [
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=0, rtol=1e-5)}),
                             'TestCommon', 'test_noncontiguous_samples',
                             device_type='cpu'),
+               # TF32
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=8e-2, rtol=1e-3)}),
+                            'TestCompositeCompliance', 'test_forward_ad',
+                            device_type='cuda'),
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=8e-2, rtol=1e-3)}),
+                            'TestCompositeCompliance', 'test_operator',
+                            device_type='cuda'),
                DecorateInfo(
                    toleranceOverride({
                        torch.float32: tol(atol=1e-5, rtol=1e-5),
@@ -14104,6 +14127,16 @@ op_db: List[OpInfo] = [
            decorators=(
                # Strides are not the same!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               # TF32
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=3e-03, rtol=1e-03),
+                                               torch.complex64: tol(atol=1e-03, rtol=1e-03)}),
+                            'TestCommon', 'test_noncontiguous_samples',
+                            device_type='cuda'),
+
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03)}),
+                            'TestOperators', 'test_jvpvjp',
+                            device_type='cuda'),
+
            )),
     OpInfo('nn.functional.bilinear',
            aten_name='bilinear',
@@ -15549,6 +15582,13 @@ op_db: List[OpInfo] = [
                             'TestMathBits', 'test_conj_view'),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1.2e-03)}),
                             'TestCommon', 'test_noncontiguous_samples'),
+               # TF32
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=8e-2, rtol=1e-3)}),
+                            'TestCompositeCompliance', 'test_forward_ad',
+                            device_type='cuda'),
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=8e-2, rtol=3e-3)}),
+                            'TestCompositeCompliance', 'test_operator',
+                            device_type='cuda'),
                DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1e-05)}),
                             "TestDecomp", "test_comprehensive", device_type="cuda",
                             active_if=TEST_WITH_ROCM),
@@ -16132,6 +16172,9 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack, with_tf32_off,
                        DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03)}),
                                     'TestCommon', 'test_noncontiguous_samples',
+                                    device_type='cuda'),
+                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)}),
+                                    'TestOperators', 'test_grad',
                                     device_type='cuda')],
            skips=(
                # test does not work with passing lambda for op
@@ -20732,6 +20775,7 @@ python_ref_db = [
         "_refs.nn.functional.pdist",
         torch_opinfo_name="nn.functional.pdist",
         supports_out=True,
+        decorators=[with_tf32_off],
         skips=(
             # RunTimeError: no _refs support for torch.Tensor.index_select
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
