@@ -5,6 +5,7 @@
 #include <torch/csrc/Module.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/utils/device_lazy_init.h>
+#include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 
@@ -94,6 +95,89 @@ PyObject* THXPModule_getDeviceCount_wrap(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   poison_fork();
   return THPUtils_packUInt64(at::xpu::device_count());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THXPModule_getCurrentStream_wrap(
+    PyObject* self,
+    PyObject* device_index) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkLong(device_index), "invalid argument to current_stream");
+  int64_t device = THPUtils_unpackLong(device_index);
+  auto stream = at::xpu::getCurrentXPUStream(device);
+  PyObject* output_tuple = PyTuple_New(3);
+  PyTuple_SetItem(
+      output_tuple, 0, THPUtils_packInt64(static_cast<int64_t>(stream.id())));
+  PyTuple_SetItem(
+      output_tuple,
+      1,
+      THPUtils_packInt64(static_cast<int64_t>(stream.device_index())));
+  PyTuple_SetItem(
+      output_tuple,
+      2,
+      THPUtils_packInt64(static_cast<int64_t>(stream.device_type())));
+  return output_tuple;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THXPModule_getCurrentStream_raw(
+    PyObject* self,
+    PyObject* device_index) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkLong(device_index),
+      "invalid argument to getCurrentRawStream");
+  int64_t device = THPUtils_unpackLong(device_index);
+  return PyLong_FromVoidPtr(&at::xpu::getCurrentXPUStream(device).queue());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THXPModule_setStream_wrap(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  int64_t stream_id = 0;
+  int64_t device_index = 0;
+  int64_t device_type = 0;
+
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+  constexpr const char* kwlist[] = {
+      "stream_id", "device_index", "device_type", nullptr};
+  if (!PyArg_ParseTupleAndKeywords(
+          args,
+          kwargs,
+          "|LLL",
+          const_cast<char**>(kwlist),
+          &stream_id,
+          &device_index,
+          &device_type)) {
+  }
+
+  auto stream = at::xpu::XPUStream::unpack3(
+      stream_id, device_index, static_cast<c10::DeviceType>(device_type));
+
+  auto device = c10::xpu::current_device();
+  if (device != stream.device_index()) {
+    c10::xpu::set_device(stream.device_index());
+  }
+  at::xpu::setCurrentXPUStream(stream);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THXPModule_xpuSynchronize(PyObject* self, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to synchronize");
+  int device = THPUtils_unpackInt(arg);
+  {
+    pybind11::gil_scoped_release no_gil;
+    // Only the SYCL queues we have reserved will be synchronized, see Note
+    // [Synchronize Streams on Device].
+    c10::xpu::syncStreamsOnDevice(static_cast<c10::DeviceIndex>(device));
+  }
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -204,6 +288,19 @@ static struct PyMethodDef _THXPModule_methods[] = {
      METH_NOARGS,
      nullptr},
     {"_xpu_isInBadFork", THXPModule_isInBadFork_wrap, METH_NOARGS, nullptr},
+    {"_xpu_getCurrentStream",
+     THXPModule_getCurrentStream_wrap,
+     METH_O,
+     nullptr},
+    {"_xpu_getCurrentRawStream",
+     THXPModule_getCurrentStream_raw,
+     METH_O,
+     nullptr},
+    {"_xpu_setStream",
+     castPyCFunctionWithKeywords(THXPModule_setStream_wrap),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_xpu_synchronize", THXPModule_xpuSynchronize, METH_O, nullptr},
     {nullptr}};
 
 PyMethodDef* THXPModule_methods() {
