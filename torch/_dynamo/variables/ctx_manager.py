@@ -199,7 +199,7 @@ class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     # call from eager that calls the compiled function, as the grad levels
     # may be different.
     _guards_singleton = Guard(
-        GlobalStateSource(), GuardBuilder.FUNCTORCH_CURRENT_LEVEL_MATCH
+        GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH
     )
 
     @staticmethod
@@ -239,9 +239,7 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     # being compiled. But the FX graph may be invalid in the case of a vmap
     # call from eager that calls the compiled function, as the vmap levels
     # may be different.
-    _guards_singleton = Guard(
-        GlobalStateSource(), GuardBuilder.FUNCTORCH_CURRENT_LEVEL_MATCH
-    )
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)
 
     @staticmethod
     def create(tx, target_values, **kwargs):

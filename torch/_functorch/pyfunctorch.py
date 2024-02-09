@@ -153,7 +153,7 @@ class GradInterpreter(FuncTorchInterpreter):
         return self._cptr.prevGradMode()
 
     def get_state(self):
-        return (self.key().name, self.level())
+        return (self.key().name, self.level(), self.prev_grad_mode())
 
 
 class JvpInterpreter(FuncTorchInterpreter):
@@ -212,19 +212,29 @@ def coerce_cinterpreter(cinterpreter: CInterpreter) -> FuncTorchInterpreter:
     raise RuntimeError(f"NYI: PyDispatcher has not implemented support for {key}")
 
 
-def retrieve_current_functorch_interpreter():
+def retrieve_current_functorch_interpreter() -> FuncTorchInterpreter:
     interpreter = torch._C._functorch.peek_interpreter_stack()
     assert interpreter is not None
     return coerce_cinterpreter(interpreter)
 
 
-def retrieve_all_functorch_interpreters():
+def retrieve_all_functorch_interpreters() -> list[FuncTorchInterpreter]:
     cis = torch._C._functorch.get_interpreter_stack()
-    assert cis is not None
+    if cis is None:
+        return []
     return [coerce_cinterpreter(ci) for ci in cis]
 
 
-def compare_functorch_state(states) -> bool:
+def compare_functorch_state(states: list[tuple[bool | int | str, ...]]) -> bool:
+    # There are four possible cases covered here:
+    # 1. Current stack empty AND stack when generated not empty -> Invalidate
+    # 2. Current stack not empty AND stack when generated empty -> Invalidate
+    # 3. Current stack and generated stack empty -> Valid FX graph
+    # 4. Current stack and generated stack not empty -> Valid if both states match
+    peek = torch._C._functorch.peek_interpreter_stack()
+    if (peek is None and len(states) != 0) or (peek is not None and len(states) == 0):
+        return False
+
     cis = retrieve_all_functorch_interpreters()
     return len(cis) == len(states) and \
         all(ci.check_state(state) for ci, state in zip(cis, states))
