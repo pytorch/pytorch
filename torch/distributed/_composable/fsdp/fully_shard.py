@@ -116,6 +116,9 @@ def fully_shard(
         state._fsdp_param_group = FSDPParamGroup(
             params, module, mesh_info, post_forward_mesh_info, device, mp_policy
         )
+    for module in managed_modules:
+        module._is_fsdp_managed_module = True  # type: ignore[assignment]
+        module._fsdp_use_orig_params = True  # type: ignore[assignment]
 
     # Place FSDP leftmost for highest priority in the method resolution order
     cls = module.__class__
