@@ -30,6 +30,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     _dynamo_dist_per_rank_init,
 )
+from torch.testing._internal.common_utils import requires_cuda
 import torch._dynamo.logging
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
@@ -267,6 +268,27 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
 
         opt_model = torch._dynamo.optimize("aot_eager")(model)
         opt_model()
+
+
+    @patch.object(config, "optimize_ddp", True)
+    def test_symbol_splitting(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight1 = nn.Parameter(torch.randn(512, 512))
+                self.weight2 = nn.Parameter(torch.randn(512, 512))
+
+            def forward(self, x):
+                x = torch.cat([x, x])
+                y = x @ self.weight1
+                z = x + y @ self.weight2
+                return z
+
+        model = Model()
+        model = FakeDDP(model)
+
+        opt_model = torch.compile(dynamic=True)(model)
+        opt_model(torch.randn(20, 512))
 
 
 # Are these tests failing?  Check and see if TestFakeDistributedSingleProc has a
@@ -525,6 +547,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
 
 @requires_nccl()
+@requires_cuda
 class TestSingleProc(DynamoDistributedSingleProcTestCase):
     """
     Test harness initializes dist process group.
@@ -662,6 +685,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
     @torch._inductor.config.patch({"layout_optimization": True, "keep_output_stride": False})
     @patch.object(config, "optimize_ddp", True)
+    @patch.object(config, "optimize_ddp_lazy_compile", True)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor_layout_optimizations(self):
         assert config.optimize_ddp
@@ -698,6 +722,41 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         opt_outputs = opt_fn(inputs)
         self.assertTrue(same(correct_outputs, opt_outputs))
 
+
+    @patch.object(config, "optimize_ddp", True)
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    def test_graph_split_inductor_transpose(self):
+        assert config.optimize_ddp
+
+        B = 100
+        N = 30
+        D = 50
+        K = 70
+
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear0 = nn.Linear(N, K)
+                self.linear1 = torch.nn.Linear(D * K, 2048)
+
+            def forward(self, x):
+                xt = x.transpose(2, 1)
+                xt = self.linear0(xt).flatten(1)
+                return self.linear1(xt)
+
+        mod = Foo().to(self.device)
+
+        compiled_mod = torch.compile(mod, backend="inductor")
+        ddp_compiled_mod = DDP(compiled_mod, device_ids=self.device_ids)
+
+        x = torch.randn((B, N, D), dtype=torch.float32, device=self.device)
+        self.assertTrue(same(mod(x), ddp_compiled_mod(x)))
+
+        x_1 = torch.randn((B * 2, N, D), dtype=torch.float32, device=self.device)
+        self.assertTrue(same(mod(x_1), ddp_compiled_mod(x_1)))
+
+        x_2 = torch.randn((B * 3, N, D), dtype=torch.float32, device=self.device)
+        self.assertTrue(same(mod(x_2), ddp_compiled_mod(x_2)))
 
     @patch.object(config, "optimize_ddp", True)
     def test_no_split(self):

@@ -1,9 +1,13 @@
 #pragma once
 
 #include <c10/core/SymNodeImpl.h>
-#include <c10/macros/Macros.h>
+#include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
+#include <cstdint>
+#include <ostream>
+#include <utility>
 
 namespace c10 {
 
@@ -54,6 +58,7 @@ class C10_API SymBool {
   // bool, so it's not so common to have to call this
   bool guard_bool(const char* file, int64_t line) const;
   bool expect_true(const char* file, int64_t line) const;
+  bool guard_size_oblivious(const char* file, int64_t line) const;
 
   bool has_hint() const;
 
@@ -84,5 +89,19 @@ C10_API std::ostream& operator<<(std::ostream& os, const SymBool& s);
   TORCH_CHECK((cond).expect_true(__FILE__, __LINE__), __VA_ARGS__)
 #define TORCH_SYM_INTERNAL_ASSERT(cond, ...) \
   TORCH_INTERNAL_ASSERT((cond).expect_true(__FILE__, __LINE__), __VA_ARGS__)
+
+inline bool guard_size_oblivious(bool b, const char* file, int64_t line) {
+  return b;
+}
+
+inline bool guard_size_oblivious(
+    const c10::SymBool& b,
+    const char* file,
+    int64_t line) {
+  return b.guard_size_oblivious(file, line);
+}
+
+#define TORCH_GUARD_SIZE_OBLIVIOUS(cond) \
+  c10::guard_size_oblivious((cond), __FILE__, __LINE__)
 
 } // namespace c10

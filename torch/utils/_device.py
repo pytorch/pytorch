@@ -1,9 +1,10 @@
+from typing import Optional
 import torch
 from torch.overrides import TorchFunctionMode
 from torch.utils._contextlib import context_decorator
 import functools
 
-CURRENT_DEVICE = None
+CURRENT_DEVICE: Optional[torch.device] = None
 
 @functools.lru_cache(1)
 def _device_constructors():

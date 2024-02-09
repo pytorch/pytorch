@@ -6,23 +6,37 @@ import inspect
 import operator
 import os
 import re
+import sys
 from itertools import chain, count
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
 import sympy
 from sympy import Expr
 
 import torch
+import torch._ops
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
 
+from torch._inductor.codegen.multi_kernel import MultiKernelState
+from torch.fx.experimental.symbolic_shapes import SymTypes
 from torch.fx.node import _get_qualified_name
 from torch.utils._sympy.singleton_int import SingletonInt
 
 from .. import codecache, config, ir
 from ..codecache import CudaKernelParamCache
-from ..ir import ComputedBuffer, InputBuffer, ReinterpretView
+from ..ir import ReinterpretView
 from ..triton_heuristics import grid as default_grid
 from ..utils import (
     cache_on_self,
@@ -35,11 +49,17 @@ from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
 from .triton_utils import config_of, signature_to_meta
 
+if TYPE_CHECKING:
+    import triton
+
 
 pexpr = PythonPrinter().doprint
 
 
-def buffer_reuse_key(node: ir.Buffer):
+ReuseKey = Tuple[torch.device, torch.dtype, str]
+
+
+def buffer_reuse_key(node: ir.Buffer) -> ReuseKey:
     return (
         node.get_device(),
         node.get_dtype(),
@@ -50,7 +70,7 @@ def buffer_reuse_key(node: ir.Buffer):
     )
 
 
-def is_int(s: str):
+def is_int(s: str) -> bool:
     # Cpp code gen adds L at the end of ints
     # Lets remove it for checking whether we have an int or not
     if s and s[-1] == "L":
@@ -64,7 +84,7 @@ def is_int(s: str):
     return True
 
 
-def is_float(s: str):
+def is_float(s: str) -> bool:
     try:
         float(s)
     except ValueError:
@@ -72,15 +92,22 @@ def is_float(s: str):
     return True
 
 
-def convert_arg_type(python_type: str):
+def convert_arg_type(arg: torch.Argument) -> str:
     from .cpp import CONTAINER_PYTHON_TO_CPP, PYTHON_TO_CPP
+
+    # use x.real_type instead of x.type so that we get ScalarType instead of int
+    python_type = repr(arg.real_type)  # type: ignore[attr-defined]
 
     if python_type == "Tensor":
         # Conversions rules follow https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/native#func
-        return f"at::{python_type} const&"
+        if arg.alias_info is not None and arg.alias_info.is_write:
+            return f"at::{python_type}&"
+        else:
+            return f"at::{python_type} const&"
 
     if python_type in PYTHON_TO_CPP:
-        return PYTHON_TO_CPP[python_type]
+        cpp_type = PYTHON_TO_CPP[python_type]
+        return cpp_type
 
     # Convert args of container types e.g. Optional[*]
     for py_container, cpp_container in CONTAINER_PYTHON_TO_CPP.items():
@@ -96,8 +123,9 @@ def convert_arg_type(python_type: str):
     raise AssertionError(f"unsupport python_type: {python_type}")
 
 
-def convert_return_type(python_type: str):
-    # TODO: support alias
+def convert_return_type(ret: torch.Argument) -> str:
+    # use x.real_type instead of x.type so that we get ScalarType instead of int
+    python_type = repr(ret.real_type)  # type: ignore[attr-defined]
     python_to_cpp = {
         "Tensor": "at::Tensor",
         "List[Tensor]": "std::vector<at::Tensor>",
@@ -105,14 +133,17 @@ def convert_return_type(python_type: str):
 
     cpp_type = python_to_cpp.get(python_type, None)
     assert cpp_type is not None, f"NYI return type: {python_type}"
+    # An output aliasing an input is returned by reference only when it's a
+    # Tensor, not when it's a Tensor[]. For example, aten.split.Tensor's output
+    # aliases the input tensor, but the op returns a vector by value.
+    if python_type == "Tensor" and ret.alias_info is not None:
+        cpp_type += "&"
     return cpp_type
 
 
-def get_cpp_op_schema(kernel):
-    # use x.real_type instead of x.type so that we get ScalarType instead of int
-    arg_types = [repr(x.real_type) for x in kernel._schema.arguments]
-    arg_names = [x.name for x in kernel._schema.arguments]
-    returns = [repr(x.real_type) for x in kernel._schema.returns]
+def get_cpp_op_schema(kernel: torch._ops.OpOverload) -> str:
+    args = kernel._schema.arguments
+    returns = kernel._schema.returns
 
     num_returns = len(returns)
     assert num_returns > 0, "must have at least one return value"
@@ -123,33 +154,62 @@ def get_cpp_op_schema(kernel):
         tuple_returns = ", ".join([convert_return_type(r) for r in returns])
         cpp_return_value = f"std::tuple<{tuple_returns}>"
 
-    cpp_arg_type = [
-        f"{convert_arg_type(arg_type)} {arg_name}"
-        for arg_type, arg_name in zip(arg_types, arg_names)
-    ]
-    return f"{cpp_return_value}({', '.join(cpp_arg_type)})"
+    cpp_arg_type = [f"{convert_arg_type(arg)} {arg.name}" for arg in args]
+    return f"{cpp_return_value}({', '.join(cpp_arg_type)})"  # type: ignore[possibly-undefined]
 
 
-def user_defined_kernel_grid_fn_code(name, configs, grids):
+# TODO: Move to a well known place
+TritonMetaParams = Dict[str, int]
+TritonGrid = Union[
+    Tuple[Union[int, sympy.Expr], ...], Callable[[TritonMetaParams], Tuple[int, ...]]
+]
+
+
+def user_defined_kernel_grid_fn_code(
+    name: str,
+    configs: List["triton.Config"],
+    grids: List[TritonGrid],
+    wrapper: Optional["WrapperCodeGen"] = None,
+) -> Tuple[str, str]:
     output = IndentedBuffer()
+
+    def _convert_to_sympy_expr(item: Union[int, sympy.Expr]) -> sympy.Expr:
+        return item if isinstance(item, sympy.Expr) else sympy.Integer(item)
+
+    def determine_grid(grid: TritonGrid):
+        if wrapper is None or callable(grid):
+            # return as-is when used in eager mode or when grid is callable
+            return grid
+        # Grid contains ints/Expr, so utilize wrapper's expr printer for codegen
+        sympy_grid = tuple(_convert_to_sympy_expr(g) for g in grid)
+        return wrapper.codegen_shape_tuple(sympy_grid)
 
     fn_name = f"grid_wrapper_for_{name}"
     output.writeline(f"def {fn_name}(meta):")
     with output.indent():
         if len(grids) == 1:
-            output.writeline(f"return {grids[0]}")
+            grid = determine_grid(grids[0])
+            output.writeline(f"return {grid}")
         else:
+            assert len(grids) > 1
             assert len(grids) == len(configs)
+            seen = set()
             for grid, c in zip(grids, configs):
                 guards = [f"meta['{name}'] == {val}" for name, val in c.kwargs.items()]
                 guards = " and ".join(guards)
-                output.writeline(f"if {guards}: return {grid}")
+                grid = determine_grid(grid)
+                statement = f"if {guards}: return {grid}"
+                if statement in seen:
+                    continue
+                seen.add(statement)
+                output.writeline(statement)
+
     return fn_name, output.getvalue()
 
 
 @dataclasses.dataclass
 class SymbolicCallArg:
-    inner: Any
+    inner: str
     # the original symbolic expression represented by inner
     inner_expr: sympy.Expr
 
@@ -168,30 +228,32 @@ MAX_STACK_ALLOCATION_SIZE = 1024 * 100
 class MemoryPlanningState:
     def __init__(self):
         super().__init__()
-        self.reuse_pool: Dict[Any, List[FreeIfNotReusedLine]] = collections.defaultdict(
-            list
-        )
+        self.reuse_pool: Dict[
+            ReuseKey, List[FreeIfNotReusedLine]
+        ] = collections.defaultdict(list)
         self.total_allocated_buffer_size: int = 0
 
-    def __contains__(self, key):
+    def __contains__(self, key: ReuseKey) -> bool:
         return bool(self.reuse_pool.get(key, None))
 
-    def pop(self, key) -> "FreeIfNotReusedLine":
+    def pop(self, key: ReuseKey) -> "FreeIfNotReusedLine":
         item = self.reuse_pool[key].pop()
         assert not item.is_reused
         return item
 
-    def push(self, key, item: "FreeIfNotReusedLine"):
+    def push(self, key: ReuseKey, item: "FreeIfNotReusedLine") -> None:
         assert not item.is_reused
         self.reuse_pool[key].append(item)
 
 
 @dataclasses.dataclass
-class EnterCudaDeviceContextManagerLine:
+class EnterDeviceContextManagerLine:
     device_idx: int
     last_seen_device_guard_index: Optional[int]
 
-    def codegen(self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack):
+    def codegen(
+        self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack
+    ) -> None:
         if V.graph.cpp_wrapper:
             code.writeline("\n")
             if V.graph.aot_mode:
@@ -199,7 +261,7 @@ class EnterCudaDeviceContextManagerLine:
                 # associated with a device, so we never expect the device to change.
                 # CUDAStreamGuard sets the stream and the device.
                 if self.last_seen_device_guard_index is None:
-                    if config.aot_inductor.abi_compatible:
+                    if config.abi_compatible:
                         code.writeline(
                             "AOTICudaStreamGuard stream_guard(stream, this->device_idx_);"
                         )
@@ -222,15 +284,15 @@ class EnterCudaDeviceContextManagerLine:
         else:
             # Note _DeviceGuard has less overhead than device, but only accepts
             # integers
-            code.writeline(f"with torch.cuda._DeviceGuard({self.device_idx}):")
+            code.writeline(f"with {V.graph.device_ops.device_guard(self.device_idx)}:")
             device_cm_stack.enter_context(code.indent())
-            code.writeline(
-                f"torch.cuda.set_device({self.device_idx}) # no-op to ensure context"
-            )
+            code.writeline(V.graph.device_ops.set_device(self.device_idx))
 
 
-class ExitCudaDeviceContextManagerLine:
-    def codegen(self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack):
+class ExitDeviceContextManagerLine:
+    def codegen(
+        self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack
+    ) -> None:
         if not V.graph.cpp_wrapper:
             device_cm_stack.close()
 
@@ -243,11 +305,11 @@ class MemoryPlanningLine:
         """First pass to find reuse"""
         return self
 
-    def codegen(self, code: IndentedBuffer):
+    def codegen(self, code: IndentedBuffer) -> None:
         """Second pass to output code"""
         pass
 
-    def __str__(self):
+    def __str__(self) -> str:
         """
         Emits a string representation that fits on one line.
         """
@@ -266,7 +328,7 @@ class MemoryPlanningLine:
 class AllocateLine(MemoryPlanningLine):
     node: ir.Buffer
 
-    def plan(self, state: MemoryPlanningState):
+    def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
         if self.node.get_name() in V.graph.removed_buffers:
             return NullLine(self.wrapper)
 
@@ -286,7 +348,7 @@ class AllocateLine(MemoryPlanningLine):
 
         return self
 
-    def codegen(self, code: IndentedBuffer):
+    def codegen(self, code: IndentedBuffer) -> None:
         assert self.node.get_name() not in V.graph.removed_buffers
         line = self.wrapper.make_buffer_allocation(self.node)
         code.writeline(line)
@@ -297,7 +359,7 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
     node: ir.Buffer
     is_reused: bool = False
 
-    def plan(self, state: MemoryPlanningState):
+    def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
         if isinstance(self.node.layout, (ir.AliasedLayout, ir.MultiOutputLayout)):
             return self
         assert not self.is_reused
@@ -307,7 +369,7 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
             state.push(buffer_reuse_key(self.node), self)
         return self
 
-    def codegen(self, code: IndentedBuffer):
+    def codegen(self, code: IndentedBuffer) -> None:
         assert self.node.get_name() not in V.graph.removed_buffers
         if not self.is_reused:
             code.writeline(self.wrapper.make_buffer_free(self.node))
@@ -319,14 +381,14 @@ class ReuseLine(MemoryPlanningLine):
     reused_as: ir.Buffer
     delete_old: bool = True
 
-    def plan(self, state: MemoryPlanningState):
+    def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
         if self.node.get_name() in V.graph.removed_buffers:
             assert self.reused_as.get_name() in V.graph.removed_buffers
             return NullLine(self.wrapper)
         assert self.reused_as.get_name() not in V.graph.removed_buffers
         return self
 
-    def codegen(self, code: IndentedBuffer):
+    def codegen(self, code: IndentedBuffer) -> None:
         assert self.node.get_name() not in V.graph.removed_buffers
         assert self.reused_as.get_name() not in V.graph.removed_buffers
         code.writeline(
@@ -338,6 +400,9 @@ class NullLine(MemoryPlanningLine):
     pass
 
 
+BufferName = str
+
+
 class WrapperCodeGen(CodeGen):
     """
     Generate outer wrapper in Python that calls the kernels.
@@ -345,13 +410,16 @@ class WrapperCodeGen(CodeGen):
 
     def __init__(self):
         super().__init__()
-        self._names_iter = count()
+        self._names_iter: Iterator[int] = count()
         self.header = IndentedBuffer()
         self.prefix = IndentedBuffer()
+        self.suffix = IndentedBuffer()
         self.wrapper_call = IndentedBuffer()
-        self.src_to_kernel = {}
-        self.kenel_numel_expr = set()
-        self.lines = []
+        # If the generated source code is exactly the same, reuse the
+        # pre-existing kernel for it
+        self.src_to_kernel: Dict[str, str] = {}
+        self.kernel_numel_expr: Set[str] = set()
+        self.lines: List[Union[MemoryPlanningLine, LineContext]] = []
         self.declare = ""
         self.declare_maybe_reference = ""
         self.ending = ""
@@ -362,13 +430,14 @@ class WrapperCodeGen(CodeGen):
         self.none_str = "None"
         self.size = "size()"
         self.stride = "stride()"
-        self.last_seen_device_guard_index = None
+        self.last_seen_device_guard_index: Optional[int] = None
         self.supports_intermediate_hooks = True
         self.expr_printer = pexpr
         self.user_defined_kernel_cache: Dict[Tuple[Any, ...], str] = {}
-        self.unbacked_symbol_decls = set()
-        self.allow_stack_allocation = None
-        self.stack_allocated_buffers = {}
+        self.unbacked_symbol_decls: Set[str] = set()  # str of sympy.Symbol
+        self.allow_stack_allocation: Optional[bool] = None
+        self.stack_allocated_buffers: Dict[BufferName, ir.Buffer] = {}
+        self.computed_sizes: Set[sympy.Symbol] = set()
 
         self.write_header()
         self.write_prefix()
@@ -378,27 +447,28 @@ class WrapperCodeGen(CodeGen):
                 # include a hash so our code cache puts different constants into different files
                 self.write_constant(name, hashed)
 
-        self.allocated = set()
-        self.freed: Set[str] = set()
+        self.allocated: Set[BufferName] = set()
+        self.freed: Set[BufferName] = set()
 
         # maps from reusing buffer to reused buffer
-        self.reuses = dict()
+        self.reuses: Dict[BufferName, BufferName] = dict()
 
         self.write_get_raw_stream = functools.lru_cache(None)(  # type: ignore[assignment]
             self.write_get_raw_stream
         )
 
         @functools.lru_cache(None)
-        def add_import_once(line):
+        def add_import_once(line: str) -> None:
             self.header.writeline(line)
 
         self.add_import_once = add_import_once
-        self._metas = {}
+        self._metas: Dict[str, str] = {}
+        self.multi_kernel_state = MultiKernelState()
 
-    def write_constant(self, name, hashed):
+    def write_constant(self, name: str, hashed: str) -> None:
         self.header.writeline(f"{name} = None  # {hashed}")
 
-    def write_header(self):
+    def write_header(self) -> None:
         self.header.splice(
             f"""
                 from ctypes import c_void_p, c_long
@@ -412,13 +482,16 @@ class WrapperCodeGen(CodeGen):
                 from torch._inductor.utils import maybe_profile
                 from torch._inductor.codegen.memory_planning import _align as align
 
-                from torch import device, empty, empty_strided
+                from torch import device, empty_strided
                 from {codecache.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
+                from torch._inductor.codegen.multi_kernel import MultiKernelCall
 
                 aten = torch.ops.aten
                 inductor_ops = torch.ops.inductor
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+                empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
+                empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
                 alloc_from_pool = torch.ops.inductor._alloc_from_pool
                 reinterpret_tensor = torch.ops.inductor._reinterpret_tensor
                 async_compile = AsyncCompile()
@@ -427,17 +500,19 @@ class WrapperCodeGen(CodeGen):
         )
 
     @cache_on_self
-    def write_triton_header_once(self):
+    def write_triton_header_once(self) -> None:
         self.header.splice(
             """
             import triton
             import triton.language as tl
             from torch._inductor.triton_heuristics import grid, start_graph, end_graph
-            from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
-            """
+            {}
+            """.format(
+                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
+            )
         )
 
-    def add_meta_once(self, meta):
+    def add_meta_once(self, meta: TritonMetaParams) -> str:
         meta = repr(meta)
         if meta not in self._metas:
             var = f"meta{len(self._metas)}"
@@ -446,13 +521,13 @@ class WrapperCodeGen(CodeGen):
         return self._metas[meta]
 
     @cache_on_self
-    def get_output_refs(self):
+    def get_output_refs(self) -> List[str]:
         return [x.codegen_reference(self.wrapper_call) for x in V.graph.graph_outputs]
 
-    def mark_output_type(self):
+    def mark_output_type(self) -> None:
         return
 
-    def codegen_input_size_asserts(self):
+    def codegen_input_size_asserts(self) -> None:
         for name, buf in V.graph.graph_inputs.items():
             if isinstance(buf, sympy.Expr):
                 continue
@@ -464,7 +539,18 @@ class WrapperCodeGen(CodeGen):
             stride = self.codegen_shape_tuple(buf.get_stride())
             self.prefix.writeline(f"assert_size_stride({name}, {size}, {stride})")
 
-    def write_prefix(self):
+    def codegen_input_nan_asserts(self) -> None:
+        self.prefix.writeline("# make sure graph inputs are not nan/inf")
+        for name, buf in V.graph.graph_inputs.items():
+            if isinstance(buf, sympy.Expr):
+                continue
+
+            line = f"assert not {name}.isnan().any().item()"
+            self.prefix.writeline(line)
+            line = f"assert not {name}.isinf().any().item()"
+            self.prefix.writeline(line)
+
+    def write_prefix(self) -> None:
         self.prefix.splice(
             """
 
@@ -476,7 +562,7 @@ class WrapperCodeGen(CodeGen):
         )
         with self.prefix.indent():
             if config.triton.debug_sync_graph:
-                self.prefix.writeline("torch.cuda.synchronize()")
+                self.prefix.writeline(V.graph.device_ops.synchronize())
             inp_len = len(V.graph.graph_inputs.keys())
             if inp_len != 0:
                 lhs = f"{', '.join(V.graph.graph_inputs.keys())}{'' if inp_len != 1 else ','}"
@@ -486,48 +572,51 @@ class WrapperCodeGen(CodeGen):
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
             if config.size_asserts:
                 self.codegen_input_size_asserts()
+            if config.nan_asserts:
+                self.codegen_input_nan_asserts()
 
-    def write_get_raw_stream(self, index):
+    def write_get_raw_stream(self, device_idx: int) -> str:
         self.write_triton_header_once()
-        name = f"stream{index}"
-        self.writeline(f"{name} = get_cuda_stream({index})")
+        name = f"stream{device_idx}"
+        self.writeline(f"{name} = get_raw_stream({device_idx})")
         return name
 
-    def next_kernel_suffix(self):
+    def next_kernel_suffix(self) -> str:
         return f"{next(self._names_iter)}"
 
-    def codegen_device_guard_enter(self, device_idx):
+    def codegen_device_guard_enter(self, device_idx: int) -> None:
         self.writeline(
-            EnterCudaDeviceContextManagerLine(
-                device_idx, self.last_seen_device_guard_index
-            )
+            EnterDeviceContextManagerLine(device_idx, self.last_seen_device_guard_index)
         )
         self.last_seen_device_guard_index = device_idx
 
-    def codegen_device_guard_exit(self):
-        self.writeline(ExitCudaDeviceContextManagerLine())
+    def codegen_device_guard_exit(self) -> None:
+        self.writeline(ExitDeviceContextManagerLine())
 
-    def generate_return(self, output_refs):
+    def generate_return(self, output_refs: List[str]) -> None:
         if output_refs:
             self.wrapper_call.writeline("return (" + ", ".join(output_refs) + ", )")
         else:
             self.wrapper_call.writeline("return ()")
 
-    def generate_end(self, result):
+    def generate_before_suffix(self, result: IndentedBuffer) -> None:
+        return
+
+    def generate_end(self, result: IndentedBuffer) -> None:
         return
 
     def generate_fallback_kernel(self, fallback_kernel, args):
         self.generate_extern_kernel_alloc(fallback_kernel, args)
 
     def generate_extern_kernel_alloc(self, extern_kernel, args):
+        output_name = extern_kernel.get_name()
+        origin_node = extern_kernel.get_origin_node()
+        kernel_name = extern_kernel.get_kernel_name()
         ending = self.ending
-        if config.memory_planning and "view_as_complex" in str(extern_kernel.kernel):
+        if config.memory_planning and "view_as_complex" in kernel_name:
             # view operation fallbacks cause issues since inductor
             # doesn't know the memory is still needed and might reuse it.
             ending = f".clone(){ending}"
-        output_name = extern_kernel.get_name()
-        origin_node = extern_kernel.get_origin_node()
-        kernel_name = extern_kernel.codegen_kernel_name()
         self.writeline(
             f"{self.declare}{output_name} = {kernel_name}({', '.join(args)}){ending}"
         )
@@ -549,7 +638,9 @@ class WrapperCodeGen(CodeGen):
         self.writeline(f"{kernel}({', '.join(args)})")
 
     def generate_user_defined_triton_kernel(self, kernel_name, grid, configs, args):
-        grid, code = user_defined_kernel_grid_fn_code(kernel_name, configs, grid)
+        grid, code = user_defined_kernel_grid_fn_code(
+            kernel_name, configs, grid, wrapper=self
+        )
         # Must happen after free symbols are already codegened
         with self.prefix.indent():
             self.prefix.splice(code)
@@ -560,7 +651,7 @@ class WrapperCodeGen(CodeGen):
         )
 
     def generate_scatter_fallback(
-        self, output, inputs, kernel, fn, src_is_tensor, reduce, kwargs
+        self, output, inputs, kernel, python_kernel_name, src_is_tensor, reduce, kwargs
     ):
         line = f"{kernel}({','.join(map(str, inputs))}"
         if kernel == "aten.scatter_":
@@ -570,6 +661,11 @@ class WrapperCodeGen(CodeGen):
             line += ", ".join([""] + kwargs)
         line += f"){self.ending}"
         self.writeline(line)
+
+    def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
+        indices_str = f"{self.open_bracket}{', '.join(indices)}{self.closed_bracket}"
+        args = [x, indices_str, values, accumulate]
+        self.writeline(self.wrap_kernel_call(kernel, args))
 
     def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,
@@ -618,8 +714,8 @@ class WrapperCodeGen(CodeGen):
                 elif isinstance(
                     line,
                     (
-                        EnterCudaDeviceContextManagerLine,
-                        ExitCudaDeviceContextManagerLine,
+                        EnterDeviceContextManagerLine,
+                        ExitDeviceContextManagerLine,
                     ),
                 ):
                     line.codegen(self.wrapper_call, device_cm_stack)
@@ -629,19 +725,21 @@ class WrapperCodeGen(CodeGen):
             output_refs = self.get_output_refs()
             self.mark_output_type()
             if config.triton.debug_sync_graph:
-                self.wrapper_call.writeline("torch.cuda.synchronize()")
+                self.wrapper_call.writeline(V.graph.device_ops.synchronize())
 
             if config.profile_bandwidth:
                 self.generate_end_graph()
 
             self.generate_return(output_refs)
 
-        self.append_precomputed_sizes_to_prefix()
         self.finalize_prefix()
         result.splice(self.prefix)
 
         with result.indent():
             result.splice(self.wrapper_call)
+
+        self.generate_before_suffix(result)
+        result.splice(self.suffix)
 
         self.generate_end(result)
 
@@ -669,8 +767,9 @@ class WrapperCodeGen(CodeGen):
         # codegen allocations in two passes
         planning_state = MemoryPlanningState()
         for i in range(len(self.lines)):
-            if isinstance(self.lines[i], MemoryPlanningLine):
-                self.lines[i] = self.lines[i].plan(planning_state)
+            line = self.lines[i]
+            if isinstance(line, MemoryPlanningLine):
+                self.lines[i] = line.plan(planning_state)
 
         self.allow_stack_allocation = (
             self.allow_stack_allocation is not False
@@ -713,17 +812,17 @@ class WrapperCodeGen(CodeGen):
         )
 
         for name, shape in graph_inputs_expr:
-            shape = V.graph.sizevars.simplify(shape)
+            shape = V.graph.sizevars.simplify(shape)  # type: ignore[arg-type]
             if shape in needed:
-                needed.remove(shape)
+                needed.remove(shape)  # type: ignore[arg-type]
                 code.writeline(f"{self.declare}{shape} = {name}{self.ending}")
 
         for name, value in graph_inputs_tensors:
             shapes = value.get_size()
             for dim, shape in enumerate(shapes):
-                shape = V.graph.sizevars.simplify(shape)
+                shape = V.graph.sizevars.simplify(shape)  # type: ignore[arg-type]
                 if shape in needed:
-                    needed.remove(shape)
+                    needed.remove(shape)  # type: ignore[arg-type]
                     code.writeline(
                         f"{self.declare}{shape} = {sizeof(name)}[{dim}]{self.ending}"
                     )
@@ -731,19 +830,22 @@ class WrapperCodeGen(CodeGen):
         for name, value in graph_inputs_tensors:
             shapes = value.get_stride()
             for dim, shape in enumerate(shapes):
-                shape = V.graph.sizevars.simplify(shape)
+                shape = V.graph.sizevars.simplify(shape)  # type: ignore[arg-type]
                 if shape in needed:
-                    needed.remove(shape)
+                    needed.remove(shape)  # type: ignore[arg-type]
                     code.writeline(
                         f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
                     )
 
-    def append_precomputed_sizes_to_prefix(self):
-        with self.prefix.indent():
-            for sym, expr in V.graph.sizevars.inv_precomputed_replacements.items():
-                self.prefix.writeline(
-                    f"{self.declare}{sym} = {self.expr_printer(expr)}{self.ending}"
-                )
+    def ensure_size_computed(self, sym: sympy.Symbol):
+        if isinstance(sym, sympy.Symbol) and sym.name.startswith("ps"):
+            if sym in self.computed_sizes:
+                return
+            self.computed_sizes.add(sym)
+            expr = V.graph.sizevars.inv_precomputed_replacements[sym]
+            self.writeline(
+                f"{self.declare}{sym} = {self.expr_printer(expr)}{self.ending}"
+            )
 
     def finalize_prefix(self):
         pass
@@ -912,6 +1014,10 @@ class WrapperCodeGen(CodeGen):
             """,
             strip=True,
         )
+        from .triton import TritonKernel
+
+        if TritonKernel.gen_attr_descriptor_import():
+            compile_wrapper.splice(TritonKernel.gen_attr_descriptor_import())
         compile_wrapper.newline()
 
         from .common import SizeArg, TensorArg
@@ -927,7 +1033,7 @@ class WrapperCodeGen(CodeGen):
                 signature.append(
                     TensorArg(
                         key,
-                        arg.codegen_reference(),
+                        arg.get_name(),
                         arg.get_dtype(),
                         # For ReinterpretView, we do not want to check alignment
                         not isinstance(arg, ReinterpretView),
@@ -1004,8 +1110,8 @@ class WrapperCodeGen(CodeGen):
 
     def generate_numel_expr(self, kernel_name: str, tree):
         expr = f"{kernel_name}_{tree.prefix}numel"
-        if expr not in self.kenel_numel_expr:
-            self.kenel_numel_expr.add(expr)
+        if expr not in self.kernel_numel_expr:
+            self.kernel_numel_expr.add(expr)
             self.writeline(
                 f"{self.declare}{expr} = {self.expr_printer(tree.numel)}{self.ending}"
             )
@@ -1047,6 +1153,7 @@ class WrapperCodeGen(CodeGen):
         device_index=None,
         cuda=True,
         triton=True,
+        arg_types=None,
     ):
         """
         Generates kernel call code.
@@ -1099,7 +1206,7 @@ class WrapperCodeGen(CodeGen):
             return repr(type(s)(Shim(self.val_to_arg_str(a)) for a in s))
         elif isinstance(s, torch._ops.OpOverload):
             return _get_qualified_name(s)
-        elif isinstance(s, (ComputedBuffer, InputBuffer, ReinterpretView)):
+        elif isinstance(s, (ir.Buffer, ReinterpretView)):
             return s.codegen_reference()
         else:
             return repr(s)
@@ -1113,23 +1220,21 @@ class WrapperCodeGen(CodeGen):
         return self.make_allocation(buffer.get_name(), device, dtype, shape, stride)
 
     def make_allocation(self, name, device, dtype, shape, stride):
-        try:
-            expected = tuple(ir.make_contiguous_strides_for(shape))
-        except Exception:  # cannot determine truth value of Relational
-            expected = None
-        if stride == expected:
+        if device.type in ("cpu", "cuda"):
+            # optimized path for faster allocations, saving ~2us versus the stuff below
             return (
-                f"{name} = empty("
-                f"{self.codegen_shape_tuple(shape)}, "
-                f"device='{device.type}', dtype={dtype})"
-            )
-        else:
-            return (
-                f"{name} = empty_strided("
+                f"{name} = empty_strided_{device.type}("
                 f"{self.codegen_shape_tuple(shape)}, "
                 f"{self.codegen_shape_tuple(stride)}, "
-                f"device='{device.type}', dtype={dtype})"
+                f"{dtype})"
             )
+        # all other devices:
+        return (
+            f"{name} = empty_strided("
+            f"{self.codegen_shape_tuple(shape)}, "
+            f"{self.codegen_shape_tuple(stride)}, "
+            f"device='{device.type}', dtype={dtype})"
+        )
 
     def make_tensor_alias(self, new_name, old_name, comment=""):
         return f"{self.declare}{new_name} = {old_name}{self.ending}  {self.comment} {comment}"
@@ -1303,7 +1408,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.closed_bracket = "}"
         self.comment = "//"
         self.namespace = "at::"
-        self.none_str = "at::Tensor()"
+        self.none_str = "nullptr" if config.abi_compatible else "at::Tensor()"
         self.extern_call_ops = set()
         self.size = "sizes()"
         self.stride = "strides()"
@@ -1316,8 +1421,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.declared_int_array_vars = set()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
         self.arg_var_id = count()
+        self.used_cached_devices = set()
         self.used_cached_dtypes = set()
         self.cached_output_id = count()
+        self.scalar_to_tensor_id = count()
 
         from .cpp import cexpr, CppPrinter
 
@@ -1345,6 +1452,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         device_index=None,
         cuda=True,
         triton=True,
+        arg_types=None,
     ):
         """
         Generates kernel call code.
@@ -1357,20 +1465,24 @@ class CppWrapperCodeGen(WrapperCodeGen):
         """
         if cuda:
             return super().generate_kernel_call(
-                name, call_args, grid, device_index, cuda, triton
+                name, call_args, grid, device_index, cuda, triton, arg_types
             )
         else:
-            if V.graph.aot_mode and config.aot_inductor.abi_compatible:
-                from .cpp import DTYPE_TO_CPP
-
+            if V.graph.aot_mode and config.abi_compatible:
+                assert arg_types is not None and len(call_args) == len(
+                    arg_types
+                ), "Mismatch call_args and arg_types in generate_kernel_call"
                 new_args = []
-                for arg in call_args:
-                    var_name = f"var_{next(self.arg_var_id)}"
-                    self.writeline(f"void *{var_name}{self.ending}")
-                    self.writeline(f"{var_name} = get_data_ptr_wrapper({arg});")
-                    dtype = V.graph.get_dtype(arg)
-                    cpp_dtype = DTYPE_TO_CPP[dtype]
-                    new_args.append(f"({cpp_dtype}*)({var_name})")
+                for idx, arg in enumerate(call_args):
+                    if "*" in arg_types[idx]:
+                        var_name = f"var_{next(self.arg_var_id)}"
+                        self.writeline(
+                            f"auto* {var_name} = get_data_ptr_wrapper({arg});"
+                        )
+                        new_args.append(f"({arg_types[idx]})({var_name})")
+                    else:
+                        # arg is a scalar
+                        new_args.append(arg)
                 self.writeline(self.wrap_kernel_call(name, new_args))
             else:
                 self.writeline(self.wrap_kernel_call(name, call_args))
@@ -1380,6 +1492,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.header.writeline(f"// {name} {hashed}")
 
     def write_header(self):
+        if V.graph.is_const_graph:
+            # We do not write header for constant graph, it will be written by main module.
+            return
+
         if V.graph.aot_mode:
             for header_cpp_file in ("interface.cpp", "implementation.cpp"):
                 with open(
@@ -1399,9 +1515,15 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 """
             )
 
-        if config.aot_inductor.abi_compatible:
+        if config.abi_compatible:
             self.header.splice("#include <torch/csrc/inductor/aoti_torch/c/shim.h>")
         else:
+            if not V.graph.aot_mode:
+                self.header.splice(
+                    """
+                    #include <pybind11/pybind11.h>
+                    """
+                )
             self.header.splice(
                 """
                 #include <ATen/ATen.h>
@@ -1410,10 +1532,18 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
                 #include <torch/csrc/inductor/inductor_ops.h>
                 #include <torch/types.h>
+                #include <ATen/ops/bernoulli_native.h>
+
                 #define reinterpret_tensor torch::inductor::_reinterpret_tensor
                 #define alloc_from_pool torch::inductor::_alloc_from_pool
                 """
             )
+            if V.graph.cuda:
+                self.header.splice(
+                    """
+                    #include <ATen/cuda/EmptyTensor.h>
+                    """
+                )
 
         self.header.splice("#include <c10/util/generic_math.h>")
 
@@ -1443,6 +1573,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.output_is_tensor = output_is_tensor
 
     def write_prefix(self):
+        if V.graph.is_const_graph:
+            # We do not write prefix for constant graph, it will be written by main module.
+            return
+
         if V.graph.aot_mode:
             self.prefix.writeline("namespace torch {")
             self.prefix.writeline("namespace aot_inductor {")
@@ -1455,53 +1589,165 @@ class CppWrapperCodeGen(WrapperCodeGen):
     ):
         self.prefix.writeline(f"""{info_kind}[{idx}].name = "{name}";""")
 
+    @staticmethod
+    def get_input_cpp_type(input):
+        assert config.use_minimal_arrayref_interface
+        from .cpp import DTYPE_TO_CPP
+
+        if isinstance(input, sympy.Expr):
+            from ..graph import may_get_constant_buffer_dtype
+
+            dtype = may_get_constant_buffer_dtype(input)
+            assert dtype is not None, f"Failed to get the dtype of sympy.Expr: {input}"
+            return DTYPE_TO_CPP[dtype]
+        return f"ArrayRefTensor<{DTYPE_TO_CPP[input.get_dtype()]}>"
+
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())
         if V.graph.aot_mode:
-            self.prefix.splice(
-                """
-                void AOTInductorModel::run_impl(
-                    AtenTensorHandle*
-                        input_handles, // array of input AtenTensorHandle; handles
-                                        // are stolen; the array itself is borrowed
-                    AtenTensorHandle*
-                        output_handles, // array for writing output AtenTensorHandle; handles
-                                        // will be stolen by the caller; the array itself is
-                                        // borrowed
-                    DeviceStreamType stream,
-                    AOTIProxyExecutorHandle proxy_executor
-                ) {
-                """
-            )
+            if config.use_minimal_arrayref_interface and not V.graph.is_const_graph:
+                from .cpp import DTYPE_TO_CPP
+
+                input_cpp_types = ", ".join(
+                    f"{CppWrapperCodeGen.get_input_cpp_type(x)}"
+                    for x in V.graph.graph_inputs.values()
+                )
+
+                output_arrayref_types = ", ".join(
+                    f"ArrayRefTensor<{DTYPE_TO_CPP[x.get_dtype()]}>"
+                    for x in V.graph.graph_outputs
+                )
+
+                self.prefix.splice(
+                    f"""
+                    using AOTInductorModelInputs = std::tuple<{input_cpp_types}>;
+                    using AOTInductorModelOutputs = std::tuple<{output_arrayref_types}>;
+                    """
+                )
+
+            if V.graph.const_module:
+                self.header.splice(V.graph.const_module.wrapper_code.header)
+                self.prefix.splice(V.graph.const_code)
+
+            if V.graph.is_const_graph:
+                self.prefix.splice(
+                    """
+                    void AOTInductorModel::_const_run_impl(
+                        std::vector<AtenTensorHandle>& output_handles,
+                        DeviceStreamType stream,
+                        AOTIProxyExecutorHandle proxy_executor
+                    ) {
+                    """
+                )
+            else:
+                if not config.aot_inductor.use_runtime_constant_folding:
+                    # If we do not split the constant graph, we'll just create
+                    # an empty implementation when wrapping the main module.
+                    self.prefix.splice(
+                        """
+                        void AOTInductorModel::_const_run_impl(
+                            std::vector<AtenTensorHandle>& output_handles,
+                            DeviceStreamType stream,
+                            AOTIProxyExecutorHandle proxy_executor
+                        ) {}
+
+                        """
+                    )
+
+                run_impl_proto = """
+                    void AOTInductorModel::run_impl(
+                        AtenTensorHandle*
+                            input_handles, // array of input AtenTensorHandle; handles
+                                            // are stolen; the array itself is borrowed
+                        AtenTensorHandle*
+                            output_handles, // array for writing output AtenTensorHandle; handles
+                                            // will be stolen by the caller; the array itself is
+                                            // borrowed
+                        DeviceStreamType stream,
+                        AOTIProxyExecutorHandle proxy_executor
+                    ) {
+                    """
+                if config.use_minimal_arrayref_interface:
+                    self.prefix.splice(
+                        """
+                        template <>
+                        AOTInductorModelOutputs AOTInductorModel::run_impl_minimal_arrayref_interface<
+                          AOTInductorModelInputs, AOTInductorModelOutputs>(
+                            const AOTInductorModelInputs& inputs,
+                            DeviceStreamType stream,
+                            AOTIProxyExecutorHandle proxy_executor
+                        ) {
+                        """
+                    )
+                    self.suffix.splice(run_impl_proto)
+                    self.suffix.splice(
+                        """
+                            AOTInductorModelInputs inputs;
+                            convert_handles_to_inputs(input_handles, inputs);
+                            auto outputs = run_impl_minimal_arrayref_interface<AOTInductorModelInputs, AOTInductorModelOutputs>(
+                                inputs, stream, proxy_executor);
+                            // NOTE: outputs is full of ArrayRef to thread_local storage. If in the future we need this
+                            // interface to perform well for a DSO using the minimal arrayref interface, all we need
+                            // to do is provide ThreadLocalCachedTensor for each one!
+                            convert_outputs_to_handles(outputs, output_handles);
+                        }
+                    """
+                    )
+
+                    self.suffix.splice(
+                        """
+                        extern "C" AOTIRuntimeError AOTInductorModelRunMinimalArrayrefInterface(
+                            AOTInductorModelHandle model_handle,
+                            const AOTInductorModelInputs& inputs,
+                            AOTInductorModelOutputs& outputs) {
+                          auto model = reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);
+                          CONVERT_EXCEPTION_TO_ERROR_CODE({
+                              outputs = model->run_impl_minimal_arrayref_interface<AOTInductorModelInputs, AOTInductorModelOutputs>(
+                                  inputs,
+                                  (torch::aot_inductor::DeviceStreamType)nullptr,
+                                  nullptr);
+                          })
+                        }
+                    """
+                    )
+                else:
+                    self.prefix.splice(run_impl_proto)
         else:
             self.prefix.splice(
                 f"""std::vector<at::Tensor> {self.call_func_name}(const std::vector<at::Tensor>& inputs) {{"""
             )
         with self.prefix.indent():
             # assign inputs and outputs in both cases so the later codegen can be simplified
-            if V.graph.aot_mode:
-                if config.aot_inductor.abi_compatible:
-                    self.prefix.splice(
-                        """
-                            auto inputs = steal_from_raw_handles_to_raii_handles(input_handles, num_inputs());
-                        """
-                    )
+            if not config.use_minimal_arrayref_interface:
+                if V.graph.aot_mode:
+                    if not V.graph.is_const_graph:
+                        if config.abi_compatible:
+                            self.prefix.splice(
+                                """
+                                    auto inputs = steal_from_raw_handles_to_raii_handles(input_handles, num_inputs());
+                                """
+                            )
+                        else:
+                            # This looks dumb, but can avoid creating two versions of code in the AOTInductor runtime.
+                            self.prefix.splice(
+                                """
+                                    auto inputs = alloc_tensors_by_stealing_from_handles(input_handles, num_inputs());
+                                """
+                            )
                 else:
-                    # This looks dumb, but can avoid creating two versions of code in the AOTInductor runtime.
                     self.prefix.splice(
                         """
-                            auto inputs = alloc_tensors_by_stealing_from_handles(input_handles, num_inputs());
+                            pybind11::gil_scoped_release release;
                         """
                     )
-            else:
-                self.prefix.splice(
-                    """
-                        py::gil_scoped_release release;
-                    """
-                )
 
             if inputs_len != 0:
                 for idx, input_key in enumerate(V.graph.graph_inputs.keys()):
+                    if config.use_minimal_arrayref_interface:
+                        self.prefix.writeline(
+                            f"auto {input_key} = std::get<{idx}>(inputs);"
+                        )
+                        continue
                     # unwrap input tensor back to scalar
                     if isinstance(V.graph.graph_inputs[input_key], sympy.Expr):
                         from ..graph import may_get_constant_buffer_dtype
@@ -1515,7 +1761,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                         ), "Fails to get the dtype of the sympy.Expr"
                         cpp_dtype = DTYPE_TO_CPP[dtype]
                         assert (
-                            not config.aot_inductor.abi_compatible
+                            not config.abi_compatible
                         ), "Need to add .item support for abi_compatible AOTInductor codegen"
                         self.prefix.writeline(
                             f"{cpp_dtype} {input_key} = inputs[{idx}].item<{cpp_dtype}>();"
@@ -1532,7 +1778,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 if V.graph.aot_mode:
                     # Weights are stored in constants_ and owned by RAIIAtenTensorHandle there.
                     # Don't call std::move here because it will cause constants_ to lose the ownership.
-                    if config.aot_inductor.abi_compatible:
+                    if config.abi_compatible:
                         self.prefix.writeline(
                             f"""auto {constants_key} = constants_->at({idx});"""
                         )
@@ -1551,13 +1797,29 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
 
             if V.graph.aot_mode:
-                self.prefix.writeline("inputs.clear();")
+                if not V.graph.is_const_graph:
+                    if config.use_minimal_arrayref_interface:
+                        # TODO: input shape checking for regular tensor interface as well?
+                        self.codegen_input_numel_asserts()
+                    else:
+                        self.prefix.writeline("inputs.clear();")
                 self.prefix.writeline(
                     "auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
                 )
 
+    def codegen_input_numel_asserts(self):
+        for name, buf in V.graph.graph_inputs.items():
+            if isinstance(buf, sympy.Expr):
+                continue
+
+            # comparing strides for 0 size tensor is tricky. Ignore them for now.
+            if sympy_product(buf.get_size()) == 0:
+                continue
+            numel = buf.get_numel()
+            self.prefix.writeline(f"assert_numel({name}, {numel});")
+
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
-        if config.aot_inductor.abi_compatible:
+        if config.abi_compatible:
             code.writeline(f"int64_t* {name}_size;")
             code.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes({name}, &{name}_size));"
@@ -1566,7 +1828,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             super().codegen_input_size_var_decl(code, name)
 
     def codegen_input_stride_var_decl(self, code: IndentedBuffer, name):
-        if config.aot_inductor.abi_compatible:
+        if config.abi_compatible:
             code.writeline(f"int64_t* {name}_stride;")
             code.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides({name}, &{name}_stride));"
@@ -1580,9 +1842,13 @@ class CppWrapperCodeGen(WrapperCodeGen):
             "class AOTInductorModelKernels : public AOTInductorModelKernelsBase {"
         )
         self.prefix.writeline("  public:")
-        for kernel in chain(
-            self.src_to_kernel.values(), self.user_defined_kernel_cache.values()
-        ):
+        declare_kernel = set(self.src_to_kernel.values())
+        declare_kernel.update(self.user_defined_kernel_cache.values())
+        if V.graph.const_module:
+            declare_kernel.update(
+                V.graph.const_module.wrapper_code.src_to_kernel.values()
+            )
+        for kernel in declare_kernel:
             self.prefix.writeline(f"    CUfunction {kernel}{{nullptr}};")
         self.prefix.writeline("};")
         self.prefix.writeline("}  // namespace")
@@ -1614,8 +1880,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
             f"""
             AOTInductorModel::AOTInductorModel(std::shared_ptr<ConstantMap> constants_map,
                                                std::shared_ptr<std::vector<ConstantHandle>> constants_array,
+                                               const std::string& device_str,
                                                std::optional<std::string> cubin_dir)
-                : AOTInductorModelBase({num_inputs}, {num_outputs}, {num_constants}, cubin_dir) {{
+                : AOTInductorModelBase({num_inputs}, {num_outputs}, {num_constants}, device_str, cubin_dir) {{
             """
         )
 
@@ -1638,6 +1905,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 self.prefix.writeline(
                     f"constants_info_[{idx}].data_size = {tensor.untyped_storage().nbytes()};"
                 )
+                from_folded = "true" if name in V.graph.folded_constants else "false"
+                self.prefix.writeline(
+                    f"constants_info_[{idx}].from_folded = {from_folded};"
+                )
 
                 size_str = ", ".join([str(s) for s in tensor.size()])
                 self.prefix.writeline(f"constants_info_[{idx}].shape = {{{size_str}}};")
@@ -1646,6 +1917,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 self.prefix.writeline(
                     f"constants_info_[{idx}].stride = {{{stride_str}}};"
                 )
+                if name in V.graph.dynamo_flat_name_to_original_fqn:
+                    self.prefix.writeline(
+                        f"""constants_info_[{idx}].original_fqn = "{V.graph.dynamo_flat_name_to_original_fqn[name]}";"""
+                    )
 
             self.prefix.writeline("update_constants_map(std::move(constants_map));")
             self.prefix.writeline("update_constants_array(std::move(constants_array));")
@@ -1678,18 +1953,103 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         self.prefix.writeline("}")
 
+    def codegen_const_run_driver(self):
+        """
+        // Generated code example
+        std::unordered_map<std::string, AtenTensorHandle> AOTInductorModel::const_run_impl(
+            DeviceStreamType stream,
+            AOTIProxyExecutorHandle proxy_executor,
+            bool initialization
+        ) {
+            std::unordered_map<std::string, AtenTensorHandle> folded_constants_map;
+            std::vector<AtenTensorHandle> output_handles;
+            // build up output_handles over here.
+            _const_run_impl(output_handles, stream, proxy_executor);
+            // build up folded_constants_map
+            return folded_constants_map;
+        }
+        """
+
+        self.prefix.splice(
+            """
+            std::unordered_map<std::string, AtenTensorHandle> AOTInductorModel::const_run_impl(
+                DeviceStreamType stream,
+                AOTIProxyExecutorHandle proxy_executor,
+                bool initialization
+            ) {
+            """
+        )
+        if not config.aot_inductor.use_runtime_constant_folding:
+            self.prefix.splice(
+                """
+                    if (!initialization) {
+                        throw std::runtime_error(std::string("use_runtime_constant_folding is not set."));
+                    }
+                    return {};
+                }
+                """
+            )
+            return
+
+        with self.prefix.indent():
+            # This is a mapping to the index of constant folding graph's output
+            const_index_mapping: List[Optional[Tuple[int, str]]] = [None] * len(
+                V.graph.const_output_index
+            )
+            for idx, (name, _) in enumerate(V.graph.constants.items()):
+                if name in V.graph.const_output_index:
+                    const_index_mapping[V.graph.const_output_index[name]] = (idx, name)  # type: ignore[call-overload]
+            assert (
+                None not in const_index_mapping
+            ), "Not all constant gets mapped for constant folding graph."
+
+            self.prefix.writeline(
+                f"""
+                std::unordered_map<std::string, AtenTensorHandle> folded_constants_map;
+                folded_constants_map.reserve({len(const_index_mapping)});
+                std::vector<AtenTensorHandle> output_handles({len(const_index_mapping)});
+                """
+            )
+
+            self.prefix.splice(
+                """
+                // The below assignment of output_handles to constants is not used directly.
+                // It's only used to memo the correspondence of handle and constants.
+                """
+            )
+
+            for output_idx, (const_idx, _) in enumerate(const_index_mapping):  # type: ignore[misc]
+                self.prefix.writeline(
+                    f"output_handles[{output_idx}] = constants_->at({const_idx});"
+                )
+
+            self.prefix.writeline(
+                "_const_run_impl(output_handles, stream, proxy_executor);"
+            )
+
+            for output_idx, (_, const_name) in enumerate(const_index_mapping):  # type: ignore[misc]
+                self.prefix.writeline(
+                    f'folded_constants_map["{const_name}"] = output_handles[{output_idx}];'
+                )
+            self.prefix.writeline("return folded_constants_map;")
+
+        self.prefix.writeline("}")
+
     def generate(self, is_inference):
-        if V.graph.aot_mode:
+        if V.graph.aot_mode and not V.graph.is_const_graph:
             self.codegen_model_kernels()
             self.codegen_model_constructor()
+            self.codegen_const_run_driver()
         self.write_wrapper_decl()
         return super().generate(is_inference)
 
     def finalize_prefix(self):
         cached_dtypes_buffer = IndentedBuffer()
-        if config.aot_inductor.abi_compatible:
+        if config.abi_compatible:
             for dtype in self.used_cached_dtypes:
                 cached_dtypes_buffer.writeline(f"CACHE_TORCH_DTYPE({dtype});")
+            for device in self.used_cached_devices:
+                cached_dtypes_buffer.writeline(f"CACHE_TORCH_DEVICE({device});")
         cached_dtypes_buffer.splice(self.prefix)
         self.prefix = cached_dtypes_buffer
 
@@ -1698,54 +2058,136 @@ class CppWrapperCodeGen(WrapperCodeGen):
     ):
         self.header.splice(f"\n{kernel}\n")
 
+    def codegen_scalar_to_tensor(self, output: str):
+        name = f"scalar_to_tensor_{next(self.scalar_to_tensor_id)}"
+        self.wrapper_call.writeline(
+            f"RAIIAtenTensorHandle {name} = scalar_to_tensor_handle({output});"
+        )
+        return name
+
+    @cache_on_self
+    def get_output_refs(self):
+        return [
+            f"at::scalar_tensor({x.codegen_reference(self.wrapper_call)})"
+            if isinstance(x, ir.ShapeAsConstantBuffer) and not config.abi_compatible
+            else x.codegen_reference(self.wrapper_call)
+            for x in V.graph.graph_outputs
+        ]
+
     def generate_return(self, output_refs):
         if V.graph.aot_mode:
             cst_names = V.graph.constants.keys()
-            for idx, output in enumerate(output_refs):
-                if config.aot_inductor.abi_compatible:
+            arr_iface = (
+                not V.graph.is_const_graph and config.use_minimal_arrayref_interface
+            )  # For brevity.
+
+            def use_thread_local_cached_output_tensor(idx, output):
+                cached_output_name = f"cached_output_{next(self.cached_output_id)}"
+                cache_type = "Array" if arr_iface else "Tensor"
+                self.wrapper_call.writeline(
+                    f"thread_local ThreadLocalCachedOutput{cache_type}<std::decay_t<decltype({output})>> "
+                    f"{cached_output_name}({output});"
+                )
+                if arr_iface:
                     self.wrapper_call.writeline(
-                        f"if constexpr (std::is_same_v<std::decay_t<decltype({output})>, RAIIAtenTensorHandle> || "
-                        f"    std::is_same_v<std::decay_t<decltype({output})>, AtenTensorHandle> || "
-                        f"    std::is_same_v<std::decay_t<decltype({output})>, ConstantHandle>) {{"
+                        f"{cached_output_name}.copy_data_from({output});"
+                    )
+                    output_entry = f"std::get<{idx}>(output_arrayref_tensors)"
+                    element_type = f"std::decay_t<decltype({output_entry}.data()[0])>"
+                    self.wrapper_call.writeline(
+                        f"{output_entry} = {cached_output_name}.arrayref_tensor<{element_type}>();"
+                    )
+                else:
+                    self.wrapper_call.writeline(
+                        f"{cached_output_name}.copy_data_from({output});"
+                    )
+                    self.wrapper_call.writeline(
+                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&output_handles[{idx}]));"
+                    )
+                    self.wrapper_call.writeline(
+                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_assign_tensors({cached_output_name}.tensor(), "
+                        f"output_handles[{idx}]));"
+                    )
+
+            if arr_iface:
+                self.wrapper_call.writeline(
+                    "AOTInductorModelOutputs output_arrayref_tensors;"
+                )
+            for idx, output in enumerate(output_refs):
+                if config.abi_compatible:
+                    output_buffer = V.graph.graph_outputs[idx]
+                    if isinstance(output_buffer, ir.ShapeAsConstantBuffer):
+                        # Need to wrap scalar into tensor as the main function returns a vector of tensors
+                        output_tensor = self.codegen_scalar_to_tensor(output)
+                        self.wrapper_call.writeline(
+                            f"output_handles[{idx}] = {output_tensor}.release();"
+                        )
+                        continue
+
+                    output_is_tensor_handle_expr = (
+                        f"std::is_same_v<std::decay_t<decltype({output})>,"
+                        "RAIIAtenTensorHandle> || "
+                        f"std::is_same_v<std::decay_t<decltype({output})>,"
+                        "AtenTensorHandle> || "
+                        f"std::is_same_v<std::decay_t<decltype({output})>,"
+                        "ConstantHandle>"
+                    )
+                    self.wrapper_call.writeline(
+                        f"if constexpr ({output_is_tensor_handle_expr}) {{"
                     )
                     with self.wrapper_call.indent():
-                        if output in cst_names:
-                            # NOTE(return_constant): In some rare cases where we return
-                            # a constant, we have to return a copy of this constant,
-                            # because (1) constants are not owned by the Model instance
-                            # (2) constants remain the same cross inference runs,
-                            # assuming they are not updated at runtime Basically, we
-                            # cannot release or transfer the ownership of any original
-                            # constant to the user.
+                        if arr_iface:
+                            cached_output_name = (
+                                f"cached_output_{next(self.cached_output_id)}"
+                            )
+                            output_value_type = f"std::decay_t<decltype(std::get<{idx}>(output_arrayref_tensors).data()[0])>"
                             self.wrapper_call.writeline(
-                                f"aoti_torch_clone({output}, &output_handles[{idx}]);"
+                                f"thread_local RAIIAtenTensorHandle {cached_output_name};"
+                            )
+                            if output in cst_names:
+                                # NOTE(return_constant): In some rare cases where we return
+                                # a constant, we have to return a copy of this constant,
+                                # because (1) constants are not owned by the Model instance
+                                # (2) constants remain the same cross inference runs,
+                                # assuming they are not updated at runtime Basically, we
+                                # cannot release or transfer the ownership of any original
+                                # constant to the user.
+                                self.wrapper_call.writeline(
+                                    f"AtenTensorHandle {cached_output_name}_tmp;"
+                                )
+                                self.wrapper_call.writeline(
+                                    f"aoti_torch_clone({output}, &{cached_output_name}_tmp);"
+                                )
+                                self.wrapper_call.writeline(
+                                    f"{cached_output_name} = {cached_output_name}_tmp;"
+                                )
+                            else:
+                                self.wrapper_call.writeline(
+                                    f"{cached_output_name} = {output}.release();"
+                                )
+                            self.wrapper_call.writeline(
+                                f"convert_handle_to_arrayref_tensor({cached_output_name}, "
+                                f"std::get<{idx}>(output_arrayref_tensors));"
                             )
                         else:
-                            self.wrapper_call.writeline(
-                                f"output_handles[{idx}] = {output}.release();"
-                            )
+                            if output in cst_names:
+                                # See NOTE(return_constant) above.
+                                self.wrapper_call.writeline(
+                                    f"aoti_torch_clone({output}, &output_handles[{idx}]);"
+                                )
+                            else:
+                                self.wrapper_call.writeline(
+                                    f"output_handles[{idx}] = {output}.release();"
+                                )
                     self.wrapper_call.writeline("} else {")
                     with self.wrapper_call.indent():
-                        cached_output_name = (
-                            f"cached_output_{next(self.cached_output_id)}"
-                        )
-                        self.wrapper_call.writeline(
-                            f"thread_local ThreadLocalCachedOutputTensor<std::decay_t<decltype({output})>> "
-                            f"{cached_output_name}({output});"
-                        )
-                        self.wrapper_call.writeline(
-                            f"{cached_output_name}.copy_data_from({output});"
-                        )
-                        self.wrapper_call.writeline(
-                            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&output_handles[{idx}]));"
-                        )
-                        self.wrapper_call.writeline(
-                            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_assign_tensors({cached_output_name}.tensor(), "
-                            f"output_handles[{idx}]));"
-                        )
+                        use_thread_local_cached_output_tensor(idx, output)
                     self.wrapper_call.writeline("}")
 
                 else:
+                    assert (
+                        not arr_iface
+                    ), "minimal ArrayRef interface is only supported in ABI-compatible mode"
                     if output in cst_names:
                         output_expr = f"{output}.clone()"
                         # See NOTE(return_constant) above.
@@ -1755,22 +2197,29 @@ class CppWrapperCodeGen(WrapperCodeGen):
                         f"output_handles[{idx}] = reinterpret_cast<AtenTensorHandle>("
                         + f"new at::Tensor({output_expr}));"
                     )
+            if arr_iface:
+                self.wrapper_call.writeline("return output_arrayref_tensors;")
+
         else:
             self.wrapper_call.writeline(f"return {{{', '.join(output_refs)}}};\n}}")
 
+    def generate_before_suffix(self, result):
+        if V.graph.aot_mode and not V.graph.is_const_graph:
+            result.writeline("} // AOTInductorModel::run_impl")
+
     def generate_end(self, result):
         if V.graph.aot_mode:
-            result.writeline("} // AOTInductorModel::run_impl")
-            result.writeline("} // namespace aot_inductor")
-            result.writeline("} // namespace torch")
+            if V.graph.is_const_graph:
+                result.writeline("} // AOTInductorModel::_const_run_impl")
+            else:
+                result.writeline("} // namespace aot_inductor")
+                result.writeline("} // namespace torch")
             return
 
         result.writeline("'''\n)")
-        # get the hash of the wrapper code to name the extension
-        wrapper_call_hash = codecache.code_hash(result.getvalue())
         result.splice(
             f"""
-            module = CppWrapperCodeCache.load(cpp_wrapper_src, '{self.call_func_name}', '{wrapper_call_hash}', {self.cuda})
+            inductor_entry = CppWrapperCodeCache.load_pybinding(["std::vector<at::Tensor>"], cpp_wrapper_src, {self.cuda})
             """
         )
 
@@ -1812,7 +2261,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     {args_str}
                     {return_str}
                 return g
-            call = _wrap_func(module.{self.call_func_name})
+            call = _wrap_func(inductor_entry)
             """
         )
 
@@ -1824,7 +2273,23 @@ class CppWrapperCodeGen(WrapperCodeGen):
         if kernel_suffix == "call":
             kernel_suffix = kernel_tokens[-2]
         shim_fn = f"aoti_torch_{kernel_suffix}"
-        self.writeline(f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));")
+        # HACK: val_to_arg_str jams multiple arguments together using a comma. If that
+        # ever breaks, it needs to be reworked to be able to return multiple arguments,
+        # and the split-on-comma code here needs to be removed.
+        wrapped_args = []
+        for x in args:
+            pieces = x.split(", ")
+            for piece in pieces:
+                # We only really *need* convert_arrayref_tensor_to_tensor for
+                # ArrayRefTensors. The code flowing into here uses `0` for nullptr,
+                # which convert_arrayref_tensor_to_tensor would blindly coerce to int,
+                # so just avoid wrapping integers.
+                if not piece.isdigit():
+                    piece = f"convert_arrayref_tensor_to_tensor({piece})"
+                wrapped_args.append(piece)
+        self.writeline(
+            f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(wrapped_args)}));"
+        )
 
     def generate_c_shim_extern_kernel_alloc(self, extern_kernel, args):
         # registered output buffer name
@@ -1833,12 +2298,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.writeline(f"AtenTensorHandle {output_handle_name};")
         output_arg = f"&{output_handle_name}"
         self.generate_c_shim_extern_kernel_call(
-            extern_kernel.codegen_kernel_name(), args + [output_arg]
+            extern_kernel.get_kernel_name(), args + [output_arg]
         )
         self.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
 
     def generate_extern_kernel_alloc(self, extern_kernel, args):
-        if V.graph.aot_mode and config.aot_inductor.abi_compatible:
+        if V.graph.aot_mode and config.abi_compatible:
             self.generate_c_shim_extern_kernel_alloc(extern_kernel, args)
         else:
             super().generate_extern_kernel_alloc(extern_kernel, args)
@@ -1871,7 +2336,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         args = args + output_args
         assert (
             fallback_kernel.abi_compatible_kernel is not None
-        ), f"abi_compatible_kernel is None for {fallback_kernel.kernel=}"
+        ), f"abi_compatible_kernel is None for {fallback_kernel.python_kernel_name=}"
         self.generate_c_shim_extern_kernel_call(
             fallback_kernel.abi_compatible_kernel, args
         )
@@ -1879,7 +2344,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.writeline(raii_handle)
 
     def generate_fallback_kernel(self, fallback_kernel, args):
-        if V.graph.aot_mode and config.aot_inductor.abi_compatible:
+        if V.graph.aot_mode and config.abi_compatible:
             self.generate_c_shim_fallback_kernel(fallback_kernel, args)
         else:
             super().generate_fallback_kernel(fallback_kernel, args)
@@ -1894,7 +2359,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         else:
             args.insert(0, f"{codegen_reference}")
 
-        if V.graph.aot_mode and config.aot_inductor.abi_compatible:
+        if V.graph.aot_mode and config.abi_compatible:
             self.generate_c_shim_extern_kernel_call(kernel, args)
         else:
             self.writeline(self.wrap_kernel_call(kernel, args))
@@ -1923,14 +2388,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
         )
 
     def generate_scatter_fallback(
-        self, output, inputs, kernel, fn, src_is_tensor, reduce, kwargs
+        self, output, inputs, kernel, python_kernel_name, src_is_tensor, reduce, kwargs
     ):
         # TODO: support other overload for cpp wrapper and remove the below assertions
-        if V.graph.aot_mode and config.aot_inductor.abi_compatible:
+        if V.graph.aot_mode and config.abi_compatible:
             # call the ABI shim function instead of the ATen one
             kernel = kernel.replace("at::", "aoti_torch_")
         line = f"{kernel}({output}, {','.join(map(str, inputs))}"
-        if fn == "aten.scatter_":
+        if python_kernel_name == "aten.scatter_":
             if src_is_tensor:
                 if reduce:
                     line += f", {V.graph.wrapper_code.val_to_arg_str(reduce)}"
@@ -1943,6 +2408,24 @@ class CppWrapperCodeGen(WrapperCodeGen):
         line += f"){self.ending}"
         self.writeline(line)
 
+    def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
+        if V.graph.aot_mode and V.graph.cpp_wrapper and config.abi_compatible:
+            # See the comment in codegen_reinterpret_view about why having something like
+            # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the correponding
+            # tensor prematurely deallocated, thus this std:vector().data() trick here.
+            indices_str = (
+                f"std::vector<AtenTensorHandle>{{{', '.join(indices)}}}.data()"
+            )
+            args = [x, indices_str, str(len(indices)), values, accumulate]
+        else:
+            indices_str = (
+                f"{self.open_bracket}{', '.join(indices)}{self.closed_bracket}"
+            )
+            args = [x, indices_str, values, accumulate]
+
+        args.insert(0, x)  # set x as the output tensor, this fallback mutates x.
+        self.writeline(self.wrap_kernel_call(kernel, args))
+
     def add_benchmark_harness(self, output):
         if V.graph.aot_mode:
             return
@@ -1952,7 +2435,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         return self.expr_printer(V.graph.sizevars.simplify(x))
 
     def codegen_tuple_access(self, basename: str, name: str, index: str) -> str:
-        if V.graph.aot_mode and config.aot_inductor.abi_compatible:
+        if V.graph.aot_mode and config.abi_compatible:
             # in the abi_compatible mode, outputs are returned via arguments
             return name
         else:
@@ -1967,16 +2450,24 @@ class CppWrapperCodeGen(WrapperCodeGen):
         return f"{{{', '.join(parts)}}}"
 
     def codegen_dynamic_scalar(self, node):
-        from .cpp import DTYPE_TO_ATEN
+        from .cpp import DTYPE_TO_ATEN, DTYPE_TO_CPP
 
         (data,) = (t.codegen_reference() for t in node.inputs)
-        if node.is_bool:
-            self.writeline(f"bool {node.sym} = {data}.item() ? 1 : 0;")
+        if config.abi_compatible:
+            dtype = node.inputs[0].get_dtype()
+            dtype_str = str(dtype).split(".")[-1]
+            self.writeline(f"{DTYPE_TO_CPP[dtype]} {node.sym};")
+            self.writeline(f"aoti_torch_item_{dtype_str}({data}, &{node.sym});")
+            # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
+            self.unbacked_symbol_decls.add(str(node.sym))
         else:
-            convert_type = DTYPE_TO_ATEN[node.inputs[0].get_dtype()].replace(
-                "at::k", "to"
-            )
-            self.writeline(f"auto {node.sym} = {data}.item().{convert_type}();")
+            if node.is_bool:
+                self.writeline(f"bool {node.sym} = {data}.item() ? 1 : 0;")
+            else:
+                convert_type = DTYPE_TO_ATEN[node.inputs[0].get_dtype()].replace(
+                    "at::k", "to"
+                )
+                self.writeline(f"auto {node.sym} = {data}.item().{convert_type}();")
 
     def can_stack_allocate_buffer(self, buffer):
         return (
@@ -1993,6 +2484,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
             ""
             if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
             or (V.graph.aot_mode and buffer.get_name() in self.stack_allocated_buffers)
+            or (
+                config.use_minimal_arrayref_interface
+                and V.graph.aot_mode
+                and buffer.get_name() in V.graph.graph_inputs
+            )
             else f"{buffer.get_name()}.reset();"
         )
 
@@ -2000,7 +2496,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         return " ".join(f"{name}.reset();" for name in names_to_del)
 
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
-        if config.aot_inductor.abi_compatible:
+        if config.abi_compatible:
             return f"auto {new_name} = std::move({old_name});  // reuse"
         else:
             return super().codegen_exact_buffer_reuse(old_name, new_name, del_line)
@@ -2027,7 +2523,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
             )
 
     def codegen_device(self, device):
-        if config.aot_inductor.abi_compatible:
+        if config.abi_compatible:
+            self.used_cached_devices.add(device.type)
             return f"cached_torch_device_type_{device.type},{device.index if device.index else 0}"
         else:
             from .cpp import DEVICE_TO_ATEN
@@ -2039,7 +2536,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             )
 
     def codegen_dtype(self, dtype):
-        if config.aot_inductor.abi_compatible:
+        if config.abi_compatible:
             dtype_str = str(dtype).split(".")[-1]
             self.used_cached_dtypes.add(dtype_str)
             return f"cached_torch_dtype_{dtype_str}"
@@ -2084,11 +2581,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self, name, device, dtype, shape, stride, buffer_if_can_stack_allocate=None
     ):
         orig_stride = stride
-        device = self.codegen_device(device)
+        device_str = self.codegen_device(device)
         dtype_code = self.codegen_dtype(dtype)
         size = self.codegen_shape_tuple(shape)
         stride = self.codegen_shape_tuple(orig_stride)
-        if config.aot_inductor.abi_compatible:
+        if config.abi_compatible:
             size_array_var = self.codegen_int_array_var(
                 size,
                 self.wrapper_call,
@@ -2099,7 +2596,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 self.wrapper_call,
                 known_statically=self.is_statically_known_list_of_ints(orig_stride),
             )
-            device_type, device_id = device.split(",")
+            device_type, device_id = device_str.split(",")
             device_idx = "this->device_idx_" if V.graph.aot_mode else device_id
             if buffer_if_can_stack_allocate is not None:
                 from .cpp import DTYPE_TO_CPP
@@ -2113,7 +2610,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     f"{name}_storage",
                     size_array_var,
                     stride_array_var,
-                    dtype_code,
                     device_type,
                     device_idx,
                 ]
@@ -2136,18 +2632,25 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
             return f"RAIIAtenTensorHandle {name}({name}_handle);"
 
-        if V.graph.aot_mode and device.startswith("c10::Device("):
-            tensor_device = f"{device.split(',')[0]}, this->device_idx_)"
+        if V.graph.aot_mode and device_str.startswith("c10::Device("):
+            tensor_device = f"{device_str.split(',')[0]}, this->device_idx_)"
         else:
-            tensor_device = device
+            tensor_device = device_str
 
+        if device.type == "cpu":
+            return f"at::Tensor {name} = at::detail::empty_strided_cpu({size}, {stride}, {dtype_code});"
+        if device.type == "cuda":
+            return (
+                f"at::Tensor {name} = at::detail::empty_strided_cuda("
+                f"{size}, {stride}, {dtype_code}, c10::DeviceType::CUDA);"
+            )
         return (
             f"{self.declare}{name} = {self.namespace}empty_strided("
             f"{size}, {stride}, at::TensorOptions({tensor_device}).dtype({dtype_code})){self.ending}"
         )
 
     def codegen_alloc_from_pool(self, name, offset, dtype, shape, stride) -> str:
-        if config.aot_inductor.abi_compatible:
+        if config.abi_compatible:
             size = self.codegen_shape_tuple(shape)
             stride = self.codegen_shape_tuple(stride)
             tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
@@ -2186,7 +2689,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         stride = self.codegen_shape_tuple(stride_list)
         offset = self.codegen_sizevar(offset)
 
-        if config.aot_inductor.abi_compatible:
+        if config.abi_compatible:
             tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
             # Because the memory planning is done in two passes (see the implementation
             # of self.generate), the writeline behavior is different in the two passes.
@@ -2260,7 +2763,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             return f"reinterpret_tensor({', '.join(args)})"
 
     def codegen_device_copy(self, src, dst):
-        if config.aot_inductor.abi_compatible:
+        if config.abi_compatible:
             self.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_tensor_copy_(expensive_copy_to_tensor_if_needed({src}), {dst}));"
             )
@@ -2270,7 +2773,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def codegen_multi_output(self, name, value):
         # in the abi_compatible mode, outputs are retrieved by passing
         # output pointers, so we skip its codegen here.
-        if not config.aot_inductor.abi_compatible:
+        if not config.abi_compatible:
             super().codegen_multi_output(name, value)
 
     def generate_extern_kernel_args_decl_if_needed(
@@ -2303,7 +2806,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 new_int_args.append(str(arg))
             elif isinstance(arg_type, torch.SymIntType):
                 # SymInt
-                new_int_args.append(str(arg))
+                expr = arg.node.expr if isinstance(arg, torch.SymInt) else arg
+                new_int_args.append(self.expr_printer(expr))
             elif isinstance(arg_type, torch.NumberType):
                 # Scalar of type int
                 assert isinstance(arg, (int, float, bool))
@@ -2325,11 +2829,17 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     new_tensor_args.extend(
                         [f"{a.codegen_reference()}" for a in arg if a is not None]
                     )
-                # List [int] or List[SymInt]
-                elif isinstance(
-                    arg_type.getElementType(), (torch.IntType, torch.SymIntType)
-                ):
+                # List[int]
+                elif isinstance(arg_type.getElementType(), torch.IntType):
                     new_int_args.extend([str(a) for a in arg])
+                # List[SymInt]
+                elif isinstance(arg_type.getElementType(), torch.SymIntType):
+                    expressions = [
+                        a.node.expr if isinstance(a, torch.SymInt) else a for a in arg
+                    ]
+                    new_int_args.extend(
+                        [self.expr_printer(expr) for expr in expressions]
+                    )
                 # List[Scalar]
                 elif isinstance(arg_type.getElementType(), torch.NumberType):
                     # Only treat int Scalar as dynamic
@@ -2499,7 +3009,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def val_to_cpp_arg_str(self, type_, val, is_legacy_abi) -> str:
         if (
-            config.aot_inductor.abi_compatible
+            config.abi_compatible
             and not is_legacy_abi
             and isinstance(type_, torch.OptionalType)
         ):
@@ -2517,19 +3027,20 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def val_to_arg_str(self, val) -> str:
         if val is None:
             # When None is passed as an argument, it represents an optional that does not contain a value.
-            if config.aot_inductor.abi_compatible:
+            if config.abi_compatible:
                 return "0"  # nullptr is not available in C
             return "c10::nullopt"
         elif isinstance(val, bool):
-            if config.aot_inductor.abi_compatible:
+            if config.abi_compatible:
                 return "1" if val else "0"
             else:
                 return "true" if val else "false"
         elif isinstance(val, int):
-            return f"{val}L"
+            # uint64_t is long on Linux, but long long on MacOS
+            return f"{val}LL" if sys.platform == "darwin" else f"{val}L"
         elif isinstance(val, str):
             return f'"{val}"'
-        elif isinstance(val, (ComputedBuffer, InputBuffer, ReinterpretView)):
+        elif isinstance(val, (ir.Buffer, ReinterpretView)):
             return val.codegen_reference()
         elif isinstance(val, torch.device):
             return self.codegen_device(val)
@@ -2543,7 +3054,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         elif isinstance(val, (list, tuple)):
             # FIXME handle embedded optional types?
             result = f"{{{', '.join(self.val_to_arg_str(x) for x in val)}}}"
-            if config.aot_inductor.abi_compatible:
+            if config.abi_compatible:
                 static = self.is_statically_known_list_of_ints(val)
                 # Need to pass the array length because we can't use std::vector
                 return f"{self.codegen_int_array_var(result, known_statically=static)}, {len(val)}"
@@ -2564,10 +3075,18 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         self.cuda = True
 
     def write_header(self):
+        if V.graph.is_const_graph:
+            # We do not write header for constant graph, it will be written by main module.
+            return
+
         super().write_header()
 
         self.header.splice("#include <filesystem>")
-        if not config.aot_inductor.abi_compatible:
+        if config.abi_compatible:
+            self.header.splice(
+                "#include <torch/csrc/inductor/aoti_runtime/utils_cuda.h>"
+            )
+        else:
             self.header.splice(
                 """
                 #include <c10/cuda/CUDAGuard.h>
@@ -2707,7 +3226,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             elif arg == "c10::nullopt":
                 self.writeline(f"auto {var_name} = c10::nullopt;")
             else:
-                if config.aot_inductor.abi_compatible:
+                if config.abi_compatible:
                     self.writeline(f"CUdeviceptr {var_name};")
                     self.writeline(
                         f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr({arg}, reinterpret_cast<void**>(&{var_name})));"
@@ -2733,7 +3252,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         params = CudaKernelParamCache.get(name)
         assert (
             params is not None
-        ), f"cuda kernel parameters for {name} should already exist at this moment"
+        ), f"cuda kernel parameters for {name} should already exist at this moment, only found {CudaKernelParamCache.get_keys()}"
         block_cfg = {
             "XBLOCK": params["x_block"],
             "YBLOCK": params["y_block"],
@@ -2742,12 +3261,19 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         return grid_fn(block_cfg)
 
     def generate_kernel_call(
-        self, name, call_args, grid=None, device_index=None, cuda=True, triton=True
+        self,
+        name,
+        call_args,
+        grid=None,
+        device_index=None,
+        cuda=True,
+        triton=True,
+        arg_types=None,
     ):
         if not cuda:
             # Even in CudaWrapperCodeGen, we may see cpp kernels
             return super().generate_kernel_call(
-                name, call_args, grid, device_index, cuda, triton
+                name, call_args, grid, device_index, cuda, triton, arg_types
             )
 
         params = CudaKernelParamCache.get(name)
@@ -2776,12 +3302,12 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         ), f"expected grid to be a list or tuple but got: {grid=}"
 
         grid = [V.graph.sizevars.simplify(item) for item in grid]
-        grid_has_unbacked_symbols = any(free_unbacked_symbols(item) for item in grid)
+        grid_uses_symbolic_shapes = any(item.free_symbols for item in grid)
         grid_args = [self.grid_expr_printer(item) for item in grid]
         grid_args_str = ", ".join(grid_args)
         self.writeline(f"Grid {grid_name} = Grid({grid_args_str});")
 
-        if grid_has_unbacked_symbols:
+        if grid_uses_symbolic_shapes:
             self.writeline(f"if ({grid_name}.is_non_zero()) {{")
         kernel_var_name = f"kernels.{name}" if V.graph.aot_mode else name
         self.writeline(
@@ -2796,5 +3322,5 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 stream,
             )
         )
-        if grid_has_unbacked_symbols:
+        if grid_uses_symbolic_shapes:
             self.writeline("}")

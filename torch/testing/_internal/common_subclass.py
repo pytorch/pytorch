@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import torch
 from copy import deepcopy
 from torch.utils._pytree import tree_map
