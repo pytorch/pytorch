@@ -76,7 +76,7 @@ librosa>=0.6.2 ; python_version < "3.11"
 #Description: A testing library that allows you to replace parts of your
 #system under test with mock objects
 #Pinned versions:
-#test that import: test_module_init.py, test_modules.py, test_nn.py,
+#test that import: test_modules.py, test_nn.py,
 #test_testing.py
 
 #MonkeyType # breaks pytorch-xla-linux-bionic-py3.7-clang8
@@ -278,9 +278,9 @@ ghstack==0.7.1
 #Pinned versions: 0.7.1
 #test that import:
 
-jinja2==3.1.2
+jinja2==3.1.3
 #Description: jinja2 template engine
-#Pinned versions: 3.1.2
+#Pinned versions: 3.1.3
 #test that import:
 
 pytest-cpp==2.3.0
