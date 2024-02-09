@@ -3269,9 +3269,12 @@ class ShapeEnv:
             shape_groups[v].append(k)
         return shape_groups
 
-    def bound_sympy(self, expr: sympy.Expr) -> ValueRanges:
+    def bound_sympy(self, expr: sympy.Expr, size_oblivious: bool = False) -> ValueRanges:
+        var_to_range = {x: self.var_to_range.get(x, None) for x in expr.free_symbols}
+        if size_oblivious:
+            var_to_range = {x: v & ValueRanges(2, sympy.oo) if x in self.size_like else v for (x, v) in self.size_like}
         """Given a sympy expression, computes a ValueRanges bound for what values it can be"""
-        return bound_sympy(expr, {x: self.var_to_range.get(x, None) for x in expr.free_symbols})
+        return bound_sympy(expr, var_to_range)
 
     @_lru_cache
     def _maybe_evaluate_static(
@@ -3535,6 +3538,9 @@ class ShapeEnv:
                     self.var_to_range[b] = b_bound & self.var_to_range[b]
                     tgt_bound = self.bound_sympy(tgt)
                     assert issubset(tgt_bound, src_bound)
+                # Propagate size-likeness in this case
+                if a in self.size_like and b not in self.size_like and tgt.xreplace({b: 0}) == 0:
+                    self.size_like.add(b)
 
             # TODO: Should we propagate size-like-ness?
             #
@@ -3583,12 +3589,11 @@ class ShapeEnv:
                 self.log.debug("skipped set_replacement %s = %s (%s) [%s not subset of %s]", a, tgt, msg, tgt_bound, src_bound)
                 return
             elif (
-                self.is_unbacked_symint(a) and
                 a in self.size_like and
-                free_unbacked_symbols(tgt) and
-                tgt not in self.size_like
+                not issubset(bound_sympy(tgt, size_oblivious=True), self.var_to_range[a] & ValueRanges(2, sympy.oo))
             ):
-                self.log.debug("skipped set_replacement %s = %s (%s) [rhs not size-like]", a, tgt, msg)
+                self.log.debug("skipped set_replacement %s = %s (%s) "
+                               "[VR for rhs not subset of lhs under size-oblivious]", a, tgt, msg)
                 return
 
         if config.print_specializations and isinstance(tgt, (sympy.Integer, sympy.Float)):
@@ -3716,10 +3721,6 @@ class ShapeEnv:
                             self.var_to_range[i1] = SymPyValueRangeAnalysis.truediv(
                                 self.var_to_range[i0], ValueRanges.wrap(d)
                             )
-                            # Propagate size-like-ness
-                            if i0 in self.size_like:
-                                self.size_like.add(i1)
-                                self.size_like.add(d * i1)
                             self._set_replacement(i0, d * i1, "divisibility")
 
             except NotImplementedError:
