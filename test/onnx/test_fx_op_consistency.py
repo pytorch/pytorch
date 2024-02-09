@@ -1772,6 +1772,7 @@ def _compare_onnx_and_torch_exported_program(
                     error_reproduction.create_mismatch_report(
                         test_name,
                         sample_num,
+                        onnx_exported_program.model_proto,
                         input_args,
                         sample_kwargs,
                         torch.tensor(onnx_output),

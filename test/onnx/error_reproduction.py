@@ -4,9 +4,15 @@ from __future__ import annotations
 
 import difflib
 import pathlib
+import platform
 import sys
 import time
 import traceback
+
+import numpy as np
+
+import onnx
+import onnxruntime as ort
 import torch
 
 _MISMATCH_MARKDOWN_TEMPLATE = """\
@@ -19,6 +25,12 @@ To recreate this report, use
 
 ```bash
 CREATE_REPRODUCTION_REPORT=1 python -m pytest onnxscript/tests/function_libs/torch_lib/ops_test.py -k {short_test_name}
+```
+
+### ONNX Model
+
+```
+{onnx_model_text}
 ```
 
 ### Inputs
@@ -81,11 +93,20 @@ actual = {actual}
 ```
 {error_stack}
 ```
+
+### Environment
+
+```
+{sys_info}
+```
+
 """
+
 
 def create_mismatch_report(
     test_name: str,
     sample_num: int,
+    onnx_model: onnx.ModelProto,
     inputs,
     kwargs,
     actual,
@@ -104,12 +125,23 @@ def create_mismatch_report(
         tofile="expected",
         lineterm="",
     )
+    onnx_model_text = onnx.printer.to_text(onnx_model)
     input_shapes = repr(
         [
-            f"Tensor<{inp.shape}, dtype={inp.dtype}>" if isinstance(inp, torch.Tensor) else inp
+            f"Tensor<{inp.shape}, dtype={inp.dtype}>"
+            if isinstance(inp, torch.Tensor)
+            else inp
             for inp in inputs
         ]
     )
+    sys_info = f"""\
+OS: {platform.platform()}
+Python version: {sys.version}
+onnx=={onnx.__version__}
+onnxruntime=={ort.__version__}
+numpy=={np.__version__}
+torch=={torch.__version__}"""
+
     markdown = _MISMATCH_MARKDOWN_TEMPLATE.format(
         test_name=test_name,
         short_test_name=short_test_name,
@@ -123,6 +155,8 @@ def create_mismatch_report(
         actual_shape=actual.shape if isinstance(actual, torch.Tensor) else None,
         diff="\n".join(diff),
         error_stack=error_stack,
+        sys_info=sys_info,
+        onnx_model_text=onnx_model_text,
     )
 
     markdown_file_name = f'mismatch-{short_test_name.replace("/", "-").replace(":", "-")}-{str(time.time()).replace(".", "_")}.md'
