@@ -885,7 +885,9 @@ def use_triton_template(layout, *, enable_int32=False):
 def use_cutlass_template(layout, m, n, k):
     if m * n * k < config.cuda.cutlass_backend_min_gemm_size:
         return False
-    from .codegen.cuda.cutlass_utils import try_import_cutlass
+    from .codegen.cuda.cutlass_utils import try_import_cutlass, _DISABLE_CUTLASS_BACKEND
+    if _DISABLE_CUTLASS_BACKEND:
+        return False
 
     # Do not use cutlass template on ROCm
     if torch.version.hip:
