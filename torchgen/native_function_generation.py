@@ -51,6 +51,7 @@ FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "_assert_async",  # no return
     "_assert_async.msg",  # no return
     "_cslt_sparse_mm_search",  # returns an int
+    "_assert_scalar",  # no return
     "_dimI",  # returns an int
     "_dimV",  # returns an int
     "_has_same_storage_numel",  # returns a boolean
@@ -394,7 +395,11 @@ def add_generated_native_functions(
             # Don't bother generating functions trio's for native functions that bypass the dispatcher.
             are_manual = all(f.manual_cpp_binding for f in d.values())
             # Don't bother generating functional + out= variants for view operators
-            has_view_ops = any(f.is_view_op for f in d.values())
+            # set_ is technically an inplace_view, but for now it is treated
+            # as a normal inplace op in the codegen
+            has_view_ops = any(
+                f.is_view_op and str(f.func.name.name) != "set_" for f in d.values()
+            )
             # Don't generate the other variants for CompositeImplicitAutograd operators.
             # We could probably do this, but the main benefit of generating the function triplets
             # is for transforms that need them, and transforms don't need to act directly

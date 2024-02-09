@@ -33,7 +33,7 @@ TensorBase empty_mps(
 
     TORCH_CHECK_NOT_IMPLEMENTED(
         layout_or_default(layout_opt) == Layout::Strided,
-        "strided tensors not supported yet");
+        "only strided tensors are supported on MPS");
 
     TORCH_CHECK(size.size() <= 16, "MPS supports tensors with dimensions <= 16, but got ", size.size(), ".");
 

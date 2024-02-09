@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 import torch.fx
+
 from torch.fx._compatibility import compatibility
 from torch.fx.node import map_arg
 
@@ -109,12 +110,19 @@ class _MinimizerBase:
             [TensorOrTensors, TensorOrTensors, Names], Tuple[float, bool]
         ],
         settings: _MinimizerSettingBase,
+        module_exporter: Optional[
+            Callable[
+                [List[torch.Tensor], torch.fx.GraphModule, str],
+                None
+            ]
+        ] = None,
     ):
         assert isinstance(module, torch.fx.GraphModule)
 
         self.module = module
         self.sample_input = sample_input
         self.compare_fn = compare_fn
+        self.module_exporter = module_exporter
         self.settings = settings
 
         # Stores outputs of run_a function
@@ -351,21 +359,34 @@ class _MinimizerBase:
             if node.op == "output":
                 result_key = map_arg(node.args, lambda x: x.name)
 
-        a_result = self.run_a(submodule, a_input)
-        b_result = self.run_b(submodule, b_input)
-        self._store_outputs(a_result, b_result, submodule)
+        try:
+            a_result = self.run_a(submodule, a_input)
+            b_result = self.run_b(submodule, b_input)
+            self._store_outputs(a_result, b_result, submodule)
+        except Exception as e:
+            report.append(f"Exception raised when running {submod_name}: {e}")
+            raise FxNetMinimizerRunFuncError(  # noqa: TRY200
+                f"Exception raised when running {submod_name}: {e}"
+            )
 
         # Compare results
         names: Names = output_names
         if output_names is None:
-            names = [str(v) for v in result_key]
+            names = [str(v) for v in result_key]  # type: ignore[possibly-undefined]
 
         numeric_result, bool_result = self.compare_fn(a_result, b_result, names)
 
-        self.results[result_key] = numeric_result
+        self.results[result_key] = numeric_result  # type: ignore[possibly-undefined]
         report.append(f"Numerical accuracy = {numeric_result}")
         if not bool_result:
             report.append(f"Result mismatch for {result_key}")
+            if self.module_exporter:
+                self.module_exporter(
+                    List[torch.Tensor](a_input), submodule, str(result_key[0]) + "_cpu",
+                )
+                self.module_exporter(
+                    List[torch.Tensor](b_input), submodule, str(result_key[0]) + "_acc",
+                )
             raise FxNetMinimizerResultMismatchError(f"Result mismatch for {result_key}")
 
     def _binary_search_impl(
@@ -472,6 +493,27 @@ class _MinimizerBase:
                 self.print_report(report)
                 if not self.settings.find_all:
                     return culprits
+
+        return culprits
+
+    def _defined_traverse(self, nodes: NodeList) -> NodeSet:
+        """
+        run user defined `nodes` and determine if it is a culprit.
+        """
+        culprits: NodeSet = set()
+
+        first_node_name = nodes[0].name
+        output_node_name = nodes[-1].name
+        report = [f"Defined graph from {first_node_name} to {output_node_name}"]
+        cur_nodes: NodeSet = set(nodes)
+        try:
+            split_module, submod_name = self._build_submodule(cur_nodes)
+            self._run_and_compare(split_module, submod_name, [output_node_name])
+            self.print_report(report)
+        except (FxNetMinimizerResultMismatchError, FxNetMinimizerRunFuncError):
+            report.append(f"Found culprit {cur_nodes}")
+            self.print_report(report)
+            return culprits
 
         return culprits
 
@@ -678,9 +720,12 @@ class _MinimizerBase:
         if self.settings.traverse_method == "accumulate":
             return self._accumulate_traverse(nodes)
 
-        if(self.settings.traverse_method == "skip"):
+        if self.settings.traverse_method == "skip":
             if (skip_nodes is None):
                 raise RuntimeError("'skip_nodes' can't be None when 'traverse_method' is 'skip'.")
             return self._skip_traverse(nodes, skip_nodes)
+
+        if self.settings.traverse_method == "defined":
+            return self._defined_traverse(nodes)
 
         raise RuntimeError(f"Unknown traverse method {self.settings.traverse_method}!")

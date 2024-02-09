@@ -152,7 +152,7 @@ def to_underlying_dtype(qdtype):
         torch.int16: torch.int16,
         torch.int32: torch.int32,
     }
-    assert qdtype in DTYPE_MAPPING, "Unsupported dtype: " + qdtype
+    assert qdtype in DTYPE_MAPPING, "Unsupported dtype: " + str(qdtype)
     return DTYPE_MAPPING[qdtype]
 
 def get_qparam_dict(observer_or_fake_quant):

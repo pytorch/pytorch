@@ -397,6 +397,8 @@ class Tensor(torch._C.TensorBase):
             v3_dtypes = [
                 torch.float8_e5m2,
                 torch.float8_e4m3fn,
+                torch.float8_e5m2fnuz,
+                torch.float8_e4m3fnuz,
                 torch.bits8,
                 torch.bits16,
                 torch.bits1x8,
@@ -672,14 +674,6 @@ class Tensor(torch._C.TensorBase):
       Returned Tensor shares the same storage with the original one.
       In-place modifications on either of them will be seen, and may trigger
       errors in correctness checks.
-      IMPORTANT NOTE: Previously, in-place size / stride / storage changes
-      (such as `resize_` / `resize_as_` / `set_` / `transpose_`) to the returned tensor
-      also update the original tensor. Now, these in-place changes will not update the
-      original tensor anymore, and will instead trigger an error.
-      For sparse tensors:
-      In-place indices / values changes (such as `zero_` / `copy_` / `add_`) to the
-      returned tensor will not update the original tensor anymore, and will instead
-      trigger an error.
     """,
     )
 

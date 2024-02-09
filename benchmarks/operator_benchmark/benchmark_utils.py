@@ -1,3 +1,4 @@
+import argparse
 import bisect
 import itertools
 import os
@@ -86,7 +87,7 @@ def generate_configs(**configs):
                       ({'M': 2}, {'N' : 4}),
                       ({'M': 2}, {'N' : 5}))
     """
-    assert "sample_func" in configs, "Missing sample_func to generat configs"
+    assert "sample_func" in configs, "Missing sample_func to generate configs"
     result = []
     for key, values in configs.items():
         if key == "sample_func":
@@ -241,7 +242,7 @@ def random_sample_configs(**configs):
     """
     This function randomly sample <total_samples> values from the given inputs based on
     their weights.
-    Here is an example showing what are the expected inputs and outpus from this function:
+    Here is an example showing what are the expected inputs and outputs from this function:
     M = [1, 2],
     N = [4, 5],
     K = [7, 8],

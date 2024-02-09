@@ -320,7 +320,7 @@ struct alignas(sizeof(T) * 2) complex {
   constexpr void real(T value) {
     real_ = value;
   }
-  constexpr T imag() const {
+  C10_HOST_DEVICE constexpr T imag() const {
     return imag_;
   }
   constexpr void imag(T value) {
@@ -433,9 +433,9 @@ constexpr complex<T> operator/(const T& lhs, const complex<T>& rhs) {
 // not support this when T is a floating-point number. This is useful because it
 // saves a lot of "static_cast" when operate a complex and an integer. This
 // makes the code both less verbose and potentially more efficient.
-#define COMPLEX_INTEGER_OP_TEMPLATE_CONDITION                           \
-  typename std::enable_if_t<                                            \
-      std::is_floating_point<fT>::value && std::is_integral<iT>::value, \
+#define COMPLEX_INTEGER_OP_TEMPLATE_CONDITION                 \
+  typename std::enable_if_t<                                  \
+      std::is_floating_point_v<fT> && std::is_integral_v<iT>, \
       int> = 0
 
 template <typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>
