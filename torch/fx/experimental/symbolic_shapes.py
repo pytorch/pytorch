@@ -3270,6 +3270,7 @@ class ShapeEnv:
         return shape_groups
 
     def bound_sympy(self, expr: sympy.Expr) -> ValueRanges:
+        """Given a sympy expression, computes a ValueRanges bound for what values it can be"""
         return bound_sympy(expr, {x: self.var_to_range.get(x, None) for x in expr.free_symbols})
 
     @_lru_cache
@@ -3486,7 +3487,7 @@ class ShapeEnv:
             # problem
         )
 
-    def _set_replacement(self, a: "sympy.Symbol", tgt: "sympy.Expr", msg: str, *, force_size_like: bool = False) -> None:
+    def _set_replacement(self, a: "sympy.Symbol", tgt: "sympy.Expr", msg: str) -> None:
         """
         Adds or updates a replacement for a symbol.
         Use this instead of `self.replacements[a] = tgt`.
@@ -3585,8 +3586,7 @@ class ShapeEnv:
                 self.is_unbacked_symint(a) and
                 a in self.size_like and
                 free_unbacked_symbols(tgt) and
-                tgt not in self.size_like and
-                not force_size_like
+                tgt not in self.size_like
             ):
                 self.log.debug("skipped set_replacement %s = %s (%s) [rhs not size-like]", a, tgt, msg)
                 return
@@ -3716,7 +3716,11 @@ class ShapeEnv:
                             self.var_to_range[i1] = SymPyValueRangeAnalysis.truediv(
                                 self.var_to_range[i0], ValueRanges.wrap(d)
                             )
-                            self._set_replacement(i0, d * i1, "divisibility", force_size_like=True)
+                            # Propagate size-like-ness
+                            if i0 in self.size_like:
+                                self.size_like.add(i1)
+                                self.size_like.add(d * i1)
+                            self._set_replacement(i0, d * i1, "divisibility")
 
             except NotImplementedError:
                 pass
