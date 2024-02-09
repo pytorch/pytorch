@@ -645,7 +645,7 @@ class TORCH_API TensorBase {
     TORCH_CHECK(dim() == N, "TensorAccessor expected ", N, " dims but tensor has ", dim());
     T* ptr = nullptr;
     if constexpr (std::is_const<T>::value) {
-      ptr = const_data_ptr<std::remove_const_t<T>>();
+      ptr = const_data_ptr<T>();
     } else {
       ptr = mutable_data_ptr<T>();
     }
