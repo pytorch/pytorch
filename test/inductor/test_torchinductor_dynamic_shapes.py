@@ -337,7 +337,10 @@ class TestInductorDynamic(TestCase):
             return v1, v2
 
         cf = torch.compile(fullgraph=True)(f)
-        args = (torch.randn(8, requires_grad=True, device=device), torch.tensor([3, 5], device=device))
+        args = (
+            torch.randn(8, requires_grad=True, device=device),
+            torch.tensor([3, 5], device=device),
+        )
         self.assertEqual(f(*args), cf(*args))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
