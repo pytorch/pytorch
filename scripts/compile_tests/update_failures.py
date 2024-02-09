@@ -124,8 +124,6 @@ def get_intersection_and_outside(a_dict, b_dict):
 
 
 def update(filename, py38_dir, py311_dir, also_remove_skips):
-    return patch_file(filename, {}, {}, {}, {})
-
     def read_test_results(directory):
         xmls = open_test_results(directory)
         testcases = get_testcases(xmls)
@@ -199,6 +197,6 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     assert pathlib.Path(args.filename).exists(), args.filename
-    # dynamo38, dynamo311 = download_reports(args.commit, ("dynamo38", "dynamo311"))
-    # update(args.filename, dynamo38, dynamo311, args.also_remove_skips)
+    dynamo38, dynamo311 = download_reports(args.commit, ("dynamo38", "dynamo311"))
+    update(args.filename, dynamo38, dynamo311, args.also_remove_skips)
     update(args.filename, None, None, args.also_remove_skips)
