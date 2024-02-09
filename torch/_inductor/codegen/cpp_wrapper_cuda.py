@@ -241,6 +241,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         cuda=True,
         triton=True,
         arg_types=None,
+        grid_fn: str = "grid",
     ):
         if not cuda:
             # Even in CudaWrapperCodeGen, we may see cpp kernels
