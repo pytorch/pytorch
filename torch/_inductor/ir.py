@@ -1694,8 +1694,10 @@ class Scan(Loops):
             combine_fn=combine_fn,
             scan_numel=scan_numel,
         )
-        if num_splits > 1:
-            # TODO: Support splitting
+        scan_type = Scan if num_splits <= 1 else SplitScan
+
+        if num_splits > 1 and torch.version.hip is not None:
+            # Fallback for split-scan on ROCm
             return None
 
         def reindex(index, scan_index):
@@ -1704,7 +1706,7 @@ class Scan(Loops):
             return [*index[:axis], *scan_index, *index[axis:]]
 
         result = TensorBox.create(
-            Scan(
+            scan_type(
                 device=device,
                 dtype=dtype,
                 inner_fn=inner_fn,
@@ -1746,6 +1748,12 @@ class Scan(Loops):
             reduction_type="sum",
             reduction_numel=scan_numel,
         )
+
+
+# This signifies a scan op that should go through TritonSplitScanKernel codgen on CUDA.
+@dataclasses.dataclass
+class SplitScan(Scan):
+    pass
 
 
 def is_storage_and_layout(x):
@@ -4626,7 +4634,7 @@ class FallbackKernel(ExternKernelAlloc):
 
         self.cpp_kernel_name = kernel._schema.name
         self.cpp_kernel_overload_name = kernel._schema.overload_name
-        self.cpp_kernel_key = f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]  # noqa: B950
+        self.cpp_kernel_key = f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]
 
         self.cpp_op_schema = get_cpp_op_schema(kernel)
         self.init_args_default_value(kernel._schema)
@@ -7397,7 +7405,7 @@ class _CollectiveKernel(FallbackKernel):
 
         self.cpp_kernel_name = kernel._schema.name
         self.cpp_kernel_overload_name = kernel._schema.overload_name
-        self.cpp_kernel_key = f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]  # noqa: B950
+        self.cpp_kernel_key = f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]
 
         self.cpp_op_schema = get_cpp_op_schema(kernel)
         self.ordered_kwargs_for_cpp_kernel = [
