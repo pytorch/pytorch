@@ -40,6 +40,64 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
+class TestFullyShardCompileMultiThread(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_compile_multi_thread(self):
+        vocab_size = 32
+        model_args = ModelArgs(
+            n_layers=3,
+            n_heads=4,
+            vocab_size=vocab_size,
+            max_seq_len=64,
+            dropout_p=0.0,
+        )
+        model = Transformer(model_args)
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module)
+        fully_shard(model)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
+        inp = torch.randint(0, vocab_size, (3, 64), device="cuda")
+        for _ in range(3):
+            out = model(inp)
+            out.sum().backward()
+            optim.step()
+            optim.zero_grad()
+
+
+class TestFullyShardCompileMultiProcess(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_compile_multi_process(self):
+        vocab_size = 32
+        model_args = ModelArgs(
+            n_layers=3,
+            n_heads=4,
+            vocab_size=vocab_size,
+            max_seq_len=64,
+            dropout_p=0.0,
+        )
+        model = Transformer(model_args)
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module)
+        fully_shard(model)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
+        inp = torch.randint(0, vocab_size, (3, 64), device="cuda")
+        for _ in range(3):
+            out = model(inp)
+            out.sum().backward()
+            optim.step()
+            optim.zero_grad()
+
+
 class TestFullyShardForwardInputs(FSDPTestMultiThread):
     @property
     def world_size(self) -> int:

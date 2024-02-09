@@ -31,7 +31,7 @@ FSDP considers the following tensors:
 - All-gather inputs: the ``torch.Tensor`` or ``Tensor`` s passed to all-gather,
   derived from the sharded parameter
 - All-gather output: the ``torch.Tensor`` or ``Tensor`` s resulting from
-  all-gathering the all-gather input
+  all-gathering the all-gather inputs
 - Unsharded parameter: parameter used for forward/backward computation, derived
   from the all-gather output; autograd leaf
 
