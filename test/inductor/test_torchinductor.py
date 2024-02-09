@@ -3952,11 +3952,10 @@ class CommonTemplate:
 
         self.common(
             fn,
-            # TODO: Remove dtype once https://github.com/pytorch/pytorch/issues/94010 is fixed
             (
                 torch.randn(
                     [16, 16],
-                    dtype=torch.float64 if self.device == "cpu" else torch.float32,
+                    dtype=torch.float32,
                 ),
             ),
             # Mismatched elements: 9 / 256 (3.5%)
@@ -8479,6 +8478,12 @@ class CommonTemplate:
     def test_bessel_j1(self):
         def fn(x):
             return torch.special.bessel_j1(x)
+
+        self.common(fn, (torch.randn(8, 8),))
+
+    def test_modified_bessel_i0(self):
+        def fn(x):
+            return torch.special.modified_bessel_i0(x)
 
         self.common(fn, (torch.randn(8, 8),))
 
