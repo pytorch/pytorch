@@ -168,8 +168,6 @@ test_failures = {
     "test_like_rands_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linspace2_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linspace3_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_logcumsumexp_dynamic_shapes": TestFailure(("cpu",)),
-    "test_logcumsumexp_zero_dim_dynamic_shapes": TestFailure(("cpu",)),
     "test_max_pool2d6_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_max_pool2d8_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_max_pool2d_with_indices_backward5_dynamic_shapes": TestFailure(
@@ -179,52 +177,20 @@ test_failures = {
         ("cpu", "cuda")
     ),
     "test_misaligned_address_issue1_dynamic_shapes": TestFailure(("cpu",)),
-    "test_multilayer_cumsum_dynamic_shapes": TestFailure(("cpu",)),
     "test_mm_views_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_new_empty_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_new_empty_strided_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_new_ones_dynamic_shapes": TestFailure(("cpu",)),
     "test_permute2_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_pointwise_airy_ai_dynamic_shapes": TestFailure(("cuda",)),
-    "test_pointwise_digamma_dynamic_shapes": TestFailure(("cuda",)),
-    "test_pointwise_gammainc_dynamic_shapes": TestFailure(("cuda",)),
-    "test_pointwise_gammaincc_dynamic_shapes": TestFailure(("cuda",)),
-    "test_pointwise_i0e_dynamic_shapes": TestFailure(("cuda",)),
-    "test_pointwise_i1e_dynamic_shapes": TestFailure(("cuda",)),
-    "test_pointwise_modified_bessel_k0_dynamic_shapes": TestFailure(("cuda",)),
-    "test_pointwise_modified_bessel_k1_dynamic_shapes": TestFailure(("cuda",)),
-    "test_pointwise_ndtri_dynamic_shapes": TestFailure(("cuda",)),
-    "test_pointwise_polygamma_dynamic_shapes": TestFailure(("cuda",)),
-    "test_pointwise_psi_dynamic_shapes": TestFailure(("cuda",)),
-    "test_pointwise_scaled_modified_bessel_k0_dynamic_shapes": TestFailure(("cuda",)),
-    "test_pointwise_scaled_modified_bessel_k1_dynamic_shapes": TestFailure(("cuda",)),
-    "test_pointwise_spherical_bessel_j0_dynamic_shapes": TestFailure(("cuda",)),
-    "test_pointwise_zeta_dynamic_shapes": TestFailure(("cuda",)),
-    "test_pointwise_chebyshev_polynomial_t_dynamic_shapes": TestFailure(("cuda",)),
-    "test_pointwise_chebyshev_polynomial_u_dynamic_shapes": TestFailure(("cuda",)),
-    "test_pointwise_chebyshev_polynomial_v_dynamic_shapes": TestFailure(("cuda",)),
-    "test_pointwise_chebyshev_polynomial_w_dynamic_shapes": TestFailure(("cuda",)),
-    "test_pointwise_shifted_chebyshev_polynomial_t_dynamic_shapes": TestFailure(
-        ("cuda",)
-    ),
-    "test_pointwise_shifted_chebyshev_polynomial_u_dynamic_shapes": TestFailure(
-        ("cuda",)
-    ),
-    "test_pointwise_shifted_chebyshev_polynomial_v_dynamic_shapes": TestFailure(
-        ("cuda",)
-    ),
-    "test_pointwise_shifted_chebyshev_polynomial_w_dynamic_shapes": TestFailure(
-        ("cuda",)
-    ),
-    "test_pointwise_hermite_polynomial_h_dynamic_shapes": TestFailure(("cuda",)),
-    "test_pointwise_hermite_polynomial_he_dynamic_shapes": TestFailure(("cuda",)),
-    "test_pointwise_laguerre_polynomial_l_dynamic_shapes": TestFailure(("cuda",)),
-    "test_pointwise_legendre_polynomial_p_dynamic_shapes": TestFailure(("cuda",)),
     "test_randn_generator_dynamic_shapes": TestFailure(("cpu",)),
     "test_randn_like_empty_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_single_elem_dynamic_shapes": TestFailure(("cpu",)),
     "test_single_elem_indirect_dynamic_shapes": TestFailure(("cpu",)),
     "test_sort_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_split_cumsum_dynamic_shapes": TestFailure(("cpu",)),
+    "test_split_cumsum_low_prec_dynamic_shapes": TestFailure(("cpu",)),
+    "test_split_cumprod_dynamic_shapes": TestFailure(("cpu",)),
+    "test_split_cumprod_low_prec_dynamic_shapes": TestFailure(("cpu",)),
     "test_split_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_topk_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_unbind_dynamic_shapes": TestFailure(("cpu", "cuda")),
@@ -330,6 +296,10 @@ if TEST_WITH_ROCM:
     test_failures.update(
         {
             "test_cumsum_dynamic_shapes": TestFailure(("cpu", "cuda")),
+            "test_split_cumsum_dynamic_shapes": TestFailure(("cpu", "cuda")),
+            "test_split_cumsum_low_prec_dynamic_shapes": TestFailure(("cpu", "cuda")),
+            "test_split_cumprod_dynamic_shapes": TestFailure(("cpu", "cuda")),
+            "test_split_cumprod_low_prec_dynamic_shapes": TestFailure(("cpu", "cuda")),
         }
     )
 
