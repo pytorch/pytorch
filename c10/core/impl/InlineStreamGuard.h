@@ -4,8 +4,7 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/irange.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 /**
  * A StreamGuard is an RAII class that changes the current device
@@ -253,5 +252,4 @@ class InlineMultiStreamGuard {
   }
 };
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

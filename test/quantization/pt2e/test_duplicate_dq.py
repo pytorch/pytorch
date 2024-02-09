@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 import copy
 import unittest
+from typing import Any, Dict
 
 import torch
 import torch._export as export
@@ -109,7 +110,7 @@ class TestDuplicateDQPass(QuantizationTestCase):
         m = prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
-        m = convert_pt2e(m)
+        m = convert_pt2e(m, fold_quantize=True)
 
         pt2_quant_output = m(*example_inputs)
         for n in m.graph.nodes:
@@ -249,7 +250,7 @@ class TestDuplicateDQPass(QuantizationTestCase):
                     eps=2**-12
                 ),
             )
-            weight_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
+            weight_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (  # noqa: F821
                 MinMaxObserver
             )
 
@@ -266,7 +267,7 @@ class TestDuplicateDQPass(QuantizationTestCase):
                 ),
             )
 
-            bias_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
+            bias_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (  # noqa: F821
                 PlaceholderObserver
             )
             bias_quantization_spec = QuantizationSpec(

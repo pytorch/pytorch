@@ -1367,13 +1367,13 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
 
   // capture the outer shape if needed.
   if (axis > 1) {
-    const auto x_shape = dummy_->NewDummyName();
-    nodes.emplace_back(MakeNode("Shape", {x}, {x_shape}));
+    const auto x_shape_2 = dummy_->NewDummyName();
+    nodes.emplace_back(MakeNode("Shape", {x}, {x_shape_2}));
 
     const auto x_shape_outer = dummy_->NewDummyName();
     nodes.emplace_back(MakeNode(
         "Slice",
-        {x_shape},
+        {x_shape_2},
         {x_shape_outer},
         std::vector<AttributeProto>{
             MakeAttribute("starts", std::vector<int64_t>{0}),

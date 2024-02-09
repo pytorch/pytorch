@@ -50,7 +50,7 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
         constant_fold(gm)
         # Make sure meta['val'] is properly set for all nodes
         fake_tensor_prop(gm, aot_example_inputs, True)
-        binary_folding_pass.apply(gm.graph)
+        binary_folding_pass.apply(gm.graph)  # type: ignore[arg-type]
         # If we don't have binary folding, we don't need to run the pass again.
         # TODO: remove the need to run fake_tensor_prop on the whole model.
         if counters["inductor"]["binary_folding"] == binary_folding:
@@ -63,7 +63,7 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
     fake_tensor_prop(gm, aot_example_inputs, True)
 
     for pattern in pass_patterns:
-        pattern.apply(gm.graph)
+        pattern.apply(gm.graph)  # type: ignore[arg-type]
 
     # The CPU weight packing always assume the conv's weight is channels last,
     # So make sure the layout_optimization is on when doing it.

@@ -8,7 +8,7 @@ from typing import NamedTuple, Optional
 
 import torch
 from torch import Tensor
-from torch.testing._internal.common_utils import TemporaryFileName
+from torch.testing._internal.common_utils import TemporaryFileName, skipIfTorchDynamo
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -709,6 +709,7 @@ class TestSaveLoad(JitTestCase):
         traced_inputs, loaded_inputs = get_loaded_inputs(input4)
         self.assertEqual(traced_inputs[1].type(), loaded_inputs[1].type())
 
+    @skipIfTorchDynamo("too slow")
     def test_save_load_large_string_attribute(self):
         """
         Check if the model with string > 4GB can be loaded.

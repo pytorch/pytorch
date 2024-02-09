@@ -32,7 +32,7 @@
 #include <vector>
 
 
-namespace at { namespace native {
+namespace at::native {
 
 Tensor embedding_symint(const Tensor & weight, const Tensor & indices,
                         c10::SymInt padding_idx, bool scale_grad_by_freq, bool sparse) {
@@ -212,4 +212,4 @@ Tensor & embedding_renorm_cpu_(
 }
 
 
-}}  // namespace at::native
+}  // namespace at::native

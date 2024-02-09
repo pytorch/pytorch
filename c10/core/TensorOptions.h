@@ -3,15 +3,22 @@
 #include <c10/core/Backend.h>
 #include <c10/core/DefaultDtype.h>
 #include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
+#include <c10/core/DispatchKey.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
+#include <cstdint>
 #include <iosfwd>
+#include <string>
+#include <type_traits>
 #include <utility>
 
 namespace c10 {

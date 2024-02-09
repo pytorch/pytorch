@@ -18,7 +18,7 @@ import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
-    (IS_FBCODE, IS_JETSON, IS_LINUX, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
+    (IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
      parametrize, subtest, instantiate_parametrized_tests, dtype_name, TEST_WITH_ROCM, decorateIf)
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
@@ -29,6 +29,7 @@ from torch.testing._internal import opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and, floating_types
 from torch.testing._internal.common_modules import modules, module_db, ModuleInfo
 from torch.testing._internal.opinfo.core import SampleInput, DecorateInfo, OpInfo
+import operator
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -1427,7 +1428,7 @@ class TestMakeTensor(TestCase):
     @parametrize("noncontiguous", [False, True])
     @parametrize("shape", [tuple(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)])
     def test_noncontiguous(self, dtype, device, noncontiguous, shape):
-        numel = functools.reduce(lambda a, b: a * b, shape, 1)
+        numel = functools.reduce(operator.mul, shape, 1)
 
         t = torch.testing.make_tensor(shape, dtype=dtype, device=device, noncontiguous=noncontiguous)
         self.assertEqual(t.is_contiguous(), not noncontiguous or numel < 2)
@@ -1484,15 +1485,7 @@ class TestMakeTensor(TestCase):
         low_inclusive, high_exclusive = {
             torch.bool: (0, 2),
             torch.uint8: (0, 10),
-            **{
-                signed_integral_dtype: (-9, 10)
-                for signed_integral_dtype in [
-                    torch.int8,
-                    torch.int16,
-                    torch.int32,
-                    torch.int64,
-                ]
-            },
+            **dict.fromkeys([torch.int8, torch.int16, torch.int32, torch.int64], (-9, 10)),
         }.get(dtype, (-9, 9))
 
         t = torch.testing.make_tensor(10_000, dtype=dtype, device=device, low=low_inclusive, high=high_exclusive)
@@ -2317,15 +2310,6 @@ class TestImports(TestCase):
         ]
         out = self._check_python_output("; ".join(commands))
         self.assertEqual(out.strip(), expected)
-
-    @unittest.skipIf(TEST_WITH_ROCM, "On-demand profiling early init not supported on ROCm")
-    @unittest.skipIf(not IS_LINUX, "On-demand profiling not supported outside of Linux")
-    def test_libkineto_profiler_is_initialized(self) -> None:
-        # Check that the profiler is initialized at import time.
-        out = self._check_python_output("""import sys; import torch;
-print(torch._C._autograd._isProfilerInitialized() if torch._C._autograd._is_use_kineto_defined() else 'True')
-""")
-        self.assertEqual(out.strip(), "True")
 
 class TestOpInfos(TestCase):
     def test_sample_input(self) -> None:

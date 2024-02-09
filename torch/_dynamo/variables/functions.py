@@ -1,17 +1,24 @@
+# mypy: ignore-errors
+
 import functools
 import inspect
 import itertools
 import types
-from typing import Dict, List
+from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_rot_n
 from ..exc import unimplemented, Unsupported
+from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
-from ..utils import make_cell
+from ..utils import get_first_attr, identity, istype, make_cell
 from .base import typestr, VariableTracker
+from .constant import ConstantVariable
+
+if TYPE_CHECKING:
+    from torch._guards import Source
 
 
 def wrap_bound_arg(tx, val, source=None):
@@ -82,6 +89,16 @@ class BaseUserFunctionVariable(VariableTracker):
             self, list(self.self_args()) + list(args), kwargs
         )
 
+    def call_hasattr(self, tx, name: str) -> VariableTracker:
+        result = False
+
+        try:
+            result = hasattr(self.get_function(), name)
+        except NotImplementedError:
+            if name == "__name__" and isinstance(self, NestedUserFunctionVariable):
+                result = True
+        return variables.ConstantVariable.create(result)
+
     def inspect_parameter_names(self):
         return list(inspect.signature(self.get_function()).parameters)
 
@@ -91,6 +108,14 @@ class BaseUserFunctionVariable(VariableTracker):
 
 class UserFunctionVariable(BaseUserFunctionVariable):
     """Some unsupported user-defined global function"""
+
+    @classmethod
+    def create_with_source(cls, value, source):
+        install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
+        return cls(
+            value,
+            source=source,
+        )
 
     def __init__(self, fn, is_constant=False, **kwargs):
         super().__init__(**kwargs)
@@ -109,6 +134,12 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         if inspect.getattr_static(fn, "__script_if_tracing_wrapper", False):
             fn = inspect.getattr_static(fn, "__original_fn", fn)
         self.fn: types.FunctionType = fn
+
+    def as_python_constant(self):
+        if istype(self, UserFunctionVariable):
+            return self.fn
+        # subclasses (such as methods) usually aren't a constant
+        return super().as_python_constant()
 
     def self_args(self):
         return []
@@ -240,6 +271,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     def export_freevars(self, parent, child):
         pass
+
+    def call_hasattr(self, tx, name: str) -> VariableTracker:
+        result = hasattr(self.fn, name)
+        return variables.ConstantVariable.create(result)
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -441,7 +476,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             tuple(make_cell(None) for _ in range(len(self.get_code().co_freevars))),
         )
         if self.kwdefaults:
-            func.__kwdefaults__ = self.kwdefaults.items
+            func.__kwdefaults__ = self.kwdefaults.keys_as_python_constant()
         bound = inspect.signature(func).bind(*args, **kwargs)
         bound.apply_defaults()
         result = dict(bound.arguments.items())
@@ -482,7 +517,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         codegen.load_import_from(__name__, "_create_nested_fn")
         codegen(self.code)
         codegen.extend_output([codegen._create_load_const(self.f_globals)])
-        codegen(self.fn_name)
+        codegen(ConstantVariable.create(self.code.value.co_name))
 
         if self.defaults:
             codegen(self.defaults)
@@ -501,15 +536,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
         if self.annotations:
             try:
-                if isinstance(self.annotations, variables.ConstDictVariable):
-                    annotations = {
-                        k: v.as_python_constant()
-                        for k, v in self.annotations.items.items()
-                    }
-                else:
-                    annotations = tuple(
-                        [v.as_python_constant() for v in self.annotations.items]
-                    )
+                annotations = self.annotations.as_python_constant()
                 codegen.extend_output([codegen._create_load_const(annotations)])
             except NotImplementedError:
                 codegen(self.annotations)
@@ -541,13 +568,8 @@ def _traceable_collective_remaps():
 
 def _traceable_collectives_source(tx, fn):
     assert torch.distributed.is_available(), "Illegal invocation."
-    from torch.distributed._functional_collectives import (
-        all_gather_tensor_inplace,
-        reduce_scatter_tensor_inplace,
-    )
+    assert fn in _traceable_collective_remaps().values()
 
-    valid_values = {all_gather_tensor_inplace, reduce_scatter_tensor_inplace}
-    assert fn in valid_values
     inner_name = fn.__name__
     path_source = tx.import_source("torch.distributed._functional_collectives")
     return AttrSource(path_source, inner_name)
@@ -596,7 +618,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         # call_function must check any unsupported arguments and graph-break.
         # It's safe to assume args/kwargs from orig_fn map 1:1 to args/kwargs of remapped_fn,
         # since that's the contract for putting a mapping in `traceable_collective_remaps`
-        if kwargs.get("async_op", False):
+        if "async_op" in kwargs and kwargs["async_op"].as_python_constant():
             unimplemented(
                 f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.fn}"
             )
@@ -604,14 +626,27 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
 
 
 class FunctoolsPartialVariable(VariableTracker):
-    def __init__(self, func, args, keywords, original=None, **kwargs):
+    def __init__(self, func: VariableTracker, args, keywords, **kwargs):
         super().__init__(**kwargs)
         self.func = func
         assert isinstance(args, list)
         self.args = args
         assert isinstance(keywords, dict)
         self.keywords = keywords
-        self.original = original
+
+    def reconstruct(self, codegen):
+        codegen.load_import_from("functools", "partial")
+        codegen(self.func)
+        if self.args:
+            codegen.foreach(self.args)
+        if not self.keywords:
+            return create_call_function(len(self.args) + 1, True)
+
+        codegen.foreach(self.keywords.values())
+        keys = tuple(self.keywords.keys())
+        return codegen.create_call_function_kw(
+            len(keys) + len(self.args) + 1, keys, True
+        )
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -620,22 +655,26 @@ class FunctoolsPartialVariable(VariableTracker):
         merged_kwargs = {**self.keywords, **kwargs}
         return self.func.call_function(tx, merged_args, merged_kwargs)
 
+    def call_hasattr(self, tx, name: str) -> VariableTracker:
+        # functools.partial uses slots, so attributes are constant
+        return variables.ConstantVariable.create(
+            hasattr(functools.partial(identity), name)
+        )
+
     def as_python_constant(self):
-        if self.original:
-            return self.original
-        else:
+        return functools.partial(
+            self.func.as_python_constant(),
+            *[arg.as_python_constant() for arg in self.args],
+            **{k: v.as_python_constant() for k, v in self.keywords.items()},
+        )
 
-            def get_val(v):
-                if isinstance(v, variables.UserDefinedObjectVariable):
-                    return v.value
-                else:
-                    return v.as_python_constant()
-
-            return functools.partial(
-                self.func.fn,
-                *[get_val(arg) for arg in self.args],
-                **{k: get_val(v) for k, v in self.keywords.items()},
-            )
+    def guard_as_python_constant(self):
+        """Similar to as_python_constant(), but add ID_MATCH guards to try to force things to become constants"""
+        return functools.partial(
+            self.func.guard_as_python_constant(),
+            *[v.guard_as_python_constant() for v in self.args],
+            **{k: v.guard_as_python_constant() for k, v in self.keywords.items()},
+        )
 
 
 class TritonKernelVariable(VariableTracker):
@@ -658,10 +697,21 @@ class TritonKernelVariable(VariableTracker):
         if isinstance(kernel, Autotuner):
             # We only support configs and keys arguments of triton.autotune
             # Make sure other arguments are defaulted
-            defaults = inspect.signature(Autotuner).parameters
+            defaults = inspect.signature(Autotuner.__init__).parameters
+
+            # Newer version of triton change attribute name from warmup to num_warmup and rep to num_rep.
+            # The call to get_first_attr is to maintain backward-compatibility.
             if (
-                ("warmup" in defaults and defaults["warmup"].default != kernel.warmup)
-                or ("rep" in defaults and defaults["rep"].default != kernel.rep)
+                (
+                    "warmup" in defaults
+                    and defaults["warmup"].default
+                    != get_first_attr(kernel, "num_warmups", "warmup")
+                )
+                or (
+                    "rep" in defaults
+                    and defaults["rep"].default
+                    != get_first_attr(kernel, "num_reps", "rep")
+                )
                 or (
                     "prune_configs_by" in defaults
                     and defaults["prune_configs_by"].default
@@ -686,7 +736,11 @@ class TritonKernelVariable(VariableTracker):
 
         # Both for grid's meta as well as for the kernel, we need combined
         # args and kwargs normalized
-        normalized_args = {**dict(zip(self.kernel.arg_names, args)), **kwargs}
+        names = (
+            variables.ConstantVariable.create(name) for name in self.kernel.arg_names
+        )
+        kwargs = {variables.ConstantVariable.create(k): v for k, v in kwargs.items()}
+        normalized_args = {**dict(zip(names, args)), **kwargs}
 
         configs = (
             [config.kwargs for config in self.kernel.configs]
@@ -701,7 +755,8 @@ class TritonKernelVariable(VariableTracker):
             if isinstance(grid, (NestedUserFunctionVariable, UserFunctionVariable)):
                 # Populate the special "meta" argument to call the grid function
                 config_args = {
-                    k: ConstantVariable.create(v) for k, v in config_args.items()
+                    ConstantVariable.create(k): ConstantVariable.create(v)
+                    for k, v in config_args.items()
                 }
                 meta = ConstDictVariable({**normalized_args, **config_args}, dict)
                 grid = grid.call_function(tx, [meta], {})
@@ -776,6 +831,7 @@ class TritonKernelVariable(VariableTracker):
             if "grid" not in kwargs:
                 raise Unsupported("Triton kernel requires to be called with a grid")
             grid = kwargs.pop("grid")
+            kwargs.pop("warmup", None)
             # rewrite kernel.run(*args, grid=grid) to kernel[grid](*args)
             return TritonKernelVariable(
                 kernel=self.kernel, kernel_idx=self.kernel_idx, grid=grid
