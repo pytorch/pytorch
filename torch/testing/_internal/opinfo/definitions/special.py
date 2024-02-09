@@ -101,6 +101,19 @@ def sample_inputs_entr(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg(()))
 
 
+def sample_inputs_erfcx(op_info, device, dtype, requires_grad, **kwargs):
+    for shape in ((L,), (1, 0, 3), ()):
+        yield SampleInput(
+            make_tensor(
+                shape,
+                device=device,
+                dtype=dtype,
+                low=-5,
+                requires_grad=requires_grad,
+            ),
+        )
+
+
 op_db: List[OpInfo] = [
     UnaryUfuncInfo(
         "special.i0e",
@@ -283,7 +296,6 @@ op_db: List[OpInfo] = [
         "special.erfcx",
         ref=scipy.special.erfcx if TEST_SCIPY else None,
         aten_name="special_erfcx",
-        domain=(-4, 10),
         decorators=(
             toleranceOverride(
                 {
@@ -294,6 +306,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
+        sample_inputs_func=sample_inputs_erfcx,
     ),
     UnaryUfuncInfo(
         "special.airy_ai",
@@ -734,7 +747,6 @@ python_ref_db: List[OpInfo] = [
         "_refs.special.erfcx",
         torch_opinfo_name="special.erfcx",
         op_db=op_db,
-        domain=(-4, 10),
         decorators=(
             toleranceOverride(
                 {
