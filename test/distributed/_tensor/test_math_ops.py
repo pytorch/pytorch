@@ -127,6 +127,10 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertIsNone(dist_x.grad)
             dist_y.backward()
             self.assertIsNotNone(dist_x.grad)
+            if dims[softmax_dim] == dims[shard_dim]:
+                self.assertTrue(dist_x.grad.placements[0].is_replicate())
+            else:
+                self.assertTrue(dist_x.grad.placements[0].is_shard(dim=shard_dim))
             self.assertEqual(dist_x.grad.full_tensor(), x.grad)
 
     @with_comms

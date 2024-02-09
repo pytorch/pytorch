@@ -73,9 +73,6 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.utils._sympy.value_ranges import ValueRangeError, ValueRanges
 
-from .exported_program import (
-    CallSpec,
-)
 from .passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
 )
@@ -197,45 +194,30 @@ def capture_pre_autograd_graph(
             range_constraints=range_constraints,
         )
 
+    error_message = \
+        """
+        Calling train() or eval() is not supported for exported models.
+        Alternatively, you may override these methods to do custom user behavior as follows:
+
+            def _my_train(self, mode: bool = True):
+                ...
+
+            def _my_eval(self):
+                ...
+
+            model.train = types.MethodType(_my_train, model)
+            model.eval = types.MethodType(_my_eval, model)
+        """
+
     def _train(self, mode: bool = True):
-        raise NotImplementedError("Calling train() is not supported yet.")
+        raise NotImplementedError(error_message)
 
     def _eval(self, mode: bool = True):
-        raise NotImplementedError("Calling eval() is not supported yet.")
+        raise NotImplementedError(error_message)
 
     module.train = types.MethodType(_train, module)  # type: ignore[method-assign]
     module.eval = types.MethodType(_eval, module)  # type: ignore[method-assign]
     return module
-
-
-def export(
-    f: Callable,
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
-    constraints: Optional[List[Constraint]] = None,
-    *,
-    strict: bool = True,
-    preserve_module_call_signature: Tuple[str, ...] = (),
-) -> ExportedProgram:
-    from torch.export._trace import _export
-    warnings.warn("This function is deprecated. Please use torch.export.export instead.")
-
-    if constraints is not None:
-        warnings.warn(
-            "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
-            "and will not be supported in the future. "
-            "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-    return _export(
-        f,
-        args,
-        kwargs,
-        constraints,
-        strict=strict,
-        preserve_module_call_signature=preserve_module_call_signature,
-    )
 
 
 def save(
