@@ -20,10 +20,15 @@ __all__ = ["grid_sampler"]
 
 # string_conversion.py
 
+
 def convert_grid_sample_mode(mode_s):
-    return "linear" if mode_s == "bilinear" else "cubic" if mode_s == "bicubic" else mode_s
+    return (
+        "linear" if mode_s == "bilinear" else "cubic" if mode_s == "bicubic" else mode_s
+    )
+
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=20)
+
 
 @_onnx_symbolic("aten::grid_sampler")
 @symbolic_helper.parse_args("v", "v", "i", "i", "b")
@@ -48,6 +53,7 @@ def grid_sampler(
         mode_s=mode_s,
         padding_mode_s=padding_mode_s,
     )
+
 
 @_onnx_symbolic("aten::affine_grid_generator")
 @symbolic_helper.parse_args("v", "v", "b")

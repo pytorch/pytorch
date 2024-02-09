@@ -13396,10 +13396,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             self.align_corners = align_corners
 
         def forward(self, theta, size):
-            return torch.nn.functional.affine_grid(
-                theta, size, self.align_corners
-            )
-
+            return torch.nn.functional.affine_grid(theta, size, self.align_corners)
 
     @skipIfUnsupportedMinOpsetVersion(20)
     @skipScriptTest()
@@ -13410,8 +13407,16 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @common_utils.parametrize(
         "theta_params",
         (
-            (10, np.array([0.3, -0.5]), np.array([1.5, 0.5]), ),
-            (60, np.array([-0.5, -0.5]), np.array([3.0, 5.5]), )
+            (
+                10,
+                np.array([0.3, -0.5]),
+                np.array([1.5, 0.5]),
+            ),
+            (
+                60,
+                np.array([-0.5, -0.5]),
+                np.array([3.0, 5.5]),
+            ),
         ),
     )
     @common_utils.parametrize(
@@ -13447,8 +13452,16 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @common_utils.parametrize(
         "theta_params",
         (
-            ([10, 20], np.array([0.3, -0.5, 1.8]), np.array([1.5, 2.0, 0.5]), ),
-            ([60, -30], np.array([-0.5, -0.5, 0.3]), np.array([0.3, 3.0, 5.5]), )
+            (
+                [10, 20],
+                np.array([0.3, -0.5, 1.8]),
+                np.array([1.5, 2.0, 0.5]),
+            ),
+            (
+                [60, -30],
+                np.array([-0.5, -0.5, 0.3]),
+                np.array([0.3, 3.0, 5.5]),
+            ),
         ),
     )
     @common_utils.parametrize(
@@ -13562,7 +13575,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                     (volumetric_input_tensor, volumetric_grid_tensor),
                     **atol_rtol,
                 )
-
 
     class IfNoneInput(torch.nn.Module):
         def forward(self, x) -> Optional[Tensor]:

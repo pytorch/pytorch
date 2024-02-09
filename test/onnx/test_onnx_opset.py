@@ -495,8 +495,8 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
                 # )
 
         opset_version = 20
-        ops_2d = {opset_version:
-            [
+        ops_2d = {
+            opset_version: [
                 {"op_name": "Constant"},
                 {"op_name": "Unsqueeze"},
                 {"op_name": "Constant"},
@@ -507,10 +507,11 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
                 {"op_name": "Unsqueeze"},
                 {"op_name": "Concat"},
                 {"op_name": "AffineGrid"},
-                ]}
+            ]
+        }
 
-        ops_3d = {opset_version:
-            [
+        ops_3d = {
+            opset_version: [
                 {"op_name": "Constant"},
                 {"op_name": "Unsqueeze"},
                 {"op_name": "Constant"},
@@ -523,7 +524,8 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
                 {"op_name": "Unsqueeze"},
                 {"op_name": "Concat"},
                 {"op_name": "AffineGrid"},
-                ]}
+            ]
+        }
         # 2D affine
         theta_2d = torch.empty(1, 2, 3, dtype=torch.double)
         size_2d = torch.Size([1, 1, 2, 2])
@@ -536,7 +538,10 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
             (True, False),
         ):
             theta, size, ops = inputs
-            args = (theta, size, )
+            args = (
+                theta,
+                size,
+            )
             check_onnx_opsets_operator(
                 MyModule(align_corners=align_corners),
                 args,
@@ -566,36 +571,40 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
                     grid,
                     mode=self.mode,
                     padding_mode=self.padding_mode,
-                    align_corners=self.align_corners
+                    align_corners=self.align_corners,
                 )
 
-        from torch.onnx.symbolic_opset20 import convert_grid_sample_mode
         for mode, padding_mode, align_corners, opset_version in itertools.product(
             ("bilinear", "nearest", "bicubic"),
             ("zeros", "border", "reflection"),
-            (True, False), (16, 20)
+            (True, False),
+            (16, 20),
         ):
+
             def test_eval_and_training(
-                ops,
-                opset_version,
-                mode,
-                padding_mode,
-                align_corners,
-                x_shape,
-                grid):
+                ops, opset_version, mode, padding_mode, align_corners, x_shape, grid
+            ):
                 args = (
                     torch.randn(*x_shape),  # x
                     torch.randn(grid),  # grid,
                 )
                 check_onnx_opsets_operator(
-                    MyModule(mode=mode, padding_mode=padding_mode, align_corners=align_corners),
+                    MyModule(
+                        mode=mode,
+                        padding_mode=padding_mode,
+                        align_corners=align_corners,
+                    ),
                     args,
                     ops,
                     opset_versions=[opset_version],
                     training=torch.onnx.TrainingMode.TRAINING,
                 )
                 check_onnx_opsets_operator(
-                    MyModule(mode=mode, padding_mode=padding_mode, align_corners=align_corners),
+                    MyModule(
+                        mode=mode,
+                        padding_mode=padding_mode,
+                        align_corners=align_corners,
+                    ),
                     args,
                     ops,
                     opset_versions=[opset_version],
@@ -612,7 +621,8 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
                 padding_mode,
                 align_corners,
                 (n, c, h_in, w_in),
-                (n, h_out, w_out, 2))
+                (n, h_out, w_out, 2),
+            )
             if opset_version == 20 and mode != "bicubic":
                 test_eval_and_training(
                     ops,
@@ -621,7 +631,8 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
                     padding_mode,
                     align_corners,
                     (n, c, d_in, h_in, w_in),
-                    (n, d_out, h_out, w_out, 3))
+                    (n, d_out, h_out, w_out, 3),
+                )
 
     def test_flatten(self):
         class MyModule(Module):
