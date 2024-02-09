@@ -2,6 +2,11 @@
 
 Note [ONNX Operators that are added/updated in opset 20]
 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+https://github.com/onnx/onnx/blob/main/docs/Changelog.md#version-20-of-the-default-onnx-operator-set
+New operators:
+    AffineGrid
+    GridSample
 """
 
 import functools
