@@ -3,7 +3,7 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any, Callable, Dict, List, Set
 
 from github_utils import gh_fetch_json_dict, gh_graphql
 from gitutils import GitRepo
@@ -132,31 +132,41 @@ def get_branches(repo: GitRepo) -> Dict[str, Any]:
     return branches_by_base_name
 
 
+def paginate_graphql(
+    query: str,
+    kwargs: Dict[str, Any],
+    termination_func: Callable[[List[Dict[str, Any]]], bool],
+    get_data: Callable[[Dict[str, Any]], List[Dict[str, Any]]],
+    get_page_info: Callable[[Dict[str, Any]], Dict[str, Any]],
+) -> List[Any]:
+    hasNextPage = True
+    endCursor = None
+    data: List[Dict[str, Any]] = []
+    while hasNextPage:
+        ESTIMATED_TOKENS[0] += 1
+        res = gh_graphql(query, cursor=endCursor, **kwargs)
+        data.extend(get_data(res))
+        hasNextPage = get_page_info(res)["hasNextPage"]
+        endCursor = get_page_info(res)["endCursor"]
+        if termination_func(data):
+            break
+    return data
+
+
 def get_recent_prs() -> Dict[str, Any]:
     now = datetime.now().timestamp()
 
-    pr_infos: List[Dict[str, Any]] = []
-
     # Grab all PRs updated in last CLOSED_PR_RETENTION days
-    hasNextPage = True
-    endCursor = None
-    while hasNextPage:
-        ESTIMATED_TOKENS[0] += 1
-        res = gh_graphql(
-            GRAPHQL_ALL_PRS_BY_UPDATED_AT,
-            owner="pytorch",
-            repo="pytorch",
-            cursor=endCursor,
-        )
-        info = res["data"]["repository"]["pullRequests"]
-        pr_infos.extend(info["nodes"])
-        hasNextPage = info["pageInfo"]["hasNextPage"]
-        endCursor = info["pageInfo"]["endCursor"]
-        if (
-            PR_WINDOW
-            and now - convert_gh_timestamp(pr_infos[-1]["updatedAt"]) > PR_WINDOW
-        ):
-            break
+    pr_infos: List[Dict[str, Any]] = paginate_graphql(
+        GRAPHQL_ALL_PRS_BY_UPDATED_AT,
+        {"owner": "pytorch", "repo": "pytorch"},
+        lambda data: (
+            PR_WINDOW is not None
+            and (now - convert_gh_timestamp(data[-1]["updatedAt"]) > PR_WINDOW)
+        ),
+        lambda res: res["data"]["repository"]["pullRequests"]["nodes"],
+        lambda res: res["data"]["repository"]["pullRequests"]["pageInfo"],
+    )
 
     # Get the most recent PR for each branch base (group gh together)
     prs_by_branch_base = {}
@@ -174,36 +184,23 @@ def get_recent_prs() -> Dict[str, Any]:
 
 
 def get_branches_with_magic_label_or_open_pr() -> Set[str]:
-    pr_infos: List[Dict[str, Any]] = []
+    pr_infos: List[Dict[str, Any]] = paginate_graphql(
+        GRAPHQL_NO_DELETE_BRANCH_LABEL,
+        {"owner": "pytorch", "repo": "pytorch"},
+        lambda data: False,
+        lambda res: res["data"]["repository"]["label"]["pullRequests"]["nodes"],
+        lambda res: res["data"]["repository"]["label"]["pullRequests"]["pageInfo"],
+    )
 
-    # Grab all PRs with the magic label
-    hasNextPage = True
-    endCursor = None
-    while hasNextPage:
-        ESTIMATED_TOKENS[0] += 1
-        res = gh_graphql(
-            GRAPHQL_NO_DELETE_BRANCH_LABEL,
-            owner="pytorch",
-            repo="pytorch",
-            cursor=endCursor,
+    pr_infos.extend(
+        paginate_graphql(
+            GRAPHQL_OPEN_PRS,
+            {"owner": "pytorch", "repo": "pytorch"},
+            lambda data: False,
+            lambda res: res["data"]["repository"]["pullRequests"]["nodes"],
+            lambda res: res["data"]["repository"]["pullRequests"]["pageInfo"],
         )
-        info = res["data"]["repository"]["label"]["pullRequests"]
-        pr_infos.extend(info["nodes"])
-        hasNextPage = info["pageInfo"]["hasNextPage"]
-        endCursor = info["pageInfo"]["endCursor"]
-
-    # Grab all open PRs
-    hasNextPage = True
-    endCursor = None
-    while hasNextPage:
-        ESTIMATED_TOKENS[0] += 1
-        res = gh_graphql(
-            GRAPHQL_OPEN_PRS, owner="pytorch", repo="pytorch", cursor=endCursor
-        )
-        info = res["data"]["repository"]["pullRequests"]
-        pr_infos.extend(info["nodes"])
-        hasNextPage = info["pageInfo"]["hasNextPage"]
-        endCursor = info["pageInfo"]["endCursor"]
+    )
 
     # Get the most recent PR for each branch base (group gh together)
     branch_bases = set()
