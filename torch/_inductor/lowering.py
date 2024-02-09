@@ -396,13 +396,8 @@ def make_pointwise(
     override_fn_when_input_bool=None,
     override_fn_when_cuda_float64=None,
     allow_alpha=False,
-    triton_fallback=None,
 ):
     def inner(*inputs: List[TensorBox], alpha=None):
-        if triton_fallback is not None and any(map(is_triton, inputs)):
-            assert not allow_alpha  # not implemented
-            return triton_fallback(*inputs)
-
         inputs = promote_constants(inputs, override_return_dtype)
         if allow_alpha:
             if alpha is not None and alpha != 1:
@@ -610,7 +605,6 @@ def register_pointwise(
     override_fn_when_input_bool=None,
     allow_alpha=False,
     use_libdevice_for_f64=False,
-    triton_fallback=None,
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
@@ -626,7 +620,6 @@ def register_pointwise(
         override_fn_when_input_bool=override_fn_when_input_bool,
         override_fn_when_cuda_float64=fn_libdevice if use_libdevice_for_f64 else None,  # type: ignore[possibly-undefined]
         allow_alpha=allow_alpha,
-        triton_fallback=triton_fallback,
     )
     fn = register_lowering(
         aten_fn,
@@ -1066,7 +1059,7 @@ def pointwise_cat(inputs, dim=0):
 
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
-    if all(input.get_dtype() is torch.uint8 for input in inputs):
+    if all(input.get_dtype() in [torch.int8, torch.uint8] for input in inputs):
         # TODO <leslie> Remove this fallback when we support vectorization
         # code gen with uint8 data type directly.
         for input in inputs:
@@ -2240,6 +2233,7 @@ make_fallback(aten.avg_pool3d)
 make_fallback(aten._cdist_forward)
 make_fallback(aten.cummax)
 make_fallback(aten.cummin)
+make_fallback(aten.digamma, warn=False)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
 make_fallback(aten._efficientzerotensor)
@@ -2249,6 +2243,9 @@ make_fallback(aten.fractional_max_pool3d)
 make_fallback(aten.frexp)
 make_fallback(aten.geqrf)
 make_fallback(aten.histc)
+make_fallback(aten.i0)
+make_fallback(aten.igamma, warn=False)
+make_fallback(aten.igammac, warn=False)
 make_fallback(aten.isin)
 make_fallback(aten.kthvalue)
 make_fallback(aten.linalg_cholesky_ex)
@@ -2267,6 +2264,7 @@ make_fallback(aten._linalg_slogdet)
 make_fallback(aten._linalg_solve_ex)
 make_fallback(aten.linalg_solve_triangular)
 make_fallback(aten._linalg_svd)
+make_fallback(aten.logcumsumexp)
 make_fallback(aten.lu_unpack)
 make_fallback(aten.max_pool3d_with_indices)
 make_fallback(aten.max_unpool2d)
@@ -2276,12 +2274,33 @@ make_fallback(aten.mode)
 make_fallback(aten.nanmedian)
 make_fallback(aten.ormqr)
 make_fallback(aten._pdist_forward)
+make_fallback(aten.polygamma)
 make_fallback(aten.put)
 make_fallback(aten.resize)
 make_fallback(aten.resize_)
 make_fallback(aten.resize_as)
 make_fallback(aten.resize_as_)
 make_fallback(aten.searchsorted)
+make_fallback(aten.special_airy_ai)
+make_fallback(aten.special_bessel_y0, warn=False)
+make_fallback(aten.special_bessel_y1)
+make_fallback(aten.special_chebyshev_polynomial_t)
+make_fallback(aten.special_chebyshev_polynomial_u)
+make_fallback(aten.special_erfcx, warn=False)
+make_fallback(aten.special_hermite_polynomial_h)
+make_fallback(aten.special_hermite_polynomial_he)
+make_fallback(aten.special_i0e, warn=False)
+make_fallback(aten.special_i1, warn=False)
+make_fallback(aten.special_i1e, warn=False)
+make_fallback(aten.special_laguerre_polynomial_l)
+make_fallback(aten.special_modified_bessel_i1)
+make_fallback(aten.special_modified_bessel_k0)
+make_fallback(aten.special_modified_bessel_k1)
+make_fallback(aten.special_ndtri, warn=False)
+make_fallback(aten.special_scaled_modified_bessel_k0)
+make_fallback(aten.special_scaled_modified_bessel_k1)
+make_fallback(aten.special_spherical_bessel_j0, warn=False)
+make_fallback(aten.special_zeta, warn=False)
 make_fallback(aten._trilinear)
 make_fallback(aten.uniform, warn=False)
 make_fallback(aten._adaptive_avg_pool3d_backward)
@@ -4984,7 +5003,6 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
 
 fallback_cumsum = fallback_handler(aten.cumsum.default)
 fallback_cumprod = fallback_handler(aten.cumprod.default)
-fallback_logcumsumexp = fallback_handler(aten.logcumsumexp.default)
 
 
 @register_lowering(aten.cumsum)
@@ -5022,26 +5040,6 @@ def cumprod(x, axis=None, dtype=None):
     result = ir.Scan.create(**kwargs, combine_fn=ops.mul, init=1)
     if result is None:
         return fallback_cumprod(x, dim=axis, dtype=dtype)
-    return result
-
-
-@register_lowering(aten.logcumsumexp)
-def logcumsumexp(x, dim):
-    def log_add_exp_helper(a, b):
-        min_v = ops.minimum(a, b)
-        max_v = ops.maximum(a, b)
-        mask = (min_v != max_v) | (~ops.isinf(min_v))
-        return ops.where(mask, ops.log1p(ops.exp(min_v - max_v)) + max_v, a)
-
-    dtype = x.get_dtype()
-    if len(x.get_size()) == 0:
-        assert dim in [0, -1]
-        return clone(x)
-
-    kwargs = _make_scan_inner(x, axis=dim, dtype=dtype)
-    result = ir.Scan.create(**kwargs, combine_fn=log_add_exp_helper, init=float("-inf"))
-    if result is None:
-        return fallback_logcumsumexp(x, dim=dim)
     return result
 
 
@@ -5099,12 +5097,11 @@ add = register_pointwise(
 )
 
 
-def register_pointwise_numeric(op, name=None, triton_fallback=None):
+def register_pointwise_numeric(op, name=None):
     return register_pointwise(
         op,
         name=name,
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        triton_fallback=triton_fallback,
     )
 
 
@@ -5206,48 +5203,11 @@ register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
 
-from .codegen.common import pointwise_overrides_data
-
-
-def _get_pointwise_overrides(ns, name):
-    data = pointwise_overrides_data[name]
-    op = getattr(ns, data.name, None)
-    if op is None:
-        return
-
-    def make_triton_fallback(op):
-        if data.triton is None:
-            return fallback_handler(op)
-
-    if isinstance(op, torch._ops.OpOverloadPacket):
-        for olname in op.overloads():
-            ol = getattr(op, olname)
-            yield ol, data.type_promotion_kind, make_triton_fallback(ol)
-    else:
-        yield op, data.type_promotion_kind, make_triton_fallback(op)
-
-
-for name in pointwise_overrides_data:
-    for op, type_promotion_kind, triton_fallback in _get_pointwise_overrides(
-        aten, name
-    ):
-        register_pointwise(
-            op,
-            name=name,
-            type_promotion_kind=type_promotion_kind,
-            triton_fallback=triton_fallback,
-        )
-
-    for op, type_promotion_kind, triton_fallback in _get_pointwise_overrides(
-        prims, name
-    ):
-        register_pointwise(
-            op,
-            name=name,
-            type_promotion_kind=type_promotion_kind,
-            triton_fallback=triton_fallback,
-        )
-
+register_pointwise_numeric(aten.special_bessel_j0, name="bessel_j0")
+register_pointwise_numeric(prims.bessel_j0, name="bessel_j0")
+register_pointwise_numeric(aten.special_bessel_j1, name="bessel_j1")
+register_pointwise_numeric(prims.bessel_j1, name="bessel_j1")
+register_pointwise_numeric(aten.special_modified_bessel_i0, name="modified_bessel_i0")
 
 foreach_add_list = register_foreach_pointwise(
     aten._foreach_add.List, add, allow_alpha=True
@@ -5361,7 +5321,7 @@ register_inplace(aten.__ixor__, aten.__xor__)
 
 
 @register_lowering(aten.sym_constrain_range)
-def sym_constrain_range(a, min, max):
+def sym_constrain_range(a, min=None, max=None):
     tracing_context = torch._guards.TracingContext.get()
     assert a in tracing_context.fake_mode.shape_env.var_to_range
     return a

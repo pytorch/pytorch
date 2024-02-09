@@ -1488,6 +1488,7 @@ dynamo_expected_failures = {
     "TestTorchDeviceTypeCPU.test_broadcast_fn_div_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_quint8",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_lt_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_memory_format_operators_cpu",  # test_torch
     "TestTorch.test_pin_memory",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_masked_fill_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool2d_cpu_float64",  # test_torch
@@ -1594,7 +1595,6 @@ dynamo_expected_failures = {
     "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_inf_mode_inplace_op",  # test_autograd
     "TestAutograd.test_nested_anomaly_detect_nan",  # test_autograd
     "TestAutograd.test_nested_anomaly_printstack_cleanup",  # test_autograd
-    "TestAutograd.test_post_accumulate_grad_hook_gets_cleaned_up",  # test_autograd
     "TestAutogradInferenceMode.test_inference_mode_context_manager",  # test_autograd
     "TestAutograd.test_hook_none",  # test_autograd
     "TestAutograd.test_set_data_tensorimpl_type",  # test_autograd

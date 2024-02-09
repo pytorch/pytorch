@@ -1931,6 +1931,8 @@ symbolic_tensor_segfaults = {
 symbolic_tensor_failures.update(symbolic_tensor_segfaults)
 
 outplace_symbolic_tensor_failures = {
+    xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
+
     xfail('linalg.norm', ''),
 }
 
@@ -1955,6 +1957,7 @@ out_symbolic_tensor_failures = {
     xfail('fft.ifft2', ''),
     xfail('fft.ifftn', ''),
     xfail('gather', ''),
+    xfail('i0', ''),
     xfail('linalg.cholesky', ''),
     xfail('linalg.cholesky_ex', ''),
     xfail('linalg.det', ''),
