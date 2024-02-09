@@ -214,9 +214,6 @@ def calculate_shards(
     )
     total_time = serial_time + parallel_time / NUM_PROCS_FOR_SHARDING_CALC
     estimated_time_per_shard = total_time / num_shards
-    print(
-        f"Serial time: {round(serial_time, 2)}, Parallel time: {round(parallel_time, 2)}"
-    )
     estimated_time_limit = 0.0
     if estimated_time_per_shard != 0:
         estimated_time_limit = serial_time % estimated_time_per_shard
@@ -226,9 +223,6 @@ def calculate_shards(
         num_serial_shards = num_shards
     else:
         num_serial_shards = math.ceil(serial_time / total_time * num_shards)
-    print(
-        f"Putting serial tests in first {num_serial_shards} shards out of {num_shards}"
-    )
 
     sharded_jobs = [ShardJob() for _ in range(num_shards)]
     shard(
@@ -248,10 +242,6 @@ def calculate_shards(
         sort_by_time,
         False,
     )
-    for job in sharded_jobs:
-        print(f"Job time: {round(job.get_total_time(), 2)}")
-        print(f"Serial: {len(job.serial)}, Parallel: {len(job.parallel)}")
-        print()
 
     return [job.convert_to_tuple() for job in sharded_jobs]
 
