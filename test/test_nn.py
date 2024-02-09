@@ -1591,6 +1591,22 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         finally:
             torch.__future__.set_overwrite_module_params_on_conversion(False)
 
+    def test_swap_module_params_fails_after_forward(self):
+        torch.__future__.set_swap_module_params_on_conversion(True)
+        try:
+            m = torch.nn.Linear(2, 3)
+            inp = torch.randn(2, 2)
+            # forward will init AccumulateGrad nodes, which bumps use_count of parameters' at::Tensors
+            out = m(inp)
+            with self.assertRaisesRegex(RuntimeError, re.escape("_apply(): Couldn't swap Linear.weight")):
+                m.half()
+            del out
+            # works as expected now
+            m.half()
+            self.assertTrue(all(p.dtype == torch.float16 for p in m.parameters()))
+        finally:
+            torch.__future__.set_swap_module_params_on_conversion(False)
+
     def test_type(self):
         l = nn.Linear(10, 20)
         net = nn.Module()
@@ -6509,6 +6525,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         inp = torch.randn(2, 3, 5)
         expected = m(inp.view(6, 5)).view(2, 3, 8)
         self.assertEqual(expected, m(inp))
+
+    def test_linear_raise_on_scalar_input(self):
+        # This used to cause an int underflow issue when reshaping the input
+        # see https://github.com/pytorch/pytorch/issues/119161
+        m = nn.Linear(1, 1)
+        inp = torch.ones(1).squeeze()
+        with self.assertRaisesRegex(RuntimeError, ".*both arguments.*1D.*"):
+            m(inp)
 
     @parametrize_test('device', ['cpu'] + (['cuda'] if TEST_CUDA else []))
     @parametrize_test('bias', [
@@ -12080,6 +12104,17 @@ if __name__ == '__main__':
         input = torch.randn(5, 10, device=device, dtype=dtype)
         m = MyModule(10, 1, device='meta', dtype=dtype)
         m(input)
+
+        # Test empty meta module error with torch.nn.Module.to().
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            re.escape(
+                "Cannot copy out of meta tensor; no data! Please use torch.nn.Module.to_empty() "
+                "instead of torch.nn.Module.to() when moving module from meta to a different "
+                "device."
+            ),
+        ):
+            m.to(device)
 
         # Test materializing meta module on a real device.
         m.to_empty(device=device)
