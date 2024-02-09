@@ -126,10 +126,11 @@ jobs:
           MAX_JOBS: 8
           CUDA_VERSION: ${{ inputs.cuda-version }}
           PYTHON_VERSION: "3.8"
-          SCCACHE_BUCKET: "ossci-compiler-cache"
+          SCCACHE_BUCKET: ossci-compiler-cache
           SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           SCCACHE_REGION: us-east-1
           SCCACHE_S3_USE_SSL: false
+          SCCACHE_ENDPOINT: http://ossci-compiler-cache.s3.amazonaws.com/
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
           VC_YEAR: "2019"
