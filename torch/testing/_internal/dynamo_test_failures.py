@@ -438,9 +438,6 @@ dynamo_expected_failures = {
     "TestSortAndSelectCPU.test_isin_cpu_float32",  # test_sort_and_select
     "TestShapeOpsCUDA.test_flip_cuda_float32",  # test_shape_ops
     "TestShapeOpsCPU.test_flip_cpu_float32",  # test_shape_ops
-    "TestShapeOpsCPU.test_clamp_cpu_int64",  # test_shape_ops
-    "TestShapeOpsCPU.test_clamp_propagates_nans_cpu",  # test_shape_ops
-    "TestShapeOpsCPU.test_clamp_cpu_float32",  # test_shape_ops
     "TestSubclassSerialization.test_tensor_subclass_deepcopy",  # test_serialization
     "TestSubclassSerialization.test_tensor_subclass_getstate_overwrite",  # test_serialization
     "TestSubclassSerialization.test_tensor_subclass_wrapper_serialization",  # test_serialization
@@ -1176,6 +1173,7 @@ dynamo_expected_failures = {
     "TestVmapOperatorsLegacy.test_select",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_binary_pointwise_ops",  # test_legacy_vmap
     "TestVmapAPILegacy.test_non_tensor_output_raises",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_binary_cross_entropy_cpu",  # Cannot access storage of BatchedTensorImpl
     "TestVmapOperatorsLegacy.test_diagonal",  # test_legacy_vmap
     "TestVmapAPILegacy.test_nonzero_out_dims",  # test_legacy_vmap
     "TestVmapAPILegacy.test_unsupported_op_err_msg",  # test_legacy_vmap
