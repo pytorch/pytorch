@@ -1,16 +1,14 @@
+import contextlib
 import warnings
 from collections import namedtuple
-from typing import Any, Optional, Tuple, List
+from typing import Any, Optional, Tuple, List, Callable, Dict
 
 import torch
 from torch.sparse._semi_structured_conversions import (
     sparse_semi_structured_from_dense_cutlass,
     sparse_semi_structured_to_dense_cutlass,
 )
-from functools import partial
 
-from torch.sparse._semi_structured_ops import *
-import contextlib
 
 __all__ = [
     "SparseSemiStructuredTensor",
@@ -24,15 +22,27 @@ _SEMI_STRUCTURED_SPARSE_CONFIG = namedtuple(
     "sparse_min_rows sparse_min_cols dense_min_rows dense_min_cols",
 )
 
+
 class SparseSemiStructuredTensor(torch.Tensor):
     _FORCE_CUTLASS = True
     _FUSE_TRANSPOSE = False
     _DEFAULT_ALG_ID = 0
     _PROTOTYPE_WARNING_SHOWN = False
+
+    packed: Optional[torch.Tensor]
+    meta: Optional[torch.Tensor]
+    packed_t: Optional[torch.Tensor]
+    meta_t: Optional[torch.Tensor]
+    threads_masks: Optional[torch.Tensor]
+    fuse_transpose_cusparselt: bool
+    alg_id_cusparselt: int
+    SPARSE24_DISPATCH: Dict[Callable, Callable]
+    _DTYPE_SHAPE_CONSTRAINTS: Dict[torch.dtype, _SEMI_STRUCTURED_SPARSE_CONFIG]
+
     __slots__ = ["packed", "meta", "packed_t", "meta_t", "threads_masks"]
 
     @staticmethod
-    def __new__(
+    def __new__(  # noqa: PYI034
         cls,
         shape: torch.Size,
         packed: Optional[torch.Tensor],
@@ -43,7 +53,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         fuse_transpose_cusparselt: bool = False,
         alg_id_cusparselt: int = 0,
         requires_grad: bool = False,
-    ) -> torch.Tensor:
+    ) -> SparseSemiStructuredTensor:  # noqa: F821
         """
         Create a new instance of the tensor subclass from the compressed sparse representation.
 
@@ -58,8 +68,10 @@ class SparseSemiStructuredTensor(torch.Tensor):
             meta: The metadata of the original dense tensor, if it is stored separately
             packed_t: The compressed representation of the transposed original dense tensor
             meta_t: The metadata of the transposed original dense tensor, if it is stored separately
-            threads_masks: The masks used by the CUTLASS backend to determine which threads should participate in the computation. Used for pointwise ops
-            fuse_transpose_cusparselt: Whether to fuse the transpose operation with the sparse matrix multiplication when using cuSPARSELT
+            threads_masks: The masks used by the CUTLASS backend to determine which threads should participate in the computation.
+                           Used for pointwise ops.
+            fuse_transpose_cusparselt: When running with cuSPARSELt, we have the option to fuse a transposition
+                                       with a matmul, which is useful in the case of 2:4 sparse training.
             alg_id_cusparselt: The algorithm id to use when using cuSPARSELT, will have effect on performance
 
         Returns:
@@ -113,8 +125,12 @@ class SparseSemiStructuredTensor(torch.Tensor):
         assert hasattr(self, "shape")
         return f"{self.__class__.__name__}(shape={self.shape})"
 
-    def __tensor_flatten__(self) -> Tuple[List[str], Tuple[torch.Size, bool, int, bool]]:
-        inner_tensors = list(filter(lambda x: getattr(self, x) is not None, self.__slots__))
+    def __tensor_flatten__(
+        self,
+    ) -> Tuple[List[str], Tuple[torch.Size, bool, int, bool]]:
+        inner_tensors = list(
+            filter(lambda x: getattr(self, x) is not None, self.__slots__)
+        )
         tensor_meta = (
             self.shape,
             self.fuse_transpose_cusparselt,
@@ -124,7 +140,9 @@ class SparseSemiStructuredTensor(torch.Tensor):
         return inner_tensors, tensor_meta
 
     @classmethod
-    def __tensor_unflatten__(cls, inner_tensors, tensor_meta, outer_size, outer_stride) -> torch.Tensor:
+    def __tensor_unflatten__(
+        cls, inner_tensors, tensor_meta, outer_size, outer_stride
+    ) -> torch.Tensor:
         shape, fuse_transpose_cusparselt, alg_id_cusparselt, requires_grad = tensor_meta
         return cls(
             shape=shape,
@@ -266,7 +284,10 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
     @classmethod
     def from_dense(cls, original_tensor):
         cls._validate_device_dim_dtype_shape(original_tensor)
-        sparse_tensor_cutlass, meta_tensor_cutlass = sparse_semi_structured_from_dense_cutlass(original_tensor)
+        (
+            sparse_tensor_cutlass,
+            meta_tensor_cutlass,
+        ) = sparse_semi_structured_from_dense_cutlass(original_tensor)
         return cls(
             original_tensor.shape,
             packed=sparse_tensor_cutlass,
@@ -278,10 +299,15 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
         )
 
     def to_dense(self):
-        return sparse_semi_structured_to_dense_cutlass(
-            self.packed,
-            self.meta,
-        ) if self.meta.ndim == 2 else super().to_dense()
+        assert self.meta is not None and self.packed is not None
+        return (
+            sparse_semi_structured_to_dense_cutlass(
+                self.packed,
+                self.meta,
+            )
+            if self.meta.ndim == 2
+            else super().to_dense()
+        )
 
     def _mm(
         self,
@@ -296,7 +322,7 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
             raise NotImplementedError(
                 f"`{self.__class__.__name__}` matmul: Broadcasting is not implemented"
             )
-        assert self.packed is not None, "FLAG"
+        assert self.packed is not None and self.meta is not None, "FLAG"
 
         res = torch._sparse_semi_structured_linear(
             B.t(), self.packed, self.meta, bias=bias
@@ -311,7 +337,6 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
         torch.bfloat16: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 16, 8, 8),
         torch.float32: _SEMI_STRUCTURED_SPARSE_CONFIG(8, 8, 4, 4),
     }
-
 
     @classmethod
     def from_dense(cls, original_tensor):
@@ -354,7 +379,11 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
 
         assert self.packed is not None, "FLAG"
         temp = torch._cslt_sparse_mm(
-            self.packed, B, bias=bias, transpose_result=self.fuse_transpose_cusparselt, alg_id=self.alg_id_cusparselt
+            self.packed,
+            B,
+            bias=bias,
+            transpose_result=self.fuse_transpose_cusparselt,
+            alg_id=self.alg_id_cusparselt,
         )
         if self.fuse_transpose_cusparselt:
             temp = temp.t()
@@ -423,6 +452,7 @@ def to_sparse_semi_structured(
 
 # Below are the implementations of various ops aten operators for 2x4 sparsity.
 
+
 @contextlib.contextmanager
 def no_dispatch():
     guard = torch._C._DisableTorchDispatch()
@@ -431,14 +461,17 @@ def no_dispatch():
     finally:
         del guard
 
+
 def fallback_dispatcher(func, types, args, kwargs):
     with no_dispatch():
         return func(*args)
+
 
 def sparse_24_values(func, types, args=(), kwargs=None) -> torch.Tensor:
     assert len(args) == 1
     A = args[0]
     assert isinstance(A, SparseSemiStructuredTensor)
+    assert A.packed is not None
     if A.meta is None:
         m, k = A.shape
         num_kept_elements = m * k // 2
@@ -451,6 +484,7 @@ def sparse_24_indices(func, types, args=(), kwargs=None) -> torch.Tensor:
     assert len(args) == 1
     A = args[0]
     assert isinstance(A, SparseSemiStructuredTensor)
+    assert A.packed is not None
     if A.meta is None:
         m, k = A.shape
         num_kept_elements = m * k // 2
@@ -469,7 +503,7 @@ def sparse24_t(func, types, args=(), kwargs=None) -> torch.Tensor:
     # we just keep track of how many times we have been transposed. Depending on whether the sparse matrix
     # is the first or second argument, we expect an even / odd number of calls to transpose respectively.
     return self.__class__(
-        (self.shape[-1], self.shape[0]),
+        torch.Size([self.shape[-1], self.shape[0]]),
         packed=self.packed_t,
         meta=self.meta_t,
         packed_t=self.packed,
