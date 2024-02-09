@@ -11,7 +11,8 @@ from .. import config
 from ..codecache import CudaKernelParamCache
 from ..triton_heuristics import grid as default_grid
 from ..virtualized import V
-from .wrapper import CppWrapperCodeGen, SymbolicCallArg
+from .cpp_wrapper_cpu import CppWrapperCodeGen
+from .wrapper import SymbolicCallArg
 
 
 def is_int(s: str) -> bool:
