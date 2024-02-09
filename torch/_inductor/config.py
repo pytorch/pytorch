@@ -668,11 +668,6 @@ class cuda:
     # 4) default system search PATH.
     cuda_cxx: Optional[str] = os.environ.get("CUDA_NVCC_EXECUTABLE", None)
 
-    # If set to True, it will ensure that only GEMM ops capable of
-    # epilogue fusion via CUTLASS Epilogue Visitor Trees ( EVT )
-    # are enabled for the CUTLASS backend.
-    cutlass_prefer_evt_capable_ops: bool = False
-
     # Minimum of M*N*N to consider the CUTLASS backend for GEMM ops.
     cutlass_backend_min_gemm_size: int = 1
 
