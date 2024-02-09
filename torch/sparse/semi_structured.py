@@ -23,11 +23,45 @@ _SEMI_STRUCTURED_SPARSE_CONFIG = namedtuple(
 )
 
 
+def to_sparse_semi_structured(
+    original_tensor: torch.Tensor,
+) -> Any:
+    sparse_subclass = (
+        SparseSemiStructuredTensorCUTLASS
+        if SparseSemiStructuredTensor._FORCE_CUTLASS
+        else SparseSemiStructuredTensorCUSPARSELT
+    )
+    return sparse_subclass.from_dense(original_tensor)
+
+
 class SparseSemiStructuredTensor(torch.Tensor):
+    """
+    This class implementes semi-structured sparsity as a Tensor subclass.
+
+    Semi-structured sparsity describes a sparsity pattern where n in every 2n elements are sparse,
+    depending on the datatype. It is also referred to as 2:4 sparsity or fine-grained
+    structured sparsity.
+
+    cuSPARSELt:
+        The cuSPARSELt backend expects the specified elements and the metadata to be stored in a single tensor:
+        compressed tensor = [ specified elements of original tensor | metadata ]
+        For an original tensor of size (m, k) we expect the first m * k // 2 elements to be the kept elements
+        The rest of the tensor is metadata.
+    CUTLASS:
+        For CUTLASS backend, elements of original tensor and metadata are kept in separate tensors.
+        When _FORCE_CUTLASS is set, or when cuSPARSELt is not available, this subclass calls into _sparse_semi_structured_linear
+        and sparse_semi_structured_from_dense for conversion to the compressed format.
+        When PyTorch is compiled with cuSPARSELt support, this subclass will call into _cslt_sparse_mm for sparse mm and
+        _cslt_compress to convert into the compressed format.
+    """
+
+    _DEFAULT_ALG_ID = 0
+    _DTYPE_SHAPE_CONSTRAINTS: Dict[torch.dtype, _SEMI_STRUCTURED_SPARSE_CONFIG]
     _FORCE_CUTLASS = True
     _FUSE_TRANSPOSE = False
-    _DEFAULT_ALG_ID = 0
     _PROTOTYPE_WARNING_SHOWN = False
+
+    SPARSE24_DISPATCH: Dict[Callable, Callable]
 
     packed: Optional[torch.Tensor]
     meta: Optional[torch.Tensor]
@@ -36,8 +70,6 @@ class SparseSemiStructuredTensor(torch.Tensor):
     threads_masks: Optional[torch.Tensor]
     fuse_transpose_cusparselt: bool
     alg_id_cusparselt: int
-    SPARSE24_DISPATCH: Dict[Callable, Callable]
-    _DTYPE_SHAPE_CONSTRAINTS: Dict[torch.dtype, _SEMI_STRUCTURED_SPARSE_CONFIG]
 
     __slots__ = ["packed", "meta", "packed_t", "meta_t", "threads_masks"]
 
@@ -318,13 +350,15 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
             raise ValueError(
                 "`Sparse24Tensor @ Sparse24Tensor` is not supported by the hardware"
             )
+
+        cls_name = self.__class__.__name__
         if self.ndim != 2 or B.ndim != 2:
             raise NotImplementedError(
-                f"`{self.__class__.__name__}` matmul: Broadcasting is not implemented"
+                f"`{cls_name}` matmul: Broadcasting is not implemented"
             )
         if self.packed is None or self.meta is None:
             raise NotImplementedError(
-                f"`{self.__class__.__name__}` matmul: operation is not supported"
+                f"`{cls_name}` matmul: operation is not supported"
             )
         else:
             res = torch._sparse_semi_structured_linear(
@@ -396,66 +430,6 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
             if self.fuse_transpose_cusparselt:
                 temp = temp.t()
             return temp
-
-
-def to_sparse_semi_structured(
-    original_tensor: torch.Tensor,
-) -> Any:
-    """
-    This function converts a dense tensor into a sparse semi-structured tensor.
-    It will return either
-        1. a SparseSemiStructuredTensor if the input tensor is already in the correct format
-        2. a regular SparseTensor if the input tensor was not in the correct format
-
-    This function will check to ensure the dense tensor has the right dtype, size, dims, and device.
-    We currently only support semi-structured sparse tensors for 2d CUDA tensors.
-    Additionally, your tensor must be a positive multiple of a block size given the dtype
-
-    - torch.float16  (r, c) must be >= and a multiple of 64
-    - torch.int8     (r, c) must be >= and a multiple of 128
-
-    Args:
-        original_tensor (Tensor): the dense tensor to convert
-
-    Returns:
-        SparseSemiStructuredTensor: A sparse semi-structured tensor created from the given original_tensor
-
-    Raises:
-        None
-
-    Example:
-        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
-        >>> A = torch.Tensor([0, 0, 1, 1]).tile((128, 32)).half().cuda()
-        tensor([[0., 0., 1.,  ..., 0., 1., 1.],
-                [0., 0., 1.,  ..., 0., 1., 1.],
-                [0., 0., 1.,  ..., 0., 1., 1.],
-                ...,
-                [0., 0., 1.,  ..., 0., 1., 1.],
-                [0., 0., 1.,  ..., 0., 1., 1.],
-                [0., 0., 1.,  ..., 0., 1., 1.]], device='cuda:0', dtype=torch.float16)
-        >>> A_sparse = to_sparse_semi_structured(A)
-        SparseSemiStructuredTensor(shape=torch.Size([128, 128]), values=tensor([[1., 1., 1.,  ..., 1., 1., 1.],
-                [1., 1., 1.,  ..., 1., 1., 1.],
-                [1., 1., 1.,  ..., 1., 1., 1.],
-                ...,
-                [1., 1., 1.,  ..., 1., 1., 1.],
-                [1., 1., 1.,  ..., 1., 1., 1.],
-                [1., 1., 1.,  ..., 1., 1., 1.]], device='cuda:0', dtype=torch.float16),
-            metadata=tensor([[-4370, -4370, -4370,  ..., -4370, -4370, -4370],
-                [-4370, -4370, -4370,  ..., -4370, -4370, -4370],
-                [-4370, -4370, -4370,  ..., -4370, -4370, -4370],
-                ...,
-                [-4370, -4370, -4370,  ..., -4370, -4370, -4370],
-                [-4370, -4370, -4370,  ..., -4370, -4370, -4370],
-                [-4370, -4370, -4370,  ..., -4370, -4370, -4370]], device='cuda:0',
-       dtype=torch.int16))
-    """
-    sparse_subclass = (
-        SparseSemiStructuredTensorCUTLASS
-        if SparseSemiStructuredTensor._FORCE_CUTLASS
-        else SparseSemiStructuredTensorCUSPARSELT
-    )
-    return sparse_subclass.from_dense(original_tensor)
 
 
 # Below are the implementations of various ops aten operators for 2x4 sparsity.
