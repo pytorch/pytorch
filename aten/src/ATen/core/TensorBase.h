@@ -593,8 +593,11 @@ class TORCH_API TensorBase {
     return mutable_data_ptr();
   }
 
-  template <typename T>
+  template <typename T, std::enable_if_t<!std::is_const<T>::value, int> = 0>
   const T* const_data_ptr() const;
+
+  template <typename T, std::enable_if_t<std::is_const<T>::value, int> = 0>
+  const std::remove_const_t<T>* const_data_ptr() const;
 
   template <typename T>
   T* mutable_data_ptr() const;
@@ -620,7 +623,13 @@ class TORCH_API TensorBase {
   TensorAccessor<T,N> accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
     TORCH_CHECK(dim() == N, "TensorAccessor expected ", N, " dims but tensor has ", dim());
-    return TensorAccessor<T,N>(data_ptr<T>(),sizes().data(),strides().data());
+    T* ptr = nullptr;
+    if constexpr (std::is_const<T>::value) {
+      ptr = const_data_ptr<T>();
+    } else {
+      ptr = mutable_data_ptr<T>();
+    }
+    return TensorAccessor<T,N>(ptr,sizes().data(),strides().data());
   }
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() && = delete;
@@ -634,7 +643,13 @@ class TORCH_API TensorBase {
   GenericPackedTensorAccessor<T,N,PtrTraits,index_t> generic_packed_accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
     TORCH_CHECK(dim() == N, "TensorAccessor expected ", N, " dims but tensor has ", dim());
-    return GenericPackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data_ptr<T>()),sizes().data(),strides().data());
+    T* ptr = nullptr;
+    if constexpr (std::is_const<T>::value) {
+      ptr = const_data_ptr<T>();
+    } else {
+      ptr = mutable_data_ptr<T>();
+    }
+    return GenericPackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(ptr),sizes().data(),strides().data());
   }
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
   GenericPackedTensorAccessor<T,N> generic_packed_accessor() && = delete;

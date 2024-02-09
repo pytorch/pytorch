@@ -103,7 +103,7 @@ def start_processes(
     start_method: str = "spawn",
     redirects: Union[Std, Dict[int, Std]] = Std.NONE,
     tee: Union[Std, Dict[int, Std]] = Std.NONE,
-    filter_local_ranks: Optional[Set[int]] = None,
+    local_ranks_filter: Optional[Set[int]] = None,
 ) -> PContext:
     """
     Start ``n`` copies of ``entrypoint`` processes with the provided options.
@@ -195,7 +195,7 @@ def start_processes(
                       ignored for binaries
         redirects: which std streams to redirect to a log file
         tee: which std streams to redirect + print to console
-        filter_local_ranks: which ranks' logs to print to console
+        local_ranks_filter: which ranks' logs to print to console
 
     """
     # listdir raises FileNotFound or NotADirectoryError so no need to check manually
@@ -254,7 +254,7 @@ def start_processes(
             if t & Std.ERR == Std.ERR:
                 tee_stderrs[local_rank] = stderrs[local_rank]
 
-            if filter_local_ranks and local_rank not in filter_local_ranks:
+            if local_ranks_filter and local_rank not in local_ranks_filter:
                 # If stream is tee'd, only write to file, but don't tail
                 if local_rank in tee_stdouts:
                     tee_stdouts.pop(local_rank, None)
