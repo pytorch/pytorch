@@ -5,7 +5,7 @@ import os
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, DefaultDict, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
@@ -452,8 +452,11 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
         # we count the number of aliases for a given name to determine alias group number
         # to ensure that two aliases for the same value are never grouped together
         def group_args(arg_pairs):
-            out = defaultdict(list)
-            alias_counts = defaultdict(int)
+            out: DefaultDict[
+                Tuple[torch.device, bool, int],
+                List[Tuple[int, Tuple[ir.IRNode, ir.IRNode]]],
+            ] = defaultdict(list)
+            alias_counts: DefaultDict[str, int] = defaultdict(int)
             for i, args in enumerate(arg_pairs):
                 use_foreach = not is_dynamic(*args)
                 device = None
