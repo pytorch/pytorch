@@ -39,6 +39,7 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     TEST_MKL,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA
