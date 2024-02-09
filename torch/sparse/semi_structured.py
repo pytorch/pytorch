@@ -53,12 +53,12 @@ class SparseSemiStructuredTensor(torch.Tensor):
         fuse_transpose_cusparselt: bool = False,
         alg_id_cusparselt: int = 0,
         requires_grad: bool = False,
-    ) -> SparseSemiStructuredTensor:  # noqa: F821
+    ):
         """
         Create a new instance of the tensor subclass from the compressed sparse representation.
 
         We have the option to create the subclass with the compressed representations of both X and X', for training.
-        For inference, we only need a single representation (eithere X or X'), while the corresponding other set will be None.
+        For inference, we only need a single representation (either X or X'), while the corresponding other set will be None.
 
         Depending on the backend selected, certain fields will be set to None. (CUSPARSELT vs CUTLASS)
 
@@ -322,12 +322,15 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
             raise NotImplementedError(
                 f"`{self.__class__.__name__}` matmul: Broadcasting is not implemented"
             )
-        assert self.packed is not None and self.meta is not None, "FLAG"
-
-        res = torch._sparse_semi_structured_linear(
-            B.t(), self.packed, self.meta, bias=bias
-        ).t()
-        return res[: self.shape[0]]
+        if self.packed is None or self.meta is None:
+            raise NotImplementedError(
+                f"`{self.__class__.__name__}` matmul: operation is not supported"
+            )
+        else:
+            res = torch._sparse_semi_structured_linear(
+                B.t(), self.packed, self.meta, bias=bias
+            ).t()
+            return res[: self.shape[0]]
 
 
 class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
@@ -348,6 +351,8 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
             packed_t=None,
             meta_t=None,
             threads_masks=None,
+            fuse_transpose_cusparselt=SparseSemiStructuredTensor._FUSE_TRANSPOSE,
+            alg_id_cusparselt=SparseSemiStructuredTensor._DEFAULT_ALG_ID,
             requires_grad=original_tensor.requires_grad,
         )
 
@@ -376,18 +381,21 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
                 "with A.dtype=B.dtype={self.dtype} and C.dtype={B.dtype}. "
                 "This operation is only supported when A, B and C have the same data type."
             )
-
-        assert self.packed is not None, "FLAG"
-        temp = torch._cslt_sparse_mm(
-            self.packed,
-            B,
-            bias=bias,
-            transpose_result=self.fuse_transpose_cusparselt,
-            alg_id=self.alg_id_cusparselt,
-        )
-        if self.fuse_transpose_cusparselt:
-            temp = temp.t()
-        return temp
+        if self.packed is None:
+            raise NotImplementedError(
+                f"`{self.__class__.__name__}` matmul: operation is not supported."
+            )
+        else:
+            temp = torch._cslt_sparse_mm(
+                self.packed,
+                B,
+                bias=bias,
+                transpose_result=self.fuse_transpose_cusparselt,
+                alg_id=self.alg_id_cusparselt,
+            )
+            if self.fuse_transpose_cusparselt:
+                temp = temp.t()
+            return temp
 
 
 def to_sparse_semi_structured(

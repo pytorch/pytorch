@@ -256,7 +256,7 @@ class TestSparseSemiStructured(TestCase):
                     sparse_result = torch.mm(A_sparse, B)
             else:
                 with self.assertRaisesRegex(RuntimeError,
-                                            "CUDA error"):
+                                            "CUDA error: operation not supported when calling `cusparseLtMatmulDescriptorInit"):
                     sparse_result = torch.mm(A_sparse, B)
         else:
             dense_result = torch.mm(A, B)
@@ -287,7 +287,7 @@ class TestSparseSemiStructured(TestCase):
                     sparse_result = torch.mm(A_sparse, B.t())
             else:
                 with self.assertRaisesRegex(RuntimeError,
-                                            "CUDA error"):
+                                            "CUDA error: operation not supported when calling `cusparseLtMatmulDescriptorInit"):
                     sparse_result = torch.mm(A_sparse, B.t())
         elif dtype is torch.int8:
             # test transpose
@@ -314,8 +314,8 @@ class TestSparseSemiStructured(TestCase):
         B = torch.rand(dense_input_shape, device=A_sparse.device).to(dtype)
 
         with self.assertRaisesRegex(
-            AssertionError,
-            r"",
+            NotImplementedError,
+            r"`SparseSemiStructuredTensor.*` matmul: operation is not supported",
         ):
             torch.mm(A_sparse.t(), B)
 
@@ -356,8 +356,8 @@ class TestSparseSemiStructured(TestCase):
         A = torch.rand(dense_input_shape, device=B_sparse.device).to(dtype)
 
         with self.assertRaisesRegex(
-            AssertionError,
-            r"",
+            NotImplementedError,
+            r"`SparseSemiStructuredTensor.*` matmul: operation is not supported",
         ):
             sparse_result = torch.mm(A, B_sparse)
 
