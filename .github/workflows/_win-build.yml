@@ -128,13 +128,12 @@ jobs:
           PYTHON_VERSION: "3.8"
           SCCACHE_BUCKET: "ossci-compiler-cache"
           SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
-          SCCACHE_REGION: us-east-1
+          SCCACHE_REGION: auto
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
           VC_YEAR: "2019"
           ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
           AWS_DEFAULT_REGION: us-east-1
-          AWS_EC2_METADATA_DISABLED: true
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           DEBUG: ${{ inputs.build-with-debug && '1' || '0' }}
