@@ -1604,6 +1604,8 @@ void ProcessGroupNCCL::watchdogHandler() {
       // If work hits an exception (either an error or timeout)
       if (work.exception()) {
         if (SHOULD_CLEAN_UP(asyncErrorHandling_)) {
+          // Abort work and corresponding communicators
+          work.abort();
           // PG level abort, which would abort all other communicators on this
           // rank
           abort();
