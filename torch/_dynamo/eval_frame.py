@@ -1315,6 +1315,9 @@ def export(
             not disable_constraint_solver
             and (shape_env := getattr(fake_mode, "shape_env", None)) is not None
             and (dim_constraints := shape_env.dim_constraints) is not None
+            and not isinstance(
+                call_to_inspect, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
+            )
             and not trace_rules.check(call_to_inspect)
         ):
             dim_constraints.solve()
