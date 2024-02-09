@@ -50,17 +50,15 @@ class SparseSemiStructuredTensor(torch.Tensor):
     and SparseSemiStructuredCUSPARSELT both inherit from this class and define three backend-specific items.
     Note that as such, this class cannot be insantiated directly.
 
-    -`_DTYPE_SHAPE_CONSTRAINTS` - A dictionary holding backend specific shape constraints
-    - `from_dense` - backend specific compression scripts
-    - `_mm` - calss into _cslt_sparse_mm or _sparse_semi_structured_linear based on backend.
-
+    -`_DTYPE_SHAPE_CONSTRAINTS` - A dictionary holding backend specific dense/sparse min shape constraints
+    - `def from_dense` - backend specific compression routines
+    - `def _mm` - calls into _cslt_sparse_mm or _sparse_semi_structured_linear based on backend.
     """
-
-    _DEFAULT_ALG_ID = 0
+    _DEFAULT_ALG_ID : int = 0
     _DTYPE_SHAPE_CONSTRAINTS: Dict[torch.dtype, _SEMI_STRUCTURED_SPARSE_CONFIG]
-    _FORCE_CUTLASS = True
-    _FUSE_TRANSPOSE = False
-    _PROTOTYPE_WARNING_SHOWN = False
+    _FORCE_CUTLASS : bool = True
+    _FUSE_TRANSPOSE : bool = False
+    _PROTOTYPE_WARNING_SHOWN : bool = False
 
     SPARSE24_DISPATCH: Dict[Callable, Callable]
 
