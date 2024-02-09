@@ -101,6 +101,9 @@ class IndexingOptions:
     def has_tmpmask(self):
         return "tmp" in self.mask_str
 
+    def has_rmask(self):
+        return "rmask" in self.mask_str
+
 
 @dataclasses.dataclass
 class BlockPtrOptions:
@@ -217,6 +220,9 @@ class BlockPtrOptions:
 
     def has_rindex(self):
         return "RBLOCK" in self.block_shape
+
+    def has_rmask(self):
+        return self.has_rindex()
 
     def has_tmpmask(self):
         return False  # block_ptr can't do indirect indexing
@@ -445,6 +451,9 @@ class TritonCSEVariable(CSEVariable):
                 # however, when index vars are used to compute indices for indirect reads
                 # those reads should subsequently be masked,
                 self.mask_vars.update({f"{arg.name[0]}mask"})
+
+    def __repr__(self):
+        return f"TritonCSEVariable(name={self.name})"
 
 
 class TritonOverrides(OpOverrides):
@@ -1948,7 +1957,7 @@ class TritonKernel(Kernel):
         if advance_block_ptr:
             load_buffer.writeline(advance_block_ptr)
 
-        if not self.inside_reduction or not has_rindex:
+        if not self.inside_reduction or (not indexing.has_rmask() and not has_rindex):
             self.outside_loop_vars.add(result_var)
 
         return result_var
