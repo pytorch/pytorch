@@ -28,11 +28,12 @@ import torch._dynamo.utils
 
 import torch._functorch.config
 import torch.library
-
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import CompileCounter, rand_strided, same
 from torch.nn import functional as F
+
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
 )
@@ -3998,6 +3999,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 # frame_count should stay at 1.
                 self.assertEqual(cnt.frame_count, 1)
 
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "flash attention not supported"
+    )
     def test_flash_attn_backward_mixed_strides(self):
         # in this repro, "grad_out" and "value" are transposed tensors,
         # but "key" and "value" are contiguous
