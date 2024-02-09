@@ -617,6 +617,37 @@ class LazyModuleWithLazySubmodule(LazyModuleMixin, torch.nn.Module):
         return self.layer(x)
 
 
+class LazyLayerWithInputs(LazyModuleMixin, torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def initialize_parameters(self, x, y):
+        with torch.no_grad():
+            self._param_x = torch.nn.Parameter(torch.empty(x[0].shape).fill_(0.5))
+            self._param_y = torch.nn.Parameter(torch.empty(y[0].shape).fill_(0.5))
+
+    def forward(self, x, y):
+        res_x = 0
+        for i in range(len(x)):
+            res_x = res_x + x[i]
+        res_y = 0
+        for i in range(len(y)):
+            res_y = res_y + y[i]
+        return res_x + res_y
+
+
+class LazyModuleKwArgs(LazyModuleMixin, torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def initialize_parameters(self, *args, **kwargs):
+        with torch.no_grad():
+            self.layer = LazyLayerWithInputs()
+
+    def forward(self, x, y):
+        return self.layer(x, y=y)
+
+
 class LazyParentModule(LazyModuleMixin, torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1432,6 +1463,14 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         res = opt_m(x)
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
+
+    def test_lazy_module_kwargs(self):
+        m = LazyModuleKwArgs()
+        x = [torch.rand([5, 5])] * 3
+        y = [torch.rand([5, 5])] * 2
+        opt_m = torch.compile(backend="eager", fullgraph=True)(m)
+        exp_res = m(x, y)
+        self.assertTrue(torch.allclose(exp_res, opt_m(x, y)))
 
     def test_call_fn_with_non_const_inputs_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
