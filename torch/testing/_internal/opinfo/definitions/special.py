@@ -283,6 +283,7 @@ op_db: List[OpInfo] = [
         "special.erfcx",
         ref=scipy.special.erfcx if TEST_SCIPY else None,
         aten_name="special_erfcx",
+        domain=(-4, 10),
         decorators=(
             toleranceOverride(
                 {
@@ -733,6 +734,7 @@ python_ref_db: List[OpInfo] = [
         "_refs.special.erfcx",
         torch_opinfo_name="special.erfcx",
         op_db=op_db,
+        domain=(-4, 10),
         decorators=(
             toleranceOverride(
                 {
