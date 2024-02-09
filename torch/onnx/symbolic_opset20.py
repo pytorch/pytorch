@@ -1,4 +1,4 @@
-"""This file exports ONNX ops for opset 18.
+"""This file exports ONNX ops for opset 20.
 
 Note [ONNX Operators that are added/updated in opset 20]
 
@@ -11,10 +11,8 @@ New operators:
 
 import functools
 
-from torch.nn.functional import (
-    GRID_SAMPLE_INTERPOLATION_MODES,
-    GRID_SAMPLE_PADDING_MODES,
-)
+from torch import _C
+import torch.nn.functional as F
 from torch.onnx import symbolic_helper
 from torch.onnx._internal import _beartype, jit_utils, registration
 
@@ -40,16 +38,16 @@ _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=20)
 @_beartype.beartype
 def grid_sampler(
     g: jit_utils.GraphContext,
-    input,
-    grid,
-    mode_enum,
-    padding_mode_enum,
-    align_corners,
+    input: _C.Value,
+    grid: _C.Value,
+    mode_enum: int,
+    padding_mode_enum: int,
+    align_corners: bool,
 ):
-    mode_s = {v: k for k, v in GRID_SAMPLE_INTERPOLATION_MODES.items()}[mode_enum]  # type: ignore[call-arg]
+    mode_s = {v: k for k, v in F.GRID_SAMPLE_INTERPOLATION_MODES.items()}[mode_enum]  # type: ignore[call-arg]
     # mode string changes at https://onnx.ai/onnx/operators/text_diff_GridSample_16_20.html
     mode_s = convert_grid_sample_mode(mode_s)
-    padding_mode_s = {v: k for k, v in GRID_SAMPLE_PADDING_MODES.items()}[padding_mode_enum]  # type: ignore[call-arg]
+    padding_mode_s = {v: k for k, v in F.GRID_SAMPLE_PADDING_MODES.items()}[padding_mode_enum]  # type: ignore[call-arg]
     return g.op(
         "GridSample",
         input,
