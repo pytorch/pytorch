@@ -269,7 +269,7 @@ class TensorVariable(VariableTracker):
         def method_data():
             return self.call_method(tx, "detach", [], {})
 
-        handler = getattr(self, f"method_{name}", None)
+        handler = locals().get(f"method_{name}", None)
         result = handler() if handler is not None else None
 
         # Add a guard for type matching, these guards are checked before tensor guards
