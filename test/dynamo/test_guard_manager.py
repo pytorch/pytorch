@@ -15,8 +15,10 @@ GetAttrGuardAccessor = guards.GetAttrGuardAccessor
 GetItemGuardAccessor = guards.GetItemGuardAccessor
 GetDictItemGuardAccessor = guards.GetDictItemGuardAccessor
 TypeGuardAccessor = guards.TypeGuardAccessor
-TensorAliasingGuard = guards.TensorAliasingGuard
+TENSOR_ALIASING = guards.TENSOR_ALIASING
+NO_TENSOR_ALIASING = guards.NO_TENSOR_ALIASING
 install_tensor_aliasing_guard = guards.install_tensor_aliasing_guard
+install_no_tensor_aliasing_guard = guards.install_no_tensor_aliasing_guard
 
 
 global_pair = {
@@ -216,6 +218,24 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(guard_manager.check(6))
         self.assertFalse(guard_manager.check(4))
         self.assertFalse(guard_manager.check("foo"))
+
+    def test_tensor_match_guard(self):
+        guard_manager = RootGuardManager()
+        x = torch.randn(4, 4)
+        size = [t for t in x.size()]
+        stride = list(x.stride())
+        guard_manager.add_tensor_match_guard(x, "check_tensor(x)", "x", size, stride)
+        self.assertTrue(guard_manager.check(x))
+        self.assertTrue(guard_manager.check_verbose(x).result)
+        self.assertTrue(guard_manager.check(torch.randn(4, 4)))
+        self.assertTrue(guard_manager.check_verbose(torch.randn(4, 4)).result)
+        self.assertFalse(guard_manager.check(x.t_()))
+
+        x = torch.randn(4, 4)
+        x.t_()
+        debug_info = guard_manager.check_verbose(x)
+        print(debug_info.failed_guard)
+        self.assertTrue("tensor 'x' stride mismatch" in debug_info.failed_guard)
 
     def test_attr_guard_manager(self):
         class Foo:
@@ -431,8 +451,8 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         y_guards = y_guard_mgr.get_leaf_guards()
         self.assertEqual(len(x_guards), 1)
         self.assertEqual(len(y_guards), 1)
-        self.assertTrue(isinstance(x_guards[0], TensorAliasingGuard))
-        self.assertTrue(isinstance(y_guards[0], TensorAliasingGuard))
+        self.assertTrue(isinstance(x_guards[0], TENSOR_ALIASING))
+        self.assertTrue(isinstance(y_guards[0], TENSOR_ALIASING))
         # Check that the two guards are the same object
         self.assertTrue(x_guards[0] is y_guards[0])
 
@@ -452,6 +472,54 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
             "y": torch.zeros(4),
         }
         self.assertFalse(guard_manager.check(f_locals_not_aliased_same_value))
+
+    def test_no_tensor_aliasing_guard(self):
+        guard_manager = RootGuardManager()
+
+        a = torch.randn(3, 4)
+        f_locals = {"x": a, "y": a, "z": a}
+
+        x_guard_mgr = guard_manager.dict_get_item_manager("x", a)
+        y_guard_mgr = guard_manager.dict_get_item_manager("y", a)
+        z_guard_mgr = guard_manager.dict_get_item_manager("z", a)
+        install_no_tensor_aliasing_guard(
+            [x_guard_mgr, y_guard_mgr, z_guard_mgr],
+            ["x", "y", "z"],
+            "no_aliasing(x, y, z)",
+        )
+
+        # Check structure
+        x_guards = x_guard_mgr.get_leaf_guards()
+        y_guards = y_guard_mgr.get_leaf_guards()
+        z_guards = z_guard_mgr.get_leaf_guards()
+        self.assertEqual(len(x_guards), 1)
+        self.assertEqual(len(y_guards), 1)
+        self.assertEqual(len(z_guards), 1)
+        self.assertTrue(isinstance(x_guards[0], NO_TENSOR_ALIASING))
+        self.assertTrue(isinstance(y_guards[0], NO_TENSOR_ALIASING))
+        self.assertTrue(isinstance(z_guards[0], NO_TENSOR_ALIASING))
+        # Check that the two guards are the same object
+        self.assertTrue(x_guards[0] is y_guards[0] is z_guards[0])
+        self.assertFalse(guard_manager.check(f_locals))
+        self.assertFalse(guard_manager.check_verbose(f_locals).result)
+
+        f_locals_unaliased = {
+            "x": torch.randn(3, 4),
+            "y": torch.randn(3, 4),
+            "z": torch.randn(3, 4),
+        }
+        self.assertTrue(guard_manager.check(f_locals_unaliased))
+        self.assertTrue(guard_manager.check_verbose(f_locals_unaliased).result)
+        # Check that hash map is cleared.
+        self.assertTrue(guard_manager.check(f_locals_unaliased))
+
+        f_locals_unaliased = {
+            "x": a,
+            "y": torch.randn(3, 4),
+            "z": a,
+        }
+        self.assertFalse(guard_manager.check(f_locals_unaliased))
+        self.assertFalse(guard_manager.check_verbose(f_locals_unaliased).result)
 
     # def test_tensor_aliasing_guard_reset(self):
     #     # Check that guard state is reset on failure

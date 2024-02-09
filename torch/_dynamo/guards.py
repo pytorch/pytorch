@@ -104,6 +104,9 @@ RootGuardManager = torch._C._dynamo.guards.RootGuardManager
 DictGuardManager = torch._C._dynamo.guards.DictGuardManager
 KeyValueDictGuardManager = torch._C._dynamo.guards.KeyValueDictGuardManager
 install_tensor_aliasing_guard = torch._C._dynamo.guards.install_tensor_aliasing_guard
+install_no_tensor_aliasing_guard = (
+    torch._C._dynamo.guards.install_no_tensor_aliasing_guard
+)
 
 
 class GuardManager:
@@ -310,6 +313,7 @@ class GuardBuilder(GuardBuilderBase):
         self.tensor_check_names: List[str] = []
         self.tensor_check_examples: List[torch.Tensor] = []
         self.tensor_check_guards: List[Guard] = []
+        self.tensor_check_guard_managers: List[GuardManager] = []
 
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
         # Keep track of weak references of objects with ID_MATCH guard. This
@@ -346,30 +350,19 @@ class GuardBuilder(GuardBuilderBase):
 
         return name
 
-    def _get_guard_manager_from_source(self, originating_source, value=None):
+    def _get_guard_manager_from_source(self, originating_source):
         # eval_frame calls check_fn with f_locals dict, which is then later
         # wrapped up into a "L" dict.
         root_guard_manager = self.guard_manager.root
         global_manager = root_guard_manager.globals_dict_manager(self.scope["G"], None)
 
-        # if isinstance(value, dict):
-        #     print("----------", value, originating_source)
-        # TODO(janimesh) - This should probably to guards object itself with a
-        # member function - get_guard_manager. Need to figure out where to put
-        # root_guard manager.
-        def build(source, is_first_call):
+        def build(source):
             example_value = None
-            if is_first_call:
-                example_value = value
+            if source.name() != "":
+                example_value = self.get(source.name())
 
             if isinstance(source, ChainedSource):
-                base_guard_manager = build(source.base, False)
-
-                # if isinstance(base_guard_manager, DictGuardManager):
-                #     if not istype(
-                #         source, (GetItemSource, ODictGetItemSource, ConstDictKeySource)
-                #     ):
-                #         raise AssertionError(f"DictGuardManager should not be here {source}")
+                base_guard_manager = build(source.base)
 
             # Use istype instead of isinstance to check for exact type of source.
             if istype(source, LocalSource):
@@ -456,16 +449,11 @@ class GuardBuilder(GuardBuilderBase):
                     f"missing guard manager builder {source} - {source.name()}"
                 )
 
-        mgr = build(originating_source, is_first_call=True)
+        mgr = build(originating_source)
         return mgr
 
     def get_guard_manager(self, guard: Guard):
-        try:
-            value = self.get(guard.name)
-        except:
-            value = None
-
-        return self._get_guard_manager_from_source(guard.originating_source, value)
+        return self._get_guard_manager_from_source(guard.originating_source)
 
     def get_guard_str(self, guard, code):
         guard_strs = []
@@ -482,7 +470,8 @@ class GuardBuilder(GuardBuilderBase):
             code, make_guard_fn_args, run_cse=False
         )
         out: Dict[str, Any] = dict()
-        exec(pycode, self.scope, out)
+        globals_for_guard_fn = {"G": self.scope["G"]}
+        exec(pycode, globals_for_guard_fn, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         if is_epilogue:
             self.guard_manager.root.add_epilogue_lambda_guard(guard_fn, guard_str)
@@ -1034,6 +1023,26 @@ class GuardBuilder(GuardBuilderBase):
                 self.tensor_check_examples.append(value)
                 self.tensor_check_guards.append(guard)
 
+                if config.enable_cpp_guard_manager:
+                    guard_manager = self.get_guard_manager(guard)
+                    self.tensor_check_guard_managers.append(guard_manager)
+
+                    output_graph = self.check_fn_manager.output_graph
+                    size = convert(
+                        output_graph.tensor_weakref_to_sizes_strides[value]["size"]
+                    )
+                    stride = convert(
+                        output_graph.tensor_weakref_to_sizes_strides[value]["stride"]
+                    )
+
+                    guard_manager.add_tensor_match_guard(
+                        value,
+                        get_tensor_guard_str(value, tensor_name, size, stride),
+                        tensor_name,
+                        size,
+                        stride,
+                    )
+
             # A frame is valid for reuse with dynamic dimensions if the new dynamic dimensions are a
             # strict subset of the old.
             #
@@ -1262,6 +1271,32 @@ def get_guard_debug_info(code, guard, do_logging=True):
     return extra
 
 
+def convert(size_or_stride):
+    converted: List[Optional[int]] = []
+    for dim in size_or_stride:
+        if not is_symbolic(dim):
+            converted.append(dim)
+        else:
+            assert isinstance(dim, torch.SymInt)
+            converted.append(dim.node.maybe_as_int())
+    return converted
+
+
+def get_tensor_guard_str(value, name, sizes, strides):
+    pytype = type(value)
+    dispatch_key = (
+        torch._C._dispatch_keys(value) | torch._C._dispatch_tls_local_include_set()
+    ) - torch._C._dispatch_tls_local_exclude_set()
+    dtype = value.dtype
+    device_index = value.device.index
+    requires_grad = value.requires_grad
+    guard_str = (
+        f"check_tensor({name}, {pytype.__qualname__}, {dispatch_key}, {dtype}, "
+        f"device={device_index}, requires_grad={requires_grad}, size={sizes}, stride={strides})"
+    )
+    return guard_str
+
+
 # NB: Naively, you'd expect this to only be a function that produces
 # the callable that constitutes the guard.  However, there is some
 # delicate handling for invalidating this check function when the
@@ -1428,16 +1463,6 @@ class CheckFunctionManager:
             ), "Illegal to set tensor_check_names in export."
             tensor_check_examples = builder.tensor_check_examples
 
-            def convert(size_or_stride):
-                converted: List[Optional[int]] = []
-                for dim in size_or_stride:
-                    if not is_symbolic(dim):
-                        converted.append(dim)
-                    else:
-                        assert isinstance(dim, torch.SymInt)
-                        converted.append(dim.node.maybe_as_int())
-                return converted
-
             dynamic_dims_sizes = [
                 convert(self.output_graph.tensor_weakref_to_sizes_strides[t]["size"])
                 for t in tensor_check_examples
@@ -1492,14 +1517,12 @@ class CheckFunctionManager:
                     log_only=True,
                 )
 
-            closure_vars = {
-                "___check_tensors": check_tensors_fn,
-                "___check_tensors_verbose": check_tensors_verbose_fn,
-                "tensor_check_names": tensor_check_names,
-                **CLOSURE_VARS,
-            }
-            builder.add_python_lambda_leaf_guard_to_root(
-                [code_parts_tensor], "\n".join(guard_strs), closure_vars=closure_vars
+        if config.enable_cpp_guard_manager and builder.tensor_check_guard_managers:
+            # Add no tensor aliasing guard
+            install_no_tensor_aliasing_guard(
+                builder.tensor_check_guard_managers,
+                tensor_check_names,
+                "check_no_aliasing(" + ", ".join(tensor_check_names) + ")",
             )
 
         aotautograd_guards: List[GuardEnvExpr] = (
@@ -1572,6 +1595,12 @@ class CheckFunctionManager:
         # Grab only G, but preserve "G" because guards access it as "G"
         guard_fn.global_scope = globals_for_guard_fn
         guard_fn.guard_fail_fn = guard_fail_fn
+
+        # TODO(janimesh) - It is unclear to me why do we even need these. Maybe
+        # there is some circular ref because of GraphBuilder and CheckFnManager.
+        # This is exposed only after introducing get_guard_manager helper.
+        builder.tensor_check_examples = []
+        builder.scope = {}
         return guard_fn
 
     def invalidate(self):
