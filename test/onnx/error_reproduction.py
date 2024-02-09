@@ -13,6 +13,7 @@ import numpy as np
 
 import onnx
 import onnxruntime as ort
+import onnxscript
 import torch
 
 _MISMATCH_MARKDOWN_TEMPLATE = """\
@@ -139,6 +140,7 @@ OS: {platform.platform()}
 Python version: {sys.version}
 onnx=={onnx.__version__}
 onnxruntime=={ort.__version__}
+onnxscript=={onnxscript.__version__}
 numpy=={np.__version__}
 torch=={torch.__version__}"""
 
