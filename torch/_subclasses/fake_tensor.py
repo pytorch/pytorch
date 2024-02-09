@@ -1422,6 +1422,8 @@ class FakeTensorMode(TorchDispatchMode):
         try:
             with in_kernel_invocation_manager(self):
                 r = func(*args, **kwargs)
+        except RuntimeError as e:
+            raise UnsupportedOperatorException(str(e)) from e
         except NotImplementedError as not_implemented_error:
             return maybe_run_unsafe_fallback(not_implemented_error)
 
