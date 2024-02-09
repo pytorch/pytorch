@@ -1213,7 +1213,6 @@ dynamo_expected_failures = {
     "TestVmapOperatorsLegacy.test_select",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_binary_pointwise_ops",  # test_legacy_vmap
     "TestVmapAPILegacy.test_non_tensor_output_raises",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_binary_cross_entropy_cpu",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_diagonal",  # test_legacy_vmap
     "TestVmapAPILegacy.test_nonzero_out_dims",  # test_legacy_vmap
     "TestVmapAPILegacy.test_unsupported_op_err_msg",  # test_legacy_vmap
