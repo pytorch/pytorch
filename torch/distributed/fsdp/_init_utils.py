@@ -440,6 +440,11 @@ def _init_core_state(
                 "the world size is 1."
             )
         sharding_strategy = ShardingStrategy.NO_SHARD
+    elif sharding_strategy == ShardingStrategy.NO_SHARD:
+        warnings.warn(
+            "The `NO_SHARD` sharding strategy is deprecated. If having issues, "
+            "please use DistributedDataParallel instead."
+        )
     state.sharding_strategy = sharding_strategy or ShardingStrategy.FULL_SHARD
     state.mixed_precision = mixed_precision or MixedPrecision()
     if mixed_precision is not None:
