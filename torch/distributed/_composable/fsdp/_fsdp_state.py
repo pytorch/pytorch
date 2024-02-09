@@ -1,9 +1,11 @@
+import functools
+
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
-from torch.autograd.graph import register_multi_grad_hook
+from torch.autograd.graph import Node, register_multi_grad_hook
 from torch.distributed._composable_state import (
     _get_module_state,
     _insert_module_state,
@@ -29,6 +31,8 @@ class FSDPStateContext:
         self.iter_forward_root: Optional[FSDPState] = None
         # Final callback should only be queued once per backward
         self.post_backward_final_callback_queued: bool = False
+        # Whether to finalize backward in this backward's final callback
+        self.is_last_backward: bool = True
 
 
 class FSDPState(_State):
@@ -158,16 +162,23 @@ class FSDPState(_State):
                 self._comm_ctx.all_gather_state = None  # free the all-gather result
             self._state_ctx.iter_forward_root = None
 
-    def _pre_backward(self, *unused: Any) -> None:
+    def _pre_backward(self, forward_grad_fns: Tuple[Node, ...], *unused: Any) -> None:
         self._training_state = TrainingState.PRE_BACKWARD
         self._register_root_post_backward_final_callback()
         if self._fsdp_param_group:
-            self._fsdp_param_group.pre_backward(*unused)
+            self._fsdp_param_group.pre_backward(forward_grad_fns, *unused)
 
     def _root_post_backward_final_callback(self) -> None:
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
             for state in self._state_ctx.all_states:
-                state._finalize_backward()
+                if state._fsdp_param_group and state._fsdp_param_group.is_unsharded:
+                    # Run post-backward in case forward inputs did not require
+                    # gradient so the autograd backward did not run
+                    state._fsdp_param_group.post_backward()
+                if self._state_ctx.is_last_backward:
+                    state._finalize_backward()
+            if self._state_ctx.is_last_backward:
+                self._comm_ctx.post_forward_order.clear()
             self._state_ctx.post_backward_final_callback_queued = False
 
     def _finalize_backward(self) -> None:
@@ -185,8 +196,12 @@ class FSDPState(_State):
         flat_outputs, _ = tree_flatten(output)
         tensors = tuple(t for t in flat_outputs if t.requires_grad)
         if tensors:
-            handle = register_multi_grad_hook(tensors, self._pre_backward, mode="any")
+            grad_fns = tuple(t.grad_fn for t in tensors if t.grad_fn is not None)
+            pre_backward = functools.partial(self._pre_backward, grad_fns)
+            handle = register_multi_grad_hook(tensors, pre_backward, mode="any")
             self._pre_backward_hook_handles.append(handle)
+            if self._fsdp_param_group:
+                self._fsdp_param_group.all_forward_output_grad_fns.add(grad_fns)
         return output
 
     def _register_root_post_backward_final_callback(self):

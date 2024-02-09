@@ -89,10 +89,10 @@ def foreach_all_gather_copy_out(
     out = [
         fsdp_param.all_gather_output.view(world_size, -1) for fsdp_param in fsdp_params
     ]
-    # TODO: Use `torch.split_with_sizes_copy` fast path once it lands.
-    splits = torch.split(all_gather_output, all_gather_input_numels, dim=1)
     with _unsafe_preserve_version_counters(out):
-        torch._foreach_copy_(out, splits)  # one `copy_` per parameter
+        torch.split_with_sizes_copy(
+            all_gather_output, all_gather_input_numels, dim=1, out=out
+        )
 
 
 @torch.no_grad()
@@ -139,6 +139,10 @@ def foreach_reduce_scatter(
         # Record to mark the end of the reduce-scatter copy-in in the RS stream
         copy_in_event = torch.cuda.Event()
         copy_in_event.record()
+        # Only after the copy-in finishes can we free the gradients, which were
+        # computed in the default stream
+        current_stream.wait_event(copy_in_event)
+        unsharded_grads.clear()
         reduce_scatter_output = reduce_scatter_input.new_empty(
             (reduce_scatter_output_numel,)
         )
@@ -168,10 +172,6 @@ def foreach_reduce_scatter(
             flat_grad_offset += padded_sharded_numel
         reduce_scatter_view_out_event = torch.cuda.Event()
         reduce_scatter_view_out_event.record()
-    # Only after the copy-in finishes can we free the gradients, which were
-    # computed in the default stream
-    current_stream.wait_event(copy_in_event)
-    unsharded_grads.clear()
     # The RS output is allocated in the RS stream and used in the default
     # stream (for optimizer). To ensure its memory is not reused for later
     # RSs, we do not need extra synchronization since the sharded parameters
