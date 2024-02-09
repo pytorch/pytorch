@@ -1,9 +1,13 @@
 # Owner(s): ["module: optimizer"]
 import functools
+import math
+from typing import Any, Dict, Tuple
 import unittest
 from copy import deepcopy
 
 import torch
+from torch.optim import Optimizer, SGD
+from torch.optim.optimizer import register_optimizer_step_pre_hook, register_optimizer_step_post_hook
 from optim.test_optim import TestOptim, TestDifferentiableOptimizer  # noqa: F401
 from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
 from optim.test_swa_utils import TestSWAUtils  # noqa: F401
@@ -86,9 +90,9 @@ class TestOptimRenewed(TestCase):
                 optimizer.zero_grad()
                 loss = (weight.mv(input) + bias).pow(2).sum()
                 loss.backward()
-                if optim_cls.__name__ == "SparseAdam":
-                    # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
-                    # which we know does NOT represent the expected use case!
+                if optim_info.only_supports_sparse_grads:
+                    # For this test, we naively convert the Tensor layout, which we know does
+                    # NOT represent the expected use case for optims like SparseAdam!
                     weight.grad = weight.grad.to_sparse()
                     bias.grad = bias.grad.to_sparse()
                 return loss
@@ -126,9 +130,9 @@ class TestOptimRenewed(TestCase):
                 optimizer.zero_grad()
                 loss = (weight.mv(input).cuda(1) + bias).pow(2).sum()
                 loss.backward()
-                if optim_cls.__name__ == "SparseAdam":
-                    # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
-                    # which we know does NOT represent the expected use case!
+                if optim_info.only_supports_sparse_grads:
+                    # For this test, we naively convert the Tensor layout, which we know does
+                    # NOT represent the expected use case for optims like SparseAdam!
                     weight.grad = weight.grad.to_sparse()
                     bias.grad = bias.grad.to_sparse()
                 return loss
@@ -566,9 +570,9 @@ class TestOptimRenewed(TestCase):
                 optimizer.zero_grad()
                 loss = (weight.mv(input) + bias).pow(2).sum()
                 loss.backward()
-                if optim_cls.__name__ == "SparseAdam":
-                    # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
-                    # which we know does NOT represent the expected use case!
+                if optim_info.only_supports_sparse_grads:
+                    # For this test, we naively convert the Tensor layout, which we know does
+                    # NOT represent the expected use case for optims like SparseAdam!
                     weight.grad = weight.grad.to_sparse()
                     bias.grad = bias.grad.to_sparse()
                 optimizer.step()
@@ -615,9 +619,9 @@ class TestOptimRenewed(TestCase):
                 loss = (weight.mv(input) + bias).pow(2).sum()
                 loss.backward()
                 irrelevant.grad = torch.rand_like(irrelevant)
-                if optim_cls.__name__ == "SparseAdam":
-                    # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
-                    # which we know does NOT represent the expected use case!
+                if optim_info.only_supports_sparse_grads:
+                    # For this test, we naively convert the Tensor layout, which we know does
+                    # NOT represent the expected use case for optims like SparseAdam!
                     weight.grad = weight.grad.to_sparse()
                     bias.grad = bias.grad.to_sparse()
                     irrelevant.grad = irrelevant.grad.to_sparse()
@@ -686,7 +690,7 @@ class TestOptimRenewed(TestCase):
                 params = [param]
 
             optimizer = optim_cls(params, **kwargs)
-            if optim_cls.__name__ == "SparseAdam":
+            if optim_info.only_supports_sparse_grads:
                 # Intentionally construct a multidimensional empty v for the sparse grad
                 # Single dim v passes the test while multidim correctly repros the issue
                 # https://github.com/pytorch/pytorch/issues/82486
@@ -798,7 +802,7 @@ class TestOptimRenewed(TestCase):
                 return loss
 
             for _ in range(3):
-                if optim_cls.__name__ == "LBFGS":
+                if optim_info.step_requires_closure:
                     optimizer.step(functools.partial(fwd_bwd, optimizer, model, input))
                 else:
                     fwd_bwd(optimizer, model, input)
@@ -815,7 +819,7 @@ class TestOptimRenewed(TestCase):
             optimizer.load_state_dict(old_state_dict)
 
             # Make sure we can still step
-            if optim_cls.__name__ == "LBFGS":
+            if optim_info.step_requires_closure:
                 optimizer.step(functools.partial(fwd_bwd, optimizer, model, input))
             else:
                 fwd_bwd(optimizer, model, input)
@@ -831,16 +835,16 @@ class TestOptimRenewed(TestCase):
         params = [Parameter(torch.randn(2, 3, device=device, dtype=dtype)) for _ in range(2)]
         for p in params:
             p.grad = torch.rand_like(p)
-            # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
-            # which we know does NOT represent the expected use case!
-            if optim_cls.__name__ == "SparseAdam":
+            if optim_info.only_supports_sparse_grads:
+                # For this test, we naively convert the Tensor layout, which we know does
+                # NOT represent the expected use case for optims like SparseAdam!
                 p.grad = p.grad.to_sparse()
 
-        # Needed for LBFGS
-        lbfgs_loss = torch.rand(1, device=device, dtype=dtype)
+        # Needed for second order optims like LBFGS
+        closure_loss = torch.rand(1, device=device, dtype=dtype)
 
         def closure():
-            return lbfgs_loss if optim_cls.__name__ == "LBFGS" else None
+            return closure_loss if optim_info.step_requires_closure else None
 
         for optim_input in all_optim_inputs:
             kwargs = optim_input.kwargs
@@ -868,11 +872,11 @@ class TestOptimRenewed(TestCase):
         # We limit our configs to CPU only, because we will be moving them to CUDA later
         cpu_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs("cpu", dtype, optim_info, skip=("differentiable",))
 
-        # Needed for LBFGS
-        lbfgs_loss = torch.rand(1, device=device, dtype=dtype)
+        # Needed for second order optims like LBFGS
+        closure_loss = torch.rand(1, device=device, dtype=dtype)
 
         def closure():
-            return lbfgs_loss if optim_cls.__name__ == "LBFGS" else None
+            return closure_loss if optim_info.step_requires_closure else None
 
         for optim_input in cpu_optim_inputs:
             if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
@@ -882,9 +886,9 @@ class TestOptimRenewed(TestCase):
             params = [Parameter(torch.randn(2, 3, device="cpu", dtype=dtype)) for _ in range(2)]
             for p in params:
                 p.grad = torch.randn_like(p)
-                # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
-                # which we know does NOT represent the expected use case!
-                if optim_cls.__name__ == "SparseAdam":
+                if optim_info.only_supports_sparse_grads:
+                    # For this test, we naively convert the Tensor layout, which we know does
+                    # NOT represent the expected use case for optims like SparseAdam!
                     p.grad = p.grad.to_sparse()
 
             optimizer = optim_cls(params, **optim_input.kwargs)
@@ -919,6 +923,287 @@ class TestOptimRenewed(TestCase):
                 self.assertEqual(optimizer.state_dict(), optimizer_cuda.state_dict())
 
 
+    @staticmethod
+    def _state_dict_pre_hook(optimizer: Optimizer) -> None:
+        optimizer.state["test"] = 1
+
+
+    @staticmethod
+    def _state_dict_post_hook(optimizer: Optimizer, state_dict: Dict[str, Any]) -> Dict[str, Any]:
+        if "test" in state_dict["state"]:
+            state_dict["state"].pop("test")
+            state_dict["ran_state_dict_pre_hook"] = True
+        else:
+            state_dict["ran_state_dict_pre_hook"] = False
+        return state_dict
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_state_dict_pre_hook(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
+        for optim_input in all_optim_inputs:
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
+            param = torch.rand(2, 3, device=device, dtype=dtype, requires_grad=True)
+            optim = optim_cls([param], **optim_input.kwargs)
+            optim.register_state_dict_pre_hook(self.__class__._state_dict_pre_hook)
+            state_dict = optim.state_dict()
+            self.assertEqual(state_dict["state"]["test"], 1)
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_state_dict_post_hook(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
+        for optim_input in all_optim_inputs:
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
+            param = torch.rand(2, 3, device=device, dtype=dtype, requires_grad=True)
+            optim = optim_cls([param], **optim_input.kwargs)
+            optim.register_state_dict_post_hook(self.__class__._state_dict_post_hook)
+            state_dict = optim.state_dict()
+            self.assertFalse(state_dict["ran_state_dict_pre_hook"])
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_state_dict_pre_post_hook(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
+        for optim_input in all_optim_inputs:
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
+            param = torch.rand(2, 3, device=device, dtype=dtype, requires_grad=True)
+            optim = optim_cls([param], **optim_input.kwargs)
+            optim.register_state_dict_pre_hook(self.__class__._state_dict_pre_hook)
+            optim.register_state_dict_post_hook(self.__class__._state_dict_post_hook)
+            state_dict = optim.state_dict()
+            self.assertFalse("test" in state_dict["state"])
+            self.assertTrue(state_dict["ran_state_dict_pre_hook"])
+
+
+    @staticmethod
+    def _load_state_dict_pre_hook1(optimizer: Optimizer, state_dict: Dict[str, Any]) -> None:
+        state_dict["param_groups"][0]["lr"] = 0.002
+
+
+    @staticmethod
+    def _load_state_dict_pre_hook2(optimizer: Optimizer, state_dict: Dict[str, Any]) -> Dict[str, Any]:
+        # The typical use case for returning a state dict is to drastically modify the state dict.
+        # I will simulate by simply making a deep copy and ensuring that my_state_dict still gets used
+        my_state_dict = deepcopy(state_dict)
+        my_state_dict["param_groups"][0]["lr"] = 0.003
+        return my_state_dict
+
+
+    @staticmethod
+    def _load_state_dict_post_hook(optimizer: Optimizer) -> None:
+        optimizer.state["ran_load_state_dict_pre_hook2"] = optimizer.param_groups[0]["lr"] == 0.003
+        optimizer.state["ran_load_state_dict_post_hook"] = True
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_load_state_dict_pre_hook_and_prepend(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
+        for optim_input in all_optim_inputs:
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
+            param = torch.rand(2, 3, device=device, dtype=dtype, requires_grad=True)
+            optim = optim_cls([param], **optim_input.kwargs)
+            state_dict = optim.state_dict()
+
+            # usually one would have a new optim instance here, but it's all the same here
+            optim.register_load_state_dict_pre_hook(self.__class__._load_state_dict_pre_hook1)
+            optim.load_state_dict(state_dict)
+            self.assertEqual(optim.param_groups[0]["lr"], 0.002)
+
+            optim.register_load_state_dict_pre_hook(self.__class__._load_state_dict_pre_hook2, prepend=True)
+            optim.load_state_dict(state_dict)
+            # If prepend were False would be 0.003 but since prepend is True, the other hook overrides
+            self.assertEqual(optim.param_groups[0]["lr"], 0.002)
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_load_state_dict_post_hook(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
+        for optim_input in all_optim_inputs:
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
+            param = torch.rand(2, 3, device=device, dtype=dtype, requires_grad=True)
+            optim = optim_cls([param], **optim_input.kwargs)
+
+            optim.register_load_state_dict_post_hook(self.__class__._load_state_dict_post_hook)
+            optim.load_state_dict(optim.state_dict())
+            self.assertFalse(optim.state["ran_load_state_dict_pre_hook2"])
+            self.assertTrue(optim.state["ran_load_state_dict_post_hook"])
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_load_state_dict_pre_post_hook(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
+        for optim_input in all_optim_inputs:
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
+            param = torch.rand(2, 3, device=device, dtype=dtype, requires_grad=True)
+            optim = optim_cls([param], **optim_input.kwargs)
+
+            optim.register_load_state_dict_pre_hook(self.__class__._load_state_dict_pre_hook2)
+            optim.register_load_state_dict_post_hook(self.__class__._load_state_dict_post_hook)
+            optim.load_state_dict(optim.state_dict())
+            self.assertTrue(optim.state["ran_load_state_dict_pre_hook2"])
+            self.assertTrue(optim.state["ran_load_state_dict_post_hook"])
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_step_post_hook(self, device, dtype, optim_info):
+        def post_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+            nonlocal data
+            data += 2
+
+        params = [torch.tensor([1, 1], device=device, dtype=dtype)]
+
+        def dummy_closure():
+            return 1
+
+        closure = dummy_closure if optim_info.step_requires_closure else None
+
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
+        for optim_input in all_optim_inputs:
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
+            optim = optim_info.optim_cls(params, **optim_input.kwargs)
+            data = 2
+            hook_handle = optim.register_step_post_hook(post_hook)
+
+            optim.step(closure)
+            optim.step(closure)
+            # check if post hooks were registered
+            self.assertEqual(data, 6)
+
+            # remove handles, take step and verify that hook is no longer registered
+            hook_handle.remove()
+
+            optim.step(closure)
+            self.assertEqual(data, 6)
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_step_pre_hook(self, device, dtype, optim_info):
+        def pre_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+            nonlocal data
+            data += 2
+
+        params = [torch.tensor([1, 1], device=device, dtype=dtype)]
+
+        def dummy_closure():
+            return 1
+
+        closure = dummy_closure if optim_info.step_requires_closure else None
+
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
+        for optim_input in all_optim_inputs:
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
+            optim = optim_info.optim_cls(params, **optim_input.kwargs)
+            data = 5
+            hook_handle = optim.register_step_pre_hook(pre_hook)
+
+            optim.step(closure)
+            optim.step(closure)
+            # check if pre hooks were registered
+            self.assertEqual(data, 9)
+
+            # remove handles, take step and verify that hook is no longer registered
+            hook_handle.remove()
+
+            optim.step(closure)
+            self.assertEqual(data, 9)
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_step_all_hooks(self, device, dtype, optim_info):
+        def global_pre_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+            nonlocal data
+            data.append(0)
+
+        def global_post_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+            nonlocal data
+            data.append(5)
+
+        def local_pre_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+            nonlocal data
+            data.append(1)
+
+        def local_post_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+            nonlocal data
+            data.append(2)
+
+        params = [torch.tensor([1, 1], device=device, dtype=dtype)]
+
+        def dummy_closure():
+            return 1
+
+        closure = dummy_closure if optim_info.step_requires_closure else None
+
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
+        for optim_input in all_optim_inputs:
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
+            optim = optim_info.optim_cls(params, **optim_input.kwargs)
+            optim2 = SGD(params)
+            data = []
+
+            # register global hooks to both optimizers
+            global_pre_handle = register_optimizer_step_pre_hook(global_pre_hook)
+            global_post_handle = register_optimizer_step_post_hook(global_post_hook)
+
+            # register local hooks
+            first_pre_handle = optim.register_step_pre_hook(local_pre_hook)
+            first_post_handle = optim.register_step_post_hook(local_post_hook)
+            second_pre_handle = optim2.register_step_pre_hook(local_pre_hook)
+            second_post_handle = optim2.register_step_post_hook(local_post_hook)
+
+            optim.step(closure)
+            self.assertListEqual(data, [0, 1, 2, 5])
+            optim2.step(closure)
+            self.assertListEqual(data, [0, 1, 2, 5, 0, 1, 2, 5])
+            optim.step(closure)
+            self.assertListEqual(data, [0, 1, 2, 5, 0, 1, 2, 5, 0, 1, 2, 5])
+
+            # remove all hooks
+            global_pre_handle.remove()
+            global_post_handle.remove()
+            first_pre_handle.remove()
+            first_post_handle.remove()
+            second_pre_handle.remove()
+            second_post_handle.remove()
+
+            optim.step(closure)
+            optim2.step(closure)
+            self.assertListEqual(data, [0, 1, 2, 5, 0, 1, 2, 5, 0, 1, 2, 5])
+
+
     @optims(optim_db, dtypes=[torch.float32])
     def test_deepcopy_copies_all_public_attrs(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
@@ -929,14 +1214,14 @@ class TestOptimRenewed(TestCase):
         params = [Parameter(torch.randn(2, 3, device=device, dtype=dtype)) for _ in range(2)]
         for p in params:
             p.grad = torch.rand_like(p)
-            if optim_cls.__name__ == "SparseAdam":
-                # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
-                # which we know does NOT represent the expected use case!
+            if optim_info.only_supports_sparse_grads:
+                # For this test, we naively convert the Tensor layout, which we know does
+                # NOT represent the expected use case for optims like SparseAdam!
                 p.grad = p.grad.to_sparse()
 
-        # Needed for LBFGS
+        # Needed for second order optims like LBFGS
         def closure():
-            return 1 if optim_cls.__name__ == "LBFGS" else None
+            return 1 if optim_info.step_requires_closure else None
 
         def getPublicAttrs(obj):
             return {k for k in obj.__dict__ if not k.startswith("_")}
@@ -953,6 +1238,29 @@ class TestOptimRenewed(TestCase):
                 optimizer.step(closure)
 
             self.assertEqual(getPublicAttrs(optimizer), getPublicAttrs(deepcopy(optimizer)))
+
+
+    @optims([optim for optim in optim_db if optim.step_requires_closure], dtypes=[torch.float32])
+    def test_second_order_optims_return_consistent_types(self, device, dtype, optim_info):
+        # Motivated by #7586
+        optim_cls = optim_info.optim_cls
+        params = [torch.randn(10, 5, device=device, dtype=dtype), torch.randn(10, device=device, dtype=dtype)]
+
+        def closure():
+            return torch.tensor([10], device=device, dtype=dtype)
+
+        for optim_input in optim_info.optim_inputs_func(device=device):
+            # Currently, the only second order optim is LBFGS, so we just go ahead and modify
+            # "tolerance_grad", but this may not scale if we add second order optims in the future
+            kwargs = optim_input.kwargs
+            kwargs["tolerance_grad"] = math.inf
+            optim_inf = optim_cls(params, **kwargs)
+            kwargs["tolerance_grad"] = -math.inf
+            optim_neg_inf = optim_cls(params, **kwargs)
+
+            res1 = optim_inf.step(closure)
+            res2 = optim_neg_inf.step(closure)
+            self.assertEqual(type(res1), type(res2))
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
