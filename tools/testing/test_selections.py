@@ -156,13 +156,14 @@ def shard(
 
     def _shard_serial(tests: List[ShardedTest], sharded_jobs: List[ShardJob]) -> None:
         assert estimated_time_limit is not None, "Estimated time limit must be provided"
+        new_sharded_jobs = sharded_jobs
         for test in tests:
             if (
                 len(sharded_jobs) > 1
                 and sharded_jobs[-1].get_total_time() > estimated_time_limit
             ):
-                sharded_jobs = sharded_jobs[:-1]
-            min_sharded_job = min(sharded_jobs, key=lambda j: j.get_total_time())
+                new_sharded_jobs = sharded_jobs[:-1]
+            min_sharded_job = min(new_sharded_jobs, key=lambda j: j.get_total_time())
             min_sharded_job.serial.append(test)
 
     def _shard_parallel(tests: List[ShardedTest], sharded_jobs: List[ShardJob]) -> None:
@@ -218,7 +219,7 @@ def calculate_shards(
     )
     estimated_time_limit = 0.0
     if estimated_time_per_shard != 0:
-        estimated_time_limit = total_time % estimated_time_per_shard
+        estimated_time_limit = serial_time % estimated_time_per_shard
     if estimated_time_limit <= 0.01:
         estimated_time_limit = estimated_time_per_shard
     if total_time == 0:
