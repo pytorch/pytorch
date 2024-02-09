@@ -518,11 +518,10 @@ def sample_inputs_batch_norm_with_update(op_info, device, dtype, requires_grad, 
         args = sample.args
         momentum = sample.kwargs.get('momentum', 0.5)
         eps = sample.kwargs.get('eps', 1e-5)
+        if any(args[i] is None for i in range(4)):
+            continue
         for cudnn_enabled in [True, False]:
-            if args[0] is not None and args[1] is not None:
-                yield SampleInput(sample.input, args=(args[2], args[3], args[0], args[1], momentum, eps, cudnn_enabled))
-            else:
-                yield SampleInput(sample.input, args=(args[2], args[3], momentum, eps, cudnn_enabled))
+            yield SampleInput(sample.input, args=(args[2], args[3], args[0], args[1], momentum, eps, cudnn_enabled))
 
 def sample_inputs_nn_activation_relu(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
