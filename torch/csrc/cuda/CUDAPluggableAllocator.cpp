@@ -95,7 +95,7 @@ void* CUDAPluggableAllocator::malloc(
 }
 
 c10::DataPtr CUDAPluggableAllocator::allocate(size_t size) const {
-  int device = -1;
+  c10::DeviceIndex device = -1;
   C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
   cudaStream_t stream =
       c10::cuda::getCurrentCUDAStream(static_cast<c10::DeviceIndex>(device));
@@ -116,7 +116,7 @@ c10::DeleterFnPtr CUDAPluggableAllocator::raw_deleter() const {
 }
 
 void* CUDAPluggableAllocator::raw_alloc(size_t nbytes) {
-  int device = -1;
+  c10::DeviceIndex device = -1;
   C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
   cudaStream_t stream =
       c10::cuda::getCurrentCUDAStream(static_cast<c10::DeviceIndex>(device));
@@ -126,7 +126,7 @@ void* CUDAPluggableAllocator::raw_alloc(size_t nbytes) {
 void* CUDAPluggableAllocator::raw_alloc_with_stream(
     size_t nbytes,
     cudaStream_t stream) {
-  int device = -1;
+  c10::DeviceIndex device = -1;
   C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
   return malloc(nbytes, device, stream);
 }
@@ -305,8 +305,10 @@ c10::cuda::CUDACachingAllocator::CheckpointDelta CUDAPluggableAllocator::
       "If you need it, please file an issue describing your use case.");
 }
 
-void CUDAPluggableAllocator::enablePeerAccess(int dev, int dev_to_access) {
-  c10::cuda::CUDAGuard device_guard(static_cast<c10::DeviceIndex>(dev));
+void CUDAPluggableAllocator::enablePeerAccess(
+    c10::DeviceIndex dev,
+    c10::DeviceIndex dev_to_access) {
+  c10::cuda::CUDAGuard device_guard(dev);
   cudaError_t err = cudaDeviceEnablePeerAccess(dev_to_access, 0);
   if (err == cudaErrorPeerAccessAlreadyEnabled) {
     // ignore and clear the error if access was already enabled

@@ -593,7 +593,7 @@ auto get_generator_sources(
 }
 
 int64_t get_available_workspace() {
-  int device;
+  c10::DeviceIndex device = 0;
   C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
   size_t max_block_size = 0;
   c10::cuda::CUDACachingAllocator::cacheInfo(device, &max_block_size);
