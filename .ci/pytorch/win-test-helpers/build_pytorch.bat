@@ -21,6 +21,7 @@ if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 
 call %INSTALLER_DIR%\install_sccache.bat
+echo install_sccache exited with error code: %errorlevel%
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 
