@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -ex
+set -x
 
 # The generic Linux job chooses to use base env, not the one setup by the image
 CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
