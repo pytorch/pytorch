@@ -288,6 +288,8 @@ def mps_ops_modifier(ops):
         'mul',
         'narrow',
         'narrow_copy',
+        'nn.functional.conv1d',
+        'nn.functional.conv_transpose1d',
         'nn.functional.padcircular',
         'nn.functional.feature_alpha_dropoutwithout_train',
         'nn.functional.unfold',
@@ -337,7 +339,10 @@ def mps_ops_modifier(ops):
         'acos',
         'acosh',
         'all',
+        'allclose',
         'any',
+        'addcdiv',
+        'addcmul',
         'argwhere',
         'asin',
         'atan',
@@ -354,8 +359,12 @@ def mps_ops_modifier(ops):
         'cosh',
         'count_nonzero',
         'diff',
+        'div',
+        'divno_rounding_mode',
         'dot',
         'dstack',
+        'eq',
+        'equal',
         'exp2',
         'exp',
         'expm1',
@@ -365,19 +374,27 @@ def mps_ops_modifier(ops):
         'fliplr',
         'flipud',
         'float',
+        'gradient',
         'half',
         'hstack',
         'int',
+        'isnan',
         'ldexp',
         'log10',
         'log1p',
         'log2',
         'log',
+        'logical_and',
         'logical_not',
+        'logical_or',
+        'logical_xor',
         'long',
+        'masked_fill',
+        'masked.mean',
         'masked.prod',
         'masked.sum',
         'mean',
+        'ne',
         'neg',
         'nn.functional.padconstant',
         'nn.functional.padreflect',
@@ -399,11 +416,15 @@ def mps_ops_modifier(ops):
         'stack',
         'sum',
         'sum_to_size',
+        'square',
         'tan',
         'tanh',
         'trace',
+        'trapz',
+        'trapezoid',
         'tril',
         'triu',
+        'true_divide',
         'vstack',
         'where',
     }
@@ -563,12 +584,6 @@ def mps_ops_modifier(ops):
         'masked.cumprod': [torch.int64],
         'linalg.vander': [torch.int64],
     }
-
-    MACOS_BEFORE_14_0_XFAILLIST = {
-        'cfloat': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8, torch.float16, torch.float32],
-        'chalf': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8, torch.float16, torch.float32],
-    }
-
 
     MACOS_AFTER_13_1_XFAILLIST = {
         # before macOS 13.2 it falls back to cpu and pass the forward pass
@@ -994,11 +1009,6 @@ def mps_ops_modifier(ops):
                          unittest.expectedFailure,
                          dtypes=MACOS_12_3_XFAILLIST[key]))
 
-        if key in MACOS_BEFORE_14_0_XFAILLIST and product_version < 14.0:
-            addDecorator(op, DecorateInfo(
-                         unittest.expectedFailure,
-                         dtypes=MACOS_BEFORE_14_0_XFAILLIST[key]))
-
         # If ops is not supported for complex types, expect it to fail
         if key not in SUPPORTED_COMPLEX_OPS and (key not in AFTER_MACOS_14_0_SUPPORTED_COMPLEX_OPS or product_version < 14.0):
             addDecorator(op, DecorateInfo(unittest.expectedFailure, dtypes=[torch.complex32, torch.complex64]))
@@ -1042,12 +1052,6 @@ def mps_ops_error_inputs_modifier(ops):
         # unimplemented
         'logcumsumexp',
     }
-    if product_version < 14.0:
-        XFAILLIST.update({
-            # unsupported complex dtypes
-            'fft.hfft',
-            'fft.irfft',
-        })
 
     def addDecorator(op, d) -> None:
         op.decorators = list(op.decorators) if op.decorators is not None else []
@@ -11586,6 +11590,27 @@ class TestErrorInputs(TestCase):
 
             with self.assertRaisesRegex(error_type, error_regex):
                 op(*mps_args, **mps_kwargs)
+
+class TestComplex(TestCase):
+    def test_tensor_scalar_binops(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/119088
+        def to_cpu(x):
+            return x.cpu() if isinstance(x, torch.Tensor) else x
+
+        # Allocate tensors on mps
+        with torch.device("mps"):
+            inputs = [torch.rand(2, dtype=dtype) for dtype in [torch.float, torch.half, torch.cfloat]]
+        self.assertTrue(all(x.device.type == "mps" for x in inputs))
+        # Add scalars
+        inputs.extend([7, 3.14, 2 + 3j, torch.tensor(4 + 5j, dtype=torch.chalf)])
+
+        # Iterate over all permutations of types(int, float, complex, half) and ops (excluding div)
+        for x, y in itertools.product(inputs, inputs):
+            for op_name in ["__add__", "__sub__", "__mul__"]:
+                x_cpu, y_cpu = map(to_cpu, (x, y))
+                res = getattr(x, op_name)(y)
+                res_cpu = getattr(x_cpu, op_name)(y_cpu)
+                self.assertEqual(to_cpu(res), res_cpu, f"{op_name}({x}, {y}) produces different results {res} vs {res_cpu}")
 
 
 # Copied from `TestCommon` in `test_ops.py`, just enough to duplicate the `test_numpy_ref` for MPS
