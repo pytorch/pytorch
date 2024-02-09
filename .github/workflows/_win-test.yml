@@ -25,7 +25,7 @@ on:
       timeout-minutes:
         required: false
         type: number
-        default: 300
+        default: 240
         description: |
           Set the maximum (in minutes) how long the workflow should take to finish
 
@@ -132,9 +132,18 @@ jobs:
           test-matrix: ${{ inputs.test-matrix }}
           job-name: ${{ steps.get-job-id.outputs.job-name }}
 
+      - name: Set Test step time
+        id: test-timeout
+        shell: bash
+        env:
+          JOB_TIMEOUT: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
+        run: |
+          echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
+
       - name: Test
         id: test
         shell: bash
+        timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
         env:
           USE_CUDA: ${{ inputs.cuda-version != 'cpu' && '1' || '0' }}
           INSTALL_WINDOWS_SDK: 1
