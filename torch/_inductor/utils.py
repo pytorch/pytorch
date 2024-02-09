@@ -810,6 +810,9 @@ class IndentedBuffer:
             for line in other_code.split("\n"):
                 self.writeline(line)
 
+    def __repr__(self):
+        return f"{type(self)}({self.getvalue()})"
+
 
 class DeferredLineBase:
     """A line that can be 'unwritten' at a later time"""

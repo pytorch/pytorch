@@ -231,6 +231,7 @@ test_failures = {
     "test_forced_buffer_realize_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
+    "test_tmp_not_defined_issue3_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_gather2_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_inplace_add_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_inplace_mixed_dtype_ops_dynamic_shapes": TestFailure(
