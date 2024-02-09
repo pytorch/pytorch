@@ -662,7 +662,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def frexp(x):
-        return f"tl.math.ldexp({x}, -tl.math.ilogb({x}))", f"tl.math.ilogb({x})"
+        return (f"tl.math.ldexp({x}, -tl.math.ilogb({x}))", f"tl.math.ilogb({x})")
 
     @staticmethod
     def copysign(x, y):

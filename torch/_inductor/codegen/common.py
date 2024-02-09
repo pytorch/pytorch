@@ -26,6 +26,7 @@ from sympy.printing.printer import Printer
 
 import torch
 import torch.fx
+from torch.utils import _pytree as pytree
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import config, metrics
@@ -1133,25 +1134,13 @@ class Kernel(CodeGen):
                         )
 
                     value = getattr(parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
-                    if isinstance(value, tuple):
-                        result = []
-                        for v in value:
-                            csevar = self.cse.generate(
-                                self.compute,
-                                v,
-                                bounds=buf_bounds,
-                            )
-                            csevar.update_on_args(name, args, kwargs)
-                            result.append(csevar)
-                        return result
-                    else:
-                        csevar = self.cse.generate(
-                            self.compute,
-                            value,
-                            bounds=buf_bounds,
-                        )
+
+                    def do_cse(v):
+                        csevar = self.cse.generate(self.compute, v, bounds=buf_bounds)
                         csevar.update_on_args(name, args, kwargs)
                         return csevar
+
+                    return pytree.tree_map(do_cse, value)
 
                 return inner
 

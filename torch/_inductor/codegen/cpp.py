@@ -16,6 +16,7 @@ import torch.fx
 from torch._inductor import dependencies
 from torch._inductor.ir import StorageBox, TensorBox
 from torch._prims_common import is_float_dtype
+from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
@@ -2636,10 +2637,7 @@ class CppVecKernelChecker(CppVecKernel):
                         self.disable_vec(f"op: {name}")
 
                     parent_val = getattr(parent_handler, name)(*args, **kwargs)
-                    try:
-                        return tuple([self.simd_vec] * len(parent_val))
-                    except TypeError:
-                        return self.simd_vec
+                    return pytree.tree_map(lambda _: self.simd_vec, parent_val)
 
                 return inner
 

@@ -145,9 +145,6 @@ class IndexPropVar:
             self.value, TypedExpr
         ), "Symbolic IndexPropVar must contain a TypedExpr"
 
-    def __getitem__(self, items):
-        return IndexPropVar(self.value[items], self.is_symbolic)
-
 
 IndexPropResult: TypeAlias = Union[IndexPropVar, Tuple["IndexPropResult", ...]]
 

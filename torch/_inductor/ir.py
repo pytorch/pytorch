@@ -6755,6 +6755,12 @@ class LoopBodyBlock:
                     "call_module", name, (dtype_proxy, value_proxy, init_proxy), {}
                 )
 
+            def frexp(self, value_proxy):
+                result = self._inner.frexp(value_proxy)
+                # TODO(isuruf): fix me. need some more pytree.tree_map sprinkled
+                # in the codebase
+                return (result[0], result[1])
+
             @staticmethod
             def indirect_indexing(index_proxy, size, check=True):
                 """
