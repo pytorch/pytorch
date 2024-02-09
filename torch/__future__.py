@@ -52,7 +52,7 @@ def set_swap_module_params_on_conversion(value: bool) -> None:
 
     The semantics for :meth:`~nn.Module.load_state_dict` when this is set are as follows:
 
-    #. For each parameter/buffer, its corresponding``sd['key']`` is transformed via 
+    #. For each parameter/buffer, its corresponding``state_dict['key']`` is transformed via 
        :meth:`~torch.Tensor.module_load` (i.e. ``res = param.module_load(state_dict['key'])``)
     #. If necessary, ``res`` will be wrapped in an :class:`~nn.Parameter`
     #. The parameter/buffer in the module will be swapped via :func:`~torch.utils.swap_tensors`
