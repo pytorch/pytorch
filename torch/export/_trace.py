@@ -3,7 +3,6 @@ import functools
 import logging
 import re
 import warnings
-from collections import OrderedDict
 from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -145,14 +144,16 @@ def _replace_param_buffer_names(param_buffer_table, sig, constants):
             spec.target = param_buffer_table[spec.target]
 
 
-def _reorder_kwargs_by_names(
-    arg_names: List[str], args: Tuple[Any], kwargs: Dict[str, Any]
-):
-    assert len(arg_names) == len(args) + len(kwargs), (
-        f"Total number of arg names is expected to be {len(arg_names)} "
+def _convert_to_positional_args(orig_arg_names, args, kwargs):
+    assert len(orig_arg_names) == len(args) + len(kwargs), (
+        f"Total number of arg names is expected to be {len(orig_arg_names)} "
         f"but got {len(args)} positional args, {len(kwargs)} kwargs."
     )
-    return OrderedDict({kw_name: kwargs[kw_name] for kw_name in arg_names[len(args) :]})
+    reordered_kwargs = [kwargs[kw_name] for kw_name in orig_arg_names[len(args) :]]
+    return (
+        *args,
+        *reordered_kwargs,
+    )
 
 
 def _normalize_nn_module_stack(gm_torch_level, root_cls):
@@ -356,9 +357,10 @@ def _export_non_strict(
     ), grad_safe_guard, _ignore_backend_decomps():  # type: ignore[attr-defined]
         gm, graph_signature = transform(aot_export_module)(
             mod,
-            (*fake_args, *fake_kwargs.values()),
+            fake_args,
             trace_joint=False,
             pre_dispatch=pre_dispatch,
+            kwargs=fake_kwargs,
         )
     # TODO unfortunately preserving graph-level metadata is not
     # working well with aot_export. So we manually copy it.
@@ -566,7 +568,6 @@ def _export(
 
     if not strict:
         assert isinstance(f, torch.nn.Module)
-        assert len(kwargs) == 0, "keyword arguments NYI"
         out_spec = None
 
         module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
@@ -581,7 +582,9 @@ def _export(
             return "L__self__" + strip_root(x)
 
         def _tuplify_outputs(aot_export):
-            def _aot_export_non_strict(mod, args, **kwargs):
+            def _aot_export_non_strict(mod, args, kwargs=None, **flags):
+                kwargs = kwargs or {}
+
                 class Wrapper(torch.nn.Module):
                     def __init__(self, mod):
                         super().__init__()
@@ -608,7 +611,7 @@ def _export(
                 with _wrap_submodules(
                     wrapped_mod, new_preserved_call_signatures, module_call_specs
                 ):
-                    gm, sig = aot_export(wrapped_mod, args, **kwargs)
+                    gm, sig = aot_export(wrapped_mod, args, kwargs=kwargs, **flags)
 
                 sig.parameters = pytree.tree_map(strip_root, sig.parameters)
                 sig.buffers = pytree.tree_map(strip_root, sig.buffers)
@@ -635,15 +638,19 @@ def _export(
 
             return _aot_export_non_strict
 
-        fake_mode, fake_args, src_equalities, original_signature = make_fake_inputs(
-            f, args, constraints
-        )
+        (
+            fake_mode,
+            fake_args,
+            fake_kwargs,
+            src_equalities,
+            original_signature,
+        ) = make_fake_inputs(f, args, kwargs, constraints)
 
         fake_params_buffers = make_fake_params_buffers(
             fake_mode, _get_params_buffers(f)
         )
         ep_non_strict = _export_non_strict(
-            f, fake_args, {}, fake_params_buffers, transform=_tuplify_outputs
+            f, fake_args, fake_kwargs, fake_params_buffers, transform=_tuplify_outputs
         )
         range_constraints, equality_constraints = make_constraints(
             fake_mode, src_equalities, original_signature, ep_non_strict.gm
@@ -779,11 +786,11 @@ def _export(
     if out_spec.type not in (list, tuple):
         out_spec = pytree.TreeSpec(tuple, None, [out_spec])
 
-    orig_args = gm_torch_level.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
+    orig_arg_names = gm_torch_level.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
 
     gm_torch_level.graph._codegen = _PyTreeCodeGen(
         _PyTreeInfo(
-            orig_args,
+            orig_arg_names,
             gm_torch_level._in_spec,
             out_spec,
         )
@@ -793,12 +800,11 @@ def _export(
     if isinstance(f, torch.nn.Module):
         _normalize_nn_module_stack(gm_torch_level, type(f))
 
-    # Note: aot_export_module doesn't accept kwargs, we'd like to reorder the kwargs as an OrderedDict
-    # to follow the order in orig_args and correctly call module
+    # NOTE: graph module expects only positional args
     ep_non_strict = _export_non_strict(
         gm_torch_level,
-        fake_args,
-        _reorder_kwargs_by_names(orig_args, fake_args, fake_kwargs),
+        _convert_to_positional_args(orig_arg_names, fake_args, fake_kwargs),
+        {},
         fake_params_buffers,
         pre_dispatch=pre_dispatch,
     )
