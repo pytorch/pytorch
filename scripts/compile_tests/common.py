@@ -1,6 +1,8 @@
 import os
 import xml.etree.ElementTree as ET
 
+from download_reports import download_reports
+
 
 def open_test_results(directory):
     xmls = []
@@ -90,6 +92,22 @@ def is_unexpected_success(testcase):
                 "unexpected success" in child.attrib["message"].lower()
             )
             if is_unexpected_success:
+                return True
+        return False
+
+    return find(testcase, condition)
+
+
+MSG = "This test passed, maybe we can remove the skip from dynamo_test_failures.py"
+
+
+def is_passing_skipped_test(testcase):
+    def condition(children):
+        for child in children:
+            if child.tag != "skipped":
+                continue
+            has_passing_skipped_test_msg = MSG in child.attrib["message"]
+            if has_passing_skipped_test_msg:
                 return True
         return False
 
