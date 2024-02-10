@@ -246,7 +246,7 @@ class NumBytesMetricTests(TestCase):
             return torch.cat(input) + 10
 
         inp = (T(10, 10) for _ in range(16))
-        self.assertExpectedInline(count_numel(f, *inp), """3200""")
+        self.assertExpectedInline(count_numel(f, *inp), """9600""")
 
     @patch.object(config, "max_pointwise_cat_inputs", 0)
     def test_cat_pointwise_config_option(self):

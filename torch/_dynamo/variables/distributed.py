@@ -4,10 +4,10 @@ import inspect
 from typing import Dict, List
 
 import torch
+from torch._dynamo.variables.base import VariableTracker
 from .. import variables
 from ..exc import unimplemented
 from ..utils import istype
-from .base import VariableTracker
 from .constant import ConstantVariable
 
 
@@ -51,12 +51,14 @@ def is_constant_pg_functions(value):
 
     from torch.distributed.distributed_c10d import (
         _get_group_tag,
+        _rank_not_in_group,
         get_process_group_ranks,
     )
 
     constant_processgroup_functions = [
         get_process_group_ranks,
         _get_group_tag,
+        _rank_not_in_group,
     ]
 
     return inspect.isfunction(value) and value in constant_processgroup_functions
@@ -186,7 +188,8 @@ class DeviceMeshVariable(DistributedVariable):
             return ConstantVariable.create(self.value.get_coordinate())
         if name == "get_group":
             return ConstantVariable.create(self.value.get_group())
-
+        if name == "_get_or_create_default_group":
+            return ProcessGroupVariable(self.value._get_or_create_default_group())
         return super().call_method(tx, name, args, kwargs)
 
 
