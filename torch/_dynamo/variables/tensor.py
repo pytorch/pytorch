@@ -215,48 +215,48 @@ class TensorVariable(VariableTracker):
         install_guard(attr_source.make_guard(GuardBuilder.HASATTR))
         return VariableBuilder(tx, attr_source)(real_value)
 
-    def _method_ndim(self, tx):
+    def method_attr_ndim(self, tx):
         if self.ndim is not None:
             return ConstantVariable.create(self.ndim)
         else:
             return self.call_method(tx, "dim", [], {})
 
-    def _method_dtype(self, tx):
+    def method_attr_dtype(self, tx):
         if self.dtype is not None:
             return ConstantVariable.create(self.dtype)
 
-    def _method_device(self, tx):
+    def method_attr_device(self, tx):
         if self.device is not None:
             return ConstantVariable.create(self.device)
 
-    def _method_layout(self, tx):
+    def method_attr_layout(self, tx):
         if self.layout is not None:
             return ConstantVariable.create(self.layout)
 
-    def _method_is_cuda(self, tx):
+    def method_attr_is_cuda(self, tx):
         if self.device is not None:
             return ConstantVariable.create(self.device.type == "cuda")
 
-    def _method_shape(self, tx):
+    def method_attr_shape(self, tx):
         if self.size is not None:
             sizes = [variables.ConstantVariable.create(x) for x in self.size]
             return SizeVariable(sizes)
         else:
             return self.call_method(tx, "size", [], {})
 
-    def _method_requires_grad(self, tx):
+    def method_attr_requires_grad(self, tx):
         if self.requires_grad is not None:
             return ConstantVariable.create(self.requires_grad)
 
-    def _method_is_quantized(self, tx):
+    def method_attr_is_quantized(self, tx):
         if self.is_quantized is not None:
             return ConstantVariable.create(self.is_quantized)
 
-    def _method_is_sparse(self, tx):
+    def method_attr_is_sparse(self, tx):
         if self.is_sparse is not None:
             return ConstantVariable.create(self.is_sparse)
 
-    def _method_data(self, tx):
+    def method_attr_data(self, tx):
         return self.call_method(tx, "detach", [], {})
 
     def var_getattr(self, tx, name):
@@ -269,7 +269,7 @@ class TensorVariable(VariableTracker):
         if name == "__class__":
             return UserDefinedClassVariable(self.python_type())
 
-        handler = getattr(self, f"_method_{name}", None)
+        handler = getattr(self, f"method_attr_{name}", None)
         result = handler(tx) if handler is not None else None
 
         # Add a guard for type matching, these guards are checked before tensor guards
