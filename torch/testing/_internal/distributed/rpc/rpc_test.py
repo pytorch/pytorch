@@ -5258,12 +5258,12 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
         with self.assertRaisesRegex(
-            RuntimeError, "Device index must not be negative"
+            RuntimeError, "Device index must .*"
         ):
             options.set_device_map(dst, {-1: 0})
 
         with self.assertRaisesRegex(
-            RuntimeError, "Device index must not be negative"
+            RuntimeError, "Device index must .*"
         ):
             options.set_device_map(dst, {0: -1})
 

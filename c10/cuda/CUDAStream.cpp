@@ -39,23 +39,23 @@ static int max_stream_priorities;
 // the destruction.
 #if !defined(USE_ROCM)
 // CUDA-only: used to initializes the stream pools (once)
-static std::array<c10::once_flag, C10_COMPILE_TIME_MAX_GPUS> device_flags;
+static std::array<c10::once_flag, c10::Device::MAX_NUM_DEVICES> device_flags;
 #endif
 static std::array<
-    std::array<std::atomic<uint32_t>, C10_COMPILE_TIME_MAX_GPUS>,
+    std::array<std::atomic<uint32_t>, c10::Device::MAX_NUM_DEVICES>,
     c10::cuda::max_compile_time_stream_priorities>
     priority_counters;
 
 static std::array<
     std::array<
         std::array<cudaStream_t, kStreamsPerPool>,
-        C10_COMPILE_TIME_MAX_GPUS>,
+c10::Device::MAX_NUM_DEVICES>,
     c10::cuda::max_compile_time_stream_priorities>
     streams;
 #ifdef USE_ROCM
 static c10::once_flag
     stream_flags[c10::cuda::max_compile_time_stream_priorities]
-                [C10_COMPILE_TIME_MAX_GPUS][kStreamsPerPool];
+                [c10::Device::MAX_NUM_DEVICES][kStreamsPerPool];
 #endif
 
 // Note [HIP Lazy Streams]
@@ -175,10 +175,10 @@ static void initGlobalStreamState() {
   // Check if the number of GPUs matches the expected compile-time max number
   // of GPUs.
   TORCH_CHECK(
-      num_gpus <= C10_COMPILE_TIME_MAX_GPUS,
+      num_gpus <= c10::Device::MAX_NUM_DEVICES,
       "Number of CUDA devices on the machine is larger than the compiled "
       "max number of gpus expected (",
-      C10_COMPILE_TIME_MAX_GPUS,
+      c10::Device::MAX_NUM_DEVICES,
       "). Increase that and recompile.");
   int leastPriority = -1, greatestPriority = -1;
   C10_CUDA_CHECK(
