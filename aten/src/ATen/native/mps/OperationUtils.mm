@@ -1,5 +1,4 @@
 //  Copyright © 2022 Apple Inc.
-#include "c10/util/BFloat16.h"
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
