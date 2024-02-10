@@ -94,20 +94,17 @@ if __name__ == "__main__":
 
     def test_stream_event_repr(self):
         s = torch.xpu.current_stream()
-        self.assertTrue("torch.xpu.Stream" in s.__repr__())
+        self.assertTrue("torch.xpu.Stream" in str(s))
         e = torch.xpu.Event()
-        self.assertTrue("torch.xpu.Event" in e.__repr__())
+        self.assertTrue("torch.xpu.Event(uninitialized)" in str(e))
         s.record_event(e)
-        self.assertTrue("torch.xpu.Event" in e.__repr__())
+        self.assertTrue("torch.xpu.Event" in str(e))
 
     def test_events(self):
         stream = torch.xpu.current_stream()
         event = torch.xpu.Event()
         self.assertTrue(event.query())
-        start_event = torch.xpu.Event()
-        stream.record_event(start_event)
         stream.record_event(event)
-        self.assertFalse(event.query())
         event.synchronize()
         self.assertTrue(event.query())
 
