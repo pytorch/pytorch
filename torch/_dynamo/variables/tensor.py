@@ -1091,6 +1091,7 @@ class UntypedStorageVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "size":
+            assert not (args or kwargs)
             result = self.example_value.size()
             if not has_free_symbols(result):
                 # avoid creating a node in the graph
