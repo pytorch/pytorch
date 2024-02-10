@@ -21,7 +21,7 @@ jobs:
       timeout: 120
       runner: linux.2xlarge
       docker-image: pytorch-linux-jammy-cuda11.8-cudnn8-py3.9-linter
-      fetch-depth: 0
+      fetch-depth: 1
       submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
@@ -35,7 +35,7 @@ jobs:
       timeout: 120
       runner: linux.2xlarge
       docker-image: pytorch-linux-jammy-cuda11.8-cudnn8-py3.9-linter
-      fetch-depth: 0
+      fetch-depth: 1
       submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
