@@ -1416,6 +1416,18 @@ class CommonTemplate:
         a = torch.rand(())
         self.common(fn, (a,))
 
+    def test_cumsum_no_mask(self):
+        def fn(x):
+            return x.cumsum(-1)
+
+        # Persistent reduction
+        a = torch.rand((1, 1024))
+        self.common(fn, (a,), check_lowp=not TEST_WITH_ROCM)
+
+        # Non-persistent reduction
+        b = torch.rand((1, 8192))
+        self.common(fn, (b,), check_lowp=not TEST_WITH_ROCM)
+
     def test_cumprod_zero_dim(self):
         def fn(x):
             return x.cumprod(0), x.cumprod(-1)
