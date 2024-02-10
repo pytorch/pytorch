@@ -172,7 +172,6 @@ dynamo_expected_failures = {
     "TestApplyAlongAxis.test_scalar_array",
     "TestDstack.test_non_iterable",
     "TestSplit.test_unequal_split",
-    "TestPutAlongAxis.test_broadcast",
     "TestArraySplit.test_integer_0_split",
     "TestDsplit.test_2D_array",
     "TestTakeAlongAxis.test_invalid",
@@ -1501,7 +1500,6 @@ dynamo_expected_failures = {
     "TestTorch.test_tensoriterator_output_setup",  # test_torch
     "TestTorch.test_parsing_double",  # test_torch
     "TestTorchDeviceTypeCPU.test_exponential_kstest_cpu_float32",  # test_torch
-    "TestTorchDeviceTypeCPU.test_deterministic_empty_cpu_uint64",  # test_torch
     "TestAutograd.test_checkpoint_detects_non_determinism",  # test_autograd
     "TestAutograd.test_gradcheck_backward_mul_by_grad_output",  # test_autograd
     "TestAutogradLogging.test_logging",  # test_autograd
