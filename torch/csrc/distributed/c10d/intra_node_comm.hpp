@@ -11,7 +11,7 @@ namespace intra_node_comm {
 
 constexpr size_t kMaxDevices = 8;
 // TODO(yifu): make this tunable
-constexpr size_t kMaxIntraNodeSize = 64 * 1024 * 1024;
+constexpr size_t kMaxIntraNodeSize = 2ull * 100 * 1024 * 1024;
 
 using NvlMesh = std::array<std::array<size_t, kMaxDevices>, kMaxDevices>;
 using HybridCubeMesh = std::array<std::array<int, 4>, kMaxDevices>;
@@ -46,7 +46,7 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
       size_t worldSize);
 
   size_t intraNodeBufferSize() {
-    return kMaxIntraNodeSize;
+    return kMaxIntraNodeSize * 2;
   }
 
   /**
