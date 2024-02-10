@@ -6462,6 +6462,7 @@ dynamo_skips = {
     "TestCustomOpTestingCPU.test_opcheck_fails_basic_cpu",  # test_custom_ops.py
     "TestVmapAPI.test_functools_partial",  # functorch/test_vmap.py
     "TestSaveLoadForOpVersion.test_versioned_div_tensor_out",  # test_jit.py
+    "TestAutograd.test_post_accumulate_grad_hook_gets_cleaned_up",  # test_autograd
 }
 
 

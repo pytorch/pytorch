@@ -144,11 +144,9 @@ def _make_mismatch_msg(
     abs_diff: float,
     abs_diff_idx: Optional[Union[int, Tuple[int, ...]]] = None,
     atol: float,
-    abs_diff_extra: Optional[str] = None,
     rel_diff: float,
     rel_diff_idx: Optional[Union[int, Tuple[int, ...]]] = None,
     rtol: float,
-    rel_diff_extra: Optional[str] = None,
 ) -> str:
     """Makes a mismatch error message for numeric values.
 
@@ -175,7 +173,6 @@ def _make_mismatch_msg(
         diff: float,
         idx: Optional[Union[int, Tuple[int, ...]]],
         tol: float,
-        extra: Optional[str] = None,
     ) -> str:
         if idx is None:
             msg = f"{type.title()} difference: {diff}"
@@ -183,8 +180,6 @@ def _make_mismatch_msg(
             msg = f"Greatest {type} difference: {diff} at index {idx}"
         if not equality:
             msg += f" (up to {tol} allowed)"
-        if extra:
-            msg += ", " + extra
         return msg + "\n"
 
     if identifier is None:
@@ -197,12 +192,8 @@ def _make_mismatch_msg(
     if extra:
         msg += f"{extra.strip()}\n"
 
-    msg += make_diff_msg(
-        type="absolute", diff=abs_diff, idx=abs_diff_idx, tol=atol, extra=abs_diff_extra
-    )
-    msg += make_diff_msg(
-        type="relative", diff=rel_diff, idx=rel_diff_idx, tol=rtol, extra=rel_diff_extra
-    )
+    msg += make_diff_msg(type="absolute", diff=abs_diff, idx=abs_diff_idx, tol=atol)
+    msg += make_diff_msg(type="relative", diff=rel_diff, idx=rel_diff_idx, tol=rtol)
 
     return msg.strip()
 
@@ -300,13 +291,6 @@ def make_tensor_mismatch_msg(
     # Ensure that only mismatches are used for the max_rel_diff computation
     rel_diff[matches_flat] = 0
     max_rel_diff, max_rel_diff_flat_idx = torch.max(rel_diff, 0)
-
-    abs_diff_extra = f"{actual_flat[int(max_abs_diff_flat_idx)]} vs {expected_flat[int(max_abs_diff_flat_idx)]}"
-    if max_abs_diff_flat_idx == max_rel_diff_flat_idx:
-        rel_diff_extra = None
-    else:
-        rel_diff_extra = f"{actual_flat[int(max_rel_diff_flat_idx)]} vs {expected_flat[int(max_rel_diff_flat_idx)]}"
-
     return _make_mismatch_msg(
         default_identifier="Tensor-likes",
         identifier=identifier,
@@ -314,11 +298,9 @@ def make_tensor_mismatch_msg(
         abs_diff=max_abs_diff.item(),
         abs_diff_idx=unravel_flat_index(int(max_abs_diff_flat_idx)),
         atol=atol,
-        abs_diff_extra=abs_diff_extra,
         rel_diff=max_rel_diff.item(),
         rel_diff_idx=unravel_flat_index(int(max_rel_diff_flat_idx)),
         rtol=rtol,
-        rel_diff_extra=rel_diff_extra,
     )
 
 
@@ -1508,7 +1490,7 @@ def assert_close(
         Tensor-likes are not close!
         <BLANKLINE>
         Mismatched elements: 2 / 3 (66.7%)
-        Greatest absolute difference: 2.0 at index (1,) (up to 1e-05 allowed), 4.0 vs 2.0
+        Greatest absolute difference: 2.0 at index (1,) (up to 1e-05 allowed)
         Greatest relative difference: 1.0 at index (1,) (up to 1.3e-06 allowed)
         <BLANKLINE>
         Footer
