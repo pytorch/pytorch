@@ -24,7 +24,7 @@ import torch
 import torch._logging
 from torch._guards import Checkpointable, tracing, TracingContext
 
-from . import config, exc, logging as torchdynamo_logging, skipfiles, variables
+from . import config, exc, logging as torchdynamo_logging, trace_rules, variables
 from .bytecode_analysis import (
     get_indexof,
     JUMP_OPNAMES,
@@ -481,8 +481,6 @@ def break_graph_if_unsupported(*, push):
                 if not self.should_compile_partial_graph():
                     raise
 
-                log.debug("break_graph_if_unsupported triggered compile", exc_info=True)
-
                 user_stack = excp.real_stack
                 # TODO: Also report the traceback from the parent frame
                 user_stack_formatted = "".join(traceback.format_list(user_stack))
@@ -494,10 +492,20 @@ def break_graph_if_unsupported(*, push):
                     and not explain
                     and graph_break_dup_warning_checker.add(frame_loc)
                 ):
+                    # This log line is exercised from
+                    #   python test/dynamo/test_exc.py -k test_graph_break_log
                     graph_break_log.debug(
-                        "Graph break: %s from user code at:\n%s",
-                        excp,
+                        "Graph break: from user code at:\n%s",
                         user_stack_formatted,
+                        exc_info=True,
+                    )
+                else:
+                    # This log line MUST NOT contain the string "Graph break",
+                    # exercised by
+                    #   python test/dynamo/test_misc.py -k test_duplicate_graph_break_log
+                    log.debug(
+                        "Unsupported break in user code at %s:%s (details suppressed)",
+                        *frame_loc,
                     )
 
                 if self.has_backedge():
@@ -2262,7 +2270,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if func.has_self():
             unimplemented("inline with __self__")
 
-        result = skipfiles.check_verbose(func, is_inlined_call=True)
+        result = trace_rules.check_verbose(func, is_inlined_call=True)
         if result.skipped:
             from torch._dynamo.variables.misc import produce_trampoline_autograd_apply
 
@@ -2272,7 +2280,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 produce_trampoline_autograd_apply,
             ]:
                 # Known sound
-                return skipfiles.SkipResult(False, "allowlist in dynamo known function")
+                return trace_rules.SkipResult(
+                    False, "allowlist in dynamo known function"
+                )
             fn_qualname = func.fn.__qualname__ if hasattr(func, "fn") else ""
             unimplemented(
                 f"'inline in skipfiles: {fn_qualname} | {func.get_name()} {func.get_filename()}, {result.reason}'"
