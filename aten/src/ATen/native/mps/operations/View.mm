@@ -732,6 +732,7 @@ static const std::string& getGatherScatterScalarType(const Tensor& t) {
   static std::unordered_map<c10::ScalarType, std::string> scalarToMetalType = {
       {c10::ScalarType::Float, "float"},
       {c10::ScalarType::Half, "half"},
+      {c10::ScalarType::BFloat16, "bfloat"},
       {c10::ScalarType::Long, "long"},
       {c10::ScalarType::Int, "int"},
       {c10::ScalarType::Short, "short"},
@@ -771,7 +772,8 @@ static id<MTLLibrary> compileGatherScatterOpsLibrary(id<MTLDevice> device,
   }
   NSError* error = nil;
   MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion:MTLLanguageVersion2_3];
+  [options setLanguageVersion:is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) ? MTLLanguageVersion3_1
+                                                                                      : MTLLanguageVersion2_3];
   const auto shaderStr = fmt::format(needsScatter ? SCATTER_OPS_TEMPLATE : GATHER_OPS_TEMPLATE,
                                      dtypeSrc,
                                      dtypeDst,

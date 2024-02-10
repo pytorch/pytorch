@@ -52,12 +52,20 @@ static inline void checkSupportsComplex() {
   TORCH_CHECK_TYPE(supportsComplex(), "MPS complex types are only supported on MacOS 14.0 or newer.");
 }
 
+static inline void checkSupportsBFloat16() {
+  TORCH_CHECK_TYPE(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
+                   "MPS bfloat16 type is supported on MacOS 14.0 or newer.");
+}
+
 MPSDataType getMPSDataType(ScalarType scalar_type) {
   switch (scalar_type) {
     case ScalarType::Float:
       return MPSDataTypeFloat32;
     case ScalarType::Half:
       return MPSDataTypeFloat16;
+    case ScalarType::BFloat16:
+      checkSupportsBFloat16();
+      return MPSDataTypeBFloat16;
     case ScalarType::Int:
       return MPSDataTypeInt32;
     case ScalarType::Long:
@@ -134,6 +142,9 @@ MPSDataType getMPSScalarType(ScalarType scalar_type) {
       return MPSDataTypeFloat32;
     case ScalarType::Half:
       return MPSDataTypeFloat16;
+    case ScalarType::BFloat16:
+      checkSupportsBFloat16();
+      return MPSDataTypeBFloat16;
     case ScalarType::Int:
       return MPSDataTypeInt32;
     case ScalarType::Long:
