@@ -96,29 +96,30 @@ class TestPythonRegistration(TestCase):
 
     def test_finalizer(self):
         impls_refcnt = sys.getrefcount(torch.library._impls)
-        with _scoped_library(self.test_ns, "FRAGMENT") as lib:
-            lib.define("foo123(Tensor x) -> Tensor")
+        lib = Library(self.test_ns, "FRAGMENT")  # noqa: TOR901
+        lib.define("foo123(Tensor x) -> Tensor")
 
-            # 1 for `lib`, 1 for sys.getrefcount
-            self.assertEqual(sys.getrefcount(lib), 2)
-            # We gained an additional reference that gets cleared when the finalizer runs
-            self.assertEqual(sys.getrefcount(torch.library._impls), impls_refcnt + 1)
-            # 1 for `lib`
-            # 1 for the finalizer
-            # 1 for sys.getrefcount
-            self.assertEqual(sys.getrefcount(lib._op_impls), 3)
+        # 1 for `lib`, 1 for sys.getrefcount
+        self.assertEqual(sys.getrefcount(lib), 2)
+        # We gained an additional reference that gets cleared when the finalizer runs
+        self.assertEqual(sys.getrefcount(torch.library._impls), impls_refcnt + 1)
+        # 1 for `lib`
+        # 1 for the finalizer
+        # 1 for sys.getrefcount
+        self.assertEqual(sys.getrefcount(lib._op_impls), 3)
 
-            def foo123(x):
-                pass
+        def foo123(x):
+            pass
 
-            lib.impl(f"{self.test_ns}::foo123", foo123, "CPU")
-            key = f'{self.test_ns}/foo123/CPU'
-            self.assertTrue(key in torch.library._impls)
+        lib.impl(f"{self.test_ns}::foo123", foo123, "CPU")
+        key = f'{self.test_ns}/foo123/CPU'
+        self.assertTrue(key in torch.library._impls)
 
-            saved_op_impls = lib._op_impls
+        saved_op_impls = lib._op_impls
 
-            # del will definitely work if the following passes
-            self.assertEqual(sys.getrefcount(lib), 2)
+        # del will definitely work if the following passes
+        self.assertEqual(sys.getrefcount(lib), 2)
+        del lib
 
         # 1 for saved_op_impls
         # 1 for sys.getrefcount
