@@ -210,6 +210,7 @@ class ConstDictVariable(VariableTracker):
         if name == "__getitem__":
             assert len(args) == 1
             return self.getitem_const(args[0])
+
         elif name == "items":
             assert not (args or kwargs)
             return TupleVariable(

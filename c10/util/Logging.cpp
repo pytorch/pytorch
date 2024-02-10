@@ -143,7 +143,7 @@ int64_t GetGlobalRank() {
   return GLOBAL_RANK;
 }
 
-void SetGlobalRank(int64_t rank) {
+C10_API void SetGlobalRank(int64_t rank) {
   GLOBAL_RANK = rank;
 }
 

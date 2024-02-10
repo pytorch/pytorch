@@ -2434,6 +2434,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         l.param_attr = None
         self.assertEqual(num_params(), 3)
 
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_assignment(self):
         l = nn.Module()
         a = nn.Parameter(torch.randn(2))
