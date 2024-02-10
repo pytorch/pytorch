@@ -1,7 +1,6 @@
 #pragma once
 
-#include <torch/csrc/inductor/aoti_runtime/model.h>
-#include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/inductor/aoti_runtime/utils.h>
 
 namespace torch {
 namespace aot_inductor {

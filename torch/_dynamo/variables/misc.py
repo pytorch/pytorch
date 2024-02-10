@@ -24,11 +24,7 @@ from ..utils import (
     proxy_args_kwargs,
 )
 from .base import MutableLocal, VariableTracker
-from .functions import (
-    NestedUserFunctionVariable,
-    UserFunctionVariable,
-    UserMethodVariable,
-)
+from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -410,38 +406,6 @@ class AutogradFunctionVariable(VariableTracker):
                 )
             else:
                 return self.call_apply(tx, args, kwargs)
-        elif name == "backward":
-            with tx.strict_translation_mode():
-                if isinstance(self.fn_cls.backward, types.FunctionType):
-                    backward = UserFunctionVariable(self.fn_cls.backward)
-                elif isinstance(self.fn_cls.backward, types.MethodType):
-                    backward = UserMethodVariable(
-                        self.fn_cls.backward.__func__,
-                        variables.UserDefinedClassVariable(self.fn_cls),
-                    )
-                    args = [backward.obj] + args
-                else:
-                    unimplemented(
-                        f"backward is a non-function or method: {self.fn_cls.backward}"
-                    )
-
-                return tx.inline_call(tx, backward, args, kwargs)
-
-        elif name == "forward":
-            if isinstance(self.fn_cls.forward, types.FunctionType):
-                forward = UserFunctionVariable(self.fn_cls.forward)
-            elif isinstance(self.fn_cls.forward, types.MethodType):
-                forward = UserMethodVariable(
-                    self.fn_cls.forward.__func__,
-                    variables.UserDefinedClassVariable(self.fn_cls),
-                )
-                args = [forward.obj] + args
-            else:
-                unimplemented(
-                    f"forward is a non-function or method: {self.fn_cls.forward}"
-                )
-
-            return tx.inline_call(tx, forward, args, kwargs)
 
         else:
             unimplemented(f"Unsupported method: {name}")
@@ -814,6 +778,8 @@ class NumpyVariable(VariableTracker):
                 msg = f"delegate '{func.__qualname__}' to NumPy itself via "
                 msg += f"confg.use_numpy_random_stream={config.use_numpy_random_stream}"
                 unimplemented(msg)
+
+            args, kwargs = NumpyNdarrayVariable.patch_args(func.__name__, args, kwargs)
 
             constant_args = check_constant_args(args, kwargs)
             unspec_python_args = check_unspec_python_args(args, kwargs)
