@@ -918,8 +918,8 @@ if HAS_CUDA:
         return p
 
     @triton.jit
-    def helper_id_and_out(x, out_ptr):
-        return x, out_ptr
+    def helper_add_and_out(x, y, out_ptr):
+        return x + y, out_ptr
 
 
 class MutationTests(torch._dynamo.test_case.TestCase):
@@ -1063,8 +1063,7 @@ class MutationTests(torch._dynamo.test_case.TestCase):
             mask = offsets < n_elements
             x = tl.load(in_ptr0 + offsets, mask=mask)
             y = tl.load(in_ptr1 + offsets, mask=mask)
-            new_x, out = helper_id_and_out(x, out_ptr)
-            output = new_x + y
+            output, out = helper_add_and_out(x, y, out_ptr)
             tl.store(out + offsets, output, mask=mask)
 
         t = torch.randn(4)
@@ -1077,9 +1076,7 @@ class MutationTests(torch._dynamo.test_case.TestCase):
                 "out_ptr": t,
                 "BLOCK_SIZE": 4,
             },
-            # TODO(oulgen): precisely identify mutation for
-            # store(out_ptr + x) where x is not a tensor pointer
-            ["in_ptr0", "out_ptr"],
+            ["out_ptr"],
         )
 
 
