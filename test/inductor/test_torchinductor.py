@@ -9634,6 +9634,15 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             code = run_and_get_triton_code(f, *get_args())
             self.assertEqual(2, code.count("evict_first"))
 
+        def test_evict_first_for_pointwise(self):
+            @torch.compile
+            def f(a):
+                return a + 1
+
+            x = torch.rand(1024, 1024, device="cuda")
+            code = run_and_get_triton_code(f, x)
+            self.assertEqual(1, code.count("evict_first"))
+
     class RNNTest(TestCase):
         class Model(torch.nn.Module):
             def __init__(self):

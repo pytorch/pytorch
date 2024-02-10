@@ -1875,7 +1875,7 @@ class TritonKernel(Kernel):
             ep = ", eviction_policy='evict_last'"
         elif not is_coalesced:
             ep = ", eviction_policy='evict_last'"
-        elif self.inside_reduction:
+        else:
             if name in self.args.inplace_buffers:
                 names = set(self.args.inplace_buffers[name].other_names)
             else:
@@ -1886,8 +1886,7 @@ class TritonKernel(Kernel):
                 ep = ", eviction_policy='evict_last'"
             else:
                 ep = ", eviction_policy='evict_first'"
-        else:
-            ep = ""
+
         # "other" below is a workaround for https://github.com/openai/triton/issues/737
         # for bool, even though it's likely subject to the same bug, setting `other` leads
         # to LLVM errors so we are skipping it for now
