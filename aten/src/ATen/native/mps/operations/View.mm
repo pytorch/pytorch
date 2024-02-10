@@ -755,6 +755,10 @@ static std::string genScatterGatherCvtFunc(const std::string& dtypeSrc, const st
     return dtypeDst + (srcComplex ? "(x.x, x.y)" : "(x,  0.0)");
   }
   if (srcComplex) {
+    // TODO: Document why explicit cast is needed only for bfloat types
+    if (dtypeDst == "bfloat") {
+      return "bfloat(x.x)";
+    }
     return "x.x";
   }
   // TODO: Document why explicit cast is needed only for bfloat types

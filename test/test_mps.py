@@ -347,6 +347,7 @@ def mps_ops_modifier(ops):
         'asin',
         'atan',
         'atanh',
+        'bfloat16',
         'bool',
         'cartesian_prod',
         'cat',
