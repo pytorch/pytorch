@@ -132,7 +132,7 @@ class LoggingTests(LoggingTestCase):
         self.assertEqual(len([r for r in records if ".__bytecode" in r.name]), 0)
         self.assertEqual(len([r for r in records if ".__output_code" in r.name]), 0)
 
-    @make_logging_test(graph_breaks=logging.DEBUG)
+    @make_logging_test(graph_breaks=True)
     def test_dynamo_error(self, records):
         try:
             fn_opt = torch._dynamo.optimize("inductor")(dynamo_error_fn)

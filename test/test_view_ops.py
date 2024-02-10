@@ -246,6 +246,7 @@ class TestViewOps(TestCase):
                 a.view(view_dtype)
 
     @onlyNativeDeviceTypes
+    @skipIfTorchDynamo("self.assertRaisesRegex multiple exceptions")
     def test_view_as_complex(self, device):
         def fn(contiguous_input=True, dim0=0, dim1=1):
             t = torch.randn(3, 2, 2, device=device)

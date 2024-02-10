@@ -466,7 +466,6 @@ dynamo_expected_failures = {
     "TestNN.test_Sequential_extend",  # test_nn
     "TestNN.test_overwrite_module_params_on_conversion",  # test_nn
     "TestNN.test_ModuleList",  # test_nn
-    "TestNNDeviceTypeCPU.test_threshold_inplace_overlap_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_module_to_empty_cpu_float64",  # test_nn
     "TestNN.test_Sequential_imul",  # test_nn
     "TestNN.test_upsampling_bfloat16",  # test_nn
@@ -1477,7 +1476,6 @@ dynamo_expected_failures = {
     "TestTorch.test_new",  # test_torch
     "TestTorchDeviceTypeCPU.test_uniform_kstest_cpu_bfloat16",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_quint8",  # test_torch
-    "TestTorchDeviceTypeCPU.test_memory_format_operators_cpu",  # test_torch
     "TestTorch.test_pin_memory",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool2d_cpu_float64",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_qint32",  # test_torch
