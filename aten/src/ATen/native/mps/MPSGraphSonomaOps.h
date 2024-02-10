@@ -7,4 +7,7 @@
 
 // define BFloat16 enums for MacOS13
 #define MPSDataTypeBFloat16 ((MPSDataType) (MPSDataTypeAlternateEncodingBit | MPSDataTypeFloat16))
+
+// define Metal version
+#define MTLLanguageVersion3_1 ((MTLLanguageVersion) ((3 << 16) + 1))
 #endif
