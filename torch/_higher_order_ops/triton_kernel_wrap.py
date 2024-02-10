@@ -167,7 +167,7 @@ def parse_ttir(ttir, kwargs):
     # TODO(oulgen):
     # - Support parsing of conditionals
     # - Support parsing for/while loops
-    # - Support ops with multiple return value (e.g. %4:2 = "tt.reduce")
+    # - Support closures (e.g. "tt.reduce")
 
     try:
         import lark  # type: ignore[import-not-found]
@@ -197,16 +197,18 @@ def parse_ttir(ttir, kwargs):
 
         func_block: "tt.func" ("public"|"private") FN_NAME "(" /.+/ NEWLINE op+ "}" LOC -> process_func
 
-        op: "tt.return" LOC
-          | [assign_lhs "="] OP_NAME [FN_NAME] args rest  -> process_op
+        op: OP_NAME LOC
+          | [assign_lhs "="] OP_NAME [FN_NAME] args rest?  -> process_op
 
         ?rest: (":" | "{" | "\\"" | "->" | "<") /.+/ NEWLINE
 
         args: | "("? arg ("," arg)* ")"?
 
-        ?arg: INTERMEDIATE | CONSTANT | PARAM | "[" arg "]"
+        ?arg: INTERMEDIATE | CONSTANT | PARAM | "[" arg "]" | arg_with_index
 
-        ?assign_lhs: INTERMEDIATE | CONSTANT
+        ?arg_with_index: arg "#" DIGIT+
+
+        ?assign_lhs: (INTERMEDIATE | CONSTANT) [":" DIGIT+]
 
         PARAM.5: "%arg" DIGIT+
         INTERMEDIATE.4: "%" DIGIT+
@@ -216,7 +218,7 @@ def parse_ttir(ttir, kwargs):
         FN_NAME: "@" NAME+
         OP_NAME: "\\""? NAME "." NAME "\\""?
 
-        LOC: "loc(#loc" DIGIT* ")"
+        LOC.5: "loc(#loc" DIGIT* ")"
 
         %import common.LETTER
         %import common.DIGIT
@@ -228,7 +230,14 @@ def parse_ttir(ttir, kwargs):
 
     def convert(token):
         if isinstance(token, lark.tree.Tree):
-            return [convert(a) for a in token.children]
+            if token.data == "args":
+                return [convert(a) for a in token.children]
+            elif token.data in {"assign_lhs", "arg_with_index"}:
+                # Drop length/index qualifier
+                return convert(token.children[0])
+            else:
+                raise AssertionError(f"Tree node with {token.data}")
+
         if token is None or (
             isinstance(token, lark.lexer.Token) and token.type == "CONSTANT"
         ):
@@ -276,8 +285,8 @@ def parse_ttir(ttir, kwargs):
 
 class MemoizeWithCycleCheck:
     def __init__(self, fn):
-        self.cache = {}
         self.fn = fn
+        self.reset()
 
     def __call__(self, functions, fn_name, num_args):
         key = (fn_name, num_args)
@@ -287,6 +296,9 @@ class MemoizeWithCycleCheck:
         if self.cache[key] is None:
             raise Exception("Recursion is not supported")
         return self.cache[key]
+
+    def reset(self):
+        self.cache = {}
 
 
 @MemoizeWithCycleCheck
@@ -362,6 +374,10 @@ def identify_mutated_tensors(kernel, kwargs):
         kernel_name = next(iter(functions.keys()))
         # Triton codegen modifies the name
         assert kernel.fn.__name__ in kernel_name
+        # Reset the cache between top level invocations
+        # The cache for analyze kernel mutations is mainly used for cycle
+        # detection, so each top level invocation needs a clean cache
+        analyze_kernel_mutations.reset()
         mutations = analyze_kernel_mutations(functions, kernel_name, len(kwargs))
 
         return [
