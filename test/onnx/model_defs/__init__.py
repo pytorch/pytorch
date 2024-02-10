@@ -1,4 +1,4 @@
-from .op_test import *  # noqa: F403
-from .squeezenet import *  # noqa: F403
-from .srresnet import *  # noqa: F403
-from .super_resolution import *  # noqa: F403
+from .op_test import DummyNet, ConcatNet, PermuteNet, PReluNet, FakeQuantNet
+from .squeezenet import Fire, SqueezeNet
+from .srresnet import ResidualBlock, UpscaleBlock, SRResNet
+from .super_resolution import SuperResolutionNet

@@ -1,7 +1,9 @@
 # Owner(s): ["module: custom-operators"]
 
-from torch.testing._internal.common_utils import *  # noqa: F403
-from torch.testing._internal.common_device_type import *  # noqa: F403
+from torch.testing._internal.common_utils import instantiate_parametrized_tests, subtest, parametrize, run_tests, \
+    IS_WINDOWS, TestCase, unittest
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, OpDTypes, ops
+
 import collections
 
 import itertools

@@ -19,7 +19,8 @@ from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfRocm
 
 # Defines all the kernels for tests
-from torch.testing._internal.triton_utils import *  # noqa: F403
+from torch.testing._internal.triton_utils import requires_cuda, HAS_CUDA, add_kernel, add_kernel_autotuned, \
+    add_kernel_2d_autotuned, mul2_kernel, mul2_inplace_kernel, zero_negs, indirection_kernel, double_strided_kernel
 
 if HAS_CUDA:
     import triton

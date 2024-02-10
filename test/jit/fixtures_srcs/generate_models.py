@@ -7,7 +7,9 @@ from typing import Set
 
 import torch
 # Use asterisk symbol so developer doesn't need to import here when they add tests for upgraders.
-from test.jit.fixtures_srcs.fixtures_src import *  # noqa: F403
+from test.jit.fixtures_srcs.fixtures_src import TestVersionedDivTensorExampleV7, TestVersionedLinspaceV7, \
+    TestVersionedLinspaceOutV7, TestVersionedLogspaceV8, TestVersionedLogspaceOutV8, TestVersionedGeluV9, \
+    TestVersionedGeluOutV9, TestVersionedRandomV10, TestVersionedRandomFuncV10, TestVersionedRandomOutV10
 from torch.jit.mobile import _load_for_lite_interpreter, _export_operator_list
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger(__name__)

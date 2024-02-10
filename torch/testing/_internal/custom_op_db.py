@@ -17,7 +17,7 @@ from torch.testing._internal.autograd_function_db import (
 )
 from torch import Tensor
 from torch.types import Number
-from typing import *  # noqa: F403
+from typing import Sequence, Tuple, List
 import torch._custom_ops as custom_ops
 
 # Note: [custom op db]
