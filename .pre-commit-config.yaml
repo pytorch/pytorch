@@ -1,0 +1,8 @@
+repos:
+  - repo: local
+    hooks:
+      - id: lintrunner
+        name: lintrunner
+        entry: make lint
+        language: system
+        pass_filenames: false
