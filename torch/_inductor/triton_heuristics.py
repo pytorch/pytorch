@@ -520,7 +520,7 @@ class CachingAutotuner(KernelInterface):
                     v,
                     k.n_regs if k.n_regs is not None else -1,
                     k.n_spills if k.n_spills is not None else -1,
-                    k.shared if k.shared is not None else -1
+                    k.metadata.shared if k.shared is not None else -1,
                 )
 
         return timings
