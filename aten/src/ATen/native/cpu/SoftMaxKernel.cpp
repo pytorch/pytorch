@@ -42,13 +42,17 @@ inline void _vec_log_softmax_lastdim(
   // size of L1D cache on many processors. Some processors have 48 KB L1D cache
   // nowadays, so maybe in the future, we can leverage the knowledge of a
   // machine's L1D cache size.
-  int64_t CHUNK_SIZE = std::max<int64_t>(
+  int64_t MAX_CHUNK_SIZE = std::max<int64_t>(
       1,
       at::internal::GRAIN_SIZE / (sizeof(scalar_t) * dim_size));
-
-  int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
-
-  parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
+  int64_t CHUNK_SIZE = std::min<int64_t>(MAX_CHUNK_SIZE, outer_size);
+  // Note: grain_size value of 0
+  // We don't change the number of OpenMP threads in the OpenMP thread-pool,
+  // so some threads do useful work, while others don't.
+  // We can simply use grain_size of 0 & rely upon invoke_parallel to distribute
+  // work among threads in an equitable manner. We compute CHUNK_SIZE to ensure
+  // each thread's computations would be efficient.
+  parallel_for(0, outer_size, 0, [&](int64_t begin, int64_t end) {
     // MSVC requires such a declaration of dynamic arrays
     // Source: https://stackoverflow.com/a/33423538
     auto tmp_sum_scalar = std::make_unique<scalar_t[]>(CHUNK_SIZE);
@@ -114,8 +118,8 @@ _vec_softmax_lastdim(
     int64_t outer_size,
     int64_t dim_size) {
   using Vec = vec::Vectorized<scalar_t>;
-  int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
-  parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
+  // See Note: grain_size value of 0
+  parallel_for(0, outer_size, 0, [&](int64_t begin, int64_t end) {
     for (const auto i : c10::irange(begin, end)) {
       scalar_t* input_data = input_data_base + i * dim_size;
       scalar_t* output_data = output_data_base + i * dim_size;
@@ -149,8 +153,8 @@ _vec_softmax_lastdim(
     int64_t dim_size) {
   using Vec = vec::Vectorized<scalar_t>;
   using fVec = vec::Vectorized<float>;
-  int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
-  parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
+  // See Note: grain_size value of 0
+  parallel_for(0, outer_size, 0, [&](int64_t begin, int64_t end) {
     // thread local temp buffer.
     auto buffer = std::make_unique<float []>(dim_size);
     float* buffer_data = buffer.get();
@@ -214,14 +218,11 @@ inline void _vec_host_softmax_backward_lastdim(
     int64_t outer_size,
     int64_t dim_size) {
   using Vec = vec::Vectorized<at::opmath_type<scalar_t>>;
-  int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
-  if (grain_size < 1)
-    grain_size = 1;
-
+  // See Note: grain_size value of 0
   parallel_for(
       0,
       outer_size,
-      grain_size,
+      0,
       [&](int64_t begin, int64_t end) {
         for (const auto i : c10::irange(begin, end)) {
           scalar_t* grad_input_data = grad_input_data_base + i * dim_size;
@@ -271,13 +272,14 @@ _vec_softmax_backward(
   using Vec = vec::Vectorized<scalar_t>;
   int64_t outer_stride = dim_size * inner_size;
   int64_t BLOCK_SIZE = 128 * 1024;
-  int64_t CHUNK_SIZE = std::max<int64_t>(
+  int64_t MAX_CHUNK_SIZE = std::max<int64_t>(
       BLOCK_SIZE / dim_size / sizeof(scalar_t), Vec::size());
-  CHUNK_SIZE = CHUNK_SIZE / Vec::size() * Vec::size();
+  MAX_CHUNK_SIZE = MAX_CHUNK_SIZE / Vec::size() * Vec::size();
+  int64_t CHUNK_SIZE = std::min<int64_t>(MAX_CHUNK_SIZE, inner_size);
   int64_t num_chunks = divup(inner_size, CHUNK_SIZE);
-  int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
+  // See Note: grain_size value of 0
   parallel_for(
-      0, outer_size * num_chunks, grain_size, [&](int64_t begin, int64_t end) {
+      0, outer_size * num_chunks, 0, [&](int64_t begin, int64_t end) {
         // thread local temp buffer that holds vertical sum result
         auto buffer = std::make_unique<scalar_t[]>(CHUNK_SIZE);
         scalar_t* tmp_sum_data = buffer.get();
@@ -355,13 +357,14 @@ _vec_softmax_backward(
   using fVec = vec::Vectorized<float>;
   int64_t outer_stride = dim_size * inner_size;
   int64_t BLOCK_SIZE = 128 * 1024;
-  int64_t CHUNK_SIZE = std::max<int64_t>(
+  int64_t MAX_CHUNK_SIZE = std::max<int64_t>(
       BLOCK_SIZE / dim_size / sizeof(scalar_t), Vec::size());
-  CHUNK_SIZE = CHUNK_SIZE / Vec::size() * Vec::size();
+  MAX_CHUNK_SIZE = MAX_CHUNK_SIZE / Vec::size() * Vec::size();
+  int64_t CHUNK_SIZE = std::min<int64_t>(MAX_CHUNK_SIZE, inner_size);
   int64_t num_chunks = divup(inner_size, CHUNK_SIZE);
-  int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
+  // See Note: grain_size value of 0
   parallel_for(
-      0, outer_size * num_chunks, grain_size, [&](int64_t begin, int64_t end) {
+      0, outer_size * num_chunks, 0, [&](int64_t begin, int64_t end) {
         // thread local temp buffer that holds vertical sum result
         auto buffer = std::make_unique<float[]>(CHUNK_SIZE);
         float* tmp_sum_data = buffer.get();
@@ -480,13 +483,14 @@ _vec_log_softmax_backward(
   using Vec = vec::Vectorized<scalar_t>;
   int64_t outer_stride = dim_size * inner_size;
   int64_t BLOCK_SIZE = 128 * 1024;
-  int64_t CHUNK_SIZE = std::max<int64_t>(
+  int64_t MAX_CHUNK_SIZE = std::max<int64_t>(
       BLOCK_SIZE / dim_size / sizeof(scalar_t), Vec::size());
-  CHUNK_SIZE = CHUNK_SIZE / Vec::size() * Vec::size();
+  MAX_CHUNK_SIZE = MAX_CHUNK_SIZE / Vec::size() * Vec::size();
+  int64_t CHUNK_SIZE = std::min<int64_t>(MAX_CHUNK_SIZE, inner_size);
   int64_t num_chunks = divup(inner_size, CHUNK_SIZE);
-  int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
+  // See Note: grain_size value of 0
   parallel_for(
-      0, outer_size * num_chunks, grain_size, [&](int64_t begin, int64_t end) {
+      0, outer_size * num_chunks, 0, [&](int64_t begin, int64_t end) {
         // thread local temp buffer that holds vertical sum result
         auto buffer = std::make_unique<scalar_t[]>(CHUNK_SIZE);
         scalar_t* tmp_sum_data = buffer.get();
@@ -563,13 +567,14 @@ _vec_log_softmax_backward(
   using fVec = vec::Vectorized<float>;
   int64_t outer_stride = dim_size * inner_size;
   int64_t BLOCK_SIZE = 128 * 1024;
-  int64_t CHUNK_SIZE = std::max<int64_t>(
+  int64_t MAX_CHUNK_SIZE = std::max<int64_t>(
       BLOCK_SIZE / dim_size / sizeof(scalar_t), Vec::size());
-  CHUNK_SIZE = CHUNK_SIZE / Vec::size() * Vec::size();
+  MAX_CHUNK_SIZE = MAX_CHUNK_SIZE / Vec::size() * Vec::size();
+  int64_t CHUNK_SIZE = std::min<int64_t>(MAX_CHUNK_SIZE, inner_size);
   int64_t num_chunks = divup(inner_size, CHUNK_SIZE);
-  int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
+  // See Note: grain_size value of 0
   parallel_for(
-      0, outer_size * num_chunks, grain_size, [&](int64_t begin, int64_t end) {
+      0, outer_size * num_chunks, 0, [&](int64_t begin, int64_t end) {
         // thread local temp buffer that holds vertical sum result
         auto buffer = std::make_unique<float[]>(CHUNK_SIZE);
         float* tmp_sum_data = buffer.get();
@@ -694,10 +699,10 @@ _vec_softmax(
   using Vec16 = vec::Vectorized<scalar_t>;
   int64_t dim_stride = inner_size;
   int64_t outer_stride = dim_size * dim_stride;
-  int64_t grain_size = internal::GRAIN_SIZE / dim_size;
   int vectorized_step = Vec16().size(); // Currently, we only support BFloat16/Half in this special implementation
+  // See Note: grain_size value of 0
   parallel_for(
-      0, outer_size * inner_size, grain_size, [&](int64_t begin, int64_t end) {
+      0, outer_size * inner_size, 0, [&](int64_t begin, int64_t end) {
         int64_t idx = begin;
         std::unique_ptr<float[]> temp_vec_input(new float[dim_size*vectorized_step]());
         std::unique_ptr<float[]> temp_vec_output(new float[dim_size*vectorized_step]());
@@ -801,10 +806,10 @@ _vec_softmax(
   using Vec = vec::Vectorized<scalar_t>;
   int64_t dim_stride = inner_size;
   int64_t outer_stride = dim_size * dim_stride;
-  int64_t grain_size = internal::GRAIN_SIZE / dim_size;
   int vectorized_step = Vec().size();
+  // See Note: grain_size value of 0
   parallel_for(
-      0, outer_size * inner_size, grain_size, [&](int64_t begin, int64_t end) {
+      0, outer_size * inner_size, 0, [&](int64_t begin, int64_t end) {
         int64_t idx = begin;
         while (idx < end) {
           int64_t outer_idx = idx / inner_size;
@@ -894,12 +899,13 @@ _vec_logsoftmax(
     int64_t dim_size) {
   using Vec = vec::Vectorized<scalar_t>;
   int64_t BLOCK_SIZE = 128 * 1024;
-  int64_t CHUNK_SIZE = std::max<int64_t>(BLOCK_SIZE / dim_size / sizeof(scalar_t), Vec::size());
-  CHUNK_SIZE = CHUNK_SIZE / Vec::size() * Vec::size();
+  int64_t MAX_CHUNK_SIZE = std::max<int64_t>(BLOCK_SIZE / dim_size / sizeof(scalar_t), Vec::size());
+  MAX_CHUNK_SIZE = MAX_CHUNK_SIZE / Vec::size() * Vec::size();
+  int64_t CHUNK_SIZE = std::min<int64_t>(MAX_CHUNK_SIZE, inner_size);
   int64_t num_chunks = divup(inner_size, CHUNK_SIZE);
 
-  int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
-  at::parallel_for(0, outer_size * num_chunks, grain_size, [&](int64_t begin, int64_t end) {
+  // See Note: grain_size value of 0
+  at::parallel_for(0, outer_size * num_chunks, 0, [&](int64_t begin, int64_t end) {
     // thread local temp buffer which holds vertical reduction result: max and sum.
     auto buffer = std::make_unique<scalar_t []>(CHUNK_SIZE * 2);
     scalar_t* input_max_data = buffer.get();
@@ -999,12 +1005,13 @@ _vec_logsoftmax(
   using Vec = vec::Vectorized<scalar_t>;
   using fVec = vec::Vectorized<float>;
   int64_t BLOCK_SIZE = 128 * 1024;
-  int64_t CHUNK_SIZE = std::max<int64_t>(BLOCK_SIZE / dim_size / sizeof(scalar_t), Vec::size());
-  CHUNK_SIZE = CHUNK_SIZE / Vec::size() * Vec::size();
+  int64_t MAX_CHUNK_SIZE = std::max<int64_t>(BLOCK_SIZE / dim_size / sizeof(scalar_t), Vec::size());
+  MAX_CHUNK_SIZE = MAX_CHUNK_SIZE / Vec::size() * Vec::size();
+  int64_t CHUNK_SIZE = std::min<int64_t>(MAX_CHUNK_SIZE, inner_size);
   int64_t num_chunks = divup(inner_size, CHUNK_SIZE);
 
-  int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
-  at::parallel_for(0, outer_size * num_chunks, grain_size, [&](int64_t begin, int64_t end) {
+  // See Note: grain_size value of 0
+  at::parallel_for(0, outer_size * num_chunks, 0, [&](int64_t begin, int64_t end) {
     auto buffer = std::make_unique<float []>(CHUNK_SIZE * 2);
     float* input_max_data = buffer.get();
     float* tmp_sum_data = buffer.get() + CHUNK_SIZE;

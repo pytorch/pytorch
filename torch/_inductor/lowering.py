@@ -5,7 +5,7 @@ import os
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
@@ -23,6 +23,7 @@ from torch._prims_common import (
     dtype_to_type,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    get_computation_dtype,
     is_boolean_dtype,
     is_float_dtype,
     is_integer_dtype,
@@ -53,21 +54,22 @@ from .utils import (
     is_dynamic,
     is_pointwise_use,
     pad_listlike,
+    parallel_num_threads,
     sympy_product,
 )
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
-lowerings = {}
-layout_constraints = {}
-fallbacks = set()
+lowerings: Dict[torch._ops.OpOverload, Callable[..., Any]] = {}
+layout_constraints: Dict[torch._ops.OpOverload, Callable[..., Any]] = {}
+fallbacks: Set[torch._ops.OpOverload] = set()
 aten = torch.ops.aten
 tr_c10d = torch.ops.tr_c10d
 prims = torch.ops.prims
-needs_realized_inputs = set()
-foreach_ops = set()
-inplace_foreach_ops = set()
-inplaceable_foreach_ops = dict()
+needs_realized_inputs: Set[torch._ops.OpOverload] = set()
+foreach_ops: Set[torch._ops.OpOverload] = set()
+inplace_foreach_ops: Set[torch._ops.OpOverload] = set()
+inplaceable_foreach_ops: Dict[torch._ops.OpOverload, torch._ops.OpOverload] = dict()
 
 
 def assert_nyi(cond, msg):
@@ -766,6 +768,15 @@ def trunc(x):
     return make_pointwise(fn)(x)
 
 
+@register_lowering(
+    [aten.special_bessel_j0, prims.bessel_j0],
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def bessel_j0(x):
+    fn = ops_wrapper("bessel_j0")
+    return make_pointwise(fn)(x)
+
+
 @register_lowering(aten.expand, type_promotion_kind=None)
 def expand(x, sizes):
     (x,) = promote_constants([x])
@@ -882,10 +893,6 @@ def slice_(x, dim=0, start=0, end=2**63, step=1):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
-    if V.graph.sizevars.evaluate_expr(sympy.Lt(start + dim_size, 0)):
-        start = 0
-    if V.graph.sizevars.evaluate_expr(sympy.Lt(end + dim_size, 0)):
-        end = 0
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
 
 
@@ -985,8 +992,8 @@ def pointwise_cat(inputs, dim=0):
     inputs_ranges: List[Tuple[sympy.Expr, sympy.Expr]] = []
     prev_end = 0
     for inp in inputs:
-        inputs_ranges.append((prev_end, prev_end + inp.get_size()[dim]))
-        prev_end = inputs_ranges[-1][-1]
+        inputs_ranges.append((prev_end, prev_end + inp.get_size()[dim]))  # type: ignore[arg-type]
+        prev_end = inputs_ranges[-1][-1]  # type: ignore[assignment]
 
     inputs_loaders = [inp.make_loader() for inp in inputs]
 
@@ -1091,7 +1098,12 @@ def cat(inputs, dim=0):
 
         return False
 
-    if len(inputs) <= config.max_pointwise_cat_inputs:
+    # TODO: We observed negative performance impact of pointwise_cat optimization on CPU so disabled it.
+    #             We will revisit this later after enabling vectorization on index_expr.
+    if (
+        len(inputs) <= config.max_pointwise_cat_inputs
+        and inputs[0].get_device().type != "cpu"
+    ):
         pointwise_uses = all(is_pointwise_use(use) for use in V.current_node.users)
         all_pointwise_inputs = all(should_lower_cat_input(inp) for inp in inputs)
         any_pointwise_inputs = any(should_lower_cat_input(inp) for inp in inputs)
@@ -1212,7 +1224,7 @@ def unfold(x, dimension, size, step):
     dim_size = sizes[dim]
     sizevars = V.graph.sizevars
     sizevars.guard_leq(size, dim_size)
-    sizevars.guard_lt(0, step)
+    sizevars.guard_lt(0, step)  # type: ignore[arg-type]
 
     new_dim_size = FloorDiv(dim_size - size, step) + 1
     if sizevars.size_hint(dim_size) > 0:
@@ -1522,6 +1534,17 @@ def register_onednn_fusion_ops():
             unary_scalars,
             unary_algorithmm,
         ):
+            if (
+                binary_attr == "sum"
+                and output_dtype in [torch.float32, torch.bfloat16]
+                and accum.get_dtype() in [torch.float32, torch.bfloat16]
+                and accum.get_dtype() != output_dtype
+            ):
+                # For int8-mixed-bf16 quantization and inplace add,
+                # there is case when accum dtype is float32 but output dtype is bfloat16.
+                # Since the accum will be inplaced changed with post op sum,
+                # we will do accum dtype convertion here.
+                accum = to_dtype(accum, output_dtype)
             return TensorBox.create(
                 ir.QConvPointWiseBinaryPT2E.create(
                     x,
@@ -2038,7 +2061,7 @@ make_fallback(aten._embedding_bag_forward_only, require_contiguous)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
 make_fallback(aten.grid_sampler_2d_backward, require_dense)
-make_fallback(aten.randperm)
+make_fallback(aten.randperm)  # needs sort
 
 
 def sdpa_constraint(fx_node, *args, **kwargs):
@@ -2115,6 +2138,16 @@ make_fallback(
 )
 make_fallback(
     aten._scaled_dot_product_flash_attention_backward.default,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_flash_attention_for_cpu.default,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_flash_attention_for_cpu_backward.default,
     sdpa_constraint,
     warn=False,
 )
@@ -2200,7 +2233,6 @@ make_fallback(aten.resize_as)
 make_fallback(aten.resize_as_)
 make_fallback(aten.searchsorted)
 make_fallback(aten.special_airy_ai)
-make_fallback(aten.special_bessel_j0, warn=False)
 make_fallback(aten.special_bessel_j1, warn=False)
 make_fallback(aten.special_bessel_y0, warn=False)
 make_fallback(aten.special_bessel_y1)
@@ -2222,7 +2254,6 @@ make_fallback(aten.special_scaled_modified_bessel_k0)
 make_fallback(aten.special_scaled_modified_bessel_k1)
 make_fallback(aten.special_spherical_bessel_j0, warn=False)
 make_fallback(aten.special_zeta, warn=False)
-make_fallback(aten.take)
 make_fallback(aten._trilinear)
 make_fallback(aten.uniform, warn=False)
 make_fallback(aten._adaptive_avg_pool3d_backward)
@@ -2242,7 +2273,7 @@ make_fallback(aten.soft_margin_loss_backward, warn=False)
 make_fallback(aten.linalg_pinv.atol_rtol_tensor)
 make_fallback(aten.segment_reduce.default)
 make_fallback(aten._segment_reduce_backward.default)
-make_fallback(aten.angle)
+make_fallback(aten.angle)  # needs complex
 make_fallback(aten.cholesky_inverse)
 make_fallback(aten.cholesky_solve)
 make_fallback(aten._fft_r2c)
@@ -2348,8 +2379,8 @@ def select_scatter(x, src, dim: int, index: int):
     dim = _validate_dim(x, dim, 0)
     if V.graph.sizevars.evaluate_expr(sympy.Lt(index, 0)):
         index = index + x.get_size()[dim]
-    V.graph.sizevars.guard_leq(0, index)
-    V.graph.sizevars.guard_lt(index, x.get_size()[dim])
+    V.graph.sizevars.guard_leq(0, index)  # type: ignore[arg-type]
+    V.graph.sizevars.guard_lt(index, x.get_size()[dim])  # type: ignore[arg-type]
     src = expand(unsqueeze(src, dim), x.get_size())
     src_loader = src.make_loader()
 
@@ -2377,14 +2408,8 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
-    if start is not None and V.graph.sizevars.evaluate_expr(sympy.Lt(start, 0)):
-        start = start + dim_size
-    if end is not None and V.graph.sizevars.evaluate_expr(sympy.Lt(end, 0)):
-        end = end + dim_size
-    if start is None:
-        start = 0
-    if end is None or V.graph.sizevars.statically_known_leq(x.get_size()[dim], end):
-        end = dim_size
+
+    start, end = ir.SliceView.normalize_start_end(x, dim, start, end)
 
     src_size = list(x.get_size())
     src_size[dim] = FloorDiv(end - start + (step - 1), step)
@@ -2595,6 +2620,10 @@ def tensor_constructor(fill_value):
         dtype = dtype or torch.get_default_dtype()
         if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
             size = tuple(size[0])
+        # See https://github.com/pytorch/pytorch/issues/118102
+        # All sizes at lowering time should be sympy.Symbol, not SymInt!
+        for s in size:
+            assert not isinstance(s, torch.SymInt)
         size = [sympy.expand(s) for s in size]
         return _full(fill_value, device, dtype, size)
 
@@ -2970,7 +2999,6 @@ def index_put_as_masked_fill(self, indices, value, accumulate):
 def index_put_fallback(self, indices, values, accumulate):
     deterministic = torch.are_deterministic_algorithms_enabled()
     if is_triton(values) and (accumulate or deterministic):
-        V.graph.disable_cudagraphs = True
         msg = (
             "index put with accumulate."
             if not deterministic
@@ -3162,6 +3190,7 @@ def scatter_fallback(
             and isinstance(src, TensorBox)
             and src.get_device() == torch.device("cpu")
             and config.cpp.fallback_scatter_reduce_sum
+            and (config.cpp.dynamic_threads or parallel_num_threads() != 1)
         )
         or (reduce == reduce_ty and self.get_dtype() in {torch.bool, torch.int64})
         or torch.are_deterministic_algorithms_enabled()
@@ -3325,10 +3354,10 @@ def upsample_nearestnd(
     assert len(scales_x) == n
     o_sizes = output_size
 
-    scales = [i / o for i, o in zip(i_sizes, o_sizes)]
+    inv_scales = [i / o for i, o in zip(i_sizes, o_sizes)]
     for i, scale in enumerate(scales_x):
-        if scale:
-            scales[i] = scale
+        if scale is not None:
+            inv_scales[i] = 1.0 / scale
 
     def scale_fn(x, scale, size):
         # Nearest Exact: input_index = round(scale * (output_index + 0.5) - 0.5)
@@ -3345,7 +3374,7 @@ def upsample_nearestnd(
         x = idx[-n:]
         b = idx[:-n]
         return x_loader(
-            [*b, *[scale_fn(i, s, size) for i, s, size in zip(x, scales, i_sizes)]]
+            [*b, *[scale_fn(i, s, size) for i, s, size in zip(x, inv_scales, i_sizes)]]
         )
 
     return Pointwise.create(
@@ -3652,12 +3681,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     # if padding is a complicated expression, hoist it
     bounds_precomp: List[Tuple[sympy.Symbol, Any]] = []
     for l, h in bounds:
-        l_precomp = (
-            V.graph.sizevars.lookup_precomputed_size(l)
-            if isinstance(l, sympy.Expr) and not l.is_number
-            else l
-        )
-        bounds_precomp.append((l_precomp, h))
+        bounds_precomp.append((V.graph.sizevars.lookup_precomputed_size(l), h))  # type: ignore[arg-type]
 
     output_size = list(sizes[:n])
     mask_sizes = []
@@ -3753,8 +3777,8 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
         )
         if V.graph.sizevars.size_hint((x_alt - 1) * stride[i] - x - padding[i]) >= 0:
             # Sliding windows must start within the input or left padding
-            x_alt -= 1
-            V.graph.sizevars.guard_leq(0, x_alt * stride[i] - x - padding[i])
+            x_alt -= 1  # type: ignore[assignment]
+            V.graph.sizevars.guard_leq(0, x_alt * stride[i] - x - padding[i])  # type: ignore[arg-type]
         if V.graph.sizevars.size_hint(x_out - x_alt) == 0:
             # ceil mode is actually a no-op, lets guard on that
             V.graph.sizevars.guard_equals(x_out, x_alt)
@@ -4560,7 +4584,7 @@ def _make_scan_inner(x, *, axis, dtype):
     if dtype is not None:
         x = to_dtype(x, dtype)
     size = x.get_size()
-    axis = _validate_reduction_axis(x, axis)[0]
+    axis = _validate_dim(x, axis)
 
     return dict(
         device=x.get_device(),
@@ -4608,7 +4632,7 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     denom = ExpandView.create(denom, list(sum_result.get_size()))
     x_var = div(sum_result, denom)
     if not return_mean:
-        return x_var
+        return (x_var,)
 
     x_mean = x_mean if keepdim else squeeze(x_mean, axis)
     return x_var, x_mean
@@ -4670,29 +4694,39 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
     if return_mean:
         mean.realize()
         return var, mean
-    return var
+    return (var,)
+
+
+def var_mean_helper_(x, *, axis, correction, keepdim, return_mean):
+    out_dtype = x.get_dtype()
+    compute_dtype = get_computation_dtype(out_dtype)
+    x = to_dtype(x, compute_dtype, copy=False)
+    kwargs = dict(
+        x=x,
+        axis=axis,
+        correction=correction,
+        keepdim=keepdim,
+        return_mean=return_mean,
+    )
+    output = (
+        var_mean_sum_(**kwargs)
+        if use_two_step_variance(x, axis=axis, keepdim=keepdim)
+        else var_mean_welford_(**kwargs)
+    )
+    output = tuple(to_dtype(x, out_dtype, copy=False) for x in output)
+    return output[0] if not return_mean else output
 
 
 @register_lowering([aten.var, prims.var])
 def var_(x, axis=None, *, correction=None, keepdim=False):
-    if use_two_step_variance(x, axis=axis, keepdim=keepdim):
-        return var_mean_sum_(
-            x, axis=axis, correction=correction, keepdim=keepdim, return_mean=False
-        )
-
-    return var_mean_welford_(
+    return var_mean_helper_(
         x, axis=axis, correction=correction, keepdim=keepdim, return_mean=False
     )
 
 
 @register_lowering(aten.var_mean)
 def var_mean(x, axis=None, *, correction=None, keepdim=False):
-    if use_two_step_variance(x, axis=axis, keepdim=keepdim):
-        return var_mean_sum_(
-            x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
-        )
-
-    return var_mean_welford_(
+    return var_mean_helper_(
         x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
     )
 
@@ -4931,6 +4965,11 @@ def cumsum(x, axis=None, dtype=None):
     ) and dtype is None:
         dtype = torch.int64
 
+    if len(x.get_size()) == 0:
+        assert axis in [0, -1]
+        dtype = dtype or x.get_dtype()
+        return to_dtype(x, dtype, copy=True)
+
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     result = ir.Scan.create(**kwargs, combine_fn=ops.add, init=0)
     if result is None:
@@ -4944,6 +4983,11 @@ def cumprod(x, axis=None, dtype=None):
         is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     ) and dtype is None:
         dtype = torch.int64
+
+    if len(x.get_size()) == 0:
+        assert axis in [0, -1]
+        dtype = dtype or x.get_dtype()
+        return to_dtype(x, dtype, copy=True)
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     result = ir.Scan.create(**kwargs, combine_fn=ops.mul, init=1)
@@ -5078,6 +5122,7 @@ minimum = register_pointwise(aten.minimum)
 register_lowering(aten.clamp_min)(maximum)
 register_lowering(aten.clamp_max)(minimum)
 neg = register_pointwise(aten.neg)
+abs = register_pointwise(aten.abs)
 reciprocal = register_pointwise_numeric(aten.reciprocal)
 register_pointwise(aten.remainder)
 sign = register_pointwise(aten.sign, override_fn_when_input_bool="identity")
@@ -5281,6 +5326,11 @@ def accumulate_grad_(variable, new_grad):
     return variable
 
 
+from torch._higher_order_ops.auto_functionalize import auto_functionalized
+
+make_fallback(auto_functionalized)
+
+
 @register_lowering(triton_kernel_wrapper_mutation)
 def triton_kernel_wrap_(*, kernel_idx, grid, kwargs):
     ir.UserDefinedTritonKernel(kernel_idx=kernel_idx, grid=grid, kernel_args=kwargs)
@@ -5289,11 +5339,28 @@ def triton_kernel_wrap_(*, kernel_idx, grid, kwargs):
 
 @register_lowering(triton_kernel_wrapper_functional)
 def triton_kernel_wrap(*, kernel_idx, grid, kwargs, tensors_to_clone):
-    kwargs = {
-        key: (clone_preserve_reinterpret_view(x) if key in tensors_to_clone else x)
-        for key, x in kwargs.items()
-    }
-    return triton_kernel_wrap_(kernel_idx=kernel_idx, grid=grid, kwargs=kwargs)
+    new_kwargs = {}
+    for name, value in kwargs.items():
+        if isinstance(value, ir.TensorBox):
+            x = value.data
+            has_non_rv_views = False
+            while isinstance(x, ir.BaseView):
+                if not isinstance(x, ir.ReinterpretView):
+                    has_non_rv_views = True
+                    break
+                x = x.data
+            if has_non_rv_views:
+                # we realize the inputs wrapped into any view which is not
+                # ReinterpretView to convert them into ReinterpretView during
+                # realization; all views being ReinterpretView is assumed by
+                # the downstream code (e.g., preserving ReinterpretView in
+                # cloning; layout should be available in mutation marking)
+                value = ir.TensorBox(ir.ExternKernel.realize_input(value))
+            if name in tensors_to_clone:
+                value = clone_preserve_reinterpret_view(value)
+        new_kwargs[name] = value
+
+    return triton_kernel_wrap_(kernel_idx=kernel_idx, grid=grid, kwargs=new_kwargs)
 
 
 try:
@@ -5437,6 +5504,18 @@ try:
                 group_size,
                 group_name,
             ),
+        )
+
+    @register_lowering(_c10d_functional.all_to_all_single)
+    def _all_to_all_single(inp, output_split_sizes, input_split_sizes, group_name):
+        return ir.TensorBox.create(
+            ir._CollectiveKernel.create_out_of_place(
+                _c10d_functional.all_to_all_single.default,
+                inp,
+                output_split_sizes,
+                input_split_sizes,
+                group_name,
+            )
         )
 
     @register_lowering(_c10d_functional.wait_tensor)

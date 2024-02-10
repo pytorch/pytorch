@@ -55,7 +55,7 @@ class OutDtypeOperator(HigherOrderOperator):
             raise ValueError("out_dtype's first argument must be an OpOverload")
         if op._schema.is_mutable:
             raise ValueError("out_dtype's first argument needs to be a functional operator")
-        if not(
+        if not (
             len(op._schema.returns) == 1 and
             isinstance(op._schema.returns[0].type, torch.TensorType)
         ):
@@ -164,7 +164,6 @@ def out_dtype_fake_tensor_mode(
     *args
 ):
     with mode:
-        print("ARGS", args)
         return out_dtype_dense(op, output_dtype, *args)
 
 

@@ -1689,7 +1689,7 @@ def norm(input, p: Optional[Union[float, str]] = "fro", dim=None, keepdim=False,
             else:
                 return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype, out=out)  # type: ignore[attr-defined]
 
-def unravel_index(indices: Tensor, shape: Union[int, Sequence[int], torch.Size]) -> List[Tensor]:
+def unravel_index(indices: Tensor, shape: Union[int, Sequence[int], torch.Size]) -> Tuple[Tensor, ...]:
     r"""Converts a tensor of flat indices into a tuple of coordinate tensors that
     index into an arbitrary tensor of the specified shape.
 

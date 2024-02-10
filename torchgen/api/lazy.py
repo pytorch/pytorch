@@ -35,7 +35,7 @@ from torchgen.model import (
 )
 
 
-_valueT = None
+_valueT: Optional[BaseCppType] = None
 
 
 # A ValueT is an IR type which represents the computation of a Tensor.  In other

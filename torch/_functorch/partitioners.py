@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
@@ -14,7 +16,7 @@ import itertools
 import sympy
 from collections import defaultdict
 from torch.fx.passes import graph_drawer
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Set, Tuple, Union
 from .compile_utils import fx_graph_cse, get_aten_target
 from . import config
 import functools
@@ -218,8 +220,8 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_s
         bwd_outputs
     )
 
-    fwd_module = fx.GraphModule(joint_module, fwd_graph)
-    bwd_module = fx.GraphModule(joint_module, bwd_graph)
+    fwd_module = fx._lazy_graph_module._make_graph_module(joint_module, fwd_graph)
+    bwd_module = fx._lazy_graph_module._make_graph_module(joint_module, bwd_graph)
     return fwd_module, bwd_module
 
 
@@ -325,7 +327,8 @@ def _size_of(node: fx.Node) -> int:
     # Only needed since we don't always trace with fake tensors.
     if 'tensor_meta' in node.meta:
         metadata = node.meta['tensor_meta']
-        numel = _prod(map(to_size_hint, metadata.shape))
+        # TODO: What is to_size_hint suppose to be?
+        numel = _prod(map(to_size_hint, metadata.shape))  # noqa: F821
         dtype = metadata.dtype
     else:
         return 0
@@ -736,8 +739,6 @@ def min_cut_rematerialization_partition(
     random_ops = [aten.native_dropout, aten.rand_like, aten.randn_like]
     compute_intensive_ops = [aten.mm, aten.convolution, aten.convolution_backward, aten.bmm, aten.addmm, aten.upsample_bilinear2d, aten._softmax, aten._softmax_backward_data, aten.native_layer_norm, aten.native_layer_norm_backward, aten.native_batch_norm, aten.native_batch_norm_backward, aten._native_batch_norm_legit]  # noqa: E501,B950
 
-    unrecomputable_ops = random_ops + compute_intensive_ops
-
     fusible_ops = recomputable_ops | set(random_ops)
     if AOT_PARTITIONER_DEBUG:
         joint_module_ops = {
@@ -749,6 +750,10 @@ def min_cut_rematerialization_partition(
         print("Ops banned from rematerialization: ", ops_ignored)
         print()
 
+    # `AGGRESSIVE_RECOMPUTATION` is a mode that recomputes everything except
+    # random ops and compute-intensive ops.
+    # It's an internal-only debug mode and is not related to user-facing
+    # (selective) activation checkpointing.
     AGGRESSIVE_RECOMPUTATION = False
 
     def is_materialized_backwards(node):
@@ -767,7 +772,8 @@ def min_cut_rematerialization_partition(
         if "recompute" in node.meta:
             return node.meta["recompute"] == 0
         elif AGGRESSIVE_RECOMPUTATION:
-            return (node.op == 'call_function' and get_aten_target(node) in unrecomputable_ops)
+            ignored_ops = random_ops + compute_intensive_ops
+            return (node.op == 'call_function' and get_aten_target(node) in ignored_ops)
         else:
             if node.op != 'call_function':
                 return False

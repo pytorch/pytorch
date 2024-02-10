@@ -1,6 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -27,33 +27,24 @@ Scalar item(const Tensor& self) {
   }
 }
 
+#define AT_SD_BASE_TYPES AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_COMPLEX_TYPES), kComplexHalf, kHalf, kBool, kBFloat16, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES)
 #if !defined(C10_MOBILE)
-#define _AT_DISPATCH_SD_TYPES(TYPE, NAME, ...) \
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND8(      \
-      kComplexHalf,                            \
-      kHalf,                                   \
-      kBool,                                   \
-      kBFloat16,                               \
-      kFloat8_e5m2,                            \
-      kFloat8_e5m2fnuz,                        \
-      kFloat8_e4m3fn,                          \
-      kFloat8_e4m3fnuz,                        \
-      TYPE,                                    \
-      NAME,                                    \
-      __VA_ARGS__)
+#define AT_SD_TYPES AT_EXPAND(AT_SD_BASE_TYPES), AT_EXPAND(AT_FLOAT8_TYPES)
 #else
-#define _AT_DISPATCH_SD_TYPES(TYPE, NAME, ...)     \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(    \
-            kComplexHalf, kHalf, kBool, kBFloat16, \
-            TYPE, NAME, __VA_ARGS__)
+#define AT_SD_TYPES AT_EXPAND(AT_SD_BASE_TYPES)
 #endif
 
 Scalar _local_scalar_dense_cpu(const Tensor& self) {
   Scalar r;
-  _AT_DISPATCH_SD_TYPES(self.scalar_type(), "_local_scalar_dense_cpu", [&] {
-        scalar_t value = *self.data_ptr<scalar_t>();
-        r = Scalar(value);
-      });
+  AT_DISPATCH_V2(
+    self.scalar_type(),
+    "_local_scalar_dense_cpu",
+    AT_WRAP([&] {
+      scalar_t value = *self.data_ptr<scalar_t>();
+      r = Scalar(value);
+    }),
+    AT_EXPAND(AT_SD_TYPES)
+  );
   return r;
 }
 

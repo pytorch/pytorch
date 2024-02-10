@@ -25,6 +25,7 @@ from functools import wraps
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU, dtypes, onlyCUDA
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
 from torch.testing._internal.common_cuda import with_tf32_off, SM70OrLater, TEST_CUDA
+from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing import make_tensor
 from torch._dynamo import allow_in_graph
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -419,7 +420,6 @@ class TestGradTransform(TestCase):
         expected = -y * x.sin()
         self.assertEqual(result, expected)
 
-    @xfailIfTorchDynamo
     def test_grad_of_vjp_of_grad_composition(self, device):
         x = torch.randn([], device=device)
         y = torch.randn([], device=device)
@@ -1216,7 +1216,7 @@ class TestAutogradFunction(TestCase):
         grad_y = torch.randn_like(x)
 
         def h(x, grad_y):
-            _, vjp_fn = vjp(f, x)
+            _, vjp_fn = vjp(f, x)  # noqa: F821
             gx, = vjp_fn(grad_y)
             return gx
 
@@ -1255,7 +1255,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
         class NumpyCube(torch.autograd.Function):
             @staticmethod
             def forward(input):
-                input_np = to_numpy(input)
+                input_np = to_numpy(input)  # noqa: F821
                 dinput = torch.tensor(3 * input_np ** 2, device=input.device)
                 return torch.tensor(input_np ** 3, device=input.device), dinput
 
@@ -1277,7 +1277,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
 
             @staticmethod
             def forward(input):
-                input_np = to_numpy(input)
+                input_np = to_numpy(input)  # noqa: F821
                 dinput = torch.tensor(3 * input_np ** 2, device=input.device)
                 return torch.tensor(input_np ** 3, device=input.device), dinput
 
@@ -1528,7 +1528,6 @@ class TestAutogradFunctionVmapAPI(TestCase):
 
 @markDynamoStrictTest
 class TestVmapOfGrad(TestCase):
-    @xfailIfTorchDynamo
     def test_per_sample_grads_inplace_view(self, device):
         def compute_loss(weight, x, t):
             x = x.mm(weight)
@@ -1572,7 +1571,6 @@ class TestVmapOfGrad(TestCase):
         result = vmap(grad(foo))(y, x)
         self.assertEqual(result, torch.ones_like(y))
 
-    @xfailIfTorchDynamo
     def test_per_sample_grads_simple(self, device):
         def compute_loss(weight, x, t):
             y = x @ weight
@@ -2672,7 +2670,6 @@ class TestJvp(TestCase):
         _, y = jvp(lambda x: jvp(f, (x,), (t,))[1], (x,), (t,))
         self.assertEqual(y, 2)
 
-    @xfailIfTorchDynamo
     def test_disable_fwd_grad_mixed(self, device):
         def f(x):
             with fwAD._set_fwd_grad_enabled(False):
@@ -3154,7 +3151,7 @@ class TestComposability(TestCase):
             torch.vmap(torch.sin)
 
     # Some of these pass, some of these don't
-    @skipIfTorchDynamo
+    @skipIfTorchDynamo()
     @parametrize('transform', [
         'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
     ])
@@ -3400,7 +3397,7 @@ class TestComposability(TestCase):
             transform(MySin.apply)(x)
 
     # Some of these pass, some of these don't
-    @skipIfTorchDynamo
+    @skipIfTorchDynamo()
     @parametrize('transform', [
         'vmap', 'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
     ])
@@ -3425,7 +3422,6 @@ class TestComposability(TestCase):
         with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
             transform(g)(x)
 
-    @xfailIfTorchDynamo
     def test_vjp_doesnt_support_saved_tensor_hooks(self, device):
         def f(x):
             return torch.sin(x).sum()
@@ -3442,7 +3438,6 @@ class TestComposability(TestCase):
         with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
             vjp(g, x)
 
-    @xfailIfTorchDynamo
     def test_jvp_doesnt_support_saved_tensor_hooks(self, device):
         def f(x):
             return torch.sin(x).sum()
@@ -3939,7 +3934,6 @@ class TestExamplesCorrectness(TestCase):
 
         self.assertEqual(result_grads, expected_grads)
 
-    @xfailIfTorchDynamo
     @parametrize("mechanism", ["make_functional", "functional_call"])
     def test_maml_omniglot(self, device, mechanism):
         # TODO: there appears to be precision issues for float32
@@ -4838,6 +4832,7 @@ def traceable(f):
 
 @markDynamoStrictTest
 class TestCompileTransforms(TestCase):
+    @skipIfRocm(msg="test leaks memory on ROCm")
     @xfailIfTorchDynamo
     # torch.compile is not supported on Windows
     # Triton only supports GPU with SM70 or later.

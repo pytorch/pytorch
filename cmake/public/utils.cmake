@@ -527,6 +527,8 @@ function(torch_update_find_cuda_flags)
   endif()
 endfunction()
 
+include(CheckCXXCompilerFlag)
+
 ##############################################################################
 # CHeck if given flag is supported and append it to provided outputvar
 # Also define HAS_UPPER_CASE_FLAG_NAME variable

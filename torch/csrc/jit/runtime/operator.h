@@ -80,8 +80,7 @@ struct TORCH_API Operator {
 
  public:
   Operator(c10::OperatorHandle opHandle, Operation operation)
-      : op_(C10Operator(
-            C10Operator{std::move(opHandle), std::move(operation)})) {}
+      : op_(C10Operator{std::move(opHandle), std::move(operation)}) {}
 
   Operator(
       std::string schema,

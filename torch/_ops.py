@@ -4,7 +4,7 @@ import importlib
 import inspect
 import sys
 import types
-from typing import Any, Callable, Dict, Type, Union
+from typing import Any, Callable, Dict, Set, Type, Union
 
 import torch._C
 import torch.utils._pytree as pytree
@@ -149,8 +149,7 @@ class OperatorBase:
             return fn(_CppFunctionalizeAPI(), *args, **kwargs)
 
         def functionalize_dispatch_mode_fn(mode, *args, **kwargs):
-            # Mode is unused (there's a global FunctionalTensorMode that we can access)
-            return fn(_PythonFunctionalizeAPI(), *args, **kwargs)
+            return fn(_PythonFunctionalizeAPI(mode), *args, **kwargs)
 
         def functionalize_functorch_fn(interpreter, *args, **kwargs):
             return fn(_FunctorchFunctionalizeAPI(interpreter), *args, **kwargs)
@@ -228,7 +227,7 @@ def resolve_key(op: OperatorBase, k: DispatchKey):  # type: ignore[valid-type]
     raise NotImplementedError(f"could not find kernel for {op} at dispatch key {k}")
 
 
-_higher_order_ops = {}
+_higher_order_ops: Dict[str, "HigherOrderOperator"] = {}
 
 _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
     DispatchKey.PythonDispatcher,  # type: ignore[attr-defined]
@@ -280,7 +279,6 @@ class HigherOrderOperator(OperatorBase):
         self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)
 
     def dispatch(self, dispatch_key, *args, **kwargs):
-        print(self, dispatch_key)
         from torch.utils._python_dispatch import _get_current_dispatch_mode
 
         if dispatch_key in self._dispatch_cache:
@@ -312,8 +310,6 @@ class HigherOrderOperator(OperatorBase):
 
             # The check for Python in the exclude set is so we properly respect `with no_dispatch()`
             # calls inside of a mode.
-            if _len_torch_dispatch_stack_pre_dispatch() == 0:
-                breakpoint()
             if (
                 _len_torch_dispatch_stack_pre_dispatch() > 0
             ) and not torch._C._dispatch_tls_is_dispatch_key_excluded(
@@ -504,7 +500,7 @@ def mode_stack_state_for_pre_dispatch():
     return _mode_stack_state_for_pre_dispatch
 
 
-cached_ops = set()
+cached_ops: Set["OpOverload"] = set()
 
 
 def add_cached_op(op_overload):
@@ -571,8 +567,8 @@ class OpOverload(OperatorBase):
 
     def __call__(self_, *args, **kwargs):  # noqa: B902
         # use `self_` to avoid naming collide with aten ops arguments that
-        # named "self". This way, all the aten ops can be called by kwargs.
-        return self_._op(*args, **(kwargs or {}))
+        # are named "self". This way, all the aten ops can be called by kwargs.
+        return self_._op(*args, **kwargs)
 
     def __hash__(self):
         return hash(self._op)
@@ -687,6 +683,7 @@ class OpOverload(OperatorBase):
                             ).has(torch._C.DispatchKey.Python):
                                 overload_types.append(type(a))
                         # TODO: check that I got these args correct (in C++, we pass in "0000"??)
+
                         return curr_mode.__torch_dispatch__(
                             self, overload_types, args, kwargs
                         )
