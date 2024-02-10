@@ -143,6 +143,7 @@ class CachingAutotuner(KernelInterface):
         heuristic_type,
         size_hints=None,
         inductor_meta=None,  # metadata not relevant to triton
+        custom_kernel=False,  # whether the kernel is inductor-generated or custom
     ):
         super().__init__()
 
@@ -154,6 +155,7 @@ class CachingAutotuner(KernelInterface):
         self.mutated_arg_names = mutated_arg_names
         self.configs = configs
         self.heuristic_type = heuristic_type
+        self.custom_kernel = custom_kernel
 
         # Align the default design that default as cuda
         self.device_type = (
@@ -405,7 +407,12 @@ class CachingAutotuner(KernelInterface):
 
     def bench(self, launcher, *args, grid, **kwargs):
         """Measure the performance of a given launcher"""
-        if launcher.n_spills > config.triton.spill_threshold:
+        # we don't skip configs wiht spilled registers when auto-tuning custom
+        # (user-written) Triton kernels, as (i) we don't have any knowledge or
+        # control over the kernel code; (ii) there is empirical evidence that
+        # for some (complicated) custom Triton kernels, a register-spilling
+        # config may yield the best latency.
+        if not self.custom_kernel and launcher.n_spills > config.triton.spill_threshold:
             log.debug(
                 "Skip config %s because of register spilling: %d",
                 launcher.config,
@@ -772,6 +779,7 @@ def cached_autotune(
     heuristic_type,
     filename=None,
     inductor_meta=None,
+    custom_kernel=False,
 ):
     """
     A copy of triton.autotune that calls our subclass.  Our subclass
@@ -836,6 +844,7 @@ def cached_autotune(
                 mutated_arg_names=mutated_arg_names,
                 heuristic_type=heuristic_type,
                 size_hints=size_hints,
+                custom_kernel=custom_kernel,
             )
         return CachingAutotuner(
             fn,
@@ -846,6 +855,7 @@ def cached_autotune(
             mutated_arg_names=mutated_arg_names,
             heuristic_type=heuristic_type,
             size_hints=size_hints,
+            custom_kernel=custom_kernel,
         )
 
     return decorator
@@ -1298,7 +1308,9 @@ def template(num_stages, num_warps, triton_meta, filename=None, inductor_meta=No
     )
 
 
-def user_autotune(configs, triton_meta, filename=None, inductor_meta=None):
+def user_autotune(
+    configs, triton_meta, filename=None, inductor_meta=None, custom_kernel=False
+):
     """
     Compile a user defined triton kernel
     """
@@ -1329,6 +1341,7 @@ def user_autotune(configs, triton_meta, filename=None, inductor_meta=None):
         heuristic_type=HeuristicType.USER_AUTOTUNE,
         filename=filename,
         inductor_meta=inductor_meta,
+        custom_kernel=custom_kernel,
     )
 
 
