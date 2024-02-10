@@ -129,20 +129,6 @@ def _pop_mode_temporarily(k: Optional[DispatchKey] = None):
     finally:
         _push_mode(old, k)
 
-
-@contextlib.contextmanager
-def _temp_pop_torch_function_mode():
-    len = torch._C._len_torch_function_stack()
-    if len > 0:
-        old_value = torch._C._pop_torch_function_stack()
-        try:
-            yield
-        finally:
-            torch._C._push_on_torch_function_stack(old_value)
-    else:
-        yield
-
-
 @contextlib.contextmanager
 def _disable_current_modes():
     from torch._ops import _len_torch_dispatch_stack_pre_dispatch, _pop_mode_from_pre_dispatch, _set_mode_pre_dispatch
