@@ -453,9 +453,8 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
             and set(self.global_state.keys()) == self._supported_global_states
         ), "Global state mismatch"
 
-        with _temp_pop_torch_function_mode():
-            for func, args in self.global_state.values():
-                func(args)
+        for func, args in self.global_state.values():
+            func(args)
 
 
 """

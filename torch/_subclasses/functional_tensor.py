@@ -483,9 +483,7 @@ def dispatch_functionalize(func, mode):
         disable_above = torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
-        from torch._dispatch.python import enable_python_dispatcher
-
-        with disable_above, mode, enable_python_dispatcher():
+        with disable_above, mode:
             func_args = pytree.tree_map_only(torch.Tensor, to_fun, args)
             func_kwargs = pytree.tree_map_only(torch.Tensor, to_fun, kwargs)
             func_outputs = func(*func_args, **func_kwargs)
