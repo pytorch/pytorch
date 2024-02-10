@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 r"""This file is allowed to initialize CUDA context when imported."""
 
 import functools
@@ -6,6 +8,7 @@ import torch.cuda
 from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS
 import inspect
 import contextlib
+import os
 
 
 CUDA_ALREADY_INITIALIZED_ON_IMPORT = torch.cuda.is_initialized()
@@ -28,7 +31,23 @@ SM75OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_devic
 SM80OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0))
 SM90OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0))
 
-PLATFORM_SUPPORTS_FLASH_ATTENTION: bool = LazyVal(lambda: TEST_CUDA and (not TEST_WITH_ROCM) and (not IS_WINDOWS) and SM80OrLater)
+def evaluate_gfx90a_exact():
+    if not torch.cuda.is_available():
+        return False
+    gcn_arch_name = torch.cuda.get_device_properties('cuda').gcnArchName
+    arch = os.environ.get('PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE', gcn_arch_name)
+    return arch == 'gfx90a:sramecc+:xnack-'
+
+GFX90A_Exact = LazyVal(lambda: evaluate_gfx90a_exact())
+
+def evaluate_platform_supports_flash_attention():
+    if TEST_WITH_ROCM:
+        return evaluate_gfx90a_exact()
+    if TEST_CUDA:
+        return not IS_WINDOWS and SM80OrLater
+    return False
+
+PLATFORM_SUPPORTS_FLASH_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_flash_attention())
 PLATFORM_SUPPORTS_MEM_EFF_ATTENTION: bool = LazyVal(lambda: TEST_CUDA and not TEST_WITH_ROCM)
 # This condition always evaluates to PLATFORM_SUPPORTS_MEM_EFF_ATTENTION but for logical clarity we keep it separate
 PLATFORM_SUPPORTS_FUSED_ATTENTION: bool = LazyVal(lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION or PLATFORM_SUPPORTS_MEM_EFF_ATTENTION)

@@ -3,6 +3,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/TensorIterator.h>
@@ -52,10 +53,9 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
 
 #if !defined(C10_MOBILE)
 #define _AT_DISPATCH_CP_TYPES(TYPE, NAME, ...)                              \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND8(                             \
-            kComplexHalf, kHalf, kBool, kBFloat16, kFloat8_e5m2,            \
-            kFloat8_e4m3fn, kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, TYPE, NAME, \
-            __VA_ARGS__)
+        AT_DISPATCH_V2(                             \
+            TYPE, NAME, AT_WRAP(__VA_ARGS__), kComplexHalf, kHalf, kBool, kBFloat16, kFloat8_e5m2,            \
+            kFloat8_e4m3fn, kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES))
 #else
 #define _AT_DISPATCH_CP_TYPES(TYPE, NAME, ...)     \
         AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(    \

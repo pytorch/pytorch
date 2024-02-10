@@ -1,3 +1,4 @@
+import itertools
 import logging
 import operator
 import os
@@ -23,6 +24,8 @@ from torch.utils._mode_utils import no_dispatch
 
 from . import config, ir
 from .codegen.common import (
+    DeviceOpOverrides,
+    get_device_op_overrides,
     get_scheduling_for_device,
     get_wrapper_codegen_for_device,
     register_backend_for_device,
@@ -44,6 +47,7 @@ from .ir import (
     TensorBox,
 )
 from .lowering import (
+    constrain_to_fx_strides,
     FALLBACK_ALLOW_LIST,
     fallback_handler,
     fallback_node_due_to_unsupported_type,
@@ -82,12 +86,13 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
         torch.bool,
         torch.bfloat16,
         torch.complex64,
-        # torch.float16, # TODO: implement this
+        torch.float16,
     }
     if cuda:
-        supported_dtype.add(torch.float16)
         supported_dtype.add(torch.float8_e4m3fn)
         supported_dtype.add(torch.float8_e5m2)
+        supported_dtype.add(torch.float8_e4m3fnuz)
+        supported_dtype.add(torch.float8_e5m2fnuz)
 
     return dtype in supported_dtype
 
@@ -113,6 +118,18 @@ def may_get_constant_buffer_dtype(constant_buffer):
 def is_magic_method(op):
     magic_ops = {method_to_operator(m) for m in magic_methods}
     return op in magic_ops
+
+
+def getattr_recursive(obj, target):
+    target_atoms = target.split(".")
+    attr_itr = obj
+    for i, atom in enumerate(target_atoms):
+        if not hasattr(attr_itr, atom):
+            raise RuntimeError(
+                f"Node referenced nonexistent target {'.'.join(target_atoms[:i])}"
+            )
+        attr_itr = getattr(attr_itr, atom)
+    return attr_itr
 
 
 class GraphLowering(torch.fx.Interpreter):
@@ -220,6 +237,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.mutated_buffers: Set[str] = set()
         self.never_reuse_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
+        self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
         self.wrapper_code: WrapperCodeGen = None  # type: ignore[assignment]
         # See `ProxyExecutor Design Note` in ir.py for more details
         self.extern_kernel_nodes: List[ir.ExternKernelNode] = []
@@ -252,9 +270,14 @@ class GraphLowering(torch.fx.Interpreter):
             []
         )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported
-        self.disable_cudagraphs = False
-        self.disable_cudagraphs_reason = ""
+        self.disable_cudagraphs_reason: Optional[str] = None
+
+        # only keeping one node per device for stack trace purposes
+        self.device_node_mapping: Dict[torch.device, torch.fx.Node] = {}
         self.orig_gm: torch.fx.GraphModule = gm.__copy__()
+        self.dynamo_flat_name_to_original_fqn = self.module.meta.get(
+            "dynamo_flat_name_to_original_fqn", {}
+        )
         self.init_backend_registration()
 
     @staticmethod
@@ -275,10 +298,6 @@ class GraphLowering(torch.fx.Interpreter):
         nconv = len(conv_nodes)
 
         if nconv == 0:
-            return False
-
-        # NHWC perf issue on ROCm5.7 first noted here https://github.com/pytorch/pytorch/pull/110319
-        if torch.version.hip and torch.cuda.is_available():
             return False
 
         # For cpu backend and mkldnn enabled, we always using channels_last for a better performance.
@@ -483,6 +502,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.device_types.add(device.type)
         if device.index is not None:
             self.device_idxs.add(device.index)
+        if V.graph.current_node and device not in self.device_node_mapping:
+            self.device_node_mapping[device] = V.graph.current_node
 
     @property
     def fake_mode(self):
@@ -669,6 +690,23 @@ class GraphLowering(torch.fx.Interpreter):
             # passthrough lowerings from .pattern_matcher
             return target(*args, **kwargs)
 
+        def get_custom_op_layout_constraints(target, args, kwargs):
+            # Custom operations that require preserving stride order
+            # which run through implicit fallback must constrain their
+            # arguments' fx strides
+            layout_constraint = None
+            if torch._C.Tag.needs_fixed_stride_order in target.tags:
+                # We have to set the current args because call_function will immediately
+                # evaluate this lowering after creating the fallback, without evaluating
+                # the layout constraint
+                args, kwargs = constrain_to_fx_strides(
+                    self.current_node, *args, **kwargs
+                )
+                # Also register the layout constraint so when the fallback
+                # is used again, we can constrain the args to the same layout
+                layout_constraint = constrain_to_fx_strides
+            return layout_constraint, args, kwargs
+
         if target not in lowerings:
             assert isinstance(
                 target, torch._ops.OpOverload
@@ -677,6 +715,9 @@ class GraphLowering(torch.fx.Interpreter):
             if base_name in FALLBACK_ALLOW_LIST:
                 make_fallback(target)
             elif config.implicit_fallbacks:
+                layout_constraint, args, kwargs = get_custom_op_layout_constraints(
+                    target, args, kwargs
+                )
                 error = (
                     MissingOperatorWithDecomp
                     if get_decompositions([target])
@@ -686,7 +727,8 @@ class GraphLowering(torch.fx.Interpreter):
                     "Creating implicit fallback for:\n%s",
                     error.operator_str(target, args, kwargs),
                 )
-                make_fallback(target)
+                make_fallback(target, layout_constraint)
+
             elif get_decompositions([target]):
                 # There isn't a good way to dynamically patch this in
                 # since AOT Autograd already ran.  The error message tells
@@ -713,7 +755,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def get_attr(self, target, args, kwargs):
         # this is a constant
-        value = getattr(self.module, target)
+        value = getattr_recursive(self.module, target)
 
         if config.always_keep_tensor_constants or unsupported_output_tensor(value):
             return self.add_tensor_constant(value, target)
@@ -819,7 +861,7 @@ class GraphLowering(torch.fx.Interpreter):
                 )
             elif n.op == "call_function" and n.target in layout_constraints:
                 debug("layout_constraints")
-                args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
+                args, kwargs = layout_constraints[n.target](n, *args, **kwargs)  # type: ignore[index]
                 result = self.call_function(n.target, args, kwargs)
             elif is_magic_method(n.target):
                 # TODO: this is sus, it probably should be handled in the
@@ -938,7 +980,7 @@ class GraphLowering(torch.fx.Interpreter):
                 curr = result.data.data
                 if isinstance(curr, Pointwise):
                     # Use inner fn as a rough proxy. Good enough.
-                    if curr.inner_fn_str_len() > config.realize_bytes_threshold:
+                    if curr.has_large_inner_fn():
                         result.realize()
 
         # This is not complete, but it doesn't have to be: origin_node
@@ -974,7 +1016,7 @@ class GraphLowering(torch.fx.Interpreter):
         if config.disable_cpp_codegen:
             raise CppWrapperCodeGenError("C++ codegen is disabled")
 
-        if sys.platform != "linux":
+        if sys.platform not in ["linux", "darwin"]:
             raise CppWrapperCodeGenError(f"Unsupported platform {sys.platform}")
 
         for value in self.graph_inputs.values():
@@ -1006,6 +1048,8 @@ class GraphLowering(torch.fx.Interpreter):
         )
         only_cpu = len(device_types) == 0
         device_type = "cpu" if only_cpu else device_types.pop()
+
+        self.device_ops = get_device_op_overrides(device_type)
         wrapper_code_gen_cls = get_wrapper_codegen_for_device(device_type)
         assert wrapper_code_gen_cls is not None, f"Device {device_type} not supported"
         self.wrapper_code = wrapper_code_gen_cls()
@@ -1034,9 +1078,23 @@ class GraphLowering(torch.fx.Interpreter):
                     ), "Unknown type when creating real inputs" + str(type(x))
                     return x
 
+            if tracing_context := torch._guards.TracingContext.try_get():
+                if tracing_context.output_strides:
+                    tracing_context.output_strides.clear()
+
+                params_flat = [
+                    param
+                    for param in tracing_context.params_flat  # type: ignore[union-attr]
+                    if param is not None
+                ]
+                real_inputs = [
+                    materialize(x) for x in itertools.chain(params_flat, V.real_inputs)
+                ]
+            else:
+                real_inputs = [materialize(x) for x in V.real_inputs]
+
             with torch.utils._python_dispatch._disable_current_modes():
                 assert self.example_inputs is not None
-                real_inputs = [materialize(x) for x in self.example_inputs]
                 compiled(real_inputs)
             del real_inputs
 
@@ -1107,7 +1165,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def compile_to_fn(self):
         if self.aot_mode:
-            from .codecache import AotCodeCache
+            from .codecache import AotCodeCompiler
 
             assert self.cpp_wrapper, "AOT mode only supports C++ wrapper"
             code, linemap = self.codegen_with_cpp_wrapper()
@@ -1128,7 +1186,7 @@ class GraphLowering(torch.fx.Interpreter):
                 )
 
             # Directly return the file path with the compiled code
-            return AotCodeCache.compile(
+            return AotCodeCompiler.compile(
                 self, code, serialized_extern_kernel_nodes, cuda=self.cuda
             )
         else:

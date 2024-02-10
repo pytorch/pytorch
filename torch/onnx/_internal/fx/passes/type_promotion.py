@@ -8,7 +8,7 @@ import inspect
 import logging
 from types import ModuleType
 
-from typing import Any, Callable, Mapping, Optional, Sequence, Set
+from typing import Any, Callable, Mapping, Optional, Sequence, Set, Union
 
 import torch
 import torch._ops
@@ -67,17 +67,6 @@ class TypePromotionSnapshot:
 
     out_dtype: torch.dtype
     """Expected output dtype of the node."""
-
-
-@_beartype.beartype
-def _fake_tensor_from_node_val(node: torch.fx.Node) -> fake_tensor.FakeTensor:
-    """Syntactic sugar for retrieving fake tensor from node.meta['val']."""
-    val = node.meta.get("val", None)
-    if not isinstance(val, fake_tensor.FakeTensor):
-        raise RuntimeError(
-            f"Cannot retrieve fake tensor from node {node}. Got type({type(val)}) instead."
-        )
-    return val
 
 
 class TypePromotionRule(abc.ABC):
@@ -1684,7 +1673,21 @@ class InsertTypePromotion(_pass.Transform):
             diagnostic_context, module, type_promotion_table or TypePromotionTable()
         )
 
-    def _fetch_fake_args(self) -> Sequence[Optional[fake_tensor.FakeTensor]]:
+    def _fetch_fake_args(
+        self,
+    ) -> Sequence[
+        Optional[
+            Union[
+                fake_tensor.FakeTensor,
+                float,
+                int,
+                bool,
+                torch.SymInt,
+                torch.SymFloat,
+                torch.SymBool,
+            ]
+        ]
+    ]:
         """Fetch fake args from fx graph.
 
         For each argument, try to fetch fake tensor from the matching placeholder node.
@@ -1693,12 +1696,14 @@ class InsertTypePromotion(_pass.Transform):
         for node in self.module.graph.nodes:
             if node.op == "placeholder":
                 try:
-                    fake_tensor = _fake_tensor_from_node_val(node)
+                    # Meta value can be torch.Tensor, int, float, bool,
+                    # torch.SymInt, torch.SymFloat, torch.SymBool.
+                    meta_value = _val = node.meta.get("val", None)
                 except RuntimeError as e:
                     if not node.users:
                         # If the placeholder is not used, we can safely ignore it and put
                         # None as placeholder.
-                        fake_tensor = None
+                        meta_value = None
                     else:
                         raise RuntimeError(
                             "Cannot fetch symbolic fake args from fx graph. "
@@ -1706,7 +1711,7 @@ class InsertTypePromotion(_pass.Transform):
                             "Otherwise the pass will produce inaccurate dynamic shape. "
                         ) from e
 
-                fake_args.append(fake_tensor)
+                fake_args.append(meta_value)
         return fake_args
 
     @_beartype.beartype

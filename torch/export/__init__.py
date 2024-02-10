@@ -3,7 +3,7 @@ import copy
 import dataclasses
 import inspect
 import io
-import pathlib
+import os
 import sys
 import typing
 import warnings
@@ -22,7 +22,6 @@ from typing import (
 )
 
 import torch
-import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch.fx._compatibility import compatibility
 
@@ -59,6 +58,7 @@ __all__ = [
     "unflatten",
     "FlatArgsAdapter",
     "UnflattenedModule",
+    "WrapperModule",
 ]
 
 
@@ -66,13 +66,14 @@ from .dynamic_shapes import Constraint, Dim, dims, dynamic_dim
 from .exported_program import ExportedProgram, ModuleCallEntry, ModuleCallSignature
 from .graph_signature import ExportBackwardSignature, ExportGraphSignature
 from .unflatten import FlatArgsAdapter, unflatten, UnflattenedModule
+from .wrapper import WrapperModule
 
 
 PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
 
 
 def export(
-    f: Callable,
+    mod: torch.nn.Module,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
@@ -122,7 +123,7 @@ def export(
     ``dynamic_shapes`` argument to your :func:`export` call.
 
     Args:
-        f: The callable to trace.
+        mod: We will trace the forward method of this module.
 
         args: Example positional inputs.
 
@@ -177,6 +178,11 @@ def export(
     from ._trace import _export
     from .dynamic_shapes import _process_dynamic_shapes
 
+    if not isinstance(mod, torch.nn.Module):
+        raise ValueError(
+            f"Expected `mod` to be an instance of `torch.nn.Module`, got {type(mod)}."
+        )
+
     if constraints is not None:
         warnings.warn(
             "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
@@ -186,10 +192,10 @@ def export(
             stacklevel=2,
         )
     else:
-        constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
+        constraints = _process_dynamic_shapes(mod, args, kwargs, dynamic_shapes)
 
     return _export(
-        f,
+        mod,
         args,
         kwargs,
         constraints,
@@ -200,7 +206,7 @@ def export(
 
 def save(
     ep: ExportedProgram,
-    f: Union[str, pathlib.Path, io.BytesIO],
+    f: Union[str, os.PathLike, io.BytesIO],
     *,
     extra_files: Optional[Dict[str, Any]] = None,
     opset_version: Optional[Dict[str, int]] = None,
@@ -217,7 +223,7 @@ def save(
     Args:
         ep (ExportedProgram): The exported program to save.
 
-        f (Union[str, pathlib.Path, io.BytesIO): A file-like object (has to
+        f (Union[str, os.PathLike, io.BytesIO): A file-like object (has to
          implement write and flush) or a string containing a file name.
 
         extra_files (Optional[Dict[str, Any]]): Map from filename to contents
@@ -252,11 +258,16 @@ def save(
     """
     from torch._export import save
 
+    if not isinstance(ep, ExportedProgram):
+        raise TypeError(
+            f"The 'ep' parameter must be an instance of 'ExportedProgram', got '{type(ep).__name__}' instead."
+        )
+
     save(ep, f, extra_files=extra_files, opset_version=opset_version)
 
 
 def load(
-    f: Union[str, pathlib.Path, io.BytesIO],
+    f: Union[str, os.PathLike, io.BytesIO],
     *,
     extra_files: Optional[Dict[str, Any]] = None,
     expected_opset_version: Optional[Dict[str, int]] = None,
@@ -273,7 +284,7 @@ def load(
     Args:
         ep (ExportedProgram): The exported program to save.
 
-        f (Union[str, pathlib.Path, io.BytesIO): A file-like object (has to
+        f (Union[str, os.PathLike, io.BytesIO): A file-like object (has to
          implement write and flush) or a string containing a file name.
 
         extra_files (Optional[Dict[str, Any]]): The extra filenames given in

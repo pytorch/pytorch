@@ -100,6 +100,7 @@ c10::DataPtr CUDAPluggableAllocator::allocate(size_t size) const {
   cudaStream_t stream =
       c10::cuda::getCurrentCUDAStream(static_cast<c10::DeviceIndex>(device));
   void* r =
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       const_cast<CUDAPluggableAllocator*>(this)->malloc(size, device, stream);
   c10::DataPtr data_ptr = {
       r,
@@ -328,6 +329,14 @@ cudaError_t CUDAPluggableAllocator::memcpyAsync(
 
 std::string CUDAPluggableAllocator::name() {
   return "pluggable";
+}
+
+void CUDAPluggableAllocator::copy_data(
+    void* dest,
+    const void* src,
+    std::size_t count) const {
+  C10_CUDA_CHECK(
+      cudaMemcpy(dest, src, count, cudaMemcpyKind::cudaMemcpyDeviceToDevice));
 }
 
 std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>

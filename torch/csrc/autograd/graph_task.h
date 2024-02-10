@@ -6,8 +6,7 @@
 #include <torch/csrc/autograd/utils/warnings.h>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 using edge_list = std::vector<Edge>;
 struct ReadyQueue;
@@ -132,8 +131,11 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
   // These will be synced with leaf_streams in exec_post_processing.
   std::vector<c10::optional<c10::Stream>> caller_current_streams_;
 
-  // Collects caller_current_streams_
-  void stash_current_streams();
+  // Collects caller_current_streams_ for cuda/rocm.
+  void stash_current_cuda_streams();
+
+  // Collects caller_current_streams_ for privateuse1.
+  void stash_current_privateuse1_streams();
 
   void init_to_execute(
       Node& graph_root,
@@ -239,5 +241,4 @@ TORCH_API std::vector<Node*> get_current_graph_task_execution_order();
 TORCH_API int get_current_graph_task_id();
 void add_node_to_current_graph_task_exec_info(Node* fn);
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

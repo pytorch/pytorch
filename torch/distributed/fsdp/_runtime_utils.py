@@ -250,6 +250,8 @@ def _share_state_and_init_handle_attrs(
         fsdp_state._default_stream = root_state._default_stream
         fsdp_state._exec_order_data = root_state._exec_order_data
         fsdp_state._free_event_queue = root_state._free_event_queue
+        if fsdp_state._fsdp_extension is not None:
+            fsdp_state._fsdp_extension.compute_stream = root_state._default_stream
         handle = fsdp_state._handle
         if handle:
             handle.init_flat_param_attributes()
@@ -279,6 +281,10 @@ def _init_streams(
     high_priority = -1 if state.limit_all_gathers and uses_hybrid_sharding else 0
     # Default stream for computation
     state._default_stream = state._device_handle.current_stream()
+    if state._fsdp_extension is not None:
+        # set the compute stream to the FSDP extension
+        state._fsdp_extension.compute_stream = state._default_stream
+
     # Stream for unshard logic, including allocating the all-gather destination
     # tensors and the all-gathers themselves
     state._unshard_stream = state._device_handle.Stream(priority=high_priority)
@@ -782,6 +788,22 @@ def _post_backward_hook(
             _no_dispatch_record_stream(
                 autograd_computed_grad, state._post_backward_stream
             )
+
+
+def _post_backward_reshard_only_hook(
+    state: _FSDPState,
+    handle: FlatParamHandle,
+    *unused: Any,
+) -> None:
+    with torch.profiler.record_function(
+        "FullyShardedDataParallel._post_backward_hook_reshard_only"
+    ):
+        # `_pre_backward_hook` may not get executed
+        # if forward output does not require grad
+        # overwrite IDLE state for post-backward prefetching
+        state.training_state = TrainingState.FORWARD_BACKWARD
+        handle._training_state = HandleTrainingState.BACKWARD_POST
+        _post_backward_reshard(state, handle)
 
 
 def _post_backward_reshard(
@@ -1498,7 +1520,7 @@ def _register_post_backward_reshard_only_hook(
         ]
     assert inp_tensors is not None  # mypy
     hook_handle = register_multi_grad_hook(
-        inp_tensors, functools.partial(_post_backward_reshard, state, handle)
+        inp_tensors, functools.partial(_post_backward_reshard_only_hook, state, handle)
     )
     if torch.distributed._functional_collectives.is_torchdynamo_compiling():
         flat_param._post_backward_hook_handle = hook_handle  # type: ignore[attr-defined, assignment]

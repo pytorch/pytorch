@@ -450,10 +450,6 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
             )
 
 
-# See below for why we inherit BuildExtension from object.
-# https://stackoverflow.com/questions/1713038/super-fails-with-error-typeerror-argument-1-must-be-type-not-classobj-when
-
-
 class BuildExtension(build_ext):
     """
     A custom :mod:`setuptools` build extension .
@@ -1959,6 +1955,9 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
 
     # If not given, determine what's best for the GPU / CUDA version that can be found
     if not _arch_list:
+        print(
+            "TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. \n"
+            "If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'].", file=sys.stderr)
         arch_list = []
         # the assumption is that the extension should run on any of the currently visible cards,
         # which could be of different types - therefore all archs for visible cards should be included

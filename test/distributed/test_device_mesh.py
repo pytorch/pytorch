@@ -14,11 +14,15 @@ from torch.distributed._tensor.placement_types import _Partial, Shard
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 
 from torch.distributed.distributed_c10d import (
+    _get_process_group_name,
+    _world,
     get_global_rank,
+    get_process_group_ranks,
     get_world_size,
     init_process_group,
     is_initialized,
     is_nccl_available,
+    new_group,
     ProcessGroup,
 )
 from torch.testing._internal.common_utils import run_tests
@@ -61,6 +65,71 @@ class DeviceMeshTest(DTensorTestBase):
         DeviceMesh(device_type, mesh_tensor)
         self.assertTrue(is_initialized())
         self.destroy_pg()
+
+    def _get_tags_to_pg_name(self, tags_to_pg):
+        tags_to_pg_name = {}
+        for tag_name, groups in tags_to_pg.items():
+            tags_to_pg_name[tag_name] = []
+            for group in groups:
+                tags_to_pg_name[tag_name].append(_get_process_group_name(group))
+        return tags_to_pg_name
+
+    @with_comms
+    def test_reuse_process_group(self):
+        # Manually create new_group.
+        tp_group_0 = new_group([0, 1])
+        tp_group_1 = new_group([2, 3])
+        dp_group_0 = new_group([0, 2])
+        dp_group_1 = new_group([1, 3])
+
+        # Record the pg tags_to_pg_name so we can check whether init_device_mesh create new pg.
+        # We cannot do a deepcopy of ProcessGroup for comparison,
+        # since we cannot pickle 'torch._C._distributed_c10d.ProcessGroup' object.
+        # Therefore, we rely on the tags_to_pg_name for comparison to make sure
+        # before/after init_device_mesh, tags_to_pg in the current world does not change.
+        ref_tags_to_pg = _world.tags_to_pg
+        ref_tags_to_pg_name = self._get_tags_to_pg_name(ref_tags_to_pg)
+
+        mesh_shape = (2, self.world_size // 2)
+        mesh_dim_names = ("DP", "TP")
+        mesh_2d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+        tags_to_pg = _world.tags_to_pg
+        tags_to_pg_name = self._get_tags_to_pg_name(tags_to_pg)
+
+        # Check before/after init_device_mesh, tags_to_pg in the current world does not change.
+        self.assertEqual(ref_tags_to_pg_name, tags_to_pg_name)
+
+        # For each rank, there should be 4 tags_to_pg, including tags:
+        #   1) default tag for user PGs (which contains all the pgs on a particular rank)
+        #   2) tag for world size pg
+        #   3) tag for tp pg
+        #   4) tag for dp pg
+        self.assertEqual(len(tags_to_pg), 4)
+        # "" is the default tag for user PGs, and the default tag should only
+        # contain 3 pgs, since we re-use pgs, whenever possible. The 3 pgs are:
+        #   1) pg for the whole world
+        #   2) pg for tp_group
+        #   3) pg for dp_group
+        self.assertEqual(len(tags_to_pg[""]), 3)
+
+        default_user_pgs = tags_to_pg[""]
+        dp_dim = 0
+        tp_dim = 1
+        for idx, group in enumerate(default_user_pgs):
+            # world size pg
+            if idx == 0:
+                self.assertEqual(get_process_group_ranks(group), range(self.world_size))
+            # tp pg
+            if idx == 1:
+                # rank0 - mesh_2d._dim_group_infos is: [('ptd:3', [0, 2]), ('ptd:1', [0, 1])]
+                tp_group_ranks = mesh_2d._dim_group_infos[tp_dim][-1]
+                self.assertEqual(get_process_group_ranks(group), tp_group_ranks)
+            # dp pg
+            if idx == 2:
+                dp_group_ranks = mesh_2d._dim_group_infos[dp_dim][-1]
+                self.assertEqual(get_process_group_ranks(group), dp_group_ranks)
 
     @with_comms
     def test_get_group(self):
@@ -133,13 +202,6 @@ class DeviceMeshTest(DTensorTestBase):
                 dim_ranks[0] if self.rank in dim_ranks[0] else dim_ranks[1]
             )
             self.assertEqual(global_ranks, current_rank_expected_group_ranks)
-
-    @with_comms
-    def test_lazy_init_device_mesh(self):
-        mesh = DeviceMesh(self.device_type, [1], _init_process_groups=False)
-
-        with self.assertRaisesRegex(RuntimeError, "process groups not initialized!"):
-            mesh.get_group()
 
     def test_fake_pg_device_mesh(self):
         fake_store = FakeStore()

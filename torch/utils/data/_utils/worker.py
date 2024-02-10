@@ -58,7 +58,7 @@ else:
                 self.manager_dead = os.getppid() != self.manager_pid
             return not self.manager_dead
 
-_worker_info = None
+_worker_info: Optional["WorkerInfo"] = None
 
 
 class WorkerInfo:

@@ -43,7 +43,7 @@ from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import TestCase, skipIfTorchDynamo
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     AnnotatedSingleLayerLinearModel,
@@ -725,6 +725,7 @@ class TestHistogramObserver(QuantizationTestCase):
         self.assertEqual(myobs.max_val, 8.0)
         self.assertEqual(myobs.histogram, [2., 3., 3.])
 
+    @skipIfTorchDynamo("too slow")
     @given(N=st.sampled_from([10, 1000]),
            bins=st.sampled_from([256, 512, 1024, 2048]),
            dtype=st.sampled_from([torch.qint8, torch.quint8]),

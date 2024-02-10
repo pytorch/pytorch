@@ -8,7 +8,7 @@ from functools import partial
 import torch
 import torch.nn.functional as F
 from torch.nn import Parameter
-from torch.optim import Adam, SGD
+from torch.optim import Adam, SGD, Rprop
 from torch.optim.lr_scheduler import (
     LambdaLR,
     MultiplicativeLR,
@@ -1510,8 +1510,12 @@ class TestLRScheduler(TestCase):
 
     def test_cycle_lr_cycle_momentum_fail_with_momentumless_optimizer(self):
         with self.assertRaises(ValueError):
-            adam_opt = Adam(self.net.parameters())
-            scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=True)
+            rprop_opt = Rprop(self.net.parameters())
+            scheduler = CyclicLR(rprop_opt, base_lr=1, max_lr=5, cycle_momentum=True)
+
+    def test_cycle_lr_cycle_momentum_with_beta1_optimizer(self):
+        adam_opt = Adam(self.net.parameters())
+        scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=True)
 
     def test_cycle_lr_removed_after_out_of_scope(self):
         import gc

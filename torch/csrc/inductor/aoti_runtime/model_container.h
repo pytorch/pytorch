@@ -19,7 +19,7 @@ class AOTInductorModelContainer {
  public:
   AOTInductorModelContainer(
       size_t num_models,
-      bool is_cpu = false,
+      const std::string& device_str,
       std::optional<std::string> cubin_dir = std::nullopt) {
     constants_map_ = std::make_shared<ConstantMap>();
     constants_array_ = std::make_shared<std::vector<ConstantHandle>>();
@@ -28,7 +28,7 @@ class AOTInductorModelContainer {
     available_models_.reserve(num_models);
     for (size_t i = 0; i < num_models; ++i) {
       models_.push_back(AOTInductorModel::Create(
-          constants_map_, constants_array_, cubin_dir));
+          constants_map_, constants_array_, device_str, cubin_dir));
       available_models_.push_back(models_.back().get());
     }
 
@@ -53,7 +53,7 @@ class AOTInductorModelContainer {
       output_names_.push_back(model->output_name(i));
     }
 
-    model->load_constants(is_cpu);
+    model->load_constants();
 #ifdef USE_CUDA
     constant_blob_ = model->release_constant_blob();
     constants_internal_offset_.resize(model->num_constants());
@@ -93,6 +93,34 @@ class AOTInductorModelContainer {
       pending_models_.push_back(model);
     }
     pending_models_available_.notify_one();
+  }
+
+  size_t num_constants() const {
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
+    return models_[0]->num_constants();
+  }
+
+  const char* constant_name(size_t idx) const {
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
+    return models_[0]->constant_name(idx);
+  }
+
+  const char* constant_original_fqn(size_t idx) const {
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
+    return models_[0]->constant_original_fqn(idx);
+  }
+
+  int32_t constant_dtype(size_t idx) const {
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
+    return models_[0]->constant_dtype(idx);
   }
 
   // This function updates the buffer for storing constants.
@@ -161,7 +189,7 @@ class AOTInductorModelContainer {
           models_[0]->constant_shape(idx),
           stride,
           offset,
-          models_[0]->constant_type(idx),
+          models_[0]->constant_dtype(idx),
           aoti_torch_device_type_cuda(),
           device_idx,
           &tensor_handle));

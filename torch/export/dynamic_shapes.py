@@ -5,11 +5,15 @@ import math
 import sys
 import weakref
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.utils._pytree import SUPPORTED_NODES
 from .exported_program import ExportedProgram
+
+if TYPE_CHECKING:
+    from ..fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 
 
 __all__ = ["Constraint", "Dim", "dims", "dynamic_dim"]
@@ -118,7 +122,7 @@ class Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
     """
 
     # NOTE(avik): In the future, this could be Union[StrictMinMaxConstraint, <other kinds>]
-    constraint_range: "StrictMinMaxConstraint"  # type: ignore[name-defined]
+    constraint_range: "StrictMinMaxConstraint"
     # Represent that `constraint_range` is shared with another _ConstraintTarget, which
     # typically arises because of a specified equality with another dynamic dimension.
     shared: Optional[_ConstraintTarget] = None
@@ -368,17 +372,18 @@ def _process_dynamic_shapes(
                 )
             for k, shape in dynamic_shapes.items():
                 yield from tree_zip(combined_args[k], shape)
-        elif dataclasses.is_dataclass(combined_args):
-            if not type(dynamic_shapes) == type(combined_args):
+        elif type(combined_args) in SUPPORTED_NODES:
+            if not isinstance(dynamic_shapes, Sequence):
                 raise UserError(
                     UserErrorType.INVALID_INPUT,
-                    f"Expected dynamic_shapes of a {type(combined_args)} to be a {type(combined_args)}, "
-                    f"got {dynamic_shapes} instead",
+                    f"Expected dynamic_shapes of a user-registered class (e.g., "
+                    f"{type(combined_args)}) to be a Sequence that matches the "
+                    f"flattened structure, but got {dynamic_shapes} instead",
                 )
-            for f in dataclasses.fields(combined_args):
-                yield from tree_zip(
-                    getattr(combined_args, f.name), getattr(dynamic_shapes, f.name)
-                )
+            yield from tree_zip(
+                SUPPORTED_NODES[type(combined_args)].flatten_fn(combined_args)[0],
+                dynamic_shapes,
+            )
         elif isinstance(combined_args, torch.Tensor):
             yield (combined_args, dynamic_shapes)
         else:
@@ -481,7 +486,7 @@ def _process_constraints(
     graph_module: torch.fx.GraphModule,
     num_lifted_params_buffers: int,
     example_inputs: List[torch.Tensor],
-) -> Tuple[Dict, List[Tuple[Any, Any]]]:
+) -> Dict:
     """
     Process the constraints stored in the graph module to return something more readable.
 
@@ -497,9 +502,6 @@ def _process_constraints(
             symbols (from SymInts) appearing in the fake tensors in
             node.meta["val"] to their range constraints, which are a tuple
             containing (lower, upper) constraints.
-
-        equality_constraints (List[Tuple[InputDim, InputDim]]): List of tuples
-            of (node, dim) to mark that these dimensions are equal.
     """
     from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
         InputDim,
@@ -526,8 +528,6 @@ def _process_constraints(
             tensor_id_to_nodes[id(example_input)].append(node.name)
             placeholder_nodes[node.name] = node
 
-    # Create list of (node name, dim) tuples to mark that they are equal
-    equality_constraints: List[Tuple[InputDim, InputDim]] = []
     # Create dict mapping (node name, dim) a list of range (lower, upper)
     # constraints
     multi_range_constraints: Dict[InputDim, List[ValueRanges]] = defaultdict(list)
@@ -539,12 +539,6 @@ def _process_constraints(
             multi_range_constraints[node_dim].append(
                 ValueRanges(constraint["min"], constraint["max"])
             )
-
-            # Accumulate equality constraints
-            if shared := constraint.get("shared", None):
-                for other_node in tensor_id_to_nodes[shared["t_id"]]:
-                    other_node_dim = InputDim(other_node, shared["dim"])
-                    equality_constraints.append((node_dim, other_node_dim))
 
     # Create dict mapping symbol to a singular range (lower, upper)
     range_constraints: Dict[Any, ValueRanges] = {}
@@ -574,4 +568,4 @@ def _process_constraints(
         symbol = symint.node._expr
         range_constraints[symbol] = ValueRanges(min_val, max_val)
 
-    return range_constraints, equality_constraints
+    return range_constraints
