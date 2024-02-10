@@ -2,6 +2,7 @@
 
 #include <ATen/xpu/XPUEvent.h>
 #include <c10/util/irange.h>
+#include <c10/xpu/test/impl/XPUTest.h>
 
 TEST(XpuEventTest, testXPUEventBehavior) {
   if (!at::xpu::is_available()) {
@@ -30,18 +31,6 @@ void eventSync(sycl::event& event) {
   event.wait();
 }
 
-void clearHostData(int* hostData, int numel) {
-  for (const auto i : c10::irange(numel)) {
-    hostData[i] = 0;
-  }
-}
-
-void validateHostData(int* hostData, int numel) {
-  for (const auto i : c10::irange(numel)) {
-    EXPECT_EQ(hostData[i], i);
-  }
-}
-
 TEST(XpuEventTest, testXPUEventFunction) {
   if (!at::xpu::is_available()) {
     return;
@@ -49,9 +38,7 @@ TEST(XpuEventTest, testXPUEventFunction) {
 
   constexpr int numel = 1024;
   int hostData[numel];
-  for (const auto i : c10::irange(numel)) {
-    hostData[i] = i;
-  }
+  initHostData(hostData, numel);
 
   auto stream = c10::xpu::getStreamFromPool();
   int* deviceData = sycl::malloc_device<int>(numel, stream);
