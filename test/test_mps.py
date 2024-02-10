@@ -550,13 +550,13 @@ def mps_ops_modifier(ops):
         # - CPU output: tensor([102.668, 1.129e+15])
         # - MPS output: tensor([102.6681, inf])
         # In the latter case, inf is probably correct (this is what scipy does).
-        'polygamma': [torch.float32, torch.uint8],
-        'polygammapolygamma_n_0': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'polygammapolygamma_n_2': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'polygammapolygamma_n_1': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'polygammapolygamma_n_3': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'polygammapolygamma_n_4': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'special.polygamma': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
+        'polygamma': [torch.uint8],
+        'polygammapolygamma_n_0': [torch.int16, torch.int32, torch.int64, torch.int8],
+        'polygammapolygamma_n_2': [torch.int16, torch.int32, torch.int64, torch.int8],
+        'polygammapolygamma_n_1': [torch.int16, torch.int32, torch.int64, torch.int8],
+        'polygammapolygamma_n_3': [torch.int16, torch.int32, torch.int64, torch.int8],
+        'polygammapolygamma_n_4': [torch.int16, torch.int32, torch.int64, torch.int8],
+        'special.polygamma': [torch.int16, torch.int32, torch.int64, torch.int8],
         'special.polygammaspecial_polygamma_n_0': [torch.int16, torch.int32, torch.int64, torch.int8],
 
         # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
