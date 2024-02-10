@@ -9610,6 +9610,30 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
 
             self.assertTrue(bwd_seq_nr_set.issubset(fwd_seq_nr_set))
 
+        def test_evict_first_for_persistent_reduction(self):
+            """
+            Adding evict_first to the first 2 loads imporve the perf for this
+            kernel from 44us to 37us (16%).
+            """
+
+            def get_args():
+                shape = (128, 512, 64)
+                arg_0 = rand_strided(shape, (32768, 1, 512), device="cuda")
+                arg_1 = rand_strided(shape, (32768, 1, 512), device="cuda")
+                arg_2 = rand_strided(shape, (64, 0, 1), device="cuda")
+                arg_3 = rand_strided(shape, (64, 0, 1), device="cuda")
+                return arg_0, arg_1, arg_2, arg_3
+
+            @torch.compile
+            def f(*args):
+                a0, a1, a2, a3 = args
+                act0 = (a0 * (a1.relu() - a2) * a3).sum(dim=-1)
+                act1 = a0.sum(dim=-1)
+                return act0, act1
+
+            code = run_and_get_triton_code(f, *get_args())
+            self.assertEqual(2, code.count("evict_first"))
+
     class RNNTest(TestCase):
         class Model(torch.nn.Module):
             def __init__(self):
