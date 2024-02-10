@@ -15,8 +15,10 @@ GetAttrGuardAccessor = guards.GetAttrGuardAccessor
 GetItemGuardAccessor = guards.GetItemGuardAccessor
 GetDictItemGuardAccessor = guards.GetDictItemGuardAccessor
 TypeGuardAccessor = guards.TypeGuardAccessor
-TensorAliasingGuard = guards.TensorAliasingGuard
+TENSOR_ALIASING = guards.TENSOR_ALIASING
+NO_TENSOR_ALIASING = guards.NO_TENSOR_ALIASING
 install_tensor_aliasing_guard = guards.install_tensor_aliasing_guard
+install_no_tensor_aliasing_guard = guards.install_no_tensor_aliasing_guard
 
 
 global_pair = {
@@ -34,7 +36,7 @@ def equals_match(x, expected):
 
 
 def equals_match_failure_fn(expected):
-    return f"x == {expected}"
+    return [f"x == {expected}"]
 
 
 def ge_match(x, expected):
@@ -50,7 +52,7 @@ def less_match(x, expected):
 
 
 def less_match_failure_fn(expected):
-    return f"expected < {expected}"
+    return [f"expected < {expected}"]
 
 
 def id_type(x):
@@ -59,7 +61,7 @@ def id_type(x):
 
 class GuardManagerTests(torch._dynamo.test_case.TestCase):
     def test_python_lambda_leaf_guard(self):
-        const_guard = guards.PythonLambdaGuard(
+        const_guard = guards.LAMBDA_GUARD(
             functools.partial(equals_match, expected=5),
             equals_match_failure_fn(5),
         )
@@ -69,14 +71,14 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
     def test_type_guard(self):
         foo = 4
-        guard = guards.TYPE_MATCH(id_type(foo), "type(x) == int")
+        guard = guards.TYPE_MATCH(id_type(foo), ["type(x) == int"])
 
         self.assertTrue(guard(5))
         self.assertTrue(guard(4))
         self.assertFalse(guard("foo"))
 
         foo = {"a": 1}
-        guard = guards.TYPE_MATCH(id_type(foo), "type(x) == dict")
+        guard = guards.TYPE_MATCH(id_type(foo), ["type(x) == dict"])
         self.assertTrue(guard(foo))
         self.assertTrue(guard({}))
         self.assertFalse(guard(5))
@@ -89,7 +91,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         foo = Foo(1, 2)
 
-        guard = guards.TYPE_MATCH(id_type(foo), "type(x) == Foo")
+        guard = guards.TYPE_MATCH(id_type(foo), ["type(x) == Foo"])
         self.assertTrue(guard(foo))
         self.assertFalse(guard({}))
         self.assertFalse(guard(5))
@@ -97,14 +99,14 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
     def test_id_guard(self):
         foo = 4
-        guard = guards.ID_MATCH(id(foo), "id(x) == id(foo)")
+        guard = guards.ID_MATCH(id(foo), ["id(x) == id(foo)"])
 
         self.assertTrue(guard(foo))
         self.assertFalse(guard(5))
         self.assertFalse(guard("foo"))
 
         foo = {"a": 1}
-        guard = guards.ID_MATCH(id(foo), "id(x) == id(foo)")
+        guard = guards.ID_MATCH(id(foo), ["id(x) == id(foo)"])
         self.assertTrue(guard(foo))
         self.assertFalse(guard({"a": 1}))
         self.assertFalse(guard({}))
@@ -112,7 +114,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
     def test_equals_guard(self):
         foo = 4
-        guard = guards.EQUALS_MATCH(foo, "x == 4")
+        guard = guards.EQUALS_MATCH(foo, ["x == 4"])
 
         self.assertTrue(guard(4))
         self.assertFalse(guard(5))
@@ -120,7 +122,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         # dict
         foo = {"a": 1}
-        guard = guards.EQUALS_MATCH(foo, "x == foo")
+        guard = guards.EQUALS_MATCH(foo, ["x == foo"])
         self.assertTrue(guard(foo))
         self.assertTrue(guard({"a": 1}))
         self.assertFalse(guard({}))
@@ -129,7 +131,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         # tuple
         foo = (1, 2, 3)
-        guard = guards.EQUALS_MATCH(foo, "x == foo")
+        guard = guards.EQUALS_MATCH(foo, ["x == foo"])
         self.assertTrue(guard(foo))
         self.assertTrue(guard((1, 2, 3)))
         self.assertFalse(guard((1, 2, 3, 4)))
@@ -137,14 +139,14 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         # list
         foo = [1, 2, 3]
-        guard = guards.EQUALS_MATCH(foo, "x == foo")
+        guard = guards.EQUALS_MATCH(foo, ["x == foo"])
         self.assertTrue(guard(foo))
         self.assertTrue(guard([1, 2, 3]))
         self.assertFalse(guard([1, 2, 3, 4]))
 
         # type
         foo = int
-        guard = guards.EQUALS_MATCH(foo, "x == foo")
+        guard = guards.EQUALS_MATCH(foo, ["x == foo"])
         self.assertTrue(guard(foo))
         self.assertTrue(guard(int))
         self.assertFalse(guard(float))
@@ -153,7 +155,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
     def test_dict_version_guard(self):
         foo = {"a": 1, "b": 2}
-        guard = guards.DICT_VERSION(foo, "x.version == foo.version")
+        guard = guards.DICT_VERSION(foo, ["x.version == foo.version"])
 
         self.assertTrue(guard(foo))
         self.assertFalse(guard(dict(foo)))
@@ -164,14 +166,14 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
     def test_dict_contains_guard(self):
         foo = {"a": 1, "b": 2}
-        guard = guards.DICT_CONTAINS("a", "has a", False)
+        guard = guards.DICT_CONTAINS("a", False, ["has a"])
 
         self.assertTrue(guard(foo))
         self.assertTrue(guard({"a": 1, "b": 2}))
         self.assertFalse(guard({"b": 2, "c": 3}))
         self.assertFalse(guard({}))
 
-        guard = guards.DICT_CONTAINS("c", "not has a", True)
+        guard = guards.DICT_CONTAINS("c", True, ["not has a"])
         self.assertTrue(guard(foo))
         self.assertTrue(guard({"a": 1, "b": 2}))
         self.assertFalse(guard({"b": 2, "c": 3}))
@@ -186,7 +188,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         foo = Foo()
         bar = Bar()
-        guard = guards.NAME_MATCH(foo, "x.__name__ == Foo")
+        guard = guards.NAME_MATCH(foo, ["x.__name__ == Foo"])
 
         self.assertTrue(guard(foo))
         self.assertFalse(guard(bar))
@@ -195,14 +197,14 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         x = torch.rand(3, 4)
         weakref_x = weakref.ref(x)
 
-        guard = guards.WEAKREF_ALIVE("weakref_x is not None")
+        guard = guards.WEAKREF_ALIVE(["weakref_x is not None"])
         self.assertTrue(guard(weakref_x()))
         del x
         self.assertFalse(guard(weakref_x()))
 
     def test_guard_manager_leaf_guard(self):
         guard_manager = RootGuardManager()
-        guard_manager.add_type_match_guard(id_type(5), "type(x) == int")
+        guard_manager.add_type_match_guard(id_type(5), ["type(x) == int"])
         guard_manager.add_lambda_guard(
             functools.partial(ge_match, expected=5),
             ge_match_failure_fn(expected=5),
@@ -217,6 +219,26 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(guard_manager.check(4))
         self.assertFalse(guard_manager.check("foo"))
 
+    def test_tensor_match_guard(self):
+        guard_manager = RootGuardManager()
+        x = torch.randn(4, 4)
+        size = [t for t in x.size()]
+        stride = list(x.stride())
+        guard_manager.add_tensor_match_guard(x, size, stride, "x", ["check_tensor(x)"])
+        self.assertTrue(guard_manager.check(x))
+        self.assertTrue(guard_manager.check_verbose(x).result)
+        self.assertTrue(guard_manager.check(torch.randn(4, 4)))
+        self.assertTrue(guard_manager.check_verbose(torch.randn(4, 4)).result)
+        self.assertFalse(guard_manager.check(x.t_()))
+
+        x = torch.randn(4, 4)
+        x.t_()
+        debug_info = guard_manager.check_verbose(x)
+        print(debug_info.verbose_code_parts[0])
+        self.assertTrue(
+            "tensor 'x' stride mismatch" in debug_info.verbose_code_parts[0]
+        )
+
     def test_attr_guard_manager(self):
         class Foo:
             def __init__(self, x, y):
@@ -225,7 +247,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         foo = Foo(1, 2)
         guard_manager = RootGuardManager()
-        guard_manager.add_type_match_guard(id_type(foo), "type(x) == Foo")
+        guard_manager.add_type_match_guard(id_type(foo), ["type(x) == Foo"])
         guard_manager.getattr_manager("x", 1).add_lambda_guard(
             functools.partial(equals_match, expected=foo.x),
             equals_match_failure_fn(foo.x),
@@ -271,7 +293,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         foo = Foo(1, 2)
         guard_manager = RootGuardManager()
-        guard_manager.add_type_match_guard(id_type(foo), "type(x) == Foo")
+        guard_manager.add_type_match_guard(id_type(foo), ["type(x) == Foo"])
         guard_manager.getitem_manager("x", 1).add_lambda_guard(
             functools.partial(equals_match, expected=foo["x"]),
             equals_match_failure_fn(foo["x"]),
@@ -305,7 +327,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         foo = (1, 2, 3)
 
         guard_manager = RootGuardManager()
-        guard_manager.add_type_match_guard(id_type(foo), "type(x) == tuple")
+        guard_manager.add_type_match_guard(id_type(foo), ["type(x) == tuple"])
         guard_manager.getitem_manager(0, 1).add_lambda_guard(
             lambda x: x == 1,
             "Expected int",
@@ -424,15 +446,15 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         x_guard_mgr = guard_manager.dict_get_item_manager("x", a)
         y_guard_mgr = guard_manager.dict_get_item_manager("y", a)
-        install_tensor_aliasing_guard(x_guard_mgr, y_guard_mgr, "x is y")
+        install_tensor_aliasing_guard(x_guard_mgr, y_guard_mgr, ["x is y"])
 
         # Check structure
         x_guards = x_guard_mgr.get_leaf_guards()
         y_guards = y_guard_mgr.get_leaf_guards()
         self.assertEqual(len(x_guards), 1)
         self.assertEqual(len(y_guards), 1)
-        self.assertTrue(isinstance(x_guards[0], TensorAliasingGuard))
-        self.assertTrue(isinstance(y_guards[0], TensorAliasingGuard))
+        self.assertTrue(isinstance(x_guards[0], TENSOR_ALIASING))
+        self.assertTrue(isinstance(y_guards[0], TENSOR_ALIASING))
         # Check that the two guards are the same object
         self.assertTrue(x_guards[0] is y_guards[0])
 
@@ -452,6 +474,54 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
             "y": torch.zeros(4),
         }
         self.assertFalse(guard_manager.check(f_locals_not_aliased_same_value))
+
+    def test_no_tensor_aliasing_guard(self):
+        guard_manager = RootGuardManager()
+
+        a = torch.randn(3, 4)
+        f_locals = {"x": a, "y": a, "z": a}
+
+        x_guard_mgr = guard_manager.dict_get_item_manager("x", a)
+        y_guard_mgr = guard_manager.dict_get_item_manager("y", a)
+        z_guard_mgr = guard_manager.dict_get_item_manager("z", a)
+        install_no_tensor_aliasing_guard(
+            [x_guard_mgr, y_guard_mgr, z_guard_mgr],
+            ["x", "y", "z"],
+            ["no_aliasing(x, y, z)"],
+        )
+
+        # Check structure
+        x_guards = x_guard_mgr.get_leaf_guards()
+        y_guards = y_guard_mgr.get_leaf_guards()
+        z_guards = z_guard_mgr.get_leaf_guards()
+        self.assertEqual(len(x_guards), 1)
+        self.assertEqual(len(y_guards), 1)
+        self.assertEqual(len(z_guards), 1)
+        self.assertTrue(isinstance(x_guards[0], NO_TENSOR_ALIASING))
+        self.assertTrue(isinstance(y_guards[0], NO_TENSOR_ALIASING))
+        self.assertTrue(isinstance(z_guards[0], NO_TENSOR_ALIASING))
+        # Check that the two guards are the same object
+        self.assertTrue(x_guards[0] is y_guards[0] is z_guards[0])
+        self.assertFalse(guard_manager.check(f_locals))
+        self.assertFalse(guard_manager.check_verbose(f_locals).result)
+
+        f_locals_unaliased = {
+            "x": torch.randn(3, 4),
+            "y": torch.randn(3, 4),
+            "z": torch.randn(3, 4),
+        }
+        self.assertTrue(guard_manager.check(f_locals_unaliased))
+        self.assertTrue(guard_manager.check_verbose(f_locals_unaliased).result)
+        # Check that hash map is cleared.
+        self.assertTrue(guard_manager.check(f_locals_unaliased))
+
+        f_locals_unaliased = {
+            "x": a,
+            "y": torch.randn(3, 4),
+            "z": a,
+        }
+        self.assertFalse(guard_manager.check(f_locals_unaliased))
+        self.assertFalse(guard_manager.check_verbose(f_locals_unaliased).result)
 
     # def test_tensor_aliasing_guard_reset(self):
     #     # Check that guard state is reset on failure
@@ -517,7 +587,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         guard_manager.dict_get_item_manager("foo", 5).add_lambda_guard(
             lambda x: isinstance(x, int),
-            "Expected int",
+            ["Expected int"],
         )
         # Just add same guard to test if guard reshuffling happens on failure
         for _ in range(5):
@@ -528,13 +598,13 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         guard_manager.dict_get_item_manager("bar", None).add_lambda_guard(
             lambda x: isinstance(x, Pair),
-            "Expected Pair",
+            ["Expected Pair"],
         )
         guard_manager.dict_get_item_manager("bar", None).getattr_manager(
             "x", None
         ).add_lambda_guard(
             lambda x: isinstance(x, int),
-            "Expected int",
+            ["Expected int"],
         )
         guard_manager.dict_get_item_manager("bar", None).getattr_manager(
             "x", None
@@ -546,7 +616,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
             "y", None
         ).add_lambda_guard(
             lambda x: isinstance(x, int),
-            "Expected int",
+            ["Expected int"],
         )
         guard_manager.dict_get_item_manager("bar", None).getattr_manager(
             "y", None
@@ -602,7 +672,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         }
         first_debug_info = guard_manager.check_verbose(f_locals_perturbed)
         self.assertFalse(first_debug_info.result)
-        self.assertTrue("Expected Pair" in first_debug_info.failed_guard)
+        self.assertTrue("Expected Pair" in first_debug_info.verbose_code_parts[0])
 
         guard_manager.check(f_locals_perturbed)
 
@@ -678,7 +748,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
             return a + b + c
 
         guard_manager = RootGuardManager()
-        guard_manager.add_lambda_guard(lambda x: callable(x), "Expected callable")
+        guard_manager.add_lambda_guard(lambda x: callable(x), ["Expected callable"])
 
         # Guard on b = 1
         guard_manager.getattr_manager("__defaults__", foo.__defaults__).getitem_manager(
@@ -711,7 +781,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         guard_manager = RootGuardManager()
         guard_manager.tuple_iterator_getitem_manager(2, foo).add_equals_match_guard(
-            a[3], "x==4"
+            a[3], ["x==4"]
         )
 
         self.assertTrue(guard_manager.check(foo))
@@ -788,20 +858,20 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         guard_manager = RootGuardManager()
 
         foo_manager = guard_manager.getitem_manager("foo", f_locals["foo"])
-        foo_manager.add_equals_match_guard(1, "guard_fail a")
+        foo_manager.add_equals_match_guard(1, ["guard_fail a"])
         bar_manager = guard_manager.getitem_manager("bar", f_locals["bar"])
         bar_manager.get_key_value_manager(0).get_key_manager(
             "a"
-        ).add_equals_match_guard("a", "guard_fail a")
+        ).add_equals_match_guard("a", ["guard_fail a"])
         bar_manager.get_key_value_manager(0).get_value_manager(
             1
-        ).add_equals_match_guard(1, "guard_fail b")
+        ).add_equals_match_guard(1, ["guard_fail b"])
         bar_manager.get_key_value_manager(1).get_key_manager(
             "b"
-        ).add_equals_match_guard("b", "guard_fail c")
+        ).add_equals_match_guard("b", ["guard_fail c"])
         bar_manager.get_key_value_manager(1).get_value_manager(
             2
-        ).add_equals_match_guard(2, "guard_fail d")
+        ).add_equals_match_guard(2, ["guard_fail d"])
 
         self.assertTrue(guard_manager.check(f_locals))
         f_locals = {
