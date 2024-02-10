@@ -349,7 +349,12 @@ def analyze_kernel_mutations(functions, fn_name, num_args):
 
         if isinstance(arg, Param):
             mutated[arg.idx] = True
-        elif isinstance(arg, Intermediate) and not arg.fake():
+        elif (
+            isinstance(arg, Intermediate)
+            and not arg.fake()
+            # Skip arguments to load
+            and ops[arg].name != "tt.load"
+        ):
             stack.extend(ops[arg].args)
     return mutated
 
