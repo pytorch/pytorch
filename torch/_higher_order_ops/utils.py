@@ -6,7 +6,7 @@ import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._ops import HigherOrderOperator
-from torch.fx.experimental.proxy_tensor import make_fx, disable_proxy_modes_tracing
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.multiprocessing.reductions import StorageWeakRef
 
 
@@ -96,6 +96,7 @@ def _has_potential_branch_input_mutation(branch, inputs):
     """
     try:
         from torch._ops import _len_torch_dispatch_stack_pre_dispatch
+
         if _len_torch_dispatch_stack_pre_dispatch() > 0:
             gm = make_fx(branch, pre_dispatch=True)(*inputs)
         else:
@@ -140,6 +141,7 @@ def _has_potential_branch_input_alias(branch, inputs):
     """
     try:
         from torch._ops import _len_torch_dispatch_stack_pre_dispatch
+
         if _len_torch_dispatch_stack_pre_dispatch() > 0:
             gm = make_fx(branch, pre_dispatch=True)(*inputs)
         else:

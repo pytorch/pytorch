@@ -2962,10 +2962,12 @@ def forward(self, arg0_1, arg1_1):
                 def true_fn(x):
                     y = x
                     y.add_(5)
+
                     def true_true_fn(x):
                         y = x.sin()
                         y.add_(7)
                         return y.sin()
+
                     def true_false_fn(x):
                         return x.cos()
 
@@ -2992,7 +2994,7 @@ def forward(self, arg0_1):
     getitem = conditional[0];  conditional = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
-    return (add, add_1)""")
+    return (add, add_1)""")  # noqa: B950
 
         self.assertExpectedInline(str(gm.true_graph_0.code).strip(), """\
 def forward(self, arg0_1):
@@ -3003,7 +3005,7 @@ def forward(self, arg0_1):
     false_graph_0 = self.false_graph_0
     conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [cos_1]);  true_graph_0 = false_graph_0 = cos_1 = None
     getitem = conditional[0];  conditional = None
-    return (getitem,)""")
+    return (getitem,)""")  # noqa: B950
 
         self.assertExpectedInline(str(gm.true_graph_0.true_graph_0.code).strip(), """\
 def forward(self, arg0_1):
@@ -3044,7 +3046,7 @@ def forward(self, arg0_1):
     getitem = conditional[0];  conditional = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
-    return (add, add_1)""")
+    return (add, add_1)""")  # noqa: B950
         self.assertExpectedInline(str(gm.true_graph_0.code).strip(), """\
 def forward(self, arg0_1):
     add = torch.ops.aten.add.Tensor(arg0_1, 5);  arg0_1 = None

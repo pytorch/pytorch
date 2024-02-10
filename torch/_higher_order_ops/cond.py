@@ -248,11 +248,15 @@ cond_op.py_impl(DispatchKey.Autograd)(
     autograd_not_implemented(cond_op, deferred_error=True)
 )
 
+
 @cond_op.py_impl(DispatchKey.PreDispatch)
 def cond_pre_dispatch(pred, true_fn, false_fn, operands):
     from torch._ops import _len_torch_dispatch_stack_pre_dispatch
+
     if _len_torch_dispatch_stack_pre_dispatch() == 0:
-        with torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(DispatchKey.PreDispatch)):
+        with torch._C._ExcludeDispatchKeyGuard(
+            torch._C.DispatchKeySet(DispatchKey.PreDispatch)
+        ):
             return cond_op(pred, true_fn, false_fn, operands)
 
 

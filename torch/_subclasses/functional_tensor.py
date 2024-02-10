@@ -148,11 +148,15 @@ class FunctionalTensor(torch.Tensor):
 
             def unwrap(x):
                 return x.elem
+
             # All metadata accesses should be plumbed to the inner tensor, that way we don't have to worry
             # about the problem of keeping metadata in sync between the wrapper and inner tensor.
             # This also alleviates us from having to manually handle metadata mutations on the wrapper.
             assert len(kwargs) == 0
-            if func in [torch.ops.aten.is_strides_like_format.default, torch.ops.aten.is_contiguous.memory_format]:
+            if func in [
+                torch.ops.aten.is_strides_like_format.default,
+                torch.ops.aten.is_contiguous.memory_format,
+            ]:
                 assert len(args) == 2 and isinstance(args[0], FunctionalTensor)
                 return func(args[0].elem, args[1])
             assert len(args) == 1 and isinstance(args[0], FunctionalTensor)

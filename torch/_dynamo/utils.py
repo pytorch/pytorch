@@ -95,7 +95,6 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._utils_internal import log_compilation_event
 
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._python_dispatch import _temp_pop_torch_function_mode
 from torch.utils._pytree import tree_map_only
 
 

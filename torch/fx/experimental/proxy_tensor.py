@@ -1207,7 +1207,10 @@ def disable_proxy_modes_tracing(pre_dispatch=False):
     from torch._ops import unset_mode_pre_dispatch, _set_mode_pre_dispatch
     # Only one proxy_mode can be "active" at a time.
     # So we simply remove our active mode.
-    maybe_old = torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY) if not pre_dispatch else unset_mode_pre_dispatch(torch._C._TorchDispatchModeKey.PROXY)
+    maybe_old = (
+        torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
+        if not pre_dispatch else unset_mode_pre_dispatch(torch._C._TorchDispatchModeKey.PROXY)
+    )
     try:
         yield
     finally:
