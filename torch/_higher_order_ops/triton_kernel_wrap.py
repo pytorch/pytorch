@@ -76,10 +76,17 @@ class Intermediate:
         return self.idx < 0
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class Op:
     name: str
+    fn_call_name: str
     args: List[Union[Param, Intermediate]]
+
+    def __post_init__(self):
+        if self.name == "tt.call":
+            assert self.fn_call_name is not None
+        else:
+            assert self.fn_call_name is None
 
 
 def generate_ttir(kernel, kwargs):
@@ -106,28 +113,33 @@ def generate_ttir(kernel, kwargs):
     if len(kwargs) != len(kernel.arg_names):
         raise Exception("Incorrect number of arguments passed to kernel")
 
-    # Drop the keys
     # Replace all SymExprs with a regular value for TTIR generation
     # Replace all FakeTensor with real tensors
     # These replacements are needed for triton's type, key and config functions
-    args: List[Any] = []
+    ordered_args: Dict[str, Any] = {}
     for name in kernel.arg_names:
         a = kwargs[name]
         if isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-            args.append(2)
+            ordered_args[name] = 2
         elif isinstance(a, FakeTensor):
-            args.append(torch.empty(2, dtype=a.dtype))
+            ordered_args[name] = torch.empty(2, dtype=a.dtype)
         else:
-            args.append(a)
+            ordered_args[name] = a
 
-    tensor_param_locs = [i for i, arg in enumerate(args) if isinstance(arg, Tensor)]
-    specialization = kernel._get_config(*args)
-    constants = {i: arg for i, arg in enumerate(args) if not isinstance(arg, Tensor)}
+    ordered_tensor_names = [
+        name for name, arg in ordered_args.items() if isinstance(arg, Tensor)
+    ]
+    specialization = kernel._get_config(*ordered_args.values())
+    constants = {
+        i: arg
+        for i, arg in enumerate(ordered_args.values())
+        if not isinstance(arg, Tensor)
+    }
 
     # Build kernel signature -- doesn't include constexpr arguments.
     signature = {
         i: kernel._type_of(kernel._key_of(arg))
-        for i, arg in enumerate(args)
+        for i, arg in enumerate(ordered_args.values())
         if i not in kernel.constexprs
     }
 
@@ -140,7 +152,7 @@ def generate_ttir(kernel, kwargs):
 
     src = ASTSource(kernel, signature, constants, specialization)
     ttir_module = src.make_ir(options, context)
-    return str(ttir_module), tensor_param_locs
+    return str(ttir_module), ordered_tensor_names
 
 
 def parse_ttir(ttir, kwargs):
@@ -153,17 +165,12 @@ def parse_ttir(ttir, kwargs):
     parser which further makes parsing much simpler.
     """
     # TODO(oulgen):
-    # - Support multiple functions
     # - Support parsing of conditionals
     # - Support parsing for/while loops
-    # - Support ops with multiple return value (e.g. %4:2 = "tt.reduce")
-
-    if ttir.count("tt.func") != 1:
-        log.debug("Multiple functions in TTIR")
-        return None
+    # - Support closures (e.g. "tt.reduce")
 
     try:
-        import lark
+        import lark  # type: ignore[import-not-found]
         from lark import Lark, Transformer, v_args
     except ModuleNotFoundError:
         warnings.warn(
@@ -171,7 +178,9 @@ def parse_ttir(ttir, kwargs):
         )
         raise
 
+    functions: Dict[str, Dict[Intermediate, Op]] = {}
     ops: Dict[Intermediate, Op] = {}
+    current_function = None
     next_fake_intermediate = 0
 
     # Ops looks like one of the following forms:
@@ -184,30 +193,32 @@ def parse_ttir(ttir, kwargs):
 
         loc_line: "#loc" /.+/ NEWLINE
 
-        module_block: "module" "{" decl_block "}" LOC
+        module_block: "module" "{" func_block+ "}" LOC
 
-        decl_block: /.+/ NEWLINE op+ "}" LOC
+        func_block: "tt.func" ("public"|"private") FN_NAME "(" /.+/ NEWLINE op+ "}" LOC -> process_func
 
-        op: "tt.return" LOC
-          | assign_lhs "=" OP_NAME args rest  -> process_op
-          | OP_NAME args rest                 -> process_op_no_ret
+        op: OP_NAME LOC
+          | [assign_lhs "="] OP_NAME [FN_NAME] args rest?  -> process_op
 
         ?rest: (":" | "{" | "\\"" | "->" | "<") /.+/ NEWLINE
 
         args: | "("? arg ("," arg)* ")"?
 
-        ?arg: INTERMEDIATE | CONSTANT | PARAM | "[" arg "]"
+        ?arg: INTERMEDIATE | CONSTANT | PARAM | "[" arg "]" | arg_with_index
 
-        ?assign_lhs: INTERMEDIATE | CONSTANT
+        ?arg_with_index: arg "#" DIGIT+
+
+        ?assign_lhs: (INTERMEDIATE | CONSTANT) [":" DIGIT+]
 
         PARAM.5: "%arg" DIGIT+
         INTERMEDIATE.4: "%" DIGIT+
         NAME: (LETTER | DIGIT | "_")+
         CONSTANT: "%"? NAME+ ("<" DIGIT+ ">")?
 
+        FN_NAME: "@" NAME+
         OP_NAME: "\\""? NAME "." NAME "\\""?
 
-        LOC: "loc(#loc" DIGIT* ")"
+        LOC.5: "loc(#loc" DIGIT* ")"
 
         %import common.LETTER
         %import common.DIGIT
@@ -219,7 +230,14 @@ def parse_ttir(ttir, kwargs):
 
     def convert(token):
         if isinstance(token, lark.tree.Tree):
-            return [convert(a) for a in token.children]
+            if token.data == "args":
+                return [convert(a) for a in token.children]
+            elif token.data in {"assign_lhs", "arg_with_index"}:
+                # Drop length/index qualifier
+                return convert(token.children[0])
+            else:
+                raise AssertionError(f"Tree node with {token.data}")
+
         if token is None or (
             isinstance(token, lark.lexer.Token) and token.type == "CONSTANT"
         ):
@@ -239,6 +257,8 @@ def parse_ttir(ttir, kwargs):
     # In alternative representation, function names are quoted.
     # It should be possible to move this into the grammar alltogether.
     def convert_name(token):
+        if token is None:
+            return None
         s = token.value
         if len(s) > 2 and s[0] == '"' and s[-1] == '"':
             return s[1:-1]
@@ -246,18 +266,43 @@ def parse_ttir(ttir, kwargs):
 
     @v_args(inline=True)
     class CalculateOps(Transformer):
-        def process_op_no_ret(self, *args):
-            self.process_op(None, *args)
+        def process_op(self, ret, op_name, fn_name, args, *rest):
+            ops[convert(ret)] = Op(
+                convert_name(op_name), convert_name(fn_name), convert(args)
+            )
 
-        def process_op(self, ret, name, args, *rest):
-            ops[convert(ret)] = Op(convert_name(name), convert(args))
+        def process_func(self, name, *rest):
+            nonlocal ops
+            functions[name.value] = ops
+            ops = {}
 
-    parser = Lark(grammar, parser="lalr", transformer=CalculateOps())
+    parser = Lark(
+        grammar, parser="lalr", maybe_placeholders=True, transformer=CalculateOps()
+    )
     parser.parse(ttir)
-    return ops
+    return functions
 
 
-def analyze_kernel_mutations(ops, kwargs, tensor_param_locs):
+class MemoizeWithCycleCheck:
+    def __init__(self, fn):
+        self.fn = fn
+        self.reset()
+
+    def __call__(self, functions, fn_name, num_args):
+        key = (fn_name, num_args)
+        if key not in self.cache:
+            self.cache[key] = None
+            self.cache[key] = self.fn(functions, fn_name, num_args)
+        if self.cache[key] is None:
+            raise Exception("Recursion is not supported")
+        return self.cache[key]
+
+    def reset(self):
+        self.cache = {}
+
+
+@MemoizeWithCycleCheck
+def analyze_kernel_mutations(functions, fn_name, num_args):
     """
     Analyzes the graph to detect all sinks from a predefined list of sinks
     by using triton's MemWrite trait list. NOTE: What if triton exposed this?
@@ -274,17 +319,27 @@ def analyze_kernel_mutations(ops, kwargs, tensor_param_locs):
 
     stack: List[Union[Param, Intermediate]] = []
     visited = set()
+    ops = functions[fn_name]
     for op in ops.values():
         if op.name in UNKNOWN_OPS:
             raise Exception(
                 f"ttir analysis hit an op we do not know how to analyze: {op.name}"
             )
 
-        for idx in MUTATION_OPS.get(op.name, []):
-            stack.append(op.args[idx])
+        if op.name == "tt.call":
+            assert op.fn_call_name in functions
+            mutations = analyze_kernel_mutations(
+                functions, op.fn_call_name, len(op.args)
+            )
+            for idx, mutated in enumerate(mutations):
+                if mutated:
+                    stack.append(op.args[idx])
+        else:
+            for idx in MUTATION_OPS.get(op.name, []):
+                stack.append(op.args[idx])
 
     # The following is an iterative DFS algorithm
-    mutated = [False] * len(kwargs)
+    mutated = [False] * num_args
     while len(stack):
         arg = stack.pop()
         if arg in visited:
@@ -293,15 +348,15 @@ def analyze_kernel_mutations(ops, kwargs, tensor_param_locs):
             visited.add(arg)
 
         if isinstance(arg, Param):
-            mutated[tensor_param_locs[arg.idx]] = True
-        elif isinstance(arg, Intermediate) and not arg.fake():
+            mutated[arg.idx] = True
+        elif (
+            isinstance(arg, Intermediate)
+            and not arg.fake()
+            # Skip arguments to load
+            and ops[arg].name != "tt.load"
+        ):
             stack.extend(ops[arg].args)
-
-    return [
-        key
-        for i, (key, value) in enumerate(kwargs.items())
-        if isinstance(value, Tensor) and mutated[i]
-    ]
+    return mutated
 
 
 def identify_mutated_tensors(kernel, kwargs):
@@ -318,9 +373,21 @@ def identify_mutated_tensors(kernel, kwargs):
         if not config.optimize_user_defined_triton_kernels:
             raise Exception("optimize_user_defined_triton_kernels is False")
 
-        ttir, tensor_param_locs = generate_ttir(kernel, kwargs)
-        ops = parse_ttir(ttir, kwargs)
-        return analyze_kernel_mutations(ops, kwargs, tensor_param_locs)
+        ttir, ordered_tensor_names = generate_ttir(kernel, kwargs)
+        functions = parse_ttir(ttir, kwargs)
+
+        kernel_name = next(iter(functions.keys()))
+        # Triton codegen modifies the name
+        assert kernel.fn.__name__ in kernel_name
+        # Reset the cache between top level invocations
+        # The cache for analyze kernel mutations is mainly used for cycle
+        # detection, so each top level invocation needs a clean cache
+        analyze_kernel_mutations.reset()
+        mutations = analyze_kernel_mutations(functions, kernel_name, len(kwargs))
+
+        return [
+            ordered_tensor_names[i] for i, mutated in enumerate(mutations) if mutated
+        ]
     except Exception as e:
         import traceback
 
