@@ -34,7 +34,7 @@ jobs:
     with:
       timeout: 120
       runner: linux.2xlarge
-      docker-image: pytorch-linux-jammy-cuda11.8-cudnn8-py3.9-linter
+      docker-image: pytorch-linux-focal-linter
       fetch-depth: 1
       submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
