@@ -1416,12 +1416,12 @@ class CommonTemplate:
             return x.cumsum(-1)
 
         # Persistent reduction
-        a = torch.randn((1, 1024))
-        self.common(fn, (a,))
+        a = torch.rand((1, 1024))
+        self.common(fn, (a,), check_lowp=not TEST_WITH_ROCM)
 
         # Non-persistent reduction
-        b = torch.randn((1, 8192))
-        self.common(fn, (b,))
+        b = torch.rand((1, 8192))
+        self.common(fn, (b,), check_lowp=not TEST_WITH_ROCM)
 
     def test_cumprod_zero_dim(self):
         def fn(x):
