@@ -24,6 +24,7 @@ from .dicts import (
 from .functions import (
     FunctoolsPartialVariable,
     NestedUserFunctionVariable,
+    SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
@@ -63,7 +64,6 @@ from .misc import (
     NewGlobalVariable,
     NumpyVariable,
     PythonModuleVariable,
-    SkipFilesVariable,
     StringFormatVariable,
     SuperVariable,
     TypingVariable,
@@ -125,7 +125,7 @@ __all__ = [
     "RepeatIteratorVariable",
     "RestrictedListSubclassVariable",
     "SDPAParamsVariable",
-    "SkipFilesVariable",
+    "SkipFunctionVariable",
     "SliceVariable",
     "StringFormatVariable",
     "SuperVariable",
