@@ -7,6 +7,8 @@ import operator
 import types
 from typing import Dict, List
 
+from ..bytecode_transformation import create_call_method
+
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -21,8 +23,6 @@ import torch.fx
 import torch.random
 
 from torch._dynamo import compiled_autograd
-
-from torch._dynamo.variables.base import VariableTracker
 
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
@@ -1098,6 +1098,7 @@ class UntypedStorageVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "size":
+            assert not (args or kwargs)
             result = self.example_value.size()
             if not has_free_symbols(result):
                 # avoid creating a node in the graph
@@ -1115,5 +1116,22 @@ class UntypedStorageVariable(VariableTracker):
                         {},
                     ),
                 )
+        if name == "resize_" and len(args) == 1:
+            assert not kwargs
+            from ..external_utils import resize_storage_
+
+            tx.output.create_proxy(
+                "call_function",
+                resize_storage_,
+                (self.from_tensor.as_proxy(), args[0].as_proxy()),
+                {},
+            )
+            return self
 
         return super().call_method(tx, name, args, kwargs)
+
+    def reconstruct(self, codegen):
+        codegen(self.from_tensor)
+        codegen.append_output(codegen.create_load_method("untyped_storage"))
+        codegen.extend_output(create_call_method(0))
+        return ()

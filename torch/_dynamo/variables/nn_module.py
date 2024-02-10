@@ -8,7 +8,6 @@ from contextlib import contextmanager, nullcontext
 from typing import Any, Dict, List
 
 import torch.nn
-from torch._dynamo.variables.base import VariableTracker
 
 from .. import trace_rules, variables
 from ..exc import unimplemented, UnspecializeRestartAnalysis, Unsupported
@@ -246,7 +245,8 @@ class NNModuleVariable(VariableTracker):
                 return VariableBuilder(tx, source)(subobj.__get__(base))
             else:
                 unimplemented(
-                    f"class property {typestr(base)} {typestr(subobj)} {subobj.__class__} {isinstance(subobj, types.GetSetDescriptorType)} {subobj.__get__(base)}"
+                    f"class property {typestr(base)} {typestr(subobj)} {subobj.__class__} "
+                    f"{isinstance(subobj, types.GetSetDescriptorType)} {subobj.__get__(base)}"
                 )
 
         return variables.GetAttrVariable(self, name, source=source)

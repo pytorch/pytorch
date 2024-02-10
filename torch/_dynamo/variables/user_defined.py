@@ -755,7 +755,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         self.value, torch.distributed.fsdp._flat_param.FlatParamHandle
                     ):
                         return True
-                except:
+                except Exception:
                     # module 'torch.distributed' has no attribute 'fsdp'
                     # is not protected by torch.distributed.is_available() for some reason?
                     return False
