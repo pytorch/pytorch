@@ -686,6 +686,14 @@ class TestLRScheduler(TestCase):
         )
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
+    def test_reduce_lr_on_plateau_get_last_lr_before_step(self):
+        for param_group in self.opt.param_groups:
+            param_group["lr"] = 0.5
+        scheduler = ReduceLROnPlateau(
+            self.opt,
+        )
+        self.assertEqual(scheduler.get_last_lr(), [0.5 for param_group in self.opt.param_groups])
+
     def test_sequentiallr1(self):
         epochs = 19
         schedulers = [None] * 2
