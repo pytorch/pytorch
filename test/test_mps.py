@@ -620,7 +620,7 @@ def mps_ops_modifier(ops):
         'polygammapolygamma_n_3': [torch.float32, torch.int16, torch.int64, torch.int8],
         'polygammapolygamma_n_4': [torch.float32, torch.int16, torch.int64, torch.int8],
         'special.polygamma': [torch.float32, torch.int16, torch.int32, torch.int8],
-        'special.polygammaspecial_polygamma_n_0': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
+        'special.polygammaspecial_polygamma_n_0': [torch.float32, torch.int16, torch.int8],
     }
 
     # Those ops are not expected to work
