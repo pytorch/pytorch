@@ -3,6 +3,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
