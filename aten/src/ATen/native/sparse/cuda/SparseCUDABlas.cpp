@@ -156,7 +156,11 @@ void _csrmm2(
   auto handle = at::cuda::getCurrentCUDASparseHandle();
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   // ALG1 is broken on SM89 as of CUDA 11.8+
+#if !defined(USE_ROCM)
   auto default_alg = prop->major == 8 && prop->minor == 9 ? CUSPARSE_SPMM_CSR_ALG2 : CUSPARSE_SPMM_CSR_ALG1;
+#else
+  auto default_alg = CUSPARSE_SPMM_CSR_ALG1;
+#endif
 
   // cusparseSpMM_bufferSize returns the bufferSize that can be used by cusparseSpMM
   size_t bufferSize;
