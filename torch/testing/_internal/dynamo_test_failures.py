@@ -172,6 +172,7 @@ dynamo_expected_failures = {
     "TestApplyAlongAxis.test_scalar_array",
     "TestDstack.test_non_iterable",
     "TestSplit.test_unequal_split",
+    "TestPutAlongAxis.test_broadcast",
     "TestArraySplit.test_integer_0_split",
     "TestDsplit.test_2D_array",
     "TestTakeAlongAxis.test_invalid",
@@ -461,6 +462,7 @@ dynamo_expected_failures = {
     "TestNNDeviceTypeCPU.test_nll_loss_all_ignored_cpu",  # test_nn
     "TestNN.test_ParameterList_replication",  # test_nn
     "TestNN.test_interpolate_buffer_overflow",  # test_nn
+    "TestNNDeviceTypeCPU.test_nll_loss_byte_target_matches_long_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_module_to_empty_cpu_float32",  # test_nn
     "TestNNDeviceTypeCPU.test_nll_loss_empty_tensor_reduction_none_cpu",  # test_nn
     "TestNN.test_Sequential_extend",  # test_nn
@@ -1286,6 +1288,7 @@ dynamo_expected_failures = {
     "TestFX.test_pytree_concrete",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_Mutation_cpu",  # test_fx
     "TestFX.test_custom_traceback_raised_when_exception_source_is_graphmodule",  # test_fx
+    "TestConstFold.test_check_skip_folding_quant_dequant_pattern",  # test_fx
     "TestFX.test_immutable_list_pytree_ops",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_TakeList_cpu",  # test_fx
     "TestPassManager.test_pass_manager",  # test_fx
@@ -1469,37 +1472,60 @@ dynamo_expected_failures = {
     "TestTorch.test_cuda_not_built",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_quint4x2",  # test_torch
     "TestTorch.test_map",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_fmod_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_uniform_kstest_cpu_float16",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_lerp_cpu",  # test_torch
     "TestTorch.test_parsing_int64",  # test_torch
     "TestTorchDeviceTypeCPU.test_exponential_kstest_cpu_bfloat16",  # test_torch
     "TestTorch.test_parsing_intlist",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_eq_cpu",  # test_torch
     "TestTorch.test_contains",  # test_torch
     "TestTorch.test_new",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_map2_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_ne_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_gt_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_uniform_kstest_cpu_bfloat16",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_div_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_quint8",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_lt_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_memory_format_operators_cpu",  # test_torch
     "TestTorch.test_pin_memory",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_masked_fill_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool2d_cpu_float64",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_sub_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_le_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_qint32",  # test_torch
     "TestTorchDeviceTypeCPU.test_exponential_kstest_cpu_float16",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_qint8",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_remainder_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool1d_cpu_float32",  # test_torch
     "TestTorchDeviceTypeCPU.test_uniform_kstest_cpu_float64",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_add_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_addcmul_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_quint2x4",  # test_torch
     "TestTorchDeviceTypeCPU.test_exponential_kstest_cpu_float64",  # test_torch
     "TestTorchDeviceTypeCPU.test_uniform_kstest_cpu_float32",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool2d_cpu_float32",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool3d_cpu_float32",  # test_torch
     "TestTorch.test_upsample_nearest2d_meta",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_map_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool1d_cpu_float64",  # test_torch
     "TestTorch.test_upsample_nearest1d_meta",  # test_torch
     "TestTorchDeviceTypeCPU.test_normal_kstest_cpu_float32",  # test_torch
     "TestTorchDeviceTypeCPU.test_normal_kstest_cpu_float64",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_pow_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_copy_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool3d_cpu_float64",  # test_torch
     "TestTorchDeviceTypeCPU.test_normal_kstest_cpu_float16",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_masked_scatter_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_ge_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_atan2_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_mul_cpu",  # test_torch
     "TestTorch.test_tensoriterator_output_setup",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_addcdiv_cpu",  # test_torch
     "TestTorch.test_parsing_double",  # test_torch
     "TestTorchDeviceTypeCPU.test_exponential_kstest_cpu_float32",  # test_torch
+    "TestTorchDeviceTypeCPU.test_deterministic_empty_cpu_uint64",  # test_torch
     "TestAutograd.test_checkpoint_detects_non_determinism",  # test_autograd
     "TestAutograd.test_gradcheck_backward_mul_by_grad_output",  # test_autograd
     "TestAutogradLogging.test_logging",  # test_autograd

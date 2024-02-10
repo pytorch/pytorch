@@ -1424,8 +1424,6 @@ class FakeTensorMode(TorchDispatchMode):
                 r = func(*args, **kwargs)
         except NotImplementedError as not_implemented_error:
             return maybe_run_unsafe_fallback(not_implemented_error)
-        except RuntimeError as e:
-            raise UnsupportedOperatorException(str(e)) from e
 
         return self.wrap_meta_outputs_with_default_device_logic(
             r, func, flat_args, device=kwargs.get("device")
