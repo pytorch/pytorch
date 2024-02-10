@@ -51,7 +51,7 @@ from .variables import (
     BuiltinVariable,
     FunctorchVmapHigherOrderVariable,
     NestedUserFunctionVariable,
-    SkipFilesVariable,
+    SkipFunctionVariable,
     TorchInGraphFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
@@ -65,7 +65,7 @@ Map of function objects to their tracing rules (Dynamo variables).
 * TorchInGraphFunctionVariable: The functions should be put into the FX graph or can be constant folded. E.g.,
   - torch.add: should be put into the FX graph.
   - torch.is_floating_point: constant folded.
-* SkipFilesVariable: The objects should be skipped from tracing.
+* SkipFunctionVariable: The objects should be skipped from tracing.
 * UserFunctionVariable: The functions should be inlined.
 
 For developers: If you add/remove a torch level API, it may trigger failures from
@@ -100,29 +100,29 @@ manual_torch_name_rule_map = {
     "torch.overrides.get_default_nowrap_functions": TorchInGraphFunctionVariable,
     "torch.fx._symbolic_trace.is_fx_tracing": TorchInGraphFunctionVariable,
     "torch._dynamo.external_utils.is_compiling": TorchInGraphFunctionVariable,
-    "torch.autograd._profiler_enabled": SkipFilesVariable,
+    "torch.autograd._profiler_enabled": SkipFunctionVariable,
     # We graph break on RNG state setters or getters like
     # `torch.get_rng_state` or `torch.set_rng_state`. These functions
     # are not aten operations and therefore they are completely ignored
     # by the AOT dispatcher. As a result, the AOT graph does not have
     # these setter or getter functions, producing an incorrect graph
     # when it comes to rng states.
-    "torch.default_generator#get_state": SkipFilesVariable,
-    "torch._C.Generator#get_state": SkipFilesVariable,
-    "torch.get_rng_state": SkipFilesVariable,
-    "torch.cuda.get_rng_state": SkipFilesVariable,
-    "torch.default_generator#set_state": SkipFilesVariable,
-    "torch._C.Generator#set_state": SkipFilesVariable,
-    "torch.set_rng_state": SkipFilesVariable,
-    "torch.cuda.set_rng_state": SkipFilesVariable,
+    "torch.default_generator#get_state": SkipFunctionVariable,
+    "torch._C.Generator#get_state": SkipFunctionVariable,
+    "torch.get_rng_state": SkipFunctionVariable,
+    "torch.cuda.get_rng_state": SkipFunctionVariable,
+    "torch.default_generator#set_state": SkipFunctionVariable,
+    "torch._C.Generator#set_state": SkipFunctionVariable,
+    "torch.set_rng_state": SkipFunctionVariable,
+    "torch.cuda.set_rng_state": SkipFunctionVariable,
     # https://github.com/pytorch/pytorch/issues/107187
-    "torch.manual_seed": SkipFilesVariable,
+    "torch.manual_seed": SkipFunctionVariable,
     # https://github.com/pytorch/pytorch/issues/93501
-    "torch.nn.utils.rnn.pack_padded_sequence": SkipFilesVariable,
+    "torch.nn.utils.rnn.pack_padded_sequence": SkipFunctionVariable,
     # https://github.com/pytorch/pytorch/issues/99569
-    "torch.nn.Parameter": SkipFilesVariable,
-    "torch._nested_tensor_from_mask": SkipFilesVariable,
-    "torch._nested_from_padded": SkipFilesVariable,
+    "torch.nn.Parameter": SkipFunctionVariable,
+    "torch._nested_tensor_from_mask": SkipFunctionVariable,
+    "torch._nested_from_padded": SkipFunctionVariable,
     # symbol operators implemented in Python
     "torch.sym_not": TorchInGraphFunctionVariable,
     "torch.sym_float": TorchInGraphFunctionVariable,
@@ -131,28 +131,28 @@ manual_torch_name_rule_map = {
     "torch.sym_min": TorchInGraphFunctionVariable,
     "torch.sym_sqrt": TorchInGraphFunctionVariable,
     "torch.sym_ite": TorchInGraphFunctionVariable,
-    "torch.Tensor#_make_wrapper_subclass": SkipFilesVariable,
-    "torch.Tensor#__init__": SkipFilesVariable,
-    "torch.cuda.set_device": SkipFilesVariable,
-    "torch.cuda.current_device": SkipFilesVariable,
-    "torch._C.autocast_decrement_nesting": SkipFilesVariable,
-    "torch._C.autocast_increment_nesting": SkipFilesVariable,
-    "torch.autograd.grad": SkipFilesVariable,
-    "torch._C.clear_autocast_cache": SkipFilesVariable,
-    "torch.distributions.constraints.is_dependent": SkipFilesVariable,
-    "torch.jit.isinstance": SkipFilesVariable,
-    "torch._C.set_anomaly_enabled": SkipFilesVariable,
-    "torch._C.set_autocast_cache_enabled": SkipFilesVariable,
-    "torch._C.set_autocast_cpu_dtype": SkipFilesVariable,
-    "torch._C.set_autocast_cpu_enabled": SkipFilesVariable,
-    "torch._C.set_autocast_enabled": SkipFilesVariable,
-    "torch._C.set_autocast_gpu_dtype": SkipFilesVariable,
-    "torch._C.set_autocast_ipu_dtype": SkipFilesVariable,
-    "torch._C.set_autocast_ipu_enabled": SkipFilesVariable,
-    "torch._C.set_autocast_xla_dtype": SkipFilesVariable,
-    "torch._C.set_autocast_xla_enabled": SkipFilesVariable,
-    "torch.resize_as_": SkipFilesVariable,
-    "torch.resize_as_sparse_": SkipFilesVariable,
+    "torch.Tensor#_make_wrapper_subclass": SkipFunctionVariable,
+    "torch.Tensor#__init__": SkipFunctionVariable,
+    "torch.cuda.set_device": SkipFunctionVariable,
+    "torch.cuda.current_device": SkipFunctionVariable,
+    "torch._C.autocast_decrement_nesting": SkipFunctionVariable,
+    "torch._C.autocast_increment_nesting": SkipFunctionVariable,
+    "torch.autograd.grad": SkipFunctionVariable,
+    "torch._C.clear_autocast_cache": SkipFunctionVariable,
+    "torch.distributions.constraints.is_dependent": SkipFunctionVariable,
+    "torch.jit.isinstance": SkipFunctionVariable,
+    "torch._C.set_anomaly_enabled": SkipFunctionVariable,
+    "torch._C.set_autocast_cache_enabled": SkipFunctionVariable,
+    "torch._C.set_autocast_cpu_dtype": SkipFunctionVariable,
+    "torch._C.set_autocast_cpu_enabled": SkipFunctionVariable,
+    "torch._C.set_autocast_enabled": SkipFunctionVariable,
+    "torch._C.set_autocast_gpu_dtype": SkipFunctionVariable,
+    "torch._C.set_autocast_ipu_dtype": SkipFunctionVariable,
+    "torch._C.set_autocast_ipu_enabled": SkipFunctionVariable,
+    "torch._C.set_autocast_xla_dtype": SkipFunctionVariable,
+    "torch._C.set_autocast_xla_enabled": SkipFunctionVariable,
+    "torch.resize_as_": SkipFunctionVariable,
+    "torch.resize_as_sparse_": SkipFunctionVariable,
     "torch.get_default_device": TorchInGraphFunctionVariable,
     # functorch
     "torch._functorch.vmap._check_int_or_none": UserFunctionVariable,
@@ -3027,8 +3027,8 @@ Dynamo skip/inline rules & priorities are defined as follows:
     We should specify inline for the functions in `manual_torch_name_rule_map` or
     put the corresponding python module into MOD_INLINELIST to make dynamo inline them.
 * If you call functions under skipped modules/files, Dynamo will wrap these functions
-    as SkipFilesVariable. There are a few functions(e.g, collections.OrderedDict) that
-    we have special handling at SkipFilesVariable.call_function.
+    as SkipFunctionVariable. There are a few functions(e.g, collections.OrderedDict) that
+    we have special handling at SkipFunctionVariable.call_function.
 
 Overall: *_INLINELIST has precedence over *_SKIPLIST has precedence over DEFAULT (inline)
 
@@ -3313,7 +3313,7 @@ There are mainly three call sites of check/check_verbose:
       is in InliningInstructionTranslator.check_inlineable of symbolic_convert.py.
     * If f2 is skipped by Dynamo, when evaluating the frame of f3, Dynamo need the inline/skip check again
       and the call site is in catch_errors_wrapper.catch_errors of convert_frame.py.
-* For global variables and function arguments, Dynamo needs to decide if they are wrapped as SkipFilesVariable in builder.py.
+* For global variables and function arguments, Dynamo needs to decide if they are wrapped as SkipFunctionVariable in builder.py.
 
 `is_inlined_call` is used to indicate if the current function call is inlined (f2 is inlined call if it passes check)
 or not (f3 is not inlined call if f2 is skipped). Inside of the `check_verbose` function, there are more rules
@@ -3351,7 +3351,7 @@ def check_verbose(obj, is_inlined_call=False):
             "inlined according trace_rules.lookup",
         )
     else:
-        assert rule == SkipFilesVariable, rule
+        assert rule == SkipFunctionVariable, rule
         return SkipResult(
             True,
             "skipped according trace_rules.lookup",
@@ -3396,7 +3396,7 @@ def lookup_callable(obj):
         return None
     # Custom allow/disallow in graph takes precedence over the general lookup.
     if is_callable_disallowed(obj):
-        return SkipFilesVariable
+        return SkipFunctionVariable
     if is_callable_allowed(obj):
         return TorchInGraphFunctionVariable
     if is_builtin_callable(obj):
@@ -3430,7 +3430,7 @@ def lookup_inner(obj, name=None, filename=None, is_direct_call=True):
     # Step 2: lookup obj's tracing rule by function name.
     if is_direct_call:
         if name == "patched_init":
-            return SkipFilesVariable
+            return SkipFunctionVariable
         elif name == "__torch_function__":
             return UserFunctionVariable
 
@@ -3439,6 +3439,6 @@ def lookup_inner(obj, name=None, filename=None, is_direct_call=True):
         filename = getfile(obj)
 
     if check_file(filename, is_direct_call).skipped:
-        return SkipFilesVariable
+        return SkipFunctionVariable
     else:
         return UserFunctionVariable
