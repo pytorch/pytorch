@@ -757,7 +757,11 @@ static std::string genScatterGatherCvtFunc(const std::string& dtypeSrc, const st
   if (srcComplex) {
     return "x.x";
   }
-  return "x";
+  // TODO: Document why explicit cast is needed only for bfloat types
+  if (dtypeDst == "bfloat") {
+    return "bfloat(x)";
+  }
+  return "(x)";
 }
 
 static id<MTLLibrary> compileGatherScatterOpsLibrary(id<MTLDevice> device,
