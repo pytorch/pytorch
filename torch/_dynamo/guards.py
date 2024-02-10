@@ -138,9 +138,7 @@ class GuardManager:
                 s += self._debug_print(child_mgr, prefix + "|  ")
 
         # Now handle the general case of GuardManager/RootGuardManager
-        for accessor, child_mgr in zip(
-            mgr.get_accessors(), mgr.get_child_managers(), strict=True
-        ):
+        for accessor, child_mgr in zip(mgr.get_accessors(), mgr.get_child_managers()):
             suffix = " with " + accessor.repr() + "\n"
             s += prefix + "+- " + child_mgr.__class__.__name__ + suffix
             s += self._debug_print(child_mgr, prefix + "|  ")
@@ -1392,8 +1390,8 @@ class CheckFunctionManager:
             guard.create(builder)
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
 
-        if config.enable_cpp_guard_manager:
-            print(self.guard_manager)
+        # if config.enable_cpp_guard_manager:
+        #     print(self.guard_manager)
 
         # Check that the check_fn is True for this frame
         # assert self.check_fn(output_graph.local_scope)
