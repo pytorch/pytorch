@@ -8,6 +8,7 @@
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/generated/Functions.h>
+#include <torch/csrc/autograd/generated/ViewFuncs.h>
 #include <torch/csrc/autograd/utils/error_messages.h>
 
 #include <ATen/ATen.h>
@@ -24,6 +25,19 @@
 
 namespace torch {
 namespace autograd {
+
+// Returns a ViewFunc with a corresponding view that matches the shape,
+// stride, and storage offset of the given tensor.
+// NB: On mobile, the as_strided() op and thus the generated AsStridedViewFunc
+// may not be available.
+static std::unique_ptr<ViewFunc> create_view_func_matching(const Variable& t) {
+#ifdef AS_STRIDED_VIEW_FUNC_AVAILABLE
+  return std::make_unique<torch::autograd::generated::AsStridedViewFunc>(
+      t.sym_sizes(), t.sym_strides(), t.sym_storage_offset());
+#else
+  return std::make_unique<ErroringViewFunc>("as_strided() not available");
+#endif
+}
 
 DifferentiableViewMeta::DifferentiableViewMeta(
     at::TensorImpl* self_impl,
@@ -58,7 +72,7 @@ DifferentiableViewMeta::DifferentiableViewMeta(
 ViewInfo ViewInfo::chain(
     const Variable& base,
     const Variable& tensor,
-    std::function<Variable(const Variable&)> view_func,
+    std::unique_ptr<ViewFunc> view_func,
     std::function<Variable(const Variable&)> rev_view_func) const {
   // Set `view_func` using the root base as input.
   // `view_func` is used to recover views in backward when either as_strided is
@@ -69,12 +83,8 @@ ViewInfo ViewInfo::chain(
   if (view_func) {
     // both current_view and it's parent have a view_func
     if (view_fn_) {
-      // Copy parent view function to gain ownership
-      auto prev_fn = view_fn_;
-      view_func = [=](const at::Tensor& root_base) {
-        auto temp = prev_fn(root_base);
-        return view_func(temp);
-      };
+      view_func = std::make_unique<ChainedViewFunc>(
+          view_fn_->clone_and_set(), std::move(view_func));
 
       // assume view_fn_ / rev_view_fn_ always exist together or neither are set
       auto prev_rev_fn = rev_view_fn_;
@@ -85,13 +95,9 @@ ViewInfo ViewInfo::chain(
     } else {
       // current_view has a view_func and but it's parent doesn't have one
       if (base.unsafeGetTensorImpl()->support_as_strided()) {
-        auto size = base.sym_sizes().vec();
-        auto stride = base.sym_strides().vec();
-        auto storage_offset = base.sym_storage_offset();
-        view_func = [=](const at::Tensor& root_base) {
-          auto temp = root_base.as_strided_symint(size, stride, storage_offset);
-          return view_func(temp);
-        };
+        auto match_base_view_func = create_view_func_matching(base);
+        view_func = std::make_unique<ChainedViewFunc>(
+            std::move(match_base_view_func), std::move(view_func));
 
         // assume view_fn_ / rev_view_fn_ always exist together or neither are
         // set
@@ -111,12 +117,7 @@ ViewInfo ViewInfo::chain(
         auto error_msg =
             ("Attempted to chain views when the parent view has no view_func() and "
              "does not support as_strided(). This is not supported.");
-
-        view_func = [=](const at::Tensor& root_base) {
-          TORCH_CHECK(false, error_msg);
-          return root_base;
-        };
-
+        view_func = std::make_unique<ErroringViewFunc>(error_msg);
         rev_view_func = [=](const at::Tensor& root_view) {
           TORCH_CHECK(false, error_msg);
           return root_view;
@@ -125,15 +126,9 @@ ViewInfo ViewInfo::chain(
     }
   } else if (view_fn_) {
     // if current_view doesn't have a view_func but it's parent has one
-    // Copy parent view function to gain ownership
-    auto prev_view_fn = view_fn_;
-    auto size = tensor.sym_sizes().vec();
-    auto stride = tensor.sym_strides().vec();
-    auto storage_offset = tensor.sym_storage_offset();
-    view_func = [=](const at::Tensor& root_base) {
-      auto temp = prev_view_fn(root_base);
-      return temp.as_strided_symint(size, stride, storage_offset);
-    };
+    auto match_tensor_view_func = create_view_func_matching(tensor);
+    view_func = std::make_unique<ChainedViewFunc>(
+        view_fn_->clone_and_set(), std::move(match_tensor_view_func));
 
     // assume view_fn_ / rev_view_fn_ always exist together or neither are set
     auto prev_rev_view_fn = rev_view_fn_;
@@ -232,12 +227,12 @@ void rebase_history(const Variable& self, Edge gradient_edge) {
     TORCH_CHECK(
         gradient_edge.function->num_inputs() == 1,
         "Functions which modify views in-place must return a single Variable");
-    auto view_info = diff_view_meta->get_backward_view();
+    const auto& view_info = diff_view_meta->get_backward_view();
     diff_view_meta->output_nr_ = gradient_edge.input_nr;
     auto copy_slices = std::make_shared<CopySlices>(
         view_info.base_,
         at::TensorGeometry(self),
-        view_info.view_fn_,
+        view_info.has_view_fn() ? view_info.view_fn().clone_and_set() : nullptr,
         std::move(gradient_edge.function));
     if (self.requires_grad()) {
       // If self did not previously require grad, there are no hooks to move
@@ -656,7 +651,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
   if (diff_view_meta && diff_view_meta->has_bw_view()) {
     // See NOTE [ View + Inplace detection ]
     std::lock_guard<std::mutex> lock(diff_view_meta->mutex_);
-    auto view_info = diff_view_meta->get_backward_view();
+    auto& view_info = diff_view_meta->get_backward_view();
     if (!diff_view_meta->grad_fn_ && !view_info.base_.requires_grad()) {
       return diff_view_meta->grad_fn_;
     }
@@ -696,7 +691,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
       // in VariableType_x.cpp
       //       that would provide a way to recreate the grad_fn chain.
       if (view_info.has_view_fn()) {
-        auto view_fn = view_info.view_fn();
+        auto& view_fn = view_info.view_fn();
         Tensor diff_view;
         {
           // We can reach this path with grad_mode disabled, e.g. engine

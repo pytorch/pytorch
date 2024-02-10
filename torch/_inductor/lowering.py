@@ -1059,7 +1059,7 @@ def pointwise_cat(inputs, dim=0):
 
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
-    if all(input.get_dtype() is torch.uint8 for input in inputs):
+    if all(input.get_dtype() in [torch.int8, torch.uint8] for input in inputs):
         # TODO <leslie> Remove this fallback when we support vectorization
         # code gen with uint8 data type directly.
         for input in inputs:
@@ -5321,7 +5321,7 @@ register_inplace(aten.__ixor__, aten.__xor__)
 
 
 @register_lowering(aten.sym_constrain_range)
-def sym_constrain_range(a, min, max):
+def sym_constrain_range(a, min=None, max=None):
     tracing_context = torch._guards.TracingContext.get()
     assert a in tracing_context.fake_mode.shape_env.var_to_range
     return a
