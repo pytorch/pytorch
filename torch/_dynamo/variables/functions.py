@@ -14,8 +14,8 @@ from ..bytecode_transformation import create_call_function, create_rot_n
 from ..exc import unimplemented, Unsupported
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
-from ..utils import get_first_attr, identity, istype, make_cell
-from .base import typestr, VariableTracker
+from ..utils import check_constant_args, get_first_attr, identity, istype, make_cell
+from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
 
 if TYPE_CHECKING:
