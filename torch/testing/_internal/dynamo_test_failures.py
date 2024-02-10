@@ -237,7 +237,6 @@ dynamo_expected_failures = {
     "TestConstant.test_check_constant_pad_2d",
     "TestConcatenate.test_exceptions",  # torch_np/numpy_tests/core/test_shape_base
     "TestConcatenate.test_large_concatenate_axis_None",  # torch_np/numpy_tests/core/test_shape_base
-    "TestConcatenate.test_concatenate",  # torch_np/numpy_tests/core/test_shape_base
     "TestVstack.test_empty_input",  # torch_np/numpy_tests/core/test_shape_base
     "TestVstack.test_non_iterable",  # torch_np/numpy_tests/core/test_shape_base
     "TestStackMisc.test_stack",  # torch_np/numpy_tests/core/test_shape_base
@@ -2005,7 +2004,6 @@ dynamo_expected_failures = {
     "TestCustomOp.test_autogen_aten_ops_are_pt2_compliant",  # test_custom_ops
     "TestCustomOp.test_define_with_tags_list",  # test_custom_ops
     "TestCustomOp.test_impl_device_cpu",  # test_custom_ops
-    "TestCustomOp.test_impl_device_function",  # test_custom_ops
     "TestCustomOp.test_builtin_torchscript_ops",  # test_custom_ops
     "TestCustomOpTestingCPU.test_missing_functionalization_cpu",  # test_custom_ops
     "TestCustomOp.test_define_with_tags_tuple",  # test_custom_ops
