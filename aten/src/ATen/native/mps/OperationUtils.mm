@@ -1,4 +1,5 @@
 //  Copyright © 2022 Apple Inc.
+#include "c10/util/BFloat16.h"
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
@@ -181,6 +182,8 @@ std::string getMPSTypeString(ScalarType scalar_type, bool short_name) {
       return short_name ? "f32" : "Float32";
     case ScalarType::Half:
       return short_name ? "f16" : "Float16";
+    case ScalarType::BFloat16:
+      return short_name ? "bf16" : "BFloat16";
     case ScalarType::Int:
       return short_name ? "i32" : "Int32";
     case ScalarType::Long:
@@ -417,6 +420,8 @@ MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
       return {.value.f = scalar.to<float>(), .size = sizeof(float), .type = type};
     case ScalarType::Half:
       return {.value.h = scalar.to<at::Half>(), .size = sizeof(short), .type = type};
+    case ScalarType::BFloat16:
+      return {.value.bf16 = scalar.to<at::BFloat16>(), .size = sizeof(short), .type = type};
     case ScalarType::Long:
       return {.value.i = scalar.to<int64_t>(), .size = sizeof(int64_t), .type = type};
     case ScalarType::Int:
