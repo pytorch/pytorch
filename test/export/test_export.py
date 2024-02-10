@@ -451,7 +451,6 @@ class TestExport(TestCase):
         inps = (torch.ones(6, 4), torch.tensor(5), torch.tensor(4))
         self._test_export_same_as_eager(list_tensor_map, inps)
 
-    @testing.expectedFailureNonStrict
     def test_export_func_with_kwargs(self):
         def kw_func(arg1, arg2, kw1, kw2):
             return arg1 + arg2, kw1 + kw2
@@ -460,7 +459,6 @@ class TestExport(TestCase):
         kwargs = {"kw1": torch.ones(1, 1), "kw2": torch.ones(6, 4)}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    @testing.expectedFailureNonStrict
     def test_export_func_with_pytree_kwargs(self):
         def kw_func(arg1, arg2, a, b):
             return arg1 + a["kw1"] + b[0], arg2 + a["kw2"] + b[1]
@@ -472,7 +470,6 @@ class TestExport(TestCase):
         }
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    @testing.expectedFailureNonStrict
     def test_export_func_with_default_kwargs(self):
         def kw_func(arg1, arg2, a, b=1):
             return arg1 + arg2, a["kw1"] + a["kw2"] + b
@@ -495,7 +492,6 @@ class TestExport(TestCase):
         args = (torch.ones(2, 3), torch.ones(3, 4), torch.ones(2, 3), torch.ones(3, 4))
         self._test_export_same_as_eager(kw_func, args)
 
-    @testing.expectedFailureNonStrict
     def test_export_func_with_keyword_only_args(self):
         def kw_func(arg1, arg2, *args, kw1, kw2):
             return arg1 + args[0] + kw1, arg2 + args[1] + kw2
@@ -504,7 +500,6 @@ class TestExport(TestCase):
         kwargs = {"kw1": torch.ones(2, 3), "kw2": torch.ones(3, 4)}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    @testing.expectedFailureNonStrict
     def test_export_func_with_var_keyword_args(self):
         def kw_func(arg1, arg2, *args, kw1, kw2, **kwargs):
             return (
@@ -521,7 +516,6 @@ class TestExport(TestCase):
         }
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    @testing.expectedFailureNonStrict
     def test_export_func_with_var_keyword_pytree_args(self):
         def kw_func(arg1, arg2, *args, kw1, kw2, **kwargs):
             return (
@@ -1422,7 +1416,6 @@ def forward(self, arg_0):
             "torch.ops.aten._assert_async.msg", 2, exactly=True
         ).run(decompose_ep.graph_module.code)
 
-    @testing.expectedFailureNonStrict
     def test_mixed_input(self):
         def func(a, b, alpha: int):
             return torch.add(a, b, alpha=alpha)
