@@ -52,8 +52,20 @@ def data_type_logger(msg):
         schedule_log.debug("Data type propagation: %s", msg)
 
 
+class WorkspaceArg(NamedTuple):
+    """A temporary buffer used for a single kernel, then discarded.
+
+    Not registered as a traditional buffer since there are no users,
+    so it would be dead code eliminated.
+    """
+
+    nbytes: sympy.Expr
+    zero_fill: bool
+
+
 TensorArg = namedtuple("TensorArg", ["name", "buffer", "dtype", "check_alignment"])
 SizeArg = namedtuple("SizeArg", ["name", "expr"])
+KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg]
 
 DeviceCodegen = namedtuple("DeviceCodegen", ["scheduling", "wrapper_codegen"])
 device_codegens: Dict[str, DeviceCodegen] = {}
@@ -595,6 +607,7 @@ class KernelArgs:
         self.output_buffers = dict()
         self.inplace_buffers = dict()
         self.sizevars = sizevars or dict()
+        self.workspace_arg = None
 
     def __repr__(self):
         return "KernelArgs({})".format(
@@ -647,6 +660,16 @@ class KernelArgs:
             )
             self.inplace_buffers[input_name] = buf
             self.inplace_buffers[output_name] = buf
+
+    def workspace(self, nbytes: sympy.Expr, zero_fill: bool):
+        if self.workspace_arg is None:
+            self.workspace_arg = WorkspaceArg(nbytes, zero_fill)
+            return "ws_ptr", 0
+
+        offset = self.workspace_arg.nbytes
+        zero_fill = zero_fill or self.workspace_arg.zero_fill
+        self.workspace_arg = WorkspaceArg(offset + nbytes, zero_fill)
+        return "ws_ptr", offset
 
     def seed_offset(self, name, value):
         if value in self.sizevars:
@@ -713,12 +736,13 @@ class KernelArgs:
             arg_types.append(f"const {INDEX_TYPE}")
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
+        assert self.workspace_arg is None, "Workspace not supported on CPU "
         return arg_defs, call_args, arg_types
 
     def python_argdefs(self):
         arg_defs = []
         call_args = []
-        precompile_args: List[Union[TensorArg, SizeArg]] = []
+        precompile_args: List[Union[TensorArg, SizeArg, WorkspaceArg]] = []
         for inplaced in unique(self.inplace_buffers.values()):
             if self._buffer_is_marked_removed(inplaced):
                 continue
@@ -748,6 +772,10 @@ class KernelArgs:
             precompile_args.append(SizeArg(inner, outer))
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
+        if self.workspace_arg is not None:
+            arg_defs.append("ws_ptr")
+            call_args.append("workspace")
+            precompile_args.append(self.workspace_arg)
 
         return arg_defs, call_args, precompile_args
 
@@ -797,7 +825,7 @@ class CSEVariable:
     See example of TritonCSEVariable in triton.py
     """
 
-    def __init__(self, name, bounds: ValueRanges):
+    def __init__(self, name, bounds: ValueRanges[Any]):
         assert isinstance(bounds, ValueRanges)
         self.name = name
         self.bounds = bounds
@@ -819,7 +847,7 @@ class CppWrapperKernelArgs(KernelArgs):
     def wrap_ptr_arg(self, buf, dtype):
         from .cpp import DTYPE_TO_CPP
 
-        if config.aot_inductor.abi_compatible:
+        if config.abi_compatible:
             # In the abi_compatible model, we just return the buf here.
             # We will form correct call args later in wrapper.generate_kernel_all.
             return buf
@@ -876,7 +904,7 @@ class CSE:
         buffer: IndentedBuffer,
         expr: Union[str, CSEVariable, OpsValue, IndentedBuffer],
         *,
-        bounds: ValueRanges = ValueRanges.unknown(),
+        bounds: ValueRanges[Any] = ValueRanges.unknown(),
         write=True,
         assignment=True,
     ) -> CSEVariable:
@@ -917,7 +945,7 @@ class CSE:
 
         return var
 
-    def newvar(self, bounds: ValueRanges = ValueRanges.unknown()) -> CSEVariable:
+    def newvar(self, bounds: ValueRanges[Any] = ValueRanges.unknown()) -> CSEVariable:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
         var = V.kernel.create_cse_var(var_name, bounds)
         self.varname_map[var_name] = var
@@ -1002,7 +1030,7 @@ class Kernel(CodeGen):
         self._load_mask = None
         # set in set_current_node
         self.current_node = None
-        self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = None
+        self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges[Any]]] = None
         # Upper bounds for indirect_indexing and their str representation
         # NB: None, None is never stored in map, but it is the assumed
         # "not set" value for the dict
@@ -1335,8 +1363,8 @@ class OptimizationContext:
     dtype: Optional[torch.dtype] = None
     ops_name: str = ""
 
-    # Load uint8 value as float32
-    is_load_uint8_as_float: bool = False
+    # Load uint8/int8 value as float32
+    is_load_int8_as_float: bool = False
 
 
 @functools.lru_cache(None)

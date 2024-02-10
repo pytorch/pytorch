@@ -37,6 +37,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
+from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -1698,8 +1699,10 @@ class Scan(Loops):
             combine_fn=combine_fn,
             scan_numel=scan_numel,
         )
-        if num_splits > 1:
-            # TODO: Support splitting
+        scan_type = Scan if num_splits <= 1 else SplitScan
+
+        if num_splits > 1 and torch.version.hip is not None:
+            # Fallback for split-scan on ROCm
             return None
 
         def reindex(index, scan_index):
@@ -1708,7 +1711,7 @@ class Scan(Loops):
             return [*index[:axis], *scan_index, *index[axis:]]
 
         result = TensorBox.create(
-            Scan(
+            scan_type(
                 device=device,
                 dtype=dtype,
                 inner_fn=inner_fn,
@@ -1750,6 +1753,12 @@ class Scan(Loops):
             reduction_type="sum",
             reduction_numel=scan_numel,
         )
+
+
+# This signifies a scan op that should go through TritonSplitScanKernel codgen on CUDA.
+@dataclasses.dataclass
+class SplitScan(Scan):
+    pass
 
 
 def is_storage_and_layout(x):
@@ -4173,8 +4182,9 @@ def mark_node_as_mutating(cur_buffer, *mutated_ops):
     indicates to the scheduler that these ops depend on cur_buffer.
     """
     for op in mutated_ops:
-        assert isinstance(op, TensorBox)
+        assert isinstance(op, IRNode), op
         V.graph.mark_buffer_mutated(op.get_name())
+        assert hasattr(op, "layout")
         MutationOutput(op.layout, op, cur_buffer)
 
 
@@ -4232,6 +4242,58 @@ class InplaceBernoulliFallback(ExternKernel):
         mark_node_as_mutating(self, x)
 
 
+# Used to deal with torch.complex types
+class InplaceCopyFallback(ExternKernel):
+    """
+    This needs to be a custom class to handle mutation properly
+    """
+
+    def codegen(self, wrapper):
+        (dst, src, non_blocking) = self.codegen_args()
+        wrapper.writeline(
+            f"{self.get_kernel_name()}({dst}, {src}, {non_blocking}){wrapper.ending}"
+        )
+
+    def should_allocate(self):
+        return False
+
+    def get_mutation_names(self):
+        return [self.inputs[0].get_name()]
+
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args,
+    ):
+        super().__init__(
+            None,
+            layout,
+            inputs,
+            constant_args,
+            python_kernel_name="aten.copy_",
+            cpp_kernel_name=(
+                "aoti_torch_copy_" if config.abi_compatible else "at::_ops::copy_::call"
+            ),
+        )
+        self.name = V.graph.register_buffer(self)
+
+    @classmethod
+    def create(cls, dst, src, non_blocking: bool = False):
+        inputs = [cls.realize_input(t) for t in [dst, src]]
+        constant_args = (non_blocking,)
+        result = InplaceCopyFallback(
+            NoneLayout(dst.get_device()),  # type: ignore[arg-type]
+            inputs,
+            constant_args,
+        )
+        mark_node_as_mutating(result, dst)
+        return result
+
+
 class AccumulateGrad(ExternKernel):
     """
     This needs to be a custom class to handle mutation properly
@@ -4262,6 +4324,8 @@ class AccumulateGrad(ExternKernel):
         self.python_kernel_name = "inductor_ops.accumulate_grad_"
         self.cpp_kernel_name = "torch::inductor::accumulate_grad_"
         mark_node_as_mutating(self, variable)
+        # never reuse gradient buffers since they might be stolen
+        V.graph.never_reuse_buffers.add(new_grad.data.get_name())
 
 
 class ScatterFallback(ExternKernel):
@@ -4399,16 +4463,22 @@ class IndexPutFallback(ExternKernel):
         )
         self.name = V.graph.register_buffer(self)
         self.python_kernel_name = "aten.index_put_"
-        self.cpp_kernel_name = "at::index_put_out"
+        self.cpp_kernel_name = (
+            "aoti_torch_index_put_out" if config.abi_compatible else "at::index_put_out"
+        )
         mark_node_as_mutating(self, x)
 
 
 class DeviceCopy(ExternKernelOut):
     @classmethod
     def create(cls, x, device):
-        if not x.is_extern() and all(
-            (r.name in V.graph.constants and isinstance(r, dependencies.MemoryDep))
-            for r in x.get_reads()
+        if (
+            not x.is_extern()
+            and all(
+                (r.name in V.graph.constants and isinstance(r, dependencies.MemoryDep))
+                for r in x.get_reads()
+            )
+            and not config.aot_inductor.use_runtime_constant_folding
         ):
             return x.constant_to_device(device)
 
@@ -4480,15 +4550,18 @@ class ExternKernelNode:
 
 has_c_shim = {
     aten._embedding_bag.default,
+    aten._fft_c2c.default,
     aten._scaled_dot_product_efficient_attention.default,
     aten._scaled_dot_product_flash_attention.default,
+    aten._scaled_mm.default,
     aten.addmm.out,
     aten.bmm.out,
+    aten.copy_.default,
     aten.mm.out,
-    aten._scaled_mm.default,
     aten.repeat_interleave.Tensor,
     aten.nonzero.default,
     aten.view.dtype,
+    aten.view_as_real.default,
 }
 
 
@@ -4500,11 +4573,12 @@ def get_aten_cpp_kernel_name(kernel):
     assert (
         isinstance(kernel, torch._ops.OpOverload) and kernel.namespace == "aten"
     ), "Invalid aten kernel"
-    return (
-        f"at::{kernel.__name__.split('.')[0]}"
+    opname = (
+        kernel.__name__.split(".")[0]
         if kernel._overloadname == "default"
-        else f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
+        else kernel.__name__.replace(".", "_")
     )
+    return f"at::_ops::{opname}::call"
 
 
 class FallbackKernel(ExternKernelAlloc):
@@ -4543,6 +4617,69 @@ class FallbackKernel(ExternKernelAlloc):
         self.unflatten_args = unflatten_args
         self.kwargs = {} if kwargs is None else kwargs
         V.graph.warn_fallback(self.python_kernel_name)
+
+        # args that are aliased
+        self.alias_names: List[str] = []
+        # args that are mutated AND returned from the op
+        self.mutation_names: List[str] = []
+
+        if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
+            # We assume here that HOPs with FallbackKernel are functional.
+            # This may not always be true! HOPs must individually opt-in to
+            # FallbackKernel, so please check this if you opt-in.
+            return
+
+        schema = self.op_overload._schema
+
+        # NOTE: [FallbackKernel supported operators]
+        # We only support three types of operators:
+        # - functional ops
+        # - view ops
+        # - inplace aten ops
+        # - mutating ops that are auto-functionalizable. That is,
+        # the operator may mutate any number of inputs, but its outputs
+        # may not alias any of the inputs.
+        #
+        # The unsupported cases usually do not show up here (because
+        # AOTAutograd functionalized them away); the only way for an in-place
+        # op to show up here is if a lowering or pass introduced it.
+        if torch._library.utils.mutates_and_returns_first_arg(self.op_overload):
+            self.mutation_names.append(tensor_args[0].get_name())
+            return
+
+        if schema.is_mutable and not can_auto_functionalize(kernel):
+            raise NotImplementedError(
+                f"NYI: Can't generate FallbackKernel for {kernel}"
+            )
+
+        schema_args = schema.arguments
+        args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
+
+        def handle_aliasing_and_mutation(info, arg):
+            # Assertions to make sure we didn't mismatch args
+            if isinstance(info.type, torch.ListType):
+                assert isinstance(arg, (list, tuple))
+            is_optional_tensor = isinstance(
+                info.type, torch.OptionalType
+            ) and isinstance(info.type.getElementType(), torch.TensorType)
+            if is_optional_tensor or isinstance(info.type, torch.TensorType):
+                # PyTorch also accepts None and scalar types for args marked as "Tensor".
+                # We're not going to check all of them here.
+                assert not isinstance(arg, (tuple, list))
+
+            if arg is None:
+                return
+            if info.alias_info is None:
+                return
+            # can_auto_functionalize already filters out mutable List[Tensor].
+            # We can support this in the future, but this is very uncommon.
+            assert isinstance(info.type, torch.TensorType) or is_optional_tensor
+            self.alias_names.append(arg.get_name())
+            if info.alias_info.is_write:
+                mark_node_as_mutating(self, arg)
+
+        for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
+            handle_aliasing_and_mutation(info, arg)
 
     def set_cpp_kernel(self, kernel):
         from .codegen.wrapper import get_cpp_op_schema
@@ -4693,20 +4830,16 @@ class FallbackKernel(ExternKernelAlloc):
         return None
 
     def has_side_effects(self):
-        # TODO - some fallbacks are still OpOverloadPackets
-        if not isinstance(self.op_overload, torch._ops.OpOverload):
+        if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
             return False
         return get_schema_info(self.op_overload).is_mutable()
 
     def get_alias_names(self):
-        # TODO - some fallbacks are still OpOverloadPackets
-        if not isinstance(self.op_overload, torch._ops.OpOverload):
-            return []
-        if torch._inductor.utils.is_view(self.op_overload):
-            # TODO - use op._schema.arguments alias_info to figure out
-            # precise list
-            return [inp.get_name() for inp in self.inputs]
-        return []
+        return self.alias_names
+
+    def get_mutation_names(self):
+        assert len(self.mutation_names) <= 1
+        return self.mutation_names
 
     def fill_non_provided_args(self, args, kwargs, convert_val_to_str=False):
         assert isinstance(args, (list, tuple))
