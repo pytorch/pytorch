@@ -2,12 +2,18 @@
 
 Torch Environment Variables
 ===============================
-PyTorch uses environment variables to control various settings, such as which
-gloo device to use, the number of threads used for parallelism, and the number
-of OpenMP threads, and many others. As well, some libraries that PyTorch uses
-(e.g., MKL) also use environment variables to control their behavior. This
-page lists the environment variables that can be used to configure PyTorch.
-Note: There are many environment variables and this list is not exhaustive.
+
+PyTorch leverages environment variables for adjusting various settings that influence its runtime behavior.
+These variables offer control over key functionalities, such as displaying the C++ stack trace upon encountering errors, synchronizing the execution of CUDA kernels,
+specifying the number of threads for parallel processing tasks and many more.
+
+Moreover, PyTorch leverages several high-performance libraries, such as MKL and cuDNN,
+which also utilize environment variables to modify their functionality.
+This interplay of settings allows for a highly customizable development environment that can be
+optimized for efficiency, debugging, and computational resource management.
+
+Please note that while this documentation covers a broad spectrum of environment variables relevant to PyTorch and its associated libraries, it is not exhaustive.
+If you find anything in this documentation that is missing, incorrect, or could be improved, please let us know by filing an issue or opening a pull request.
 
 
 .. toctree::
