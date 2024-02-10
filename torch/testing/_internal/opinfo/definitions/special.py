@@ -65,7 +65,7 @@ def sample_inputs_i0_i1(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_polygamma(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(
-        make_tensor, device=device, low=1, dtype=dtype, requires_grad=requires_grad
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
     )
     tensor_shapes = ((S, S), ())
     ns = (1, 2, 3, 4, 5)
@@ -208,9 +208,9 @@ op_db: List[OpInfo] = [
             ),
         ),
         sample_kwargs=lambda device, dtype, input: ({"n": 0}, {"n": 0}),
-        # polygamma functions have multiple singularities at x <= 0
+        # polygamma functions have multiple singularities at x having non-positive integer value
         reference_numerics_filter=NumericsFilter(
-            condition=lambda x: x < 0.1, safe_val=1
+            condition=lambda x: (x < 0.1) & ((x - x.round()).abs() < 1e-4), safe_val=1
         ),
     ),
     BinaryUfuncInfo(
