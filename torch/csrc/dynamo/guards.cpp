@@ -1132,6 +1132,52 @@ class TENSOR_MATCH : public LeafGuard {
   std::unique_ptr<TensorCheck> _tensor_check;
 };
 
+class DYNAMIC_INDICES_CHECK : public LeafGuard {
+  // C++ equivalent of
+  // if hasattr(value, "_dynamo_dynamic_indices"):
+  //     code.append(
+  //         f"(({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices}))
+  //         if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  #
+  //         noqa: B950
+  //     )
+  // else:
+  //     code.append(
+  //         f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
+  //     )
+ public:
+  DYNAMIC_INDICES_CHECK(
+      bool absent,
+      py::set dynamic_indices,
+      py::object verbose_code_parts)
+      : LeafGuard(verbose_code_parts),
+        _absent(absent),
+        _dynamic_indices(dynamic_indices) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    py::handle handle = py::handle(value);
+
+    bool has_attr = py::hasattr(handle, "_dynamo_dynamic_indices");
+    if (_absent) {
+      return !has_attr;
+    }
+
+    if (!has_attr) {
+      return true;
+    }
+
+    py::handle indices = py::getattr(handle, "_dynamo_dynamic_indices");
+    // py::set does not have issubset, so we have to manually get the method and
+    // do the call.
+    py::function is_subset =
+        py::cast<py::function>(py::getattr(indices, "issubset"));
+    return py::cast<bool>(is_subset(_dynamic_indices));
+  }
+
+ private:
+  bool _absent;
+  py::set _dynamic_indices;
+};
+
 /**
  * Relational guards compare more than one value. We implement Relational
  * guards by capturing some state in the guard object. For example for tensor
@@ -2425,6 +2471,12 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "TENSOR_MATCH")
       .def(py::init<py::object, py::object, py::object, py::str, py::list>())
       .def("__call__", &TENSOR_MATCH::check);
+  py::class_<
+      DYNAMIC_INDICES_CHECK,
+      LeafGuard,
+      std::shared_ptr<DYNAMIC_INDICES_CHECK>>(py_m, "DYNAMIC_INDICES_CHECK")
+      .def(py::init<bool, py::set, py::list>())
+      .def("__call__", &DYNAMIC_INDICES_CHECK::check);
   py::class_<DEFAULT_DEVICE, LeafGuard, std::shared_ptr<DEFAULT_DEVICE>>(
       py_m, "DEFAULT_DEVICE")
       .def(py::init<py::list>())
@@ -2583,6 +2635,15 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(std::make_shared<TENSOR_MATCH>(
                 value, sizes, strides, tensor_name, verbose_code_parts));
+          })
+      .def(
+          "add_dynamic_indices_guard",
+          [](GuardManager& self,
+             bool absent,
+             py::set value,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<DYNAMIC_INDICES_CHECK>(
+                absent, value, verbose_code_parts));
           })
       .def(
           "add_weakref_alive_guard",

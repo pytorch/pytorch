@@ -1084,20 +1084,26 @@ class GuardBuilder(GuardBuilderBase):
                 value, is_tensor=True, guard_source=guard.source
             )
             if not static:
+                dynamic_indices = set()
+                dynamic_indices_code_part = ""
+                absent = False
                 if hasattr(value, "_dynamo_dynamic_indices"):
-                    code.append(
-                        f"(({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  # noqa: B950
-                    )
+                    dynamic_indices_code_part = f"(({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  # noqa: B950
+                    dynamic_indices = value._dynamo_dynamic_indices
                 # In the case of us not having any dynamic dimension indices, we compiled the frame with no chance of
                 # raising for this specific tensor - and any inputs with more dynamic user directives specified must be recompiled.
                 else:
-                    code.append(
+                    absent = True
+                    dynamic_indices_code_part = (
                         f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
                     )
-            if len(code) > 0:
-                self.add_python_lambda_leaf_guard_to_root(
-                    code, self.get_verbose_code_parts(guard, code)
+                code.append(dynamic_indices_code_part)
+                self.get_guard_manager(guard).add_dynamic_indices_guard(
+                    absent,
+                    dynamic_indices,
+                    self.get_verbose_code_parts(guard, [dynamic_indices_code_part]),
                 )
+            if len(code) > 0:
                 self._produce_guard_code(guard, code)
 
     # A util that appends guarded code, or, in the case of export, adds data onto guards
