@@ -156,6 +156,7 @@ test_failures = {
     "test_convolution2_dynamic_shapes": TestFailure(("cpu",)),
     "test_cumprod_zero_dim_dynamic_shapes": TestFailure(("cpu",)),
     "test_cumsum_dynamic_shapes": TestFailure(("cpu",)),
+    "test_cumsum_no_mask_dynamic_shapes": TestFailure(("cpu",)),
     "test_cumsum_zero_dim_dynamic_shapes": TestFailure(("cpu",)),
     "test_div8_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_embedding_bag_dynamic_shapes": TestFailure(("cpu", "cuda")),
@@ -297,6 +298,7 @@ if TEST_WITH_ROCM:
     test_failures.update(
         {
             "test_cumsum_dynamic_shapes": TestFailure(("cpu", "cuda")),
+            "test_cumsum_no_mask_dynamic_shapes": TestFailure(("cpu", "cuda")),
             "test_split_cumsum_dynamic_shapes": TestFailure(("cpu", "cuda")),
             "test_split_cumsum_low_prec_dynamic_shapes": TestFailure(("cpu", "cuda")),
             "test_split_cumprod_dynamic_shapes": TestFailure(("cpu", "cuda")),
