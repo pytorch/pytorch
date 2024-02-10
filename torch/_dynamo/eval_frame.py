@@ -1562,6 +1562,25 @@ class TorchPatcher:
             if hasattr(opt, "_init_group"):
                 opt._init_group = disable(opt._init_group)
 
+            # disable any currently set hooks
+            # Note: we only want to disable the profiling hook
+            # which is the *last* hook applied, we want to keep the no_grad hook
+            hooked = getattr(opt.step, "hooked", False)
+            if hooked:
+                unwrapped_step = getattr(opt.step, "__wrapped__", None)
+                if unwrapped_step:
+                    opt.step = unwrapped_step
+
+            # disable future hooking
+            opt.step.hooked = True  # type: ignore[attr-defined]
+
+        # annoying - we cannot annotate these functions directly due to
+        # torch.package issues, see https://github.com/pytorch/pytorch/pull/116229
+        if config.trace_distributed and torch.distributed.is_available():
+            import torch.distributed.fsdp._flat_param as flat_param
+
+            torch._dynamo.allow_in_graph(flat_param._same_storage_size)
+
     @staticmethod
     def suppress_torch_distributed_warnings(fn):
         def inner_fn(*args, **kwargs):
