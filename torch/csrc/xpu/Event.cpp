@@ -40,7 +40,10 @@ static PyObject* THXPEvent_pynew(
 }
 
 static void THXPEvent_dealloc(THXPEvent* self) {
-  self->xpu_event.~XPUEvent();
+  {
+    pybind11::gil_scoped_release no_gil{};
+    self->xpu_event.~XPUEvent();
+  }
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
