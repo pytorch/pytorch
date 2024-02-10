@@ -718,6 +718,8 @@ def get_state_dict(
 
     Returns:
         ``Tuple`` that contain model state_dict and optimizer state_dict.
+
+    :rtype: typing.Tuple[typing.Dict[str, ValueType], OptimizerStateType]
     """
 
     with gc_context():
