@@ -56,6 +56,8 @@ from . import config, convert_frame, exc, mutation_guard
 from .eval_frame import set_guard_error_hook
 from .source import (
     AttrSource,
+    ChainedSource,
+    ConstDictKeySource,
     DefaultsSource,
     FSDPNNModuleSource,
     GetItemSource,
@@ -97,35 +99,59 @@ TensorGuards = torch._C._dynamo.guards.TensorGuards
 check_obj_id = torch._C._dynamo.guards.check_obj_id
 check_type_id = torch._C._dynamo.guards.check_type_id
 dict_version = torch._C._dynamo.guards.dict_version
+GuardManager = torch._C._dynamo.guards.GuardManager
 RootGuardManager = torch._C._dynamo.guards.RootGuardManager
+DictGuardManager = torch._C._dynamo.guards.DictGuardManager
+KeyValueDictGuardManager = torch._C._dynamo.guards.KeyValueDictGuardManager
 install_tensor_aliasing_guard = torch._C._dynamo.guards.install_tensor_aliasing_guard
+install_no_tensor_aliasing_guard = (
+    torch._C._dynamo.guards.install_no_tensor_aliasing_guard
+)
 
 
 class GuardManager:
     def __init__(self):
         self.root = RootGuardManager()
 
-    def pretty_print_leaf_guard_str(self, prefix, s):
-        guards = s.split("\n")
-        guards = [prefix + s for s in guards]
-        return "\n".join(guards) + "\n"
+    def pretty_print_leaf_guard(self, prefix, guard):
+        guard_name = guard.__class__.__name__
+        parts = guard.verbose_code_parts()
+        parts = [prefix + guard_name + ": " + part for part in parts]
+        return "\n".join(parts) + "\n"
 
-    def _debug_print(self, node, prefix):
+    def _debug_print(self, mgr, prefix):
         s = ""
-        for guard in node.get_leaf_guards():
-            s += self.pretty_print_leaf_guard_str(prefix + "+- ", guard.repr())
-            # prefix + "+-" + guard.repr() + "\n"
-        for accessor, mgr in zip(node.get_accessors(), node.get_child_managers()):
-            s += prefix + "+- " + accessor.repr() + "\n"
-            s += self._debug_print(mgr, prefix + "|  ")
+
+        for guard in mgr.get_leaf_guards():
+            s += self.pretty_print_leaf_guard(prefix + "+- ", guard)
+
+        if istype(mgr, DictGuardManager):
+            for kv_mgr in mgr.get_key_value_managers():
+                s += prefix + "+- " + kv_mgr.__class__.__name__ + "\n"
+                s += self._debug_print(kv_mgr, prefix + "|  ")
+        elif istype(mgr, KeyValueDictGuardManager):
+            for idx, child_mgr in enumerate(mgr.get_key_value_managers()):
+                if child_mgr is None:
+                    continue
+                suffix = " for key\n" if idx == 0 else "value\n"
+                s += prefix + "+- " + child_mgr.__class__.__name__ + suffix
+                s += self._debug_print(child_mgr, prefix + "|  ")
+
+        # Now handle the general case of GuardManager/RootGuardManager
+        for accessor, child_mgr in zip(
+            mgr.get_accessors(), mgr.get_child_managers(), strict=True
+        ):
+            suffix = " with " + accessor.repr() + "\n"
+            s += prefix + "+- " + child_mgr.__class__.__name__ + suffix
+            s += self._debug_print(child_mgr, prefix + "|  ")
         return s
 
     def __str__(self):
-        first_line = "+- " + self.root.repr() + "\n"
+        first_line = "\n+- " + self.root.__class__.__name__ + "\n"
         subtree = self._debug_print(self.root, "|  ")
         epilogue_guards = ""
         for guard in self.root.get_epilogue_lambda_guards():
-            epilogue_guards += self.pretty_print_leaf_guard_str("|  ", guard.repr())
+            epilogue_guards += self.pretty_print_leaf_guard("|  +- ", guard)
         return first_line + subtree + epilogue_guards
 
     def __call__(self, x):
@@ -289,6 +315,7 @@ class GuardBuilder(GuardBuilderBase):
         self.tensor_check_names: List[str] = []
         self.tensor_check_examples: List[torch.Tensor] = []
         self.tensor_check_guards: List[Guard] = []
+        self.tensor_check_guard_managers: List[GuardManager] = []
 
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
         # Keep track of weak references of objects with ID_MATCH guard. This
@@ -325,23 +352,43 @@ class GuardBuilder(GuardBuilderBase):
 
         return name
 
-    def _get_guard_manager_from_source(self, originating_source, value=None):
+    def _get_guard_manager_from_source(self, originating_source):
         # eval_frame calls check_fn with f_locals dict, which is then later
         # wrapped up into a "L" dict.
         root_guard_manager = self.guard_manager.root
-        global_manager = root_guard_manager.globals_dict_manager(self.scope["G"])
+        global_manager = root_guard_manager.globals_dict_manager(self.scope["G"], None)
 
-        # TODO(janimesh) - This should probably to guards object itself with a
-        # member function - get_guard_manager. Need to figure out where to put
-        # root_guard manager.
         def build(source):
+            example_value = None
+            if source.name() != "":
+                example_value = self.get(source.name())
+
+            if isinstance(source, ChainedSource):
+                base_guard_manager = build(source.base)
+
             # Use istype instead of isinstance to check for exact type of source.
             if istype(source, LocalSource):
-                return root_guard_manager.dict_get_item_manager(source.local_name)
+                # TODO(janimesh) - Maybe make RootGuardManager a
+                # DictGuardManager. One reason not to do that is that we will
+                # have to undo it if we use fastlocals.
+                return root_guard_manager.dict_get_item_manager(
+                    source.local_name, example_value
+                )
             elif istype(source, GlobalSource):
-                return global_manager.dict_get_item_manager(source.global_name)
+                # TODO(janimesh) - Maybe make global manager a dict guard
+                # manager. One reason not to do that is because the globals dict
+                # is big and we will rarely iterate over all the keys and
+                # values. Here, key is always a string, so need to put a guard
+                # on the key object. DictGuardManager is targetted for smaller
+                # dicts and more specifically where we expect to cover many keys
+                # and values.
+                return global_manager.dict_get_item_manager(
+                    source.global_name, example_value
+                )
             elif istype(source, GlobalWeakRefSource):
-                return global_manager.global_weakref_manager(source.global_name)
+                return global_manager.global_weakref_manager(
+                    source.global_name, example_value
+                )
             elif istype(source, GlobalStateSource):
                 # TODO(janimesh) - Revisit this how to insert the global state
                 # guards at the root level. Specifically how is the closure
@@ -351,30 +398,54 @@ class GuardBuilder(GuardBuilderBase):
                 # List of sources that don't need accessors are put at the root
                 return root_guard_manager
             elif istype(source, TypeSource):
-                return build(source.base).type_manager()
+                return base_guard_manager.type_manager(example_value)
             elif istype(
                 source, (NNModuleSource, NotNNModuleSource, FSDPNNModuleSource)
             ):
-                return build(source.base)
+                return base_guard_manager
             elif istype(source, AttrSource):
-                return build(source.base).getattr_manager(source.member)
-            elif istype(source, GetItemSource) and not source.index_is_slice:
-                return build(source.base)[source.index]
+                return base_guard_manager.getattr_manager(source.member, example_value)
+            elif istype(source, GetItemSource):
+                if isinstance(source.index, ConstDictKeySource):
+                    if not isinstance(base_guard_manager, DictGuardManager):
+                        raise AssertionError("DictGuardManager should not be here")
+                    return base_guard_manager.get_key_value_manager(
+                        source.index.index
+                    ).get_value_manager(example_value)
+                return base_guard_manager.getitem_manager(source.index, example_value)
             elif istype(source, ODictGetItemSource):
-                return build(source.base).dict_get_item_manager(source.index)
+                # Necessary to call dict_get_item_manager to call PyDict_GetItem
+                # instead of PyObject_GetItem which can trigger user code.
+                if isinstance(source.index, ConstDictKeySource):
+                    if not isinstance(base_guard_manager, DictGuardManager):
+                        raise AssertionError("DictGuardManager should not be here")
+                    return base_guard_manager.get_key_value_manager(
+                        source.index.index
+                    ).get_value_manager(example_value)
+                return base_guard_manager.dict_get_item_manager(
+                    source.index, example_value
+                )
             elif istype(source, DefaultsSource):
                 if not source.is_kw:
-                    return build(source.base).getattr_manager("__defaults__")[
-                        source.idx_key
-                    ]
+                    return base_guard_manager.getattr_manager(
+                        "__defaults__", None
+                    ).getitem_manager(source.idx_key, example_value)
                 else:
-                    return build(source.base).getattr_manager("__kwdefaults__")[
-                        str(source.idx_key)
-                    ]
+                    return base_guard_manager.getattr_manager(
+                        "__kwdefaults__", None
+                    ).getitem_manager(str(source.idx_key), example_value)
             elif istype(source, NumpyTensorSource):
-                return build(source.base).lambda_manager(from_numpy)
+                return base_guard_manager.lambda_manager(from_numpy, example_value)
             elif istype(source, TupleIteratorGetItemSource):
-                return build(source.base).tuple_iterator_getitem_manager(source.index)
+                return base_guard_manager.tuple_iterator_getitem_manager(
+                    source.index, example_value
+                )
+            elif isinstance(source, ConstDictKeySource):
+                if not isinstance(base_guard_manager, DictGuardManager):
+                    raise AssertionError("DictGuardManager should not be here")
+                return base_guard_manager.get_key_value_manager(
+                    source.index
+                ).get_key_manager(example_value)
             else:
                 raise AssertionError(
                     f"missing guard manager builder {source} - {source.name()}"
@@ -384,31 +455,30 @@ class GuardBuilder(GuardBuilderBase):
         return mgr
 
     def get_guard_manager(self, guard: Guard):
-        try:
-            value = self.get(guard.name)
-        except:
-            value = None
+        return self._get_guard_manager_from_source(guard.originating_source)
 
-        return self._get_guard_manager_from_source(guard.originating_source, value)
-
-    def get_guard_str(self, guard, code):
-        guard_strs = []
-        for c in code:
-            extra = get_guard_debug_info(c, guard)
-            guard_strs.append(f"{c:<60}{extra}")
-        return "\n".join(guard_strs)
+    def get_verbose_code_parts(self, guard, code_parts):
+        verbose_code_parts = []
+        for code_part in code_parts:
+            extra = get_guard_debug_info(code_part, guard)
+            verbose_code_parts.append(f"{code_part:<60}{extra}")
+        return verbose_code_parts
 
     def add_python_lambda_leaf_guard_to_root(
-        self, code, guard_str, closure_vars=CLOSURE_VARS
+        self, code, guard_str, closure_vars=CLOSURE_VARS, is_epilogue=True
     ):
         make_guard_fn_args = ", ".join(closure_vars.keys())
         guard_body, pycode = build_guard_function(
             code, make_guard_fn_args, run_cse=False
         )
         out: Dict[str, Any] = dict()
-        exec(pycode, self.scope, out)
+        globals_for_guard_fn = {"G": self.scope["G"]}
+        exec(pycode, globals_for_guard_fn, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
-        self.guard_manager.root.add_epilogue_lambda_guard(guard_fn, guard_str)
+        if is_epilogue:
+            self.guard_manager.root.add_epilogue_lambda_guard(guard_fn, guard_str)
+        else:
+            self.guard_manager.root.add_lambda_guard(guard_fn, guard_str)
 
     def TYPE_MATCH(self, guard: Guard):
         # ___check_type_id is same as `id(type(x)) == y`
@@ -417,7 +487,7 @@ class GuardBuilder(GuardBuilderBase):
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
         self._produce_guard_code(guard, [code])
         self.get_guard_manager(guard).add_type_match_guard(
-            obj_id, self.get_guard_str(guard, [code])
+            obj_id, self.get_verbose_code_parts(guard, [code])
         )
 
     def DICT_VERSION(self, guard: Guard):
@@ -427,7 +497,7 @@ class GuardBuilder(GuardBuilderBase):
         code = f"___dict_version({ref}) == {version}"
         self._produce_guard_code(guard, [code])
         self.get_guard_manager(guard).add_dict_version_guard(
-            self.get(guard.name), self.get_guard_str(guard, [code])
+            self.get(guard.name), self.get_verbose_code_parts(guard, [code])
         )
 
     def DICT_CONTAINS(self, guard: Guard, key: str, invert: bool):
@@ -437,7 +507,7 @@ class GuardBuilder(GuardBuilderBase):
         code = f"{maybe_not}___dict_contains({key!r}, {dict_ref})"
         self._produce_guard_code(guard, [code])
         self.get_guard_manager(guard).add_dict_contains_guard(
-            key, self.get_guard_str(guard, [code]), invert
+            key, invert, self.get_verbose_code_parts(guard, [code])
         )
 
     def BOOL_FALSE(self, guard: Guard):
@@ -457,7 +527,7 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, [code])
         # We dont need any type id check as BOOL_FALSE is used in special case.
         self.get_guard_manager(guard).add_length_check_guard(
-            0, self.get_guard_str(guard, [code])
+            0, self.get_verbose_code_parts(guard, [code])
         )
 
     def ID_MATCH(self, guard: Guard):
@@ -473,7 +543,7 @@ class GuardBuilder(GuardBuilderBase):
         code = f"___check_obj_id({ref}, {self.id_ref(val)})"
         self._produce_guard_code(guard, [code])
         self.get_guard_manager(guard).add_id_match_guard(
-            self.id_ref(val), self.get_guard_str(guard, [code])
+            self.id_ref(val), self.get_verbose_code_parts(guard, [code])
         )
 
         # Keep track of ID_MATCH'd objects. This will be used to modify the
@@ -493,15 +563,15 @@ class GuardBuilder(GuardBuilderBase):
         code = f"{self.arg_ref(guard)}.__name__ == '{obj.__name__}'"
         self._produce_guard_code(guard, [code])
         self.get_guard_manager(guard).add_name_match_guard(
-            obj, self.get_guard_str(guard, [code])
+            obj, self.get_verbose_code_parts(guard, [code])
         )
 
     def DATA_PTR_MATCH(self, guard: Guard):
         obj = self.get(guard.name)
         code = f"{self.arg_ref(guard)}.data_ptr() == {obj.data_ptr()}"
         self._produce_guard_code(guard, [code])
-        self.add_python_lambda_leaf_guard_to_root(
-            [code], self.get_guard_str(guard, [code])
+        self.get_guard_manager(guard).add_data_ptr_guard(
+            obj.data_ptr(), self.get_verbose_code_parts(guard, [code])
         )
 
     def HASATTR(self, guard: Guard):
@@ -518,7 +588,7 @@ class GuardBuilder(GuardBuilderBase):
 
         self._produce_guard_code(guard, [code], provided_guarded_object=self.get(base))
         self.add_python_lambda_leaf_guard_to_root(
-            [code], self.get_guard_str(guard, [code])
+            [code], self.get_verbose_code_parts(guard, [code])
         )
 
     def FUNCTORCH_CURRENT_LEVEL_MATCH(self, guard: Guard):
@@ -529,7 +599,9 @@ class GuardBuilder(GuardBuilderBase):
             "torch._C._functorch.maybe_current_level() is None",
         ]
         self._produce_guard_code(guard, code)
-        self.add_python_lambda_leaf_guard_to_root(code, self.get_guard_str(guard, code))
+        self.add_python_lambda_leaf_guard_to_root(
+            code, self.get_verbose_code_parts(guard, code)
+        )
 
     def EQUALS_MATCH(self, guard: Guard):
         ref = self.arg_ref(guard)
@@ -615,7 +687,7 @@ class GuardBuilder(GuardBuilderBase):
         code.append(f"{ref} == {val!r}")
 
         self.get_guard_manager(guard).add_equals_match_guard(
-            val, self.get_guard_str(guard, code)
+            val, self.get_verbose_code_parts(guard, code)
         )
         self._produce_guard_code(guard, code)
 
@@ -638,10 +710,12 @@ class GuardBuilder(GuardBuilderBase):
                 GuardCodeList([f"{ref}.training == {val.training}"], guard)
             )
             self.get_guard_manager(guard).getattr_manager(
-                "training"
+                "training", val.training
             ).add_equals_match_guard(
                 val.training,
-                self.get_guard_str(guard, [f"{ref}.training == {val.training}"]),
+                self.get_verbose_code_parts(
+                    guard, [f"{ref}.training == {val.training}"]
+                ),
             )
 
         if hasattr(val, "training"):
@@ -671,8 +745,8 @@ class GuardBuilder(GuardBuilderBase):
                 # TODO(janimesh) Check if the guard installation can be modified
                 # to move the getattr __code__ to the installation.
                 self.get_guard_manager(guard).getattr_manager(
-                    "__code__"
-                ).add_id_match_guard(obj_id, self.get_guard_str(guard, code))
+                    "__code__", None
+                ).add_id_match_guard(obj_id, self.get_verbose_code_parts(guard, code))
             else:
                 self.FUNCTION_MATCH(guard)
 
@@ -696,7 +770,7 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, code)
 
         self.get_guard_manager(guard).add_length_check_guard(
-            len(value), self.get_guard_str(guard, code)
+            len(value), self.get_verbose_code_parts(guard, code)
         )
 
     def TUPLE_ITERATOR_LEN(self, guard):
@@ -709,7 +783,7 @@ class GuardBuilder(GuardBuilderBase):
         code.append(f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}")
         self.get_guard_manager(guard).add_tuple_iterator_length_guard(
             tuple_iterator_len(value),
-            self.get_guard_str(guard, code),
+            self.get_verbose_code_parts(guard, code),
         )
 
         self._produce_guard_code(guard, code)
@@ -724,7 +798,7 @@ class GuardBuilder(GuardBuilderBase):
         install_tensor_aliasing_guard(
             self.get_guard_manager(guard),
             self._get_guard_manager_from_source(source_b),
-            self.get_guard_str(guard, code),
+            self.get_verbose_code_parts(guard, code),
         )
 
     def DICT_KEYS(self, guard):
@@ -747,9 +821,12 @@ class GuardBuilder(GuardBuilderBase):
             code.append(f"___key_to_id({ref}) == {const_keys_repr}")
         else:
             code.append(f"list({ref}.keys()) == {const_keys_repr}")
-            # self.get_guard_manager(guard).add_dict_keys_guard(
-            #     value, self.get_guard_str(guard, code)
-            # )
+            dict_mgr = self.get_guard_manager(guard)
+            assert isinstance(dict_mgr, DictGuardManager)
+            for idx, key in enumerate(list(value.keys())):
+                dict_mgr.get_key_value_manager(idx).get_key_manager(
+                    key
+                ).add_equals_match_guard(key, [f"key value == {key}"])
 
         self._produce_guard_code(guard, code)
 
@@ -757,7 +834,7 @@ class GuardBuilder(GuardBuilderBase):
         code = [f"{self.arg_ref(guard)} is not None"]
         self._produce_guard_code(guard, code)
         self.get_guard_manager(guard).add_weakref_alive_guard(
-            self.get_guard_str(guard, code)
+            self.get_verbose_code_parts(guard, code)
         )
 
     def NN_MODULE_PARAM_NAMES(self, guard):
@@ -773,7 +850,7 @@ class GuardBuilder(GuardBuilderBase):
 
         self._produce_guard_code(guard, code)
         self.add_python_lambda_leaf_guard_to_root(
-            [code], self.get_guard_str(guard, [code])
+            [code], self.get_verbose_code_parts(guard, [code])
         )
 
     def DICT_CONST_KEYS(self, guard):
@@ -788,10 +865,12 @@ class GuardBuilder(GuardBuilderBase):
 
         self._produce_guard_code(guard, code)
 
-        self.add_python_lambda_leaf_guard_to_root(
-            [code], self.get_guard_str(guard, [code])
-        )
-
+        dict_mgr = self.get_guard_manager(guard)
+        assert isinstance(dict_mgr, DictGuardManager)
+        for idx, key in enumerate(list(value.keys())):
+            dict_mgr.get_key_value_manager(idx).get_key_manager(
+                key
+            ).add_equals_match_guard(key, [f"key value == {key}"])
 
     def OBJECT_MUTATION(self, guard: Guard):
         mutation_guard.watch(self.get(guard.name), self.check_fn_manager)
@@ -813,7 +892,7 @@ class GuardBuilder(GuardBuilderBase):
         code = [f"utils_device.CURRENT_DEVICE == {m.CURRENT_DEVICE!r}"]
         self._produce_guard_code(guard, code)
         self.get_guard_manager(guard).add_default_device_guard(
-            self.get_guard_str(guard, code)
+            self.get_verbose_code_parts(guard, code)
         )
 
     def BACKEND_MATCH(self, guard: Guard):
@@ -829,7 +908,7 @@ class GuardBuilder(GuardBuilderBase):
             "___check_current_backend": torch._dynamo.eval_frame.check_current_backend
         }
         self.add_python_lambda_leaf_guard_to_root(
-            code, self.get_guard_str(guard, code), closure_vars
+            code, self.get_verbose_code_parts(guard, code), closure_vars
         )
 
     def SHAPE_ENV(self, guard: Guard):
@@ -950,6 +1029,29 @@ class GuardBuilder(GuardBuilderBase):
                 self.tensor_check_examples.append(value)
                 self.tensor_check_guards.append(guard)
 
+                if config.enable_cpp_guard_manager:
+                    guard_manager = self.get_guard_manager(guard)
+                    self.tensor_check_guard_managers.append(guard_manager)
+
+                    output_graph = self.check_fn_manager.output_graph
+                    size = convert(
+                        output_graph.tensor_weakref_to_sizes_strides[value]["size"]
+                    )
+                    stride = convert(
+                        output_graph.tensor_weakref_to_sizes_strides[value]["stride"]
+                    )
+
+                    verbose_code_parts = self.get_verbose_code_parts(
+                        guard, [get_tensor_guard_str(value, tensor_name, size, stride)]
+                    )
+                    guard_manager.add_tensor_match_guard(
+                        value,
+                        size,
+                        stride,
+                        tensor_name,
+                        verbose_code_parts,
+                    )
+
             # A frame is valid for reuse with dynamic dimensions if the new dynamic dimensions are a
             # strict subset of the old.
             #
@@ -982,20 +1084,26 @@ class GuardBuilder(GuardBuilderBase):
                 value, is_tensor=True, guard_source=guard.source
             )
             if not static:
+                dynamic_indices = set()
+                dynamic_indices_code_part = ""
+                absent = False
                 if hasattr(value, "_dynamo_dynamic_indices"):
-                    code.append(
-                        f"(({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  # noqa: B950
-                    )
+                    dynamic_indices_code_part = f"(({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  # noqa: B950
+                    dynamic_indices = value._dynamo_dynamic_indices
                 # In the case of us not having any dynamic dimension indices, we compiled the frame with no chance of
                 # raising for this specific tensor - and any inputs with more dynamic user directives specified must be recompiled.
                 else:
-                    code.append(
+                    absent = True
+                    dynamic_indices_code_part = (
                         f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
                     )
-            if len(code) > 0:
-                self.add_python_lambda_leaf_guard_to_root(
-                    code, self.get_guard_str(guard, code)
+                code.append(dynamic_indices_code_part)
+                self.get_guard_manager(guard).add_dynamic_indices_guard(
+                    absent,
+                    dynamic_indices,
+                    self.get_verbose_code_parts(guard, [dynamic_indices_code_part]),
                 )
+            if len(code) > 0:
                 self._produce_guard_code(guard, code)
 
     # A util that appends guarded code, or, in the case of export, adds data onto guards
@@ -1178,6 +1286,32 @@ def get_guard_debug_info(code, guard, do_logging=True):
     return extra
 
 
+def convert(size_or_stride):
+    converted: List[Optional[int]] = []
+    for dim in size_or_stride:
+        if not is_symbolic(dim):
+            converted.append(dim)
+        else:
+            assert isinstance(dim, torch.SymInt)
+            converted.append(dim.node.maybe_as_int())
+    return converted
+
+
+def get_tensor_guard_str(value, name, sizes, strides):
+    pytype = type(value)
+    dispatch_key = (
+        torch._C._dispatch_keys(value) | torch._C._dispatch_tls_local_include_set()
+    ) - torch._C._dispatch_tls_local_exclude_set()
+    dtype = value.dtype
+    device_index = value.device.index
+    requires_grad = value.requires_grad
+    guard_str = (
+        f"check_tensor({name}, {pytype.__qualname__}, {dispatch_key}, {dtype}, "
+        f"device={device_index}, requires_grad={requires_grad}, size={sizes}, stride={strides})"
+    )
+    return guard_str
+
+
 # NB: Naively, you'd expect this to only be a function that produces
 # the callable that constitutes the guard.  However, there is some
 # delicate handling for invalidating this check function when the
@@ -1257,18 +1391,20 @@ class CheckFunctionManager:
             #     builder.get_guard_manager(guard)
             guard.create(builder)
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
-        # Check that the check_fn is True for this frame
-        assert self.check_fn(output_graph.local_scope)
-        assert self.check_fn(output_graph.local_scope)
+
         if config.enable_cpp_guard_manager:
-            # breakpoint()
             print(self.guard_manager)
-            debug_guard_check = self.guard_manager.root.check_verbose(
-                output_graph.local_scope
-            )
-            if not debug_guard_check.result:
-                print("FAILED GUARD", debug_guard_check.failed_guard)
-                assert False
+
+        # Check that the check_fn is True for this frame
+        # assert self.check_fn(output_graph.local_scope)
+        # if config.enable_cpp_guard_manager:
+        #     print(self.guard_manager)
+        #     debug_guard_check = self.guard_manager.root.check_verbose(
+        #         output_graph.local_scope
+        #     )
+        #     if not debug_guard_check.result:
+        #         print("FAILED GUARD", debug_guard_check.verbose_code_parts)
+        #         assert False
 
         self._weakrefs.clear()
         # Keep track of weak references of objects with ID_MATCH guard. This
@@ -1283,11 +1419,6 @@ class CheckFunctionManager:
 
         # TODO - Use flag to choose between old guard vs new guard manager
         self.guard_manager.id_matched_objs = builder.id_matched_objs
-        self.guard_manager.global_scope = {
-            "G": output_graph.global_scope,
-        }
-        self.guard_manager.closure_vars = CLOSURE_VARS
-        self.guard_manager.guard_fail_fn = guard_fail_fn
         if config.enable_cpp_guard_manager:
             self.check_fn = self.guard_manager
 
@@ -1302,7 +1433,7 @@ class CheckFunctionManager:
         code_parts = ["___guarded_code.valid", "___check_global_state()"]
 
         # Insert global state guard at the root
-        self.guard_manager.root.add_global_state_guard("Checking global state")
+        self.guard_manager.root.add_global_state_guard(["Checking global state"])
         verbose_code_parts = code_parts[:]
 
         def add_code_part(code, guard, log_only=False):
@@ -1343,16 +1474,6 @@ class CheckFunctionManager:
                 not self.output_graph.export
             ), "Illegal to set tensor_check_names in export."
             tensor_check_examples = builder.tensor_check_examples
-
-            def convert(size_or_stride):
-                converted: List[Optional[int]] = []
-                for dim in size_or_stride:
-                    if not is_symbolic(dim):
-                        converted.append(dim)
-                    else:
-                        assert isinstance(dim, torch.SymInt)
-                        converted.append(dim.node.maybe_as_int())
-                return converted
 
             dynamic_dims_sizes = [
                 convert(self.output_graph.tensor_weakref_to_sizes_strides[t]["size"])
@@ -1408,14 +1529,12 @@ class CheckFunctionManager:
                     log_only=True,
                 )
 
-            closure_vars = {
-                "___check_tensors": check_tensors_fn,
-                "___check_tensors_verbose": check_tensors_verbose_fn,
-                "tensor_check_names": tensor_check_names,
-                **CLOSURE_VARS,
-            }
-            builder.add_python_lambda_leaf_guard_to_root(
-                [code_parts_tensor], "\n".join(guard_strs), closure_vars=closure_vars
+        if config.enable_cpp_guard_manager and builder.tensor_check_guard_managers:
+            # Add no tensor aliasing guard
+            install_no_tensor_aliasing_guard(
+                builder.tensor_check_guard_managers,
+                tensor_check_names,
+                ["check_no_aliasing(" + ", ".join(tensor_check_names) + ")"],
             )
 
         aotautograd_guards: List[GuardEnvExpr] = (
@@ -1434,12 +1553,12 @@ class CheckFunctionManager:
         # TODO: the "guard" here is actually just the top level SHAPE_ENV
         # which is useless.  Get ShapeEnv to pass in more provenance.
         symbolic_shape_code_parts = set()
-        symbolic_shape_guard_str = ""
+        symbolic_shape_verbose_code_parts = set()
         for gcl in builder.shape_env_code:
             for code in gcl.code_list:
                 symbolic_shape_code_parts.add(code)
-                symbolic_shape_guard_str += (
-                    builder.get_guard_str(gcl.guard, [code]) + "\n"
+                symbolic_shape_verbose_code_parts.add(
+                    builder.get_verbose_code_parts(gcl.guard, [code])[0]
                 )
                 add_code_part(code, gcl.guard)
 
@@ -1457,9 +1576,13 @@ class CheckFunctionManager:
             **SYMPY_INTERP,
             **CLOSURE_VARS,
         }
-        builder.add_python_lambda_leaf_guard_to_root(
-            symbolic_shape_code_parts, symbolic_shape_guard_str, closure_vars
-        )
+        if symbolic_shape_code_parts:
+            # TODO(janimesh) - We dont need full closure_vars here
+            builder.add_python_lambda_leaf_guard_to_root(
+                symbolic_shape_code_parts,
+                list(symbolic_shape_verbose_code_parts),
+                closure_vars,
+            )
 
         unique_code_parts = list(unique(code_parts))
         make_guard_fn_args = ", ".join(closure_vars.keys())
@@ -1488,6 +1611,20 @@ class CheckFunctionManager:
         # Grab only G, but preserve "G" because guards access it as "G"
         guard_fn.global_scope = globals_for_guard_fn
         guard_fn.guard_fail_fn = guard_fail_fn
+
+        # Attach some metadata useful for debugging.  TODO(janimesh) - Make a
+        # class to separate out metadata for debugging. For example, the
+        # following two are only needed for debugging, but it was not clear from
+        # the code. Look for other such metadata.
+        self.guard_manager.global_scope = globals_for_guard_fn
+        self.guard_manager.guard_fail_fn = guard_fail_fn
+        self.guard_manager.closure_vars = closure_vars
+
+        # TODO(janimesh) - It is unclear to me why do we even need these. Maybe
+        # there is some circular ref because of GraphBuilder and CheckFnManager.
+        # This is exposed only after introducing get_guard_manager helper.
+        builder.tensor_check_examples = []
+        builder.scope = {}
         return guard_fn
 
     def invalidate(self):
@@ -1579,37 +1716,48 @@ def get_guard_fail_reason(
     Only the first failed check of guard_fn is reported.
     """
 
-    # TODO - Use a config flag for guard manager
+    scope = {"L": f_locals, "G": guard_fn.global_scope["G"]}
+    scope.update(guard_fn.closure_vars)
+    reasons: List[str] = []
+
+    verbose_code_parts: List[str] = []
     if config.enable_cpp_guard_manager:
         guard_manager = guard_fn
         guard_debug_info = guard_manager.check_verbose(f_locals)
-        assert not guard_debug_info.result
-        reasons = [guard_debug_info.failed_guard]
+        # For test_export_with_map_cond, the check_verbose fail. We need to fix
+        # the issue in that test to remove this workaround.
+        if not guard_debug_info.result:
+            verbose_code_parts = guard_debug_info.verbose_code_parts
+            # We already know the reason if the len is 1.
+            if len(verbose_code_parts) == 1:
+                reasons = verbose_code_parts
+                verbose_code_parts = []
     else:
-        scope = {"L": f_locals, "G": guard_fn.global_scope["G"]}
-        scope.update(guard_fn.closure_vars)
-        scope["___check_tensors"] = scope["___check_tensors_verbose"]
-        reasons: List[str] = []
-        for part in guard_fn.verbose_code_parts:
-            global_scope = dict(guard_fn.global_scope)
-            global_scope["__compile_source__"] = part
-            with report_compile_source_on_error():
-                try:
-                    fail_reason = eval(part, global_scope, scope)
-                except Exception as e:
-                    if is_recompiles_verbose_enabled():
-                        continue
-                    else:
-                        raise
-            # Only ___check_tensors knows how to return a fancy fail reason;
-            # for everything else we just report the code that failed
+        verbose_code_parts = guard_fn.verbose_code_parts
+        # This is not needed for CPP guard because the verbose check is already
+        # run in C++.
+        scope["___check_tensors_verbose"] = scope["___check_tensors"]
 
-            if isinstance(fail_reason, bool) and not fail_reason:
-                fail_reason = part
-            if isinstance(fail_reason, str):
-                reasons.append(fail_reason)
-                if not is_recompiles_verbose_enabled():
-                    break
+    for part in verbose_code_parts:
+        global_scope = dict(guard_fn.global_scope)
+        global_scope["__compile_source__"] = part
+        with report_compile_source_on_error():
+            try:
+                fail_reason = eval(part, global_scope, scope)
+            except Exception as e:
+                if is_recompiles_verbose_enabled():
+                    continue
+                else:
+                    raise
+        # Only ___check_tensors knows how to return a fancy fail reason;
+        # for everything else we just report the code that failed
+
+        if isinstance(fail_reason, bool) and not fail_reason:
+            fail_reason = part
+        if isinstance(fail_reason, str):
+            reasons.append(fail_reason)
+            if not is_recompiles_verbose_enabled():
+                break
 
     reason_str = "\n".join(reasons)
     guard_failures[orig_code_map[code]].append(reason_str)

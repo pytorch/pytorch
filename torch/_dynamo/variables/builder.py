@@ -809,6 +809,7 @@ class VariableBuilder:
             return ConstantVariable.create(value=value)
         # One can index a tensor with a list/tuple. Therefore, we need to
         # have a stricter match.
+        self.install_guards(GuardBuilder.TYPE_MATCH)
         self.install_guards(GuardBuilder.LIST_LENGTH)
 
         for item in value:
@@ -866,7 +867,7 @@ class VariableBuilder:
             isinstance(value, (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM))
             and not config.allow_rnn
         ):
-            unimplemented("TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")
+            unimplemented("TorchDynamo purposely graph TYPE_MATCH on RNN, GRU, LSTMs")
         if mutation_guard.is_dynamic_nn_module(value):
             # created dynamically, don't specialize on it
             self.install_guards(GuardBuilder.TYPE_MATCH)
