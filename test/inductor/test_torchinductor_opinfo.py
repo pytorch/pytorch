@@ -200,6 +200,7 @@ if not SM80OrLater:
 if TEST_WITH_ROCM:
     # Tensors are not alike
     inductor_skips["cuda"]["logcumsumexp"] = {f32}
+    inductor_skips["cuda"]["special.modified_bessel_i1"] = {f64}
 
 inductor_expected_failures_single_sample = defaultdict(dict)
 

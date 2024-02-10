@@ -65,7 +65,7 @@ def sample_inputs_i0_i1(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_polygamma(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(
-        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+        make_tensor, device=device, low=1, dtype=dtype, requires_grad=requires_grad
     )
     tensor_shapes = ((S, S), ())
     ns = (1, 2, 3, 4, 5)
@@ -99,6 +99,19 @@ def sample_inputs_entr(op_info, device, dtype, requires_grad, **kwargs):
     )
     yield SampleInput(make_arg((L,)))
     yield SampleInput(make_arg(()))
+
+
+def sample_inputs_erfcx(op_info, device, dtype, requires_grad, **kwargs):
+    for shape in ((L,), (1, 0, 3), ()):
+        yield SampleInput(
+            make_tensor(
+                shape,
+                device=device,
+                dtype=dtype,
+                low=-5,
+                requires_grad=requires_grad,
+            ),
+        )
 
 
 op_db: List[OpInfo] = [
@@ -293,6 +306,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
+        sample_inputs_func=sample_inputs_erfcx,
     ),
     UnaryUfuncInfo(
         "special.airy_ai",
