@@ -1529,7 +1529,7 @@ def softmax(g: jit_utils.GraphContext, input, dim, dtype=None):
             )
 
         if is_transpose_required:
-            softmax = g.op("Transpose", softmax, perm_i=axes)
+            softmax = g.op("Transpose", softmax, perm_i=axes)  # type: ignore[possibly-undefined]
         return softmax
 
     # Apply max normalization.
@@ -2467,7 +2467,7 @@ def log_softmax(g: jit_utils.GraphContext, input, dim, dtype=None):
             "Cast", return_op, to_i=_type_utils.JitScalarType(parsed_dtype).onnx_type()
         )
     if is_transpose_required:
-        return_op = g.op("Transpose", return_op, perm_i=axes)
+        return_op = g.op("Transpose", return_op, perm_i=axes)  # type: ignore[possibly-undefined]
     return return_op
 
 
@@ -2978,7 +2978,7 @@ def native_layer_norm(
     # mean and normalized, so we need to Cast it back
     if is_type_half:
         denominator = g.op(
-            "Cast", denominator, to_i=_type_utils.JitScalarType(input_dtype).onnx_type()
+            "Cast", denominator, to_i=_type_utils.JitScalarType(input_dtype).onnx_type()  # type: ignore[possibly-undefined]
         )
         rdenominator = g.op("Reciprocal", denominator)
     else:
@@ -4754,7 +4754,7 @@ def _generic_rnn(
                 reform_weights(g, w, hidden_size, reform_permutation) for w in weights
             )
         return tuple(
-            symbolic_helper._unsqueeze_helper(g, x, [0]) for x in (weight_ih, weight_hh)
+            symbolic_helper._unsqueeze_helper(g, x, [0]) for x in (weight_ih, weight_hh)  # type: ignore[possibly-undefined]
         )
 
     @_beartype.beartype
@@ -4766,10 +4766,10 @@ def _generic_rnn(
             weight_ih, weight_hh, bias_ih, bias_hh = (
                 reform_weights(g, w, hidden_size, reform_permutation) for w in weights
             )
-        bias_concat = g.op("Concat", bias_ih, bias_hh, axis_i=0)
+        bias_concat = g.op("Concat", bias_ih, bias_hh, axis_i=0)  # type: ignore[possibly-undefined]
         return tuple(
             symbolic_helper._unsqueeze_helper(g, x, [0])
-            for x in (weight_ih, weight_hh, bias_concat)
+            for x in (weight_ih, weight_hh, bias_concat)  # type: ignore[possibly-undefined]
         )
 
     @_beartype.beartype
@@ -4808,16 +4808,16 @@ def _generic_rnn(
 
         inputs = [prev_output, weight_ih, weight_hh, bias_concat, sequence_lens]
 
-        inputs.append(retrieve_state(h0, *state_indices))
+        inputs.append(retrieve_state(h0, *state_indices))  # type: ignore[possibly-undefined]
         if variant == "LSTM":
-            inputs.append(retrieve_state(c0, *state_indices))
+            inputs.append(retrieve_state(c0, *state_indices))  # type: ignore[possibly-undefined]
 
         extra_kwargs = {} if unidirectional else {"direction_s": "bidirectional"}
         if variant == "RNN":
             if bidirectional:
-                activation = [nonlinearity, nonlinearity]
+                activation = [nonlinearity, nonlinearity]  # type: ignore[possibly-undefined]
             else:
-                activation = [nonlinearity]
+                activation = [nonlinearity]  # type: ignore[possibly-undefined]
 
             prev_output, h_out = g.op(
                 "RNN",
@@ -4859,17 +4859,17 @@ def _generic_rnn(
         else:
             prev_output = symbolic_helper._squeeze_helper(g, prev_output, [1])
 
-        h_outs.append(h_out)
+        h_outs.append(h_out)  # type: ignore[possibly-undefined]
         if variant == "LSTM":
-            c_outs.append(c_out)
+            c_outs.append(c_out)  # type: ignore[possibly-undefined]
     if batch_first:
         # seq, batch, num_directions * hidden_size -> batch, seq, num_directions * hidden_size
         prev_output = g.op("Transpose", prev_output, perm_i=[1, 0, 2])
-    h_outs = h_out if num_layers == 1 else g.op("Concat", *h_outs, axis_i=0)
+    h_outs = h_out if num_layers == 1 else g.op("Concat", *h_outs, axis_i=0)  # type: ignore[possibly-undefined]
     if variant == "RNN" or variant == "GRU":
         return prev_output, h_outs
     elif variant == "LSTM":
-        c_outs = c_out if num_layers == 1 else g.op("Concat", *c_outs, axis_i=0)
+        c_outs = c_out if num_layers == 1 else g.op("Concat", *c_outs, axis_i=0)  # type: ignore[possibly-undefined]
         return prev_output, h_outs, c_outs
 
 
