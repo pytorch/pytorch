@@ -23,7 +23,7 @@ from ..utils import (
     is_tensor_base_attr_getter,
     proxy_args_kwargs,
 )
-from .base import MutableLocal, VariableTracker
+from .base import VariableTracker
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .user_defined import UserDefinedObjectVariable
 
@@ -613,110 +613,6 @@ class PythonModuleVariable(VariableTracker):
             result = hasattr(self.value, name)
             return variables.ConstantVariable.create(result)
         return super().call_hasattr(tx, name)
-
-
-class SkipFilesVariable(VariableTracker):
-    def __init__(self, value, reason=None, **kwargs):
-        super().__init__(**kwargs)
-        self.value = value
-        self.reason = reason
-
-    def python_type(self):
-        return type(self.value)
-
-    def as_python_constant(self):
-        return self.value
-
-    @classmethod
-    def create_with_source(cls, value, source):
-        install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
-        return cls(
-            value,
-            source=source,
-        )
-
-    @staticmethod
-    @functools.lru_cache(None)
-    def fold_through_function_to_wrapper():
-        return {
-            collections.namedtuple: variables.UserDefinedClassVariable,
-        }
-
-    def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
-    ) -> "VariableTracker":
-        if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
-            unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
-        # Fold through the functions(e.g, collections.namedtuple)
-        # that inputs & outputs are all python constants
-        elif (
-            self.value in self.fold_through_function_to_wrapper().keys()
-            and check_constant_args(args, kwargs)
-        ):
-            value = self.value(
-                *[x.as_python_constant() for x in args],
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
-            )
-            return self.fold_through_function_to_wrapper().get(self.value)(
-                value, mutable_local=MutableLocal()
-            )
-        elif (
-            self.value is functools.wraps
-            and not kwargs
-            and len(args) == 1
-            and (
-                args[0].source is not None or args[0].can_reconstruct(tx.output.root_tx)
-            )
-        ):
-
-            def wraps(fn):
-                if isinstance(fn, variables.NestedUserFunctionVariable):
-                    if args[0].source:
-                        reconstructible = args[0].source
-                    else:
-                        reconstructible = args[0]
-                    return fn.clone(wrapped_reconstructible=reconstructible)
-                unimplemented(f"functools.wraps({fn})")
-
-            return variables.LambdaVariable(wraps)
-        elif self.value is collections.deque and not kwargs:
-            if len(args) == 0:
-                items = []
-            elif len(args) == 1 and args[0].has_unpack_var_sequence(tx):
-                items = args[0].unpack_var_sequence(tx)
-            else:
-                unimplemented("deque() with more than 1 arg not supported")
-            return variables.lists.DequeVariable(items, mutable_local=MutableLocal())
-        elif self.value is functools.partial:
-            if not args:
-                unimplemented("functools.partial malformed")
-            # The first arg, a callable (the ctor below will assert on types)
-            fn = args[0]
-            rest_args = args[1:]
-            # guards for the produced FunctoolsPartialVariable are installed in FunctoolsPartialVariable ctor from the
-            # args and keywords
-            return variables.functions.FunctoolsPartialVariable(
-                fn, args=rest_args, keywords=kwargs
-            )
-        elif self.value is itertools.repeat:
-            if len(args) < 2:
-                return variables.RepeatIteratorVariable(
-                    *args, mutable_local=MutableLocal()
-                )
-
-            from .builder import SourcelessBuilder
-
-            return tx.inline_user_function_return(
-                SourcelessBuilder()(tx, polyfill.repeat), args, kwargs
-            )
-        else:
-            try:
-                path = inspect.getfile(self.value)
-            except TypeError:
-                path = f"Builtin {self.value.__name__}"
-            msg = f"'skip function {self.value.__qualname__} in file {path}'"
-            msg += f"', {self.reason}'" if self.reason else ""
-            unimplemented(msg)
 
 
 class TypingVariable(VariableTracker):
