@@ -570,8 +570,8 @@ class GuardBuilder(GuardBuilderBase):
         obj = self.get(guard.name)
         code = f"{self.arg_ref(guard)}.data_ptr() == {obj.data_ptr()}"
         self._produce_guard_code(guard, [code])
-        self.add_python_lambda_leaf_guard_to_root(
-            [code], self.get_verbose_code_parts(guard, [code])
+        self.get_guard_manager(guard).add_data_ptr_guard(
+            obj.data_ptr(), self.get_verbose_code_parts(guard, [code])
         )
 
     def HASATTR(self, guard: Guard):

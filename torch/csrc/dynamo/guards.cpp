@@ -1178,6 +1178,26 @@ class DYNAMIC_INDICES_CHECK : public LeafGuard {
   py::set _dynamic_indices;
 };
 
+class DATA_PTR_MATCH : public LeafGuard {
+ public:
+  DATA_PTR_MATCH(py::object data_ptr, py::object verbose_code_parts)
+      : LeafGuard(verbose_code_parts), _data_ptr(data_ptr) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    PyObject* data_ptr_method =
+        PyObject_GetAttrString(value, "data_ptr"); // new ref
+    PyObject* data_ptr = PyObject_CallNoArgs(data_ptr_method); // new ref
+    bool result = PyObject_RichCompareBool(data_ptr, _data_ptr.ptr(), Py_EQ);
+    Py_DECREF(data_ptr);
+    Py_DECREF(data_ptr_method);
+    return result;
+  }
+
+ private:
+  // Need to save the ptr so py::object.
+  py::object _data_ptr;
+};
+
 /**
  * Relational guards compare more than one value. We implement Relational
  * guards by capturing some state in the guard object. For example for tensor
@@ -2471,6 +2491,10 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "TENSOR_MATCH")
       .def(py::init<py::object, py::object, py::object, py::str, py::list>())
       .def("__call__", &TENSOR_MATCH::check);
+  py::class_<DATA_PTR_MATCH, LeafGuard, std::shared_ptr<DATA_PTR_MATCH>>(
+      py_m, "DATA_PTR_MATCH")
+      .def(py::init<py::object, py::list>())
+      .def("__call__", &DATA_PTR_MATCH::check);
   py::class_<
       DYNAMIC_INDICES_CHECK,
       LeafGuard,
@@ -2644,6 +2668,14 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(std::make_shared<DYNAMIC_INDICES_CHECK>(
                 absent, value, verbose_code_parts));
+          })
+      .def(
+          "add_data_ptr_guard",
+          [](GuardManager& self,
+             py::object data_ptr,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(
+                std::make_shared<DATA_PTR_MATCH>(data_ptr, verbose_code_parts));
           })
       .def(
           "add_weakref_alive_guard",
