@@ -5,4 +5,4 @@ repos:
         name: lintrunner
         entry: make lint
         language: system
-        pass_filenames: false
+        pass_filenames: true
