@@ -11,8 +11,9 @@ New operators:
 
 import functools
 
-from torch import _C
 import torch.nn.functional as F
+
+from torch import _C
 from torch.onnx import symbolic_helper
 from torch.onnx._internal import _beartype, jit_utils, registration
 
