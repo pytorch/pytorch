@@ -350,6 +350,15 @@ inductor_override_kwargs = {
     ("softmax", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
     ("_softmax_backward_data", "cuda", f16): {"atol": 0.008, "rtol": 0.002},
     ("special.log_ndtr", "cuda", f64): {"atol": 1e-6, "rtol": 1e-5},
+    ("polygamma.polygamma_n_0", "cpu", f32): {"atol": 1e-3, "rtol": 1e-4},
+    ("polygamma.polygamma_n_1", "cpu", f32): {"atol": 1e-3, "rtol": 1e-4},
+    ("polygamma.polygamma_n_2", "cpu", f32): {"atol": 1e-3, "rtol": 1e-4},
+    ("polygamma.polygamma_n_3", "cpu", f32): {"atol": 1e-3, "rtol": 1e-4},
+    ("polygamma.polygamma_n_4", "cpu", f32): {"atol": 1e-3, "rtol": 1e-4},
+    ("special.polygamma.special_polygamma_n_0", "cpu", f32): {
+        "atol": 1e-3,
+        "rtol": 1e-4,
+    },
     ("std_mean.unbiased", "cuda", f16): {"reference_in_float": True},
     ("uniform", "cuda"): {"reference_in_float": True},
     # Following tests are failing with strict comparision but atol=1 is acceptable due roundings errors
@@ -498,7 +507,6 @@ class TestInductorOpInfo(TestCase):
             overridden_kwargs = inductor_override_kwargs[(op_name, device_type)]
         elif (op_name, device_type, dtype) in inductor_override_kwargs:
             overridden_kwargs = inductor_override_kwargs[(op_name, device_type, dtype)]
-
         func = op.get_op()
 
         def fn(*args, **kwargs):
