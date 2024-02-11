@@ -685,7 +685,7 @@ def get_state_dict(
     optimizer parameter IDs to the canonical FQNs.
 
     Example:
-
+        >>> # xdoctest: +SKIP
         >>> import torch
         >>> from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
         >>> from torch.nn.parallel import DistributedDataParallel as DDP
