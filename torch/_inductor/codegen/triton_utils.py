@@ -67,7 +67,9 @@ def config_of(args: List[KernelArgType]) -> instance_descriptor:
         """
         if isinstance(x, TensorArg):
             if include_tensor:
-                offset_aligned = (x.offset * x.dtype.itemsize) % alignment == 0
+                offset_aligned = V.graph.sizevars.statically_known_multiple_of(
+                    x.offset * x.dtype.itemsize, alignment  # type: ignore[arg-type]
+                )
                 return offset_aligned and not V.graph.scheduler.is_unaligned_buffer(
                     x.buffer
                 )

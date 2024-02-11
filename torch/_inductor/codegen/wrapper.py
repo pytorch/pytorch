@@ -1034,7 +1034,6 @@ class WrapperCodeGen(CodeGen):
                         name=key,
                         buffer=arg.get_name(),
                         dtype=arg.get_dtype(),
-                        offset=0,
                     )
                 )
             elif isinstance(arg, ir.ReinterpretView):

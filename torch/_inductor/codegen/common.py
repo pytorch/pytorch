@@ -68,13 +68,13 @@ class TensorArg:
     name: str
     buffer: str
     dtype: torch.dtype
-    offset: int = 0
+    offset: sympy.Expr = sympy.Integer(0)
 
 
 @dataclasses.dataclass
 class SizeArg:
     name: str
-    expr: sympy.Expr
+    expr: Union[sympy.Symbol, sympy.Expr]
 
 
 @dataclasses.dataclass

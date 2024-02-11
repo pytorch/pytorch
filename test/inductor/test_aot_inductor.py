@@ -1258,9 +1258,9 @@ class AOTInductorTestsTemplate:
                 x = x.clone()
                 out = torch.zeros_like(x[:, 4:])
                 # the slicing below creates two ReinterpretView
-                # instances: with offset=0 and offset=4
+                # instances: with offset=3 and offset=4
                 add_kernel[(10,)](
-                    in_ptr0=x[:, :-4],
+                    in_ptr0=x[:, 3:-1],
                     in_ptr1=x[:, 4:],
                     out_ptr=out,
                     n_elements=160,
