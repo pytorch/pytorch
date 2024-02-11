@@ -2,7 +2,8 @@ import dataclasses
 import logging
 import threading
 import warnings
-from typing import Any, Dict, List, Union
+from collections import defaultdict
+from typing import Any, Dict, List, Optional, Union
 
 import torch.utils._pytree as pytree
 from torch import Tensor
@@ -79,8 +80,9 @@ class Intermediate:
 @dataclasses.dataclass(frozen=True)
 class Op:
     name: str
-    fn_call_name: str
+    fn_call_name: Optional[str]
     args: List[Union[Param, Intermediate]]
+    ret: Intermediate = dataclasses.field(repr=False)
 
     def __post_init__(self):
         if self.name == "tt.call":
@@ -165,7 +167,6 @@ def parse_ttir(ttir, kwargs):
     parser which further makes parsing much simpler.
     """
     # TODO(oulgen):
-    # - Support parsing of conditionals
     # - Support parsing for/while loops
     # - Support closures (e.g. "tt.reduce")
 
@@ -177,11 +178,6 @@ def parse_ttir(ttir, kwargs):
             "Using slow path for user-defined Triton kernels. `pip install lark` to fix this."
         )
         raise
-
-    functions: Dict[str, Dict[Intermediate, Op]] = {}
-    ops: Dict[Intermediate, Op] = {}
-    current_function = None
-    next_fake_intermediate = 0
 
     # Ops looks like one of the following forms:
     #
@@ -195,7 +191,11 @@ def parse_ttir(ttir, kwargs):
 
         module_block: "module" "{" func_block+ "}" LOC
 
-        func_block: "tt.func" ("public"|"private") FN_NAME "(" /.+/ NEWLINE op+ "}" LOC -> process_func
+        func_block: "tt.func" ("public"|"private") FN_NAME "(" /.+/ NEWLINE stmt* "}" LOC -> process_func
+
+        ?stmt: op | cond
+
+        cond: [assign_lhs "="] "scf.if" args rest stmt* "}" "else" "{" stmt* "}" LOC -> process_cond
 
         op: OP_NAME LOC
           | [assign_lhs "="] OP_NAME [FN_NAME] args rest?  -> process_op
@@ -227,6 +227,8 @@ def parse_ttir(ttir, kwargs):
         %import common.ESCAPED_STRING
         %ignore WS
     """
+
+    next_fake_intermediate = 0
 
     def convert(token):
         if isinstance(token, lark.tree.Tree):
@@ -264,20 +266,46 @@ def parse_ttir(ttir, kwargs):
             return s[1:-1]
         return s
 
+    functions: Dict[str, Dict[Intermediate, List[Op]]] = {}
+
+    def extend_dict_list(d1, d2):
+        for key, values in d2.items():
+            d1[key].extend(values)
+
     @v_args(inline=True)
-    class CalculateOps(Transformer):
+    class TransformOps(Transformer):
         def process_op(self, ret, op_name, fn_name, args, *rest):
-            ops[convert(ret)] = Op(
-                convert_name(op_name), convert_name(fn_name), convert(args)
+            return Op(
+                convert_name(op_name),
+                convert_name(fn_name),
+                convert(args),
+                convert(ret),
             )
 
-        def process_func(self, name, *rest):
-            nonlocal ops
+        def process_func(self, name, _args, *stmts):
+            ops: Dict[Intermediate, List[Op]] = defaultdict(list)
+            for e in stmts:
+                if isinstance(e, Op):
+                    ops[e.ret].append(e)
+                elif isinstance(e, dict):
+                    extend_dict_list(ops, e)
             functions[name.value] = ops
-            ops = {}
+
+        def process_cond(self, ret, _args, _rest, *stmts):
+            ret = convert(ret)
+            ops: Dict[Intermediate, List[Op]] = defaultdict(list)
+            for e in stmts:
+                if isinstance(e, Op):
+                    if e.name == "scf.yield":
+                        ops[ret].append(Op(e.name, None, e.args, ret))
+                    else:
+                        ops[e.ret].append(e)
+                elif isinstance(e, dict):
+                    extend_dict_list(ops, e)
+            return ops
 
     parser = Lark(
-        grammar, parser="lalr", maybe_placeholders=True, transformer=CalculateOps()
+        grammar, parser="lalr", maybe_placeholders=True, transformer=TransformOps()
     )
     parser.parse(ttir)
     return functions
@@ -320,23 +348,24 @@ def analyze_kernel_mutations(functions, fn_name, num_args):
     stack: List[Union[Param, Intermediate]] = []
     visited = set()
     ops = functions[fn_name]
-    for op in ops.values():
-        if op.name in UNKNOWN_OPS:
-            raise Exception(
-                f"ttir analysis hit an op we do not know how to analyze: {op.name}"
-            )
+    for op_list in ops.values():
+        for op in op_list:
+            if op.name in UNKNOWN_OPS:
+                raise Exception(
+                    f"ttir analysis hit an op we do not know how to analyze: {op.name}"
+                )
 
-        if op.name == "tt.call":
-            assert op.fn_call_name in functions
-            mutations = analyze_kernel_mutations(
-                functions, op.fn_call_name, len(op.args)
-            )
-            for idx, mutated in enumerate(mutations):
-                if mutated:
+            if op.name == "tt.call":
+                assert op.fn_call_name in functions
+                mutations = analyze_kernel_mutations(
+                    functions, op.fn_call_name, len(op.args)
+                )
+                for idx, mutated in enumerate(mutations):
+                    if mutated:
+                        stack.append(op.args[idx])
+            else:
+                for idx in MUTATION_OPS.get(op.name, []):
                     stack.append(op.args[idx])
-        else:
-            for idx in MUTATION_OPS.get(op.name, []):
-                stack.append(op.args[idx])
 
     # The following is an iterative DFS algorithm
     mutated = [False] * num_args
@@ -349,13 +378,11 @@ def analyze_kernel_mutations(functions, fn_name, num_args):
 
         if isinstance(arg, Param):
             mutated[arg.idx] = True
-        elif (
-            isinstance(arg, Intermediate)
-            and not arg.fake()
-            # Skip arguments to load
-            and ops[arg].name != "tt.load"
-        ):
-            stack.extend(ops[arg].args)
+        elif isinstance(arg, Intermediate) and not arg.fake():
+            for op in ops[arg]:
+                # Skip arguments to load
+                if op.name != "tt.load":
+                    stack.extend(op.args)
     return mutated
 
 
