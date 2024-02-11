@@ -936,17 +936,8 @@ class CppOverrides(OpOverrides):
         V.kernel.compute.splice(code)
         return result
 
-    @staticmethod
-    def bessel_j0(x):
-        return f"bessel_j0_forward({x})"
 
-    @staticmethod
-    def bessel_j1(x):
-        return f"bessel_j1_forward({x})"
-
-    @staticmethod
-    def modified_bessel_i0(x):
-        return f"modified_bessel_i0_forward({x})"
+CppOverrides._initialize_pointwise_overrides("cpp")
 
 
 class CppVecOverrides(CppOverrides):
@@ -1452,6 +1443,9 @@ class CppVecOverrides(CppOverrides):
             csevar = V.kernel.load_non_contiguous(None, index, dtype, V.kernel.compute)
         csevar.update_on_args("index_expr", (expr, dtype), {})
         return csevar
+
+
+CppVecOverrides._initialize_pointwise_overrides("cppvec")
 
 
 class CppTile2DOverrides(CppVecOverrides):
@@ -3370,7 +3364,7 @@ class CppScheduling(BaseScheduling):
         return tuple(tuple(map(V.graph.sizevars.simplify, s)) for s in sizes)
 
     def get_kernel_group(self):
-        from .cpp_wrapper_cpu import CppWrapperCodeGen
+        from .wrapper import CppWrapperCodeGen
 
         self.kernel_group: Union[CppWrapperKernelGroup, KernelGroup]
         if isinstance(V.graph.wrapper_code, CppWrapperCodeGen):
