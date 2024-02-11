@@ -4,7 +4,6 @@
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <c10/core/SafePyObject.h>
-#include <ATen/core/SingletonSymNodeImpl.h>
 
 namespace {
 

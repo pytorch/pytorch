@@ -1783,7 +1783,7 @@ class FakeTensorMode(TorchDispatchMode):
     # before erroring out. Returning NotImplemented here allows this.
     def check_user_dispatchable_args(self, flat_args):
         # Avoid importing sympy at a module level
-        from torch.fx.experimental.symbolic_shapes import is_singleton
+        from torch.fx.experimental.symbolic_shapes import is_nested_int
 
         def check(x):
             return (
@@ -1791,7 +1791,7 @@ class FakeTensorMode(TorchDispatchMode):
                 and not isinstance(x, FakeTensor)
                 and type(x) is not torch.Tensor
                 and type(x) is not torch.nn.Parameter
-            ) or is_singleton(x)
+            ) or is_nested_int(x)
 
         return [type(x) for x in flat_args if check(x)]
 

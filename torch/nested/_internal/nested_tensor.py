@@ -15,7 +15,7 @@ def get_tensor_symint(tensor, *, coeff=1, sum_vec=None):
     global _tensor_id_counter
     tensor_symint = _tensor_symint_registry.get(tensor)
     if tensor_symint is None:
-        tensor_symint = torch._C._get_singleton_int(
+        tensor_symint = torch._C._get_nested_int(
             _tensor_id_counter, coeff, tensor, sum_vec
         )
         _tensor_id_counter += 1
@@ -32,18 +32,18 @@ class NestedTensor(torch.Tensor):
     _values: torch.Tensor  # type: ignore[assignment]
     _offsets: torch.Tensor
     _lengths: Optional[torch.Tensor]
-    # NOTE [ Singleton ints for ragged sizes and strides ]
+    # NOTE [ Nested ints for ragged sizes and strides ]
     #
     # Jagged layout tensors are tensors that represent a n-dim tensor with a
     # ragged dimension, but are backed by an (n-1)-dim tensor underneath, e.g.,
     # a jagged tensor with outer shape [B, x, D] is represented internally by a
-    # tensor with shape [sum(x), D] where we introduce what we call a singleton
-    # (or skolem) denoted as "x" here (but sometimes denoted with "*" to
+    # tensor with shape [sum(x), D] where we introduce what we call a nested int
+    # denoted as "x" here (but sometimes denoted with "*" to
     # represent the ragged dimension, and sum(x) represents the dim of the inner
     # tensor or equivalently the sum of all the sizes of the constituent
     # tensors' varying lengths.
     #
-    # We also use singleton ints to represent the strides of this tensor.
+    # We also use nested ints to represent the strides of this tensor.
     # For example, a jagged tensor with shape [B, x, D] can be strided in two
     # ways: [xD, D, 1] and [x, 1, sum(x)], where xD represents x multiplied by D
     _size: Tuple[int, ...]
@@ -200,20 +200,20 @@ class NestedTensor(torch.Tensor):
             # Associate offsets or lengths (possibly fake, possibly functionalized)
             # with the ragged_size.
             ragged_size = outer_size[ragged_idx]
-            # Ordinarily, we create singleton ints by passing a 1D tensor to
-            # get_tensor_symint. When we create singleton ints this way, we are
-            # able to set the singleton int's metadata, e.g. the 'vec' field
+            # Ordinarily, we create nested ints by passing a 1D tensor to
+            # get_tensor_symint. When we create nested ints this way, we are
+            # able to set the nested int's metadata, e.g. the 'vec' field
             # during construction.
             #
             # In the case of torch compile, a symbolic version of the
-            # singleton int does not yet have the metadata set, and so we set it
+            # nested int does not yet have the metadata set, and so we set it
             # here.
             #
-            # The invariant today is that we must guarantee that singleton ints
+            # The invariant today is that we must guarantee that nested ints
             # acquire its metadata by the time it finds its way onto some
             # NestedTensor.
-            ragged_size.node._singleton_vec = offsets
-            ragged_size.node._singleton_sum_vec = values.shape[0]
+            ragged_size.node._nested_int_vec = offsets
+            ragged_size.node._nested_int_sum_vec = values.shape[0]
             _tensor_symint_registry[ragged_source] = ragged_size
 
         return NestedTensor(

@@ -40,7 +40,7 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual bool is_float() {
     TORCH_CHECK(false, "NYI");
   };
-  virtual bool is_singleton() const {
+  virtual bool is_nested_int() const {
     return false;
   };
   virtual SymNode add(const SymNode& other) {
@@ -186,16 +186,16 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual std::string str() {
     TORCH_CHECK(false, "NYI");
   };
-  virtual c10::optional<int64_t> singleton_int() {
+  virtual c10::optional<int64_t> nested_int() {
     return c10::nullopt;
   }
-  virtual TensorImpl* singleton_vec() const {
+  virtual TensorImpl* nested_int_vec() const {
     TORCH_CHECK(false, "NYI");
   }
-  virtual int64_t singleton_sum_vec() const {
+  virtual int64_t nested_int_sum_vec() const {
     TORCH_CHECK(false, "NYI");
   }
-  virtual c10::optional<int64_t> singleton_coeff() {
+  virtual c10::optional<int64_t> nested_int_coeff() {
     return c10::nullopt;
   }
   virtual c10::optional<int64_t> constant_int() {
@@ -213,15 +213,13 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual bool is_symbolic() {
     return true;
   }
-  inline c10::DispatchKeySet key_set() const {
-    return key_set_;
+  virtual c10::DispatchKeySet key_set() const {
+    return c10::DispatchKeySet();
   }
   std::ostream& operator<<(std::ostream& os) {
     os << str();
     return os;
   }
-protected:
-  c10::DispatchKeySet key_set_;
 };
 
 } // namespace c10

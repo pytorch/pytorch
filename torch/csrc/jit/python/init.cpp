@@ -101,7 +101,7 @@
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
 #include <torch/csrc/utils/cpp_stacktraces.h>
 
-#include <ATen/core/SingletonSymNodeImpl.h>
+#include <ATen/core/NestedIntSymNodeImpl.h>
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
 #include <c10/util/signal_handler.h>
@@ -1281,9 +1281,9 @@ void initJITBindings(PyObject* module) {
             return node->is_constant();
           })
       .def(
-          "is_singleton",
+          "is_nested_int",
           [](const c10::SymNode& node) {
-            return node->is_singleton();
+            return node->is_nested_int();
           })
       .def(
           "is_symbolic",
@@ -1291,27 +1291,27 @@ void initJITBindings(PyObject* module) {
             return node->is_symbolic();
           })
       .def(
-          "singleton_int",
+          "nested_int",
           [](const c10::SymNode& node) {
-            return node->singleton_int();
+            return node->nested_int();
           })
       .def(
-          "singleton_vec",
+          "nested_int_vec",
           [](const c10::SymNode& node) {
-            TORCH_CHECK(node->is_singleton());
-            return c10::get_singleton_vec(node.get());
+            TORCH_CHECK(node->is_nested_int());
+            return c10::get_nested_int_vec(node.get());
           })
       .def(
-          "singleton_sum_vec",
+          "nested_int_sum_vec",
           [](const c10::SymNode& node) {
-            TORCH_CHECK(node->is_singleton());
-            return node->singleton_sum_vec();
+            TORCH_CHECK(node->is_nested_int());
+            return node->nested_int_sum_vec();
           })
       .def(
-          "singleton_coeff",
+          "nested_int_coeff",
           [](const c10::SymNode& node) {
-            TORCH_CHECK(node->is_singleton());
-            return node->singleton_coeff();
+            TORCH_CHECK(node->is_nested_int());
+            return node->nested_int_coeff();
           });
 
   // clang-format on
