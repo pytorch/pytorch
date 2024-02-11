@@ -1383,6 +1383,8 @@ if(USE_DISTRIBUTED)
   # can only be compiled with USE_TENSORPIPE is set.
   if(USE_TENSORPIPE)
     target_compile_definitions(torch_cpu PUBLIC USE_TENSORPIPE)
+    target_compile_definitions(torch_cpu PRIVATE TORCH_USE_LIBUV)
+    target_link_libraries(torch_cpu PRIVATE tensorpipe tensorpipe_uv)
   endif()
 endif()
 
