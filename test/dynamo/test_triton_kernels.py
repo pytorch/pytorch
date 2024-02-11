@@ -1044,8 +1044,7 @@ class MutationTests(torch._dynamo.test_case.TestCase):
                 "out_ptr": t,
                 "BLOCK_SIZE": 4,
             },
-            # TODO(oulgen): helper return values not implemented yet
-            ["in_ptr0", "in_ptr1", "out_ptr"],
+            ["out_ptr"],
         )
 
     @make_mutation_test
@@ -1077,8 +1076,7 @@ class MutationTests(torch._dynamo.test_case.TestCase):
                 "out_ptr": t,
                 "BLOCK_SIZE": 4,
             },
-            # TODO(oulgen): multiple return values not implemented yet
-            ["in_ptr0", "in_ptr1", "out_ptr"],
+            ["out_ptr"],
         )
 
 
@@ -1127,8 +1125,7 @@ if HAS_CUDA and HAS_LARK:
                 "BLOCK_SIZE": 4,
                 "ACTIVATION": "add_kernel",
             },
-            # TODO(oulgen): Multiple functions is not implemented yet
-            ["in_ptr0", "out_ptr"],
+            ["out_ptr"],
         ],
         [
             mul2_inplace_kernel,
