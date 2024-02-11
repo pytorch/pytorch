@@ -8,7 +8,7 @@
 #include <vector>
 
 #ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/NativeFunctions.h>
+#include <ATen/Functions.h>
 #else
 #include <ATen/ops/empty.h>
 #endif
