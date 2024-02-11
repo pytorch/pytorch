@@ -1,24 +1,24 @@
 #include <gtest/gtest.h>
 
-#include <ATen/core/SingletonSymNodeImpl.h>
+#include <ATen/core/NestedIntSymNodeImpl.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/SymNodeImpl.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
 
-TEST(SingletonIntTest, Comparisons) {
+TEST(NestedIntTest, Comparisons) {
   auto x = torch::randn({2, 2});
 
   auto a =
-      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(
-          1, 1, x, 1, c10::SingletonVariant::PYTHON)));
+      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::NestedIntSymNodeImpl>(
+          1, 1, x, 1, c10::NestedTensorVariant::PYTHON)));
   auto b =
-      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(
-          1, 1, x, 1, c10::SingletonVariant::PYTHON)));
+      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::NestedIntSymNodeImpl>(
+          1, 1, x, 1, c10::NestedTensorVariant::PYTHON)));
   auto c =
-      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(
-          2, 1, x, 1, c10::SingletonVariant::PYTHON)));
+      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::NestedIntSymNodeImpl>(
+          2, 1, x, 1, c10::NestedTensorVariant::PYTHON)));
   auto d = c10::SymInt(3);
 
   ASSERT_TRUE(a == a);
@@ -90,15 +90,15 @@ TEST(SingletonIntTest, Comparisons) {
   ASSERT_TRUE(a > 1);
 }
 
-TEST(SingletonIntTest, WithFactor) {
+TEST(NestedIntTest, WithFactor) {
   auto x = torch::randn({2, 2});
 
   auto a =
-      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(
-          1, 5, x, 1, c10::SingletonVariant::PYTHON)));
+      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::NestedIntSymNodeImpl>(
+          1, 5, x, 1, c10::NestedTensorVariant::PYTHON)));
   auto b =
-      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(
-          1, 10, x, 1, c10::SingletonVariant::PYTHON)));
+      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::NestedIntSymNodeImpl>(
+          1, 10, x, 1, c10::NestedTensorVariant::PYTHON)));
   // eq
   ASSERT_FALSE(a == b);
   ASSERT_FALSE(a >= b);
@@ -113,15 +113,15 @@ TEST(SingletonIntTest, WithFactor) {
   ASSERT_TRUE(a * 2 == 2 * a);
 }
 
-TEST(SingletonIntTest, CppSingletonErrorsOnComparison) {
+TEST(NestedIntTest, CppNestedIntErrorsOnComparison) {
   auto x = torch::randn({2, 2});
 
   auto c =
-      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(
-          -1, -1, x, -1, c10::SingletonVariant::CPP)));
+      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::NestedIntSymNodeImpl>(
+          -1, -1, x, -1, c10::NestedTensorVariant::CPP)));
   auto p =
-      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(
-          -1, -1, x, -1, c10::SingletonVariant::PYTHON)));
+      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::NestedIntSymNodeImpl>(
+          -1, -1, x, -1, c10::NestedTensorVariant::PYTHON)));
 
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW((void)(c == p), c10::Error);

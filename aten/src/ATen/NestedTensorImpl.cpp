@@ -1,5 +1,5 @@
 #include <ATen/ATen.h>
-#include <ATen/core/SingletonSymNodeImpl.h>
+#include <ATen/core/NestedIntSymNodeImpl.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/NestedTensorImpl.h>
@@ -291,9 +291,9 @@ c10::SymIntArrayRef NestedTensorImpl::sym_sizes_custom() const {
         sym_sizes[i] = c10::SymInt(*mb_size);
       } else {
         auto vec = nested_sizes_.select(1, i - 1);
-        // See NOTE [ SingletonVariant ]
+        // See NOTE [ NestedTensorVariant ]
         sym_sizes[i] = c10::SymInt(
-          c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(-1, -1, std::move(vec), -1, c10::SingletonVariant::CPP)));
+          c10::SymNode(c10::make_intrusive<c10::NestedIntSymNodeImpl>(-1, -1, std::move(vec), -1, c10::NestedTensorVariant::CPP)));
       }
     }
     sym_sizes_ = std::move(sym_sizes);

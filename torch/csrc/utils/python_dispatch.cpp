@@ -5,9 +5,9 @@
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+#include <ATen/core/NestedIntSymNodeImpl.h>
 #include <ATen/core/PythonFallbackKernel.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
-#include <ATen/core/SingletonSymNodeImpl.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
 #include <ATen/functorch/BatchedTensorImpl.h>
@@ -817,11 +817,11 @@ void initDispatchBindings(PyObject* module) {
   });
 
   m.def(
-      "_get_singleton_int",
+      "_get_nested_int",
       [](int64_t data, int64_t coeff, const at::Tensor& vec, int64_t sum_vec) {
         return c10::SymInt(
-            c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(
-                data, coeff, vec, sum_vec, c10::SingletonVariant::PYTHON)));
+            c10::SymNode(c10::make_intrusive<c10::NestedIntSymNodeImpl>(
+                data, coeff, vec, sum_vec, c10::NestedTensorVariant::PYTHON)));
       });
 
   m.def("_get_constant_bool_symnode", [](int64_t data) {

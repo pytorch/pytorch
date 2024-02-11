@@ -1,6 +1,6 @@
 #include <ATen/native/nested/NestedTensorUtils.h>
 
-#include <ATen/core/SingletonSymNodeImpl.h>
+#include <ATen/core/NestedIntSymNodeImpl.h>
 #include <ATen/NestedTensorImpl.h>
 #include <c10/util/Optional.h>
 
@@ -183,15 +183,15 @@ Tensor get_nested_sizes_from_sym_sizes(const c10::SymIntArrayRef& size) {
     if (idx == 0) {
       continue;
     }
-    if (size[idx].is_heap_allocated() && size[idx].toSymNodeImplUnowned()->is_singleton()) {
-      auto vec = c10::get_singleton_vec(size[idx].toSymNodeImplUnowned());
-      // NB: singleton_vec in the C++ nested tensor case holds lengths not offsets
+    if (size[idx].is_heap_allocated() && size[idx].toSymNodeImplUnowned()->is_nested_int()) {
+      auto vec = c10::get_nested_int_vec(size[idx].toSymNodeImplUnowned());
+      // NB: nested_int_vec in the C++ nested tensor case holds lengths not offsets
       //     so if the sizes came from jagged NT, we could support it by computing
       //     lengths from offsets. But not supporting to for now because it's not
       //     very useful and to get good performance we'd want to cache the result.
       TORCH_CHECK(
           size[idx].toSymNodeImplUnowned()->key_set().has(DispatchKey::NestedTensor),
-          "Expected singleton to have been created from C++ NestedTensor sizes");
+          "Expected nested int to have been created from C++ NestedTensor sizes");
       TORCH_INTERNAL_ASSERT(vec.size(0) == B, vec.size(0), " != ", B);
       nt_sizes.select(1, idx - 1).copy_(vec);
     } else {
