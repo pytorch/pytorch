@@ -981,7 +981,7 @@ class CppVecOverrides(CppOverrides):
                 scalars = [
                     arg
                     for arg in args
-                    if isinstance(arg, (int, sympy.Expr)) or (isinstance(arg, CppCSEVariable) and not arg.is_vec)
+                    if isinstance(arg, CppCSEVariable) and not arg.is_vec
                 ]
                 vectors = [
                     arg
@@ -994,14 +994,6 @@ class CppVecOverrides(CppOverrides):
                     new_args = []
                     vec_dtype = vectors[0].dtype
                     for arg in args:
-                        if isinstance(arg, (int, sympy.Expr)):
-                            arg_dtype = torch.int64
-                            opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-                            assert opt_ctx
-                            if opt_ctx.dtype is not None:
-                                arg_dtype = opt_ctx.dtype
-                            arg = ops.constant(arg, arg_dtype)
-                            arg = arg.value if isinstance(arg, OpsValue) else arg
                         if isinstance(arg, CppCSEVariable) and not arg.is_vec:
                             assert isinstance(V.kernel, CppVecKernel)
                             # align scalar data type to the vector for binary ops
@@ -1312,8 +1304,10 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def where(a, b, c):
-        assert isinstance(b, CppCSEVariable)
-        assert isinstance(V.kernel, CppVecKernel)
+        if b.dtype == torch.int64:
+            raise CppVecUnsupportedError(
+                "where with int64 tensor is not supported in vectorized codegen"
+            )
         return f"decltype({b})::blendv({c}, {b}, {V.kernel._get_mask_cast(a, b.dtype)})"
 
     @staticmethod
@@ -1982,9 +1976,6 @@ class CppVecKernel(CppKernel):
                 if indirect_var.is_vec:
                     array_var = vec_to_array(indirect_var)
                     replacements[indirect_var] = f"{array_var}[{itervar_inner}]"
-            index = self.scale_index_with_offset(
-                index, itervar_idx=self.tiling_idx, offset=itervar_inner
-            )
             load_mask = None
             if self._load_mask is not None:
                 assert isinstance(self._load_mask, CppCSEVariable), self._load_mask
@@ -1994,6 +1985,10 @@ class CppVecKernel(CppKernel):
                     )
                 else:
                     load_mask = f"{self._load_mask} != 0"
+            index = sympy_subs(index, replacements)  # type: ignore[arg-type]
+            index = self.scale_index_with_offset(
+                index, itervar_idx=self.tiling_idx, offset=itervar_inner
+            )
             if codecache.is_gcc():
                 code.writeline(f"#pragma GCC unroll {self.tiling_factor}")
             else:
@@ -2002,13 +1997,10 @@ class CppVecKernel(CppKernel):
                 f"for (long {itervar_inner} = 0; {itervar_inner} < {self.tiling_factor}; {itervar_inner}++)"
             )
             with code.indent(), contextlib.ExitStack() as stack:
-                index_c = cexpr_index(index)
-                for indirect_var in replacements:
-                    index_c = re.sub(r'\b' + f"{indirect_var}" + r'\b', replacements[indirect_var], index_c)
                 rhs = (
-                    f"{var}[{index_c}]"
+                    f"{var}[{cexpr_index(index)}]"
                     if var is not None
-                    else f"{index_c}"
+                    else f"{cexpr_index(index)}"
                 )
                 if is_mask:
                     rhs = f"{self._get_mask_type()}::from({rhs})"
@@ -2326,30 +2318,6 @@ initializer(omp_priv={{{self.reduction_init_vec(reduction_type, dtype)}}})
             return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
         else:
             raise NotImplementedError()
-
-    def indirect_assert(self, var, lower, upper, mask=None):
-        assert not mask, "do not support mask in indirect_indexing assertion"
-        assert isinstance(var, CppCSEVariable)
-        if not var.is_vec:
-            return super().indirect_assert(var, lower, upper, mask)
-        if lower:
-            lower_scalar = lower
-            lower = f"{self._get_vec_type(var.dtype)}({lower})"
-        if upper:
-            upper_scalar = upper
-            upper = f"{self._get_vec_type(var.dtype)}({upper})"
-        if lower and upper:
-            cond = f"({lower} <= {var}) & ({var} < {upper})"
-            cond_print = f"{lower_scalar} <= {var} < {upper_scalar}"
-        elif lower:
-            cond = f"{lower} <= {var}"
-            cond_print = f"{lower_scalar} <= {var}"
-        else:
-            assert upper
-            cond = f"{var} < {upper}"
-            cond_print = f"{var} < {upper_scalar}"
-        cond = f"at::vec::VecMask({cond}).all_masked()"
-        return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
 
 
 class CppTile2DKernel(CppVecKernel):

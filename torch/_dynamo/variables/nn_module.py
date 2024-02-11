@@ -9,7 +9,7 @@ from typing import Any, Dict, List
 
 import torch.nn
 
-from .. import skipfiles, variables
+from .. import trace_rules, variables
 from ..exc import unimplemented, UnspecializeRestartAnalysis, Unsupported
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import GenerationTracker
@@ -389,7 +389,7 @@ class NNModuleVariable(VariableTracker):
             with record_nn_module_stack(self.module_key, self.source, tx, module):
                 return generic_call_method_helper(name)
 
-        if name == "_check_input_dim" and skipfiles.is_torch_inline_allowed(
+        if name == "_check_input_dim" and trace_rules.is_torch_inline_allowed(
             inspect.getfile(module.__class__._check_input_dim)
         ):
             return ConstantVariable.create(True)
