@@ -1093,6 +1093,8 @@ def main():
         "jinja2",
         "fsspec",
     ]
+    if IS_WINDOWS:
+        install_requires.append("mkl>=2021.1.1,<=2021.4.0")
 
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
@@ -1184,6 +1186,7 @@ def main():
         "include/ATen/native/mps/*.h",
         "include/ATen/native/quantized/*.h",
         "include/ATen/native/quantized/cpu/*.h",
+        "include/ATen/native/sparse/*.h",
         "include/ATen/native/utils/*.h",
         "include/ATen/quantized/*.h",
         "include/caffe2/serialize/*.h",
@@ -1269,6 +1272,7 @@ def main():
         "include/torch/csrc/lazy/core/ops/*.h",
         "include/torch/csrc/lazy/python/python_util.h",
         "include/torch/csrc/lazy/ts_backend/*.h",
+        "include/torch/csrc/xpu/*.h",
         "include/pybind11/*.h",
         "include/pybind11/detail/*.h",
         "include/pybind11/eigen/*.h",
@@ -1283,6 +1287,7 @@ def main():
         "include/sleef.h",
         "_inductor/codegen/*.h",
         "_inductor/codegen/aoti_runtime/*.cpp",
+        "_export/serde/*.yaml",
         "share/cmake/ATen/*.cmake",
         "share/cmake/Caffe2/*.cmake",
         "share/cmake/Caffe2/public/*.cmake",

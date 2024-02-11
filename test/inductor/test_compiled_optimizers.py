@@ -3,6 +3,7 @@
 import sys
 import unittest
 import weakref
+from contextlib import ExitStack
 
 from copy import deepcopy
 from typing import NamedTuple
@@ -10,8 +11,10 @@ from typing import NamedTuple
 import torch
 
 import torch._inductor
+import torch._inductor.cudagraph_trees
+from torch._inductor import config
 
-# The rest of the optimizers not yet imported: LBFGS, RAdam, SparseAdam
+# LBFGS, SparseAdam not supported
 from torch.optim import (
     Adadelta,
     Adagrad,
@@ -20,6 +23,7 @@ from torch.optim import (
     AdamW,
     ASGD,
     NAdam,
+    RAdam,
     RMSprop,
     Rprop,
     SGD,
@@ -69,9 +73,12 @@ KERNEL_COUNTS = {
     Adagrad: KernelCounts(multitensor=5, singletensor=8),
     ASGD: KernelCounts(multitensor=2, singletensor=12),
     SGD: KernelCounts(multitensor=2, singletensor=8),
+    RAdam: KernelCounts(
+        multitensor=2, singletensor=None
+    ),  # Single tensor eager needs to be refactored to enable tracing (#118230)
     Adamax: KernelCounts(
         multitensor=2, singletensor=None
-    ),  # Single tensor eager needs to be refactored to enable tracing
+    ),  # Single tensor eager needs to be refactored to enable tracing (#117836)
 }
 
 
@@ -81,19 +88,16 @@ def build_compiled_opt_kwarg_db():
         if optim_info.optim_cls not in KERNEL_COUNTS:
             continue
 
-        for optim_inputs in optim_info.optim_inputs_func():
-            for device in ["cpu", "cuda"]:
+        for device in ["cpu", "cuda"]:
+            for optim_inputs in optim_info.optim_inputs_func(device):
                 for foreach in [True, False]:
-                    if device == "cpu" and "capturable" in optim_inputs.kwargs:
-                        continue
-
                     kwargs = dict(optim_inputs.kwargs)
                     name = (
                         f"test_{optim_info.optim_cls.__name__.lower()}"
                         f"{'_foreach' if foreach else ''}"
                     )
 
-                    for key in optim_inputs.kwargs:
+                    for key in kwargs:
                         if key == "lr":
                             continue
                         name += "_" + key
@@ -101,7 +105,12 @@ def build_compiled_opt_kwarg_db():
                     name += f"_{device}"
 
                     # Eager for-loop impl doesn't support capturable ASGD
-                    if name == "test_asgd_capturable_cuda":
+                    if name in [
+                        "test_asgd_capturable_cuda",
+                        "test_asgd_maximize_capturable_cuda",
+                        "test_asgd_weight_decay_capturable_cuda",
+                        "test_asgd_weight_decay_maximize_capturable_cuda",
+                    ]:
                         continue
 
                     kwargs["foreach"] = foreach
@@ -153,13 +162,13 @@ def compile_opt(opt_compiled, closure=None):
     # run the patcher so that step has the expected structure
     torch._dynamo.eval_frame.TorchPatcher.patch()
 
-    # unwrap step to avoid a deliberate graph break due to
+    # unwrap step TWICE to avoid a deliberate graph break due to
     # a limitation of functionalization/no_grad detection
     # see the [Note on graph break] in optimizer.py
     # This ignores the outer _use_grad_if_differentiable wrapper
     # and instead manually disables grad before calling step, which is fine
     # for now as dynamo does not support differentiable optimizers anyway
-    step_fn = opt_compiled.step.__wrapped__
+    step_fn = opt_compiled.step.__wrapped__.__wrapped__
     if closure is not None:
 
         def fn():
@@ -183,64 +192,80 @@ def make_test(
     **kwargs,
 ):
     def test_fn(self):
-        torch._dynamo.reset()
-        torch._inductor.metrics.reset()
-        input = torch.ones([10, 10], device=device)
-        model_eager = torch.nn.Sequential(
-            *[torch.nn.Linear(10, 10, device=device) for _ in range(2)]
-        )
-        model_eager(input).sum().backward()
+        stack = ExitStack()
+        try:
+            # https://github.com/pytorch/pytorch/issues/118715 for capturable Adagrad support
+            # https://github.com/pytorch/pytorch/issues/118018 for capturable SGD support
+            run_cudagraphs = device == "cuda" and optim_cls not in (Adagrad, SGD)
+            if run_cudagraphs:
+                stack.enter_context(config.patch({"triton.cudagraphs": True}))
 
-        input = torch.ones([10, 10], device=device)
-        model_compiled = deepcopy(model_eager)
-        model_compiled(input).sum().backward()
+            if isinstance(kwargs.get("lr", None), torch.Tensor):
+                kwargs["lr"] = kwargs["lr"].to(device)
 
-        opt_eager = optim_cls(model_eager.parameters(), **kwargs)
-        opt_compiled = optim_cls(model_compiled.parameters(), **kwargs)
-        compiled_step = compile_opt(opt_compiled, closure=closure)
+            torch._dynamo.reset()
+            torch._inductor.metrics.reset()
+            input = torch.ones([10, 10], device=device)
+            model_eager = torch.nn.Sequential(
+                *[torch.nn.Linear(10, 10, device=device) for _ in range(2)]
+            )
+            model_eager(input).sum().backward()
 
-        with torch.set_grad_enabled(False):
-            compiled_step()
-            compiled_step()
-            opt_eager.step()
-            opt_eager.step()
+            input = torch.ones([10, 10], device=device)
+            model_compiled = deepcopy(model_eager)
+            model_compiled(input).sum().backward()
 
-        self.assertEqual(
-            list(model_eager.parameters()),
-            list(model_compiled.parameters()),
-            atol=atol,
-            rtol=rtol,
-        )
+            opt_eager = optim_cls(model_eager.parameters(), **kwargs)
+            opt_compiled = optim_cls(model_compiled.parameters(), **kwargs)
+            compiled_step = compile_opt(opt_compiled, closure=closure)
 
-        # currently we don't mutate step properly until we resolve
-        # https://github.com/pytorch/pytorch/issues/115679
-        if optim_cls not in (Adadelta, Rprop, RMSprop):
-            for p_eager, p_compiled in zip(
-                model_eager.parameters(), model_compiled.parameters()
-            ):
-                self.assertEqual(
-                    opt_eager.state[p_eager],
-                    opt_compiled.state[p_compiled],
-                    atol=atol,
-                    rtol=rtol,
-                )
+            with torch.set_grad_enabled(False):
+                compiled_step()
+                compiled_step()
+                opt_eager.step()
+                opt_eager.step()
 
-        if self.check_kernel_count:
-            # currently, we compile the step and the rest of the computation
-            # separately because the step is a single element tensor
-            # hence, the usual kernel count is 2
             self.assertEqual(
-                torch._inductor.metrics.generated_kernel_count, kernel_count
+                list(model_eager.parameters()),
+                list(model_compiled.parameters()),
+                atol=atol,
+                rtol=rtol,
             )
 
+            # currently we don't mutate step properly until we resolve
+            # https://github.com/pytorch/pytorch/issues/115679
+            if optim_cls not in (Adadelta, Rprop, RMSprop):
+                for p_eager, p_compiled in zip(
+                    model_eager.parameters(), model_compiled.parameters()
+                ):
+                    self.assertEqual(
+                        opt_eager.state[p_eager],
+                        opt_compiled.state[p_compiled],
+                        atol=atol,
+                        rtol=rtol,
+                    )
+
+            if run_cudagraphs:
+                self.check_cudagraphs_ran()
+
+            if self.check_kernel_count:
+                # currently, we compile the step and the rest of the computation
+                # separately because the step is a single element tensor
+                # hence, the usual kernel count is 2
+                self.assertEqual(
+                    torch._inductor.metrics.generated_kernel_count, kernel_count
+                )
+        finally:
+            stack.close()
+
     if device == "cuda":
-        test_fn = requires_cuda()(test_fn)
+        test_fn = requires_cuda(test_fn)
 
     return test_fn
 
 
 def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
-    @requires_cuda()
+    @requires_cuda
     def test_fn(self):
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
@@ -294,16 +319,23 @@ class CompiledOptimizerTests(TestCase):
 
     def setUp(self):
         super().setUp()
+        torch._dynamo.reset()
         torch._inductor.metrics.reset()
 
     def tearDown(self):
         super().tearDown()
+        torch._dynamo.reset()
         torch._inductor.metrics.reset()
+
+    def check_cudagraphs_ran(self):
+        # We run the zeroth device currently
+        manager = torch._inductor.cudagraph_trees.get_container(0).tree_manager
+        self.assertIsNotNone(manager)
+        self.assertEqual(manager.new_graph_id().id, 1)
 
     test_adam_recompile = make_recompile_test(Adam, lr=0.01)
     test_adamw_recompile = make_recompile_test(AdamW, lr=0.01)
-    # Need an impl which does not use python scalars
-    # test_adamax_recompile = make_recompile_test(Adamax, lr=0.01)
+    test_adamax_recompile = make_recompile_test(Adamax, lr=0.01)
     test_nadam_recompile = make_recompile_test(NAdam, lr=0.01)
     test_rprop_recompile = make_recompile_test(Rprop, kernel_count=1, lr=0.01)
     test_rmsprop_recompile = make_recompile_test(RMSprop, kernel_count=1, lr=0.01)
@@ -323,8 +355,11 @@ class CompiledOptimizerTests(TestCase):
         SGD, kernel_count=1, lr=0.01, foreach=True
     )
 
-    @requires_cuda()
+    @requires_cuda
     def test_static_address_finalizer(self):
+        import gc
+
+        gc.disable()
         p_ref = None
 
         def fn():
@@ -347,6 +382,7 @@ class CompiledOptimizerTests(TestCase):
         fn()
 
         self.assertTrue(p_ref() is None)
+        gc.enable()
 
 
 for optim_cls, name, kwargs in COMPILED_OPT_KWARG_DB:

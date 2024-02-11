@@ -1,34 +1,10 @@
 #pragma once
 
-#include <stddef.h>
-#include <stdint.h>
-
 // WARNING: Be careful when adding new includes here. This header will be used
 // in model.so, and should not refer to any aten/c10 headers except the stable
 // C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
-#include <torch/csrc/inductor/aoti_torch/c/shim.h>
-
-#ifdef __GNUC__
-#define AOT_INDUCTOR_EXPORT __attribute__((__visibility__("default")))
-#else // !__GNUC__
-#ifdef _WIN32
-#define AOT_INDUCTOR_EXPORT __declspec(dllexport)
-#else // !_WIN32
-#define AOT_INDUCTOR_EXPORT
-#endif // _WIN32
-#endif // __GNUC__
-
-using AOTIRuntimeError = int32_t;
-#define AOTI_RUNTIME_SUCCESS 0
-#define AOTI_RUNTIME_FAILURE 1
-
-#define AOTI_RUNTIME_ERROR_CODE_CHECK(call)                                \
-  if ((call) != AOTI_RUNTIME_SUCCESS) {                                    \
-    throw std::runtime_error(                                              \
-        std::string(#call " API call failed at ") + __FILE__ + ", line " + \
-        std::to_string(__LINE__));                                         \
-  }
+#include <torch/csrc/inductor/aoti_runtime/utils.h>
 
 extern "C" {
 struct AOTInductorModelOpaque;
@@ -119,6 +95,13 @@ AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
 AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle);
+
+// Run constant folding on constant buffer.
+AOTIRuntimeError AOTInductorModelContainerRunConstantFolding(
+    AOTInductorModelContainerHandle container_handle,
+    bool use_inactive,
+    AOTInductorStreamHandle stream_handle,
+    AOTIProxyExecutorHandle proxy_executor_handle);
 
 // Swap the constant buffer being used to the inactive one.
 AOTIRuntimeError AOTInductorModelContainerSwapConstantBuffer(
