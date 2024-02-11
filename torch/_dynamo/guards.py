@@ -1385,8 +1385,6 @@ class CheckFunctionManager:
             ):
                 continue
 
-            # if config.enable_cpp_guard_manager:
-            #     builder.get_guard_manager(guard)
             guard.create(builder)
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
 
@@ -1431,6 +1429,13 @@ class CheckFunctionManager:
         code_parts = ["___guarded_code.valid", "___check_global_state()"]
 
         # Insert global state guard at the root
+        builder.add_python_lambda_leaf_guard_to_root(
+            ["___guarded_code.valid"],
+            ["___guarded_code.valid"],
+            {"___guarded_code": self,},
+            False,
+        )
+
         self.guard_manager.root.add_global_state_guard(["Checking global state"])
         verbose_code_parts = code_parts[:]
 
