@@ -61,6 +61,7 @@ struct FusedSgdMathFunctor {
   static_assert(
       depth == 2 || depth == 3,
       "depth of 2 for SGD w/ momentum == 0, 3 for SGD w/ momentum != 0");
+  template <template <int> class TensorListMetadata>
   C10_DEVICE __forceinline__ void operator()(
       const int chunk_size,
       TensorListMetadata<depth>& tl,
