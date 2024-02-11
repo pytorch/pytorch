@@ -162,7 +162,7 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
   using CachedGraph = MPSBinaryCachedGraph;
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
   TORCH_CHECK(self.scalar_type() == ScalarType::Double || self.scalar_type() == ScalarType::Float ||
-                  self.scalar_type() == ScalarType::Half,
+                  self.scalar_type() == ScalarType::Half || self.scalar_type() == ScalarType::BFloat16,
               "MPS device does not support mm for non-float inputs");
 
   TensorArg args[]{{output, "out", 0}, {self, "mat1", 1}, {other, "mat2", 2}};

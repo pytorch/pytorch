@@ -4,6 +4,8 @@
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Resize.h>
+// For MTLLanguageVersion_3_1
+#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
 
@@ -732,6 +734,7 @@ static const std::string& getGatherScatterScalarType(const Tensor& t) {
   static std::unordered_map<c10::ScalarType, std::string> scalarToMetalType = {
       {c10::ScalarType::Float, "float"},
       {c10::ScalarType::Half, "half"},
+      {c10::ScalarType::BFloat16, "bfloat"},
       {c10::ScalarType::Long, "long"},
       {c10::ScalarType::Int, "int"},
       {c10::ScalarType::Short, "short"},
@@ -754,9 +757,17 @@ static std::string genScatterGatherCvtFunc(const std::string& dtypeSrc, const st
     return dtypeDst + (srcComplex ? "(x.x, x.y)" : "(x,  0.0)");
   }
   if (srcComplex) {
+    // TODO: Document why explicit cast is needed only for bfloat types
+    if (dtypeDst == "bfloat") {
+      return "bfloat(x.x)";
+    }
     return "x.x";
   }
-  return "x";
+  // TODO: Document why explicit cast is needed only for bfloat types
+  if (dtypeDst == "bfloat") {
+    return "bfloat(x)";
+  }
+  return "(x)";
 }
 
 static id<MTLLibrary> compileGatherScatterOpsLibrary(id<MTLDevice> device,
@@ -771,7 +782,8 @@ static id<MTLLibrary> compileGatherScatterOpsLibrary(id<MTLDevice> device,
   }
   NSError* error = nil;
   MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion:MTLLanguageVersion2_3];
+  [options setLanguageVersion:is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) ? MTLLanguageVersion3_1
+                                                                                      : MTLLanguageVersion2_3];
   const auto shaderStr = fmt::format(needsScatter ? SCATTER_OPS_TEMPLATE : GATHER_OPS_TEMPLATE,
                                      dtypeSrc,
                                      dtypeDst,
