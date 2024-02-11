@@ -152,6 +152,9 @@ DTYPE_LOWP_FP = [
 ]
 
 
+BIN_CMP_OPS = ["eq", "ne", "le", "ge", "lt", "gt"]
+
+
 def value_to_cpp(value, cpp_type):
     if value == float("-inf"):
         return f"-std::numeric_limits<{cpp_type}>::infinity()"
@@ -536,6 +539,9 @@ class CppCSEVariable(CSEVariable):
         self.dtype: Optional[torch.dtype] = None
         self.dependent_itervars: Set[sympy.Symbol] = set()
 
+    def __repr__(self):
+        return f"CppCSEVariable(name: {self.name}, bounds: {self.bounds}, is_vec: {self.is_vec}, dtype: {self.dtype}, dependent_itervars: {self.dependent_itervars})"
+
     def update_on_args(self, name, args, kwargs):
         if name == "load":
             # args[1] is index
@@ -566,6 +572,9 @@ class CppCSEVariable(CSEVariable):
             and get_current_node_opt_ctx() is not None
         ):
             self.dtype = get_current_node_opt_ctx().dtype
+
+        if name in BIN_CMP_OPS:
+            self.dtype = torch.bool
 
     def _set_dependent_itervars(self, index: sympy.Expr):
         """
@@ -972,7 +981,7 @@ class CppVecOverrides(CppOverrides):
                 scalars = [
                     arg
                     for arg in args
-                    if isinstance(arg, CppCSEVariable) and not arg.is_vec
+                    if isinstance(arg, (int, sympy.Expr)) or (isinstance(arg, CppCSEVariable) and not arg.is_vec)
                 ]
                 vectors = [
                     arg
@@ -985,6 +994,14 @@ class CppVecOverrides(CppOverrides):
                     new_args = []
                     vec_dtype = vectors[0].dtype
                     for arg in args:
+                        if isinstance(arg, (int, sympy.Expr)):
+                            arg_dtype = torch.int64
+                            opt_ctx: OptimizationContext = get_current_node_opt_ctx()
+                            assert opt_ctx
+                            if opt_ctx.dtype is not None:
+                                arg_dtype = opt_ctx.dtype
+                            arg = ops.constant(arg, arg_dtype)
+                            arg = arg.value if isinstance(arg, OpsValue) else arg
                         if isinstance(arg, CppCSEVariable) and not arg.is_vec:
                             assert isinstance(V.kernel, CppVecKernel)
                             # align scalar data type to the vector for binary ops
@@ -1080,27 +1097,39 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def eq(x, y):
-        return f"to_float_mask({x} == {y})"
+        assert isinstance(V.kernel, CppVecKernel)
+        assert isinstance(x, CppCSEVariable)
+        return f"{V.kernel._get_mask_type(x.dtype)}({x} == {y})"
 
     @staticmethod
     def ne(x, y):
-        return f"to_float_mask({x} != {y})"
+        assert isinstance(V.kernel, CppVecKernel)
+        assert isinstance(x, CppCSEVariable)
+        return f"{V.kernel._get_mask_type(x.dtype)}({x} != {y})"
 
     @staticmethod
     def lt(x, y):
-        return f"to_float_mask({x} < {y})"
+        assert isinstance(V.kernel, CppVecKernel)
+        assert isinstance(x, CppCSEVariable)
+        return f"{V.kernel._get_mask_type(x.dtype)}({x} < {y})"
 
     @staticmethod
     def gt(x, y):
-        return f"to_float_mask({x} > {y})"
+        assert isinstance(V.kernel, CppVecKernel)
+        assert isinstance(x, CppCSEVariable)
+        return f"{V.kernel._get_mask_type(x.dtype)}({x} > {y})"
 
     @staticmethod
     def le(x, y):
-        return f"to_float_mask({x} <= {y})"
+        assert isinstance(V.kernel, CppVecKernel)
+        assert isinstance(x, CppCSEVariable)
+        return f"{V.kernel._get_mask_type(x.dtype)}({x} <= {y})"
 
     @staticmethod
     def ge(x, y):
-        return f"to_float_mask({x} >= {y})"
+        assert isinstance(V.kernel, CppVecKernel)
+        assert isinstance(x, CppCSEVariable)
+        return f"{V.kernel._get_mask_type(x.dtype)}({x} >= {y})"
 
     @staticmethod
     def and_(x, y):
@@ -1144,19 +1173,19 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def logical_and(a, b):
-        return f"({a} != 0) & ({b} != 0)"
+        return f"{a} & {b}"
 
     @staticmethod
     def logical_not(a):
-        return f"{a} == 0"
+        return f"~{a}"
 
     @staticmethod
     def logical_or(a, b):
-        return f"({a} != 0) | ({b} != 0)"
+        return f"{a} | {b}"
 
     @staticmethod
     def logical_xor(a, b):
-        return f"({a} != 0) ^ ({b} != 0)"
+        return f"{a} ^ {b}"
 
     @staticmethod
     def tan(a):
@@ -1284,11 +1313,8 @@ class CppVecOverrides(CppOverrides):
     @staticmethod
     def where(a, b, c):
         assert isinstance(b, CppCSEVariable)
-        if b.dtype != torch.float:
-            raise CppVecUnsupportedError(
-                "where with non-float tensor is not supported in vectorized codegen"
-            )
-        return f"decltype({b})::blendv({c}, {b}, {a})"
+        assert isinstance(V.kernel, CppVecKernel)
+        return f"decltype({b})::blendv({c}, {b}, {V.kernel._get_mask_cast(a, b.dtype)})"
 
     @staticmethod
     def sign(x):
@@ -1325,18 +1351,18 @@ class CppVecOverrides(CppOverrides):
         assert node and isinstance(node, torch.fx.Node)
         opt_ctx_x = get_opt_ctx(node.args[1])
         assert opt_ctx_x
-        if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype == torch.bool:
-            return f"vec_convert_to_mask({x})"
-        if opt_ctx_x.dtype == torch.bool and dtype in (torch.float, torch.float32):
-            return f"mask_convert_to_float({x})"
-        if opt_ctx_x.dtype == torch.bool and dtype in DTYPE_LOWP_FP:
-            return f"mask_convert_to_lowp<{DTYPE_TO_CPP[dtype]}>({x})"
-        if opt_ctx_x.dtype == torch.bool and dtype == torch.int64:
-            return f"mask_convert_to_int64({x})"
+        assert isinstance(V.kernel, CppVecKernel)
+        src_cpp_type = DTYPE_TO_CPP[opt_ctx_x.dtype]
+        cpp_type = DTYPE_TO_CPP[dtype]
+        num_vectors = V.kernel._get_num_vectors(dtype)
+        if opt_ctx_x.dtype != torch.bool and dtype == torch.bool:
+            return f"{V.kernel._get_mask_type(opt_ctx_x.dtype)}::from<{src_cpp_type},{num_vectors}>({x})"
+        if opt_ctx_x.dtype == torch.bool and dtype != torch.bool:
+            return f"{x}.to<{cpp_type},{num_vectors}>()"
         if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype in DTYPE_LOWP_FP:
-            return f"cvt_fp32_to_lowp_fp<{DTYPE_TO_CPP[dtype]}>({x})"
+            return f"cvt_fp32_to_lowp_fp<{cpp_type}>({x})"
         if opt_ctx_x.dtype in DTYPE_LOWP_FP and dtype in (torch.float, torch.float32):
-            return f"cvt_lowp_fp_to_fp32<{DTYPE_TO_CPP[opt_ctx_x.dtype]}>({x})"
+            return f"cvt_lowp_fp_to_fp32<{src_cpp_type}>({x})"
         if opt_ctx_x.dtype in (torch.uint8, torch.int8) and dtype in (
             torch.float,
             torch.float32,
@@ -1350,7 +1376,7 @@ class CppVecOverrides(CppOverrides):
             # if we already handle the saturation previously.
             # * Pattern match of quantization op in the loop body.
             # * Skip the explicit saturation and clamp inside at::vec::convert_float_to_int8.
-            return f"at::vec::convert_float_to_int8<{DTYPE_TO_CPP[dtype]}>({x})"
+            return f"at::vec::convert_float_to_int8<{cpp_type}>({x})"
         if opt_ctx_x.dtype == torch.int32 and dtype == torch.float:
             return f"at::vec::convert_to_fp_of_same_size<float>({x})"
         if opt_ctx_x.dtype == torch.float and dtype == torch.int32:
@@ -1392,33 +1418,37 @@ class CppVecOverrides(CppOverrides):
         code.writeline(";")
         V.kernel.compute.splice(code)
 
+        dtype = result.dtype
         body_code = f"{var}()"
         body_code_vec = (
             body_code
             if result.is_vec
-            else f"{V.kernel._get_vec_type(torch.float)}({body_code})"
+            else f"{V.kernel._get_vec_type(dtype)}({body_code})"
         )
-        other_code = value_to_cpp(other, "float")
-        other_code_vec = f"{V.kernel._get_vec_type(torch.float)}({other_code})"
+        other_code = value_to_cpp(other, DTYPE_TO_CPP[dtype])
+        other_code_vec = f"{V.kernel._get_vec_type(dtype)}({other_code})"
         assert isinstance(new_mask, CppCSEVariable), new_mask
-        if new_mask.is_vec or result.is_vec:
+        if new_mask.is_vec:
             type = f"decltype({body_code_vec})"
-            float_mask = f"to_float_mask({new_mask})"
             code = BracesBuffer()
             code.writeline("[&]")
             with V.kernel.swap_buffers(code), code.indent():
-                code.writeline(f"if (all_zero({float_mask}))")
+                code.writeline(f"if ({new_mask}.all_zero())")
                 with code.indent():
                     code.writeline(f"return {other_code_vec};")
                 code.writeline("else")
                 with code.indent():
                     code.writeline(
-                        f"return {type}::blendv({other_code_vec}, {body_code_vec}, {float_mask});"
+                        f"return {type}::blendv({other_code_vec}, {body_code_vec}, {V.kernel._get_mask_cast(new_mask, dtype)});"
                     )
             code.writeline("()")
             csevar = V.kernel.cse.generate(
                 V.kernel.compute,
                 code,
+            )
+        elif result.is_vec:
+            csevar = V.kernel.cse.generate(
+                V.kernel.compute, f"{mask} ? {body_code_vec} : {other_code_vec}"
             )
         else:
             csevar = V.kernel.cse.generate(
@@ -1815,6 +1845,15 @@ class CppVecKernel(CppKernel):
         else:
             return f"at::vec::VectorizedN<{DTYPE_TO_CPP[dtype]},{num_vectors}>"
 
+    def _get_mask_type(self, dtype: torch.dtype = torch.float) -> str:
+        num_vectors = self._get_num_vectors(dtype)
+        return f"at::vec::VecMask<{DTYPE_TO_CPP[dtype]},{num_vectors}>"
+
+    def _get_mask_cast(self, mask: CppCSEVariable, dtype: torch.dtype) -> str:
+        assert mask.dtype == torch.bool, repr(mask)
+        num_vectors = self._get_num_vectors(dtype)
+        return f"{mask}.template cast<{DTYPE_TO_CPP[dtype]},{num_vectors}>()"
+
     def _get_vec_load_line(
         self,
         var: str,
@@ -1833,26 +1872,35 @@ class CppVecKernel(CppKernel):
         """
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         assert opt_ctx is not None
-        load_mask_str = f"to_float_mask({load_mask})" if load_mask else None
+        cpp_type = DTYPE_TO_CPP[dtype]
+        num_vectors = self._get_num_vectors(dtype)
+        load_mask_str = None
+        if load_mask:
+            if not load_mask.is_vec:
+                # TODO: combine with opt_ctx.is_load_as_mask path below
+                # TODO: use ?: should be faster than masked load for scalar masks
+                load_mask_str = f"{self._get_mask_type(torch.float)}::from({load_mask})"
+            else:
+                load_mask_str = f"{self._get_mask_cast(load_mask, torch.float)}"
         loadbuf = f"{var} + {cexpr_index(index)}" if index != 0 else var
         if dtype in (torch.uint8, torch.int8) and opt_ctx.is_load_int8_as_float:
             assert self._get_num_vectors(torch.uint8) == 1
             line = (
-                f"masked_load({loadbuf}, {load_mask_str})"
+                f"{load_mask_str}.template loadu<{cpp_type},{num_vectors}>({loadbuf})"
                 if load_mask_str
-                else f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>::loadu_one_fourth({loadbuf})"
+                else f"at::vec::Vectorized<{cpp_type}>::loadu_one_fourth({loadbuf})"
             )
         elif opt_ctx.is_load_as_mask:
-            line = f"flag_to_float_vec({loadbuf})"
+            line = f"{self._get_mask_type()}::from({loadbuf})"
         elif dtype in DTYPE_LOWP_FP:
             line = (
-                f"masked_load({loadbuf}, {load_mask_str})"
+                f"{load_mask_str}.template loadu<{cpp_type},{num_vectors}>({loadbuf})"
                 if load_mask_str
                 else f"{self._get_vec_type(dtype)}::loadu({loadbuf}, {self.tiling_factor})"
             )
         else:
             line = (
-                f"masked_load({loadbuf}, {load_mask_str})"
+                f"{load_mask_str}.template loadu<{cpp_type},{num_vectors}>({loadbuf})"
                 if load_mask_str
                 else f"{self._get_vec_type(dtype)}::loadu({loadbuf})"
             )
@@ -1934,19 +1982,18 @@ class CppVecKernel(CppKernel):
                 if indirect_var.is_vec:
                     array_var = vec_to_array(indirect_var)
                     replacements[indirect_var] = f"{array_var}[{itervar_inner}]"
+            index = self.scale_index_with_offset(
+                index, itervar_idx=self.tiling_idx, offset=itervar_inner
+            )
             load_mask = None
             if self._load_mask is not None:
                 assert isinstance(self._load_mask, CppCSEVariable), self._load_mask
                 if self._load_mask.is_vec:
                     load_mask = (
-                        f"vector_lane_mask_check({self._load_mask}, {itervar_inner})"
+                        f"{self._load_mask}.is_masked({itervar_inner})"
                     )
                 else:
                     load_mask = f"{self._load_mask} != 0"
-            index = sympy_subs(index, replacements)  # type: ignore[arg-type]
-            index = self.scale_index_with_offset(
-                index, itervar_idx=self.tiling_idx, offset=itervar_inner
-            )
             if codecache.is_gcc():
                 code.writeline(f"#pragma GCC unroll {self.tiling_factor}")
             else:
@@ -1955,13 +2002,16 @@ class CppVecKernel(CppKernel):
                 f"for (long {itervar_inner} = 0; {itervar_inner} < {self.tiling_factor}; {itervar_inner}++)"
             )
             with code.indent(), contextlib.ExitStack() as stack:
+                index_c = cexpr_index(index)
+                for indirect_var in replacements:
+                    index_c = re.sub(r'\b' + f"{indirect_var}" + r'\b', replacements[indirect_var], index_c)
                 rhs = (
-                    f"{var}[{cexpr_index(index)}]"
+                    f"{var}[{index_c}]"
                     if var is not None
-                    else f"{cexpr_index(index)}"
+                    else f"{index_c}"
                 )
                 if is_mask:
-                    rhs = f"flag_to_float_scalar({rhs})"
+                    rhs = f"{self._get_mask_type()}::from({rhs})"
                 if load_mask:
                     code.writeline(f"if ({load_mask})")
                     stack.enter_context(code.indent())
@@ -1995,6 +2045,9 @@ class CppVecKernel(CppKernel):
         assert isinstance(csevar, CppCSEVariable)
         csevar.update_on_args("load", (name, index), {})
         csevar.is_vec = True
+        if opt_ctx.is_load_as_mask:
+            csevar.dtype = torch.bool
+            opt_ctx.dtype = torch.bool
         return csevar
 
     def _get_vec_store_line(
@@ -2200,7 +2253,7 @@ initializer(omp_priv={{{self.reduction_init_vec(reduction_type, dtype)}}})
         assert not scalar_var.is_vec
         if scalar_var.dtype == torch.bool:
             vec_var = self.cse.generate(
-                self.compute, f"to_float_mask({scalar_var.name})"
+                self.compute, f"{self._get_mask_type()}::from({scalar_var.name})"
             )
         else:
             assert scalar_var.dtype is not None
@@ -2273,6 +2326,30 @@ initializer(omp_priv={{{self.reduction_init_vec(reduction_type, dtype)}}})
             return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
         else:
             raise NotImplementedError()
+
+    def indirect_assert(self, var, lower, upper, mask=None):
+        assert not mask, "do not support mask in indirect_indexing assertion"
+        assert isinstance(var, CppCSEVariable)
+        if not var.is_vec:
+            return super().indirect_assert(var, lower, upper, mask)
+        if lower:
+            lower_scalar = lower
+            lower = f"{self._get_vec_type(var.dtype)}({lower})"
+        if upper:
+            upper_scalar = upper
+            upper = f"{self._get_vec_type(var.dtype)}({upper})"
+        if lower and upper:
+            cond = f"({lower} <= {var}) & ({var} < {upper})"
+            cond_print = f"{lower_scalar} <= {var} < {upper_scalar}"
+        elif lower:
+            cond = f"{lower} <= {var}"
+            cond_print = f"{lower_scalar} <= {var}"
+        else:
+            assert upper
+            cond = f"{var} < {upper}"
+            cond_print = f"{var} < {upper_scalar}"
+        cond = f"at::vec::VecMask({cond}).all_masked()"
+        return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
 
 
 class CppTile2DKernel(CppVecKernel):
@@ -2691,8 +2768,6 @@ class CppVecKernelChecker(CppVecKernel):
         V.graph.wrapper_code = WrapperCodeGen()
 
         class VecCheckerProxy:
-            bin_cmp_ops = ["eq", "ne", "le", "ge", "lt", "gt"]
-
             @staticmethod
             def _bin_cmp_op(x, y):
                 current_node: torch.fx.Node = V.interpreter.current_node
@@ -2703,7 +2778,7 @@ class CppVecKernelChecker(CppVecKernel):
             @staticmethod
             def __getattr__(name):  # type: ignore[misc]
                 def inner(*args, **kwargs):
-                    if name in VecCheckerProxy.bin_cmp_ops:
+                    if name in BIN_CMP_OPS:
                         return VecCheckerProxy._bin_cmp_op(args, kwargs)
 
                     if name not in self.fast_vec_list:
@@ -2765,7 +2840,7 @@ class CppVecKernelChecker(CppVecKernel):
                     if opt_ctx.dtype not in supported_dtypes or (
                         opt_ctx.dtype == torch.int32
                         and not all(
-                            user.target in VecCheckerProxy.bin_cmp_ops
+                            user.target in BIN_CMP_OPS
                             for user in node_ctx.current_node.users
                         )
                     ):
@@ -2822,7 +2897,7 @@ class CppVecKernelChecker(CppVecKernel):
                         dtype == torch.int64
                         and can_use_int32()
                         and all(
-                            user.target in VecCheckerProxy.bin_cmp_ops
+                            user.target in BIN_CMP_OPS
                             for user in node_ctx.current_node.users
                         )
                     ):
