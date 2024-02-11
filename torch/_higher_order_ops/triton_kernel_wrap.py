@@ -316,10 +316,10 @@ def analyze_kernel_mutations(functions, fn_name, num_args):
 
         if op.name == "tt.call":
             assert op.fn_call_name in functions
-            if mutations := analyze_kernel_mutations(
+            mutations = analyze_kernel_mutations(
                 functions, op.fn_call_name, len(op.args)
-            ):
-                stack.extend(arg for arg, mutated in zip(op.args, mutations) if mutated)
+            )
+            stack.extend(arg for arg, mutated in zip(op.args, mutations) if mutated)
         else:
             for idx in MUTATION_OPS.get(op.name, []):
                 stack.append(op.args[idx])
