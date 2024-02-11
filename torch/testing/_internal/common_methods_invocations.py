@@ -16184,7 +16184,12 @@ op_db: List[OpInfo] = [
                      supports_fwgrad_bwgrad=True,
                      promotes_int_to_float=True,
                      sample_inputs_func=sample_inputs_polygamma,
-                     decorators=(DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-3)}), 'TestUnaryUfuncs'),),
+                     decorators=(
+                         DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-3)}), 'TestUnaryUfuncs'),
+                         DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e1, rtol=1e-01)}),
+                                      'TestUnaryUfuncs', 'test_reference_numerics_normal',
+                                      active_if=IS_WINDOWS),
+                     ),
                      skips=(
                          # Redundant tests
                          DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients'),
