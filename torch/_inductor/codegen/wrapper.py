@@ -970,15 +970,25 @@ class WrapperCodeGen(CodeGen):
             idx = kernel.arg_names.index(key)
             if idx in kernel.constexprs:
                 constants[key] = arg
-                continue
-            if isinstance(arg, (ir.Buffer, ir.ReinterpretView)):
+            elif isinstance(arg, ir.Buffer):
                 signature.append(
                     TensorArg(
-                        key,
-                        arg.codegen_reference(),
-                        arg.get_dtype(),
-                        # For ReinterpretView, we do not want to check alignment
-                        not isinstance(arg, ReinterpretView),
+                        name=key,
+                        buffer=arg.codegen_reference(),
+                        dtype=arg.get_dtype(),
+                        offset=0,
+                    )
+                )
+            elif isinstance(arg, ir.ReinterpretView):
+                # for ReinterpretView we use the underlying
+                # buffer name and note the (possibly non-zero)
+                # offset relative to the underlying buffer
+                signature.append(
+                    TensorArg(
+                        name=key,
+                        buffer=arg.data.get_name(),
+                        dtype=arg.get_dtype(),
+                        offset=arg.layout.offset,
                     )
                 )
             else:

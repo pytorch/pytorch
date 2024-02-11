@@ -66,10 +66,11 @@ def config_of(args: List[Union[TensorArg, SizeArg]]) -> instance_descriptor:
         https://github.com/openai/triton/blob/5282ed890d453e10b9ee30076ef89115dd197761/python/triton/runtime/jit.py#L208-L222
         """
         if isinstance(x, TensorArg):
-            if not x.check_alignment:
-                return False
             if include_tensor:
-                return not V.graph.scheduler.is_unaligned_buffer(x.buffer)
+                offset_aligned = (x.offset * x.dtype.itemsize) % alignment == 0
+                return offset_aligned and not V.graph.scheduler.is_unaligned_buffer(
+                    x.buffer
+                )
             else:
                 return False
         if isinstance(x, SizeArg):
