@@ -74,7 +74,7 @@ class TensorArg:
 @dataclasses.dataclass
 class SizeArg:
     name: str
-    expr: sympy.Symbol
+    expr: sympy.Expr
 
 
 @dataclasses.dataclass
