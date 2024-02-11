@@ -51,32 +51,34 @@ __device__ __forceinline__ void load_store(
 //
 // The multi_tensor_apply kernel and the functors take a variant of
 // TensorListMetadata as an argument. TensorListMetadata contains multiple
-// arrays whose sizes are dynamic and don't necessarily fit in the 4kb kernel
-// arugment space. Therefore, dynamically allocated kernel argument is required
-// in order to support arbitrary problem sizes. This can be achieved by
-// preparing the arrays in host memory and copying them to device with a single
+// arrays with dynamic sizes that may not fit within the 4KB kernel argument
+// space. Therefore, a dynamically allocated kernel argument is required to
+// support arbitrary problem sizes. This can be achieved by preparing the
+// arrays in host memory and copying them to the device with a single
 // cudaMemcpyAsync. When the problem size is large, the latency of the HtoD
-// copy is neglible.
+// copy is negligible.
 //
 // However, when the problem size is small, the latency of the cudaMemcpyAsync
 // becomes more pronounced. In such cases, we try to fit the arrays into the
 // 4kb kernel argument space. The technique is akin to small buffer
 // optimization.
 //
-// However, when the workload is small, the latency of the cudaMemcpyAsync
-// becomes pronounced. In such cases, we would like to try to fit the arrays
-// into the static kernel argument space (4KB). The technique is akin to small
-// buffer optimization.
+// However, when the problem size is small, the latency of the cudaMemcpyAsync
+// becomes more pronounced. In such cases, we attempt to fit the arrays into
+// the 4KB kernel argument space. This technique is akin to the small buffer
+// optimization.
 //
-// DevArrayPack is a struct for packing multiple vector into a contiguous
-// buffer. When the combined size of the vectors are small enough, they are
-// packed into the struct itself which is pass to the kernel through the static
-// kernel argument space. Otherwise, the arguments are packed into a
+// DevArrayPack is a struct used for packing multiple vectors into a contiguous
+// buffer. When the combined size of the vectors is small enough, they are
+// packed into the struct itself, which is passed to the kernel through the
+// static kernel argument space. Otherwise, the arguments are packed into a
 // dynamically allocated buffer.
 //
-// NOTE: with the previous apex approach, we were effective dividing the
-// workload into multiple kernel launches where every kernel can use small
-// buffer optimization. While the
+// NOTE: Previously, we divided a problem into multiple kernel launches so that
+// the arguments for every launch would fit in the static kernel argument
+// space. This approach avoided the need for dynamically allocated kernel
+// arguments, but it led to multiple kernel launches and lower sustained
+// occupancy.
 struct DevArrayPack {
   static constexpr size_t max_arrays = 8;
   // The buffer size is selected to ensure that the combined argument size of
@@ -116,6 +118,14 @@ void pack_vectors_helper(
   total_bytes += sizeof(T) * vec.size();
 }
 
+// Pack multiple vectors into a DevArrayPack
+//
+// When the total size of the input vectors is large, the function packs the
+// vectors into a device buffer allocated with CUDACachingAllocator. Thanks to
+// the allocator's stream awareness, the buffer can be safely accessed by the
+// kernel as long as the tensor owning the buffer is alive at the time of the
+// kernel launch. This tensor is returned to the caller, who is responsible for
+// keeping it alive until the kernel is launched.
 template <int n, typename... Vectors>
 std::tuple<DevArrayPack, c10::optional<at::Tensor>> pack_vectors(
     const at::Device& device,
@@ -134,6 +144,7 @@ std::tuple<DevArrayPack, c10::optional<at::Tensor>> pack_vectors(
   TORCH_CHECK(ptrs.size() <= DevArrayPack::max_arrays);
   DevArrayPack pack{};
 
+  // Use the small buffer in DevArrayPack to pack the vectors
   if (total_bytes < DevArrayPack::small_buffer_size) {
     pack.buffer_ptr = nullptr;
     for (const auto i : c10::irange(ptrs.size())) {
@@ -143,6 +154,7 @@ std::tuple<DevArrayPack, c10::optional<at::Tensor>> pack_vectors(
     return std::make_tuple(pack, c10::optional<at::Tensor>(c10::nullopt));
   }
 
+  // Use dynamically allocated buffer to pack the vectors
   auto buf_tensor = at::empty(
       {static_cast<int64_t>(total_bytes)},
       at::TensorOptions().dtype(at::kByte).pinned_memory(true));
@@ -163,6 +175,7 @@ struct TensorListMetadata {
   size_t* block_to_chunk;
   int start_tensor_this_launch;
 
+  // Create a DevArrayPack for TensorListMetadata
   static std::tuple<DevArrayPack, c10::optional<at::Tensor>> make_dev_array_pack(
       std::vector<const void*> (&addresses)[n],
       std::vector<int64_t>& numel_for_tensor,
@@ -173,6 +186,7 @@ struct TensorListMetadata {
         device, addresses, numel_for_tensor, block_to_tensor, block_to_chunk);
   }
 
+  // Convert a DevArrayPack to TensorListMetadata
   __device__ __forceinline__ static TensorListMetadata<n> from_dev_array_pack(
       DevArrayPack& pack) {
     TensorListMetadata<n> tl{};
@@ -183,6 +197,7 @@ struct TensorListMetadata {
     pack.get_array(tl.numel_for_tensor, n);
     pack.get_array(tl.block_to_tensor, n + 1);
     pack.get_array(tl.block_to_chunk, n + 2);
+    tl.start_tensor_this_launch = 0;
     return tl;
   }
 };
