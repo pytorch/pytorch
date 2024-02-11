@@ -24,6 +24,7 @@ def libtorch_generated_sources(gencode_pattern):
         "torch/csrc/autograd/generated/VariableType_2.cpp",
         "torch/csrc/autograd/generated/VariableType_3.cpp",
         "torch/csrc/autograd/generated/VariableType_4.cpp",
+        "torch/csrc/autograd/generated/ViewFuncs.cpp",
         "torch/csrc/autograd/generated/TraceType_0.cpp",
         "torch/csrc/autograd/generated/TraceType_1.cpp",
         "torch/csrc/autograd/generated/TraceType_2.cpp",
@@ -770,6 +771,7 @@ libtorch_python_cuda_sources = libtorch_python_cuda_core_sources + [
 
 libtorch_python_xpu_sources = [
     "torch/csrc/xpu/Module.cpp",
+    "torch/csrc/xpu/Stream.cpp",
 ]
 
 libtorch_python_core_sources = [
@@ -969,6 +971,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/AccumulateType.cpp",
     "aten/src/ATen/LegacyBatchedTensorImpl.cpp",
     "aten/src/ATen/CPUGeneratorImpl.cpp",
+    "aten/src/ATen/DeviceAccelerator.cpp",
     "aten/src/ATen/Context.cpp",
     "aten/src/ATen/DLConvertor.cpp",
     "aten/src/ATen/EmptyTensor.cpp",

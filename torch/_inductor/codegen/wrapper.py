@@ -1066,7 +1066,8 @@ class WrapperCodeGen(CodeGen):
                 configs={configs!r},
                 inductor_meta={inductor_meta!r},
                 triton_meta={triton_meta!r},
-                filename=__file__
+                filename=__file__,
+                custom_kernel=True,
             )
             @triton.jit
             """
