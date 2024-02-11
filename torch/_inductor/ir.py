@@ -1766,7 +1766,7 @@ class Scan(Loops):
         )
 
 
-# This signifies a scan op that should go through TritonSplitScanKernel codgen on CUDA.
+# This signifies a scan op that should go through TritonSplitScanKernel codegen on CUDA.
 @dataclasses.dataclass
 class SplitScan(Scan):
     pass
