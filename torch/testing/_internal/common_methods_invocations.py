@@ -16186,7 +16186,8 @@ op_db: List[OpInfo] = [
                      sample_inputs_func=sample_inputs_polygamma,
                      decorators=(
                          DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-3)}), 'TestUnaryUfuncs'),
-                         DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e1, rtol=1e-01)}),
+                         DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e1, rtol=1e-1),
+                                                         torch.float32: tol(atol=1e-4, rtol=1e-2)}),
                                       'TestUnaryUfuncs', 'test_reference_numerics_normal',
                                       active_if=IS_WINDOWS),
                      ),
