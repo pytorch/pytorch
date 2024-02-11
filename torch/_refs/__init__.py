@@ -739,7 +739,7 @@ def isreal(a: TensorLikeType) -> TensorLikeType:
 
 # TODO: if this is special maybe it should be defined there and imported here?
 @_make_elementwise_unary_reference(
-    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=aten.special_i0
+    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=aten.i0
 )
 def i0(a):
     return prims.bessel_i0(a)
