@@ -818,11 +818,11 @@ void initDispatchBindings(PyObject* module) {
 
   m.def(
       "_get_nested_int",
-      [](int64_t data, int64_t coeff, const at::Tensor& vec, int64_t sum_vec) {
+      [](int64_t val, int64_t coeff, const at::Tensor& vec) {
         return c10::SymInt(
             c10::SymNode(c10::make_intrusive<c10::NestedIntSymNodeImpl>(
-                data, coeff, vec, sum_vec, c10::NestedTensorVariant::PYTHON)));
-      });
+                val, coeff, vec, c10::NestedTensorVariant::PYTHON)));
+      }, py::arg("val"), py::kw_only(), py::arg("coeff"), py::arg("vec"));
 
   m.def("_get_constant_bool_symnode", [](int64_t data) {
     return c10::SymNode(

@@ -996,7 +996,8 @@ def jagged_factory(func, *args, **kwargs):
             "where only the second-left-most dimension is ragged. "
         )
     offsets = nested_int.node.nested_int_vec()
-    sum_offsets = nested_int.node.nested_int_sum_vec()
+    registry = torch.nested._internal.nested_tensor.get_nested_int_registry()
+    sum_offsets = registry.get_metadata(offsets, "sum_vec")
 
     return NestedTensor(func([sum_offsets, *Ds], **new_kwargs), offsets)
 

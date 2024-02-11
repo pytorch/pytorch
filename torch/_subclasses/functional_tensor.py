@@ -193,6 +193,30 @@ class FunctionalTensor(torch.Tensor):
             torch._mirror_autograd_meta_to(x_functional, out)  # type: ignore[attr-defined]
         return out
 
+    # We must handle tolist in a special way for FakeTensors here in the case
+    # where tolist is called from torch dispatch for tensor subclasses.
+    # Ordinarily, if a program calls .tolist compiling still works because there is
+    # special handling in dynamo, but for tensor subclasses if .tolist is called
+    # inside torch dispatch, the .tolist call may be directly on a FakeTensor.
+    # This would result in an error since wrapper subclasses don't have storage.
+    # To avoid this, we handle the FakeTensor case by (1) specializing on the size
+    # of the tensor to create the output Python list, and (2) creating unbacked
+    # symints for each element of the list.
+    def tolist(self):
+        assert self.dim() == 1, "NYI for higher dims"
+        functional_mode = _detect_functional_mode()
+        assert functional_mode is not None
+        functional_mode
+        shape_env = self.fake_mode.shape_env
+        out = []
+        # Specialize on the length of the list
+        for _ in range(self.shape[0]):
+            s = shape_env.create_unbacked_symint()
+            # max value?
+            torch._constrain_as_size(s, min=2)
+            out.append(s)
+        return out
+
     def from_functional(self):
         torch._sync(self)
         return torch._from_functional_tensor(self.elem)

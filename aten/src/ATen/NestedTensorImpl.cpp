@@ -293,7 +293,7 @@ c10::SymIntArrayRef NestedTensorImpl::sym_sizes_custom() const {
         auto vec = nested_sizes_.select(1, i - 1);
         // See NOTE [ NestedTensorVariant ]
         sym_sizes[i] = c10::SymInt(
-          c10::SymNode(c10::make_intrusive<c10::NestedIntSymNodeImpl>(-1, -1, std::move(vec), -1, c10::NestedTensorVariant::CPP)));
+          c10::SymNode(c10::make_intrusive<c10::NestedIntSymNodeImpl>(-1, -1, std::move(vec), c10::NestedTensorVariant::CPP)));
       }
     }
     sym_sizes_ = std::move(sym_sizes);

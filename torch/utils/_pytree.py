@@ -17,6 +17,7 @@ To improve the performance we can move parts of the implementation to C++.
 
 import dataclasses
 import importlib
+import inspect
 import json
 import threading
 import warnings
@@ -854,17 +855,25 @@ def map_only(__type_or_types: TypeAny) -> MapOnlyFn[FnAny[Any]]:
     You can also directly use 'tree_map_only'
     """
 
+    if (isinstance(__type_or_types, tuple) and
+        all(inspect.isclass(t) for t in __type_or_types)) or inspect.isclass(__type_or_types):
+        return _map_only(lambda x: isinstance(x, __type_or_types))
+    elif callable(__type_or_types):
+        return _map_only(__type_or_types)
+    else:
+        raise TypeError("Argument must be a type, a tuple of types, or a callable.")
+
+
+def _map_only(pred: Callable[[Any], bool]) -> MapOnlyFn[FnAny[Any]]:
     def wrapper(func: Callable[[T], Any]) -> Callable[[Any], Any]:
         # @functools.wraps(func)  # torch dynamo doesn't support this yet
         def wrapped(x: T) -> Any:
-            if isinstance(x, __type_or_types):
+            if pred(x):
                 return func(x)
             return x
 
         return wrapped
-
     return wrapper
-
 
 @overload
 def tree_map_only(

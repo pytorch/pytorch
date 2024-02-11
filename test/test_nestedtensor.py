@@ -3028,7 +3028,7 @@ class TestNestedTensorSubclass(TestCase):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
         c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
-        nt, _offsets = jagged_from_list([a, b, c], None)
+        nt, offsets = jagged_from_list([a, b, c], None)
 
         for op in (
             torch.ops.aten.is_non_overlapping_and_dense.default,
@@ -3044,7 +3044,8 @@ class TestNestedTensorSubclass(TestCase):
                                     "directly calling torch.ops.aten.size"):
             torch.ops.aten.size.default(nt)
 
-        nested_int = torch.nested._internal.nested_tensor.get_tensor_symint(_offsets, coeff=1)
+        registry = torch.nested._internal.nested_tensor.get_nested_int_registry()
+        nested_int = registry.maybe_create(offsets)
         self.assertEqual(nt.size(), (3, nested_int, 3))
         self.assertEqual(nt.shape, (3, nested_int, 3))
         self.assertEqual(nt.dim(), 3)

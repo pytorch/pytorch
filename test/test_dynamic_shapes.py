@@ -805,9 +805,9 @@ class TestSymNumberMagicMethods(TestCase):
 
         # nested int SymInt, constant SymBool, SymNode are hashable
         x = torch.tensor(1.)
-        j1 = torch._C._get_nested_int(1, 1, x, 1)
-        j1_copy = torch._C._get_nested_int(1, 1, x, 1)
-        j2 = torch._C._get_nested_int(2, 1, x, 1)
+        j1 =  torch._C._get_nested_int(1, coeff=1, vec=x, sum_vec=1)
+        j1_copy =  torch._C._get_nested_int(1, coeff=1, vec=x, sum_vec=1)
+        j2 = torch._C._get_nested_int(2, coeff=1, vec=x, sum_vec=1)
         t = self.get_constant_bool(True)
         t_copy = self.get_constant_bool(True)
         f = self.get_constant_bool(False)
@@ -828,9 +828,9 @@ class TestSymNumberMagicMethods(TestCase):
 
     def test_non_symbolic_symnode(self):
         x = torch.tensor(1.)
-        j1 = torch._C._get_nested_int(1, 1, x, 1)
-        j2 = torch._C._get_nested_int(1, 1, x, 1)
-        j3 = torch._C._get_nested_int(3, 1, x, 1)
+        j1 =  torch._C._get_nested_int(1, coeff=1, vec=x, sum_vec=1)
+        j2 =  torch._C._get_nested_int(1, coeff=1, vec=x, sum_vec=1)
+        j3 = torch._C._get_nested_int(3, coeff=1, vec=x, sum_vec=1)
 
         self.assertIsInstance(j1, torch.SymInt)
         self.assertNotIsInstance(j1, int)

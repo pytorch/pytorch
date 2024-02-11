@@ -102,17 +102,16 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return getPyObj().attr("is_nested_int")().is(py::handle(Py_True));
   }
 
+  // We don't expect to call these functions because the only time we need to
+  // use vec/sum_vec in the compiled case is when we are in the constructing
+  // a new Python NT in torch dispatch. In that case we would be calling
+  // SymNode methods directly in Python.
   c10::TensorImpl* nested_int_vec() const override {
-    py::gil_scoped_acquire acquire;
-    return getPyObj()
-        .attr("nested_int_vec")()
-        .cast<at::Tensor>()
-        .unsafeGetTensorImpl();
+    TORCH_INTERNAL_ASSERT(false, "We don't expect to call this function");
   }
 
   int64_t nested_int_sum_vec() const override {
-    py::gil_scoped_acquire acquire;
-    return getPyObj().attr("nested_int_sum_vec")().cast<int64_t>();
+    TORCH_INTERNAL_ASSERT(false, "We don't expect to call this function");
   }
 
   bool has_hint() override {
