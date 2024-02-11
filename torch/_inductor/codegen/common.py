@@ -74,7 +74,7 @@ class TensorArg:
 @dataclasses.dataclass
 class SizeArg:
     name: str
-    expr: Union[sympy.Symbol, sympy.Expr]
+    expr: sympy.Symbol
 
 
 @dataclasses.dataclass
