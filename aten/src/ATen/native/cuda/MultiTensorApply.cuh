@@ -30,6 +30,8 @@ static constexpr int depth_to_max_tensors_scalarlist_of_complex_double[2] = {
     72,
     60};
 
+static constexpr size_t max_kernel_arg_size = 4096;
+
 template <typename T>
 __device__ __forceinline__ bool is_aligned(T* p) {
   return ((uint64_t)p) % (kILP * sizeof(T)) == 0;
@@ -45,14 +47,113 @@ __device__ __forceinline__ void load_store(
   ((LT*)dst)[dst_offset] = ((LT*)src)[src_offset];
 }
 
-template <int n>
-struct TensorListMetadataStatic {
-  const void* addresses[n][depth_to_max_tensors[n - 1]];
-  int64_t numel_for_tensor[depth_to_max_tensors[n - 1]];
-  unsigned char block_to_tensor[depth_to_max_blocks[n - 1]];
-  int block_to_chunk[depth_to_max_blocks[n - 1]];
-  int start_tensor_this_launch;
+// NOTE [small buffer optimization]
+//
+// The multi_tensor_apply kernel and the functors take a variant of
+// TensorListMetadata as an argument. TensorListMetadata contains multiple
+// arrays whose sizes are dynamic and don't necessarily fit in the 4kb kernel
+// arugment space. Therefore, dynamically allocated kernel argument is required
+// in order to support arbitrary problem sizes. This can be achieved by
+// preparing the arrays in host memory and copying them to device with a single
+// cudaMemcpyAsync. When the problem size is large, the latency of the HtoD
+// copy is neglible.
+//
+// However, when the problem size is small, the latency of the cudaMemcpyAsync
+// becomes more pronounced. In such cases, we try to fit the arrays into the
+// 4kb kernel argument space. The technique is akin to small buffer
+// optimization.
+//
+// However, when the workload is small, the latency of the cudaMemcpyAsync
+// becomes pronounced. In such cases, we would like to try to fit the arrays
+// into the static kernel argument space (4KB). The technique is akin to small
+// buffer optimization.
+//
+// DevArrayPack is a struct for packing multiple vector into a contiguous
+// buffer. When the combined size of the vectors are small enough, they are
+// packed into the struct itself which is pass to the kernel through the static
+// kernel argument space. Otherwise, the arguments are packed into a
+// dynamically allocated buffer.
+//
+// NOTE: with the previous apex approach, we were effective dividing the
+// workload into multiple kernel launches where every kernel can use small
+// buffer optimization. While the
+struct DevArrayPack {
+  static constexpr size_t max_arrays = 8;
+  // The buffer size is selected to ensure that the combined argument size of
+  // multi_tensor_apply_dev_array_pack_kernel does not exceed
+  // max_kernel_arg_size for all template specializations. This is enforced at
+  // compile time with a static assertion.
+  static constexpr size_t small_buffer_size = 3360;
+
+  char small_buffer[small_buffer_size];
+  // i-th array => (buffer_ptr ? buffer_ptr : small_buffer) + offsets[i]
+  size_t offsets[max_arrays];
+  // When small_buffer is used, buffer_ptr is nullptr
+  char* buffer_ptr = nullptr;
+
+  template <typename T>
+  __device__ __forceinline__ void get_array(T*& out, int idx) {
+    if (buffer_ptr == nullptr) {
+      out = reinterpret_cast<T*>(small_buffer + offsets[idx]);
+    } else {
+      out = reinterpret_cast<T*>(buffer_ptr + offsets[idx]);
+    }
+  }
 };
+
+template <typename T>
+void pack_vectors_helper(
+    std::vector<const void*>& ptrs,
+    std::vector<size_t>& sizes,
+    std::vector<size_t>& offsets,
+    size_t& total_bytes,
+    const std::vector<T>& vec) {
+  ptrs.push_back(vec.data());
+  // Align the offset by sizeof(T)
+  total_bytes = at::round_up(total_bytes, sizeof(T));
+  offsets.push_back(total_bytes);
+  sizes.push_back(sizeof(T) * vec.size());
+  total_bytes += sizeof(T) * vec.size();
+}
+
+template <int n, typename... Vectors>
+std::tuple<DevArrayPack, c10::optional<at::Tensor>> pack_vectors(
+    const at::Device& device,
+    std::vector<const void*> (&addresses)[n],
+    const Vectors&... vecs) {
+  std::vector<const void*> ptrs;
+  std::vector<size_t> sizes;
+  std::vector<size_t> offsets;
+  size_t total_bytes = 0;
+
+  for (auto d = 0; d < n; ++d) {
+    pack_vectors_helper(ptrs, sizes, offsets, total_bytes, addresses[d]);
+  }
+  (pack_vectors_helper(ptrs, sizes, offsets, total_bytes, vecs), ...);
+
+  TORCH_CHECK(ptrs.size() <= DevArrayPack::max_arrays);
+  DevArrayPack pack{};
+
+  if (total_bytes < DevArrayPack::small_buffer_size) {
+    pack.buffer_ptr = nullptr;
+    for (const auto i : c10::irange(ptrs.size())) {
+      pack.offsets[i] = offsets[i];
+      memcpy(pack.small_buffer + offsets[i], ptrs[i], sizes[i]);
+    }
+    return std::make_tuple(pack, c10::optional<at::Tensor>(c10::nullopt));
+  }
+
+  auto buf_tensor = at::empty(
+      {static_cast<int64_t>(total_bytes)},
+      at::TensorOptions().dtype(at::kByte).pinned_memory(true));
+  for (const auto i : c10::irange(ptrs.size())) {
+    pack.offsets[i] = offsets[i];
+    memcpy(buf_tensor.data_ptr<uint8_t>() + offsets[i], ptrs[i], sizes[i]);
+  }
+  buf_tensor = buf_tensor.to(device, /*non_blocking=*/true);
+  pack.buffer_ptr = static_cast<char*>(buf_tensor.data_ptr());
+  return std::make_tuple(pack, buf_tensor);
+}
 
 template <int n>
 struct TensorListMetadata {
@@ -61,6 +162,29 @@ struct TensorListMetadata {
   size_t* block_to_tensor;
   size_t* block_to_chunk;
   int start_tensor_this_launch;
+
+  static std::tuple<DevArrayPack, c10::optional<at::Tensor>> make_dev_array_pack(
+      std::vector<const void*> (&addresses)[n],
+      std::vector<int64_t>& numel_for_tensor,
+      std::vector<size_t>& block_to_tensor,
+      std::vector<size_t>& block_to_chunk,
+      const at::Device& device) {
+    return pack_vectors(
+        device, addresses, numel_for_tensor, block_to_tensor, block_to_chunk);
+  }
+
+  __device__ __forceinline__ static TensorListMetadata<n> from_dev_array_pack(
+      DevArrayPack& pack) {
+    TensorListMetadata<n> tl{};
+#pragma unroll n
+    for (auto d = 0; d < n; ++d) {
+      pack.get_array(tl.addresses[d], d);
+    }
+    pack.get_array(tl.numel_for_tensor, n);
+    pack.get_array(tl.block_to_tensor, n + 1);
+    pack.get_array(tl.block_to_chunk, n + 2);
+    return tl;
+  }
 };
 
 template <typename scalar_vals_t, int n>
@@ -111,79 +235,29 @@ struct FusedOptimizerTensorListMetadata {
   int start_tensor_this_launch;
 };
 
-bool can_use_static_tensor_list_meta(
-    std::vector<std::vector<at::Tensor>>& tensor_lists,
-    int depth) {
-  const int64_t n_tensors = tensor_lists[0].size();
-  if (n_tensors > depth_to_max_tensors[depth - 1]) {
-    return false;
-  }
-  int64_t num_blocks = 0;
-  for (const auto t : c10::irange(n_tensors)) {
-    const auto numel = tensor_lists[0][t].numel();
-    const auto chunks = at::ceil_div(numel, kChunkSize);
-    num_blocks += chunks;
-    if (num_blocks > depth_to_max_blocks[depth - 1]) {
-      return false;
-    }
-  }
-  return true;
-}
-
-// Helper for transfering multiple std::vector<T> onto device with a single
-// page-locked cudaMemcpyAsync.
-struct VecPacker {
-  std::vector<const void*> ptrs;
-  std::vector<size_t> sizes;
-  std::vector<size_t> offsets;
-  int64_t packed_numel = 0;
-  at::Tensor packed;
-
-  template <typename T>
-  // Add a vector to be copied to device
-  // NOTE: VecPacker doesn't make copies of the added vectors. They have to be
-  // kept alive by the caller until .pack() is called.
-  void add(const std::vector<T>& vec) {
-    // 16 would cover alignment for the largest known T (c10::complex)
-    static const size_t alignment = 16;
-    static_assert(alignment % sizeof(T) == 0);
-    ptrs.push_back(vec.data());
-    const auto vec_bytes = sizeof(T) * vec.size();
-    const auto vec_bytes_aligned = at::round_up(vec_bytes, alignment);
-    sizes.push_back(vec_bytes);
-    offsets.push_back(packed_numel);
-    packed_numel += vec_bytes_aligned;
-  }
-
-  // Copy all previously added vectors onto device and return their device
-  // pointers in the order they are added. We leverage the stream awareness of
-  // CUDACachingAllocator to manage the lifetime of the device arguments - the
-  // device memory is guaranteed to be alive as long as VecPacker is destroyed
-  // after the kernel that consumes it.
-  std::vector<void*> pack(const at::Device& device) {
-    packed = at::empty(
-        {packed_numel},
-        at::TensorOptions().dtype(at::kByte).pinned_memory(true));
-    for (const auto i : c10::irange(ptrs.size())) {
-      memcpy(packed.data_ptr<uint8_t>() + offsets[i], ptrs[i], sizes[i]);
-    }
-    packed = packed.to(device, /*non_blocking=*/true);
-
-    std::vector<void*> dev_ptrs;
-    dev_ptrs.reserve(ptrs.size());
-    for (const auto offset : offsets) {
-      dev_ptrs.push_back(packed.data_ptr<uint8_t>() + offset);
-    }
-    return dev_ptrs;
-  }
-};
-
+// TODO(yifu): remove this once TensorListScalarListMetadata and
+// FusedOptimizerTensorListMetadata adopt DevArrayPack.
 template <typename T, typename U, typename... ArgTypes>
 C10_LAUNCH_BOUNDS_1(kBlockSize)
 __global__ void multi_tensor_apply_kernel(
     T tensorListMeta,
     U callable,
     ArgTypes... args) {
+  // Hand the chunk information to the user-supplied functor to process however
+  // it likes.
+  callable(kChunkSize, tensorListMeta, args...);
+}
+
+template <typename T, typename U, typename... ArgTypes>
+C10_LAUNCH_BOUNDS_1(kBlockSize)
+__global__ void multi_tensor_apply_dev_array_pack_kernel(
+    DevArrayPack pack,
+    U callable,
+    ArgTypes... args) {
+  static_assert(
+      sizeof(DevArrayPack) + sizeof(U) + (0 + ... + sizeof(ArgTypes)) <
+      max_kernel_arg_size);
+  auto tensorListMeta = T::from_dev_array_pack(pack);
   // Hand the chunk information to the user-supplied functor to process however
   // it likes.
   callable(kChunkSize, tensorListMeta, args...);
@@ -298,80 +372,10 @@ void multi_tensor_apply(
 }
 
 template <int depth, typename T, typename... ArgTypes>
-void multi_tensor_apply_static(
-    std::vector<std::vector<at::Tensor>>& tensor_lists,
-    T callable,
-    ArgTypes... args) {
-  TORCH_CHECK(
-      tensor_lists.size() == depth,
-      "Number of tensor lists has to match the depth.");
-  const size_t n_tensors = tensor_lists[0].size();
-  TensorListMetadataStatic<depth> tensorListMeta;
-  tensorListMeta.start_tensor_this_launch = 0;
-
-  int loc_block_info = 0;
-  int loc_tensor_info = 0;
-  for (size_t t = 0; t < n_tensors; t++) {
-    // short-circuit to avoid adding empty tensors to tensorListMeta
-    if (tensor_lists[0][t].numel() == 0) {
-      continue;
-    }
-    tensorListMeta.numel_for_tensor[loc_tensor_info] =
-        tensor_lists[0][t].numel();
-    for (int d = 0; d < depth; d++) {
-      tensorListMeta.addresses[d][loc_tensor_info] =
-          tensor_lists[d][t].const_data_ptr();
-    }
-    loc_tensor_info++;
-
-    const auto numel = tensor_lists[0][t].numel();
-    const auto chunks = numel / kChunkSize + (numel % kChunkSize != 0);
-    for (auto chunk = 0; chunk < chunks; chunk++) {
-      tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1;
-      tensorListMeta.block_to_chunk[loc_block_info] = chunk;
-      loc_block_info++;
-    }
-  }
-  TORCH_CHECK(loc_tensor_info < depth_to_max_tensors[depth - 1]);
-  TORCH_CHECK(loc_block_info < depth_to_max_blocks[depth - 1]);
-
-  if (loc_block_info != 0) {
-    multi_tensor_apply_kernel<<<
-        loc_block_info,
-        kBlockSize,
-        0,
-        at::cuda::getCurrentCUDAStream()>>>(tensorListMeta, callable, args...);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-  }
-}
-
-template <int depth, typename T, typename... ArgTypes>
 void multi_tensor_apply(
     std::vector<std::vector<at::Tensor>>& tensor_lists,
     T callable,
     ArgTypes... args) {
-  // Note: [static arg vs. dynamic arg]
-  // Due to the dynamic nature of the workload, the kernel arguments aren't
-  // guaranteed to fit in the static 4kb kernel argument memory. Previously
-  // with the apex implementation, we overcame this limitation by dividing a
-  // multi_tensor_apply workload into multiple kernel launches. However, this
-  // led to low sustained occupancy, affecting the performance of memory bound
-  // ops.
-  //
-  // Based on the observation that the kernel argument memory limitation
-  // doesn't correlate well with available SM resources, we have adopted a
-  // different approach. When the kernel arguments fit into the static kernel
-  // argument memory, we use this memory to transfer the arguments. Conversely,
-  // when the kernel arguments don't fit into the static kernel argument
-  // memory, instead of sacrificing sustained occupancy, we use a page-locked
-  // cudaMemcpyAsync to transfer the arguments, then perform the entire
-  // workload in a single kernel.
-  if (can_use_static_tensor_list_meta(tensor_lists, depth)) {
-    multi_tensor_apply_static<depth, T, ArgTypes...>(
-        tensor_lists, callable, args...);
-    return;
-  }
-
   TORCH_CHECK(
       tensor_lists.size() == depth,
       "Number of tensor lists has to match the depth.");
@@ -405,32 +409,18 @@ void multi_tensor_apply(
     std::iota(block_to_chunk.end() - chunks, block_to_chunk.end(), 0);
   }
 
-  VecPacker packer;
-  for (auto d = 0; d < depth; ++d) {
-    packer.add(addresses[d]);
-  }
-  packer.add(numel_for_tensor);
-  packer.add(block_to_tensor);
-  packer.add(block_to_chunk);
-
   auto device = tensor_lists[0][0].device();
-  auto dev_ptrs = packer.pack(device);
-
-  TensorListMetadata<depth> tl;
-  for (auto d = 0; d < depth; ++d) {
-    tl.addresses[d] = static_cast<const void**>(dev_ptrs[d]);
-  }
-  tl.numel_for_tensor = static_cast<int64_t*>(dev_ptrs[depth]);
-  tl.block_to_tensor = static_cast<size_t*>(dev_ptrs[depth + 1]);
-  tl.block_to_chunk = static_cast<size_t*>(dev_ptrs[depth + 2]);
-  tl.start_tensor_this_launch = 0;
+  auto [dev_array_pack, buf_tensor] =
+      TensorListMetadata<depth>::make_dev_array_pack(
+          addresses, numel_for_tensor, block_to_tensor, block_to_chunk, device);
 
   if (block_to_tensor.size() > 0) {
-    multi_tensor_apply_kernel<<<
-        block_to_tensor.size(),
-        kBlockSize,
-        0,
-        at::cuda::getCurrentCUDAStream()>>>(tl, callable, args...);
+    multi_tensor_apply_dev_array_pack_kernel<TensorListMetadata<depth>>
+        <<<block_to_tensor.size(),
+           kBlockSize,
+           0,
+           at::cuda::getCurrentCUDAStream()>>>(
+            dev_array_pack, callable, args...);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
