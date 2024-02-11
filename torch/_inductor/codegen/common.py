@@ -5,7 +5,6 @@ import itertools
 import logging
 import operator
 import re
-from collections import namedtuple
 from itertools import chain
 from typing import (
     Any,
@@ -53,7 +52,8 @@ def data_type_logger(msg):
         schedule_log.debug("Data type propagation: %s", msg)
 
 
-class WorkspaceArg(NamedTuple):
+@dataclasses.dataclass
+class WorkspaceArg:
     """A temporary buffer used for a single kernel, then discarded.
 
     Not registered as a traditional buffer since there are no users,
@@ -64,11 +64,28 @@ class WorkspaceArg(NamedTuple):
     zero_fill: bool
 
 
-TensorArg = namedtuple("TensorArg", ["name", "buffer", "dtype", "check_alignment"])
-SizeArg = namedtuple("SizeArg", ["name", "expr"])
+@dataclasses.dataclass
+class TensorArg:
+    name: str
+    buffer: str
+    dtype: torch.dtype
+    offset: sympy.Expr = sympy.Integer(0)
+
+
+@dataclasses.dataclass
+class SizeArg:
+    name: str
+    expr: sympy.Expr
+
+
+@dataclasses.dataclass
+class DeviceCodegen:
+    scheduling: type
+    wrapper_codegen: type
+
+
 KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg]
 
-DeviceCodegen = namedtuple("DeviceCodegen", ["scheduling", "wrapper_codegen"])
 device_codegens: Dict[str, DeviceCodegen] = {}
 
 
@@ -1007,10 +1024,9 @@ class KernelArgs:
             call_args.append(inplaced.other_names[-1])
             precompile_args.append(
                 TensorArg(
-                    inplaced.inner_name,
-                    inplaced.other_names[-1],
-                    V.graph.get_dtype(inplaced.other_names[-1]),
-                    True,
+                    name=inplaced.inner_name,
+                    buffer=inplaced.other_names[-1],
+                    dtype=V.graph.get_dtype(inplaced.other_names[-1]),
                 )
             )
         for outer, inner in chain(
@@ -1021,7 +1037,11 @@ class KernelArgs:
             arg_defs.append(inner)
             call_args.append(outer)
             precompile_args.append(
-                TensorArg(inner, outer, V.graph.get_dtype(outer), True)
+                TensorArg(
+                    name=inner,
+                    buffer=outer,
+                    dtype=V.graph.get_dtype(outer),
+                )
             )
         for outer, inner in self.sizevars.items():
             arg_defs.append(inner)
