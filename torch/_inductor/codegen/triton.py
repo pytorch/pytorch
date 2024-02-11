@@ -846,17 +846,8 @@ class TritonOverrides(OpOverrides):
     def ceil(x):
         return f"tl.math.ceil({x})"
 
-    @staticmethod
-    def bessel_j0(x):
-        return f"tl.math.j0({x})"
 
-    @staticmethod
-    def bessel_j1(x):
-        return f"tl.math.j1({x})"
-
-    @staticmethod
-    def modified_bessel_i0(x):
-        return f"tl.math.cyl_bessel_i0({x})"
+TritonOverrides._initialize_pointwise_overrides("triton")
 
 
 # Use mypy to check protocol implemented correctly
