@@ -1,19 +1,19 @@
 #include <gtest/gtest.h>
 
-#include <ATen/core/SingletonSymNodeImpl.h>
+#include <ATen/core/NestedIntSymNodeImpl.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/SymNodeImpl.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
 
-TEST(SingletonIntTest, Comparisons) {
+TEST(NestedIntTest, Comparisons) {
   auto a = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 1)));
+      c10::SymNode(c10::make_intrusive<c10::NestedIntSymNodeImpl>(1, 1)));
   auto b = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 1)));
+      c10::SymNode(c10::make_intrusive<c10::NestedIntSymNodeImpl>(1, 1)));
   auto c = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(2, 1)));
+      c10::SymNode(c10::make_intrusive<c10::NestedIntSymNodeImpl>(2, 1)));
   auto d = c10::SymInt(3);
 
   ASSERT_TRUE(a == a);
@@ -85,11 +85,11 @@ TEST(SingletonIntTest, Comparisons) {
   ASSERT_TRUE(a > 1);
 }
 
-TEST(SingletonIntTest, WiithFactor) {
+TEST(NestedIntTest, WithFactor) {
   auto a = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 5)));
+      c10::SymNode(c10::make_intrusive<c10::NestedIntSymNodeImpl>(1, 5)));
   auto b = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 10)));
+      c10::SymNode(c10::make_intrusive<c10::NestedIntSymNodeImpl>(1, 10)));
   // eq
   ASSERT_FALSE(a == b);
   ASSERT_FALSE(a >= b);
