@@ -61,9 +61,10 @@ _NUM_THREADS_PER_WARP = 32
 
 
 class HeuristicType(Enum):
+    PERSISTENT_REDUCTION = auto()
     POINTWISE = auto()
     REDUCTION = auto()
-    PERSISTENT_REDUCTION = auto()
+    SPLIT_SCAN = auto()
     TEMPLATE = auto()
     USER_AUTOTUNE = auto()
 
@@ -164,7 +165,11 @@ class CachingAutotuner(KernelInterface):
         self.gpu_device = get_interface_for_device(self.device_type)
 
         if log.isEnabledFor(logging.DEBUG):
-            log.debug("CachingAutotuner gets %d configs", len(self.configs))
+            log.debug(
+                "CachingAutotuner gets %d configs for %s",
+                len(self.configs),
+                self.fn.__name__,
+            )
             for c in self.configs:
                 log.debug(c)
 
@@ -193,6 +198,9 @@ class CachingAutotuner(KernelInterface):
                 return
             self.launchers = []
             compiled_binaries = []
+            if not self.configs:
+                raise RuntimeError("No triton configs are available")
+
             for c in self.configs:
                 try:
                     compiled_binary, launcher = self._precompile_config(
@@ -226,7 +234,7 @@ class CachingAutotuner(KernelInterface):
                     self.configs, compiled_binaries
                 ):
                     assert len(self.size_hints) == 2
-                    xblock = triton_config.kwargs["XBLOCK"]
+                    xblock = triton_config.kwargs.get("XBLOCK", 1)
                     rblock = triton_config.kwargs["RBLOCK"]
                     total_block = (self.size_hints[0] + xblock - 1) // xblock
                     nreg = getattr(compiled_binary, "n_regs", None)
@@ -372,7 +380,19 @@ class CachingAutotuner(KernelInterface):
         scope["cta_args"] = (
             (binary.num_ctas, *get_first_attr(binary, "cluster_dims", "clusterDims"))
             if hasattr(binary, "num_ctas")
-            else ()
+            else (
+                (binary.metadata.num_ctas, *binary.metadata.cluster_dims)
+                if hasattr(binary, "metadata")
+                else ()
+            )
+        )
+        scope["num_warps"] = (
+            binary.num_warps
+            if hasattr(binary, "num_warps")
+            else binary.metadata.num_warps
+        )
+        scope["shared"] = (
+            binary.shared if hasattr(binary, "shared") else binary.metadata.shared
         )
 
         exec(
@@ -383,9 +403,12 @@ class CachingAutotuner(KernelInterface):
                 else:
                     grid_0, grid_1, grid_2 = grid
 
-                runner(grid_0, grid_1, grid_2, bin.num_warps,
-                            *cta_args, bin.shared,
-                            stream, function, None, None, None,
+                runner(grid_0, grid_1, grid_2, num_warps,
+                            *cta_args, shared,
+                            stream, function,
+                            bin.launch_enter_hook,
+                            bin.launch_exit_hook,
+                            bin.metadata,
                             {', '.join(call_args)})
                 return bin
             """.lstrip(),
@@ -475,7 +498,7 @@ class CachingAutotuner(KernelInterface):
             self.coordesc_tuner.cache_benchmark_result(k.config, v)
 
         if log.isEnabledFor(logging.DEBUG):
-            log.debug("Benchmark all input configs get:")
+            log.debug("Benchmark all input configs for %s, get:", self.fn.__name__)
             for k, v in timings.items():
                 log.debug(
                     "%s: %f, nreg %d, nspill %d, #shared-mem %d",
@@ -504,15 +527,21 @@ class CachingAutotuner(KernelInterface):
         key = self.inductor_meta.get("kernel_name", None)  # unique kernel name
         assert key is not None, "kernel_name can not be None"
         params = {
-            "mangled_name": launcher.bin.metadata["name"],
+            "mangled_name": launcher.bin.metadata.name
+            if hasattr(launcher.bin.metadata, "name")
+            else launcher.bin.metadata["name"],
             "grid_x": grid_x,
             "grid_y": grid_y,
             "grid_z": grid_z,
             "x_block": launcher.config.kwargs.get("XBLOCK", 1),
             "y_block": launcher.config.kwargs.get("YBLOCK", None),
             "z_block": launcher.config.kwargs.get("ZBLOCK", None),
-            "num_warps": launcher.bin.num_warps,
-            "shared_mem": launcher.bin.shared,
+            "num_warps": launcher.bin.num_warps
+            if hasattr(launcher.bin, "num_warps")
+            else launcher.bin.metadata.num_warps,
+            "shared_mem": launcher.bin.shared
+            if hasattr(launcher.bin, "shared")
+            else launcher.bin.metadata.shared,
             "stream": stream,
             # User defined triton kernels will have arbitrary kwarg names
             "meta": launcher.config.kwargs,
@@ -715,7 +744,9 @@ class DebugAutotuner(CachingAutotuner):
                     if arg_name.startswith("in_out_ptr")
                 ]
             )
-            num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
+            num_gb = self.inductor_meta.get("kernel_num_gb", None)
+            if num_gb is None:
+                num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
             gb_per_s = num_gb / (ms / 1e3)
             self.cached = (ms, num_gb, gb_per_s, kernel_name)
         else:
@@ -1164,6 +1195,43 @@ def pointwise(
     raise NotImplementedError(f"size_hints: {size_hints}")
 
 
+def _reduction_configs(
+    *, size_hints: List[int], inductor_meta: Dict[str, Any]
+) -> List[Config]:
+    reduction_hint = inductor_meta.get("reduction_hint", None)
+    assert len(size_hints) == 2
+    rnumel = size_hints[-1]
+
+    contiguous_config = triton_config_reduction(
+        size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048)
+    )
+    outer_config = triton_config_reduction(size_hints, 64, 8)
+    tiny_config = triton_config_reduction(
+        size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, 2048)
+    )
+    if config.max_autotune or config.max_autotune_pointwise:
+        pass  # skip all these cases
+    elif reduction_hint == ReductionHint.INNER:
+        return [contiguous_config]
+    elif reduction_hint == ReductionHint.OUTER:
+        return [outer_config]
+    elif reduction_hint == ReductionHint.OUTER_TINY:
+        return [tiny_config]
+    if disable_pointwise_autotuning():
+        return [triton_config_reduction(size_hints, 32, 128)]
+    return [
+        contiguous_config,
+        outer_config,
+        tiny_config,
+        triton_config_reduction(size_hints, 64, 64),
+        triton_config_reduction(size_hints, 8, 512),
+        # halve the XBLOCK/RBLOCK compared to outer_config
+        # TODO: this may only be beneficial when each iteration of the reduction
+        # is quite heavy. E.g. https://gist.github.com/shunting314/189a8ef69f90db9d614a823385147a72
+        triton_config_reduction(size_hints, 64, 4, num_warps=8),
+    ]
+
+
 def reduction(
     size_hints,
     reduction_hint=False,
@@ -1179,71 +1247,18 @@ def reduction(
 
     assert triton_meta is not None
     rnumel = size_hints[-1]
-    if len(size_hints) == 2:
-        contiguous_config = triton_config_reduction(
-            size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048)
-        )
-        outer_config = triton_config_reduction(size_hints, 64, 8)
-        tiny_config = triton_config_reduction(
-            size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, 2048)
-        )
-        if config.max_autotune or config.max_autotune_pointwise:
-            pass  # skip all these cases
-        elif reduction_hint == ReductionHint.INNER:
-            return cached_autotune(
-                size_hints,
-                [contiguous_config],
-                triton_meta=triton_meta,
-                inductor_meta=inductor_meta,
-                heuristic_type=HeuristicType.REDUCTION,
-                filename=filename,
-            )
-        elif reduction_hint == ReductionHint.OUTER:
-            return cached_autotune(
-                size_hints,
-                [outer_config],
-                triton_meta=triton_meta,
-                inductor_meta=inductor_meta,
-                heuristic_type=HeuristicType.REDUCTION,
-                filename=filename,
-            )
-        elif reduction_hint == ReductionHint.OUTER_TINY:
-            return cached_autotune(
-                size_hints,
-                [tiny_config],
-                triton_meta=triton_meta,
-                inductor_meta=inductor_meta,
-                heuristic_type=HeuristicType.REDUCTION,
-                filename=filename,
-            )
-        if disable_pointwise_autotuning():
-            return cached_autotune(
-                size_hints,
-                [triton_config_reduction(size_hints, 32, 128)],
-                triton_meta=triton_meta,
-                inductor_meta=inductor_meta,
-                heuristic_type=HeuristicType.REDUCTION,
-                filename=filename,
-            )
-        return cached_autotune(
-            size_hints,
-            [
-                contiguous_config,
-                outer_config,
-                tiny_config,
-                triton_config_reduction(size_hints, 64, 64),
-                triton_config_reduction(size_hints, 8, 512),
-                # halve the XBLOCK/RBLOCK compared to outer_config
-                # TODO: this may only be beneficial when each iteration of the reduction
-                # is quite heavy. E.g. https://gist.github.com/shunting314/189a8ef69f90db9d614a823385147a72
-                triton_config_reduction(size_hints, 64, 4, num_warps=8),
-            ],
-            triton_meta=triton_meta,
-            inductor_meta=inductor_meta,
-            filename=filename,
-            heuristic_type=HeuristicType.REDUCTION,
-        )
-    raise NotImplementedError(f"size_hints: {size_hints}")
+    if len(size_hints) != 2:
+        raise NotImplementedError(f"size_hints: {size_hints}")
+
+    configs = _reduction_configs(size_hints=size_hints, inductor_meta=inductor_meta)
+    return cached_autotune(
+        size_hints,
+        configs=configs,
+        triton_meta=triton_meta,
+        inductor_meta=inductor_meta,
+        heuristic_type=HeuristicType.REDUCTION,
+        filename=filename,
+    )
 
 
 def persistent_reduction(
@@ -1291,6 +1306,42 @@ def persistent_reduction(
         inductor_meta=inductor_meta,
         filename=filename,
         heuristic_type=HeuristicType.PERSISTENT_REDUCTION,
+    )
+
+
+def split_scan(
+    size_hints,
+    reduction_hint=False,
+    triton_meta=None,
+    filename=None,
+    inductor_meta=None,
+):
+    """Heuristic for TritonSplitScanKernel"""
+    inductor_meta = {} if inductor_meta is None else inductor_meta
+    inductor_meta["reduction_hint"] = reduction_hint
+    if inductor_meta.get("no_x_dim"):
+        size_hints = [1, *size_hints[1:]]
+
+    assert triton_meta is not None
+    rnumel = size_hints[-1]
+    if len(size_hints) != 2:
+        raise NotImplementedError(f"size_hints: {size_hints}")
+
+    configs = _reduction_configs(size_hints=size_hints, inductor_meta=inductor_meta)
+
+    # Fixup configs to enforce the minimum RBLOCK size
+    min_rblock = config.triton.min_split_scan_rblock
+    for cfg in configs:
+        if cfg.kwargs["RBLOCK"] < min_rblock:
+            cfg.kwargs["RBLOCK"] = min_rblock
+
+    return cached_autotune(
+        size_hints,
+        configs=configs,
+        triton_meta=triton_meta,
+        inductor_meta=inductor_meta,
+        heuristic_type=HeuristicType.SPLIT_SCAN,
+        filename=filename,
     )
 
 
@@ -1383,5 +1434,13 @@ def grid(*numels):
             get_grid_dim(ynumel, meta.get("YBLOCK", None)),
             get_grid_dim(znumel, meta.get("ZBLOCK", None)),
         )
+
+    return grid_fn
+
+
+def split_scan_grid(xnumel, rnumel):
+    def grid_fn(meta):
+        assert meta.get("XBLOCK", 1) == 1
+        return (ceildiv(rnumel, meta.get("RBLOCK", 1)), xnumel, 1)
 
     return grid_fn

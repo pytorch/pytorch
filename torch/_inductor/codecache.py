@@ -95,7 +95,7 @@ LOCK_TIMEOUT = 600
 
 # timing metrics for time spent in the compilation
 _cumulative_compile_time = 0.0
-_t0 = None
+_t0: Optional[float] = None
 
 
 def _compile_start() -> None:
@@ -201,6 +201,7 @@ class CacheBase:
     def update_local_cache(self, local_cache: Dict[str, Any]) -> None:
         if not os.path.exists(self.local_cache_path.parent):
             os.makedirs(self.local_cache_path.parent, exist_ok=True)
+
         write_atomic(
             str(self.local_cache_path),
             json.dumps({"system": self.system, "cache": local_cache}, indent=4),
@@ -419,11 +420,11 @@ def _reduce_tensor(t):
     """
     See FxGraphCachePickler. Custom reducer to pickle Tensors.
     """
-    # If we see tensors, we know they're contstants stored as attributes on
+    # If we see tensors, we know they're constants stored as attributes on
     # the GraphModule. See tensor lowering; small constants are inlined. If
     # we see a small tensor, therefore, no reference will ultimately remain
     # in the generated code. So we need to include its value in the cache key.
-    # Large constannts are effectively treated as inputs and we consider only
+    # Large constants are effectively treated as inputs and we consider only
     # their metadata.
     metadata = extract_tensor_metadata(t)
     if len(t.shape) == 0 or torch._inductor.graph.GraphLowering.can_inline_constant(t):
@@ -1127,9 +1128,11 @@ def get_compile_only(compile_only: bool = True) -> str:
     return "-c" if compile_only else ""
 
 
-def get_shared(shared: bool = True) -> str:
+def get_shared(shared: bool = True, compile_only: bool = False) -> str:
     if not shared:
         return ""
+    if compile_only:
+        return "-fPIC"
     if platform.system() == "Darwin" and "clang" in cpp_compiler():
         # This causes undefined symbols to behave the same as linux
         return "-shared -fPIC -undefined dynamic_lookup"
@@ -1340,11 +1343,11 @@ def get_include_and_linking_paths(
 
             # check the `OMP_PREFIX` environment first
             if os.getenv("OMP_PREFIX") is not None:
-                header_path = os.path.join(os.getenv("OMP_PREFIX"), "include", "omp.h")
+                header_path = os.path.join(os.getenv("OMP_PREFIX"), "include", "omp.h")  # type: ignore[arg-type]
                 valid_env = os.path.exists(header_path)
                 if valid_env:
-                    ipaths.append(os.path.join(os.getenv("OMP_PREFIX"), "include"))
-                    lpaths.append(os.path.join(os.getenv("OMP_PREFIX"), "lib"))
+                    ipaths.append(os.path.join(os.getenv("OMP_PREFIX"), "include"))  # type: ignore[arg-type]
+                    lpaths.append(os.path.join(os.getenv("OMP_PREFIX"), "lib"))  # type: ignore[arg-type]
                 else:
                     warnings.warn("environment variable `OMP_PREFIX` is invalid.")
                 omp_available = omp_available or valid_env
@@ -1355,8 +1358,8 @@ def get_include_and_linking_paths(
             if not omp_available and os.getenv("CONDA_PREFIX") is not None:
                 omp_available = is_conda_llvm_openmp_installed()
                 if omp_available:
-                    conda_lib_path = os.path.join(os.getenv("CONDA_PREFIX"), "lib")
-                    ipaths.append(os.path.join(os.getenv("CONDA_PREFIX"), "include"))
+                    conda_lib_path = os.path.join(os.getenv("CONDA_PREFIX"), "lib")  # type: ignore[arg-type]
+                    ipaths.append(os.path.join(os.getenv("CONDA_PREFIX"), "include"))  # type: ignore[arg-type]
                     lpaths.append(conda_lib_path)
                     # Prefer Intel OpenMP on x86 machine
                     if os.uname().machine == "x86_64" and os.path.exists(
@@ -1377,7 +1380,7 @@ def get_include_and_linking_paths(
             libs = ["omp"] if config.is_fbcode() else ["gomp"]
 
     # Unconditionally import c10 for non-abi-compatible mode to use TORCH_CHECK - See PyTorch #108690
-    if not config.aot_inductor.abi_compatible:
+    if not config.abi_compatible:
         libs += ["c10"]
         lpaths += [cpp_extension.TORCH_LIB_PATH]
 
@@ -1446,12 +1449,14 @@ def cpp_compile_command(
         inp_name = input
         out_name = output
         linker_paths = ""  # let the compiler pick
+    if compile_only:
+        libs, lpaths = "", ""
     inp_name_str = " ".join(inp_name)
     return re.sub(
         r"[ \n]+",
         " ",
         f"""
-            {cpp_compiler()} {inp_name_str} {get_shared(shared)}
+            {cpp_compiler()} {inp_name_str} {get_shared(shared, compile_only)}
             {get_warning_all_flag(warning_all)} {cpp_flags()}
             {get_glibcxx_abi_build_flags()}
             {ipaths_str} {lpaths} {libs} {build_arch_flags}
@@ -1507,6 +1512,10 @@ class CudaKernelParamCache:
     def get(cls, key: str) -> Optional[Dict[str, str]]:
         return cls.cache.get(key, None)
 
+    @classmethod
+    def get_keys(cls):
+        return cls.cache.keys()
+
 
 class AotCodeCompiler:
     @classmethod
@@ -1547,6 +1556,94 @@ class AotCodeCompiler:
             extra=cpp_command,
             specified_dir=specified_output_path,
         )
+
+        def _compile_consts_linux(consts: bytes) -> str:
+            _, consts_path = write(
+                consts,
+                "bin",
+                specified_dir=specified_output_path,
+            )
+
+            consts_o = os.path.splitext(consts_path)[0] + ".o"
+            if fbcode_aot_cpu_re:
+                cmd = f"{ld_command} -r -b binary -o {os.path.basename(consts_o)} {os.path.basename(consts_path)}"
+                compile_file(consts_path, consts_o, cmd.split())
+                os.chmod(consts_o, 0o644)
+            else:
+                cmd = f"{ld_command} -r -b binary -o {consts_o} {consts_path}"
+                run_command_and_check(cmd)
+            log.debug("aot constant binary command: %s", cmd)
+
+            cmd = (
+                f"{objcopy_command} --rename-section"
+                " .data=.lrodata,alloc,load,readonly,data,contents"
+                f" {consts_o} {consts_o}"
+            )
+            log.debug("aot constant obj command: %s", cmd)
+            run_command_and_check(cmd)
+
+            cmd = f"rm {consts_path}"
+            log.debug("aot constant bin removal command: %s", cmd)
+            run_command_and_check(cmd)
+
+            if fbcode_aot_cpu_re:
+                body = re.sub(r"[\W]", "_", os.path.basename(consts_path))
+            else:
+                body = re.sub(r"[\W]", "_", consts_path)
+
+            symbol_list = []
+            symbol_list.append(
+                f"{objcopy_command} --redefine-sym _binary_{body}_start=_binary_constants_bin_start {consts_o}"
+            )
+            symbol_list.append(
+                f"{objcopy_command} --redefine-sym _binary_{body}_size=_binary_constants_bin_size {consts_o}"
+            )
+            symbol_list.append(
+                f"{objcopy_command} --redefine-sym _binary_{body}_end=_binary_constants_bin_end {consts_o}"
+            )
+            log.debug("aot constant binary redefine symbol: %s", " ".join(symbol_list))
+            for cmd in symbol_list:
+                run_command_and_check(cmd)
+            return consts_o
+
+        def _compile_consts_darwin(consts: bytes) -> str:
+            is_large_consts = len(consts) > 1024
+            consts_asm = "\t.section\t__TEXT,__const\n"
+            consts_asm += "\t.globl\t__binary_constants_bin_start\n"
+            consts_asm += "__binary_constants_bin_start:\n"
+            if not is_large_consts:
+                for c in consts:
+                    consts_asm += f"\t.byte {c}\n"
+                # Add one element even if constants are empty
+                # Otherwise assembler will not put them in data section
+                if not consts:
+                    consts_asm += "\t.space 1\n"
+            else:
+                consts_asm += "\t.quad 0x1234567899abcdef\n"
+                consts_asm += f"\t.space {len(consts) - 8}\n"
+            consts_asm += ".globl\t__binary_constants_bin_end\n"
+            consts_asm += "__binary_constants_bin_end:\n"
+            _, consts_path = write(
+                consts_asm,
+                "S",
+                specified_dir=specified_output_path,
+            )
+            consts_o = os.path.splitext(consts_path)[0] + ".o"
+            cmd = f"{cpp_compiler()} -c -o {consts_o} {consts_path}"
+            run_command_and_check(cmd)
+            if is_large_consts:
+                with open(consts_o, "r+b") as f:
+                    f.seek(0)
+                    hdr = f.read(1024)
+                    # Search for magic number and write the actual data over it
+                    start_idx = hdr.find(b"\xef\xcd\xab\x99\x78\x56\x34\x12")
+                    assert start_idx != -1
+                    f.seek(start_idx)
+                    pos = 0
+                    while pos < len(consts):
+                        rc = f.write(consts[pos:])
+                        pos += rc
+            return consts_o
 
         from filelock import FileLock
 
@@ -1600,55 +1697,14 @@ class AotCodeCompiler:
                 return bytes(raw_array.contents)
 
             aot_constants = b"".join(
-                _to_bytes(tensor) for tensor in graph.constants.values()
+                _to_bytes(tensor)
+                for name, tensor in graph.constants.items()
+                if name not in graph.folded_constants
             )
-
-            _, consts_path = write(
-                aot_constants,
-                "bin",
-                specified_dir=specified_output_path,
-            )
-
-            consts_o = os.path.splitext(consts_path)[0] + ".o"
-            if fbcode_aot_cpu_re:
-                cmd = f"{ld_command} -r -b binary -o {os.path.basename(consts_o)} {os.path.basename(consts_path)}"
-                compile_file(consts_path, consts_o, cmd.split())
-                os.chmod(consts_o, 0o644)
-            else:
-                cmd = f"{ld_command} -r -b binary -o {consts_o} {consts_path}"
-                run_command_and_check(cmd)
-            log.debug("aot constant binary command: %s", cmd)
-
-            cmd = (
-                f"{objcopy_command} --rename-section"
-                " .data=.lrodata,alloc,load,readonly,data,contents"
-                f" {consts_o} {consts_o}"
-            )
-            log.debug("aot constant obj command: %s", cmd)
-            run_command_and_check(cmd)
-
-            cmd = f"rm {consts_path}"
-            log.debug("aot constant bin removal command: %s", cmd)
-            run_command_and_check(cmd)
-
-            if fbcode_aot_cpu_re:
-                body = re.sub(r"[\W]", "_", os.path.basename(consts_path))
-            else:
-                body = re.sub(r"[\W]", "_", consts_path)
-
-            symbol_list = []
-            symbol_list.append(
-                f"{objcopy_command} --redefine-sym _binary_{body}_start=_binary_constants_bin_start {consts_o}"
-            )
-            symbol_list.append(
-                f"{objcopy_command} --redefine-sym _binary_{body}_size=_binary_constants_bin_size {consts_o}"
-            )
-            symbol_list.append(
-                f"{objcopy_command} --redefine-sym _binary_{body}_end=_binary_constants_bin_end {consts_o}"
-            )
-            log.debug("aot constant binary redefine symbol: %s", " ".join(symbol_list))
-            for cmd in symbol_list:
-                run_command_and_check(cmd)
+            consts_o = {
+                "linux": _compile_consts_linux,
+                "darwin": _compile_consts_darwin,
+            }[sys.platform](aot_constants)
 
             cmd = cpp_compile_command(
                 input=[output_o, consts_o],
@@ -2113,6 +2169,7 @@ def _nvcc_compiler_options() -> List[str]:
         config.cuda.compile_opt_level,
         "-std=c++17",
         "--expt-relaxed-constexpr",
+        "-DNDEBUG",
     ]
     if config.cuda.enable_debug_info:
         options.extend(["-lineinfo", "-g", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"])

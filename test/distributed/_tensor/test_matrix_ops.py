@@ -40,6 +40,23 @@ class DistMatrixOpsTest(DTensorTestBase):
         self.assertEqual(dist_res.full_tensor(), local_res)
 
     @with_comms
+    def test_addmm_empty_operand(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        shard_spec = [Shard(0)]
+        replica_spec = [Replicate()]
+
+        tensor_to_shard = torch.randn(12, 0)
+        mat1 = distribute_tensor(tensor_to_shard, device_mesh, shard_spec)
+        tensor_to_replicate = torch.randn(0, 4)
+        mat2 = distribute_tensor(tensor_to_replicate, device_mesh, replica_spec)
+        input_tensor = torch.randn(4)
+        inp = distribute_tensor(input_tensor, device_mesh, replica_spec)
+
+        dist_res = torch.addmm(inp, mat1, mat2)
+        local_res = torch.addmm(input_tensor, tensor_to_shard, tensor_to_replicate)
+        self.assertEqual(dist_res.full_tensor(), local_res)
+
+    @with_comms
     def test_addmm_auto_redistribute(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         shard0_spec = [Shard(0)]

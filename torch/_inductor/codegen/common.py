@@ -35,8 +35,8 @@ from ..utils import (
     free_symbol_startswith,
     IndentedBuffer,
     sympy_dot,
+    sympy_index_symbol,
     sympy_subs,
-    sympy_symbol,
     unique,
 )
 from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
@@ -52,8 +52,20 @@ def data_type_logger(msg):
         schedule_log.debug("Data type propagation: %s", msg)
 
 
+class WorkspaceArg(NamedTuple):
+    """A temporary buffer used for a single kernel, then discarded.
+
+    Not registered as a traditional buffer since there are no users,
+    so it would be dead code eliminated.
+    """
+
+    nbytes: sympy.Expr
+    zero_fill: bool
+
+
 TensorArg = namedtuple("TensorArg", ["name", "buffer", "dtype", "check_alignment"])
 SizeArg = namedtuple("SizeArg", ["name", "expr"])
+KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg]
 
 DeviceCodegen = namedtuple("DeviceCodegen", ["scheduling", "wrapper_codegen"])
 device_codegens: Dict[str, DeviceCodegen] = {}
@@ -224,10 +236,10 @@ class DataTypePropagation:
             "store_reduction",
         ):
             buf_name = node.args[1]
-            return V.graph.get_dtype(buf_name)
+            return V.graph.get_dtype(buf_name)  # type: ignore[arg-type]
 
         if node.target == operator.getitem:
-            return self.deduce_node_dtype(node.args[0])
+            return self.deduce_node_dtype(node.args[0])  # type: ignore[arg-type]
 
         assert isinstance(node.target, str)
 
@@ -235,7 +247,7 @@ class DataTypePropagation:
             return node.args[1]
 
         if node.target == "constant":
-            return DTYPE_TO_COMPUTATION_DTYPE[node.args[-1]]
+            return DTYPE_TO_COMPUTATION_DTYPE[node.args[-1]]  # type: ignore[index]
 
         if node.target.startswith("masked_subblock"):
             return self.deduce_node_dtype_by_subgraph(node)
@@ -595,6 +607,7 @@ class KernelArgs:
         self.output_buffers = dict()
         self.inplace_buffers = dict()
         self.sizevars = sizevars or dict()
+        self.workspace_arg = None
 
     def __repr__(self):
         return "KernelArgs({})".format(
@@ -647,6 +660,16 @@ class KernelArgs:
             )
             self.inplace_buffers[input_name] = buf
             self.inplace_buffers[output_name] = buf
+
+    def workspace(self, nbytes: sympy.Expr, zero_fill: bool):
+        if self.workspace_arg is None:
+            self.workspace_arg = WorkspaceArg(nbytes, zero_fill)
+            return "ws_ptr", 0
+
+        offset = self.workspace_arg.nbytes
+        zero_fill = zero_fill or self.workspace_arg.zero_fill
+        self.workspace_arg = WorkspaceArg(offset + nbytes, zero_fill)
+        return "ws_ptr", offset
 
     def seed_offset(self, name, value):
         if value in self.sizevars:
@@ -713,12 +736,13 @@ class KernelArgs:
             arg_types.append(f"const {INDEX_TYPE}")
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
+        assert self.workspace_arg is None, "Workspace not supported on CPU "
         return arg_defs, call_args, arg_types
 
     def python_argdefs(self):
         arg_defs = []
         call_args = []
-        precompile_args: List[Union[TensorArg, SizeArg]] = []
+        precompile_args: List[Union[TensorArg, SizeArg, WorkspaceArg]] = []
         for inplaced in unique(self.inplace_buffers.values()):
             if self._buffer_is_marked_removed(inplaced):
                 continue
@@ -748,6 +772,10 @@ class KernelArgs:
             precompile_args.append(SizeArg(inner, outer))
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
+        if self.workspace_arg is not None:
+            arg_defs.append("ws_ptr")
+            call_args.append("workspace")
+            precompile_args.append(self.workspace_arg)
 
         return arg_defs, call_args, precompile_args
 
@@ -797,7 +825,7 @@ class CSEVariable:
     See example of TritonCSEVariable in triton.py
     """
 
-    def __init__(self, name, bounds: ValueRanges):
+    def __init__(self, name, bounds: ValueRanges[Any]):
         assert isinstance(bounds, ValueRanges)
         self.name = name
         self.bounds = bounds
@@ -819,7 +847,7 @@ class CppWrapperKernelArgs(KernelArgs):
     def wrap_ptr_arg(self, buf, dtype):
         from .cpp import DTYPE_TO_CPP
 
-        if config.aot_inductor.abi_compatible:
+        if config.abi_compatible:
             # In the abi_compatible model, we just return the buf here.
             # We will form correct call args later in wrapper.generate_kernel_all.
             return buf
@@ -876,7 +904,7 @@ class CSE:
         buffer: IndentedBuffer,
         expr: Union[str, CSEVariable, OpsValue, IndentedBuffer],
         *,
-        bounds: ValueRanges = ValueRanges.unknown(),
+        bounds: ValueRanges[Any] = ValueRanges.unknown(),
         write=True,
         assignment=True,
     ) -> CSEVariable:
@@ -917,7 +945,7 @@ class CSE:
 
         return var
 
-    def newvar(self, bounds: ValueRanges = ValueRanges.unknown()) -> CSEVariable:
+    def newvar(self, bounds: ValueRanges[Any] = ValueRanges.unknown()) -> CSEVariable:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
         var = V.kernel.create_cse_var(var_name, bounds)
         self.varname_map[var_name] = var
@@ -983,9 +1011,10 @@ class CodeGen:
 class Kernel(CodeGen):
     newvar_prefix = ""
     suffix = ""
-    overrides = None
-    load_format = None
-    store_format = None
+    overrides: Optional[Callable[[OpsHandler[Any]], OpsHandler[Any]]] = None
+    # TODO: these look dead, but with all the getattr it's hard to tell...
+    load_format: None = None
+    store_format: None = None
 
     def __init__(self, args=None, increase_kernel_count=True):
         super().__init__()
@@ -1001,7 +1030,7 @@ class Kernel(CodeGen):
         self._load_mask = None
         # set in set_current_node
         self.current_node = None
-        self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = None
+        self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges[Any]]] = None
         # Upper bounds for indirect_indexing and their str representation
         # NB: None, None is never stored in map, but it is the assumed
         # "not set" value for the dict
@@ -1142,7 +1171,7 @@ class Kernel(CodeGen):
             ):
                 # Skip CSE since this doesn't return an expression
 
-                if var.bounds.lower < 0:
+                if var.bounds.lower < 0:  # type: ignore[operator]
                     new_bounds = ValueRanges.unknown()
                     if var.bounds != ValueRanges.unknown() and isinstance(
                         size, sympy.Number
@@ -1153,13 +1182,13 @@ class Kernel(CodeGen):
                         neg = var.bounds & ValueRanges(-sympy.oo, -1)
                         new_bounds = ValueRanges(neg.lower + size, neg.upper + size)
                         # We don't have a good way of representing the empty range
-                        if var.bounds.upper >= 0:
+                        if var.bounds.upper >= 0:  # type: ignore[operator]
                             pos = var.bounds & ValueRanges(0, sympy.oo)
                             new_bounds = new_bounds | pos
 
                     stm = ops.add(var, self.rename_indexing(size))
                     # Mixed negative and non-negative
-                    if var.bounds.upper >= 0:
+                    if var.bounds.upper >= 0:  # type: ignore[operator]
                         lt = ops.lt(var, "0")
                         stm = ops.where(lt, stm, var)
                     new_var = self.cse.generate(self.compute, stm, bounds=new_bounds)
@@ -1193,7 +1222,7 @@ class Kernel(CodeGen):
                         )
 
                     self.indirect_max_sizes[map_key] = (size, self.index_to_str(size))
-                return sympy_symbol(str(var))
+                return sympy_index_symbol(str(var))
 
             @staticmethod
             def load(name: str, index: sympy.Expr) -> CSEVariable:
@@ -1309,7 +1338,7 @@ class Kernel(CodeGen):
         # adds the necessary kernel args for index expressions
         # and renames variables in index expressions to kernel arg names
         if isinstance(index, (list, tuple)):
-            return [self.rename_indexing(x) for x in index]
+            return [self.rename_indexing(x) for x in index]  # type: ignore[return-value]
         index = V.graph.sizevars.simplify(index)
         sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
         replacements = {
@@ -1334,8 +1363,8 @@ class OptimizationContext:
     dtype: Optional[torch.dtype] = None
     ops_name: str = ""
 
-    # Load uint8 value as float32
-    is_load_uint8_as_float: bool = False
+    # Load uint8/int8 value as float32
+    is_load_int8_as_float: bool = False
 
 
 @functools.lru_cache(None)

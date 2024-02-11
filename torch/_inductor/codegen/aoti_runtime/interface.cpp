@@ -1,6 +1,7 @@
 #include <torch/csrc/inductor/aoti_runtime/arrayref_tensor.h>
 #include <torch/csrc/inductor/aoti_runtime/interface.h>
 #include <torch/csrc/inductor/aoti_runtime/model_container.h>
+#include <torch/csrc/inductor/aoti_runtime/scalar_to_tensor.h>
 
 #include <iostream>
 #include <sstream>
@@ -183,6 +184,22 @@ AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
           /*validate_full_update*/ true);
 }
 
+AOTIRuntimeError AOTInductorModelContainerRunConstantFolding(
+    AOTInductorModelContainerHandle container_handle,
+    bool use_inactive,
+    AOTInductorStreamHandle stream_handle,
+    AOTIProxyExecutorHandle proxy_executor_handle) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  auto stream =
+      reinterpret_cast<torch::aot_inductor::DeviceStreamType>(stream_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    AOTINoGradGuard guard;
+    container->run_const_fold(use_inactive, stream, proxy_executor_handle);
+  })
+}
+
 AOTIRuntimeError AOTInductorModelContainerSwapConstantBuffer(
     AOTInductorModelContainerHandle container_handle) {
   auto* container =
@@ -324,8 +341,4 @@ AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
   })
 }
 
-#define CACHE_TORCH_DTYPE(typename) static auto cached_torch_dtype_##typename = aoti_torch_dtype_##typename()
-
-  static auto cached_torch_device_type_cpu = aoti_torch_device_type_cpu();
-  static auto cached_torch_device_type_cuda = aoti_torch_device_type_cuda();
 } // extern "C"

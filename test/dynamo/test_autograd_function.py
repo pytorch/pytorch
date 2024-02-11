@@ -276,14 +276,20 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             opt_model(x)
 
     def test_stride_in_bwd(self):
+        torch._dynamo.utils.counters.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
         model = CustomFuncStrideModule()
-        opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
+        opt_model = torch.compile(backend=cnt)(model)
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            ".*HigherOrderOperator body's output must consist of tensors only",
-        ):
-            opt_model(x)
+        ref = model(x)
+        res = opt_model(x)
+
+        self.assertEqual(ref, res)
+        self.assertEqual(cnt.frame_count, 1)
+        # graph break: Illegal getattr invocation stride in strict mod.
+        self.assertEqual(
+            list(torch._dynamo.utils.counters["graph_break"].values()), [1]
+        )
 
     def test_enum_arg(self):
         from enum import Enum
@@ -862,7 +868,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         foo(torch.randn(2))
         foo(torch.randn(2, requires_grad=True))
 
-    @requires_cuda()
+    @requires_cuda
     @skipIfRocm
     def test_triton_kernel_basic(self):
         class Add(torch.autograd.Function):
@@ -894,7 +900,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         loss.backward()
         self.assertEqual(x + y, z)
 
-    @requires_cuda()
+    @requires_cuda
     @skipIfRocm
     def test_triton_kernel_multiple_out(self):
         class Add(torch.autograd.Function):
