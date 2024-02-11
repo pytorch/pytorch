@@ -33,7 +33,7 @@ file(GLOB C10_SRCS
         mobile/*.cpp
         macros/*.cpp
         util/*.cpp
-        )
+      )
 file(GLOB C10_HEADERS
         *.h
         core/*.h
@@ -41,7 +41,7 @@ file(GLOB C10_HEADERS
         mobile/*.h
         macros/*.h
         util/*.h
-        )
+      )
 add_library(c10 ${C10_SRCS} ${C10_HEADERS})
 target_compile_options_if_supported(c10 "-Wdeprecated")
 if(HAVE_SOVERSION)
@@ -69,7 +69,7 @@ if(C10_USE_IWYU)
         "--prefix_header_includes=keep"
         "-Xiwyu"
         "--mapping_file=${CMAKE_CURRENT_LIST_DIR}/../tools/iwyu/all.imp"
-        )
+      )
     set_property(TARGET c10 PROPERTY CXX_INCLUDE_WHAT_YOU_USE ${iwyu_cmd})
   endif()
 endif()
@@ -81,11 +81,11 @@ endif()
 
 # ---[ Dependency of c10
 if(C10_USE_GFLAGS)
-   target_link_libraries(c10 PUBLIC gflags)
+  target_link_libraries(c10 PUBLIC gflags)
 endif()
 
 if(C10_USE_GLOG)
-    target_link_libraries(c10 PUBLIC glog::glog)
+  target_link_libraries(c10 PUBLIC glog::glog)
 endif()
 target_link_libraries(c10 PRIVATE fmt::fmt-header-only)
 
@@ -100,7 +100,7 @@ else()
 endif()
 
 if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "s390x" AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le")
-    target_link_libraries(c10 PRIVATE cpuinfo)
+  target_link_libraries(c10 PRIVATE cpuinfo)
 endif()
 
 find_package(Backtrace)
@@ -118,7 +118,7 @@ if(USE_MIMALLOC)
 endif()
 
 if(ANDROID)
-    target_link_libraries(c10 PRIVATE log)
+  target_link_libraries(c10 PRIVATE log)
 endif()
 
 target_include_directories(
