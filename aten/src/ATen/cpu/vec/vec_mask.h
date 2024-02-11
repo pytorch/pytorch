@@ -88,6 +88,12 @@ public:
     return std::all_of(mask, mask + size(), [](T m) { return m == static_cast<T>(0); });
   }
 
+  inline bool all_masked() const {
+    __at_align__ T mask[size()];
+    mask_.store(mask);
+    return std::all_of(mask, mask + size(), [](T m) { return m != static_cast<T>(0); });
+  }
+
   inline bool is_masked(int i) const {
     __at_align__ T mask[size()];
     mask_.store(mask);
