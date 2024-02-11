@@ -983,20 +983,20 @@ def embedding_default(func, *args, **kwargs):
 
 
 def jagged_factory(func, *args, **kwargs):
-    from torch.fx.experimental.symbolic_shapes import is_singleton
+    from torch.fx.experimental.symbolic_shapes import is_nested_int
 
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-    _unused_B, singleton, *Ds = new_kwargs.pop("size")
+    _unused_B, nested_int, *Ds = new_kwargs.pop("size")
 
-    if not is_singleton(singleton):
+    if not is_nested_int(nested_int):
         raise ValueError(
             f"{func.__name__}() only supports shapes of form (B, *, D1, D2...) "
             "where only the second-left-most dimension is ragged. "
         )
-    offsets = singleton.node.singleton_vec()
-    sum_offsets = singleton.node.singleton_sum_vec()
+    offsets = nested_int.node.nested_int_vec()
+    sum_offsets = nested_int.node.nested_int_sum_vec()
 
     return NestedTensor(func([sum_offsets, *Ds], **new_kwargs), offsets)
 

@@ -17,9 +17,9 @@ namespace c10 {
 // allows us to simply return [B, j0, D] if someone queries for the size of our
 // tensor.
 //
-// Morally we define comparison between two singleton ints to return true if
+// Morally we define comparison between two nested ints to return true if
 // that comparison holds for all corresponding elements of the arrays they
-// represent. Comparison between a singleton int and a plain int is defined
+// represent. Comparison between a nested int and a plain int is defined
 // similarly.
 //
 // To simulate this desired behavior but also avoid the O(N) cost of checking,
@@ -33,40 +33,40 @@ namespace c10 {
 // differentiate the two cases.
 //
 // During tracing the strides of the outputs need to be a function of the size
-// and strides of the inputs so it is important that SingletonSymNode itself is
+// and strides of the inputs so it is important that NestedIntSymNode itself is
 // able to express this.
 //
-// NOTE [ SingletonVariant ]
+// NOTE [ NestedTensorVariant ]
 //
-// Currently, if SingletonSymNodeType::CPP is passed, that means that the
-// singleton is only meant to be used to ferry nested_tensor_size metadata
+// Currently, if NestedTensorVariant::CPP is passed, that means that the
+// nested int is only meant to be used to ferry nested_tensor_size metadata
 // from forward to use in backward. In this case we set `val`, `coeff` etc
 // to bogus values and make sure to error if they are accessed.
-enum class SingletonVariant { PYTHON, CPP };
+enum class NestedTensorVariant { PYTHON, CPP };
 
-constexpr c10::DispatchKeySet py_singleton_ks({c10::DispatchKey::Python, c10::DispatchKey::PythonTLSSnapshot});
-constexpr c10::DispatchKeySet cpp_singleton_ks({c10::DispatchKey::NestedTensor});
+constexpr c10::DispatchKeySet py_nested_int_ks({c10::DispatchKey::Python, c10::DispatchKey::PythonTLSSnapshot});
+constexpr c10::DispatchKeySet cpp_nested_int_ks({c10::DispatchKey::NestedTensor});
 
-class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
+class TORCH_API NestedIntSymNodeImpl : public SymNodeImpl {
  public:
   // CAUTION: you should probably not be constructing these directly; please
   // the higher-level API in python instead.
-  explicit SingletonSymNodeImpl(
+  explicit NestedIntSymNodeImpl(
       int64_t val,
       int64_t coeff,
       at::Tensor vec,
       int64_t sum_vec,
-      SingletonVariant type)
+      NestedTensorVariant type)
       : val_(val), coeff_(coeff), vec_(std::move(vec)), sum_vec_(sum_vec), type_(type) {
-    // See NOTE [ SingletonVariant ]
-    if (type == SingletonVariant::PYTHON) {
-      key_set_ = py_singleton_ks;
-    } else if (type == SingletonVariant::CPP) {
+    // See NOTE [ NestedTensorVariant ]
+    if (type == NestedTensorVariant::PYTHON) {
+      key_set_ = py_nested_int_ks;
+    } else if (type == NestedTensorVariant::CPP) {
       TORCH_INTERNAL_ASSERT(val == -1 && coeff == -1 && sum_vec == -1);
       // NB: Since we possibly don't have python instead of relying on torch
       //     dispatch, we dispatch to the NestedTensor kernel directly.
       // NB: we can potentially add the AutogradNestedTensor key
-      key_set_ = cpp_singleton_ks;
+      key_set_ = cpp_nested_int_ks;
     }
   }
 
@@ -86,7 +86,7 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
     return false;
   }
 
-  bool is_singleton() const override {
+  bool is_nested_int() const override {
     return true;
   }
 
@@ -118,15 +118,15 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
     if (coeff_ == 1) {
       return "j" + std::to_string(val_);
     }
-    if (type_ == SingletonVariant::CPP) {
+    if (type_ == NestedTensorVariant::CPP) {
       return "jx";
     }
     return std::to_string(coeff_) + "*j" + std::to_string(val_);
   }
 
-  // NOTE [ Inequalities with SingletonInt ]
+  // NOTE [ Inequalities with nested int ]
   //
-  // The semantics of SingletonInt when it comes to relations is that it is
+  // The semantics of nested int when it comes to relations is that it is
   // treated as integer known to be within a certain range,
   //
   //     j0 \in [2, int64_t::max]
@@ -153,7 +153,7 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
   // [ Coefficient are assumed positive ]
   //
   // For the purpose of computing inequalities, we consider the coefficient of
-  // the SingletonInt to be a positive integer.
+  // the nested int to be a positive integer.
   //
   // Thus, no modifications are needed to the logic since
   // j0 >= k implies coeff * j0 >= k
@@ -166,30 +166,30 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
   c10::SymNode le(const c10::SymNode& other) override;
   c10::SymNode mul(const c10::SymNode& other) override;
 
-  c10::optional<int64_t> singleton_int() override {
+  c10::optional<int64_t> nested_int() override {
     TORCH_CHECK(
-        type_ == SingletonVariant::PYTHON,
+        type_ == NestedTensorVariant::PYTHON,
         "shape returned from strided layout NestedTensor does not support this "
         "operation");
     return val_;
   }
 
-  c10::optional<int64_t> singleton_coeff() override {
-    TORCH_INTERNAL_ASSERT(type_ == SingletonVariant::PYTHON);
+  c10::optional<int64_t> nested_int_coeff() override {
+    TORCH_INTERNAL_ASSERT(type_ == NestedTensorVariant::PYTHON);
     return coeff_;
   }
 
-  // If we would like to have singleton_vec() as a virtual method, it must
+  // If we would like to have nested_int_vec() as a virtual method, it must
   // be defined on SymNodeImpl, which exists in c10 only. This means we cannot
   // return normal Tensor. The workaround here is to return a pointer instead.
-  // Instead of using this method directly, please use get_singleton_vec, if you
-  // need a regular Tensor.
-  c10::TensorImpl* singleton_vec() const override {
+  // Instead of using this method directly, please use get_nested_int_vec, if
+  // you need a regular Tensor.
+  c10::TensorImpl* nested_int_vec() const override {
     return vec_.unsafeGetTensorImpl();
   }
 
-  int64_t singleton_sum_vec() const override {
-    TORCH_INTERNAL_ASSERT(type_ == SingletonVariant::PYTHON);
+  int64_t nested_int_sum_vec() const override {
+    TORCH_INTERNAL_ASSERT(type_ == NestedTensorVariant::PYTHON);
     return sum_vec_;
   }
 
@@ -197,11 +197,13 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
     return false;
   }
 
-// NB: if you support a new operation and it returns singleton int, be sure
-//     to update python_symnode.
+  c10::DispatchKeySet key_set() const override {
+    return key_set_;
+  }
+
 #define DEFINE_BINARY_NOT_SUPPORTED(name)                           \
   c10::SymNode name(const c10::SymNode& other) override {           \
-    TORCH_CHECK(false, #name " not supported by SingletonSymNode"); \
+    TORCH_CHECK(false, #name " not supported by NestedIntSymNode"); \
   }
 
   DEFINE_BINARY_NOT_SUPPORTED(add)
@@ -219,7 +221,7 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
 
 #define DEFINE_NOT_SUPPORTED(name)                                     \
   c10::SymNode name() override {                                       \
-    TORCH_CHECK(false, #name " is not supported by SingletonSymNode"); \
+    TORCH_CHECK(false, #name " is not supported by NestedIntSymNode"); \
   }
 
   DEFINE_NOT_SUPPORTED(sym_not)
@@ -236,9 +238,10 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
   int64_t coeff_;
   at::Tensor vec_;
   int64_t sum_vec_;
-  SingletonVariant type_;
+  NestedTensorVariant type_;
+  c10::DispatchKeySet key_set_;
 };
 
-TORCH_API at::Tensor get_singleton_vec(const c10::SymNodeImpl* node);
+TORCH_API at::Tensor get_nested_int_vec(const c10::SymNodeImpl* node);
 
 } // namespace c10
