@@ -528,10 +528,6 @@ def get_current_node_opt_ctx() -> OptimizationContext:
     return get_opt_ctx(V.interpreter.current_node)
 
 
-class CppVecUnsupportedError(Exception):
-    pass
-
-
 class CppCSEVariable(CSEVariable):
     def __init__(self, name, bounds: ValueRanges[Any]):
         super().__init__(name, bounds)
@@ -1312,7 +1308,6 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def where(a, b, c):
-        assert isinstance(b, CppCSEVariable)
         assert isinstance(V.kernel, CppVecKernel)
         return f"decltype({b})::blendv({c}, {b}, {V.kernel._get_mask_cast(a, b.dtype)})"
 
@@ -3376,52 +3371,48 @@ class CppKernelProxy(CppKernel):
         with torch._inductor.config.patch(inplace_buffers=False):
             tiling_factors, tiling_indices = select_tiling(vec_dtype)
             assert len(tiling_factors) == len(tiling_indices)
-            try:
-                if len(tiling_indices) == 1:
-                    vec_kernel = codegen_kernel(
-                        CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
-                    )
-                    metrics.generated_cpp_vec_kernel_count += 1
-                    main_loop, tail_loop = self.loop_nest.split_with_tiling(
-                        tiling_indices[0], factor=tiling_factors[0]
-                    )
-                    main_loop.set_kernel(vec_kernel)
-                    tail_loop.set_kernel(scalar_kernel)
-                    main_loop.simd_vec = True
-                    tail_loop.simd_omp = True
-                    # We chop the loop into two cubes by the nelements - main loop and tail loop.
-                    # Regarding the main loop, it is straightforward that it could be vectorized with
-                    # nelements. But for the tail loop, it still could be vectorized. For example,
-                    # if the nelements is 8(256bits), then the tail loop still could be vectorized
-                    # as 4(128bits).
-                    tail_loop.simd_nelements = tiling_factors[0] // 2
-                elif len(tiling_indices) == 2:
-                    assert (
-                        tiling_indices[1] == len(self.itervars) - 1
-                        and tiling_factors[0] == tiling_factors[1]
-                    )
-                    tile2d_kernel = codegen_kernel(
-                        CppTile2DKernel, tiling_factors[0], tiling_indices, vec_dtype
-                    )
-                    vec_kernel = codegen_kernel(
-                        CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
-                    )
-                    metrics.generated_cpp_vec_kernel_count += 2
-                    outer_main_loop, outer_tail_loop = self.loop_nest.split_with_tiling(
-                        tiling_indices[0], factor=tiling_factors[0]
-                    )
-                    outer_tail_loop.set_kernel(scalar_kernel)
-                    (
-                        inner_main_loop,
-                        inner_tail_loop,
-                    ) = outer_main_loop.split_with_tiling(
-                        tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
-                    )
-                    inner_main_loop.set_kernel(tile2d_kernel)
-                    inner_tail_loop.set_kernel(vec_kernel)
-            except CppVecUnsupportedError as e:
-                if schedule_log.isEnabledFor(logging.DEBUG):
-                    schedule_log.debug("Disabled vectorization: %s", e)
+            if len(tiling_indices) == 1:
+                vec_kernel = codegen_kernel(
+                    CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
+                )
+                metrics.generated_cpp_vec_kernel_count += 1
+                main_loop, tail_loop = self.loop_nest.split_with_tiling(
+                    tiling_indices[0], factor=tiling_factors[0]
+                )
+                main_loop.set_kernel(vec_kernel)
+                tail_loop.set_kernel(scalar_kernel)
+                main_loop.simd_vec = True
+                tail_loop.simd_omp = True
+                # We chop the loop into two cubes by the nelements - main loop and tail loop.
+                # Regarding the main loop, it is straightforward that it could be vectorized with
+                # nelements. But for the tail loop, it still could be vectorized. For example,
+                # if the nelements is 8(256bits), then the tail loop still could be vectorized
+                # as 4(128bits).
+                tail_loop.simd_nelements = tiling_factors[0] // 2
+            elif len(tiling_indices) == 2:
+                assert (
+                    tiling_indices[1] == len(self.itervars) - 1
+                    and tiling_factors[0] == tiling_factors[1]
+                )
+                tile2d_kernel = codegen_kernel(
+                    CppTile2DKernel, tiling_factors[0], tiling_indices, vec_dtype
+                )
+                vec_kernel = codegen_kernel(
+                    CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
+                )
+                metrics.generated_cpp_vec_kernel_count += 2
+                outer_main_loop, outer_tail_loop = self.loop_nest.split_with_tiling(
+                    tiling_indices[0], factor=tiling_factors[0]
+                )
+                outer_tail_loop.set_kernel(scalar_kernel)
+                (
+                    inner_main_loop,
+                    inner_tail_loop,
+                ) = outer_main_loop.split_with_tiling(
+                    tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
+                )
+                inner_main_loop.set_kernel(tile2d_kernel)
+                inner_tail_loop.set_kernel(vec_kernel)
 
     def codegen_loops(self, code, worksharing):
         self.codegen_loops_impl(self.loop_nest, code, worksharing)
