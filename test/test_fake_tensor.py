@@ -87,7 +87,7 @@ class FakeTensorTest(TestCase):
     def test_custom_op_fallback(self):
         from torch.library import Library, impl
 
-        test_lib = Library("my_test_op", "DEF")
+        test_lib = Library("my_test_op", "DEF")  # noqa: TOR901
         test_lib.define('foo(Tensor self) -> Tensor')
 
         @impl(test_lib, 'foo', 'CPU')
