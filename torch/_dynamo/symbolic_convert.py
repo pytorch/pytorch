@@ -592,7 +592,7 @@ def promote_exception_to_graph_break(inner_fn):
         except Unsupported:
             raise
         except RuntimeError as e:
-            if inst.offset is None:
+            if inst.offset is None or not hasattr(self.f_code, "co_exceptiontable"):
                 raise
 
             from torch._dynamo.bytecode_transformation import parse_exception_table
