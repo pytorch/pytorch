@@ -1697,6 +1697,14 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m.train()
         _assert_ops_are_correct(m, train=True)
 
+    def test_model_is_exported(self):
+        m = TestHelperModules.ConvWithBNRelu(relu=True)
+        example_inputs = (torch.rand(3, 3, 5, 5),)
+        exported_gm = capture_pre_autograd_graph(m, example_inputs)
+        fx_traced_gm = torch.fx.symbolic_trace(m, example_inputs)
+        self.assertTrue(torch.ao.quantization.pt2e.export_utils.model_is_exported(exported_gm))
+        self.assertFalse(torch.ao.quantization.pt2e.export_utils.model_is_exported(fx_traced_gm))
+
     def test_reentrant(self):
         """Test we can safely call quantization apis multiple times"""
         m = TestHelperModules.ConvBnReLU2dAndLinearReLU()
