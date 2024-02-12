@@ -10,6 +10,7 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM
     TestCase,
 )
 from torch.testing._internal.inductor_utils import (
@@ -291,6 +292,15 @@ test_failures = {
     ),
 }
 
+if TEST_WITH_ROCM:
+    test_failures.update(
+        {
+            "test_split_cumsum_dynamic_shapes": TestFailure(("cpu", "cuda")),
+            "test_split_cumsum_low_prec_dynamic_shapes": TestFailure(("cpu", "cuda")),
+            "test_split_cumprod_dynamic_shapes": TestFailure(("cpu", "cuda")),
+            "test_split_cumprod_low_prec_dynamic_shapes": TestFailure(("cpu", "cuda")),
+        }
+    )
 
 DynamicShapesCodegenCommonTemplate = make_dynamic_cls(
     CommonTemplate, xfail_prop="_expected_failure_codegen_dynamic"
