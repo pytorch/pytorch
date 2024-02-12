@@ -42,7 +42,7 @@ struct GemmParams : OpParams {
   GemmParams* DeepCopy() const {
     GemmParams* copy = new GemmParams;
     *copy = *this;
-    int device;
+    c10::DeviceIndex device = 0;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
     size_t c_size = m * n * sizeof(T);
     copy->c = static_cast<T*>(c10::cuda::CUDACachingAllocator::raw_alloc(c_size));
@@ -109,7 +109,7 @@ struct GemmStridedBatchedParams : OpParams {
   GemmStridedBatchedParams* DeepCopy() const {
     GemmStridedBatchedParams* copy = new GemmStridedBatchedParams;
     *copy = *this;
-    int device;
+    c10::DeviceIndex device = 0;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
     size_t c_size = batch * stride_c * sizeof(T);
     copy->c = static_cast<T*>(c10::cuda::CUDACachingAllocator::raw_alloc(c_size));
