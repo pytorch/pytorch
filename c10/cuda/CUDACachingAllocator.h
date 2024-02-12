@@ -164,7 +164,7 @@ struct TraceEntry {
   };
   TraceEntry(
       Action action,
-      int device,
+      c10::DeviceIndex device,
       int64_t addr,
       size_t size,
       cudaStream_t stream,
@@ -225,24 +225,26 @@ class CUDAAllocator : public Allocator {
   virtual void raw_delete(void* ptr) = 0;
   virtual void init(int device_count) = 0;
   virtual bool initialized() = 0;
-  virtual void setMemoryFraction(double fraction, int device) = 0;
+  virtual void setMemoryFraction(double fraction, c10::DeviceIndex device) = 0;
   virtual void emptyCache() = 0;
-  virtual void cacheInfo(int dev_id, size_t* largestBlock) = 0;
+  virtual void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) = 0;
   virtual void* getBaseAllocation(void* ptr, size_t* size) = 0;
   virtual void recordStream(const DataPtr&, CUDAStream stream) = 0;
-  virtual DeviceStats getDeviceStats(int device) = 0;
-  virtual void resetAccumulatedStats(int device) = 0;
-  virtual void resetPeakStats(int device) = 0;
+  virtual DeviceStats getDeviceStats(c10::DeviceIndex device) = 0;
+  virtual void resetAccumulatedStats(c10::DeviceIndex device) = 0;
+  virtual void resetPeakStats(c10::DeviceIndex device) = 0;
   virtual SnapshotInfo snapshot() = 0;
   virtual void beginAllocateToPool(
-      int device,
+      c10::DeviceIndex device,
       MempoolId_t mempool_id,
       std::function<bool(cudaStream_t)> filter) = 0;
-  virtual void endAllocateToPool(int device, MempoolId_t mempool_id) = 0;
-  virtual void releasePool(int device, MempoolId_t mempool_id) = 0;
+  virtual void endAllocateToPool(
+      c10::DeviceIndex device,
+      MempoolId_t mempool_id) = 0;
+  virtual void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) = 0;
   // returns true if the allocated blocks are equal to expected live allocations
   virtual bool checkPoolLiveAllocations(
-      int device,
+      c10::DeviceIndex device,
       MempoolId_t mempool_id,
       const std::unordered_set<void*>& expected_live_allocations) {
     TORCH_CHECK(
@@ -298,10 +300,10 @@ class CUDAAllocator : public Allocator {
       cudaStream_t stream,
       bool p2p_enabled) = 0;
   virtual std::shared_ptr<AllocatorState> getCheckpointState(
-      int device,
+      c10::DeviceIndex device,
       MempoolId_t id) = 0;
   virtual CheckpointDelta setCheckpointPoolState(
-      int device,
+      c10::DeviceIndex device,
       std::shared_ptr<AllocatorState> pps) = 0;
   virtual std::string name() = 0;
 };
@@ -334,7 +336,7 @@ inline void init(int device_count) {
   return get()->init(device_count);
 }
 
-inline void setMemoryFraction(double fraction, int device) {
+inline void setMemoryFraction(double fraction, c10::DeviceIndex device) {
   return get()->setMemoryFraction(fraction, device);
 }
 
@@ -342,8 +344,8 @@ inline void emptyCache() {
   return get()->emptyCache();
 }
 
-inline void cacheInfo(int dev_id, size_t* largestBlock) {
-  return get()->cacheInfo(dev_id, largestBlock);
+inline void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) {
+  return get()->cacheInfo(device, largestBlock);
 }
 
 inline void* getBaseAllocation(void* ptr, size_t* size) {
@@ -354,15 +356,15 @@ inline void recordStream(const DataPtr& dataPtr, CUDAStream stream) {
   return get()->recordStream(dataPtr, stream);
 }
 
-inline DeviceStats getDeviceStats(int device) {
+inline DeviceStats getDeviceStats(c10::DeviceIndex device) {
   return get()->getDeviceStats(device);
 }
 
-inline void resetAccumulatedStats(int device) {
+inline void resetAccumulatedStats(c10::DeviceIndex device) {
   return get()->resetAccumulatedStats(device);
 }
 
-inline void resetPeakStats(int device) {
+inline void resetPeakStats(c10::DeviceIndex device) {
   return get()->resetPeakStats(device);
 }
 
@@ -371,26 +373,26 @@ inline SnapshotInfo snapshot() {
 }
 
 inline std::shared_ptr<AllocatorState> getCheckpointState(
-    int device,
+    c10::DeviceIndex device,
     MempoolId_t id) {
   return get()->getCheckpointState(device, id);
 }
 
 inline CheckpointDelta setCheckpointPoolState(
-    int device,
+    c10::DeviceIndex device,
     std::shared_ptr<AllocatorState> pps) {
   return get()->setCheckpointPoolState(device, std::move(pps));
 }
 
 // CUDAGraph interactions
 inline void beginAllocateToPool(
-    int device,
+    c10::DeviceIndex device,
     MempoolId_t mempool_id,
     std::function<bool(cudaStream_t)> filter) {
   get()->beginAllocateToPool(device, mempool_id, std::move(filter));
 }
 
-inline void endAllocateToPool(int device, MempoolId_t mempool_id) {
+inline void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id) {
   get()->endAllocateToPool(device, mempool_id);
 }
 
@@ -408,7 +410,7 @@ inline bool isHistoryEnabled() {
 }
 
 inline bool checkPoolLiveAllocations(
-    int device,
+    c10::DeviceIndex device,
     MempoolId_t mempool_id,
     const std::unordered_set<void*>& expected_live_allocations) {
   return get()->checkPoolLiveAllocations(
@@ -423,7 +425,7 @@ inline void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) {
   return get()->attachAllocatorTraceTracker(std::move(tracker));
 }
 
-inline void releasePool(int device, MempoolId_t mempool_id) {
+inline void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return get()->releasePool(device, mempool_id);
 }
 // Not part of CUDA_ALLOCATOR_BACKEND_INTERFACE
