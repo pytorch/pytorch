@@ -17,7 +17,7 @@ fi
 lintrunner init 2> /dev/null
 
 # Do build steps necessary for linters
-if [[ ${CLANG} == "1" ]]; then
+if [[ "${CLANG}" == "1" ]]; then
     python3 -m tools.linter.clang_tidy.generate_build_files
 fi
 python3 -m tools.generate_torch_version --is_debug=false
