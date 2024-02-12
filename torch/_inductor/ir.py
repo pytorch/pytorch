@@ -4629,6 +4629,13 @@ class FallbackKernel(ExternKernelAlloc):
             # FallbackKernel, so please check this if you opt-in.
             return
 
+        if "_c10d_functional" in self.op_overload.name():
+            # _c10d_functional kernels are lowered into _CollectiveKernel which
+            # derives from FallbackKernel for the cpp codegen. The kernels
+            # don't pass the can_auto_functionalize check, but their mutation
+            # is handled properly by _CollectiveKernel.
+            return
+
         schema = self.op_overload._schema
 
         # NOTE: [FallbackKernel supported operators]
@@ -4647,15 +4654,7 @@ class FallbackKernel(ExternKernelAlloc):
             self.mutation_names.append(tensor_args[0].get_name())
             return
 
-        if schema.is_mutable and not (
-            can_auto_functionalize(kernel)
-            # _CollectiveKernel derives from FallbackKernel to utilize its cpp
-            # codegen and it handles mutation correctly.
-            # TODO(yifu): handle this special case better by either not
-            # deriving FallbackKernel or make the collective kernels pass the
-            # can_auto_functionalize test.
-            or "c10d_functional" in self.op_overload.name()
-        ):
+        if schema.is_mutable and not can_auto_functionalize(kernel):
             raise NotImplementedError(
                 f"NYI: Can't generate FallbackKernel for {kernel}"
             )
@@ -4686,9 +4685,8 @@ class FallbackKernel(ExternKernelAlloc):
             if info.alias_info.is_write:
                 mark_node_as_mutating(self, arg)
 
-        if "c10d_functional" not in self.op_overload.name():
-            for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
-                handle_aliasing_and_mutation(info, arg)
+        for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
+            handle_aliasing_and_mutation(info, arg)
 
     def set_cpp_kernel(self, kernel):
         from .codegen.wrapper import get_cpp_op_schema
