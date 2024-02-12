@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 
-#include <iostream>
 #include <unordered_map>
 
 namespace torch {
@@ -419,8 +418,7 @@ class DeadCodeEliminator {
 
   AliasDb* getOrCreateAliasDb() {
     if (!aliasDb_) {
-      std::cout << " Making alias db\n" aliasDb_ =
-          std::make_unique<AliasDb>(graph_);
+      aliasDb_ = std::make_unique<AliasDb>(graph_);
     }
     return aliasDb_.get();
   }
