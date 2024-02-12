@@ -7,7 +7,7 @@
 
 @interface MPSGraph (SonomaOps)
 -(MPSGraphTensor *) conjugateWithTensor:(MPSGraphTensor *) tensor
-                                   name:(NSString * _Nullable) name
+                                   name:(NSString * _Nullable) name;
 @end
 // define BFloat16 enums for MacOS13
 #define MPSDataTypeBFloat16 ((MPSDataType) (MPSDataTypeAlternateEncodingBit | MPSDataTypeFloat16))

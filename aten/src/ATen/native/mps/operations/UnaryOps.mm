@@ -505,6 +505,7 @@ Tensor& conj_physical_out_mps(const Tensor& self, Tensor& result) {
       return [mpsGraph conjugateWithTensor:inputTensor name:nil];
     });
   }
+  return result;
 }
 
 } // namespace at::native
