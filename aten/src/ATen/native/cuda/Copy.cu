@@ -20,7 +20,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAStream.h>
 
-// TODO(NS): Investigate why FP8 conversion intrisncs end up being slower
+// TODO(NS): Investigate why FP8 conversion intrinsics end up being slower
 #ifdef AT_USE_NV_CVT_INTRINSICS
 #include <cuda_fp8.h>
 #endif

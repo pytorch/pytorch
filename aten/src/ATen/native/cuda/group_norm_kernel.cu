@@ -611,7 +611,7 @@ void GroupNormKernelImplInternal(
     T_ACC* b_data = b.mutable_data_ptr<T_ACC>();
 
     // TODO: Since there is some issues in gpu_kernel_multiple_outputs, we are
-    // using maunal kernel here. Make it using gpu_kernel_multiple_outputs once
+    // using manual kernel here. Make it using gpu_kernel_multiple_outputs once
     // the issue fixed.
     const int64_t B = (N * C + kCUDANumThreads - 1) / kCUDANumThreads;
     ComputeFusedParamsCUDAKernel<T><<<B, kCUDANumThreads, 0, cuda_stream>>>(
@@ -772,7 +772,7 @@ void GroupNorm1dBackward(
     } else {
       const int64_t B = (C + kReduceTileSize - 1) / kReduceTileSize;
       // The algorithm for colwise reduction here is to accumulate each 32 cols
-      // to a 32 * 32 tile and write the tile to shared memmory. Then do warp
+      // to a 32 * 32 tile and write the tile to shared memory. Then do warp
       // reduce for each col in the tile. So here the blockDim must be (32, 16).
       constexpr int kThreadX = kReduceTileSize;
       constexpr int kThreadY = kReduceTileSize / 2;
@@ -944,7 +944,7 @@ void GroupNormBackwardKernelImplInternal(
     } else {
       const int64_t B = (C + kReduceTileSize - 1) / kReduceTileSize;
       // The algorithm for colwise reduction here is to accumulate each 32 cols
-      // to a 32 * 32 tile and write the tile to shared memmory. Then do warp
+      // to a 32 * 32 tile and write the tile to shared memory. Then do warp
       // reduce for each col in the tile. So here the blockDim must be (32, 16).
       constexpr int kThreadX = kReduceTileSize;
       constexpr int kThreadY = kReduceTileSize / 2;

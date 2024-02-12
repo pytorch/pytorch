@@ -173,7 +173,7 @@ static void check_result_is_bytebool(const char* name, const Tensor& self, const
 
 // Note [all, any : uint8 compatibility]:
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// For NumPy comptability, `all` and `any` return
+// For NumPy compatibility, `all` and `any` return
 // Tensor of dtype `bool`. However for compatibility reason,
 // for `uint8`, they return Tensor of same dtype `uint8`.
 // Reference: https://github.com/pytorch/pytorch/pull/47878#issuecomment-747108561
@@ -510,7 +510,7 @@ static Tensor reversed_cumsum(const Tensor& w, int64_t dim) {
 Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, const Tensor& output) {
   /*
     We show here how to derive an O(n) gradient formula for
-    abitrary inputs. It follows via a basic application of the
+    arbitrary inputs. It follows via a basic application of the
     chain rule together with a number of observations for different
     cases. We assume that x is an n-dimensional vector and y = cumprod(x).
     In the actual implementation we will need to play a bit with masks
@@ -527,7 +527,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     The term dF / dy_j is just grad_output[j] (assuming again
     everything is one-dimensional).
 
-    The term (dy_j / dx_k) is easilly seen to be
+    The term (dy_j / dx_k) is easily seen to be
 
     if j >= k
       dy_j / dx_k = prod_{1 <= i <= j, i != k} x_i
@@ -589,7 +589,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
 
     dy_j / dx_z1 = prod(x[:z1]) * (grad_output[z1] + sum(grad_output[z1+1:z2] * cumprod(x[z1+1:z2])))
 
-    When the imputs are complex, this is map is holomorphic. As such, to compute
+    When the inputs are complex, this is map is holomorphic. As such, to compute
     its backwards is just the conjugate of the usual backwards. This simplifies to
     conjugating the input. We may also reuse the output as, since the map is holomorphic,
     cumprod(input.conj()) = cumprod(input).conj()

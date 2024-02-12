@@ -82,7 +82,7 @@ static TensorAssign tensor_assign;
 // of the same size.
 template <int N> struct alignas(N) OpaqueType { char data[N]; };
 
-// essentialy rewritten related to legacy::launch_kernel parts
+// essentially rewritten related to legacy::launch_kernel parts
 template <int nt, int vt, typename func_t>
 C10_LAUNCH_BOUNDS_2(nt, vt)
 __global__ void _scatter_gather_elementwise_kernel(int N, func_t f) {

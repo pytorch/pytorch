@@ -149,7 +149,7 @@ public:
     /// Complex transform on B operand
     static ComplexTransform const kTransformB = Operator::kTransformB;
 
-    // staticaly assert kStages for DqMmaPipelined is two (Double-buffered pipeline)
+    // statically assert kStages for DqMmaPipelined is two (Double-buffered pipeline)
     static_assert((Base::kStages == 2), "DqMmaPipelined requires kStages set to value 2");
 
 private:

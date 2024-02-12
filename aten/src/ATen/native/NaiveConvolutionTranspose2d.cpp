@@ -304,7 +304,7 @@ void slow_conv_transpose2d_out_cpu_template(
     at::parallel_for(0, batch_size, 0, [&](int64_t begin, int64_t end) {
       // For each elt in batch, do:
       for (const auto elt : c10::irange(begin, end)) {
-        // Matrix mulitply per output:
+        // Matrix multiply per output:
         Tensor input_n = input_.select(0, elt);
         Tensor output_n = output.select(0, elt);
         Tensor columns_n = columns.select(0, elt);
@@ -501,7 +501,7 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
 
         // For each elt in batch, do:
         for (const auto elt : c10::irange(batch_size)) {
-          // Matrix mulitply per sample:
+          // Matrix multiply per sample:
           grad_input_n = grad_input.select(0, elt);
           grad_output_n = grad_output.select(0, elt);
 
@@ -695,12 +695,12 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
 
         // For each elt in batch, do:
         for (const auto elt : c10::irange(batch_size)) {
-          // Matrix mulitply per output:
+          // Matrix multiply per output:
           grad_output_n = grad_output.select(0, elt);
 
           // Do Weight:
           if (grad_weight.defined()) {
-            // Matrix mulitply per output:
+            // Matrix multiply per output:
             input_n = input.select(0, elt);
 
             if (need_columns) {

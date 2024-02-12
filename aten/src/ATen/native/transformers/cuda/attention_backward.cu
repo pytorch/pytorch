@@ -592,14 +592,14 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
 
   Tensor grad_q, grad_k, grad_v, grad_bias;
 
-  // This is needed because SaveVarible automatically converts
+  // This is needed because SaveVariable automatically converts
   // c10::optional to undefined tensor
   c10::optional<Tensor> kernel_bias;
   if (attn_bias.defined()) {
     kernel_bias = attn_bias;
   }
   // Will add with signauter changes for dropout and bias
-  // We are only handiling Dense inputs, but this should be passed
+  // We are only handling Dense inputs, but this should be passed
   // from forward to backward
   int64_t max_seqlen_q = q_t.size(1);
   int64_t max_seqlen_k = k_t.size(1);

@@ -20,7 +20,7 @@ Tensor mpscnn_softmax(
     int64_t dim,
     c10::optional<ScalarType> dtype) {
   TORCH_CHECK(input.is_metal());
-  // TODO: [T87180544] Implment softmax/log_softmax in metal shaders
+  // TODO: [T87180544] Implement softmax/log_softmax in metal shaders
   TORCH_CHECK(input.dim() == 2);
   if(input.numel() == 0){
       return makeTensor({input.sizes().vec()}, input.options());

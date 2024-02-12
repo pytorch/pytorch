@@ -59,7 +59,7 @@ void cpu_take_put_kernel(
     bool serial_execution=false) {
   // This kernel follows the same strategy as `cpu_index_kernel`
   // Even though the indexed_tensor is const, we modify it through the data_ptr
-  // This is a bit dirty, but otherwise it would be necessary to innecessarily add tensor
+  // This is a bit dirty, but otherwise it would be necessary to unnecessarily add tensor
   // with zero strides to `iter` which would not be much better
 
   // When launch the parallel version, set a relative small grain size less than the INTERNAL::GRAIN_SIZE

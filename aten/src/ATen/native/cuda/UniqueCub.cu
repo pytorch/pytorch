@@ -288,7 +288,7 @@ struct UniqueCub<bool> {
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
 
-    // Final sync to fix the ouput tensors shape
+    // Final sync to fix the output tensors shape
     int num_true = 0;
     at::cuda::memcpy_and_sync(&num_true, tmp_num_true.get(), sizeof(int),
                               cudaMemcpyDeviceToHost, stream);

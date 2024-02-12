@@ -103,7 +103,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   if (bias_.has_value()) {
     // the input bias is a 1-D tensor whose size is the same as the size of the last dimension of quantized_output
     // we need to add trailing dimensions in order to properly broadcast bias, otherwise broadcast_to will fail.
-    // the number of trailling dimensions is quantized_output.dim() - 2. We also prepend a leading dimension for clarity
+    // the number of trailing dimensions is quantized_output.dim() - 2. We also prepend a leading dimension for clarity
     std::vector<int64_t> new_size(quantized_output.dim(), 1);
     new_size.back() = bias_.value().size(0);
     broadcasted_bias = bias_.value().clone().reshape(new_size);
@@ -186,7 +186,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   c10::optional<cudnn_frontend::Operation> bias_mult_op;
   c10::optional<cudnn_frontend::Operation> sum_linear_bias_op;
   if (bias_.has_value()) {
-    // we can't directly assign bias_mult_op becauase operator= is deleted for cudnn_frontend::Operation;
+    // we can't directly assign bias_mult_op because operator= is deleted for cudnn_frontend::Operation;
     // alternatively, I think we can use std::unique_ptr and dynamically allocate these builder ops
     // but here, we chose to do it statically. c10::optional<T>::emplace() enables this approach
 

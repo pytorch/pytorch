@@ -253,7 +253,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
           mat2_sizes[0] > 1 && mat2_sizes[1] > 1 &&
           mat2_sizes[0] < 65535 * 32 && mat2_sizes[1] < 65535 * 32 &&
           mat1_sizes[0] < 65535 * 32 && mat1_sizes[1] < 65535 * 32 &&
-          // avoid leaing dim >> rows bugs
+          // avoid leading dim >> rows bugs
           ((mat1.strides()[0] == 1 && mat1.strides()[1] == mat1_sizes[0]) ||
            (mat1.strides()[1] == 1 && mat1.strides()[0] == mat1_sizes[1]) ||
            (scalar_type != at::ScalarType::Half &&
@@ -816,7 +816,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
        " but got ", bias->numel());
   TORCH_CHECK(
       mat1.sizes()[1] % 16 == 0,
-      "Expected trailing dimension of mat1 to be divisble by 16 ",
+      "Expected trailing dimension of mat1 to be divisible by 16 ",
       "but got mat1 shape: (",
       mat1.sizes()[0],
       "x",

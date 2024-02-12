@@ -282,7 +282,7 @@ struct CusparseMatrixMultiplyOp {
 
     at::DataPtr dataPtr1 = allocator.allocate(bufferSize1);
     dBuffer1 = dataPtr1.get();
-    // inspect the matrices A and B to understand the memory requiremnent for
+    // inspect the matrices A and B to understand the memory requirement for
     // the next step
     TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_workEstimation(
         handle,

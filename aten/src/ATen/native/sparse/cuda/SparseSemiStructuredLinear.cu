@@ -54,7 +54,7 @@ Tensor two_four_sgemm_cutlass(
     // alias for particular instantiation of this template.
     using LayoutOutput = cutlass::layout::RowMajor; // Result of the operation will be provided in row-major format.
     using MMAOp = cutlass::arch::OpClassTensorOp; // Tensor cores are to be used for maximum performance.
-    using SmArch = cutlass::arch::Sm80; // Only CC 8.x devices are suported at the moment.
+    using SmArch = cutlass::arch::Sm80; // Only CC 8.x devices are supported at the moment.
     using SwizzleThreadBlock = cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>; // This choice provides good performance across wide range of operand sizes.
     constexpr int NumStages = 3; // This choice provides good performance across wide range of operand sizes.
     using Gemm = cutlass::gemm::device::SparseGemmRowBroadcast<
@@ -455,7 +455,7 @@ Tensor two_four_sgemm_cutlass_dispatch_layouts_activation(
 // a matrix with 2:4 sparsity pattern.  The "bias" tensor is optional;
 // if provided, it should be a vector, with the number of elements
 // equal to the number of rows of "weight" matrix.  It is assumed
-// that.  It is assummed that "input", after squashing eventual batch
+// that.  It is assumed that "input", after squashing eventual batch
 // dimensions with the next-to-last dimension of this tensor, and
 // "weight" tensors are supplied either in row-major or column-major
 // layouts (different layouts between these two tensors are OK, but
@@ -561,7 +561,7 @@ Tensor _sparse_semi_structured_linear(
     // Call wrapper function for CUTLASS sparse GEMM, dispatching on
     // the input datatype, and then on input tensors layouts.
     // According to the input tensors datatypes and layouts,
-    // correspnding template arguments are supplied for instantiating
+    // corresponding template arguments are supplied for instantiating
     // the wrapper function.  The tile sizes template arguments are
     // selected according to the CUTLASS profiler results, for number
     // of runs.
