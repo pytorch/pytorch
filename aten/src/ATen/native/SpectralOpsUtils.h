@@ -3,8 +3,14 @@
 #include <string>
 #include <stdexcept>
 #include <sstream>
+#include <c10/core/ScalarType.h>
+#include <c10/util/ArrayRef.h>
+#include <c10/util/Exception.h>
 #include <ATen/native/DispatchStub.h>
 
+namespace at {
+class Tensor;
+}
 namespace at::native {
 
 // Normalization types used in _fft_with_size
