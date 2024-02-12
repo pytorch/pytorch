@@ -8234,7 +8234,6 @@ def ___make_guard_fn():
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_validate_outputs_unbacked(self):
-
         class SillyCat(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x0, x1, i):
@@ -8243,7 +8242,7 @@ def ___make_guard_fn():
 
             @staticmethod
             def backward(ctx, grad_out):
-                i, = ctx.saved_tensors
+                (i,) = ctx.saved_tensors
                 i0, i1 = i.tolist()
                 g_x0, g_x1 = grad_out.split([i0, i1])
                 return g_x0, g_x1, None
