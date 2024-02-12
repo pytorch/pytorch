@@ -2,6 +2,14 @@
 
 #include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/debug_macros.h>
+#include <torch/csrc/dynamo/cpython_defs.h>
+
+// Problem in CPython includes when mixing core and non-core build
+// The fix was not backported to 3.12 so this is needed here
+// https://github.com/python/cpython/issues/105268
+#if IS_PYTHON_3_12_PLUS
+#undef _PyGC_FINALIZED
+#endif
 
 Py_ssize_t extra_index = -1;
 
