@@ -33,24 +33,20 @@ def get_config():
     global cache
     if cache is not None:
         return cache
-    try:
-        csv_path = os.path.join(os.path.dirname(__file__), "dynamo_test_failures.csv")
-        test_failures = {}
-        with open(csv_path) as f:
-            reader = csv.reader(f)
-            for i, row in enumerate(reader):
-                # There should be 3 lines in between everything in dynamo_test_failures.csv!
-                if i % 4 != 0:
-                    assert len(row) == 0
-                    continue
-                if i == 0:
-                    # ignore header
-                    continue
-                assert len(row) >= 2
-                test_failures[row[0]] = row[1]
-    except FileNotFoundError:
-        # CSV not packaged with PyTorch or some weird build configuration
-        test_failures = {}
+	csv_path = os.path.join(os.path.dirname(__file__), "dynamo_test_failures.csv")
+	test_failures = {}
+	with open(csv_path) as f:
+		reader = csv.reader(f)
+		for i, row in enumerate(reader):
+			# There should be 3 lines in between everything in dynamo_test_failures.csv!
+			if i % 4 != 0:
+				assert len(row) == 0
+				continue
+			if i == 0:
+				# ignore header
+				continue
+			assert len(row) >= 2
+			test_failures[row[0]] = row[1]
 
     # We generate unittest.expectedFailure/unittest.skip for all of the following tests
     # when run under PYTORCH_TEST_WITH_DYNAMO=1.
