@@ -945,17 +945,8 @@ class CppOverrides(OpOverrides):
         V.kernel.compute.splice(code)
         return result
 
-    @staticmethod
-    def bessel_j0(x):
-        return f"bessel_j0_forward({x})"
 
-    @staticmethod
-    def bessel_j1(x):
-        return f"bessel_j1_forward({x})"
-
-    @staticmethod
-    def modified_bessel_i0(x):
-        return f"modified_bessel_i0_forward({x})"
+CppOverrides._initialize_pointwise_overrides("cpp")
 
 
 class CppVecOverrides(CppOverrides):
@@ -1304,10 +1295,7 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def where(a, b, c):
-        if b.dtype == torch.int64:
-            raise CppVecUnsupportedError(
-                "where with int64 tensor is not supported in vectorized codegen"
-            )
+        assert isinstance(V.kernel, CppVecKernel)
         return f"decltype({b})::blendv({c}, {b}, {V.kernel._get_mask_cast(a, b.dtype)})"
 
     @staticmethod
@@ -1476,6 +1464,18 @@ class CppVecOverrides(CppOverrides):
             csevar = V.kernel.load_non_contiguous(None, index, dtype, V.kernel.compute)
         csevar.update_on_args("index_expr", (expr, dtype), {})
         return csevar
+
+    @staticmethod
+    def indirect_indexing(index_var, size, check=True):
+        assert isinstance(index_var, CppCSEVariable)
+        if index_var.is_vec:
+            raise CppVecUnsupportedError(
+                "indirect_indexing does not support vector index_var"
+            )
+        return sympy_index_symbol(str(index_var))
+
+
+CppVecOverrides._initialize_pointwise_overrides("cppvec")
 
 
 class CppTile2DOverrides(CppVecOverrides):
