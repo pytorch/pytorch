@@ -25,6 +25,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.utils._triton import has_triton
+import logging
 
 
 def load_test_module(name):
@@ -71,7 +72,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
     def _init_process_group(self) -> None:
         # Allow testing aoti after torch.compile
         torch._inductor.config.triton.store_cubin = True
-        torch._inductor.config.debug = True
+        torch._utils.set_logs(inductor=logging.DEBUG)
 
         torch.cuda.set_device(self.device)
         store = dist.FileStore(self.file_name, self.world_size)

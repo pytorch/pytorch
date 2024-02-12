@@ -12,6 +12,7 @@ from torch._dynamo.backends.cudagraphs import cudagraphs_inner
 from torch._dynamo.testing import same
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.utils import timed
+import logging
 
 try:
     import test.test_torchinductor as tti
@@ -137,7 +138,7 @@ def main():
         torch._inductor.config.cpp.threads = args.threads
 
     if args.verbose:
-        torch._inductor.config.debug = True
+        torch._utils.set_logs(inductor=logging.DEBUG)
 
     torch._inductor.config.triton.autotune_pointwise = True
 

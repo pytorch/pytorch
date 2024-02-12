@@ -3588,7 +3588,7 @@ def run(runner, args, original_dir=None):
         experiment = speedup_experiment
         output_filename = "overheads.csv"
     elif args.inductor:
-        inductor_config.debug = args.verbose
+        torch._logging.set_logs(inductor=logging.DEBUG)
         if args.threads:
             inductor_config.cpp.threads = args.threads
 

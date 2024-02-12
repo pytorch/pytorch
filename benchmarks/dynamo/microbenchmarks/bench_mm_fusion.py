@@ -6,7 +6,6 @@ import torch._inductor.config
 import triton
 from prettytable import PrettyTable
 
-# torch._inductor.config.debug = True
 torch._inductor.config.triton.dense_indexing = True
 torch.manual_seed(0)
 
