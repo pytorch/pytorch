@@ -1294,31 +1294,32 @@ def forward(self, getitem, const):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
 
-        pred = torch.tensor(True)
-        pred2 = torch.tensor(False)
-        xs = torch.randn(2, 3, 3)
-        y = torch.randn(3, 3)
+        pred = torch.tensor(False).cuda()
+        x = torch.randn(2, 3, 3).cuda()
+        y = torch.randn(4, 3, 3).cuda()
 
-        @torch.compile(backend=cnt, fullgraph=True)
-        def cond_f(pred, pred2, x, y):
-            def true_fn(pred2, x, y):
-                return x + y
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(y, 0)
 
-            def false_fn(pred2, x, y):
-                def true_fn2(x, y):
-                    return x.sin() - y.cos()
+        def cond_f(pred, x, y):
+            def true_fn(x, y):
+                return torch.cat([x, y], dim=0) * 3.14
 
-                def false_fn2(x, y):
-                    return x.cos() - y.sin()
+            def false_fn(x, y):
+                return torch.cat([x, y], dim=0) / 2.17
 
-                return control_flow.cond(pred2, true_fn2, false_fn2, [x, y])
+            z = torch.cat([x, y], dim=0)
+            return control_flow.cond(pred, true_fn, false_fn, [z, z])[0]
 
-            return control_flow.cond(pred, true_fn, false_fn, [pred2, x, y])
+        result = cond_f(pred, x, y)
+        compuled_f = torch.compile(backend="inductor", fullgraph=True)(cond_f)
+        result_compiled = compuled_f(pred, x, y)
+        self.assertEqual(result, result_compiled)
 
-        result = cond_f(pred, pred2, xs, y)
-        self.assertEqual(result, xs + y)
+        # cond_gm = backend.graphs[0]
 
-        cond_gm = backend.graphs[0]
+        breakpoint()
+
         name_set = set()
         for name, _ in cond_gm.named_modules():
             name_set.add(name)

@@ -439,7 +439,11 @@ def get_fused_kernel_name(node_schedule, descriptive_names):
     if descriptive_names == "original_aten":
         # Bases the kernel name off of the top-level aten operator (i.e. pre-decompositions)
         sources = [
-            origin.meta["original_aten"]._overloadpacket.__name__
+            (
+                origin.meta["original_aten"]._overloadpacket.__name__
+                if origin.meta["original_aten"] is not None
+                else "none"
+            )
             for origin in all_origins
             if origin.op == "call_function"
             and "original_aten" in origin.meta
@@ -786,6 +790,12 @@ class IndentedBuffer:
                 self._indent -= offset
 
         return ctx()
+
+    def force_indent(self, offset=1):
+        self._indent += offset
+
+    def force_unindent(self, offset=1):
+        self._indent -= offset
 
     def splice(self, other_code, strip=False):
         if isinstance(other_code, IndentedBuffer):

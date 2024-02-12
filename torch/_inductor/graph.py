@@ -209,6 +209,7 @@ class GraphLowering(torch.fx.Interpreter):
         const_output_index=None,
         const_code=None,
         const_module=None,
+        name=None,
     ):
         super().__init__(gm)
 
@@ -271,7 +272,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.name_to_buffer: Dict[str, ir.Buffer] = {}
         self.name_to_users: DefaultDict[str, List[ir.IRNode]] = defaultdict(list)
         self.creation_time = time.time()
-        self.name = "GraphLowering"
+        self.name = name
         self.cpp_wrapper = cpp_wrapper
 
         # record multi_kernel choice for cpp_wrapper so the second pass knows
@@ -468,6 +469,28 @@ class GraphLowering(torch.fx.Interpreter):
 
         return True
 
+    def qualify_name(self, name: str):
+        if self.name is not None:
+            return f"{self.name}_{name}"
+        return name
+
+    def make_subgraph(
+        self,
+        gm: torch.fx.GraphModule,
+        example_inputs: List[torch.Tensor],
+        subgraph_name: str,
+    ):
+        return GraphLowering(
+            gm=gm,
+            example_inputs=example_inputs,
+            shape_env=self._shape_env,
+            cpp_wrapper=self.cpp_wrapper,
+            aot_mode=self.aot_mode,
+            extern_node_serializer=self.extern_node_serializer,
+            is_inference=self.is_inference,
+            name=self.qualify_name(subgraph_name),
+        )
+
     def find_nodes_prefer_channels_last(self):
         """
         The rule to decide if an node prefer channels last is simple.
@@ -573,7 +596,7 @@ class GraphLowering(torch.fx.Interpreter):
         return super().run(*args)
 
     def register_buffer(self, buffer: ir.Buffer):
-        name = f"buf{len(self.buffers)}"
+        name = self.qualify_name(f"buf{len(self.buffers)}")
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
         # Skip empty CPU tensor so that CUDA graphs can succeed, see https://github.com/pytorch/pytorch/pull/114144
@@ -582,7 +605,7 @@ class GraphLowering(torch.fx.Interpreter):
         return name
 
     def register_list(self, buffer_names: List[str]):
-        name = "list_" + "_".join(buffer_names)
+        name = self.qualify_name("list_" + "_".join(buffer_names))
         self.lists[name] = buffer_names
         return name
 
@@ -639,6 +662,7 @@ class GraphLowering(torch.fx.Interpreter):
                 name = f"constant{len(self.constants)}"
             if name[0].isdigit():
                 name = f"constant_{name}"
+            name = self.qualify_name(name)
             # We may generate a var name for each constant in the codegen.
             # Let's only keep sane characters.
             prefix = re.sub(r"[^a-zA-Z0-9_]", "_", name)
@@ -697,15 +721,16 @@ class GraphLowering(torch.fx.Interpreter):
             sizes, strides = self.static_sizes_strides(example)
         else:
             sizes, strides = self.symbolic_sizes_strides(example)
+        name = self.qualify_name(target)
         # TODO(jansel): handle input aliasing
         tensor = TensorBox.create(
             InputBuffer(
-                target,
+                name,
                 FixedLayout(example.device, example.dtype, sizes, strides),
             )
         )
-        self.graph_inputs[target] = tensor
-        self.graph_inputs_original[target] = tensor.data.data
+        self.graph_inputs[name] = tensor
+        self.graph_inputs_original[name] = tensor.data.data
         self.add_device_info(example.device)
         return tensor
 
@@ -783,6 +808,9 @@ class GraphLowering(torch.fx.Interpreter):
     def get_attr(self, target, args, kwargs):
         # this is a constant
         value = getattr_recursive(self.module, target)
+
+        if isinstance(value, torch.fx.GraphModule):
+            return ir.Submodule(target, value)
 
         if (
             config.aot_inductor.use_runtime_constant_folding
@@ -1063,6 +1091,11 @@ class GraphLowering(torch.fx.Interpreter):
                 raise CppWrapperCodeGenError(f"Unsupported input dtype {dtype}")
 
     def init_wrapper_code(self):
+        if self.wrapper_code is not None:
+            # for subgraphs, we set the wrapper
+            # code from the parent graph
+            return
+
         self.cuda = "cuda" in self.device_types
         if self.cpp_wrapper:
             self.validate_can_generate_cpp_wrapper()
@@ -1148,6 +1181,15 @@ class GraphLowering(torch.fx.Interpreter):
         V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
         self.scheduler.codegen()
         return self.wrapper_code.generate(self.is_inference)
+
+    def codegen_subgraph(self, parent_wrapper_code, parent_device):
+        from .scheduler import Scheduler
+
+        self.wrapper_code = parent_wrapper_code
+
+        self.scheduler = Scheduler(self.buffers)
+        self.scheduler.current_device = parent_device
+        self.scheduler.codegen()
 
     def count_bytes(self):
         from .scheduler import Scheduler

@@ -246,6 +246,16 @@ class MemoryPlanningState:
         self.reuse_pool[key].append(item)
 
 
+class IndentLine:
+    def codegen(self, code: IndentedBuffer):
+        code.force_indent()
+
+
+class UnindentLine:
+    def codegen(self, code: IndentedBuffer):
+        code.force_unindent()
+
+
 @dataclasses.dataclass
 class EnterDeviceContextManagerLine:
     device_idx: int
@@ -709,7 +719,14 @@ class WrapperCodeGen(CodeGen):
 
             device_cm_stack = contextlib.ExitStack()
             for line in self.lines:
-                if isinstance(line, MemoryPlanningLine):
+                if isinstance(
+                    line,
+                    (
+                        MemoryPlanningLine,
+                        IndentLine,
+                        UnindentLine,
+                    ),
+                ):
                     line.codegen(self.wrapper_call)
                 elif isinstance(
                     line,

@@ -5438,6 +5438,12 @@ def triton_kernel_wrap(*, kernel_idx, grid, kwargs, tensors_to_clone):
     return triton_kernel_wrap_(kernel_idx=kernel_idx, grid=grid, kwargs=new_kwargs)
 
 
+@register_lowering(torch.ops.higher_order.cond)
+def torch_cond(pred, true_fn, false_fn, operands):
+    result = ir.Conditional.create(pred, true_fn, false_fn, operands)
+    return list(map(TensorBox.create, result))
+
+
 try:
     import torch.distributed._functional_collectives
 

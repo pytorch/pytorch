@@ -6665,6 +6665,141 @@ class StorageBox(MutableBox):
         )
 
 
+@dataclasses.dataclass
+class Submodule(IRNode):
+    name: str
+    graph_module: torch.fx.GraphModule
+    graph: Optional["GraphLowering"] = None
+
+
+@dataclasses.dataclass
+class Conditional(ExternKernel):
+    pred: Optional[TensorBox] = None
+    operands: Optional[List[TensorBox]] = None
+    true_submodule: Optional[torch.fx.GraphModule] = None
+    false_submodule: Optional[torch.fx.GraphModule] = None
+    outputs: Optional[List[MultiOutput]] = None
+
+    def __init__(
+        self,
+        pred,
+        operands,
+        true_submodule,
+        false_submodule,
+        layout,
+    ):
+        self.pred = pred
+        self.operands = operands
+        self.true_submodule = true_submodule
+        self.false_submodule = false_submodule
+        super().__init__(None, layout, inputs=[pred, *operands])
+        self.name = V.graph.register_buffer(self)
+
+    @classmethod
+    def create(cls, pred, true_fn, false_fn, operands):
+        assert isinstance(true_fn, Submodule), true_fn
+        assert isinstance(true_fn.graph_module, torch.fx.GraphModule), true_fn.module
+        assert isinstance(false_fn, Submodule), false_fn
+        assert isinstance(false_fn.graph_module, torch.fx.GraphModule), false_fn.module
+
+        pred = cls.realize_input(pred)
+        operands = [cls.realize_input(x) for x in operands]
+        fx_operands = V.current_node.args[-1]
+        fake_operands = [x.meta["val"] for x in fx_operands]
+
+        for submodule in (true_fn, false_fn):
+            if submodule.graph is None:
+                submodule.graph = V.graph.make_subgraph(
+                    gm=submodule.graph_module,
+                    example_inputs=fake_operands,
+                    subgraph_name=submodule.name,
+                )
+                with V.set_graph_handler(submodule.graph):
+                    submodule.graph.run(*fake_operands)
+
+        true_outputs = true_fn.graph.graph_outputs
+        false_outputs = true_fn.graph.graph_outputs
+        assert len(true_outputs) == len(false_outputs), (true_outputs, false_outputs)
+        for i, (to, fo) in enumerate(zip(true_outputs, false_outputs)):
+            assert to.get_size() == fo.get_size(), (i, to, fo)
+            assert to.get_stride() == fo.get_stride(), (i, to, fo)
+            assert to.get_device() == fo.get_device(), (i, to, fo)
+            assert to.get_dtype() == fo.get_dtype(), (i, to, fo)
+
+        # currently, we assume that the pred, operands,
+        # and outputs are all on the same device
+        for operand in operands:
+            assert operand.get_device() == pred.get_device()
+        for output in true_outputs:
+            assert output.get_device() == pred.get_device()
+
+        packed = Conditional(
+            pred=pred,
+            operands=operands,
+            true_submodule=true_fn,
+            false_submodule=false_fn,
+            layout=MultiOutputLayout(pred.get_device()),
+        )
+
+        outputs = [
+            MultiOutput(
+                FixedLayout(
+                    output.get_device(),
+                    output.get_dtype(),
+                    output.get_size(),
+                    output.get_stride(),
+                ),
+                packed,
+                [(list, i)],
+            )
+            for i, output in enumerate(true_outputs)
+        ]
+
+        packed.outputs = outputs
+        return outputs
+
+    def codegen(self, wrapper):
+        from .codegen.wrapper import IndentLine, UnindentLine
+
+        pred = self.pred.codegen_reference()
+        parent_wrapper_code = V.graph.wrapper_code
+        parent_device = V.graph.scheduler.current_device
+
+        wrapper.writeline("")
+        wrapper.writeline(f"if {pred}.item():")
+
+        wrapper.writeline(IndentLine())
+        wrapper.writeline(f"# subgraph: {self.true_submodule.name}")
+        for operand, input_name in zip(self.operands, self.true_submodule.graph.graph_inputs):
+            wrapper.writeline(f"{input_name} = {operand.get_name()}")
+        with V.set_graph_handler(self.true_submodule.graph):
+            self.true_submodule.graph.codegen_subgraph(
+                parent_wrapper_code=parent_wrapper_code,
+                parent_device=parent_device,
+            )
+        output_names = [x.get_name() for x in self.true_submodule.graph.graph_outputs]
+        wrapper.writeline(f"{self.name} = [{','.join(output_names)}]")
+        wrapper.writeline(UnindentLine())
+
+        wrapper.writeline("else:")
+
+        wrapper.writeline(IndentLine())
+        wrapper.writeline(f"# subgraph: {self.false_submodule.name}")
+        for operand, input_name in zip(self.operands, self.false_submodule.graph.graph_inputs):
+            wrapper.writeline(f"{input_name} = {operand.get_name()}")
+        self.false_submodule.graph.wrapper_code = V.graph.wrapper_code
+        with V.set_graph_handler(self.false_submodule.graph):
+            self.false_submodule.graph.codegen_subgraph(
+                parent_wrapper_code=parent_wrapper_code,
+                parent_device=parent_device,
+            )
+        output_names = [x.get_name() for x in self.false_submodule.graph.graph_outputs]
+        wrapper.writeline(f"{self.name} = [{','.join(output_names)}]")
+        wrapper.writeline(UnindentLine())
+
+        wrapper.writeline("")
+
+
 class InterpreterShim(torch.fx.Interpreter):
     @staticmethod
     @functools.lru_cache(None)
