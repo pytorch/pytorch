@@ -43,6 +43,7 @@
 #include <ATen/ops/reciprocal_native.h>
 #include <ATen/ops/reshape.h>
 #include <ATen/ops/round_native.h>
+#include <ATen/ops/real.h>
 #include <ATen/ops/rsqrt_native.h>
 #include <ATen/ops/sgn_native.h>
 #include <ATen/ops/sigmoid_native.h>
@@ -498,8 +499,8 @@ TORCH_IMPL_FUNC(sgn_out_mps)(const Tensor& self, const Tensor& output) {
 Tensor& conj_physical_out_mps(const Tensor& self, Tensor& result) {
   TORCH_CHECK(self.is_complex());
   if (!mps::supportsComplex()) {
-    result = self;
-    at::imag(result) = at::neg(at::imag(self));
+    at::real(result).copy_(at::real(self));
+    at::imag(result).copy_(at::neg(at::imag(self)));
   } else {
     mps::unary_op(self, result, "conj", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
       return [mpsGraph conjugateWithTensor:inputTensor name:nil];
