@@ -29,10 +29,12 @@ from torch.optim import (
     SGD,
     SparseAdam,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 from torch.testing._internal.common_optimizers import (
     _get_optim_inputs_including_global_cliquey_kwargs,
     optim_db,
+    optims,
 )
 
 from torch.testing._internal.common_utils import TestCase
@@ -86,81 +88,59 @@ KERNEL_COUNTS = {
 }
 
 
-def build_opt_kwarg_dbs():
+def build_opt_kwarg_db():
     compiled_opt_db = []
-    disabled_opt_db = []
     for optim_info in optim_db:
+        if optim_info.optim_cls not in KERNEL_COUNTS:
+            continue
+
         for device in ["cpu", "cuda"]:
             for optim_inputs in _get_optim_inputs_including_global_cliquey_kwargs(
                 device, None, optim_info, skip=("differentiable",)
             ):
                 kwargs = dict(optim_inputs.kwargs)
-                # handle disabled optimizers
-                if optim_info.optim_cls not in KERNEL_COUNTS:
-                    kwargs["device"] = device
-                    disabled_opt_db.append(
-                        (
-                            optim_info.optim_cls,
-                            f"test_{optim_info.optim_cls.__name__.lower()}_disabled_falls_back_to_eager",
-                            kwargs,
-                        )
-                    )
+                name = f"test_{optim_info.optim_cls.__name__.lower()}"
+
+                for key, val in kwargs.items():
+                    if not key == "lr" and (
+                        not isinstance(val, bool) or (isinstance(val, bool) and val)
+                    ):
+                        name += "_" + key
+
+                name += f"_{device}"
+
+                # Eager for-loop impl doesn't support capturable ASGD
+                if name in [
+                    "test_asgd_capturable_cuda",
+                    "test_asgd_maximize_capturable_cuda",
+                    "test_asgd_weight_decay_capturable_cuda",
+                    "test_asgd_weight_decay_maximize_capturable_cuda",
+                ]:
+                    continue
+
+                kwargs["device"] = device
+                if name in KERNEL_COUNT_OVERRIDES:
+                    kwargs["kernel_count"] = KERNEL_COUNT_OVERRIDES[name]
                 else:
-                    name = f"test_{optim_info.optim_cls.__name__.lower()}"
+                    kwargs["kernel_count"] = (
+                        KERNEL_COUNTS[optim_info.optim_cls].multitensor
+                        if kwargs.get("foreach", False) and device == "cuda"
+                        else KERNEL_COUNTS[optim_info.optim_cls].singletensor
+                    )
 
-                    for key, val in kwargs.items():
-                        if not key == "lr" and (
-                            not isinstance(val, bool) or (isinstance(val, bool) and val)
-                        ):
-                            name += "_" + key
+                if kwargs["kernel_count"] is None:
+                    continue
 
-                    name += f"_{device}"
+                # fused optimizers are disabled
+                if kwargs.get("fused", False):
+                    kwargs["kernel_count"] = 0
 
-                    # Eager for-loop impl doesn't support capturable ASGD
-                    if name in [
-                        "test_asgd_capturable_cuda",
-                        "test_asgd_maximize_capturable_cuda",
-                        "test_asgd_weight_decay_capturable_cuda",
-                        "test_asgd_weight_decay_maximize_capturable_cuda",
-                    ]:
-                        continue
+                compiled_opt_db.append((optim_info.optim_cls, name, kwargs))
 
-                    # Eager for-loop impl doesn't support capturable ASGD
-                    if name == "test_asgd_capturable_cuda":
-                        continue
-
-                    kwargs["device"] = device
-                    if name in KERNEL_COUNT_OVERRIDES:
-                        kwargs["kernel_count"] = KERNEL_COUNT_OVERRIDES[name]
-                    else:
-                        kwargs["kernel_count"] = (
-                            KERNEL_COUNTS[optim_info.optim_cls].multitensor
-                            if kwargs.get("foreach", False) and device == "cuda"
-                            else KERNEL_COUNTS[optim_info.optim_cls].singletensor
-                        )
-
-                    if kwargs["kernel_count"] is None:
-                        continue
-
-                    # fused optimizers are disabled
-                    if kwargs.get("fused", False):
-                        kwargs["kernel_count"] = 0
-
-                    # Note on tolerances:
-                    # test_adadelta_foreach_rho_weight_decay_cuda
-                    # Mismatched elements: 1 / 100 (1.0%)
-                    # Greatest absolute difference: 2.0936131477355957e-05 at index (2, 7) (up to 2e-05 allowed)
-                    # Greatest relative difference: 8.520411211065948e-05 at index (2, 7) (up to 1e-06 allowed)
-                    if optim_info.optim_cls is Adadelta:
-                        kwargs["rtol"] = 2e-5
-                        kwargs["atol"] = 2e-5
-
-                    compiled_opt_db.append((optim_info.optim_cls, name, kwargs))
-
-    return compiled_opt_db, disabled_opt_db
+    return compiled_opt_db
 
 
-COMPILED_OPT_KWARG_DB, DISABLED_OPT_KWARG_DB = build_opt_kwarg_dbs()
+COMPILED_OPT_KWARG_DB = build_opt_kwarg_db()
 
 aten = torch.ops.aten
 
@@ -201,76 +181,34 @@ def compile_opt(opt_compiled, closure=None, fullgraph=True):
     return torch.compile(fn, backend="inductor", fullgraph=fullgraph)
 
 
-def make_disabled_test(optim_cls, device="cuda", **kwargs):
-    def test_fn(self):
-        torch._dynamo.reset()
-        torch._inductor.metrics.reset()
-        input = torch.ones([10, 10], device=device)
-        model_eager = torch.nn.Sequential(
-            *[torch.nn.Linear(10, 10, device=device) for _ in range(2)]
-        )
-        model_eager(input).sum().backward()
-        model_compiled = deepcopy(model_eager)
-        model_compiled(input).sum().backward()
+def check_optim(
+    test_cls, optim_cls, params_eager, params_compiled, state_eager, state_compiled
+):
+    params_eager = list(params_eager)
+    params_compiled = list(params_compiled)
+    # Note on tolerances:
+    # test_adadelta_foreach_rho_weight_decay_cuda
+    # Mismatched elements: 1 / 100 (1.0%)
+    # Greatest absolute difference: 2.0936131477355957e-05 at index (2, 7) (up to 2e-05 allowed)
+    # Greatest relative difference: 8.520411211065948e-05 at index (2, 7) (up to 1e-06 allowed)
+    rtol = None
+    atol = None
+    if optim_cls is Adadelta:
+        rtol = 2e-5
+        atol = 2e-5
 
-        if optim_cls is SparseAdam:
-            for param in model_eager.parameters():
-                param.grad = param.grad.to_sparse()
-            for param in model_compiled.parameters():
-                param.grad = param.grad.to_sparse()
-
-        opt_compiled = optim_cls(model_compiled.parameters(), **kwargs)
-        opt_eager = optim_cls(model_eager.parameters(), **kwargs)
-
-        if optim_cls is LBFGS:
-
-            @torch.compile()
-            def fn():
-                def closure():
-                    loss = model_compiled(input).sum()
-                    loss.backward()
-                    return loss
-
-                opt_compiled.step(closure)
-
-            def closure_eager():
-                loss = model_eager(input).sum()
-                loss.backward()
-                return loss
-
-            opt_eager.step(closure_eager)
-            opt_eager.step(closure_eager)
-        else:
-
-            @torch.compile()
-            def fn():
-                opt_compiled.step()
-
-            opt_eager.step()
-            opt_eager.step()
-
-        fn()
-        fn()
-
-        self.assertEqual(
-            list(model_eager.parameters()),
-            list(model_compiled.parameters()),
-        )
-
-        for p_eager, p_compiled in zip(
-            model_eager.parameters(), model_compiled.parameters()
-        ):
-            self.assertEqual(
-                opt_eager.state[p_eager],
-                opt_compiled.state[p_compiled],
+    # currently we don't mutate step properly until we resolve
+    # https://github.com/pytorch/pytorch/issues/115679
+    if optim_cls not in (Rprop, RMSprop):
+        for p_eager, p_compiled in zip(params_eager, params_compiled):
+            state_eager[p_eager].pop("step")
+            state_compiled[p_compiled].pop("step")
+            test_cls.assertEqual(
+                state_eager[p_eager],
+                state_compiled[p_compiled],
+                atol=atol,
+                rtol=rtol,
             )
-
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
-
-    if device == "cuda":
-        test_fn = requires_cuda(test_fn)
-
-    return test_fn
 
 
 def make_test(
@@ -278,8 +216,6 @@ def make_test(
     closure=None,
     kernel_count=2,
     device="cuda",
-    atol=None,
-    rtol=None,
     **kwargs,
 ):
     def test_fn(self):
@@ -323,25 +259,14 @@ def make_test(
                 opt_eager.step()
                 opt_eager.step()
 
-            self.assertEqual(
-                list(model_eager.parameters()),
-                list(model_compiled.parameters()),
-                atol=atol,
-                rtol=rtol,
+            check_optim(
+                self,
+                optim_cls,
+                model_eager.parameters(),
+                model_compiled.parameters(),
+                opt_eager.state,
+                opt_compiled.state,
             )
-
-            # currently we don't mutate step properly until we resolve
-            # https://github.com/pytorch/pytorch/issues/115679
-            if optim_cls not in (Adadelta, Rprop, RMSprop):
-                for p_eager, p_compiled in zip(
-                    model_eager.parameters(), model_compiled.parameters()
-                ):
-                    self.assertEqual(
-                        opt_eager.state[p_eager],
-                        opt_compiled.state[p_compiled],
-                        atol=atol,
-                        rtol=rtol,
-                    )
 
             if run_cudagraphs:
                 self.check_cudagraphs_ran()
@@ -408,6 +333,80 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
             )
 
     return test_fn
+
+
+class CompiledOptimizerParityTests(TestCase):
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_correctness(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
+            device, dtype, optim_info, skip=("differentiable",)
+        )
+        for optim_input in all_optim_inputs:
+            kwargs = dict(optim_input.kwargs)
+            print(kwargs)
+            # RAdam #117836 and Adamax #118230 and ASGD #116052
+            # Single tensor eager needs to be refactored to enable tracing
+            if optim_cls in [RAdam, Adamax, ASGD] and not kwargs.get("foreach", False):
+                kwargs["foreach"] = True
+
+            torch._dynamo.reset()
+            torch._inductor.metrics.reset()
+            input = torch.ones([10, 10], device=device)
+            model_eager = torch.nn.Sequential(
+                *[torch.nn.Linear(10, 10, device=device) for _ in range(2)]
+            )
+            model_eager(input).sum().backward()
+            model_compiled = deepcopy(model_eager)
+            model_compiled(input).sum().backward()
+
+            if optim_cls is SparseAdam:
+                for param in model_eager.parameters():
+                    param.grad = param.grad.to_sparse()
+                for param in model_compiled.parameters():
+                    param.grad = param.grad.to_sparse()
+
+            opt_compiled = optim_cls(model_compiled.parameters(), **kwargs)
+            opt_eager = optim_cls(model_eager.parameters(), **kwargs)
+
+            if optim_cls is LBFGS:
+
+                @torch.compile()
+                def fn():
+                    def closure():
+                        loss = model_compiled(input).sum()
+                        loss.backward()
+                        return loss
+
+                    opt_compiled.step(closure)
+
+                def closure_eager():
+                    loss = model_eager(input).sum()
+                    loss.backward()
+                    return loss
+
+                opt_eager.step(closure_eager)
+                opt_eager.step(closure_eager)
+            else:
+
+                @torch.compile()
+                def fn():
+                    opt_compiled.step()
+
+                opt_eager.step()
+                opt_eager.step()
+
+            fn()
+            fn()
+
+            check_optim(
+                self,
+                optim_cls,
+                model_eager.parameters(),
+                model_compiled.parameters(),
+                opt_eager.state,
+                opt_compiled.state,
+            )
 
 
 class CompiledOptimizerTests(TestCase):
@@ -486,8 +485,7 @@ class CompiledOptimizerTests(TestCase):
 for optim_cls, name, kwargs in COMPILED_OPT_KWARG_DB:
     setattr(CompiledOptimizerTests, name, make_test(optim_cls, **kwargs))
 
-for optim_cls, name, kwargs in DISABLED_OPT_KWARG_DB:
-    setattr(CompiledOptimizerTests, name, make_disabled_test(optim_cls, **kwargs))
+instantiate_device_type_tests(CompiledOptimizerParityTests, globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
