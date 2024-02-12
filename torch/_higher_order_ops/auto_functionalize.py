@@ -159,7 +159,7 @@ auto_functionalized.fallthrough(DispatchKey.AutogradCUDA)
 
 
 def do_auto_functionalize(
-    op: torch._ops.OpOverload, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    op: torch._ops.OpOverload, args: Tuple[Any, ...], kwargs: Dict[str, Any], mode
 ) -> Any:
     """Functionalizes a call to op(*args, **kwargs) by emitting a call to
     `outs = auto_functionalized(op, mutated_args_names, normalized_kwargs)`
@@ -170,7 +170,7 @@ def do_auto_functionalize(
     """
     from torch._subclasses.functional_tensor import PythonFunctionalizeAPI
 
-    ctx = PythonFunctionalizeAPI()
+    ctx = PythonFunctionalizeAPI(mode)
 
     # List of the name of args that get mutated (according to the schema)
     mutable_args_names = []
