@@ -53,7 +53,7 @@ at::Tensor InputMetadata::zeros_like() const {
   return at::zeros_symint(shape_as_dim_vector(), options_);
 }
 
-at::Tensor InputMetadata::maybe_expand(
+at::Tensor InputMetadata::maybe_reduce(
     const size_t i,
     at::Tensor grad,
     const std::function<std::string(const std::string&)>& format_error) const {

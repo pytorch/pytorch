@@ -770,6 +770,7 @@ libtorch_python_cuda_sources = libtorch_python_cuda_core_sources + [
 
 libtorch_python_xpu_sources = [
     "torch/csrc/xpu/Module.cpp",
+    "torch/csrc/xpu/Stream.cpp",
 ]
 
 libtorch_python_core_sources = [
@@ -969,6 +970,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/AccumulateType.cpp",
     "aten/src/ATen/LegacyBatchedTensorImpl.cpp",
     "aten/src/ATen/CPUGeneratorImpl.cpp",
+    "aten/src/ATen/DeviceAccelerator.cpp",
     "aten/src/ATen/Context.cpp",
     "aten/src/ATen/DLConvertor.cpp",
     "aten/src/ATen/EmptyTensor.cpp",
