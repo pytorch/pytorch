@@ -5,6 +5,7 @@ import torch
 import torch._dynamo
 import torch._inductor
 import torch._inductor.decomposition
+import torch._export
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
@@ -61,7 +62,7 @@ class TestOutDtypeOp(TestCase):
         weight = torch.randint(-128, 127, (5, 5), dtype=torch.int8)
         m = M(weight)
         x = torch.randint(-128, 127, (5, 5), dtype=torch.int8)
-        ep = torch.export.export(
+        ep = torch._export.export(
             m,
             (x,),
         )
@@ -120,15 +121,14 @@ class TestOutDtypeOp(TestCase):
         self.assertTrue(torch.allclose(numerical_res, gm(*inp)))
 
     def test_out_dtype_non_functional(self):
-        class M(torch.nn.Module):
-            def forward(self, x, y):
-                return out_dtype(
-                    torch.ops.aten.add_.Tensor, torch.int32, x, y
-                )
+        def f(x, y):
+            return out_dtype(
+                torch.ops.aten.add_.Tensor, torch.int32, x, y
+            )
 
         with self.assertRaisesRegex(ValueError, "out_dtype's first argument needs to be a functional operator"):
-            _ = torch.export.export(
-                M(), (torch.randint(-128, 127, (5, 5), dtype=torch.int8), torch.randint(-128, 127, (5, 5), dtype=torch.int8)),
+            _ = torch._export.export(
+                f, (torch.randint(-128, 127, (5, 5), dtype=torch.int8), torch.randint(-128, 127, (5, 5), dtype=torch.int8)),
             )
 
     def test_out_dtype_non_op_overload(self):

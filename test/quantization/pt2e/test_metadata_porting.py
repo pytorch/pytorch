@@ -5,7 +5,7 @@ import unittest
 from typing import List
 
 import torch
-import torch._export
+import torch._export as export
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer import Quantizer
 from torch.ao.quantization.quantizer.xnnpack_quantizer import (
@@ -64,7 +64,7 @@ class TestMetaDataPorting(QuantizationTestCase):
     def _test_quant_tag_preservation_through_decomp(
         self, model, example_inputs, from_node_to_tags
     ):
-        ep = torch.export.export(model, example_inputs)
+        ep = export.export(model, example_inputs)
         found_tags = True
         not_found_nodes = ""
         for from_node, tag in from_node_to_tags.items():
@@ -102,7 +102,7 @@ class TestMetaDataPorting(QuantizationTestCase):
 
         # program capture
         m = copy.deepcopy(m_eager)
-        m = torch._export.capture_pre_autograd_graph(
+        m = export.capture_pre_autograd_graph(
             m,
             example_inputs,
         )
@@ -110,7 +110,7 @@ class TestMetaDataPorting(QuantizationTestCase):
         m = prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
-        m = convert_pt2e(m)
+        m = convert_pt2e(m, fold_quantize=True)
 
         pt2_quant_output = m(*example_inputs)
         recorded_node_tags = {}

@@ -1,6 +1,6 @@
 import inspect
 from collections import defaultdict
-from typing import Any, Dict, Tuple, Union
+from typing import Any, Dict, Tuple
 
 import torch
 from torch._dynamo.source import (
@@ -80,16 +80,6 @@ def fakify(
     return fake
 
 
-def make_fake_params_buffers(
-    fake_mode: FakeTensorMode,
-    params_buffers: Dict[str, torch.Tensor],
-) -> Dict[str, Union[torch.Tensor, torch.nn.Parameter]]:
-    faked_params_buffers = {}
-    for key, value in params_buffers.items():
-        faked_params_buffers[key] = fake_mode.from_tensor(value, static_shapes=True)
-    return faked_params_buffers
-
-
 def make_fake_inputs(nn_module, args, constraints):
     """
     Given an nn module, example inputs, and constraints, return a new fake mode,
@@ -109,19 +99,9 @@ def make_fake_inputs(nn_module, args, constraints):
         "co_filename": code.co_filename,
         "co_firstlineno": code.co_firstlineno,
     }
-
-    fake_mode = FakeTensorMode(
-        shape_env=ShapeEnv(tracked_fakes=[], co_fields=co_fields),
-        allow_non_fake_inputs=True,
-    )
-    if fake_mode.shape_env is None or fake_mode.shape_env.tracked_fakes is None:
-        raise ValueError(
-            "Detected fake_mode does not have a shape_env with tracked fakes. "
-            "If you constructed the module under a FakeTensorMode, "
-            "please initialize it like: FakeTensorMode(shape_env=ShapeEnv(tracked_fakes=[]))"
-        )
-
-    with fake_mode:
+    with FakeTensorMode(
+        shape_env=ShapeEnv(tracked_fakes=[], co_fields=co_fields)
+    ) as fake_mode:
         original_signature = inspect.signature(nn_module.forward)
         sources: Dict[Tuple[int, int], Source] = {}
         fake_args = tree_map_with_path(

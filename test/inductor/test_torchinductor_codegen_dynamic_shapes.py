@@ -177,6 +177,7 @@ test_failures = {
         ("cpu", "cuda")
     ),
     "test_misaligned_address_issue1_dynamic_shapes": TestFailure(("cpu",)),
+    "test_multilayer_cumsum_dynamic_shapes": TestFailure(("cpu",)),
     "test_mm_views_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_new_empty_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_new_empty_strided_dynamic_shapes": TestFailure(("cpu", "cuda")),
@@ -187,10 +188,6 @@ test_failures = {
     "test_single_elem_dynamic_shapes": TestFailure(("cpu",)),
     "test_single_elem_indirect_dynamic_shapes": TestFailure(("cpu",)),
     "test_sort_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_split_cumsum_dynamic_shapes": TestFailure(("cpu",)),
-    "test_split_cumsum_low_prec_dynamic_shapes": TestFailure(("cpu",)),
-    "test_split_cumprod_dynamic_shapes": TestFailure(("cpu",)),
-    "test_split_cumprod_low_prec_dynamic_shapes": TestFailure(("cpu",)),
     "test_split_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_topk_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_unbind_dynamic_shapes": TestFailure(("cpu", "cuda")),
@@ -231,7 +228,6 @@ test_failures = {
     "test_forced_buffer_realize_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
-    "test_tmp_not_defined_issue3_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_gather2_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_inplace_add_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_inplace_mixed_dtype_ops_dynamic_shapes": TestFailure(
@@ -297,10 +293,6 @@ if TEST_WITH_ROCM:
     test_failures.update(
         {
             "test_cumsum_dynamic_shapes": TestFailure(("cpu", "cuda")),
-            "test_split_cumsum_dynamic_shapes": TestFailure(("cpu", "cuda")),
-            "test_split_cumsum_low_prec_dynamic_shapes": TestFailure(("cpu", "cuda")),
-            "test_split_cumprod_dynamic_shapes": TestFailure(("cpu", "cuda")),
-            "test_split_cumprod_low_prec_dynamic_shapes": TestFailure(("cpu", "cuda")),
         }
     )
 

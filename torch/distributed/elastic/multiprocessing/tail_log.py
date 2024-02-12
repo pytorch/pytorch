@@ -28,7 +28,7 @@ def tail_logfile(
             return
         time.sleep(interval_sec)
 
-    with open(file, errors="replace") as fp:
+    with open(file) as fp:
         while True:
             line = fp.readline()
 

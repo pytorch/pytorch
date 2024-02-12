@@ -26,7 +26,7 @@ using CuSparsePoolType = DeviceThreadHandlePool<cusparseHandle_t, createCusparse
 } // namespace
 
 cusparseHandle_t getCurrentCUDASparseHandle() {
-  c10::DeviceIndex device = 0;
+  int device;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
 
   // Thread local PoolWindows are lazily-initialized

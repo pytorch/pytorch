@@ -298,17 +298,13 @@ class CUDATemplateCaller(ChoiceCaller):
         layout: Layout,
         make_kernel_render: Callable[[CUDATemplateBuffer, Optional[List[IRNode]]], str],
         bmreq: CUDABenchmarkRequest,
-        template: "CUDATemplate",  # type: ignore[name-defined]
+        template: "CUDATemplate",
     ):
         super().__init__(name, input_nodes, layout)
         self.category = category
         self.make_kernel_render = make_kernel_render
         self.bmreq = bmreq
         self.template = template
-
-    def precompile(self) -> None:
-        assert self.bmreq is not None
-        self.bmreq.precompile()
 
     def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None

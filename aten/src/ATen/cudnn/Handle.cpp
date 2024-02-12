@@ -34,7 +34,7 @@ using CudnnPoolType = at::cuda::DeviceThreadHandlePool<cudnnHandle_t, createCuDN
 } // namespace
 
 cudnnHandle_t getCudnnHandle() {
-  c10::DeviceIndex device = 0;
+  int device;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
 
   // Thread local PoolWindows are lazily-initialized
