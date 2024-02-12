@@ -42,17 +42,11 @@ namespace at {
 namespace vec {
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_AVX512)
+#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 
-#ifdef _MSC_VER
-__declspec(align(64)) struct Vectorizedqi {
- protected:
-  __m512i vals;
-#else
 struct Vectorizedqi {
  protected:
   __m512i vals __attribute__((aligned(64)));
-#endif
 
  public:
   Vectorizedqi() {}
@@ -142,7 +136,7 @@ inline convert_float_to_int8(at::vec::Vectorized<float> src) {
 }
 
 template <typename T>
-__FORCE_INLINE void QuantizeAvx512(
+inline void __attribute__((always_inline)) QuantizeAvx512(
     const float* src,
     T* dst,
     int len,
@@ -531,17 +525,10 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
       Vectorized<float> scale,
       Vectorized<float> zero_point,
       Vectorized<float> scale_neg_zp_premul) const {
-    #if defined(_MSC_VER) && !defined(__clang__)
-    __m128i int_val0 = _mm_set_epi64x(vals.m512i_u64[1], vals.m512i_u64[0]);
-    __m128i int_val1 = _mm_set_epi64x(vals.m512i_u64[3], vals.m512i_u64[2]);
-    __m128i int_val2 = _mm_set_epi64x(vals.m512i_u64[5], vals.m512i_u64[4]);
-    __m128i int_val3 = _mm_set_epi64x(vals.m512i_u64[7], vals.m512i_u64[6]);
-    #else
     __m128i int_val0 = _mm_set_epi64x(vals[1], vals[0]);
     __m128i int_val1 = _mm_set_epi64x(vals[3], vals[2]);
     __m128i int_val2 = _mm_set_epi64x(vals[5], vals[4]);
     __m128i int_val3 = _mm_set_epi64x(vals[7], vals[6]);
-    #endif
 
     __m512 float_val0 = _mm512_cvtepi32_ps(cvtepi8_epi32(int_val0));
     __m512 float_val1 = _mm512_cvtepi32_ps(cvtepi8_epi32(int_val1));
@@ -562,17 +549,10 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
   float_vec_return_type dequantize(
       Vectorized<float> scale,
       Vectorized<float> zero_point) const {
-    #if defined(_MSC_VER) && !defined(__clang__)
-    __m128i int_val0 = _mm_set_epi64x(vals.m512i_u64[1], vals.m512i_u64[0]);
-    __m128i int_val1 = _mm_set_epi64x(vals.m512i_u64[3], vals.m512i_u64[2]);
-    __m128i int_val2 = _mm_set_epi64x(vals.m512i_u64[5], vals.m512i_u64[4]);
-    __m128i int_val3 = _mm_set_epi64x(vals.m512i_u64[7], vals.m512i_u64[6]);
-    #else
     __m128i int_val0 = _mm_set_epi64x(vals[1], vals[0]);
     __m128i int_val1 = _mm_set_epi64x(vals[3], vals[2]);
     __m128i int_val2 = _mm_set_epi64x(vals[5], vals[4]);
     __m128i int_val3 = _mm_set_epi64x(vals[7], vals[6]);
-    #endif
 
     __m512 float_val0 = _mm512_cvtepi32_ps(cvtepi8_epi32(int_val0));
     __m512 float_val1 = _mm512_cvtepi32_ps(cvtepi8_epi32(int_val1));
@@ -618,34 +598,20 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
     }
 
     int_vec_return_type widening_subtract(Vectorized<c10::qint8> b) const {
-      #if defined(_MSC_VER) && !defined(__clang__)
-      __m128i int_val0 = _mm_set_epi64x(vals.m512i_u64[1], vals.m512i_u64[0]);
-      __m128i int_val1 = _mm_set_epi64x(vals.m512i_u64[3], vals.m512i_u64[2]);
-      __m128i int_val2 = _mm_set_epi64x(vals.m512i_u64[5], vals.m512i_u64[4]);
-      __m128i int_val3 = _mm_set_epi64x(vals.m512i_u64[7], vals.m512i_u64[6]);
-      #else
       __m128i int_val0 = _mm_set_epi64x(vals[1], vals[0]);
       __m128i int_val1 = _mm_set_epi64x(vals[3], vals[2]);
       __m128i int_val2 = _mm_set_epi64x(vals[5], vals[4]);
       __m128i int_val3 = _mm_set_epi64x(vals[7], vals[6]);
-      #endif
 
       __m512i int32_val0 = cvtepi8_epi32(int_val0);
       __m512i int32_val1 = cvtepi8_epi32(int_val1);
       __m512i int32_val2 = cvtepi8_epi32(int_val2);
       __m512i int32_val3 = cvtepi8_epi32(int_val3);
 
-      #if defined(_MSC_VER) && !defined(__clang__)
-      __m128i int_b0 = _mm_set_epi64x(b.vals.m512i_u64[1], b.vals.m512i_u64[0]);
-      __m128i int_b1 = _mm_set_epi64x(b.vals.m512i_u64[3], b.vals.m512i_u64[2]);
-      __m128i int_b2 = _mm_set_epi64x(b.vals.m512i_u64[5], b.vals.m512i_u64[4]);
-      __m128i int_b3 = _mm_set_epi64x(b.vals.m512i_u64[7], b.vals.m512i_u64[6]);
-      #else
       __m128i int_b0 = _mm_set_epi64x(b.vals[1], b.vals[0]);
       __m128i int_b1 = _mm_set_epi64x(b.vals[3], b.vals[2]);
       __m128i int_b2 = _mm_set_epi64x(b.vals[5], b.vals[4]);
       __m128i int_b3 = _mm_set_epi64x(b.vals[7], b.vals[6]);
-      #endif
 
       __m512i int32_b0 = cvtepi8_epi32(int_b0);
       __m512i int32_b1 = cvtepi8_epi32(int_b1);
@@ -755,17 +721,10 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
       Vectorized<float> scale,
       Vectorized<float> zero_point,
       Vectorized<float> scale_zp_premul) const {
-    #if defined(_MSC_VER) && !defined(__clang__)
-    __m128i int_val0 = _mm_set_epi64x(vals.m512i_u64[1], vals.m512i_u64[0]);
-    __m128i int_val1 = _mm_set_epi64x(vals.m512i_u64[3], vals.m512i_u64[2]);
-    __m128i int_val2 = _mm_set_epi64x(vals.m512i_u64[5], vals.m512i_u64[4]);
-    __m128i int_val3 = _mm_set_epi64x(vals.m512i_u64[7], vals.m512i_u64[6]);
-    #else
     __m128i int_val0 = _mm_set_epi64x(vals[1], vals[0]);
     __m128i int_val1 = _mm_set_epi64x(vals[3], vals[2]);
     __m128i int_val2 = _mm_set_epi64x(vals[5], vals[4]);
     __m128i int_val3 = _mm_set_epi64x(vals[7], vals[6]);
-    #endif
 
     __m512 float_val0 = _mm512_cvtepi32_ps(cvtepu8_epi32(int_val0));
     __m512 float_val1 = _mm512_cvtepi32_ps(cvtepu8_epi32(int_val1));
@@ -787,17 +746,10 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
   float_vec_return_type dequantize(
       Vectorized<float> scale,
       Vectorized<float> zero_point) const {
-    #if defined(_MSC_VER) && !defined(__clang__)
-    __m128i int_val0 = _mm_set_epi64x(vals.m512i_u64[1], vals.m512i_u64[0]);
-    __m128i int_val1 = _mm_set_epi64x(vals.m512i_u64[3], vals.m512i_u64[2]);
-    __m128i int_val2 = _mm_set_epi64x(vals.m512i_u64[5], vals.m512i_u64[4]);
-    __m128i int_val3 = _mm_set_epi64x(vals.m512i_u64[7], vals.m512i_u64[6]);
-    #else
     __m128i int_val0 = _mm_set_epi64x(vals[1], vals[0]);
     __m128i int_val1 = _mm_set_epi64x(vals[3], vals[2]);
     __m128i int_val2 = _mm_set_epi64x(vals[5], vals[4]);
     __m128i int_val3 = _mm_set_epi64x(vals[7], vals[6]);
-    #endif
 
     __m512 float_val0 = _mm512_cvtepi32_ps(cvtepu8_epi32(int_val0));
     __m512 float_val1 = _mm512_cvtepi32_ps(cvtepu8_epi32(int_val1));
@@ -844,34 +796,20 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
     }
 
     int_vec_return_type widening_subtract(Vectorized<c10::quint8> b) const {
-      #if defined(_MSC_VER) && !defined(__clang__)
-      __m128i int_val0 = _mm_set_epi64x(vals.m512i_u64[1], vals.m512i_u64[0]);
-      __m128i int_val1 = _mm_set_epi64x(vals.m512i_u64[3], vals.m512i_u64[2]);
-      __m128i int_val2 = _mm_set_epi64x(vals.m512i_u64[5], vals.m512i_u64[4]);
-      __m128i int_val3 = _mm_set_epi64x(vals.m512i_u64[7], vals.m512i_u64[6]);
-      #else
       __m128i int_val0 = _mm_set_epi64x(vals[1], vals[0]);
       __m128i int_val1 = _mm_set_epi64x(vals[3], vals[2]);
       __m128i int_val2 = _mm_set_epi64x(vals[5], vals[4]);
       __m128i int_val3 = _mm_set_epi64x(vals[7], vals[6]);
-      #endif
 
       __m512i int32_val0 = cvtepu8_epi32(int_val0);
       __m512i int32_val1 = cvtepu8_epi32(int_val1);
       __m512i int32_val2 = cvtepu8_epi32(int_val2);
       __m512i int32_val3 = cvtepu8_epi32(int_val3);
 
-      #if defined(_MSC_VER) && !defined(__clang__)
-      __m128i int_b0 = _mm_set_epi64x(b.vals.m512i_u64[1], b.vals.m512i_u64[0]);
-      __m128i int_b1 = _mm_set_epi64x(b.vals.m512i_u64[3], b.vals.m512i_u64[2]);
-      __m128i int_b2 = _mm_set_epi64x(b.vals.m512i_u64[5], b.vals.m512i_u64[4]);
-      __m128i int_b3 = _mm_set_epi64x(b.vals.m512i_u64[7], b.vals.m512i_u64[6]);
-      #else
       __m128i int_b0 = _mm_set_epi64x(b.vals[1], b.vals[0]);
       __m128i int_b1 = _mm_set_epi64x(b.vals[3], b.vals[2]);
       __m128i int_b2 = _mm_set_epi64x(b.vals[5], b.vals[4]);
       __m128i int_b3 = _mm_set_epi64x(b.vals[7], b.vals[6]);
-      #endif
 
       __m512i int32_b0 = cvtepu8_epi32(int_b0);
       __m512i int32_b1 = cvtepu8_epi32(int_b1);
