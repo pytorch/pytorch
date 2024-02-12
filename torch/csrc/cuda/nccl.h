@@ -76,9 +76,9 @@ enum class ncclDataType {
 // manages group and lock lifetimes.
 struct AutoNcclGroup {
   AutoNcclGroup();
-  AutoNcclGroup(ncclComm_t comm, bool comm_nonblocking);
+  AutoNcclGroup(std::vector<ncclComm_t>& comms, bool comm_nonblocking);
   ~AutoNcclGroup() noexcept(false);
-  ncclComm_t comm_;
+  std::vector<ncclComm_t> comms_;
   bool comm_nonblocking_;
 };
 

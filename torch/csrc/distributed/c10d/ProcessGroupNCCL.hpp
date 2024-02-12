@@ -177,7 +177,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // Constructor takes a list of CUDA devices
     WorkNCCL(
-        at::Device& device,
+        const std::vector<at::Device>& devices,
         int rank,
         OpType opType,
         uint64_t seq,
@@ -214,7 +214,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     void synchronize() override;
 
     // Synchronize streams by blocking each on the NCCL stream
-    void synchronizeStream();
+    void synchronizeStreams();
 
     // Helper function to handle exception (throw if needed).
     void handleException(ErrorHandlingMode asyncErrorHandling);
@@ -245,20 +245,22 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
    protected:
     // The cached list of CUDA devices to operate on
-    at::Device device_;
+    std::vector<at::Device> devices_;
 
-    // The start CUDA event of NCCL operator tracking this work item. These
-    // start CUDA events are needed by desync debugging if enabled.
-    std::shared_ptr<at::cuda::CUDAEvent> ncclStartEvent_;
+    // The start CUDA events of NCCL operator tracking this work item on
+    // multiple CUDA devices. These start CUDA events are needed by desync
+    // debugging if enabled.
+    std::shared_ptr<std::vector<at::cuda::CUDAEvent>> ncclStartEvents_;
 
-    // The end CUDA event of NCCL operator tracking this work item.
-    std::shared_ptr<at::cuda::CUDAEvent> ncclEndEvent_;
+    // The end CUDA events of NCCL operator tracking this work item on
+    // multiple CUDA devices.
+    std::shared_ptr<std::vector<at::cuda::CUDAEvent>> ncclEndEvents_;
 
-    // The NCCL communicator used for this work item.
-    std::shared_ptr<NCCLComm> ncclComm_;
+    // The NCCL communicators used for this work item.
+    std::vector<std::shared_ptr<NCCLComm>> ncclComms_;
 
     // Tensors used for barrier op
-    at::Tensor barrierTensor_;
+    std::vector<at::Tensor> barrierTensors_;
 
     // Clone of blockingWait_ from ProcessGroupNCCL.
     bool blockingWait_ = false;
@@ -286,7 +288,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // Wrapper method for the static checkForNCCLErrors which can be overridden
     // for tests.
-    virtual std::exception_ptr checkForNCCLErrors();
+    virtual std::exception_ptr checkForNCCLErrors(
+        const std::vector<std::shared_ptr<NCCLComm>>& ncclComms) const;
 
     friend std::ostream& operator<<(
         std::ostream& output,
@@ -318,7 +321,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // TORCH_NCCL_AVOID_RECORD_STREAMS implementation helper.
     // Stores references to participating non-output tensors (ie inputs,
     // flattened intermediates).
-    // We'll clear this list in synchronizeStream, just after user-facing
+    // We'll clear this list in synchronizeStreams, just after user-facing
     // stream(s) are synced with the nccl work stream(s).
     // By keeping these refs (as well as outputs_) alive until after the
     // collective's work rejoins the user-facing streams, we achieve
@@ -413,16 +416,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   c10::intrusive_ptr<Work> endCoalescing() override;
 
-  // For specifying a composite optype, such as ALLGATHER and REDUCE_SCATTER
-  c10::intrusive_ptr<Work> endCoalescing(OpType optype);
-
   c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = BroadcastOptions()) override;
 
   c10::intrusive_ptr<Work> _broadcast_oop(
-      at::Tensor& outputTensors,
-      at::Tensor& inputTensors,
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
       const BroadcastOptions& opts = BroadcastOptions());
 
   c10::intrusive_ptr<Work> allreduce_sparse(
@@ -443,8 +443,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       const ReduceOptions& opts = ReduceOptions()) override;
 
   c10::intrusive_ptr<Work> _reduce_oop(
-      at::Tensor& outputTensors,
-      at::Tensor& inputTensors,
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
       const ReduceOptions& opts = ReduceOptions());
 
   c10::intrusive_ptr<Work> allgather(
@@ -511,8 +511,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void groupEnd();
 
-  void groupEndNonblocking(std::shared_ptr<NCCLComm> comm);
+  void groupEndNonblocking(std::vector<std::shared_ptr<NCCLComm>> comms);
 
+  // Unsupported Ops
   c10::intrusive_ptr<Work> gather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
@@ -523,7 +524,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ScatterOptions& opts = ScatterOptions()) override;
 
-  // Unsupported Ops
   c10::intrusive_ptr<Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
       int tag) override;
@@ -549,7 +549,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Helper function for iteratively aborting communicators in the provided map
   void abortCommsFromMap(
-      std::unordered_map<std::string, std::shared_ptr<NCCLComm>>& ncclCommsMap,
+      std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>&
+          ncclCommsMap,
       c10::optional<std::string> abortReason);
 
   c10::intrusive_ptr<intra_node_comm::IntraNodeComm> initIntraNodeComm();
@@ -574,19 +575,19 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Helper that either looks up the cached NCCL communicators or creates
   // a new set of NCCL communicators as a cache entry
-  std::shared_ptr<NCCLComm> getNCCLComm(
-      const std::string& deviceKey,
-      at::Device& device,
+  std::vector<std::shared_ptr<NCCLComm>>& getNCCLComm(
+      const std::string& devicesKey,
+      const std::vector<at::Device>& devices,
       OpType opType,
       int p2pRank = 0,
       bool isSendRecvSelf = false);
 
   // Wrapper method which can be overridden for tests.
   virtual std::exception_ptr checkForNCCLErrors(
-      std::shared_ptr<NCCLComm>& ncclComm);
+      const std::vector<std::shared_ptr<NCCLComm>>& ncclComms);
 
   virtual c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
-      at::Device& device,
+      std::vector<at::Device> devices,
       int rank,
       OpType opType,
       const char* profilingTitle = nullptr,
@@ -605,8 +606,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   //    void {pre,post}(std::vector<at::cuda::CUDAStream&>);
   template <typename Fn>
   c10::intrusive_ptr<Work> collective(
-      at::Tensor& input,
-      at::Tensor& output,
+      std::vector<at::Tensor>& input,
+      std::vector<at::Tensor>& output,
       Fn fn,
       OpType opType,
       const char* profilingTitle = nullptr,
@@ -614,20 +615,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   template <typename Fn, typename PreProcess, typename PostProcess>
   c10::intrusive_ptr<Work> collective(
-      at::Tensor& input,
-      at::Tensor& output,
-      Fn fn,
-      PreProcess pre,
-      PostProcess post,
-      OpType opType,
-      const char* profilingTitle = nullptr,
-      bool avoidRecordStreams = false);
-
-  template <typename Fn>
-  c10::intrusive_ptr<Work> collectiveCoalesced(
       std::vector<at::Tensor>& input,
       std::vector<at::Tensor>& output,
       Fn fn,
+      PreProcess pre,
+      PostProcess post,
       OpType opType,
       const char* profilingTitle = nullptr,
       bool avoidRecordStreams = false);
@@ -637,15 +629,14 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // communication primitives.
   template <typename Fn>
   c10::intrusive_ptr<Work> pointToPoint(
-      at::Tensor& tensor,
+      std::vector<at::Tensor>& tensor,
       Fn fn,
       int peer,
       OpType opType,
       const char* profilingTitle = nullptr);
-
   template <typename Fn, typename PreProcess, typename PostProcess>
   c10::intrusive_ptr<Work> pointToPoint(
-      at::Tensor& tensor,
+      std::vector<at::Tensor>& tensor,
       Fn fn,
       int peer,
       OpType opType,
@@ -654,13 +645,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       const char* profilingTitle);
 
   c10::intrusive_ptr<Work> allreduce_impl(
-      at::Tensor& tensor,
+      std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions());
 
   // Checks for NCCL errors on each of the communicators and returns an
   // appropriate exception_ptr (nullptr if no errors).
   static std::exception_ptr checkForNCCLErrorsInternal(
-      std::shared_ptr<NCCLComm>& ncclComm);
+      const std::vector<std::shared_ptr<NCCLComm>>& ncclComms);
 
   // Function that runs as part of a separate thread and checks for errors on
   // NCCL communicators. We need a separate thread to check for NCCL errors
@@ -803,14 +794,16 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // communication, the key will be "1:2" on both processes. Note: this is for
   // the scenario where there is only 1 GPU per process. When it comes to
   // multiple GPUs per process, this part may need to redesigned.
-  std::unordered_map<std::string, std::shared_ptr<NCCLComm>> devNCCLCommMap_;
+  std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>
+      devNCCLCommMap_;
 
   // The NCCL communicators currently in process of being initialized.
-  std::unordered_map<std::string, std::shared_ptr<NCCLComm>>
+  std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>
       inInitializationCommMap_;
 
   // Map from ncclUniqueId to appropriate communicator.
-  std::unordered_map<std::string, std::shared_ptr<NCCLComm>> ncclIdToCommMap_;
+  std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>
+      ncclIdToCommMap_;
 
   // Mutex to guard maps like devNCCLCommMap_ and ncclIdToCommMap_.
   std::mutex mutex_;
@@ -888,10 +881,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void workEnqueue(c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>);
 
   // The CUDA streams used by NCCL kernels
-  std::unordered_map<std::string, at::cuda::CUDAStream> ncclStreams_;
+  std::unordered_map<std::string, std::vector<at::cuda::CUDAStream>>
+      ncclStreams_;
 
   // The CUDA events used to sync NCCL streams
-  std::unordered_map<std::string, at::cuda::CUDAEvent> ncclEvents_;
+  std::unordered_map<std::string, std::vector<at::cuda::CUDAEvent>> ncclEvents_;
 
   // Device Indexes used for all collectives in this group
   std::set<int> usedDeviceIdxs_;
@@ -900,10 +894,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   int coalescing_state_ = 0;
 
   // Stores device indexes for all collectives run inside a coalescing block
-  std::vector<at::Device> coalescedDevices_;
+  std::vector<std::vector<at::Device>> coalescedDevices_;
 
   // Stores communicators for all collectives run inside a coalescing block
-  std::vector<std::shared_ptr<NCCLComm>> coalescedComms_;
+  std::vector<std::vector<std::shared_ptr<NCCLComm>>> coalescedComms_;
 
   // map from the key: "group name + pg counter (ID)" to the
   // unique NCCL ID count. This needs to be group and pg specific

@@ -269,13 +269,19 @@ inline std::string retrieveDesyncReport(
 #ifdef USE_C10D_NCCL
 
 /* Helper used by work::getDuration() and nccl flight recorder */
-float getDurationFromEvent(
-    at::cuda::CUDAEvent& ncclStartEvent,
-    at::cuda::CUDAEvent& ncclEndEvent) {
+float getDurationFromFirstEvent(
+    const std::vector<at::cuda::CUDAEvent>& ncclStartEvents,
+    const std::vector<at::cuda::CUDAEvent>& ncclEndEvents) {
   TORCH_CHECK(
-      ncclEndEvent.query(),
+      ncclStartEvents.size() == 1,
+      "getDuration only works for single device per ProcessGroup, but found multiple start events.");
+  TORCH_CHECK(
+      ncclEndEvents.size() == 1,
+      "getDuration only works for single device per ProcessGroup, but found multiple end events.");
+  TORCH_CHECK(
+      ncclEndEvents[0].query(),
       "getDuration can only be called after work is succeeded.")
-  return ncclStartEvent.elapsed_time(ncclEndEvent);
+  return ncclStartEvents[0].elapsed_time(ncclEndEvents[0]);
 }
 
 DebugInfoWriter::~DebugInfoWriter() = default;
@@ -379,7 +385,7 @@ struct NCCLTraceBuffer {
     capture_cpp_stack_ = getCvarBool({"TORCH_NCCL_TRACE_CPP_STACK"}, false);
     enabled_ = max_entries_ > 0;
   }
-  using Event = at::cuda::CUDAEvent;
+  using EventList = std::vector<at::cuda::CUDAEvent>;
   struct Entry {
     size_t id_; // incremented id in the trace buffer
                 // used to figure out where in the circular entries
@@ -393,7 +399,7 @@ struct NCCLTraceBuffer {
     // we borrow pointers to start_ and end_ so we can query the state
     // on reporting. However, once the event is completed, the call
     // to `complete` will clear these.
-    Event *start_, *end_;
+    EventList *start_, *end_;
 
     // timestamp when the entry was created, likely close to the time the work
     // was 'enqueued'- not necessarily started
@@ -433,8 +439,8 @@ struct NCCLTraceBuffer {
       const char* profiling_name,
       const std::vector<at::Tensor>& inputs,
       const std::vector<at::Tensor>& outputs,
-      Event* start,
-      Event* end) {
+      EventList* start,
+      EventList* end) {
     if (!enabled_) {
       return c10::nullopt;
     }
@@ -477,13 +483,25 @@ struct NCCLTraceBuffer {
 
   void update_state(Entry& r) {
     if (r.start_ != nullptr) {
-      bool started = r.start_->query();
+      bool started = true;
+      for (auto& ev : *r.start_) {
+        if (!ev.query()) {
+          started = false;
+          break;
+        }
+      }
       if (started && !r.time_discovered_started_) {
         r.time_discovered_started_ = c10::getTime();
       }
     }
     if (r.end_ != nullptr) {
-      bool completed = r.end_->query();
+      bool completed = true;
+      for (auto& ev : *r.end_) {
+        if (!ev.query()) {
+          completed = false;
+          break;
+        }
+      }
       if (completed && !r.time_discovered_completed_) {
         r.time_discovered_completed_ = c10::getTime();
       }
@@ -522,8 +540,8 @@ struct NCCLTraceBuffer {
     }
 
     bool can_compute_duration = false;
-    Event* startEvent = nullptr;
-    Event* endEvent = nullptr;
+    EventList* startEvents = nullptr;
+    EventList* endEvents = nullptr;
     c10::optional<float> duration = c10::nullopt;
 
     std::unique_lock<std::mutex> guard(mutex_);
@@ -535,8 +553,8 @@ struct NCCLTraceBuffer {
       if (compute_duration) {
         can_compute_duration = entry.time_discovered_completed_.has_value() &&
             entry.start_ && entry.end_;
-        startEvent = entry.start_;
-        endEvent = entry.end_;
+        startEvents = entry.start_;
+        endEvents = entry.end_;
       }
     }
 
@@ -545,7 +563,7 @@ struct NCCLTraceBuffer {
       // cudaEventDuration() can hang, and we need to acquire the lock before we
       // can dump(), which we never want to block.
       guard.unlock();
-      duration = getDurationFromEvent(*startEvent, *endEvent);
+      duration = getDurationFromFirstEvent(*startEvents, *endEvents);
       guard.lock();
 
       // Refresh the entry ref, see if it has been overwritten

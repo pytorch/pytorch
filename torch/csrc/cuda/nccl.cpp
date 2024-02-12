@@ -415,18 +415,20 @@ AutoNcclGroup::AutoNcclGroup() {
   (c10::cuda::getFreeMutex())->lock();
 #endif
   comm_nonblocking_ = false;
-  comm_ = nullptr;
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
   detail::NCCL_CHECK(ncclGroupStart());
 #endif
 }
 
-AutoNcclGroup::AutoNcclGroup(ncclComm_t comm, bool comm_nonblocking) {
+AutoNcclGroup::AutoNcclGroup(
+    std::vector<ncclComm_t>& comms,
+    bool comm_nonblocking) {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR < 2)
   // nccl < 2.0 cannot be called concurrently with cudaFree
   (c10::cuda::getFreeMutex())->lock();
 #endif
-  comm_ = comm;
+  // TODO(eqy): can we make comms_ reference?
+  comms_ = comms;
   comm_nonblocking_ = comm_nonblocking;
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
   detail::NCCL_CHECK(ncclGroupStart());
@@ -435,10 +437,10 @@ AutoNcclGroup::AutoNcclGroup(ncclComm_t comm, bool comm_nonblocking) {
 
 AutoNcclGroup::~AutoNcclGroup() noexcept(false) {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-  if (comm_nonblocking_ && comm_ != nullptr) {
-    detail::NCCL_CHECK_TIMEOUT(ncclGroupEnd(), comm_);
-  } else {
+  if (!comm_nonblocking_) {
     detail::NCCL_CHECK(ncclGroupEnd());
+  } else {
+    detail::NCCL_CHECK_TIMEOUT(ncclGroupEnd(), comms_);
   }
 #endif
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR < 2)

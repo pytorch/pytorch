@@ -2947,10 +2947,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     def blocking_wait_error_msg(self):
         return "timeout"
 
-    @property
-    def remote_error_msg(self):
-        return "remote process exit"
-
     def _run_all_reduce(self, pg):
         pg.allreduce(torch.rand(10).cuda(self.rank))
 
@@ -2999,9 +2995,8 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         process_group.allreduce(torch.rand(10).cuda(self.rank))
         if self.rank == 0:
             work = process_group.allreduce(torch.rand(10).cuda(self.rank))
-            with self.assertRaisesRegex(dist.DistBackendError, self.remote_error_msg):
-                # Previously this should timeout; but with newer NCCL version,
-                # it seems NCCL would detect that the peer rank has exited
+            with self.assertRaisesRegex(dist.DistBackendError, self.blocking_wait_error_msg):
+                # Operation would time out in blocking mode.
                 work.wait(timeout=timedelta(seconds=self.op_timeout_sec))
             # Run some GPU operations to make sure cuda has not gotten stuck.
             # It was observed cuda could get stuck if NCCL communicators were
@@ -3069,9 +3064,8 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         )
         process_group.barrier().wait()
         if self.rank == 0:
-            with self.assertRaisesRegex(dist.DistBackendError, self.remote_error_msg):
-                # Previously this should timeout; but with newer NCCL version,
-                # it seems NCCL would detect that the peer rank has exited
+            with self.assertRaisesRegex(dist.DistBackendError, self.blocking_wait_error_msg):
+                # This should timeout
                 process_group.barrier().wait(timeout=timedelta(seconds=self.op_timeout_sec))
 
     def _run_invalid_nccl_blocking_wait_env(self, val):
