@@ -276,7 +276,7 @@ enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", ""
 max_fusion_size = 64
 
 # max number of inputs to generate cat as a pointwise op with masked laods
-max_pointwise_cat_inputs = 128
+max_pointwise_cat_inputs = 8
 
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
@@ -365,19 +365,6 @@ kernel_name_max_ops = 10
 
 # Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
 shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "1") == "1"
-
-# When, during shape padding, dimension N would have to be padded, but
-# dimension M would not, then we can avoid a padding if we perform an
-# explicit transpose ( e.g. matmul(A,B) = matmul(B.T, A.T) ).T in order to
-# put the M dimension in the N position, therefore ensuring an aligned
-# GEMM result without padding. This can have dramatic
-# performance benefits if it is possible. Also, if this flag is enabled,
-# dimension M is not padded if N is aligned, since that's unneccessary
-# for an aligned result.
-shape_pad_use_transpose: bool = True
-
-# Whether to always use shape padding if it is enabled and possible
-force_shape_pad: bool = False
 
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
@@ -573,6 +560,10 @@ class triton:
         "Z": 1024,
         "R": 4096 * (16 if multi_kernel else 1),
     }
+
+    # Minimum RBLOCK to be used for a TritonSplitScanKernel
+    # NOTE: This also indirectly controls the size of workspace buffer required
+    min_split_scan_rblock = 256
 
     # Store the generated cubin files for cpp wrapper code to load
     store_cubin = False

@@ -170,7 +170,8 @@ inline AtenTensorHandle wrap_with_raii_handle_if_needed(
 #define CACHE_TORCH_DTYPE(typename) \
   static auto cached_torch_dtype_##typename = aoti_torch_dtype_##typename()
 
-static auto cached_torch_device_type_cpu = aoti_torch_device_type_cpu();
-static auto cached_torch_device_type_cuda = aoti_torch_device_type_cuda();
+#define CACHE_TORCH_DEVICE(device)                \
+  static auto cached_torch_device_type_##device = \
+      aoti_torch_device_type_##device()
 
 } // namespace torch::aot_inductor
