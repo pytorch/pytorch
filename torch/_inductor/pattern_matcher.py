@@ -5,10 +5,10 @@ import functools
 import inspect
 import itertools
 import logging
+import operator
 import os
 import re
 from collections import defaultdict
-import operator
 from typing import (
     Any,
     Callable,
