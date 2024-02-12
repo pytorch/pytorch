@@ -282,10 +282,6 @@ class EnterDeviceContextManagerLine:
                 else:
                     code.writeline(f"device_guard.set_index({self.device_idx});")
         else:
-            # Note _DeviceGuard has less overhead than device, but only accepts
-            # integers
-            code.writeline(f"with {V.graph.device_ops.device_guard(self.device_idx)}:")
-            device_cm_stack.enter_context(code.indent())
             code.writeline(V.graph.device_ops.set_device(self.device_idx))
 
 
@@ -293,8 +289,7 @@ class ExitDeviceContextManagerLine:
     def codegen(
         self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack
     ) -> None:
-        if not V.graph.cpp_wrapper:
-            device_cm_stack.close()
+        pass
 
 
 @dataclasses.dataclass
