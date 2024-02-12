@@ -131,7 +131,7 @@ jobs:
           SCCACHE_REGION: us-east-1
           SCCACHE_S3_USE_SSL: false
           SCCACHE_ENDPOINT: http://ossci-compiler-cache.s3.amazonaws.com/
-          SCCACHE_LOG: debug
+          SCCACHE_LOG: trace
           SCCACHE_NO_DAEMON: 1
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
