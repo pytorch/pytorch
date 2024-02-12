@@ -4,12 +4,6 @@
 #include <torch/csrc/dynamo/debug_macros.h>
 #include <torch/csrc/dynamo/cpython_defs.h>
 
-// Problem in CPython includes when mixing core and non-core build
-// The fix was not backported to 3.12 so this is needed here
-// https://github.com/python/cpython/issues/105268
-#if IS_PYTHON_3_12_PLUS
-#undef _PyGC_FINALIZED
-#endif
 
 Py_ssize_t extra_index = -1;
 
@@ -53,7 +47,9 @@ FrameState* extract_frame_state(ExtraState* extra_state) {
 
 ExtraState* get_extra_state(PyCodeObject* code) {
   ExtraState* extra = NULL;
-  _PyCode_GetExtra((PyObject*)code, extra_index, (void**)&extra);
+  #if !(IS_PYTHON_3_12_PLUS)
+    _PyCode_GetExtra((PyObject*)code, extra_index, (void**)&extra);
+  #endif
   return extra;
 }
 
@@ -69,7 +65,9 @@ void set_extra_state(PyCodeObject* code, ExtraState* extra_state) {
   CHECK(
       old_extra_state == NULL || old_extra_state == SKIP_CODE ||
       old_extra_state != extra_state);
-  _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
+  #if !(IS_PYTHON_3_12_PLUS)
+    _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
+  #endif
 }
 
 ExtraState* init_and_set_extra_state(PyCodeObject* code) {
