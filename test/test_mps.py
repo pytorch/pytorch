@@ -356,6 +356,7 @@ def mps_ops_modifier(ops):
         'char',
         'column_stack',
         'combinations',
+        'conj',
         'constant_pad_nd',
         'cos',
         'cosh',

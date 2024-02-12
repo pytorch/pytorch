@@ -2,6 +2,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/Copy.h>
+#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/_copy_from_and_resize_native.h>
 #include <ATen/ops/_copy_from_native.h>
@@ -46,12 +47,15 @@ static void copy_cast_mps(at::Tensor& dst,
   @autoreleasepool {
     string key = "copy_cast_mps" + getTensorsStringKey({src, dst});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, src);
-      MPSGraphTensor* inputCastTensor = inputTensor;
+      auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, src);
       if (isFloatingType(src.scalar_type()) && dstDType == MPSDataTypeUInt8) {
-        inputCastTensor = [mpsGraph castTensor:inputTensor toType:MPSDataTypeInt32 name:@"cast"];
+        inputTensor = [mpsGraph castTensor:inputTensor toType:MPSDataTypeInt32 name:@"cast"];
       }
-      MPSGraphTensor* outputTensor = [mpsGraph castTensor:inputCastTensor toType:dstDType name:@"cast"];
+      auto outputTensor = [mpsGraph castTensor:inputTensor toType:dstDType name:@"cast"];
+      if (src.is_conj() != dst.is_conj()) {
+        TORCH_CHECK(supportsComplex(), "MPS complex tensors conjugation needs MacOS14+");
+        outputTensor = [mpsGraph conjugateWithTensor:outputTensor name:nil];
+      }
 
       newCachedGraph->inputTensor_ = inputTensor;
       newCachedGraph->outputTensor_ = outputTensor;
@@ -230,7 +234,7 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
   Tensor src;
   auto sameMemFormat =
       src_.is_contiguous(dst_.suggest_memory_format()) && dst_.is_contiguous(dst_.suggest_memory_format());
-  const bool sameDataType = src_.dtype() == dst_.dtype();
+  const bool sameDataType = src_.dtype() == dst_.dtype() && src_.is_conj() == dst_.is_conj();
 
   if ((!src_.is_contiguous(MemoryFormat::Contiguous) && !sameMemFormat) ||
       // the copy_cast path requires storage_offset to be applied before casting
