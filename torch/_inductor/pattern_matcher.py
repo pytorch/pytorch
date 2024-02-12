@@ -8,6 +8,7 @@ import logging
 import os
 import re
 from collections import defaultdict
+import operator
 from typing import (
     Any,
     Callable,
@@ -837,7 +838,7 @@ class ReplacementPatternEntry(PatternEntry):
             def maybe_getitem(node):
                 if node.op != "call_function":
                     return None
-                if str(node.target) != "<built-in function getitem>":
+                if node.target != operator.getitem:
                     return None
                 assert len(node.args) == 2
                 return node.args[1]
