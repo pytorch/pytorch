@@ -3591,7 +3591,6 @@ class ShapeEnv:
             elif a in self.size_like:
                 tgt_bound_so = self.bound_sympy(tgt, size_oblivious=True)
                 src_bound_so = self.var_to_range[a] & ValueRanges(2, sympy.oo)
-                print(tgt_bound_so)
                 if not issubset(tgt_bound_so, src_bound_so):
                     self.log.debug("skipped set_replacement %s = %s (%s) "
                                    "[%s not subset of %s (size-oblivious conditions)]", a, tgt, msg, tgt_bound_so, src_bound_so)
