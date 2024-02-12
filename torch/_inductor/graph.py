@@ -1091,11 +1091,6 @@ class GraphLowering(torch.fx.Interpreter):
                 raise CppWrapperCodeGenError(f"Unsupported input dtype {dtype}")
 
     def init_wrapper_code(self):
-        if self.wrapper_code is not None:
-            # for subgraphs, we set the wrapper
-            # code from the parent graph
-            return
-
         self.cuda = "cuda" in self.device_types
         if self.cpp_wrapper:
             self.validate_can_generate_cpp_wrapper()

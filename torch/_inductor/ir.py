@@ -6770,7 +6770,9 @@ class Conditional(ExternKernel):
 
         wrapper.writeline(IndentLine())
         wrapper.writeline(f"# subgraph: {self.true_submodule.name}")
-        for operand, input_name in zip(self.operands, self.true_submodule.graph.graph_inputs):
+        for operand, input_name in zip(
+            self.operands, self.true_submodule.graph.graph_inputs
+        ):
             wrapper.writeline(f"{input_name} = {operand.get_name()}")
         with V.set_graph_handler(self.true_submodule.graph):
             self.true_submodule.graph.codegen_subgraph(
@@ -6785,7 +6787,9 @@ class Conditional(ExternKernel):
 
         wrapper.writeline(IndentLine())
         wrapper.writeline(f"# subgraph: {self.false_submodule.name}")
-        for operand, input_name in zip(self.operands, self.false_submodule.graph.graph_inputs):
+        for operand, input_name in zip(
+            self.operands, self.false_submodule.graph.graph_inputs
+        ):
             wrapper.writeline(f"{input_name} = {operand.get_name()}")
         self.false_submodule.graph.wrapper_code = V.graph.wrapper_code
         with V.set_graph_handler(self.false_submodule.graph):
