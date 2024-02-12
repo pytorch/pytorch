@@ -8,6 +8,7 @@ from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch._ops import _get_dispatch_mode_pre_dispatch
 from torch.utils._python_dispatch import (
     _detect_functional_mode,
+    _push_mode,
     return_and_correct_aliasing,
     TorchDispatchMode,
 )
@@ -442,21 +443,33 @@ def maybe_disable_functional_mode():
 # TODO: clean up the redundancy here,
 # unify on a single context manager for all mode keys.
 @contextlib.contextmanager
-def unset_functional_temporarily(is_pre_dispatch=False):
-    from torch._ops import _set_mode_pre_dispatch, unset_mode_pre_dispatch
+def unset_functional_temporarily():
+    from torch._ops import unset_mode_pre_dispatch
 
-    old = (
-        torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
-        if not is_pre_dispatch
-        else unset_mode_pre_dispatch(torch._C._TorchDispatchModeKey.FUNCTIONAL)
+    old_mode_from_aot_dispatch = torch._C._unset_dispatch_mode(
+        torch._C._TorchDispatchModeKey.FUNCTIONAL
     )
+    old_mode_from_pre_dispatch = unset_mode_pre_dispatch(
+        torch._C._TorchDispatchModeKey.FUNCTIONAL
+    )
+
+    if old_mode_from_aot_dispatch:
+        assert old_mode_from_pre_dispatch is None, "Can only have one mode available"
+    if old_mode_from_pre_dispatch:
+        assert old_mode_from_aot_dispatch is None, "Can only have one mode available"
+
     try:
-        yield old
+        if old_mode_from_aot_dispatch:
+            yield old_mode_from_aot_dispatch
+        elif old_mode_from_pre_dispatch:
+            yield old_mode_from_pre_dispatch
+        else:
+            yield
     finally:
-        if old is not None:
-            torch._C._set_dispatch_mode(
-                old
-            ) if not is_pre_dispatch else _set_mode_pre_dispatch(old)
+        if old_mode_from_aot_dispatch is not None:
+            torch._C._set_dispatch_mode(old_mode_from_aot_dispatch)
+        if old_mode_from_pre_dispatch is not None:
+            _push_mode(old_mode_from_aot_dispatch, torch._C.DispatchKey.PreDispatch)
 
 
 # This is similar to torch.func.functionalize, but:

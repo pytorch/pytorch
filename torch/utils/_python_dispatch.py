@@ -131,7 +131,7 @@ def _pop_mode_temporarily(k: Optional[DispatchKey] = None):
 
 @contextlib.contextmanager
 def _disable_current_modes():
-    from torch._ops import _len_torch_dispatch_stack_pre_dispatch, _pop_mode_from_pre_dispatch, _set_mode_pre_dispatch
+    from torch._ops import _len_torch_dispatch_stack_pre_dispatch, _pop_mode_from_pre_dispatch
     from torch._subclasses.functional_tensor import FunctionalTensorMode
     from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
     mode_len_pre_dispatch = _len_torch_dispatch_stack_pre_dispatch()
@@ -162,7 +162,7 @@ def _disable_current_modes():
         for mode in reversed(old_modes):
             _push_mode(mode)
         for mode in reversed(old_pre_dispatch_modes):
-            _set_mode_pre_dispatch(mode)
+            _push_mode(mode, torch._C.DispatchKey.PreDispatch)
 
 
 class BaseTorchDispatchMode(TorchDispatchMode):
