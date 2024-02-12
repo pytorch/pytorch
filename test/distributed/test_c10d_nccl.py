@@ -718,34 +718,28 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
     def test_gather_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())
-        local_device_ids = self.rank_to_GPU[self.rank]
-        num_gpus = len(local_device_ids)
+        device_id = self.rank_to_GPU[self.rank][0]
 
         # init input
-        tensors = []
-        for device_id in local_device_ids:
-            tensors.append(torch.tensor([self.rank]).cuda(device_id))
+        tensor = torch.tensor([self.rank]).cuda(device_id)
 
         # init output
         output_ts = []
-        for idx in range(num_gpus):
-            gpu_idx = local_device_ids[idx]
-            output_ts.append([])
-            for rank in range(self.world_size):
-                output_ts[idx].append(torch.tensor([-1]).cuda(gpu_idx))
+        for rank in range(self.world_size):
+            output_ts.append(torch.tensor([-1]).cuda(device_id))
 
         with self.assertRaisesRegex(ValueError, "invalid root rank"):
             opts = c10d.GatherOptions()
             opts.rootRank = -1
-            pg.gather(output_ts, tensors, opts)
+            pg.gather([output_ts], [tensor], opts)
 
         with self.assertRaisesRegex(TypeError, "incompatible function arguments"):
-            pg.gather(output_ts, tensors, 0)
+            pg.gather([output_ts], [tensor], 0)
 
         with self.assertRaisesRegex(ValueError, "invalid root rank"):
             opts = c10d.GatherOptions()
             opts.rootRank = self.world_size
-            pg.gather(output_ts, tensors, opts)
+            pg.gather([output_ts], [tensor], opts)
 
         with self.assertRaisesRegex(
             # throws error message from dispatcher
@@ -753,20 +747,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         ):
             opts = c10d.GatherOptions()
             opts.rootRank = 0
-            pg.gather(output_ts, [], opts)
-
-        with self.assertRaisesRegex(
-            ValueError, "Tensors must be on distinct GPU devices"
-        ):
-            # init input
-            tensors2 = []
-            for device_id in local_device_ids:
-                tensors2.append(torch.tensor([self.rank]).cuda(device_id))
-                tensors2.append(torch.tensor([self.rank]).cuda(device_id))
-
-            opts = c10d.GatherOptions()
-            opts.rootRank = 0
-            pg.gather(output_ts, tensors2, opts)
+            pg.gather([output_ts], [], opts)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -2956,7 +2937,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @property
     def op_timeout_sec(self):
-        return 1
+        return 3
 
     @property
     def world_size(self):
@@ -2965,6 +2946,10 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @property
     def blocking_wait_error_msg(self):
         return "timeout"
+
+    @property
+    def remote_error_msg(self):
+        return "remote process exit"
 
     def _run_all_reduce(self, pg):
         pg.allreduce(torch.rand(10).cuda(self.rank))
@@ -3014,8 +2999,9 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         process_group.allreduce(torch.rand(10).cuda(self.rank))
         if self.rank == 0:
             work = process_group.allreduce(torch.rand(10).cuda(self.rank))
-            with self.assertRaisesRegex(dist.DistBackendError, self.blocking_wait_error_msg):
-                # Operation would time out in blocking mode.
+            with self.assertRaisesRegex(dist.DistBackendError, self.remote_error_msg):
+                # Previously this should timeout; but with newer NCCL version,
+                # it seems NCCL would detect that the peer rank has exited
                 work.wait(timeout=timedelta(seconds=self.op_timeout_sec))
             # Run some GPU operations to make sure cuda has not gotten stuck.
             # It was observed cuda could get stuck if NCCL communicators were
@@ -3083,8 +3069,9 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         )
         process_group.barrier().wait()
         if self.rank == 0:
-            with self.assertRaisesRegex(dist.DistBackendError, self.blocking_wait_error_msg):
-                # This should timeout
+            with self.assertRaisesRegex(dist.DistBackendError, self.remote_error_msg):
+                # Previously this should timeout; but with newer NCCL version,
+                # it seems NCCL would detect that the peer rank has exited
                 process_group.barrier().wait(timeout=timedelta(seconds=self.op_timeout_sec))
 
     def _run_invalid_nccl_blocking_wait_env(self, val):
@@ -3970,11 +3957,17 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         ver = t['version']
-        self.assertEqual(ver, "1.0")
+        self.assertEqual(ver, "1.1")
         t = t['entries']
         self.assertEqual(len(t), 2)
         last = t[-1]
         self.assertEqual(last['state'], 'completed')
+        s = last['time_discovered_started_ns']
+        f = last['time_discovered_completed_ns']
+        self.assertIsNotNone(f)
+        if timing_enabled:
+            self.assertIsNotNone(s)
+            self.assertTrue(s <= f)
         self.assertIn('test_c10d_nccl.py', str(last['frames']))
         self.assertEqual(last['input_sizes'], ((3, 4),))
         self.assertEqual(last['output_sizes'], ((3, 4),))
@@ -4131,6 +4124,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 else:
                     self.assertEqual(t[-1]['seq_id'], 2)
                     self.assertEqual(t[-1]['state'], self.started_or_scheduled(timing_enabled))
+                    self.assertIsNone(t[-1]['time_discovered_completed_ns'])
                 # this will eventually cause the missing rank 0
                 # to continue which will unblock the non-zero ranks
                 self.parent.send('next')

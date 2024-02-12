@@ -663,6 +663,24 @@ class TestCompiledAutograd(TestCase):
     def test_mismatch_fake_tensor_mode_dynamic_shape(self):
         self.test_mismatch_fake_tensor_mode(dynamic_shape=True)
 
+    def test_accumulate_grad_accuracy(self):
+        def fn():
+            model = torch.nn.Sequential(
+                torch.nn.Linear(2, 1, bias=False),
+                torch.nn.Linear(1, 2, bias=False),
+            )
+            x = torch.randn(2, 2)
+
+            out = model(x)
+            loss = out.sum()
+            torch.manual_seed(0)
+            loss.backward()
+
+            yield model[0].weight.grad
+            yield model[1].weight.grad
+
+        self.check_output_and_recompiles(fn, 1)
+
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
@@ -798,7 +816,7 @@ known_failing_tests = {
     "test_mark_non_differentiable_mixed",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertTrue
     "test_materialize_grads",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
     "test_naughty_autograd_function_stashing_ctx",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function
-    "test_no_grad_copy",  # torch._dynamo.exc.Unsupported: call_function args: TensorVariable() SkipFilesVariable()
+    "test_no_grad_copy",  # torch._dynamo.exc.Unsupported: call_function args: TensorVariable() SkipFunctionVariable()
     "test_no_grad_copy_sparse",  # torch._dynamo.exc.Unsupported: Tensor.data_ptr
     "test_reentrant_priority",  # torch._dynamo.exc.InternalTorchDynamoError: '<' not supported between instances of
     "test_reentrant_with_callbacks_both_depths",  # torch._dynamo.exc.Unsupported: call_method UserDefinedObjectVariable
@@ -809,10 +827,10 @@ known_failing_tests = {
     "test_return_leaf",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
     "test_save_none_for_backward",  # AssertionError:
     "test_save_output_nr",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
-    "test_saved_variables_deprecated",  # torch._dynamo.exc.Unsupported: UNPACK_SEQUENCE SkipFilesVariable()
+    "test_saved_variables_deprecated",  # torch._dynamo.exc.Unsupported: UNPACK_SEQUENCE SkipFunctionVariable()
     "test_set_materialize_non_diff_grads",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsNone
     "test_setup_context_when_forward_has_default_args",  # torch._dynamo.exc.Unsupported: call_function args
-    "test_simple_reentrant",  # torch._dynamo.exc.Unsupported: call_method SkipFilesVariable() sum [] {}
+    "test_simple_reentrant",  # torch._dynamo.exc.Unsupported: call_method SkipFunctionVariable() sum [] {}
     "test_tensor_hooks_inplace_multiple_outputs",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
     "test_lobpcg",  # torch._dynamo.exc.Unsupported: 'call_function LOBPCGAutogradFunction.backward in skip_files
 }

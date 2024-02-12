@@ -1028,15 +1028,24 @@ class WrapperCodeGen(CodeGen):
             idx = kernel.arg_names.index(key)
             if idx in kernel.constexprs:
                 constants[key] = arg
-                continue
-            if isinstance(arg, (ir.Buffer, ir.ReinterpretView)):
+            elif isinstance(arg, ir.Buffer):
                 signature.append(
                     TensorArg(
-                        key,
-                        arg.get_name(),
-                        arg.get_dtype(),
-                        # For ReinterpretView, we do not want to check alignment
-                        not isinstance(arg, ReinterpretView),
+                        name=key,
+                        buffer=arg.get_name(),
+                        dtype=arg.get_dtype(),
+                    )
+                )
+            elif isinstance(arg, ir.ReinterpretView):
+                # for ReinterpretView we use the underlying
+                # buffer name and note the (possibly non-zero)
+                # offset relative to the underlying buffer
+                signature.append(
+                    TensorArg(
+                        name=key,
+                        buffer=arg.data.get_name(),
+                        dtype=arg.get_dtype(),
+                        offset=arg.layout.offset,
                     )
                 )
             else:
@@ -1066,7 +1075,8 @@ class WrapperCodeGen(CodeGen):
                 configs={configs!r},
                 inductor_meta={inductor_meta!r},
                 triton_meta={triton_meta!r},
-                filename=__file__
+                filename=__file__,
+                custom_kernel=True,
             )
             @triton.jit
             """
@@ -1431,6 +1441,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.declared_int_array_vars = set()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
         self.arg_var_id = count()
+        self.used_cached_devices = set()
         self.used_cached_dtypes = set()
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
@@ -2065,6 +2076,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
         if config.abi_compatible:
             for dtype in self.used_cached_dtypes:
                 cached_dtypes_buffer.writeline(f"CACHE_TORCH_DTYPE({dtype});")
+            for device in self.used_cached_devices:
+                cached_dtypes_buffer.writeline(f"CACHE_TORCH_DEVICE({device});")
         cached_dtypes_buffer.splice(self.prefix)
         self.prefix = cached_dtypes_buffer
 
@@ -2539,6 +2552,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def codegen_device(self, device):
         if config.abi_compatible:
+            self.used_cached_devices.add(device.type)
             return f"cached_torch_device_type_{device.type},{device.index if device.index else 0}"
         else:
             from .cpp import DEVICE_TO_ATEN
@@ -3096,7 +3110,11 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         super().write_header()
 
         self.header.splice("#include <filesystem>")
-        if not config.abi_compatible:
+        if config.abi_compatible:
+            self.header.splice(
+                "#include <torch/csrc/inductor/aoti_runtime/utils_cuda.h>"
+            )
+        else:
             self.header.splice(
                 """
                 #include <c10/cuda/CUDAGuard.h>
