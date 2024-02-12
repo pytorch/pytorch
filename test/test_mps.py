@@ -370,6 +370,7 @@ def mps_ops_modifier(ops):
         'exp2',
         'exp',
         'expm1',
+        'fft.fft',
         'fft.fftshift',
         'fft.ifftshift',
         'flip',
@@ -633,24 +634,24 @@ def mps_ops_modifier(ops):
         'log_sigmoid_forward': None,
         'linalg.eig': None,
         'linalg.eigvals': None,
-        'fft.fft': None,
-        'fft.fft2': None,
+        'fft.fft': [] if product_version >= 14.0 else None,
+        'fft.fft2': [] if product_version >= 14.0 else None,
         'fft.fftn': None,
-        'fft.hfft': None,
-        'fft.hfft2': None,
-        'fft.hfftn': None,
+        'fft.hfft': [] if product_version >= 14.0 else None,
+        'fft.hfft2': [] if product_version >= 14.0 else None,
+        'fft.hfftn': [] if product_version >= 14.0 else None,
         'fft.ifft': None,
-        'fft.ifft2': None,
-        'fft.ifftn': None,
+        'fft.ifft2': [] if product_version >= 14.0 else None,
+        'fft.ifftn': [] if product_version >= 14.0 else None,
         'fft.ihfft': None,
         'fft.ihfft2': None,
         'fft.ihfftn': None,
-        'fft.irfft': None,
-        'fft.irfft2': None,
-        'fft.irfftn': None,
+        'fft.irfft': [] if product_version >= 14.0 else None,
+        'fft.irfft2': [] if product_version >= 14.0 else None,
+        'fft.irfftn': [] if product_version >= 14.0 else None,
         'fft.rfft': None,
-        'fft.rfft2': None,
-        'fft.rfftn': None,
+        'fft.rfft2': [] if product_version >= 14.0 else None,
+        'fft.rfftn': [] if product_version >= 14.0 else None,
         'put': None,
         'stft': None,
         'nn.functional.conv_transpose3d': None,
@@ -11465,6 +11466,9 @@ class TestConsistency(TestCaseMPS):
             elif op.name == "nn.functional.upsample_bilinear" and dtype == torch.uint8:
                 atol = 1.0
                 rtol = 0.0
+            elif op.name in ['fft.rfftn', 'fft.hfftn', 'fft.hfft2', 'fft.fft']:
+                atol = 1e-4
+                rtol = 3e-5
             else:
                 atol = None
                 rtol = None
