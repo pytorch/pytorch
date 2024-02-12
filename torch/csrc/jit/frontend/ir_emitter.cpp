@@ -5677,7 +5677,7 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   eraseListLiterals(to_clean);
 
   // remove any uses of tuples that we inserted that are not needed
-  LowerSimpleTuples(to_clean);
+  LowerSimpleTuplesWithoutAliasDb(to_clean);
 
   // full constant propagation runs ops with mutable inputs if it can
   // prove that the inputs are not mutated anywhere in the graph.

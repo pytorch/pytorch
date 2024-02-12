@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 
+#include <iostream>
 #include <unordered_map>
 
 namespace torch {
@@ -18,10 +19,12 @@ class DeadCodeEliminator {
  public:
   explicit DeadCodeEliminator(
       std::shared_ptr<Graph> graph,
-      DCESideEffectPolicy sideEffectPolicy)
+      DCESideEffectPolicy sideEffectPolicy,
+      bool UseAliasDb = true)
       : sideEffectPolicy_(sideEffectPolicy),
         graph_(std::move(graph)),
-        useAliasDb_(true) {}
+        useAliasDb_(UseAliasDb)
+      : {}
   DeadCodeEliminator(DCESideEffectPolicy sideEffectPolicy)
       : sideEffectPolicy_(sideEffectPolicy) {}
 
@@ -416,7 +419,8 @@ class DeadCodeEliminator {
 
   AliasDb* getOrCreateAliasDb() {
     if (!aliasDb_) {
-      aliasDb_ = std::make_unique<AliasDb>(graph_);
+      std::cout << " Making alias db\n" aliasDb_ =
+          std::make_unique<AliasDb>(graph_);
     }
     return aliasDb_.get();
   }
@@ -456,6 +460,15 @@ void EliminateDeadCode(
   DeadCodeEliminator eliminator(sideEffectPolicy);
   eliminator.setDeleteCallback(std::move(cb));
   eliminator.run(block, /*recurse=*/true);
+}
+
+void EliminateDeadCodeWithoutAliasDb(const std::shared_ptr<Graph>& graph) {
+  DeadCodeEliminator(
+      graph,
+      DCESideEffectPolicy::DONT_DELETE_NODES_WITH_SIDE_EFFECTS,
+      /*UseAliasDb*/ false)
+      .run(graph->block(), /*recurse=*/true);
+  GRAPH_DUMP("After EliminateDeadCode: ", graph);
 }
 
 } // namespace jit
