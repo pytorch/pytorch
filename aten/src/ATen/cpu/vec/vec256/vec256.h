@@ -69,7 +69,7 @@ std::ostream& operator<<(std::ostream& stream, const Vectorized<T>& vec) {
 }
 
 
-#if defined(CPU_CAPABILITY_AVX2)
+#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CAST (AVX2) ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -94,8 +94,7 @@ inline Vectorized<double> cast<double, int64_t>(const Vectorized<int64_t>& src) 
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#ifndef _MSC_VER
-// MSVC is not working well on complex function overload.
+
 template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<double>>
 inline gather(const double* base_addr, const Vectorized<int64_t>& vindex) {
@@ -107,10 +106,9 @@ std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorize
 inline gather(const float* base_addr, const Vectorized<int32_t>& vindex) {
   return _mm256_i32gather_ps(base_addr, vindex, scale);
 }
-#endif
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MASK GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#ifndef _MSC_VER
-// MSVC is not working well on complex function overload.
+
 template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<double>>
 inline mask_gather(const Vectorized<double>& src, const double* base_addr,
@@ -124,7 +122,7 @@ inline mask_gather(const Vectorized<float>& src, const float* base_addr,
                    const Vectorized<int32_t>& vindex, Vectorized<float>& mask) {
   return _mm256_mask_i32gather_ps(src, base_addr, vindex, mask, scale);
 }
-#endif
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CONVERT ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // Only works for inputs in the range: [-2^51, 2^51]
@@ -304,6 +302,6 @@ inline Vectorized<uint8_t> flip(const Vectorized<uint8_t> & v) {
   return flip8(v);
 }
 
-#endif // (defined(CPU_CAPABILITY_AVX2)
+#endif // (defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
 }} // namepsace at::vec::CPU_CAPABILITY
