@@ -1146,7 +1146,7 @@ def main():
         "nn/parallel/*.pyi",
         "utils/data/*.pyi",
         "utils/data/datapipes/*.pyi",
-        "torch/testing/_internal/dynamo_test_failures.csv",
+        "testing/_internal/dynamo_test_failures.csv",
         "lib/*.so*",
         "lib/*.dylib*",
         "lib/*.dll",
