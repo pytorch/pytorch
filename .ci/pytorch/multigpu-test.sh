@@ -33,7 +33,7 @@ time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/test
 
 # functional collective tests
 time python test/run_test.py --verbose -i distributed/test_functional_api
-
+time python test/run_test.py --verbose -i distributed/test_c10d_functional_native
 
 # DTensor tests
 time python test/run_test.py --verbose -i distributed/_tensor/test_random_ops
