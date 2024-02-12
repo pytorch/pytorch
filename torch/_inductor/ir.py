@@ -5847,7 +5847,12 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
         algorithm,
     ):
         transposed = True
-        (inputs, constant_args, kernel_layout, _,) = _prepare_convolution_fusion_create(
+        (
+            inputs,
+            constant_args,
+            kernel_layout,
+            _,
+        ) = _prepare_convolution_fusion_create(
             cls,
             x,
             weight,
