@@ -1,13 +1,16 @@
 import math
 from enum import IntEnum
 
-import sympy
+from typing import TYPE_CHECKING
 
 import torch
 from . import ir
 
 from .utils import get_dtype_size, sympy_product
 from .virtualized import V
+
+if TYPE_CHECKING:
+    from torch._inductor.scheduler import BaseSchedulerNode
 
 
 class NCCL_COLL(IntEnum):
@@ -35,52 +38,19 @@ def get_gpu_type() -> NVIDIA_GPU_TYPE:
         return NVIDIA_GPU_TYPE.AMPERE
 
 
-def get_collective_type(node: ir.IRNode) -> NCCL_COLL:
-    if isinstance(node, ir._CollectiveKernel):
-        kernel_name = node.python_kernel_name
-        assert kernel_name is not None
-        if "all_reduce" in kernel_name:
-            return NCCL_COLL.ALL_REDUCE
-        elif "all_gather" in kernel_name:
-            return NCCL_COLL.ALL_GATHER
-        elif "reduce_scatter" in kernel_name:
-            return NCCL_COLL.REDUCE_SCATTER
-        else:
-            raise Exception(f"Unsupported collective kernel: {kernel_name}")
-
-    if isinstance(node, (ir.AllReduce, ir.AllReduceCoalesced)):
+def get_collective_type(snode: "BaseSchedulerNode") -> NCCL_COLL:
+    if isinstance(snode.node, (ir.AllReduce, ir.AllReduceCoalesced)):
         return NCCL_COLL.ALL_REDUCE
-    elif isinstance(node, (ir.AllGatherIntoTensor, ir.AllGatherIntoTensorCoalesced)):
+    elif isinstance(
+        snode.node, (ir.AllGatherIntoTensor, ir.AllGatherIntoTensorCoalesced)
+    ):
         return NCCL_COLL.ALL_GATHER
-    elif isinstance(node, (ir.ReduceScatterTensor, ir.ReduceScatterTensorCoalesced)):
+    elif isinstance(
+        snode.node, (ir.ReduceScatterTensor, ir.ReduceScatterTensorCoalesced)
+    ):
         return NCCL_COLL.REDUCE_SCATTER
     else:
-        raise Exception(f"Unsupported collective type: {node}")
-
-
-def get_collective_input_size_bytes(node: ir.IRNode) -> int:
-    sz_bytes = 0
-    for inp in node.inputs:  # type: ignore[attr-defined]
-        shape = inp.layout.size
-        numel = sympy_product(inp.layout.size)
-        if isinstance(numel, sympy.Integer):
-            # For ease of testing
-            numel = int(numel)
-        else:
-            numel = V.graph.sizevars.size_hint(numel)
-        sz_bytes += numel * get_dtype_size(inp.layout.dtype)
-    return sz_bytes
-
-
-def get_collective_group_size(node: ir.IRNode) -> int:
-    if type(node) == ir._CollectiveKernel:
-        from torch.distributed.distributed_c10d import _get_group_size_by_name
-
-        return _get_group_size_by_name(node.constant_args[-1])
-    elif isinstance(node, ir.CollectiveKernel):
-        return node.constant_args[2]  # type: ignore[attr-defined]
-    else:
-        raise TypeError(f"Unsupported collective type: {node}")
+        raise Exception(f"Unsupported collective type: {snode.node}")
 
 
 ####################################################################################################################
@@ -110,63 +80,68 @@ class NCCL_PROTO(IntEnum):
 
 # Latencies in us
 # len(NCCL_ALGO) x len(NCCL_PROTO)
-# NOTE: use array instead of tensor to prevent incompatibility with fake mode
-baseLat = [
-    # Tree
+baseLat = torch.tensor(
     [
-        6.8,  # LL
-    ],
-    # Ring
-    [
-        6.6,  # LL
-    ],
-]
+        # Tree
+        [
+            6.8,  # LL
+        ],
+        # Ring
+        [
+            6.6,  # LL
+        ],
+    ]
+)
 
 # Latencies in us
 # len(NCCL_HW) x len(NCCL_ALGO) x len(NCCL_PROTO)
-hwLat = [
-    # NVLINK
+hwLat = torch.tensor(
     [
-        [0.6],  # Tree (LL)
-        [0.6],  # Ring (LL)
-    ],
-    # PCI
-    [
-        [1.0],  # Tree (LL)
-        [1.0],  # Ring (LL)
-    ],
-    # NET
-    [
-        [5.0],  # Tree (LL)
-        [2.7],  # Ring (LL)
-    ],
-]
+        # NVLINK
+        [
+            [0.6],  # Tree (LL)
+            [0.6],  # Ring (LL)
+        ],
+        # PCI
+        [
+            [1.0],  # Tree (LL)
+            [1.0],  # Ring (LL)
+        ],
+        # NET
+        [
+            [5.0],  # Tree (LL)
+            [2.7],  # Ring (LL)
+        ],
+    ]
+)
 
 
 # LL128 max BW per channel
-llMaxBws = [
-    # Volta-N1/Intel-N2/Intel-N4
+llMaxBws = torch.tensor(
     [
-        39.0,
-        39.0,
-        20.4,
-    ],
-    # Ampere-N1/AMD-N2/AMD-N4
-    [
-        87.7,
-        22.5,  # avg of ring & tree
-        19.0,
-    ],
-    # Hopper-N1/AMD-N2/AMD-N4
-    [
-        87.7,
-        22.5,  # avg of ring & tree
-        19.0,
-    ],
-]
+        # Volta-N1/Intel-N2/Intel-N4
+        [
+            39.0,
+            39.0,
+            20.4,
+        ],
+        # Ampere-N1/AMD-N2/AMD-N4
+        [
+            87.7,
+            22.5,  # avg of ring & tree
+            19.0,
+        ],
+        # Hopper-N1/AMD-N2/AMD-N4
+        [
+            87.7,
+            22.5,  # avg of ring & tree
+            19.0,
+        ],
+    ]
+)
 
 
-def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
+def estimate_nccl_collective_runtime(snode: "BaseSchedulerNode") -> float:
     """
     Returns estimated NCCL collective runtime in nanoseconds (ns).
 
@@ -179,14 +154,16 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
     - 8 gpus per node  # TODO: Need to find a way to get accurate "gpus per node" and "# nodes" info.
     - collective is one of: allreduce, reducescatter, allgather
     """
-    tensor_storage_size_bytes = get_collective_input_size_bytes(node)
+    tensor_numel = V.graph.sizevars.size_hint(sympy_product(snode.node.layout.size))
+    tensor_dtype = snode.node.layout.dtype
+    tensor_storage_size_bytes = tensor_numel * get_dtype_size(tensor_dtype)
     # Convert bytes to GB
     tensor_storage_size_GB = tensor_storage_size_bytes / 1024 / 1024 / 1024
 
     # Currently assumes each node has 8 gpus. And when >1 node is used, assumes each node uses all 8 gpus.
     # TODO: Need to find a way to get accurate "gpus per node" and "# nodes" info.
     num_gpus_per_node = 8
-    group_size = get_collective_group_size(node)
+    _, _, group_size = snode.node.constant_args  # type: ignore[attr-defined]
     nNodes = math.ceil(group_size / num_gpus_per_node)
     nRanks = group_size  # this is total # of gpus globally that participate in this collective op
 
@@ -196,7 +173,7 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
     # Assumes ring algorithm
     nccl_algo = NCCL_ALGO.RING
     nccl_proto = NCCL_PROTO.LL
-    coll = get_collective_type(node)
+    coll = get_collective_type(snode)
 
     # =============== bandwidth computation ===============
     # First compute bandwidth in GB/s; then at the end, convert it to GB/ns
@@ -208,7 +185,7 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
     index2 = nNodes - 1 if nNodes <= 2 else 2
     # LL: for single node, we look at GPU type; for multi-node, we look at CPU type
     index1 = compCapIndex if nNodes == 1 else 0
-    llMaxBw = llMaxBws[index1][index2]
+    llMaxBw = llMaxBws[index1][index2].item()
 
     # NOTE: each step of ring algorithm is synchronized,
     # and is bottlenecked by the slowest link which is the inter-node interconnect.
@@ -250,9 +227,9 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
         nInterSteps = nNodes - 1
 
     # First compute latency in us; then at the end, convert it to ns
-    latency = baseLat[nccl_algo][nccl_proto]
-    intraLat = hwLat[intraHw][nccl_algo][nccl_proto]
-    interLat = hwLat[NCCL_HW.NET][nccl_algo][nccl_proto]
+    latency = baseLat[nccl_algo][nccl_proto].item()
+    intraLat = hwLat[intraHw][nccl_algo][nccl_proto].item()
+    interLat = hwLat[NCCL_HW.NET][nccl_algo][nccl_proto].item()
 
     # Inter-node rings still have to launch nsteps * net overhead.
     netOverhead = 0.0
