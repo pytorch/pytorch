@@ -281,12 +281,12 @@ def register_module_full_backward_pre_hook(
         This adds global state to the `nn.module` module
         and it is only intended for debugging/profiling purposes.
 
-    Hooks registered using this function function in the same way as those
-    registered by :meth:`torch.nn.Module.register_backward_pre_hook`.
+    Hooks registered using this function behave in the same way as those
+    registered by :meth:`torch.nn.Module.register_full_backward_pre_hook`.
     Refer to its documentation for more details.
 
     Hooks registered with this function will be called before hooks registered
-    using :meth:`torch.nn.Module.register_backward_pre_hook`.
+    using :meth:`torch.nn.Module.register_full_backward_pre_hook`.
 
     Returns:
         :class:`torch.utils.hooks.RemovableHandle`:
@@ -308,12 +308,12 @@ def register_module_full_backward_hook(
         This adds global state to the `nn.module` module
         and it is only intended for debugging/profiling purposes.
 
-    Hooks registered with this function function in the same way as those
-    registered by :meth:`torch.nn.Module.register_backward_hook`.
+    Hooks registered with this function behave in the same way as those
+    registered by :meth:`torch.nn.Module.register_full_backward_hook`.
     Refer to its documentation for more details.
 
     Hooks registered with this function will be called before hooks registered
-    using :meth:`torch.nn.Module.register_backward_hook`.
+    using :meth:`torch.nn.Module.register_full_backward_hook`.
 
     Returns:
         :class:`torch.utils.hooks.RemovableHandle`:
