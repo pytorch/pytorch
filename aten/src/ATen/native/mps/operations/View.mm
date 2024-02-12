@@ -805,7 +805,7 @@ static id<MTLComputePipelineState> getPipelineState(id<MTLDevice> device,
                                                     const std::string& dtypeDst,
                                                     bool needsScatter,
                                                     bool needsConj) {
-  auto key = kernel + dtypeSrc + dtypeDst;
+  auto key = kernel + dtypeSrc + dtypeDst + std::to_string(needsConj);
   static std::unordered_map<std::string, id<MTLComputePipelineState>> _mtlPipelineCache;
   auto it = _mtlPipelineCache.find(key);
   if (it != _mtlPipelineCache.end()) {
