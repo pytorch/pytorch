@@ -89,8 +89,6 @@ def build_triton(
         # while release build should only include the version, i.e. 2.1.0
         version_suffix = f"+{commit_hash[:10]}"
         version += version_suffix
-        if rocm_version is not None:
-            version += f"+{rocm_version}"
 
     with TemporaryDirectory() as tmpdir:
         triton_basedir = Path(tmpdir) / "triton"
