@@ -202,7 +202,7 @@ class MockHandler:
 
     @staticmethod
     def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:
-        return sympy_index_symbol(f"({str(index_var)})")
+        return sympy_index_symbol(str(index_var))
 
     @classmethod
     def _init_cls(cls):
