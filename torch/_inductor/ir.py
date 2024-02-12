@@ -332,6 +332,7 @@ class IRNode:
     make_indexer: Callable[[], Callable[[Any], Any]]
     mark_reuse: Callable[[int], None]
     realize_hint: Callable[[], None]
+    get_unbacked_symbol_uses: Callable[[], Set[sympy.Symbol]]
 
 
 class _OpCounterCSE:
@@ -1824,6 +1825,9 @@ def is_stride_order_storage_and_layout(x, stride_order):
 class BaseView(IRNode):
     data: IRNode
 
+    def get_unbacked_symbol_uses(self):
+        return self.data.get_unbacked_symbol_uses()
+
     def make_reindexer(self):
         raise NotImplementedError(f"make_reindexer NYI on {self}")
 
@@ -2295,6 +2299,13 @@ class ReinterpretView(BaseView):
 
     def freeze_layout(self):
         pass
+
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+        return (
+            free_unbacked_symbols(self.layout.size)
+            | free_unbacked_symbols(self.layout.stride)
+            | free_unbacked_symbols(self.layout.offset)
+        )
 
     def codegen_reference(self, writer=None):
         # reinterpret_tensor is similar to as_strided except:
@@ -3057,6 +3068,9 @@ class ConstantBuffer(InputBuffer):
 
 
 class NoneAsConstantBuffer(IRNode):
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+        return set()
+
     def codegen_reference(self, writer=None):
         return V.graph.wrapper_code.none_str
 
@@ -3065,6 +3079,9 @@ class ShapeAsConstantBuffer(IRNode):
     def __init__(self, shape):
         super().__init__()
         self.shape = shape
+
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+        return free_unbacked_symbols(self.shape)
 
     def codegen_reference(self, writer=None):
         return V.graph.wrapper_code.expr_printer(V.graph.sizevars.simplify(self.shape))
@@ -6520,6 +6537,9 @@ class MutableBox(IRNode):
 
     def realize(self):
         return self.data.realize()
+
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+        return self.data.get_unbacked_symbol_uses()
 
     def codegen_reference(self, writer=None):
         return self.data.codegen_reference(writer)
