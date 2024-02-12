@@ -889,15 +889,15 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
-        from . import NestedUserFunctionVariable, TensorVariable, UserFunctionVariable
-        from .builder import wrap_fx_proxy, SourcelessBuilder
+        from . import NestedUserFunctionVariable, UserFunctionVariable
+        from .builder import wrap_fx_proxy
 
         args, kwargs = VariableTracker.apply(lambda x: x.realize(), (args, kwargs))
 
-        def arg_extractor(input, dim, combine_fn, identity):
-            return input, dim, combine_fn, identity
+        def arg_extractor(input, dim, combine_fn):
+            return input, dim, combine_fn
 
-        input, dim, combine_fn, identity = arg_extractor(*args, **kwargs)
+        input, dim, combine_fn = arg_extractor(*args, **kwargs)
 
         assert isinstance(
             combine_fn,
@@ -918,7 +918,8 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             example_vals = [
                 torch.full(
                     (), float("nan"), device=input_meta.device, dtype=input_meta.dtype
-                ) for _ in range(2)
+                )
+                for _ in range(2)
             ]
 
         # Trace the subgraph
@@ -947,11 +948,13 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 {},
             )
 
-        combine_graph = tx.output.graph
+        combine_graph = subtracer.graph
         combine_graph.lint()
 
         if subtracer.lifted_freevars:
-            unimplemented(f"Combine fn had unexpected freevars: {subtracer.lifted_freevars}")
+            unimplemented(
+                f"Combine fn had unexpected freevars: {subtracer.lifted_freevars}"
+            )
 
         cond_nn_modules = dict(tx.output.nn_modules)
         if combine_result.python_type() != torch.Tensor:
@@ -962,13 +965,13 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         combine_result_meta = combine_result.as_proxy().node.meta["example_value"]
         if combine_result_meta.device != input_meta.device:
             unimplemented(
-                f"Expected combine_fn to return a tensor on device {input_meta.device} but " +
-                f"got {combine_result_meta.device}"
+                f"Expected combine_fn to return a tensor on device {input_meta.device} but "
+                + f"got {combine_result_meta.device}"
             )
         if combine_result_meta.dtype != input_meta.dtype:
             unimplemented(
-                f"Expected combine_fn to return a tensor of {input_meta.dtype} but " +
-                f"got {combine_result_meta.dtype}"
+                f"Expected combine_fn to return a tensor of {input_meta.dtype} but "
+                + f"got {combine_result_meta.dtype}"
             )
 
         if combine_result_meta.shape != ():
@@ -976,29 +979,21 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"Expected cond_fn to return a tensor with shape () but got {combine_result_meta.shape}"
             )
 
-        combine_gm = torch.fx.GraphModule(
-            dict(tx.output.nn_modules),
-            combine_graph
-        )
+        combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
         combine_fn_name = add_subgraph(tx, self.source, "scan_combine", combine_gm)
 
         p_args = (
             input.as_proxy(),
             dim.as_proxy(),
             make_attr(tx, combine_fn_name),
-            identity.as_proxy(),
         )
-
 
         with tx.fake_mode:
             out_meta = input_meta.clone()
         return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
-                "call_function",
-                torch.ops.higher_order.associative_scan,
-                p_args,
-                {}
+                "call_function", torch.ops.higher_order.associative_scan, p_args, {}
             ),
             example_value=out_meta,
         )
@@ -1110,7 +1105,7 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
             torch.fx.Proxy, lambda a: get_real_value(a.node, tx.output), p_args
         )
 
-        example_res = lowered_module.original_module(*real_sub_args)
+        example_res = lowered_module.original_module.module()(*real_sub_args)
 
         # NOTE [Guaranteeing the 1-1 correspondence of FakeTensors and real tensors]:
         # executorch modules promise not to alias inputs and outputs.

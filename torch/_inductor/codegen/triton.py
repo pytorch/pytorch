@@ -14,6 +14,7 @@ from functools import lru_cache
 from typing import (
     Any,
     Callable,
+    cast,
     Counter,
     DefaultDict,
     Dict,
@@ -100,6 +101,9 @@ class IndexingOptions:
 
     def has_tmpmask(self):
         return "tmp" in self.mask_str
+
+    def has_rmask(self):
+        return "rmask" in self.mask_str
 
 
 @dataclasses.dataclass
@@ -217,6 +221,9 @@ class BlockPtrOptions:
 
     def has_rindex(self):
         return "RBLOCK" in self.block_shape
+
+    def has_rmask(self):
+        return self.has_rindex()
 
     def has_tmpmask(self):
         return False  # block_ptr can't do indirect indexing
@@ -445,6 +452,9 @@ class TritonCSEVariable(CSEVariable):
                 # however, when index vars are used to compute indices for indirect reads
                 # those reads should subsequently be masked,
                 self.mask_vars.update({f"{arg.name[0]}mask"})
+
+    def __repr__(self):
+        return f"TritonCSEVariable(name={self.name})"
 
 
 class TritonOverrides(OpOverrides):
@@ -837,13 +847,8 @@ class TritonOverrides(OpOverrides):
     def ceil(x):
         return f"tl.math.ceil({x})"
 
-    @staticmethod
-    def bessel_j0(x):
-        return f"tl.math.j0({x})"
 
-    @staticmethod
-    def bessel_j1(x):
-        return f"tl.math.j1({x})"
+TritonOverrides._initialize_pointwise_overrides("triton")
 
 
 # Use mypy to check protocol implemented correctly
@@ -1944,7 +1949,7 @@ class TritonKernel(Kernel):
         if advance_block_ptr:
             load_buffer.writeline(advance_block_ptr)
 
-        if not self.inside_reduction or not has_rindex:
+        if not self.inside_reduction or (not indexing.has_rmask() and not has_rindex):
             self.outside_loop_vars.add(result_var)
 
         return result_var
@@ -2334,25 +2339,19 @@ class TritonKernel(Kernel):
         dtype: torch.dtype,
         combine_fn: Callable[[CSEVariable, CSEVariable], CSEVariable],
         value: CSEVariable,
-        init: int,
     ) -> CSEVariable:
         assert self.inside_reduction
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)
         masks = sorted(masks)
-        if self._load_mask:
-            masks.append(self._load_mask)
+        assert not self._load_mask, "ops.scan not supported inside ops.masked"
         reduction_range_prefix = self.range_trees[-1].prefix
 
+        cse_compute = functools.partial(self.cse.generate, self.compute)
         value = self.cse.generate(
             self.compute, f"tl.broadcast_to({value}, {self.dense_size_str()})"
         )
 
-        default = triton_constant(init)
-        default_tensor = self.cse.generate(
-            self.body,
-            f"tl.full({[1] * self.triton_tensor_ndim()}, {default}, {triton_compute_type(dtype)})",
-        )
         dim = self.triton_tensor_ndim() - 1
         acc_type = triton_acc_type(dtype)
         cond = " & ".join(masks)
@@ -2360,12 +2359,9 @@ class TritonKernel(Kernel):
         combine_helper_fn = self._lift_helper(combine_fn, 2)
 
         if self.persistent_reduction:
-            masked_value = self.cse.generate(
-                self.compute, f"tl.where({cond}, {value}, {default_tensor})"
-            )
             result_var = self.cse.generate(
                 self.compute,
-                f"tl.associative_scan({masked_value}, {dim}, {combine_helper_fn})",
+                f"tl.associative_scan({value}, {dim}, {combine_helper_fn})",
             )
         else:
             accumulator = self.cse.newvar()
@@ -2373,13 +2369,11 @@ class TritonKernel(Kernel):
             reduced_size[-1] = "1"
             reduced_size = f"[{', '.join(reduced_size)}]"
 
+            default = "float('nan')" if dtype.is_floating_point else "-1"
             self.body.writeline(
                 f"{accumulator} = tl.full({reduced_size}, {default}, {acc_type})"
             )
 
-            masked_value = self.cse.generate(
-                self.compute, f"tl.where({cond}, {value}, {default_tensor})"
-            )
             partial_reduce = self.cse.generate(
                 self.compute,
                 self.reduction_resize(
@@ -2389,12 +2383,17 @@ class TritonKernel(Kernel):
             acc_next = combine_fn(accumulator, partial_reduce)
             partial_scan = self.cse.generate(
                 self.compute,
-                f"tl.associative_scan({masked_value}, {dim}, {combine_helper_fn})",
+                f"tl.associative_scan({value}, {dim}, {combine_helper_fn})",
             )
-            result_var = self.cse.generate(
+            full_scan = self.cse.generate(
                 self.compute, combine_fn(accumulator, partial_scan)
             )
-            self.compute.writeline(f"{accumulator} = {acc_next}")
+            result_var = self.cse.generate(
+                self.compute, f"tl.where(roffset > 0, {full_scan}, {partial_scan})"
+            )
+            self.compute.writeline(
+                f"{accumulator} = tl.where(roffset > 0, {acc_next}, {partial_reduce})"
+            )
 
         result_var.mask_vars = masks  # type: ignore[attr-defined]
         return result_var
@@ -2679,15 +2678,16 @@ class TritonKernel(Kernel):
                 code.splice(self.imports_for_benchmark_kernel())
 
         argdefs, _, signature = self.args.python_argdefs()
-        # maps actual expression to SizeArg if its in sizevars replacements
+        # maps actual expression to SizeArg if it is in sizevars replacements
         for i, arg in enumerate(signature):
-            if (
-                isinstance(arg, SizeArg)
-                and arg.expr in V.graph.sizevars.inv_precomputed_replacements
-            ):
-                signature[i] = SizeArg(
-                    arg.name, V.graph.sizevars.inv_precomputed_replacements[arg.expr]
-                )
+            if isinstance(arg, SizeArg):
+                # mypy is unhappy about the sympy.Expr
+                # type for the key of the dict below
+                symbol = cast(sympy.Symbol, arg.expr)
+                if symbol in V.graph.sizevars.inv_precomputed_replacements:
+                    signature[i] = SizeArg(
+                        arg.name, V.graph.sizevars.inv_precomputed_replacements[symbol]
+                    )
 
         mutated_args = set()
         for mutation in self.mutations:

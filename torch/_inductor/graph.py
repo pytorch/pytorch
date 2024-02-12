@@ -784,6 +784,10 @@ class GraphLowering(torch.fx.Interpreter):
         # this is a constant
         value = getattr_recursive(self.module, target)
 
+        if isinstance(value, torch.fx.GraphModule):
+            return value
+
+        print(value, type(value))
         if (
             config.aot_inductor.use_runtime_constant_folding
             or config.always_keep_tensor_constants
