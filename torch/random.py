@@ -43,9 +43,6 @@ def manual_seed(seed) -> torch._C.Generator:
     if not torch.mps._is_in_bad_fork():
         torch.mps.manual_seed(seed)
 
-    if hasattr(torch, 'xpu') and not torch.xpu._is_in_bad_fork():
-        torch.xpu.manual_seed_all(seed)
-
     _seed_custom_device(seed)
 
     return default_generator.manual_seed(seed)
@@ -64,9 +61,6 @@ def seed() -> int:
     import torch.mps
     if not torch.mps._is_in_bad_fork():
         torch.mps.manual_seed(seed)
-
-    if hasattr(torch, 'xpu') and not torch.xpu._is_in_bad_fork():
-        torch.xpu.manual_seed_all(seed)
 
     _seed_custom_device(seed)
 
@@ -163,9 +157,7 @@ def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="device
         devices = list(devices)
 
     cpu_rng_state = torch.get_rng_state()
-    device_rng_states = []
-    for device in devices:
-        device_rng_states.append(device_mod.get_rng_state(device))
+    device_rng_states = [device_mod.get_rng_state(device) for device in devices]
 
     try:
         yield

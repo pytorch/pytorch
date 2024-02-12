@@ -14,7 +14,7 @@ from torch.distributed._composable.fsdp._fsdp_init import (
 )
 from torch.distributed._composable.fsdp._fsdp_param import ParamModuleInfo
 from torch.distributed._composable.fsdp._fsdp_param_group import _get_param_module_infos
-from torch.distributed._tensor import DTensor
+from torch.distributed._tensor import DTensor, Replicate, Shard
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -266,6 +266,191 @@ class TestFullyShardParamModuleInfos(FSDPTestMultiThread):
             ParamModuleInfo(mlp.out_proj, "weight", [], []),
             ParamModuleInfo(mlp.out_proj, "bias", [], []),
         ]
+
+
+class TestFullyShardShardedParameterTensor(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_shard_tensor_parameters(self):
+        # Use odd dim sizes to test uneven shards
+        model = nn.Sequential(*[MLP(3, dim_multiplier=3) for _ in range(3)])
+        orig_params = [param.detach().clone() for param in model.parameters()]
+        fully_shard(model)
+        sharded_params = list(model.parameters())
+        self._check_1d_sharded_parameters(orig_params, sharded_params)
+
+        model = nn.Sequential(*[MLP(3, dim_multiplier=3) for _ in range(3)])
+        model[0].in_proj = model[1].in_proj
+        orig_params = [param.detach().clone() for param in model.parameters()]
+        fully_shard(model)
+        sharded_params = list(model.parameters())
+        self._check_1d_sharded_parameters(orig_params, sharded_params)
+
+    def _check_1d_sharded_parameters(
+        self, orig_params: List[nn.Parameter], sharded_params: List[nn.Parameter]
+    ):
+        self.assertEqual(len(orig_params), len(sharded_params))
+        global_mesh = init_device_mesh("cuda", (self.world_size,))
+        for orig_param, sharded_param in zip(orig_params, sharded_params):
+            self.assertIsInstance(sharded_param, DTensor)
+            self.assertEqual(sharded_param.device_mesh, global_mesh)
+            self.assertEqual(sharded_param.size(), orig_param.size())
+            self.assertEqual(sharded_param.stride(), orig_param.stride())
+            self.assertEqual(sharded_param._spec.placements, (Shard(0),))
+            chunks = torch.chunk(orig_param, self.world_size, dim=0)
+            self.assertEqual(sharded_param._local_tensor, chunks[self.rank])
+
+
+class TestFullyShardShardedParameterDTensor(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_shard_dtensor_parameters(self):
+        dp_size = 2 if self.world_size > 2 else 1
+        global_mesh = init_device_mesh(
+            "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
+        )
+        dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
+        # Use odd dim sizes to test uneven shards
+        model = MLP(9, dim_multiplier=3)
+        orig_params = [param.detach().clone() for param in model.parameters()]
+        orig_param_names = [param_name for param_name, _ in model.named_parameters()]
+        parallelize_module(
+            model,
+            tp_mesh,
+            {"in_proj": ColwiseParallel(), "out_proj": RowwiseParallel()},
+        )
+        fully_shard(model, mesh=dp_mesh)
+        sharded_params = list(model.parameters())
+        self.assertEqual(len(orig_params), len(sharded_params))
+        for orig_param_name, orig_param, sharded_param in zip(
+            orig_param_names, orig_params, sharded_params
+        ):
+            self.assertIsInstance(sharded_param, DTensor)
+            self.assertEqual(sharded_param.device_mesh, global_mesh)
+            self.assertEqual(sharded_param.size(), orig_param.size())
+            self.assertEqual(sharded_param.stride(), orig_param.stride())
+            if "in_proj" in orig_param_name:
+                expected_placements = (Shard(0), Shard(0))
+            elif "out_proj" in orig_param_name and "weight" in orig_param_name:
+                expected_placements = (Shard(0), Shard(1))
+            else:
+                expected_placements = (Shard(0), Replicate())
+            self.assertEqual(sharded_param._spec.placements, expected_placements)
+
+
+class TestFullyShardLazyInit(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_fully_shard_is_root(self):
+        """
+        Tests that ``_is_root`` is set correctly after lazy initialization.
+
+        FSDP(model(
+            0: MLP(FSDP(in_proj), FSDP(out_proj)),
+            1: MLP(in_proj, out_proj),
+        ))
+        """
+        model = nn.Sequential(MLP(8), MLP(8))
+        fully_shard(model[0].in_proj)
+        fully_shard(model[0].out_proj)
+        fully_shard(model)  # root gets `model[1]`
+        root_state = fully_shard.state(model)
+        root_state._lazy_init()
+
+        model0_in_proj_state = fully_shard.state(model[0].in_proj)
+        model0_out_proj_state = fully_shard.state(model[0].out_proj)
+        self.assertTrue(root_state._is_root)
+        self.assertFalse(model0_in_proj_state._is_root)
+        self.assertFalse(model0_out_proj_state._is_root)
+
+        all_states = root_state._state_ctx.all_states
+        self.assertEqual(len(all_states), 3)
+        self.assertEqual(
+            all_states, [root_state, model0_in_proj_state, model0_out_proj_state]
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_fully_shard_module_and_param_fqns(self):
+        """
+        Tests that the module and parameter FQNs are computed correctly after
+        lazy initialization.
+
+        FSDP(model(
+            0: MLP(FSDP(in_proj), FSDP(out_proj)),
+            1: MLP(in_proj, out_proj),
+        ))
+        """
+        model = nn.Sequential(MLP(8), MLP(8))
+        fully_shard(model[0].in_proj)
+        fully_shard(model[0].out_proj)
+        fully_shard(model)  # root gets `model[1]`
+        root_state = fully_shard.state(model)
+        root_state._lazy_init()
+
+        root_param_group = root_state._fsdp_param_group
+        self.assertIsNotNone(root_param_group)
+        self.assertEqual(root_param_group._module_fqn, "")
+        root_param_fqns = {
+            fsdp_param._param_fqn for fsdp_param in root_param_group.fsdp_params
+        }
+        self.assertEqual(
+            root_param_fqns,
+            {
+                "1.in_proj.weight",
+                "1.in_proj.bias",
+                "1.out_proj.weight",
+                "1.out_proj.bias",
+            },
+        )
+
+        model0_in_proj_state = fully_shard.state(model[0].in_proj)
+        model0_in_proj_param_group = model0_in_proj_state._fsdp_param_group
+        self.assertIsNotNone(model0_in_proj_param_group)
+        self.assertEqual(model0_in_proj_param_group._module_fqn, "0.in_proj")
+        model0_in_proj_param_fqns = {
+            fsdp_param._param_fqn
+            for fsdp_param in model0_in_proj_param_group.fsdp_params
+        }
+        self.assertEqual(
+            model0_in_proj_param_fqns, {"0.in_proj.weight", "0.in_proj.bias"}
+        )
+
+        model0_out_proj_state = fully_shard.state(model[0].out_proj)
+        model0_out_proj_param_group = model0_out_proj_state._fsdp_param_group
+        self.assertIsNotNone(model0_out_proj_param_group)
+        self.assertEqual(model0_out_proj_param_group._module_fqn, "0.out_proj")
+        model0_out_proj_param_fqns = {
+            fsdp_param._param_fqn
+            for fsdp_param in model0_out_proj_param_group.fsdp_params
+        }
+        self.assertEqual(
+            model0_out_proj_param_fqns, {"0.out_proj.weight", "0.out_proj.bias"}
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_fully_shard_double_lazy_init(self):
+        model = nn.Sequential(MLP(8), MLP(8))
+        fully_shard(model[0].in_proj)
+        fully_shard(model[0].out_proj)
+        fully_shard(model)
+        root_state = fully_shard.state(model)
+        model0_in_proj_state = fully_shard.state(model[0].in_proj)
+        model0_in_proj_state._lazy_init()
+        regex = (
+            "FSDP state has already been lazily initialized for 0.in_proj\n"
+            "FSDP requires running forward through the root module first"
+        )
+        with self.assertRaisesRegex(RuntimeError, regex):
+            root_state._lazy_init()
 
 
 if __name__ == "__main__":
