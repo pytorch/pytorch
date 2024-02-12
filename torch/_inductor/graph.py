@@ -787,7 +787,6 @@ class GraphLowering(torch.fx.Interpreter):
         if isinstance(value, torch.fx.GraphModule):
             return value
 
-        print(value, type(value))
         if (
             config.aot_inductor.use_runtime_constant_folding
             or config.always_keep_tensor_constants

@@ -11,7 +11,7 @@ import torch
 
 from torch._inductor import ir
 from torch._inductor.exc import SubgraphLoweringException
-from torch._inductor.virtualized import V, ops, WrapperHandler
+from torch._inductor.virtualized import ops, V, WrapperHandler
 
 
 class PointwiseSubgraphLowering(torch.fx.Interpreter):
@@ -69,7 +69,6 @@ class InputDescriptor:
 
 
 class TracingOpsHandler(WrapperHandler):
-
     def __init__(self, tracer):
         parent = tracer.create_proxy("placeholder", "ops", (), {})
         super().__init__(parent)
@@ -127,7 +126,6 @@ def lower_pointwise_subgraph(gm: torch.fx.GraphModule, inputs: List[InputDescrip
         ops.output(*output_irs)
 
     lowered_gm = torch.fx.GraphModule({}, tracer.graph)
-    print(lowered_gm)
 
     def inner_fn(*args, **kwargs):
         return lowered_gm(V.get_ops_handler(), *args, **kwargs)
