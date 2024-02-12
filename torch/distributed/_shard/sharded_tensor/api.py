@@ -210,7 +210,7 @@ class ShardedTensor(ShardedTensorBase):
 
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-                Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
+                Default: if ``None``, uses a global default (see :func:`torch.set_default_dtype`).
         layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
             Default: ``torch.strided``.
         requires_grad (bool, optional): If autograd should record operations on the
