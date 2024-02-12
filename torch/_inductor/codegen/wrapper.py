@@ -505,7 +505,7 @@ class WrapperCodeGen(CodeGen):
             """
             import triton
             import triton.language as tl
-            from torch._inductor.triton_heuristics import grid, start_graph, end_graph
+            from torch._inductor.triton_heuristics import grid, split_scan_grid, start_graph, end_graph
             {}
             """.format(
                 V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
@@ -1020,23 +1020,32 @@ class WrapperCodeGen(CodeGen):
             compile_wrapper.splice(TritonKernel.gen_attr_descriptor_import())
         compile_wrapper.newline()
 
-        from .common import SizeArg, TensorArg
+        from .common import KernelArgType, SizeArg, TensorArg
 
-        signature: List[Union[TensorArg, SizeArg]] = []
+        signature: List[KernelArgType] = []
         constants = {}
         for key, arg in kwargs.items():
             idx = kernel.arg_names.index(key)
             if idx in kernel.constexprs:
                 constants[key] = arg
-                continue
-            if isinstance(arg, (ir.Buffer, ir.ReinterpretView)):
+            elif isinstance(arg, ir.Buffer):
                 signature.append(
                     TensorArg(
-                        key,
-                        arg.get_name(),
-                        arg.get_dtype(),
-                        # For ReinterpretView, we do not want to check alignment
-                        not isinstance(arg, ReinterpretView),
+                        name=key,
+                        buffer=arg.get_name(),
+                        dtype=arg.get_dtype(),
+                    )
+                )
+            elif isinstance(arg, ir.ReinterpretView):
+                # for ReinterpretView we use the underlying
+                # buffer name and note the (possibly non-zero)
+                # offset relative to the underlying buffer
+                signature.append(
+                    TensorArg(
+                        name=key,
+                        buffer=arg.data.get_name(),
+                        dtype=arg.get_dtype(),
+                        offset=arg.layout.offset,
                     )
                 )
             else:
@@ -1066,7 +1075,8 @@ class WrapperCodeGen(CodeGen):
                 configs={configs!r},
                 inductor_meta={inductor_meta!r},
                 triton_meta={triton_meta!r},
-                filename=__file__
+                filename=__file__,
+                custom_kernel=True,
             )
             @triton.jit
             """
@@ -1126,6 +1136,14 @@ class WrapperCodeGen(CodeGen):
         # it suffices as a type hint for the purposes of producing the correct code for this type.
         return SymbolicCallArg(expr, tree.numel)
 
+    def generate_workspace_allocation(self, nbytes, device, zero_fill):
+        line = self.make_allocation(
+            "workspace", device, torch.uint8, shape=(nbytes,), stride=(1,)
+        )
+        self.writeline(line)
+        if zero_fill:
+            self.writeline(f"workspace.zero_(){self.ending}")
+
     def wrap_kernel_call(self, name, call_args):
         return f"{name}({', '.join(call_args)}){self.ending}"
 
@@ -1154,6 +1172,7 @@ class WrapperCodeGen(CodeGen):
         cuda=True,
         triton=True,
         arg_types=None,
+        grid_fn: str = "grid",
     ):
         """
         Generates kernel call code.
@@ -1171,8 +1190,9 @@ class WrapperCodeGen(CodeGen):
             )
             if triton:
                 grid_str = ", ".join(pexpr(item) for item in grid)
+                grid_str = f"{grid_fn}({grid_str})"
                 self.writeline(
-                    f"{name}.run({call_args_str}, grid=grid({grid_str}), stream={stream_name})"
+                    f"{name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
                 )
             else:
                 stream_ptr = f"c_void_p({stream_name})"
@@ -1453,6 +1473,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         cuda=True,
         triton=True,
         arg_types=None,
+        grid_fn: str = "grid",
     ):
         """
         Generates kernel call code.
@@ -1465,7 +1486,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
         """
         if cuda:
             return super().generate_kernel_call(
-                name, call_args, grid, device_index, cuda, triton, arg_types
+                name,
+                call_args,
+                grid,
+                device_index,
+                cuda,
+                triton,
+                arg_types,
+                grid_fn,
             )
         else:
             if V.graph.aot_mode and config.abi_compatible:
@@ -3269,6 +3297,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         cuda=True,
         triton=True,
         arg_types=None,
+        grid_fn: str = "grid",
     ):
         if not cuda:
             # Even in CudaWrapperCodeGen, we may see cpp kernels
