@@ -343,8 +343,8 @@ if torch._C._has_mkldnn:
 
         def get_meta_value(argument: torch.fx.node.Argument):
             # Only torch.fx.Node is expected to have meta.
-            if isinstance(argument, torch.fx.Node)
-                return meta.get("val", None)
+            if isinstance(argument, torch.fx.Node):
+                return argument.meta.get("val", None)
             return None
 
         if any(
