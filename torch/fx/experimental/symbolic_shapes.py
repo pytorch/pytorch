@@ -3270,12 +3270,13 @@ class ShapeEnv:
         return shape_groups
 
     def bound_sympy(self, expr: sympy.Expr, size_oblivious: bool = False) -> ValueRanges:
+        """Given a sympy expression, computes a ValueRanges bound for what values it can be"""
         var_to_range = {x: self.var_to_range.get(x, None) for x in expr.free_symbols}
         if size_oblivious:
             # Clamp values of size-like variables
             for x in self.size_like & var_to_range.keys():
-                var_to_range[x] &= ValueRanges(2, sympy.oo)
-        """Given a sympy expression, computes a ValueRanges bound for what values it can be"""
+                if var_to_range[x] is not None:
+                    var_to_range[x] &= ValueRanges(2, sympy.oo)
         return bound_sympy(expr, var_to_range)
 
     @_lru_cache
@@ -3587,12 +3588,12 @@ class ShapeEnv:
             if not issubset(tgt_bound, src_bound):
                 self.log.debug("skipped set_replacement %s = %s (%s) [%s not subset of %s]", a, tgt, msg, tgt_bound, src_bound)
                 return
-            elif (
-                a in self.size_like and
-                not issubset(self.bound_sympy(tgt, size_oblivious=True), self.var_to_range[a] & ValueRanges(2, sympy.oo))
-            ):
-                self.log.debug("skipped set_replacement %s = %s (%s) "
-                               "[VR for rhs not subset of lhs under size-oblivious]", a, tgt, msg)
+            elif a in self.size_like:
+                tgt_bound_so = self.bound_sympy(tgt, size_oblivious=True)
+                src_bound_so = self.var_to_range[a] & ValueRanges(2, sympy.oo)
+                if not issubset(tgt_bound_so, src_bound_so):
+                    self.log.debug("skipped set_replacement %s = %s (%s) "
+                                   "[%s not subset of %s (size-oblivious conditions)]", a, tgt, msg, tgt_bound_so, src_bound_so)
                 return
 
         if config.print_specializations and isinstance(tgt, (sympy.Integer, sympy.Float)):
