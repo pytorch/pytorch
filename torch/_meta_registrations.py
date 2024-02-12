@@ -3876,8 +3876,11 @@ def pooling_output_shape(inputSize, kernelSize, pad, stride, dilation, ceil_mode
     torch._check(stride != 0, lambda: "stride should not be zero")
     torch._check(pad >= 0, lambda: f"pad must be non-negative, but got pad: {pad}")
     torch._check(
-        pad <= kernelSize // 2,
-        lambda: f"pad should be at most half of kernel size, but got pad={pad} and kernel_size={kernelSize}",
+        pad <= ((kernelSize - 1) * dilation + 1) // 2,
+        lambda: (
+            f"pad should be at most half of effective kernel size, but got pad={pad}, "
+            f"kernel_size={kernelSize} and dilation={dilation}"
+        ),
     )
     return pooling_output_shape_pad_lr(
         inputSize, kernelSize, pad, pad, stride, dilation, ceil_mode
@@ -5447,9 +5450,10 @@ def meta__efficient_attention_forward(
 
     res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
 
+    logsumexp_batch_dim = cu_seqlens_q.size(0) - 1 if (cu_seqlens_q is not None) else B
     logsumexp_dim = math.ceil(M / 32) * 32 if compute_log_sumexp else 0
     logsum_exp = torch.empty(
-        (B, num_heads, logsumexp_dim),
+        (logsumexp_batch_dim, num_heads, logsumexp_dim),
         dtype=torch.float,
         device=query.device,
     )
@@ -6202,9 +6206,16 @@ _create_unary_float_meta_func(aten.special_scaled_modified_bessel_k1)
 
 _create_binary_float_meta_func(aten.special_chebyshev_polynomial_t)
 _create_binary_float_meta_func(aten.special_chebyshev_polynomial_u)
+_create_binary_float_meta_func(aten.special_chebyshev_polynomial_v)
+_create_binary_float_meta_func(aten.special_chebyshev_polynomial_w)
+_create_binary_float_meta_func(aten.special_shifted_chebyshev_polynomial_t)
+_create_binary_float_meta_func(aten.special_shifted_chebyshev_polynomial_u)
+_create_binary_float_meta_func(aten.special_shifted_chebyshev_polynomial_v)
+_create_binary_float_meta_func(aten.special_shifted_chebyshev_polynomial_w)
 _create_binary_float_meta_func(aten.special_hermite_polynomial_h)
 _create_binary_float_meta_func(aten.special_hermite_polynomial_he)
 _create_binary_float_meta_func(aten.special_laguerre_polynomial_l)
+_create_binary_float_meta_func(aten.special_legendre_polynomial_p)
 
 
 # We must also trigger meta registrations from PrimTorch ref

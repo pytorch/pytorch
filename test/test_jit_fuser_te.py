@@ -21,7 +21,7 @@ torch._C._jit_set_profiling_executor(True)
 torch._C._get_graph_executor_optimize(True)
 
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, \
-    enable_profiling_mode_for_profiling_tests, slowTest, TEST_WITH_ASAN, \
+    enable_profiling_mode_for_profiling_tests, slowTest, skipIfTorchDynamo, TEST_WITH_ASAN, \
     IS_FBCODE
 from torch.testing._internal.jit_utils import JitTestCase, \
     RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward, set_fusion_group_inlining, \
@@ -1923,6 +1923,7 @@ class TestTEFuser(JitTestCase):
             t = torch.rand(8, dtype=torch.float, device=device)
             scripted = self.checkScript(eager, (t, t, t, t, 0.1))
 
+    @skipIfTorchDynamo("too slow")
     def test_chunk_mul_one(self):
         if self.dynamic_shapes:
             self.skipTest("TODO: chunk dynamic shapes")
@@ -2199,6 +2200,7 @@ class TestTEFuser(JitTestCase):
             x = torch.ones((8, 1))
             torch.testing.assert_close(eager(x), script(x))
 
+    @skipIfTorchDynamo("too slow")
     @unittest.skipIf(TEST_WITH_ASAN, "takes 10+ minutes on asan")
     def test_batch_norm(self):
         def test(fn, args):
