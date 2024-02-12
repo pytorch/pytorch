@@ -832,7 +832,7 @@ class TYPE_MATCH : public LeafGuard {
   // type_id = id(type(obj))
   TYPE_MATCH(py::object type_id, py::object verbose_code_parts)
       : LeafGuard(verbose_code_parts),
-        _expected(py::cast<unsigned long>(type_id)) {}
+        _expected(py::cast<unsigned long long>(type_id)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     return Py_TYPE(value) == (void*)_expected;
@@ -840,7 +840,7 @@ class TYPE_MATCH : public LeafGuard {
 
  private:
   // id of the type of the original object.
-  unsigned long _expected;
+  unsigned long long _expected;
 };
 
 class ID_MATCH : public LeafGuard {
@@ -848,7 +848,7 @@ class ID_MATCH : public LeafGuard {
   // obj_id = id(obj)
   ID_MATCH(py::object obj_id, py::object verbose_code_parts)
       : LeafGuard(verbose_code_parts),
-        _expected(py::cast<unsigned long>(obj_id)) {}
+        _expected(py::cast<unsigned long long>(obj_id)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     return value == (void*)_expected;
@@ -856,7 +856,7 @@ class ID_MATCH : public LeafGuard {
 
  private:
   // id of the original object.
-  unsigned long _expected;
+  unsigned long long _expected;
 };
 
 class EQUALS_MATCH : public LeafGuard {
@@ -1532,7 +1532,7 @@ class GuardManager {
           _accessors.end(),
           [](const std::unique_ptr<GuardAccessor>& a,
              const std::unique_ptr<GuardAccessor>& b) {
-            return a->get_guard_manager()->fail_count() >=
+            return a->get_guard_manager()->fail_count() >
                 b->get_guard_manager()->fail_count();
           });
     }
@@ -1913,7 +1913,7 @@ class DictGuardManager : public GuardManager {
           _indices.begin(),
           _indices.end(),
           [this](const Py_ssize_t& a, const Py_ssize_t& b) {
-            return this->_key_value_managers[a]->fail_count() >=
+            return this->_key_value_managers[a]->fail_count() >
                 this->_key_value_managers[b]->fail_count();
           });
     }
