@@ -128,12 +128,11 @@ jobs:
           PYTHON_VERSION: "3.8"
           SCCACHE_BUCKET: ossci-compiler-cache
           SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
-          SCCACHE_REGION: us-east-1
+          SCCACHE_REGION: auto
           SCCACHE_S3_USE_SSL: false
-          SCCACHE_ENDPOINT: http://ossci-compiler-cache.s3.amazonaws.com/
+          SCCACHE_ENDPOINT: http://ossci-compiler-cache.s3-us-east-1.amazonaws.com/
           SCCACHE_LOG: trace
           SCCACHE_NO_DAEMON: 1
-          SCCACHE_S3_SERVER_SIDE_ENCRYPTION: true
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
           VC_YEAR: "2019"
