@@ -793,7 +793,7 @@ class TestMaxAutotune(TestCase):
                     Y_jit = torch.compile(mm, dynamic=dynamic)(a, b)
                     assert torch.allclose(
                         Y, Y_jit
-                    ), f"Incorrect results, {Y.max()=}, {Y_jit.max()=}, {Y.min()=}, {Y_jit.min()=}, {Y.mean()=}, {Y_jit.mean()=}, {Y.size()=}, {Y_jit.size()=}"
+                    ), f"Incorrect results, {Y.max()=}, {Y_jit.max()=}, {Y.min()=}, {Y_jit.min()=}, {Y.mean()=}, {Y_jit.mean()=}, {Y.size()=}, {Y_jit.size()=}"  # noqa: B950
 
             autotuning_logs = glob.glob(tmpdir + "/*/*/autotuning_result_json_list.txt")
             assert len(autotuning_logs) >= 1
