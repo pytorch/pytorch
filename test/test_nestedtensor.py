@@ -6,6 +6,7 @@ import sys
 from typing import Optional, Tuple
 import unittest
 from functools import partial
+import math
 
 import numpy as np
 import torch
@@ -3278,22 +3279,28 @@ class TestNestedTensorSubclass(TestCase):
     def test_chunk(self, device):
         # normal case
         D = 30
-        nt = random_nt_from_dims(
-            [4, None, D], device=device, dtype=torch.float32, layout=torch.jagged)
+        B = 8
+        nt = random_nt_from_dims([B, None, D], device=device, dtype=torch.float32, layout=torch.jagged)
         NUM_CHUNKS = 3
         chunks = nt.chunk(NUM_CHUNKS, dim=-1)
         self.assertEqual(len(chunks), NUM_CHUNKS)
         for i in range(NUM_CHUNKS):
             self.assertEqual(chunks[i].shape[-1], D // NUM_CHUNKS)
 
-        # chunk on batch dim not supported
-        with self.assertRaisesRegex(
-                RuntimeError, "chunk.* not supported for NestedTensor on dim=0 or dim=1"):
-            nt.chunk(2, dim=0)
+        # chunk on batch dim
+        chunks = nt.chunk(NUM_CHUNKS, dim=0)
+        self.assertEqual(len(chunks), NUM_CHUNKS)
+        chunk_size = math.ceil(B / NUM_CHUNKS)
+        for i in range(NUM_CHUNKS):
+            if i < NUM_CHUNKS - 1:
+                self.assertEqual(chunks[i].shape[0], chunk_size)
+            else:
+                self.assertEqual(chunks[i].shape[0], B - chunk_size * (NUM_CHUNKS - 1))
+            offsets_expected = nt._offsets[i * chunk_size + 1 : (i + 1) * chunk_size + 1] - nt._offsets[i * chunk_size]
+            self.assertEqual(chunks[i]._offsets[1:], offsets_expected)
 
         # chunk on ragged dim not supported
-        with self.assertRaisesRegex(
-                RuntimeError, "chunk.* not supported for NestedTensor on dim=0 or dim=1"):
+        with self.assertRaisesRegex(RuntimeError, "chunk.* not supported for NestedTensor on dim=0 or dim=1"):
             nt.chunk(2, dim=1)
 
     def test_squeeze(self, device):
