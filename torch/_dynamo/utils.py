@@ -17,6 +17,7 @@ import math
 import operator
 import os
 import pstats
+import re
 import subprocess
 import sys
 import textwrap
@@ -28,6 +29,7 @@ import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
 from pathlib import Path
+from types import MethodWrapperType
 from typing import (
     Any,
     Callable,
@@ -38,6 +40,7 @@ from typing import (
     Deque,
     Dict,
     Iterator,
+    KeysView,
     List,
     Optional,
     Set,
@@ -47,6 +50,7 @@ from typing import (
     ValuesView,
 )
 
+from ..utils.hooks import RemovableHandle
 
 try:
     import numpy as np
@@ -422,6 +426,9 @@ def hashable(x):
         return True
     except TypeError:
         return False
+    # cannot hash writable memoryview object
+    except ValueError:
+        return False
 
 
 def nothing(*args, **kwargs):
@@ -513,16 +520,37 @@ def is_numpy_float_type(value):
     )
 
 
+def is_function_or_wrapper(value):
+    return (
+        is_function(value)
+        or isinstance(value, functools._lru_cache_wrapper)
+        and is_function(inspect.getattr_static(value, "__wrapped__"))
+        or isinstance(value, (torch._ops.OpOverloadPacket, torch._ops.OpOverload))
+    )
+
+
 def is_function(value):
-    return istype(
+    return isinstance(
         value,
         (
             types.FunctionType,
             types.BuiltinFunctionType,
             types.MethodDescriptorType,
             types.WrapperDescriptorType,
+            torch.jit.ScriptFunction,
         ),
     )
+
+
+def unwrap_if_wrapper(fn):
+    if isinstance(fn, functools._lru_cache_wrapper):
+        fn = inspect.getattr_static(fn, "__wrapped__")
+    # unpack @torch._dynamo.optimize()(fn) wrapped function
+    fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
+    # unpack torch.jit.script_if_tracing
+    if inspect.getattr_static(fn, "__script_if_tracing_wrapper", False):
+        fn = inspect.getattr_static(fn, "__original_fn", fn)
+    return fn
 
 
 def is_numpy_ndarray(value):
@@ -742,10 +770,24 @@ def clone_inputs(example_inputs):
     return res
 
 
+def skip_frame_if_in_functorch_mode(val: torch.Tensor):
+    try:
+        val.data_ptr()  # will throw for functorch tensors
+    except RuntimeError as e:
+        from .exc import SkipFrame
+
+        # This will be GradTrackingTensor/BatchedTensor/etc
+        functorch_subclass_name = re.sub(r"\(.*", "", repr(val))
+        raise SkipFrame(
+            f"torch.compile cannot be run in context: {functorch_subclass_name}"
+        ) from e
+
+
 @contextmanager
 def preserve_rng_state():
     with torch.utils._python_dispatch._disable_current_modes():
         rng_state = torch.clone(torch.random.get_rng_state())
+        skip_frame_if_in_functorch_mode(rng_state)
         if torch.cuda.is_available():
             cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
     try:
@@ -754,7 +796,7 @@ def preserve_rng_state():
         with torch.utils._python_dispatch._disable_current_modes():
             torch.random.set_rng_state(rng_state)
             if torch.cuda.is_available():
-                torch.cuda.set_rng_state(cuda_rng_state)
+                torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
 
 
 def is_jit_model(model0):
@@ -873,7 +915,7 @@ def timed(model, example_inputs, times=1):
         result = model(*example_inputs)
         synchronize()
     t1 = time.perf_counter()
-    return result, t1 - t0
+    return result, t1 - t0  # type: ignore[possibly-undefined]
 
 
 def check_is_cuda(gm, example_inputs):
@@ -893,10 +935,12 @@ def rot_n_helper(n):
 common_constant_types = {
     int,
     float,
+    complex,
     bool,
     str,
     bytes,
     type(None),
+    Ellipsis.__class__,
     types.CodeType,
     torch.device,
     torch.dtype,
@@ -914,16 +958,22 @@ def is_safe_constant(v):
     )
 
 
-def guard_if_dyn(arg):
+def specialize_symnode(arg):
     from .variables import ConstantVariable, SymNodeVariable
 
+    # Guard and specialize
     if isinstance(arg, SymNodeVariable):
-        # This is because SymNodeVariable intentionally doesn't define
-        # as_python_constant to avoid shunting down some codepaths
-        # that expect consts.   In this case, we know we definitely
-        # want to specialize though.
-        return arg.evaluate_expr()
-    elif isinstance(arg, ConstantVariable):
+        return ConstantVariable.create(arg.evaluate_expr())
+
+    return arg
+
+
+def guard_if_dyn(arg):
+    from .variables import ConstantVariable
+
+    arg = specialize_symnode(arg)
+
+    if isinstance(arg, ConstantVariable):
         return arg.as_python_constant()
 
     return arg
@@ -958,6 +1008,7 @@ def check_numpy_ndarray_args(args, kwargs):
     )
 
 
+dict_keys: Type[KeysView[Any]] = type(dict().keys())
 dict_values: Type[ValuesView[Any]] = type(dict().values())
 odict_values: Type[ValuesView[Any]] = type(collections.OrderedDict().values())
 tuple_iterator: Type[Iterator[Any]] = type(iter(tuple()))
@@ -985,6 +1036,10 @@ iter_next = next
 
 def to_subclass(t, cls):
     return t.as_subclass(cls)
+
+
+def dict_keys_getitem(d, n):
+    return next(itertools.islice(iter(d), n, n + 1))
 
 
 def enum_repr(value, local):
@@ -1047,32 +1102,54 @@ def iter_contains(items, search, tx, check_tensor_identity=False):
     return found
 
 
-def dict_param_key_ids(value):
-    return {
-        id(k) for k in value.keys() if isinstance(k, (torch.nn.Parameter, torch.Tensor))
-    }
+def key_is_id(k):
+    """Returns whether it indexes dictionaries using its id"""
+    return isinstance(k, (torch.Tensor, torch.nn.Module, MethodWrapperType))
 
 
-def dict_const_keys(value):
-    return {
-        k for k in value.keys() if not isinstance(k, (torch.nn.Parameter, torch.Tensor))
-    }
+def key_to_id(value):
+    return [id(k) if key_is_id(k) else k for k in value.keys()]
 
 
-def dict_const_keys_repr(const_keys, *, local):
-    if any(isinstance(k, enum.Enum) for k in const_keys):
+def const_repr(x, *, local) -> str:
+    from .trace_rules import is_builtin_callable
+
+    if isinstance(x, (list, tuple)):
+        elems_repr = ",".join(const_repr(s, local=local) for s in x)
+        if isinstance(x, list):
+            return f"[{elems_repr}]"
+        else:
+            assert isinstance(x, tuple)
+            if len(x) == 1:
+                return f"({elems_repr},)"
+            else:
+                return f"({elems_repr})"
+    elif isinstance(x, enum.Enum):
         # To workaround repr(Enum) returning invalid global reference before python 3.11
         # by calling enum_repr and removing quotes to render enum in guard code.
-        const_keys_str = f"{ {enum_repr(k, local=local) if isinstance(k, enum.Enum) else repr(k) for k in const_keys} }".replace(
-            "'", ""
-        )
+        return enum_repr(x, local=local).replace("'", "")
+    elif is_builtin_callable(x):
+        return x.__name__
+    elif isinstance(x, type):
+
+        def fullname(o):
+            klass = o.__class__
+            module = klass.__module__
+            if module == "builtins":
+                return klass.__qualname__  # avoid outputs like 'builtins.str'
+            return module + "." + klass.__qualname__
+
+        return fullname(x)
     else:
-        const_keys_str = f"{const_keys!r}"
-    return const_keys_str
+        return f"{x!r}"
 
 
-def global_key_name(key):
-    return f"__dict_key_{id(key)}"
+def dict_keys_repr(const_keys, *, local) -> str:
+    keys_str = ",".join(const_repr(s, local=local) for s in const_keys)
+    return "[" + keys_str + "]"
+
+
+GLOBAL_KEY_PREFIX = "__dict_key"
 
 
 from torch._subclasses import (  # noqa: F401
@@ -1569,8 +1646,17 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         elif isinstance(
             cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
         ):
+            op = cause.func
+            import_suggestion = ""
+            if isinstance(op, torch._ops.OpOverload):
+                maybe_pystub = torch._C._dispatch_pystub(
+                    op._schema.name, op._schema.overload_name
+                )
+                if maybe_pystub is not None:
+                    module, ctx = maybe_pystub
+                    import_suggestion = f"you may need to `import {module}` ({ctx}) for support, otherwise "
             unimplemented(
-                f"unsupported operator: {cause.func} (see "
+                f"unsupported operator: {cause.func} ({import_suggestion}see "
                 "https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0"
                 " for how to fix)"
             )
@@ -2003,18 +2089,18 @@ def defake(x):
     size: "torch._prims_common.ShapeType"
     stride: "torch._prims_common.StrideType"
     if x._has_symbolic_sizes_strides:
-        size = [
-            s.node.shape_env.size_hint(s.node.expr)
-            if isinstance(s, torch.SymInt)
-            else s
-            for s in x.size()
-        ]
-        stride = [
-            s.node.shape_env.size_hint(s.node.expr)
-            if isinstance(s, torch.SymInt)
-            else s
-            for s in x.stride()
-        ]
+        size = []
+        for s in x.size():
+            if isinstance(s, torch.SymInt):
+                size.append(s.node.shape_env.size_hint(s.node.expr))
+            else:
+                size.append(s)
+        stride = []
+        for s in x.stride():
+            if isinstance(s, torch.SymInt):
+                stride.append(s.node.shape_env.size_hint(s.node.expr))
+            else:
+                stride.append(s)
     else:
         size = x.size()
         stride = x.stride()
@@ -2393,3 +2479,27 @@ def get_first_attr(obj, *attrs):
             return getattr(obj, attr)
 
     raise AssertionError(f"{obj} does not has any of the attributes: {attrs}")
+
+
+@contextlib.contextmanager
+def maybe_enable_compiled_autograd(should_enable):
+    def compiler_fn(gm):
+        def inner_compiler(gm_, example_inputs_):
+            torch._dynamo.utils.counters["compiled_autograd"]["compiles"] += 1
+            return torch._inductor.compile(gm_, example_inputs_)
+
+        return torch.compile(gm, backend=inner_compiler, fullgraph=True, dynamic=True)
+
+    if should_enable:
+        with torch._dynamo.compiled_autograd.enable(compiler_fn) as ctx:
+            yield ctx
+    else:
+        yield
+
+
+def invalid_removeable_handle():
+    # need a subclass so weakref works
+    class Invalid(dict):  # type: ignore[type-arg]
+        pass
+
+    return RemovableHandle(Invalid())

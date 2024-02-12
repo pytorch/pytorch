@@ -48,8 +48,6 @@ void abs_kernel(::at::TensorIteratorBase& iter) {
   abs_counter += 1;
 }
 
-} // namespace
-
 void quantize_tensor_per_tensor_affine_privateuse1(
     const at::Tensor& rtensor,
     at::Tensor& qtensor,
@@ -57,6 +55,8 @@ void quantize_tensor_per_tensor_affine_privateuse1(
     int64_t zero_point) {
     // do nothing
 }
+
+} // namespace
 
 namespace at::native {
 
@@ -187,6 +187,10 @@ struct DummyCustomAllocator final : at::Allocator {
 
   at::DeleterFnPtr raw_deleter() const override {
     return &ReportAndDelete;
+  }
+
+  void copy_data(void* dest, const void* src, std::size_t count) const final {
+    default_copy_data(dest, src, count);
   }
 };
 
@@ -362,6 +366,7 @@ void custom_cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack
 TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("sub.Tensor", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
   m.impl("_foreach_add.List", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
+  m.impl("index.Tensor", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
 }
 
 // This basic implementation doesn't bother dealing with different device indices

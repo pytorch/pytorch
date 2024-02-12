@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import itertools
 from contextlib import nullcontext
 from functools import partial, wraps
@@ -601,18 +603,6 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False.""")
 
         compiled_fn = compiler_fn(flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata)
         if aot_config.is_export:
-            mutated_user_inp_locs = [
-                idx - aot_config.num_params_buffers
-                for idx in fw_metadata.mutated_inp_runtime_indices
-                if idx >= aot_config.num_params_buffers
-            ]
-            if len(mutated_user_inp_locs) > 0:
-                raise RuntimeError(f"""
-Found following user inputs located at {mutated_user_inp_locs} are mutated. This is currently banned in the aot_export workflow.
-If you need this functionality, please file a github issue.
-
-fw_metadata={str(fw_metadata)}""")
-
             # During export, we don't get back a callable - we get back the raw fx graph
             # (either a joint or an inference-only graph)
             assert isinstance(compiled_fn, torch.fx.GraphModule)
@@ -922,6 +912,7 @@ def aot_export_module(
     # Your module can return multiple outputs, so you must specify which output the loss is.
     output_loss_index: Optional[int] = None,
     pre_dispatch: bool = False,
+    kwargs=None,
 ) -> Tuple[torch.fx.GraphModule, GraphSignature]:
     """
     This function takes in a module, and returns:
@@ -957,6 +948,7 @@ def aot_export_module(
         raise RuntimeError("pre_dispatch is not supported when trace_joint is True.")
     named_parameters = dict(mod.named_parameters(remove_duplicate=False))
     named_buffers = dict(mod.named_buffers(remove_duplicate=False))
+
     params_and_buffers = {
         **dict(named_parameters),
         **dict(named_buffers),
@@ -964,6 +956,8 @@ def aot_export_module(
     params_and_buffers_flat, params_spec = pytree.tree_flatten(params_and_buffers)
     params_and_buffers_flat = tuple(params_and_buffers_flat)
     params_len = len(params_and_buffers_flat)
+
+    kwargs = kwargs or {}
 
     functional_call = create_functional_call(mod, params_spec, params_len, store_orig_mod=True)
 
@@ -1033,6 +1027,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             num_params_buffers=params_len,
             no_tangents=True,
             pre_dispatch=pre_dispatch,
+            kwargs=kwargs,
         )
     if trace_joint:
         def flattened_joint(*args):
@@ -1069,7 +1064,7 @@ https://github.com/pytorch/pytorch/issues/101192
             return *fw_outs, *output_gradients
         fx_g = make_fx(flattened_joint)(*full_args)
 
-    user_args_flat = pytree.arg_tree_leaves(*args)
+    user_args_flat = pytree.arg_tree_leaves(*args, **kwargs)
     return fx_g, create_graph_signature(
         fx_g,
         metadata,
@@ -1124,6 +1119,7 @@ def aot_export_joint_simple(
             args,
             decompositions=decompositions,
         )
+        in_spec, _kw_in_spec = in_spec.children_specs
     # At this point, we can just directly return the (joint or inference graph) that we traced.
     # First though: a bunch of assertions to make sure that our graph doesn't require
     # any calling convention changes compared to the original function.
@@ -1136,13 +1132,13 @@ def aot_export_joint_simple(
     if len([x for x in metadata.output_info if x.output_type != OutputType.non_alias]) != 0:
         raise RuntimeError(f"aot_export_joint_simple does not support outputs that alias inputs. {str(metadata)}")
     # No pytrees
-    if type(in_spec) == pytree.LeafSpec:
+    if in_spec.is_leaf():
         raise RuntimeError(f"aot_export_joint_simple requires inputs to be a single list/tuple. in_spec={str(in_spec)}")
-    if len([x for x in in_spec.children_specs if type(x) != pytree.LeafSpec]) != 0:
+    if not all(child.is_leaf() for child in in_spec.children_specs):
         raise RuntimeError(f"aot_export_joint_simple requires individual inputs not to be pytrees. in_spec={str(in_spec)}")
-    if type(out_spec) == pytree.LeafSpec:
+    if out_spec.is_leaf():
         raise RuntimeError(f"aot_export_joint_simple requires outputs to be a single list/tuple. out_spec={str(out_spec)}")
-    if len([x for x in out_spec.children_specs if type(x) != pytree.LeafSpec]) != 0:
+    if not all(child.is_leaf() for child in out_spec.children_specs):
         raise RuntimeError(f"aot_export_joint_simple requires individual outputs not to be pytrees. out_spec={str(out_spec)}")
     # TODO: we might have to temporarily patch config.functionalize_rng
     # so that it doesn't run when we're exporting a higher order op.
@@ -1179,15 +1175,18 @@ def _aot_export_function(
     # We don't know this info at trace time though, so we need to make it an explicit config.
     no_tangents: bool = False,
     pre_dispatch: bool = False,
+    kwargs=None,
 ) -> Tuple[torch.fx.GraphModule, ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec]:
+    kwargs = kwargs or {}
+
+    flat_fn, out_spec = create_tree_flattened_fn(func, args, kwargs)
+    flat_args, in_spec = pytree.tree_flatten((args, kwargs))
+
     dynamic_shapes = False
-    for x in args:
+    for x in flat_args:
         if isinstance(x, FakeTensor):
             dynamic_shapes = x.fake_mode.shape_env is not None
             break
-
-    flat_fn, out_spec = create_tree_flattened_fn(func, args)
-    flat_args, in_spec = pytree.tree_flatten(args)
 
     # The export use case doesn't care about several bits of AOTConfig
     # (1) compilers (we just export the graph)

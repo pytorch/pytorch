@@ -61,7 +61,9 @@ def _wrap_submodule(mod, path, module_call_specs):
         submodule = getattr(submodule, name)
 
     def update_module_call_signatures(path, in_spec, out_spec):
-        assert path not in module_call_specs
+        if path in module_call_specs:
+            assert module_call_specs[path]["in_spec"] == in_spec
+            assert module_call_specs[path]["out_spec"] == out_spec
         module_call_specs[path] = {"in_spec": in_spec, "out_spec": out_spec}
 
     assert "forward" not in submodule.__dict__
@@ -103,7 +105,7 @@ def _wrap_submodules(f, preserve_signature, module_call_signatures):
             del submodule.__dict__["forward"]
 
 
-def _mark_strict_DO_NOT_USE(cls):
+def _mark_strict_experimental(cls):
     def call(self, *args):
         return strict_mode(self, args)
 

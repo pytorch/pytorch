@@ -16,13 +16,11 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 /// `Variable` is exactly the same as `Tensor` (i.e. we have `using Variable =
 /// at::Tensor`). This means you can perform all the usual mathematical and
@@ -33,8 +31,7 @@ namespace autograd {
 /// is to eliminate the `Variable` class in the near future.
 using Variable = at::Tensor;
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd
 
 // The following are all internal APIs and should not be shown in libtorch docs.
 // Therefore, we wrap the following code with `#ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -42,8 +39,7 @@ using Variable = at::Tensor;
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 /// Check if this type is supported by the autograd engine.
 /// If you change this, update the doc at the top of the
@@ -861,7 +857,6 @@ namespace utils {
 TORCH_API bool has_same_meta(const Variable& base, const Variable& other);
 
 } // namespace utils
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd
 
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
