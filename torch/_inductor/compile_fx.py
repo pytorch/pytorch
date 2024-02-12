@@ -1312,7 +1312,9 @@ def compile_fx(
             unlifted_gm.meta["dynamo_flat_name_to_original_fqn"] = model_.meta[
                 "dynamo_flat_name_to_original_fqn"
             ]
-        with V.set_fake_mode(fake_mode), compiled_autograd.disable():
+        with V.set_fake_mode(fake_mode), torch._guards.tracing(
+            tracing_context
+        ), compiled_autograd.disable():
             return inference_compiler(unlifted_gm, example_inputs_)
 
     with V.set_fake_mode(fake_mode), torch._guards.tracing(
