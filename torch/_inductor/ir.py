@@ -4629,6 +4629,13 @@ class FallbackKernel(ExternKernelAlloc):
             # FallbackKernel, so please check this if you opt-in.
             return
 
+        if "_c10d_functional" in self.op_overload.name():
+            # _c10d_functional kernels are lowered into _CollectiveKernel which
+            # derives from FallbackKernel for the cpp codegen. The kernels
+            # don't pass the can_auto_functionalize check, but their mutation
+            # is handled properly by _CollectiveKernel.
+            return
+
         schema = self.op_overload._schema
 
         # NOTE: [FallbackKernel supported operators]
