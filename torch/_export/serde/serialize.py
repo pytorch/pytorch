@@ -254,7 +254,7 @@ def _reconstruct_fake_tensor(serialized_tensor_meta: bytes, is_parameter: bool) 
     assert _CURRENT_DESERIALIZER is not None, "Need access to current deserializer state"
     fake_tensor = _CURRENT_DESERIALIZER.deserialize_tensor_meta(tensor_meta)
     if is_parameter:
-        fake_tensor = torch.nn.Parameter(fake_tensor)
+        fake_tensor = torch.nn.Parameter(fake_tensor)  # type: ignore[assignment]
     return fake_tensor
 
 
