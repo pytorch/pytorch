@@ -4261,6 +4261,36 @@ class CommonTemplate:
             ),
         )
 
+    def test_cat_negative_dim(self):
+        def fn(*tensors):
+            return torch.cat(tensors, dim=-1)
+
+        self.common(
+            fn,
+            (
+                torch.randn([2, 3]),
+                torch.randn([2, 4]),
+            ),
+        )
+
+        self.common(
+            fn,
+            (
+                torch.randn([2, 3]),
+                torch.randn([0]),
+                torch.randn([2, 4]),
+            ),
+        )
+
+        self.common(
+            fn,
+            (
+                torch.randn([0]),
+                torch.randn([2, 3]),
+                torch.randn([2, 4]),
+            ),
+        )
+
     @expectedFailureCodegenDynamic
     def test_cat_single_empty(self):
         # fails dynamic check for 'has a dynamic dimension'

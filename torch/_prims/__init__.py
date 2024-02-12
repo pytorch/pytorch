@@ -1900,64 +1900,27 @@ collapse = _make_prim(
 
 
 # TODO: review stride logic
+# NB: unlike torch.cat, this is more strict about empty tensors and dim is
+# never negative
 def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
-    # This is a bit tricky.  Naively, you would expect to just pick one
-    # arbitrary tensor and check that all tensors match this tensor.  However,
-    # there is legacy behavior which says that if you have a 1-D empty tensor
-    # (0,), this is permissible.  So you can't assume that all the tensors
-    # have same dimensionality, and you can't assume that the first tensor is
-    # the correct stencil.
-    #
-    # We'll implement this in a few passes.  First, we will try to infer the
-    # ndim of the cat output.  If this ndim != 1, then we know that all ndim =
-    # 1 inputs must be empty, or are errors.  If this ndim == 1, then life
-    # is easy (the legacy special case coincides with regular handling).
-
-    example = None
-    for i, t in enumerate(tensors):
-        if example is None:
-            if t.ndim != 1:
-                example = t
-        else:
-            if t.ndim != 1:
-                torch._check(
-                    t.ndim == example.ndim,
-                    lambda: "Number of dimensions of tensors must match.  "
-                    f"Expected {example.ndim}-D tensors, but got {t.ndim}-D for "
-                    f"tensor number {i} in the list",
-                )
-
-    if example is None:
-        # example is None if everything is 1-D.  If so, just arbitrarily pick
-        # the first one
-        example = tensors[0]
-
-    shape = example.shape
+    # Verifies same shape (except in the concat dimension)
+    assert dim >= 0
+    shape = tensors[0].shape
     concat_length = 0
     for tensor_idx, tensor in enumerate(tensors):
-        if len(shape) != len(tensor.shape):
-            assert tensor.ndim == 1  # we've already checked this above
-            # Don't suggest the legacy behavior in the error message
-            torch._check(
-                tensor.shape[0] == 0,
-                lambda: f"Number of dimensions of tensors must match.  "
-                f"Expected {example.ndim}-D tensors, but got 1-D for "
-                f"tensor number {tensor_idx} in the list",
-            )
-        else:
-            # TODO: zip can be strict in Python 3.10
-            for idx, (common_length, length) in enumerate(zip(shape, tensor.shape)):
-                if idx == dim:
-                    concat_length = concat_length + length
-                else:
-                    torch._check(
-                        length == common_length,
-                        lambda: f"Sizes of tensors must match except in dimension {dim}. "
-                        f"Expected {common_length} but got {length} for tensor number "
-                        f"{tensor_idx} in the list",
-                    )
+        assert len(shape) == len(tensor.shape)
+        for idx, (common_length, length) in enumerate(zip(shape, tensor.shape)):
+            if idx == dim:
+                concat_length = concat_length + length
+            else:
+                torch._check(
+                    length == common_length,
+                    lambda: f"Sizes of tensors must match except in dimension {dim}. "
+                    f"Expected {common_length} but got {length} for tensor number "
+                    f"{tensor_idx} in the list",
+                )
 
-    new_shape = list(example.shape).copy()
+    new_shape = list(tensors[0].shape).copy()
     new_shape[dim] = concat_length
     return TensorMeta(
         tensors[0],
