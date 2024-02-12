@@ -309,7 +309,6 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 f"test_report_{self._testMethodName}"
                 f"_op_level_debug_{self.op_level_debug}"
                 f"_dynamic_axes_{self.dynamic_shapes}"
-                f"_model_type_{self.model_type}"
                 ".sarif"
             )
 

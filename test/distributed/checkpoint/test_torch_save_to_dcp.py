@@ -168,10 +168,6 @@ class TorchSaveReader(StorageReader):
     def prepare_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
         return global_plan
 
-    @classmethod
-    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
-        return True
-
 
 class ConversionReader(StorageReader):
     def __init__(self, fp_name: str, world_size: int) -> None:
@@ -199,10 +195,6 @@ class ConversionReader(StorageReader):
 
     def prepare_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
         return self.reader.prepare_global_plan(global_plan)
-
-    @classmethod
-    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
-        return True
 
 
 class TestTorchSaveToDCP(DTensorTestBase):

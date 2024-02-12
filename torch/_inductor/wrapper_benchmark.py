@@ -7,12 +7,11 @@ from torch.autograd import DeviceType
 from .utils import create_bandwidth_info_str, do_bench, get_num_bytes
 
 _kernel_category_choices = [
-    "foreach",
-    "persistent_reduction",
     "pointwise",
     "reduction",
-    "split_scan",
+    "persistent_reduction",
     "template",
+    "foreach",
 ]
 
 

@@ -2790,9 +2790,7 @@ std::pair<Vectorized<int64_t>, Vectorized<int64_t>> inline deinterleave2<
   return inner_deinterleave2<int64_t>(a, b);
 }
 
-template <typename T>
-typename std::enable_if<std::is_same<T, uint8_t>::value, at::vec::Vectorized<float>>::type
-inline convert_int8_to_float(const Vectorized<T> &src) {
+inline Vectorized<float> convert_uint8_to_float(const Vectorized<uint8_t> &src) {
   // Note: this function only convert inputs number of elements equal to at::vec::Vectorized<float>.size()
   // Only handle first 64 bits
   auto vec_int = src.to_vec_float_helper();
@@ -2800,11 +2798,9 @@ inline convert_int8_to_float(const Vectorized<T> &src) {
   return convert_to_float(vec_int);
 }
 
-template <typename T>
-typename std::enable_if<std::is_same<T, uint8_t>::value, at::vec::Vectorized<T>>::type
-inline convert_float_to_int8(const Vectorized<float> &src) {
-  constexpr auto min_val = std::numeric_limits<T>::min();
-  constexpr auto max_val = std::numeric_limits<T>::max();
+inline Vectorized<uint8_t> convert_float_to_uint8(const Vectorized<float> &src) {
+  constexpr auto min_val = std::numeric_limits<uint8_t>::min();
+  constexpr auto max_val = std::numeric_limits<uint8_t>::max();
 
   auto vec_int = clamp(convert_to_int(src), Vectorized<int32_t>(min_val), Vectorized<int32_t>(max_val));
 

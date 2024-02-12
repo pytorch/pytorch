@@ -201,14 +201,18 @@ def _quant_node_constraint(n: Node) -> bool:
 def convert_pt2e(
     model: GraphModule,
     use_reference_representation: bool = False,
-    fold_quantize: bool = True,
+    fold_quantize: bool = False,
 ) -> GraphModule:
     """Convert a calibrated/trained model to a quantized model
 
     Args:
       * `model` (torch.fx.GraphModule): calibrated/trained model
       * `use_reference_representation` (bool): boolean flag to indicate whether to produce referece representation or not
-      * `fold_quantize` (bool): boolean flag for whether fold the quantize op or not
+      * `fold_quantize` (bool): boolean flag to indicate whether fold the quantize op or not
+
+    Note: please set `fold_quantize` to True whenever you can, we'll deprecate this flag and
+    make True the default option in the future, to make sure the change doesn't break BC for you, it's
+    better to set the flag to True now.
 
     Returns:
         quantized model, either in q/dq representation or reference representation
@@ -239,8 +243,7 @@ def convert_pt2e(
     pm = PassManager([PortNodeMetaForQDQ()])
     model = pm(model).graph_module
 
-    if fold_quantize:
-        constant_fold(model, _quant_node_constraint)
+    constant_fold(model, _quant_node_constraint)
 
     if use_reference_representation:
         model = reference_representation_rewrite(model)

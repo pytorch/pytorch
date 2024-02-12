@@ -54,7 +54,6 @@ template <typename scalar_t, typename func_t>
 void cpu_take_put_kernel(
     TensorIterator& iter,
     const TensorBase& indexed,
-    bool is_indexed_data_mutated,
     const func_t& f,
     bool serial_execution=false) {
   // This kernel follows the same strategy as `cpu_index_kernel`
@@ -71,9 +70,7 @@ void cpu_take_put_kernel(
   const auto numel = indexed.numel();
   const auto offset_indexed = IndexToOffset(indexed);
 
-  auto* indexed_data = is_indexed_data_mutated ?
-   indexed.data_ptr<scalar_t>()
-   : const_cast<scalar_t*>(indexed.const_data_ptr<scalar_t>());
+  auto* indexed_data = indexed.data_ptr<scalar_t>();
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     auto* iterated_data_bytes = data[0];
     auto* index_data_bytes = data[1];
@@ -118,21 +115,21 @@ void put_kernel(
       bool use_parallel_for = (!is_deterministic) && (
         (iter.numel() >= internal::GRAIN_SIZE) && (at::get_num_threads() > 1));
       if (use_parallel_for && iter.dtype() == ScalarType::Float) {
-        cpu_take_put_kernel<float>(iter, self, true,
+        cpu_take_put_kernel<float>(iter, self,
             [](float& iterated, float* indexed, const int64_t idx) {
                 cpu_atomic_add_float(indexed+idx, iterated);
               });
       } else {
         // TODO: investigate parallelization of the accumulate kernel.
         // Unlike the non-accumulate case, this needs to be thread-safe.
-        cpu_take_put_kernel<scalar_t>(iter, self, true,
+        cpu_take_put_kernel<scalar_t>(iter, self,
             [](scalar_t& iterated, scalar_t* indexed, const int64_t idx) {
                 indexed[idx] += iterated;
               },
             /*serial_execution=*/true);
       }
     } else {
-      cpu_take_put_kernel<scalar_t>(iter, self, true,
+      cpu_take_put_kernel<scalar_t>(iter, self,
           [](scalar_t& iterated, scalar_t* indexed, const int64_t idx) {
               indexed[idx] = iterated;
             });
@@ -145,8 +142,8 @@ void take_kernel(
   const TensorBase & input) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
     iter.dtype(), "take_cpu", [&] {
-      cpu_take_put_kernel<scalar_t>(iter, input, false,
-          [](scalar_t& iterated, const scalar_t* indexed, const int64_t idx) {
+      cpu_take_put_kernel<scalar_t>(iter, input,
+          [](scalar_t& iterated, scalar_t* indexed, const int64_t idx) {
               iterated = indexed[idx];
             });
     });
@@ -335,7 +332,7 @@ void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
 template <typename scalar_t>
 void cpu_masked_scatter_kernel(TensorIterator& iter, const TensorBase& source) {
   std::ptrdiff_t source_cntr = 0;
-  const scalar_t* source_ptr = source.const_data_ptr<scalar_t>();
+  scalar_t* source_ptr = source.data_ptr<scalar_t>();
   auto numel = source.numel();
 
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {

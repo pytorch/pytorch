@@ -342,10 +342,11 @@ if torch._C._has_mkldnn:
             return False
 
         def get_meta_value(argument: torch.fx.node.Argument):
-            # Only torch.fx.Node is expected to have meta.
-            if isinstance(argument, torch.fx.Node):
-                return argument.meta.get("val", None)
-            return None
+            # returns argument.meta["val"] if it exists, otherwise None
+            meta = getattr(argument, "meta", None)
+            if meta is None:
+                return None
+            return meta.get("val", None)
 
         if any(
             not isinstance(get_meta_value(n.args[0]), torch.Tensor)

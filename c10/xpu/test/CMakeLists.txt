@@ -2,7 +2,6 @@
 
 set(C10_XPU_ALL_TEST_FILES
     impl/XPUDeviceTest.cpp
-    impl/XPUStreamTest.cpp
 )
 if(BUILD_TEST)
   foreach(test_src ${C10_XPU_ALL_TEST_FILES})

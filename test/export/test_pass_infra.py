@@ -8,7 +8,7 @@ from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch.export import export
 from torch.fx.passes.infra.pass_base import PassResult
-from torch.testing._internal.common_utils import run_tests, TestCase, IS_WINDOWS
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
@@ -41,7 +41,6 @@ class TestPassInfra(TestCase):
             self.assertEqual(new_node.op, old_node.op)
             self.assertEqual(new_node.target, old_node.target)
 
-    @unittest.skipIf(IS_WINDOWS, "Windows not supported")
     def test_cond(self) -> None:
         class M(torch.nn.Module):
             def __init__(self):
@@ -125,7 +124,7 @@ class TestPassInfra(TestCase):
         input_tensor1 = torch.tensor(5.0)
         input_tensor2 = torch.tensor(6.0)
 
-        ep_before = torch.export.export(my_module, (input_tensor1, input_tensor2))
+        ep_before = torch._export.export(my_module, (input_tensor1, input_tensor2))
         from torch.fx.passes.infra.pass_base import PassResult
 
         def modify_input_output_pass(gm):

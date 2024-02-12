@@ -7,6 +7,7 @@
 
 #include <c10/cuda/CUDACachingAllocator.h>
 
+#include <array>
 #include <mutex>
 
 namespace torch::cuda::CUDAPluggableAllocator {
@@ -111,8 +112,7 @@ struct CUDAPluggableAllocator
       int device,
       std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps)
       override;
-  void enablePeerAccess(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access)
-      override;
+  void enablePeerAccess(int dev, int dev_to_access) override;
   cudaError_t memcpyAsync(
       void* dst,
       int dstDevice,

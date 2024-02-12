@@ -2693,7 +2693,7 @@ class DeviceCachingAllocator {
   }
 
   void insert_events(Block* block) {
-    c10::DeviceIndex prev_device = 0;
+    int prev_device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&prev_device));
 
     stream_set streams(std::move(block->stream_uses));
@@ -2954,7 +2954,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
 
   bool isHistoryEnabled() override {
-    c10::DeviceIndex device = 0;
+    int device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     return device_allocator[device]->isHistoryEnabled();
   }
@@ -3079,7 +3079,7 @@ class NativeCachingAllocator : public CUDAAllocator {
         OutOfMemoryError,
         size < one_exa_bytes,
         "CUDA out of memory. Tried to allocate more than 1EB memory.");
-    c10::DeviceIndex device = 0;
+    int device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* devPtr = nullptr;
     void (*deleteFunc)(void*) = &local_raw_delete;
@@ -3167,7 +3167,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     if (nbytes == 0) {
       return nullptr;
     }
-    c10::DeviceIndex device = 0;
+    int device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     malloc(&r, device, nbytes, cuda::getCurrentCUDAStream(device));
@@ -3178,15 +3178,14 @@ class NativeCachingAllocator : public CUDAAllocator {
     if (nbytes == 0) {
       return nullptr;
     }
-    c10::DeviceIndex device = 0;
+    int device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     malloc(&r, device, nbytes, stream);
     return r;
   }
 
-  void enablePeerAccess(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access)
-      override {
+  void enablePeerAccess(int dev, int dev_to_access) override {
     c10::cuda::CUDAGuard device_guard(dev);
     cudaError_t err = cudaDeviceEnablePeerAccess(dev_to_access, 0);
     if (err == cudaErrorPeerAccessAlreadyEnabled) {
@@ -3256,7 +3255,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     C10_CUDA_CHECK(cudaIpcOpenMemHandle(
         &dev, *ipc_handle, cudaIpcMemLazyEnablePeerAccess));
     // devPtr has to be deleted in same device when created.
-    c10::DeviceIndex curr_device = 0;
+    int curr_device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&curr_device));
     auto sp =
         std::shared_ptr<void>(dev, [handle, curr_device, this](void* ptr) {

@@ -3,7 +3,6 @@ import dataclasses
 import functools
 import types
 import warnings
-from collections import namedtuple
 from typing import (
     Any,
     Callable,
@@ -244,7 +243,7 @@ class ExportedProgram:
     @property
     @compatibility(is_backward_compatible=False)
     def call_spec(self):
-        CallSpec = namedtuple("CallSpec", ["in_spec", "out_spec"])
+        from torch._export.exported_program import CallSpec
 
         if len(self.module_call_graph) == 0:
             return CallSpec(in_spec=None, out_spec=None)
