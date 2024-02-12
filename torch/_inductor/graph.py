@@ -1177,13 +1177,12 @@ class GraphLowering(torch.fx.Interpreter):
         self.scheduler.codegen()
         return self.wrapper_code.generate(self.is_inference)
 
-    def codegen_subgraph(self, parent_wrapper_code, parent_device):
+    def codegen_subgraph(self, parent_wrapper_code):
         from .scheduler import Scheduler
 
         self.wrapper_code = parent_wrapper_code
 
         self.scheduler = Scheduler(self.buffers)
-        self.scheduler.current_device = parent_device
         self.scheduler.codegen()
 
     def count_bytes(self):

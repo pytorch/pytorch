@@ -6763,7 +6763,6 @@ class Conditional(ExternKernel):
 
         pred = self.pred.codegen_reference()
         parent_wrapper_code = V.graph.wrapper_code
-        parent_device = V.graph.scheduler.current_device
 
         wrapper.writeline("")
         wrapper.writeline(f"if {pred}.item():")
@@ -6777,7 +6776,6 @@ class Conditional(ExternKernel):
         with V.set_graph_handler(self.true_submodule.graph):
             self.true_submodule.graph.codegen_subgraph(
                 parent_wrapper_code=parent_wrapper_code,
-                parent_device=parent_device,
             )
         output_names = [x.get_name() for x in self.true_submodule.graph.graph_outputs]
         wrapper.writeline(f"{self.name} = [{','.join(output_names)}]")
@@ -6795,7 +6793,6 @@ class Conditional(ExternKernel):
         with V.set_graph_handler(self.false_submodule.graph):
             self.false_submodule.graph.codegen_subgraph(
                 parent_wrapper_code=parent_wrapper_code,
-                parent_device=parent_device,
             )
         output_names = [x.get_name() for x in self.false_submodule.graph.graph_outputs]
         wrapper.writeline(f"{self.name} = [{','.join(output_names)}]")

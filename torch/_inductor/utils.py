@@ -791,10 +791,10 @@ class IndentedBuffer:
 
         return ctx()
 
-    def force_indent(self, offset=1):
+    def do_indent(self, offset=1):
         self._indent += offset
 
-    def force_unindent(self, offset=1):
+    def do_unindent(self, offset=1):
         self._indent -= offset
 
     def splice(self, other_code, strip=False):
