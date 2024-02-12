@@ -53,6 +53,22 @@ at::Tensor InputMetadata::zeros_like() const {
   return at::zeros_symint(shape_as_dim_vector(), options_);
 }
 
+at::Tensor InputMetadata::maybe_reduce(
+    const size_t i,
+    at::Tensor grad,
+    const std::function<std::string(const std::string&)>& format_error) const {
+  if (!is_same_shape(grad)) {
+    if (is_expandable_to_shape(grad)) {
+      return reduce_grad(grad);
+    } else {
+      const auto message = incompatible_shape_error_message(i, grad);
+      TORCH_CHECK(false, format_error(message.str()));
+    }
+  } else {
+    return grad;
+  }
+}
+
 bool InputMetadata::is_same_shape(const at::Tensor& grad) const {
   if (!is_nestedness_same(grad)) {
     return false;
