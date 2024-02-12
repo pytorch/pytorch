@@ -86,6 +86,7 @@ from .variables.dicts import ConstDictVariable, SetVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
     NestedUserFunctionVariable,
+    SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
@@ -102,7 +103,6 @@ from .variables.misc import (
     InlinedClosureVariable,
     NullVariable,
     PythonModuleVariable,
-    SkipFilesVariable,
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable
@@ -579,6 +579,33 @@ def break_graph_if_unsupported(*, push):
         return wrapper
 
     return decorator
+
+
+def promote_exception_to_graph_break(inner_fn):
+    @functools.wraps(inner_fn)
+    def wrapper(self: "InstructionTranslatorBase", inst: Instruction):
+        try:
+            TracingContext.set_current_loc(
+                self.f_code.co_filename, self.lineno, self.f_code.co_name
+            )
+            return inner_fn(self, inst)
+        except Unsupported:
+            raise
+        except RuntimeError as e:
+            if inst.offset is None:
+                raise
+
+            from torch._dynamo.bytecode_transformation import parse_exception_table
+
+            table = parse_exception_table(self.f_code.co_exceptiontable)
+            for entry in table:
+                if entry.start <= inst.offset < entry.end:
+                    # If we are in a try block of a try-catch, promote the
+                    # exception to graph break
+                    raise Unsupported(str(e)) from e
+            raise
+
+    return wrapper
 
 
 class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState]):
@@ -1196,12 +1223,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.call_function(BuiltinVariable(iter), [self.pop()], {})
 
     @break_graph_if_unsupported(push=1)
+    @promote_exception_to_graph_break
     def CALL_FUNCTION(self, inst):
         args = self.popn(inst.argval)
         fn = self.pop()
         self.call_function(fn, args, {})
 
     @break_graph_if_unsupported(push=1)
+    @promote_exception_to_graph_break
     def CALL_FUNCTION_EX(self, inst):
         kwargsvars: VariableTracker
         if inst.argval == 0:
@@ -1243,6 +1272,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.call_function(fn, argsvars.items, kwargsvars)
 
     @break_graph_if_unsupported(push=1)
+    @promote_exception_to_graph_break
     def CALL_FUNCTION_KW(self, inst):
         argnames = self.pop()
         args = self.popn(inst.argval)
@@ -1763,6 +1793,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.push(NullVariable())
 
     @break_graph_if_unsupported(push=1)
+    @promote_exception_to_graph_break
     def CALL(self, inst):
         # see https://docs.python.org/3.11/library/dis.html#opcode-CALL
         # for convention
@@ -2301,7 +2332,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def inline_call_(
         parent, func: VariableTracker, args: List[VariableTracker], kwargs
     ):
-        if isinstance(func, SkipFilesVariable):
+        if isinstance(func, SkipFunctionVariable):
             unimplemented("inline with functions in skip files")
         assert isinstance(
             func,
