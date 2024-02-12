@@ -4001,7 +4001,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(cnt.frame_count, 1)
 
     @unittest.skipIf(
-        TEST_WITH_ROCM or not PLATFORM_SUPPORTS_FLASH_ATTENTION, "flash attention not supported"
+        TEST_WITH_ROCM or not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "flash attention not supported",
     )
     def test_flash_attn_backward_mixed_strides(self):
         # in this repro, "grad_out" and "value" are transposed tensors,
