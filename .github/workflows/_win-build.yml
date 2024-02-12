@@ -131,6 +131,7 @@ jobs:
           SCCACHE_REGION: us-east-1
           SCCACHE_ENDPOINT: "http://ossci-compiler-cache.s3.us-east-1.amazonaws.com/"
           SCCACHE_LOG: trace
+          SCCACHE_S3_NO_CREDENTIALS: true
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
           VC_YEAR: "2019"
