@@ -497,6 +497,8 @@ class DebugFormatter:
     ):
         import json
 
+        from .ir import FixedLayout
+
         def build_node_info(node: ir.IRNode):
             if hasattr(node, "name"):
                 node_name = node.name
@@ -507,7 +509,28 @@ class DebugFormatter:
                 "type": type(node).__name__,
             }
             try:
-                node_info["layout"] = str(node.get_layout())
+                layout = node.get_layout()
+                if isinstance(layout, FixedLayout):
+                    offset = 0
+                    try:
+                        offset = int(layout.offset)
+                    except Exception:
+                        try:
+                            offset = V.graph.sizevars.size_hint(
+                                layout.offset, fallback=0
+                            )
+                        except Exception:
+                            pass
+                    static_layout = FixedLayout(
+                        layout.device,
+                        dtype=layout.dtype,
+                        size=list(V.graph.sizevars.size_hints(layout.size)),
+                        stride=list(V.graph.sizevars.size_hints(layout.stride)),
+                        offset=offset,
+                    )
+                    node_info["layout"] = str(static_layout)
+                else:
+                    node_info["layout"] = str(node.get_layout())
             except Exception as e:
                 pass
             try:
