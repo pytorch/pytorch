@@ -592,17 +592,10 @@ def promote_exception_to_graph_break(inner_fn):
         except Unsupported:
             raise
         except RuntimeError as e:
-            if inst.offset is None or not hasattr(self.f_code, "co_exceptiontable"):
-                raise
-
-            from torch._dynamo.bytecode_transformation import parse_exception_table
-
-            table = parse_exception_table(self.f_code.co_exceptiontable)
-            for entry in table:
-                if entry.start <= inst.offset < entry.end:
-                    # If we are in a try block of a try-catch, promote the
-                    # exception to graph break
-                    raise Unsupported(str(e)) from e
+            if self.is_instr_in_exception_handled_region(inst):
+                # If we are in a try block of a try-catch, promote the
+                # exception to graph break
+                raise Unsupported(str(e)) from e
             raise
 
     return wrapper
@@ -1956,6 +1949,17 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         return self.speculation_log.next(
             self.f_code.co_filename, self.lineno, self.instruction_pointer
         )
+
+    def is_instr_in_exception_handled_region(self, inst):
+        if inst.offset is None or not hasattr(self.f_code, "co_exceptiontable"):
+            return False
+        from torch._dynamo.bytecode_transformation import parse_exception_table
+
+        table = parse_exception_table(self.f_code.co_exceptiontable)
+        for entry in table:
+            if entry.start <= inst.offset < entry.end:
+                return True
+        return False
 
     def __init__(
         self,
