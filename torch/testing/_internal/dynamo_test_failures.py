@@ -2089,7 +2089,6 @@ dynamo_expected_failures = {
     "TestPythonRegistration.test_alias_analysis",  # test_python_dispatch
     "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_conv2d_cpu",  # test_python_dispatch
     "TestPythonRegistration.test_finalizer",  # test_python_dispatch
-    "TestPythonRegistration.test_override_cpu_sum",  # test_python_dispatch
     "TestPythonDispatch.test_subclass_autograd_device_check",  # test_python_dispatch
     "TestPythonDispatch.test_make_subclass_with_modes",  # test_python_dispatch
     "LoggingTests.test_trace_source_nested",  # dynamo/test_logging
