@@ -18,7 +18,7 @@ inline void increment_version(TensorList tensors) {
 }
 
 // Initializes args and checks if all args are aligned
-template <int depth, typename T, template <int> class TensorListMetadata>
+template <int depth, typename T>
 __device__ bool init_args(
     T** args,
     TensorListMetadata<depth>& tl,
@@ -206,7 +206,7 @@ __device__ __forceinline__ void pointwise_op_scalar(
 template <typename T, int depth, int r_args_depth, int res_arg_index>
 struct BinaryOpScalarFunctor {
   using opmath_t = at::opmath_type<T>;
-  template <typename Op, template <int> class TensorListMetadata>
+  template <typename Op>
   __device__ __forceinline__ void operator()(
       int chunk_size,
       TensorListMetadata<depth>& tl,
@@ -254,7 +254,7 @@ struct BinaryOpScalarListFunctor {
 template <typename T, int depth, int r_args_depth, int res_arg_index>
 struct BinaryOpListAlphaFunctor {
   using opmath_t = at::opmath_type<T>;
-  template <typename Op, template <int> class TensorListMetadata>
+  template <typename Op>
   __device__ __forceinline__ void operator()(
       int chunk_size,
       TensorListMetadata<depth>& tl,
@@ -306,7 +306,7 @@ struct BinaryOpListAlphaFunctor {
 template <typename T, int depth, int r_args_depth, int res_arg_index>
 struct BinaryOpScalarTensorFunctor {
   using opmath_t = at::opmath_type<T>;
-  template <typename Op, template <int> class TensorListMetadata>
+  template <typename Op>
   __device__ __forceinline__ void operator()(
       int chunk_size,
       TensorListMetadata<depth>& tl,
@@ -363,7 +363,6 @@ struct BinaryOpScalarTensorFunctor {
 
 template <typename T, int depth, int r_args_depth, int res_arg_index>
 struct ZeroFunctor {
-  template <template <int> class TensorListMetadata>
   __device__ __forceinline__ void operator()(
       int chunk_size,
       TensorListMetadata<1>& tl) {
@@ -405,7 +404,7 @@ struct ZeroFunctor {
 template <typename T, int depth, int r_args_depth, int res_arg_index>
 struct UnaryOpFunctor {
   using opmath_t = at::opmath_type<T>;
-  template <typename Op, template <int> class TensorListMetadata>
+  template <typename Op>
   __device__ __forceinline__ void operator()(
       int chunk_size,
       TensorListMetadata<depth>& tl,
@@ -457,7 +456,7 @@ struct UnaryOpFunctor {
 template <typename T, int depth, int r_args_depth, int res_arg_index>
 struct PointwiseOpScalarFunctor {
   using opmath_t = at::opmath_type<T>;
-  template <typename Op, template <int> class TensorListMetadata>
+  template <typename Op>
   __device__ __forceinline__ void operator()(
       int chunk_size,
       TensorListMetadata<depth>& tl,
@@ -505,7 +504,7 @@ struct PointwiseOpScalarListFunctor {
 template <typename T, int depth>
 struct PointwiseOpListFunctor {
   using opmath_t = at::opmath_type<T>;
-  template <typename Op, template <int> class TensorListMetadata>
+  template <typename Op>
   __device__ __forceinline__ void operator()(
       int chunk_size,
       TensorListMetadata<depth>& tl,
@@ -556,7 +555,7 @@ struct PointwiseOpListFunctor {
 template <typename T, int depth, int r_args_depth, int res_arg_index>
 struct TernaryOpListFunctor {
   using opmath_t = at::opmath_type<T>;
-  template <typename Op, template <int> class TensorListMetadata>
+  template <typename Op>
   __device__ __forceinline__ void operator()(
       int chunk_size,
       TensorListMetadata<depth>& tl,
@@ -610,7 +609,7 @@ struct TernaryOpListFunctor {
 template <typename T, int depth, int r_args_depth, int res_arg_index>
 struct TernaryOpScalarFunctor {
   using opmath_t = at::opmath_type<T>;
-  template <typename Op, template <int> class TensorListMetadata>
+  template <typename Op>
   __device__ __forceinline__ void operator()(
       int chunk_size,
       TensorListMetadata<depth>& tl,
