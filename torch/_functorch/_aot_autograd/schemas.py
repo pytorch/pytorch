@@ -245,6 +245,12 @@ class ViewAndMutationMeta:
     # to reset the grad mode to its pre-graph value prior to calling aot_autograd.
     grad_enabled_mutation: Optional[bool] = None
 
+    # Keeps track of whether `torch.use_deterministic_algorithms` was turned on
+    # when the forward was run. If deterministic mode was turned off during the
+    # forward, but is turned on during the backward call, then an error is
+    # raised
+    deterministic: Optional[bool] = None
+
     def __post_init__(self):
         # pre-compute the indices of the inputs that are mutated.
         # When keep_input_mutations is set, we don't need to worry about our epilogue
@@ -532,6 +538,7 @@ class GraphSignature:
     # "graph outputs that correspond to updated buffers"
     # to the FQN names of those mutated buffers.
     buffers_to_mutate: Dict[GraphOutputName, FQN]
+    user_inputs_to_mutate: Dict[GraphOutputName, GraphInputName]
 
     in_spec: pytree.TreeSpec
     out_spec: pytree.TreeSpec
@@ -576,22 +583,27 @@ class GraphSignature:
             )
         )
 
-        state_names = [*parameters, *buffers]
-        mutated_buffers = []
+        names = [*parameters, *buffers, *user_inputs]
+        mutations = []
         for idx, input_info in enumerate(view_mutation_metadata.input_info):
             if input_info.mutates_data:
                 # Only buffers can be mutated, not parameters
                 assert idx >= len(parameters)
-                buffer_name = state_names[idx]
-                mutated_buffers.append(buffer_name)
+                mutations.append(names[idx])
 
-        assert (
-            len(mutated_buffers)
-            == view_mutation_metadata.num_mutated_inp_runtime_indices
-        )
+        assert len(mutations) == view_mutation_metadata.num_mutated_inp_runtime_indices
 
         start, stop = 0, view_mutation_metadata.num_mutated_inp_runtime_indices
-        buffers_to_mutate = dict(zip(graph_outputs[start:stop], mutated_buffers))
+        outputs_to_mutations = dict(zip(graph_outputs[start:stop], mutations))
+
+        user_inputs_to_mutate = {}
+        buffers_to_mutate = {}
+        for output_name, mutation_name in outputs_to_mutations.items():
+            if mutation_name in user_inputs:
+                user_inputs_to_mutate[output_name] = mutation_name
+            else:
+                assert mutation_name in buffers
+                buffers_to_mutate[output_name] = mutation_name
 
         start, stop = stop, stop + num_user_outputs
         user_outputs = graph_outputs[start:stop]
@@ -610,6 +622,7 @@ class GraphSignature:
             user_outputs=user_outputs,  # type: ignore[arg-type]
             inputs_to_buffers=inputs_to_buffers,  # type: ignore[arg-type]
             inputs_to_parameters=inputs_to_parameters,  # type: ignore[arg-type]
+            user_inputs_to_mutate=user_inputs_to_mutate,
             buffers_to_mutate=buffers_to_mutate,  # type: ignore[arg-type]
             in_spec=in_spec,
             out_spec=out_spec,

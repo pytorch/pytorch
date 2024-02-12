@@ -1,5 +1,6 @@
 # Owner(s): ["module: functorch"]
 import functools
+import contextlib
 import unittest
 
 from torch.testing._internal.common_utils import TEST_WITH_TORCHDYNAMO, parametrize, instantiate_parametrized_tests
@@ -7,10 +8,11 @@ import torch
 import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import UnsupportedAliasMutationException, cond
+from torch._higher_order_ops.while_loop import while_loop
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase, IS_WINDOWS
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
-from torch._subclasses.functional_tensor import FunctionalTensor
+from torch._subclasses.functional_tensor import FunctionalTensor, CppFunctionalizeAPI, PythonFunctionalizeAPI, FunctionalTensorMode
 
 # TODO: pull these helpers from AOTAutograd later
 def to_fun(t):
@@ -50,6 +52,57 @@ def _fake_map(f, x, *args):
         zs.append(f(xp, *args))
     return _stack_pytree(zs)
 
+def _fake_while_loop(cond_fn, body_fn, operands):
+    while cond_fn(*operands):
+        operands = body_fn(*operands)
+    return operands
+
+def _while_loop_tests():
+    def simple(x):
+        def cond_fn(x):
+            return x.sum() < 10
+
+        def body_fn(x):
+            return (x + 1,)
+
+        return while_loop(cond_fn, body_fn, (x, ))
+
+    def simple_with_mutation(x):
+        def cond_fn(x):
+            y = x.clone().add_(1).add_(-1)
+            return y.sum() < 10
+
+        def body_fn(x):
+            y = x.clone().add_(1).add_(-1)
+            return (y + 1,)
+
+        return while_loop(cond_fn, body_fn, (x, ))
+
+    def nested(out_iter, it, y):
+        def cond_fn(out_iter, it, y):
+            return it.sum() < 10
+
+        def body_fn(out_iter, it, y):
+            return (out_iter.clone(), it + y, y + 1)
+
+        def outer_cond_fn(out_iter, it, y):
+            return out_iter.sum() < 2
+
+        def outer_body_fn(out_iter, it, y):
+            out_iter, it, y = while_loop(cond_fn, body_fn, (out_iter, it, y))
+            return (out_iter + 1, it, y)
+
+        return while_loop(outer_cond_fn, outer_body_fn, (out_iter, it, y))
+
+
+    x = torch.zeros(1)
+    y = torch.zeros(1)
+    z = torch.zeros(1)
+    return {"simple": (simple, (x,)),
+            "nested": (nested, (x, y, z)),
+            "simple_with_mutation": (simple_with_mutation, (x,))}
+
+
 def collect_meta_for_filtered_nodes(gm: torch.fx.GraphModule, node_names, meta_field_name):
     ret = []
     for mod in gm.modules():
@@ -77,7 +130,7 @@ class ReduceMod(torch.nn.Module):
         return self._reduce(*operands)
 
 
-
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
 class TestControlFlow(TestCase):
     def setUp(self):
@@ -117,6 +170,19 @@ class TestControlFlow(TestCase):
         y = torch.ones(2, device="cuda")
         res = control_flow.map(f, xs, y)
         expected = _fake_map(f, xs, y)
+        self.assertEqual(expected, res)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_while_loop_gpu(self):
+        def cond_fn(x):
+            return x.sum() < 10
+
+        def body_fn(x):
+            return (x + 1,)
+
+        x = torch.zeros(1, device="cuda")
+        res = while_loop(cond_fn, body_fn, (x, ))
+        expected = _fake_while_loop(cond_fn, body_fn, (x, ))
         self.assertEqual(expected, res)
 
     def test_map_illegal_inputs(self):
@@ -250,11 +316,21 @@ class TestControlFlow(TestCase):
         self.assertEqual(true_outs, fake_outs)
 
 
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
 class TestControlFlowTraced(TestCase):
     def setUp(self):
         torch._dynamo.reset()
         super().setUp()
+
+    def _check_tracing(self, fn, args):
+        graphs = {}
+        eager_res = fn(*args)
+        for tracing_mode in ["symbolic", "real", "fake"]:
+            graph = make_fx(fn, tracing_mode=tracing_mode)(*args)
+            graphs[tracing_mode] = graph
+            self.assertEqual(graph(*args), eager_res)
+        return graphs
 
     def test_cond_traced_not_nested(self):
         def true_fn(x):
@@ -276,6 +352,144 @@ class TestControlFlowTraced(TestCase):
 
         graph = make_fx(f, tracing_mode="symbolic")(x, torch.tensor(False))
         self.assertEqual(graph(x, torch.tensor(True)), f(x, torch.tensor(True)))
+
+    def test_while_loop_nested_traced(self):
+        fn, inp = _while_loop_tests()["nested"]
+        graphs = self._check_tracing(fn, inp)
+        self.assertExpectedInline(graphs["symbolic"].code.strip("\n"), """\
+def forward(self, out_iter_1, it_1, y_1):
+    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
+    while_loop_body_graph_0 = self.while_loop_body_graph_0
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (out_iter_1, it_1, y_1));  while_loop_cond_graph_0 = while_loop_body_graph_0 = out_iter_1 = it_1 = y_1 = None
+    getitem = while_loop[0]
+    getitem_1 = while_loop[1]
+    getitem_2 = while_loop[2];  while_loop = None
+    return (getitem, getitem_1, getitem_2)
+    """)  # noqa: B950
+        self.assertExpectedInline(graphs["symbolic"].while_loop_cond_graph_0.code.strip("\n"), """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    sum_1 = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
+    lt = torch.ops.aten.lt.Scalar(sum_1, 2);  sum_1 = None
+    return lt
+    """)
+        self.assertExpectedInline(graphs["symbolic"].while_loop_body_graph_0.code.strip("\n"), """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
+    while_loop_body_graph_0 = self.while_loop_body_graph_0
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg1_1, arg0_1, arg2_1));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg1_1 = arg0_1 = arg2_1 = None
+    getitem = while_loop[0]
+    getitem_1 = while_loop[1]
+    getitem_2 = while_loop[2];  while_loop = None
+    add = torch.ops.aten.add.Tensor(getitem, 1);  getitem = None
+    return (add, getitem_1, getitem_2)
+    """)  # noqa: B950
+
+    def _wrap_with_functionalize(self, fn, func_type):
+        mode = None
+        if func_type == "cpp":
+            fn = CppFunctionalizeAPI().functionalize(fn)
+        elif func_type == "python":
+            fn = PythonFunctionalizeAPI().functionalize(fn)
+            mode = FunctionalTensorMode()
+        elif func_type == "functorch":
+            fn = torch.func.functionalize(fn)
+        else:
+            assert func_type == "no"
+        return fn, mode
+
+    @parametrize("func_type", ["no", "cpp", "python", "functorch"])
+    def test_while_loop_simple_functionalize_check_graph(self, func_type):
+        fn, inp = _while_loop_tests()["simple_with_mutation"]
+        fn, mode = self._wrap_with_functionalize(fn, func_type)
+        mode = mode if mode is not None else contextlib.nullcontext()
+        with mode:
+            graphs = self._check_tracing(fn, inp)
+        if func_type == "no":
+            self.assertExpectedInline(graphs["symbolic"].code.strip("\n"), """\
+def forward(self, x_1):
+    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
+    while_loop_body_graph_0 = self.while_loop_body_graph_0
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (x_1,));  while_loop_cond_graph_0 = while_loop_body_graph_0 = x_1 = None
+    getitem = while_loop[0];  while_loop = None
+    return (getitem,)
+    """)  # noqa: B950
+            self.assertExpectedInline(graphs["symbolic"].while_loop_cond_graph_0.code.strip("\n"), """\
+def forward(self, arg0_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    add_ = torch.ops.aten.add_.Tensor(clone, 1);  clone = None
+    add__1 = torch.ops.aten.add_.Tensor(add_, -1);  add_ = None
+    sum_1 = torch.ops.aten.sum.default(add__1);  add__1 = None
+    lt = torch.ops.aten.lt.Scalar(sum_1, 10);  sum_1 = None
+    return lt
+    """)
+            self.assertExpectedInline(graphs["symbolic"].while_loop_body_graph_0.code.strip("\n"), """\
+def forward(self, arg0_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    add_ = torch.ops.aten.add_.Tensor(clone, 1);  clone = None
+    add__1 = torch.ops.aten.add_.Tensor(add_, -1);  add_ = None
+    add = torch.ops.aten.add.Tensor(add__1, 1);  add__1 = None
+    return (add,)
+    """)
+        elif func_type == "python":
+            self.assertExpectedInline(graphs["symbolic"].code.strip("\n"), """\
+def forward(self, arg0_1):
+    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
+    while_loop_body_graph_0 = self.while_loop_body_graph_0
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1,));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = None
+    getitem = while_loop[0];  while_loop = None
+    return (getitem,)
+    """)  # noqa: B950
+            self.assertExpectedInline(graphs["symbolic"].while_loop_cond_graph_0.code.strip("\n"), """\
+def forward(self, arg0_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
+    add_1 = torch.ops.aten.add.Tensor(add, -1);  add = None
+    sum_1 = torch.ops.aten.sum.default(add_1);  add_1 = None
+    lt = torch.ops.aten.lt.Scalar(sum_1, 10);  sum_1 = None
+    return lt
+    """)
+            self.assertExpectedInline(graphs["symbolic"].while_loop_body_graph_0.code.strip("\n"), """\
+def forward(self, arg0_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
+    add_1 = torch.ops.aten.add.Tensor(add, -1);  add = None
+    add_2 = torch.ops.aten.add.Tensor(add_1, 1);  add_1 = None
+    return (add_2,)
+    """)
+        else:
+            self.assertExpectedInline(graphs["symbolic"].code.strip("\n"), """\
+def forward(self, x_1):
+    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
+    while_loop_body_graph_0 = self.while_loop_body_graph_0
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (x_1,));  while_loop_cond_graph_0 = while_loop_body_graph_0 = x_1 = None
+    getitem = while_loop[0];  while_loop = None
+    return (getitem,)
+    """)  # noqa: B950
+            self.assertExpectedInline(graphs["symbolic"].while_loop_cond_graph_0.code.strip("\n"), """\
+def forward(self, arg0_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
+    add_1 = torch.ops.aten.add.Tensor(add, -1);  add = None
+    sum_1 = torch.ops.aten.sum.default(add_1);  add_1 = None
+    lt = torch.ops.aten.lt.Scalar(sum_1, 10);  sum_1 = None
+    return lt
+    """)
+            self.assertExpectedInline(graphs["symbolic"].while_loop_body_graph_0.code.strip("\n"), """\
+def forward(self, arg0_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
+    add_1 = torch.ops.aten.add.Tensor(add, -1);  add = None
+    add_2 = torch.ops.aten.add.Tensor(add_1, 1);  add_1 = None
+    return (add_2,)
+    """)
+
+    @parametrize("func_type", ["no", "cpp", "python", "functorch"])
+    def test_while_loop_functionalize(self, func_type):
+        for fn, inp in _while_loop_tests().values():
+            fn, mode = self._wrap_with_functionalize(fn, func_type)
+            mode = mode if mode is not None else contextlib.nullcontext()
+            with mode:
+                self._check_tracing(fn, inp)
 
     def test_cond_nested_traced(self):
         def true_nested(y):
@@ -1405,9 +1619,11 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             return cond(x.shape[0] == 4, true_fn, false_fn, [x])
 
         inp = torch.ones(2, 3)
-        # For top-level cond, it take 5 arguments (x, a, b, a, b)
+        # For top-level cond, it take 3 arguments (x, a, b). Dynamo should
+        # realize that the nonlocal variables are same for the true and false
+        # branches, so it should de-dupe them.
         # For second-level conds, it takes (x, a, b)
-        self._check_closure_correctly_lifted_with_mutation(foo, (a, b), args=(inp,), exp_arg_num=5)
+        self._check_closure_correctly_lifted_with_mutation(foo, (a, b), args=(inp,), exp_arg_num=3)
 
     def test_cond_nested_with_closure_graph_module(self):
         a = torch.ones(1, 1)
@@ -1451,8 +1667,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertExpectedInline(gm.code.strip(), """\
 def forward(self, pred_1, x_1):
     body_graph_0 = self.body_graph_0
-    map_impl = torch.ops.higher_order.map_impl(body_graph_0, 1, x_1, pred_1);\
-  body_graph_0 = x_1 = pred_1 = None
+    map_impl = torch.ops.higher_order.map_impl(body_graph_0, [x_1], [pred_1]);  body_graph_0 = x_1 = pred_1 = None
     getitem = map_impl[0];  map_impl = None
     return getitem""")
         self.assertExpectedInline(gm.body_graph_0.code.strip(), """\
@@ -1695,6 +1910,8 @@ def forward(self, arg0_1):
             )
 
         res = torch.vmap(fn, in_dims=(0,))(a,)
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            res = torch.vmap(fn, in_dims=(0,))(a,)
         self.assertEqual(a + c, res)
 
     def test_cond_vmap_multiple_args_with_closure(self):

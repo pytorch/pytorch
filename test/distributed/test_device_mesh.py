@@ -134,13 +134,6 @@ class DeviceMeshTest(DTensorTestBase):
             )
             self.assertEqual(global_ranks, current_rank_expected_group_ranks)
 
-    @with_comms
-    def test_lazy_init_device_mesh(self):
-        mesh = DeviceMesh(self.device_type, [1], _init_process_groups=False)
-
-        with self.assertRaisesRegex(RuntimeError, "process groups not initialized!"):
-            mesh.get_group()
-
     def test_fake_pg_device_mesh(self):
         fake_store = FakeStore()
         init_process_group("fake", store=fake_store, rank=0, world_size=self.world_size)
@@ -247,12 +240,6 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         return 8
 
     @with_comms
-    def test_raises_mesh_dim_less_than_2(self):
-        with self.assertRaisesRegex(RuntimeError, "Cannot slice a DeviceMesh"):
-            mesh = init_device_mesh(self.device_type, (8,))
-            child_mesh = mesh["DP"]
-
-    @with_comms
     def test_raises_no_mesh_dim_found(self):
         with self.assertRaisesRegex(KeyError, "No `mesh_dim_names` found."):
             mesh = init_device_mesh(self.device_type, (2, 4))
@@ -292,6 +279,17 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         dp_mesh = mesh_2d["DP"]
         dp_group_idx = self.rank % 4
         self.assertEqual(mesh_2d["DP"].mesh, pg_ranks_by_dim_name["DP"][dp_group_idx])
+
+    @with_comms
+    def test_get_item_1d(self):
+        mesh = init_device_mesh(self.device_type, (8,), mesh_dim_names=("dp",))
+        # Make sure slicing out 1D mesh from a 1D mesh works.
+        # We are just dummy return without the parent mesh here.
+        dp_mesh = mesh["dp"]
+        self.assertEqual(dp_mesh, mesh)
+
+        with self.assertRaisesRegex(RuntimeError, "Invalid mesh_dim_name"):
+            dp_mesh = mesh["dim0"]
 
 
 class TestMeshEnv(DTensorTestBase):
@@ -662,6 +660,30 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 output_tensor = torch.cat(output_tensor_list, dim=scatter_dim)
                 expected_tensor = torch.cat(expected_tensor_list, dim=scatter_dim)
                 self.assertEqual(output_tensor, expected_tensor)
+
+
+class DeviceMeshTestWithNativeFunCol(DeviceMeshTest):
+    def setUp(self) -> None:
+        self._prev_native_funcol_enabled = funcol.native_funcol_enabled()
+        funcol.enable_native_funcol()
+        super().setUp()
+
+    def tearDown(self) -> None:
+        super().tearDown()
+        if not self._prev_native_funcol_enabled:
+            funcol.disable_native_funcol()
+
+
+class DeviceMeshCollectiveTestWithNativeFunCol(DeviceMeshCollectiveTest):
+    def setUp(self) -> None:
+        self._prev_native_funcol_enabled = funcol.native_funcol_enabled()
+        funcol.enable_native_funcol()
+        super().setUp()
+
+    def tearDown(self) -> None:
+        super().tearDown()
+        if not self._prev_native_funcol_enabled:
+            funcol.disable_native_funcol()
 
 
 if __name__ == "__main__":

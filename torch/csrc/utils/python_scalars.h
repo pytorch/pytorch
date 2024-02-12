@@ -29,6 +29,16 @@ inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
     case at::kByte:
       *(uint8_t*)data = unpackIntegral<uint8_t>(obj, "uint8");
       break;
+    case at::kUInt16:
+      *(uint16_t*)data = unpackIntegral<uint16_t>(obj, "uint16");
+      break;
+    case at::kUInt32:
+      *(uint32_t*)data = unpackIntegral<uint32_t>(obj, "uint32");
+      break;
+    case at::kUInt64:
+      // NB: This doesn't allow implicit conversion of float to int
+      *(uint64_t*)data = THPUtils_unpackUInt64(obj);
+      break;
     case at::kChar:
       *(int8_t*)data = unpackIntegral<int8_t>(obj, "int8");
       break;
@@ -91,10 +101,16 @@ inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
   }
 }
 
-inline PyObject* load_scalar(void* data, at::ScalarType scalarType) {
+inline PyObject* load_scalar(const void* data, at::ScalarType scalarType) {
   switch (scalarType) {
     case at::kByte:
       return THPUtils_packInt64(*(uint8_t*)data);
+    case at::kUInt16:
+      return THPUtils_packInt64(*(uint16_t*)data);
+    case at::kUInt32:
+      return THPUtils_packUInt32(*(uint32_t*)data);
+    case at::kUInt64:
+      return THPUtils_packUInt64(*(uint64_t*)data);
     case at::kChar:
       return THPUtils_packInt64(*(int8_t*)data);
     case at::kShort:
@@ -111,11 +127,11 @@ inline PyObject* load_scalar(void* data, at::ScalarType scalarType) {
     case at::kDouble:
       return PyFloat_FromDouble(*(double*)data);
     case at::kComplexHalf: {
-      auto data_ = reinterpret_cast<c10::complex<at::Half>*>(data);
+      auto data_ = reinterpret_cast<const c10::complex<at::Half>*>(data);
       return PyComplex_FromDoubles(data_->real(), data_->imag());
     }
     case at::kComplexFloat: {
-      auto data_ = reinterpret_cast<c10::complex<float>*>(data);
+      auto data_ = reinterpret_cast<const c10::complex<float>*>(data);
       return PyComplex_FromDoubles(data_->real(), data_->imag());
     }
     case at::kComplexDouble:
@@ -136,8 +152,8 @@ inline PyObject* load_scalar(void* data, at::ScalarType scalarType) {
       return PyFloat_FromDouble(at::convert<double, at::Float8_e5m2fnuz>(
           *(at::Float8_e5m2fnuz*)data));
     case at::kFloat8_e4m3fnuz:
-      return PyFloat_FromDouble(at::convert<double, at::Float8_e5m2fnuz>(
-          *(at::Float8_e5m2fnuz*)data));
+      return PyFloat_FromDouble(at::convert<double, at::Float8_e4m3fnuz>(
+          *(at::Float8_e4m3fnuz*)data));
     default:
       throw std::runtime_error("invalid type");
   }

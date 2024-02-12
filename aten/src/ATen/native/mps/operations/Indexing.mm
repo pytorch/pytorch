@@ -41,10 +41,6 @@
 #include <ATen/ops/nonzero_native.h>
 #endif
 
-#ifdef __OBJC__
-#include <MetalPerformanceShaders/MetalPerformanceShaders.h>
-#endif
-
 namespace at::native {
 namespace mps {
 static std::string getBitSizeString(ScalarType scalar_type) {
@@ -55,7 +51,8 @@ static std::string getBitSizeString(ScalarType scalar_type) {
 static std::string getIndexFunctionName(ScalarType scalar_type,
                                         bool index_select,
                                         bool accumulate,
-                                        bool serial = false) {
+                                        bool serial,
+                                        bool use_64bit_indexing) {
   std::string indexFunction = index_select     ? "index_select_"
       : (accumulate && (scalar_type != kBool)) ? "index_put_accumulate_"
                                                : (serial ? "index_put_serial_" : "index_put_");
@@ -68,6 +65,7 @@ static std::string getIndexFunctionName(ScalarType scalar_type,
     string dtypeString = (scalar_type == ScalarType::Float) ? "_float" : "_int";
     indexFunction += dtypeString;
   }
+  indexFunction += use_64bit_indexing ? "_idx64" : "_idx32";
   return indexFunction;
 }
 
@@ -96,10 +94,11 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
       uint32_t numThreads = iter.numel();
 
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      auto kernelDataOffsets = generateKernelDataOffsets(computeEncoder, iter);
+      const bool use_64bit_indexing = !iter.can_use_32bit_indexing();
+      auto kernelDataOffsets = generateKernelDataOffsets(computeEncoder, iter, use_64bit_indexing);
 
-      std::string indexFunction =
-          getIndexFunctionName(inputTensor.scalar_type(), index_select, accumulate, serial_index_put);
+      auto indexFunction = getIndexFunctionName(
+          inputTensor.scalar_type(), index_select, accumulate, serial_index_put, use_64bit_indexing);
       id<MTLComputePipelineState> indexSelectPSO = nil;
       id<MTLBuffer> indexAB = nil;
 #if defined(__MAC_13_0)
@@ -195,7 +194,7 @@ static void validateInputData(const TensorIteratorBase& iter,
   } else {
     TORCH_CHECK(c10::isIntegralType(scalar_type, /*includesBool=*/true) || scalar_type == ScalarType::Float ||
                     scalar_type == ScalarType::Half || scalar_type == ScalarType::ComplexFloat ||
-                    scalar_type == ScalarType::ComplexHalf,
+                    scalar_type == ScalarType::ComplexHalf || scalar_type == ScalarType::BFloat16,
                 getMPSTypeString(inputTensor) + std::string(" not supported for index.Tensor_out"));
   }
 }
@@ -387,17 +386,8 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out, apparentOutputShape);
     Placeholder scatterPlaceholder = Placeholder(cachedGraph->scatterDataTensor_, out, apparentOutputShape);
 
-    // Create dictionary of inputs and outputs
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
-      scatterPlaceholder.getMPSGraphTensor() : scatterPlaceholder.getMPSGraphTensorData()
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData(),
-    };
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder, scatterPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   if (!contiguous_output) {
@@ -481,14 +471,8 @@ Tensor flip_mps(const Tensor& self, IntArrayRef dims) {
     Placeholder outputPlaceholder =
         Placeholder(cachedGraph->outputTensor_, result, /*mpsShape*/ nil, /*gatherTensorData=*/false, outputDataType);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
-        @{inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData()};
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    // Run the graph
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return result;
@@ -565,10 +549,7 @@ TORCH_IMPL_FUNC(index_add_mps_out)
       sourcePlaceholder.getMPSGraphTensor() : sourcePlaceholder.getMPSGraphTensorData(),
       cachedGraph->alphaTensor_ : getMPSGraphTensorFromScalar(stream, alpha_scalar),
     };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 
@@ -694,14 +675,8 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
                                                 /*gatherTensorData=*/false,
                                                 /*dataType=*/outputType);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
-      indexPlaceholder.getMPSGraphTensor() : indexPlaceholder.getMPSGraphTensorData()
-    };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder, indexPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return output;
@@ -782,10 +757,7 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
       cachedGraph->valueTensor_ : getMPSGraphTensorFromScalar(stream, valueScalar)
     };
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
   namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
@@ -859,14 +831,8 @@ Tensor embedding_dense_backward_mps(const Tensor& grad_,
     auto indicesPlaceholder = Placeholder(cachedGraph->indicesTensor_, indices);
     auto outgoingGradPlaceholder = Placeholder(cachedGraph->outgoingGradTensor_, outgoing_gradient);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      incomingGradPlaceholder.getMPSGraphTensor() : incomingGradPlaceholder.getMPSGraphTensorData(),
-      indicesPlaceholder.getMPSGraphTensor() : indicesPlaceholder.getMPSGraphTensorData()
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outgoingGradPlaceholder.getMPSGraphTensor() : outgoingGradPlaceholder.getMPSGraphTensorData()};
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(incomingGradPlaceholder, indicesPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outgoingGradPlaceholder);
   }
   return outgoing_gradient;
 }
@@ -1007,15 +973,8 @@ Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Te
                                                 /*gatherTensorData=*/false,
                                                 /*dataType=*/inputType);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
-      indexPlaceholder.getMPSGraphTensor() : indexPlaceholder.getMPSGraphTensorData(),
-      updatePlaceholder.getMPSGraphTensor() : updatePlaceholder.getMPSGraphTensorData()
-    };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder, indexPlaceholder, updatePlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
   return self;
 }

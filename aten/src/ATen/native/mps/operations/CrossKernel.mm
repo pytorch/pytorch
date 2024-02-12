@@ -9,6 +9,7 @@ namespace at::native {
 namespace {
 
 static const char* METAL_CROSS = R"CROSS_METAL(
+#include <metal_array>
 
 #include <metal_stdlib>
 using namespace metal;

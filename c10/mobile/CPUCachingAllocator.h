@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cstddef>
 #include <mutex>
 
+#include <c10/macros/Export.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/flat_hash_map.h>
 
