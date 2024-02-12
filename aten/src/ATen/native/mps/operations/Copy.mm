@@ -273,10 +273,10 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
     // Simulate cast to Complex on older MacOS by initializing real and imag parts
     if (dst_.is_complex() && !supportsComplex()) {
       if (!src.is_complex()) {
-        at::real(dst_) = src;
-        at::imag(dst_) = at::zeros_like(src);
+        at::real(dst_).copy_(src);
+        at::imag(dst_).fill_(0);
       } else {
-        at::view_as_real(dst_) = at::view_as_real(src);
+        at::view_as_real(dst_).copy_(at::view_as_real(src));
       }
     } else if (dst_byte_offset) {
       auto tmp = at::empty(dst_.sizes(), dst_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
