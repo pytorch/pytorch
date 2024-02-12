@@ -1432,7 +1432,9 @@ class CheckFunctionManager:
         builder.add_python_lambda_leaf_guard_to_root(
             ["___guarded_code.valid"],
             ["___guarded_code.valid"],
-            {"___guarded_code": self,},
+            {
+                "___guarded_code": self,
+            },
             False,
         )
 
