@@ -372,7 +372,12 @@ def mps_ops_modifier(ops):
         'exp',
         'expm1',
         'fft.fft',
+        'fft.fft2',
+        'fft.fftn',
         'fft.fftshift',
+        'fft.ifft',
+        'fft.ifft2',
+        'fft.ifftn',
         'fft.ifftshift',
         'flip',
         'fliplr',
@@ -637,20 +642,20 @@ def mps_ops_modifier(ops):
         'linalg.eigvals': None,
         'fft.fft': [] if product_version >= 14.0 else None,
         'fft.fft2': [] if product_version >= 14.0 else None,
-        'fft.fftn': None,
+        'fft.fftn': [] if product_version >= 14.0 else None,
         'fft.hfft': [] if product_version >= 14.0 else None,
-        'fft.hfft2': [] if product_version >= 14.0 else None,
-        'fft.hfftn': [] if product_version >= 14.0 else None,
-        'fft.ifft': None,
+        'fft.hfft2': None,
+        'fft.hfftn': None,
+        'fft.ifft': [] if product_version >= 14.0 else None,
         'fft.ifft2': [] if product_version >= 14.0 else None,
         'fft.ifftn': [] if product_version >= 14.0 else None,
-        'fft.ihfft': None,
-        'fft.ihfft2': None,
-        'fft.ihfftn': None,
+        'fft.ihfft': [] if product_version >= 14.0 else None,
+        'fft.ihfft2': [] if product_version >= 14.0 else None,
+        'fft.ihfftn': [] if product_version >= 14.0 else None,
         'fft.irfft': [] if product_version >= 14.0 else None,
         'fft.irfft2': [] if product_version >= 14.0 else None,
         'fft.irfftn': [] if product_version >= 14.0 else None,
-        'fft.rfft': None,
+        'fft.rfft': [] if product_version >= 14.0 else None,
         'fft.rfft2': [] if product_version >= 14.0 else None,
         'fft.rfftn': [] if product_version >= 14.0 else None,
         'put': None,
@@ -11467,8 +11472,8 @@ class TestConsistency(TestCaseMPS):
             elif op.name == "nn.functional.upsample_bilinear" and dtype == torch.uint8:
                 atol = 1.0
                 rtol = 0.0
-            elif op.name in ['fft.rfftn', 'fft.hfftn', 'fft.hfft2', 'fft.fft']:
-                atol = 1e-4
+            elif op.name in ['fft.rfftn', 'fft.hfftn', 'fft.hfft2', 'fft.fft', 'fft.fftn', 'fft.rfft']:
+                atol = 3e-5
                 rtol = 3e-5
             else:
                 atol = None
@@ -11532,6 +11537,9 @@ class TestConsistency(TestCaseMPS):
             elif op.name == "nn.functional.interpolate":
                 atol = 1e-3
                 rtol = 1e-4
+            elif op.name == "fft.rfft":
+                atol = 3e-5
+                rtol = 2e-5
             else:
                 atol = None
                 rtol = None
