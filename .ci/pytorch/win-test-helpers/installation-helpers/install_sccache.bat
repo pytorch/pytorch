@@ -13,6 +13,7 @@ if "%REBUILD%"=="" (
     ) else (
       aws --version
       aws s3 cp s3://ossci-windows/sccache-v0.7.4.exe %TMP_DIR_WIN%\bin\sccache.exe
+      %TMP_DIR_WIN%\bin\sccache.exe --start-server & echo %ERRORLEVEL%
     )
     goto :check_sccache
   )
