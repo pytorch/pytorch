@@ -344,7 +344,7 @@ class CompiledOptimizerParityTests(TestCase):
         )
         for optim_input in all_optim_inputs:
             kwargs = dict(optim_input.kwargs)
-            print(kwargs)
+
             # RAdam #117836 and Adamax #118230 and ASGD #116052
             # Single tensor eager needs to be refactored to enable tracing
             if optim_cls in [RAdam, Adamax, ASGD] and not kwargs.get("foreach", False):
