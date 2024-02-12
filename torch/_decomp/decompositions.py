@@ -3367,14 +3367,8 @@ def upsample_bilinear2d(
     x = x_f32.to(torch.int64)
     y = y_f32.to(torch.int64)
 
-    # We are using torch.where instead of torch.clamp below due to an expected failure
-    # in test_aot_autograd_symbolic_exhaustive_nn_functional_interpolate_bilinear_cpu_float32 test
-    # torch.ops.aten.clamp.default(add, None, sub) on int64 input tensor is returning float32 and
-    # fails with torch.ops.aten._unsafe_index.Tensor(primals_1, [None, None, _to_copy_1, clamp_2])
-    # RuntimeError: _unsafe_index found unexpected index type Float
-    # xp1 = (x + 1).clamp(max=in_w - 1); yp1 = (y + 1).clamp(max=in_h - 1)
-    xp1 = torch.where(x < in_w - 1, x + 1, x)
-    yp1 = torch.where(y < in_h - 1, y + 1, y)
+    xp1 = (x + 1).clamp(max=in_w - 1)
+    yp1 = (y + 1).clamp(max=in_h - 1)
 
     v1 = aten._unsafe_index(input, [None, None, y, x])
     v2 = aten._unsafe_index(input, [None, None, y, xp1])
