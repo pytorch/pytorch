@@ -213,7 +213,7 @@ void AutogradMeta::set_fw_grad(
       //   - Copy the given new_grad into this view
       //   - Use this view as the new new_grad
       if (this_view_meta->has_fw_view()) {
-        auto& view_info = this_view_meta->get_forward_view();
+        auto view_info = this_view_meta->get_forward_view();
         auto& base = view_info.base_;
 
         if (!base._fw_grad(level).defined()) {
