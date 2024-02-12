@@ -656,6 +656,7 @@ aten::batch_norm_gather_stats
 aten::batch_norm_gather_stats.out
 aten::batch_norm_gather_stats_with_counts
 aten::batch_norm_gather_stats_with_counts.out
+aten::batch_norm_no_update.out
 aten::batch_norm_stats
 aten::batch_norm_stats.out
 aten::batch_norm_update_stats
@@ -817,8 +818,6 @@ aten::histogram.bins_tensor
 aten::histogram.bins_tensor_out
 aten::hspmm
 aten::hspmm.out
-aten::i0
-aten::i0.out
 aten::index.Tensor
 aten::index.Tensor_out
 aten::index_put

@@ -1865,7 +1865,7 @@ def _get_batch_norm_reserve_tensor(
     if backend == torch._C._BatchNormBackend.Cudnn:  # type: ignore[attr-defined]
         reserve_size = torch._C._get_cudnn_batch_norm_reserve_space_size(input)  # type: ignore[attr-defined]
         return torch.empty(
-            reserve_size, dtype=input.dtype, layout=input.layout, device=input.device
+            reserve_size, dtype=torch.uint8, layout=input.layout, device=input.device
         )
     else:
         return torch.empty(0, dtype=torch.uint8)

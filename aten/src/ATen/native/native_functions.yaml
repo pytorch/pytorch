@@ -6472,6 +6472,7 @@
     SparseCPU, SparseCUDA: norm_sparse
   autogen: native_norm.ScalarOpt_dim_dtype_out
 
+# TODO: add these to core aten opset
 # return values are: output, save_mean, save_var, reserve
 # reserve tensor is only used in cudnn
 - func: batch_norm_with_update(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, float momentum, float eps, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, Tensor)
@@ -6493,7 +6494,7 @@
     CUDA: batch_norm_with_update_cuda_out
     MPS: batch_norm_with_update_mps_out
 
-- func: batch_norm_backward(Tensor grad_output, Tensor input, Tensor weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var, bool update, float eps, bool[3] grad_input_mask, Tensor reserve, bool cudnn_enabled) -> (Tensor, Tensor, Tensor)
+- func: batch_norm_backward(Tensor grad_out, Tensor input, Tensor weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var, bool update, float eps, bool[3] output_mask, Tensor reserve, bool cudnn_enabled) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU: _new_batch_norm_backward_cpu
     CUDA: _new_batch_norm_backward_cuda
