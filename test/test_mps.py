@@ -249,6 +249,7 @@ def mps_ops_modifier(ops):
         'cfloat',
         'chunk',
         'clone',
+        'conj_physical',
         'contiguous',
         'diag',
         'diag_embed',
