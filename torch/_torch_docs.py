@@ -2308,7 +2308,7 @@ cat(tensors, dim=0, *, out=None) -> Tensor
 
 Concatenates the given sequence of :attr:`seq` tensors in the given dimension.
 All tensors must either have the same shape (except in the concatenating
-dimension) or be empty.
+dimension) or be a 1-D empty tensor with size ``(0,)``.
 
 :func:`torch.cat` can be seen as an inverse operation for :func:`torch.split`
 and :func:`torch.chunk`.
