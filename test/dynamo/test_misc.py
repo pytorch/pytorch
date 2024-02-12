@@ -852,6 +852,42 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         else:
             self.assertExpectedInline(counts.op_count, """4""")
 
+    def test_user_defined_iter(self):
+        class Mod:
+            def __init__(self):
+                self.a = [torch.randn(2, 2), torch.randn(2, 2)]
+
+            def __iter__(self):
+                return iter(self.a)
+
+        def f(mod):
+            ret = []
+            for x in mod:
+                ret.append(x + 1)
+            return ret
+
+        mod = Mod()
+        counts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(counts, nopython=True)(f)
+        ref = f(mod)
+        res = opt_fn(mod)
+        res = opt_fn(mod)
+        res = opt_fn(mod)
+        res = opt_fn(mod)
+        self.assertTrue(same(ref, res))
+        self.assertEqual(counts.frame_count, 1)
+
+        mod.a.append(torch.randn(2, 2))
+        # `for x in mod` is inlined, where iter(m.a) creates a guard on the list length of m.a
+        # Mutating length of mod.a causes a re-compilation.
+        ref2 = f(mod)
+        res2 = opt_fn(mod)
+        res2 = opt_fn(mod)
+        res2 = opt_fn(mod)
+        res2 = opt_fn(mod)
+        self.assertTrue(same(ref2, res2))
+        self.assertEqual(counts.frame_count, 2)
+
     def test_compare_shapes_eq(self):
         def compare_shapes(a, b, to_list):
             x = list(a.unsqueeze(-1).shape) if to_list else a.shape
@@ -9078,6 +9114,9 @@ ShapeEnv not equal: field values don't match:
 ==> replacements: values don't match.
   >  Left: {s0: 3}
   > Right: {}
+==> var_to_range: values don't match.
+  >  Left: {s0: ValueRanges(lower=3, upper=3, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}
+  > Right: {s0: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}
 """,
         )
         self._replay_and_check(main)
@@ -9412,6 +9451,44 @@ fn
         c2 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c2), 0)
 
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_module_free(self):
+        """Test that CUDA memory is freed when a model goes out of scope"""
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.fc = torch.nn.Linear(10000, 10000)
+
+            def forward(self, out):
+                return self.fc(out)
+
+        def run(compile):
+            mod = Mod().cuda()
+            if compile:
+                mod = torch.compile(mod, backend="eager")
+            inp = torch.rand(10000, 10000).cuda()
+            mod(inp)
+
+        def clean_and_report_memory():
+            import gc
+
+            gc.collect()
+            return torch.cuda.memory_allocated()
+
+        run(False)
+        # mem1 = clean_and_report_memory()
+        run(True)
+        mem2 = clean_and_report_memory()
+        torch._dynamo.reset_code_caches()
+        mem3 = clean_and_report_memory()
+
+        # it's possible for dynamo to hold on to more memory
+        # even after a _dynamo.reset[_code_caches], so we omit the following check.
+        # self.assertEqual(mem1, mem2)
+
+        self.assertEqual(mem2, mem3)
+
     def test_dynamo_cache_move_to_front(self):
         class Mod(torch.nn.Module):
             def __init__(self):
@@ -9444,6 +9521,56 @@ fn
         opt_fn(inp, m2)
         c2 = _debug_get_cache_entry_list(fn.__code__)
         self.assertIs(c1[1], c2[0])
+
+    def test_dynamo_cache_invalidate(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.fc = torch.nn.Linear(3, 3)
+
+            def forward(self, out):
+                return self.fc(out)
+
+        def fn(x, mod):
+            return mod(x)
+
+        opt_fn = torch.compile(fn, backend="eager")
+
+        m1 = Mod()
+        m2 = Mod()
+        m3 = Mod()
+        inp = torch.randn(3, 3)
+
+        # NOTE: assumes that each cache entry is guarded
+        # on unique Mod instance
+        opt_fn(inp, m1)
+        opt_fn(inp, m2)
+        opt_fn(inp, m3)
+
+        c1 = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(c1), 3)
+
+        # move cache entry to front
+        opt_fn(inp, m2)
+        c2 = _debug_get_cache_entry_list(fn.__code__)
+        self.assertIs(c1[1], c2[0])
+
+        # delete center of cache
+        del m3
+        c3 = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(c3), 2)
+        self.assertIs(c3[0], c2[0])
+        self.assertIs(c3[1], c2[2])
+
+        # delete end of cache
+        del m1
+        c4 = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(c4), 1)
+        self.assertIs(c4[0], c3[0])
+
+        del m2
+        c5 = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(c5), 0)
 
 
 class TestTracer(JitTestCase):

@@ -1755,14 +1755,14 @@ class TestSDPA(NNTestCase):
         q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
         if type == "nested" \
                 or dropout > 0.0 \
-                or dtype not in [torch.float32, torch.float64, torch.bfloat16]:
+                or dtype not in [torch.float32, torch.float64, torch.bfloat16, torch.float16]:
             assert torch._fused_sdp_choice(q, k, v, dropout_p=dropout) == SDPBackend.MATH.value
         else:
             assert torch._fused_sdp_choice(q, k, v, dropout_p=dropout) == SDPBackend.FLASH_ATTENTION.value
 
     @onlyCPU
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
-    @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16])
+    @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16, torch.float16])
     @parametrize("batch_size", [2, 12])
     @parametrize("seq_len", [267, 1030])
     @parametrize("n_head", [1, 3])
@@ -1786,6 +1786,9 @@ class TestSDPA(NNTestCase):
         if dtype is torch.bfloat16:
             atol = 5e-2
             rtol = 5e-2
+        if dtype is torch.float16:
+            atol = 1e-2
+            rtol = 1e-2
 
         n_embd = n_head * head_dim
         make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, packed=True, requires_grad=False)
@@ -1800,7 +1803,7 @@ class TestSDPA(NNTestCase):
         q, k, v = x.split(n_embd, dim=2)
         q2, k2, v2 = x2.split(n_embd, dim=2)
 
-        if dtype is torch.bfloat16:
+        if dtype in [torch.bfloat16, torch.float16]:
             q2 = q2.float()
             k2 = k2.float()
             v2 = v2.float()
@@ -1820,8 +1823,8 @@ class TestSDPA(NNTestCase):
             math_ref = torch.nn.functional.scaled_dot_product_attention(
                 q2, k2, v2, attn_mask=None, dropout_p=0.0, is_causal=causal)
 
-        if dtype is torch.bfloat16:
-            math_ref = math_ref.bfloat16()
+        if dtype in [torch.bfloat16, torch.float16]:
+            math_ref = math_ref.to(dtype)
 
         self.assertEqual(actual, math_ref, atol=atol, rtol=rtol)
 
@@ -1839,7 +1842,7 @@ class TestSDPA(NNTestCase):
 
     @onlyCPU
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
-    @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16])
+    @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16, torch.float16])
     @parametrize("batch_size", [2, 12])
     @parametrize("q_seq_len", [267, 1030])
     @parametrize("kv_seq_len", [514, 1179])
@@ -1865,6 +1868,8 @@ class TestSDPA(NNTestCase):
         tol = Tolerances(1e-5, 5e-6)
         if dtype is torch.bfloat16:
             tol = Tolerances(5e-2, 5e-2)
+        if dtype is torch.float16:
+            tol = Tolerances(1e-2, 1e-2)
 
         make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, requires_grad=False)
         q_shape = SdpaShape(batch_size, n_head, q_seq_len, head_dim)
@@ -1882,7 +1887,7 @@ class TestSDPA(NNTestCase):
             k2.requires_grad_(True)
             v2.requires_grad_(True)
 
-        if dtype is torch.bfloat16:
+        if dtype in [torch.bfloat16, torch.float16]:
             q2, k2, v2 = q2.float(), k2.float(), v2.float()
         # (B, nh, T, hs)
         q = q.view(batch_size, q_seq_len, n_head, head_dim).transpose(1, 2)
@@ -1904,13 +1909,13 @@ class TestSDPA(NNTestCase):
             actual = torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
         with sdpa_kernel(backends=[SDPBackend.MATH]):
-            if not bool_mask and dtype is torch.bfloat16:
+            if not bool_mask and dtype in [torch.bfloat16, torch.float16]:
                 attn_mask = attn_mask.float()
             math_ref = torch.nn.functional.scaled_dot_product_attention(
                 q2, k2, v2, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
 
-        if dtype is torch.bfloat16:
-            math_ref = math_ref.bfloat16()
+        if dtype in [torch.bfloat16, torch.float16]:
+            math_ref = math_ref.to(dtype)
 
         self.assertEqual(actual, math_ref, atol=tol.atol, rtol=tol.rtol)
 

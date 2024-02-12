@@ -430,6 +430,7 @@ class TestExecutionTrace(TestCase):
         assert found_root_node
         assert loop_count == expected_loop_events
 
+    @unittest.skipIf(IS_WINDOWS, 'torch.compile does not support WINDOWS')
     def test_execution_trace_with_pt2(self):
 
         class ConvAndRelu(nn.Module):

@@ -12,6 +12,8 @@ import threading
 import types
 from typing import Dict, List
 
+from ..bytecode_transformation import create_call_function
+
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -735,7 +737,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ).call_function(tx, [self], {})
         elif isinstance(subobj, staticmethod):
             func = subobj.__get__(self.value)
-            if trace_rules.lookup(func) is not None:
+            if source is not None and trace_rules.lookup(func) is not None:
                 return trace_rules.lookup(func).create_with_source(func, source=source)
             else:
                 return variables.UserFunctionVariable(func, source=source)
@@ -768,7 +770,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             elif inspect.isfunction(dynamic_subobj):
                 if is_utils_checkpoint(func):
                     return build_checkpoint_variable(source=source)
-                elif trace_rules.lookup(func) is not None:
+                elif source is not None and trace_rules.lookup(func) is not None:
                     return trace_rules.lookup(func).create_with_source(
                         func, source=source
                     )
@@ -897,6 +899,8 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
 
 
 class RemovableHandleVariable(VariableTracker):
+    REMOVED = -1
+
     def __init__(
         self,
         mutable_local=None,
@@ -910,16 +914,21 @@ class RemovableHandleVariable(VariableTracker):
 
     def call_method(self, tx, method_name, args, kwargs):
         if method_name == "remove":
-            tx.output.side_effects.remove_hook(self.idx)
+            if self.idx != self.REMOVED:
+                tx.output.side_effects.remove_hook(self.idx)
+                self.idx = self.REMOVED
             return variables.ConstantVariable.create(None)
         super().call_method(tx, method_name, args, kwargs)
 
-    # This reconstruct is actually pretty unique - it does not construct the object from scratch.
-    # Handles always come from a register_hook call on a tensor, and so, rerunning that for the codegen of a
-    # hook would be incorrect.
-    # Instead, the invariant is that codegen has already produced the handle and stored it at a known name.
     def reconstruct(self, codegen):
-        if self.user_code_variable_name:
-            # It is an invariant that at this point, a STORE_FAST was executed for this name.
-            return [codegen.create_load(self.user_code_variable_name)]
+        if self.idx == self.REMOVED:
+            # Hook has already been removed, return a dummy handle
+            codegen.extend_output(
+                codegen.create_load_import_from(
+                    "torch._dynamo.utils", "invalid_removeable_handle"
+                )
+            )
+            codegen.extend_output(create_call_function(0, True))
+            return ()
+        # unreachable due to codegen.add_cache() when the hook is installed
         return super().reconstruct(codegen)
