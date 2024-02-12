@@ -204,12 +204,6 @@ class CutlassEVTEpilogueTypeFormatter:
         - accumulator_node_name (str): The name of the output Buffer for the GEMM operation in the original (unfused)
                                        IR graph.
         - evt_type_name (str):      The output name of the EVT type we are generating.
-        - pre_fused_evt (Optional[str]): Optional EVT expression declaration that is pre-fused into the template
-                                    (typically addmm style bias addition etc.)
-        - c_operand_alias (Optional[str]): Optional name of the C operand
-        - gemm_output_layout: Output layout of the GEMM operation.
-        - flip_mn: Whether to flip the M and N dimensions of the GEMM output layout.
-        - aux_load_direct: Whether to use direct loads for auxiliary inputs (i.e. load directly from global memory)
 
         """
         self.accumulator_node_name = accumulator_node_name
@@ -243,12 +237,6 @@ class CutlassEVTEpilogueTypeFormatter:
             evt_type_name (str): The name of the EVT type.
             epilogue_nodes (List[IRNode]): A list of IR nodes representing the epilogue nodes. As of now, these must be
                 ComputedBuffer nodes wrapping Pointwise nodes.
-            pre_fused_evt: Optional EVT expression declaration that is pre-fused into the template
-                           (typically addmm style bias addition etc.)
-            c_operand_alias: Optional name of the C operand
-            gemm_output_layout: Output layout of the GEMM operation.
-            flip_mn: Whether to flip the M and N dimensions of the GEMM output layout.
-            aux_load_direct: Whether to use direct loads for auxiliary inputs (i.e. load directly from global memory)
 
         Returns:
             A string representation of the IR nodes formatted according to the Cutlass EVT format.
@@ -317,19 +305,6 @@ class CutlassEVTEpilogueTypeFormatter:
 
     @staticmethod
     def create_pre_fused_addmm_evt_type() -> str:
-        """returns the name of the ADDMM EVT type which has been declared like this:
-
-        using ADDMM_EVT =  // alpha * acc + beta * C
-            cutlass::epilogue::fusion::Sm90EVT<cutlass::epilogue::fusion::Sm90Compute<cutlass::homogeneous_multiply_add,
-                        ElementD, ElementCompute, RoundStyle>, // beta * C + (alpha * acc)
-                  cutlass::epilogue::fusion::Sm90ScalarBroadcast<ElementScalar>, // beta
-                  cutlass::epilogue::fusion::Sm90SrcFetch, // C
-                  cutlass::epilogue::fusion::Sm90EVT<cutlass::epilogue::fusion::Sm90Compute<cutlass::multiplies,
-                        ElementCompute, ElementCompute, RoundStyle>, // alpha * acc
-                    cutlass::epilogue::fusion::Sm90ScalarBroadcast<ElementScalar>, // alpha
-                    cutlass::epilogue::fusion::Sm90AccFetch // acc
-              >>
-        """
         return "ADDMM_EVT"
 
     def __getattr__(self, name):
@@ -635,6 +610,9 @@ class CutlassEVTEpilogueArgumentFormatter:
         elif name == self.c_operand_alias:
             return "{}"
         else:
+            raise CUTLASSEVTOpNotImplementedError(
+                f"Operand {name} not found. Auxiliary inputs not supported yet."
+            )
             if self.dry_run:
                 return f"{{ /* dry run placeholder for aux input {name} */ }}"
             kernel = virtualized.V.kernel
@@ -655,10 +633,6 @@ class CutlassEVTEpilogueArgumentFormatter:
             strides: List[int] = map_pointwise_index_to_read_strides(
                 index_expr, self.gemm_output_layout, self.flip_mn
             )
-            # For the sanity check,
-            # output size dimensions need to be flipped if flip_mn=True for the GEMM
-            # since the output layout (incl. sizes) might have been flipped
-            # from what is actually written
             gemm_write_sizes = list(self.gemm_output_layout.size)
             if self.flip_mn:
                 gemm_write_sizes[-1], gemm_write_sizes[-2] = (
@@ -669,7 +643,6 @@ class CutlassEVTEpilogueArgumentFormatter:
             load_stride_max_idx = sum(
                 [stride * (dim - 1) for stride, dim in zip(strides, gemm_write_sizes)]
             )
-            # The strides might have reinterpreted the buffer, but they may not read beyond it's bounds, let's check that...
             assert (
                 load_stride_max_idx < aux_input_node.get_numel()
             ), f"Aux input would read beyond bounds (A): Load stride {strides} for node {aux_input_node.get_name()} with layout {aux_input_node.get_layout()} - accessed using index expr {index_expr} is too large for the node when mapped onto GEMM with output layout {self.gemm_output_layout}."  # noqa: B950
@@ -780,10 +753,6 @@ def create_cutlass_aux_load_descriptor(
     strides: List[int] = map_pointwise_index_to_read_strides(
         index_expr, gemm_output_layout, flip_mn
     )
-    # For the sanity check,
-    # output size dimensions need to be flipped if flip_mn=True for the GEMM
-    # since the output layout (incl. sizes) might have been flipped
-    # from what is actually written
     gemm_write_sizes = list(gemm_output_layout.size)
     if flip_mn:
         gemm_write_sizes[-1], gemm_write_sizes[-2] = (
@@ -793,7 +762,6 @@ def create_cutlass_aux_load_descriptor(
     load_stride_max_idx = sum(
         [stride * (dim - 1) for stride, dim in zip(strides, gemm_write_sizes)]
     )
-    # The strides might have reinterpreted the buffer, but they may not read beyond it's bounds, let's check that...
     assert (
         load_stride_max_idx < node.get_numel()
     ), f"Aux input would read beyond bounds (B): Load stride {strides} for node {node.get_name()} with layout {node.get_layout()} - accessed using index expr {index_expr} is too large for the node when mapped onto GEMM with output layout {gemm_output_layout}."  # noqa: B950
