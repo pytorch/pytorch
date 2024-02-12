@@ -2749,9 +2749,6 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
         # the first one
         example = tensors[0]
 
-    dim = utils.canonicalize_dim(example.ndim, dim)
-    utils.validate_idx(example.ndim, dim)
-
     shape = example.shape
     filtered = []
     for tensor_idx, tensor in enumerate(tensors):
@@ -2765,7 +2762,10 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
                 f"tensor number {tensor_idx} in the list",
             )
         else:
-            # Don't bother checking here, prims.cat will handle it
+            # Remove inputs that are 1-D, zero size
+            if tensor.ndim == 1 and guard_size_oblivious(tensor.shape[0] == 0):
+                continue
+            # Don't bother checking size match, prims.cat will handle it
             filtered.append(tensor)
 
     memory_format = cat_compute_output_memory_format(tensors)
@@ -2786,6 +2786,9 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
             requires_grad=requires_grad,
             memory_format=memory_format,
         )
+
+    dim = utils.canonicalize_dim(filtered[0].ndim, dim)
+    utils.validate_idx(filtered[0].ndim, dim)
 
     return prims.cat(filtered, dim).clone(memory_format=memory_format)
 
