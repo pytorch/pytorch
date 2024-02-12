@@ -3660,6 +3660,26 @@ class TestNestedTensorSubclass(TestCase):
         self.assertTrue(not nt_noncontiguous.is_contiguous(memory_format=torch.contiguous_format))
         self.assertTrue(nt_contiguous_narrow.is_contiguous(memory_format=torch.contiguous_format))
 
+    @parametrize("func", [torch.empty_like, torch.randn_like],
+                 name_fn=lambda f: f.__name__)
+    def test_like_shape(self, func):
+        nt = random_nt_from_dims([2, None, 3], torch.device('cpu'), torch.float32, layout=torch.jagged)
+        nt_like = func(nt)
+
+        for nt_ub in nt_like.unbind():
+            t_like = func(nt_ub)
+            self.assertEqual(nt_ub.shape, t_like.shape)
+
+    @parametrize("func", [torch.ones_like, torch.zeros_like],
+                 name_fn=lambda f: f.__name__)
+    def test_like_value(self, func):
+        nt = random_nt_from_dims([2, None, 3], torch.device('cpu'), torch.float32, layout=torch.jagged)
+        nt_like = func(nt)
+
+        for nt_ub in nt_like.unbind():
+            t_like = func(nt_ub)
+            self.assertEqual(nt_ub, t_like)
+
     def test_noncontiguous_pointwise(self, device):
         a = torch.randn(2, 3, 4, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, 4, requires_grad=True, dtype=torch.float64, device=device)

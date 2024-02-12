@@ -439,6 +439,7 @@ def to_copy_default(func, *args, **kwargs):
 
 register_jagged_func(
     [
+        torch.ops.aten.empty_like.default,
         torch.ops.aten.ones_like.default,
         torch.ops.aten.zeros_like.default,
         torch.ops.aten.randn_like.default,
