@@ -18,7 +18,7 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   #define FAIL_MPSHOOKS_FUNC(func) \
     TORCH_CHECK(false, "Cannot execute ", func, "() without MPS backend.");
 
-  virtual ~MPSHooksInterface() = default;
+  virtual ~MPSHooksInterface() override = default;
 
   // Initialize the MPS library state
   virtual void initMPS() const {
