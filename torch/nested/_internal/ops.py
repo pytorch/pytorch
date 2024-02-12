@@ -7,8 +7,8 @@ from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
 
 from .nested_tensor import NestedTensor
 from typing import *  # noqa: F403
-from torch.fx.operator_schemas import normalize_function
 import torch.nn.functional as F
+from torch.fx.operator_schemas import normalize_function
 
 __all__: List[Any] = []
 
@@ -22,7 +22,9 @@ def _outer_to_inner_dim(ndim, dim):
     return 0 if dim < 2 else dim - 1
 
 
-def _wrap_jagged_dim(ndim, dim, op_name, convert_to_inner_dim=True, allow_dim_zero=False):
+def _wrap_jagged_dim(
+    ndim, dim, op_name, convert_to_inner_dim=True, allow_dim_zero=False
+):
     from torch._prims_common import canonicalize_dims
 
     wrapped = canonicalize_dims(ndim, dim)
@@ -543,11 +545,15 @@ def split_with_sizes_default(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten.chunk.default, "self: jt, chunks: any, dim: any?")
 def chunk_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True)
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
 
     inp = new_kwargs.pop("input")
 
-    new_kwargs["dim"] = _wrap_jagged_dim(inp.dim(), new_kwargs["dim"], "chunk", allow_dim_zero=True)
+    new_kwargs["dim"] = _wrap_jagged_dim(
+        inp.dim(), new_kwargs["dim"], "chunk", allow_dim_zero=True
+    )
 
     if new_kwargs["dim"] == 0:
         chunks = new_kwargs["chunks"]
@@ -556,20 +562,32 @@ def chunk_default(func, *args, **kwargs):
 
         # get _offsets of the chunks
         chunk_offsets = [
-            inp._offsets[i * chunk_size + 1 : (i + 1) * chunk_size + 1] - inp._offsets[i * chunk_size]
+            inp._offsets[i * chunk_size + 1 : (i + 1) * chunk_size + 1]
+            - inp._offsets[i * chunk_size]
             for i in range(chunks)
         ]
         chunk_offsets = [F.pad(x, (1, 0), value=0) for x in chunk_offsets]
-        nested_kwargs = [{"offsets": per_offsets, "_ragged_idx": inp._ragged_idx} for per_offsets in chunk_offsets]
+        nested_kwargs = [
+            {"offsets": per_offsets, "_ragged_idx": inp._ragged_idx}
+            for per_offsets in chunk_offsets
+        ]
 
         # get _values of the chunks
         chunk_values = [inp._values[: chunk_offsets[0][-1]]]
         for i in range(1, chunk_size):
-            chunk_values.append(inp._values[chunk_offsets[i - 1][-1] : chunk_offsets[i][-1]])
+            chunk_values.append(
+                inp._values[chunk_offsets[i - 1][-1] : chunk_offsets[i][-1]]
+            )
 
-        return [NestedTensor(values=chunk_values[i], **(nested_kwargs[i])) for i in range(0, chunk_size)]
+        return [
+            NestedTensor(values=chunk_values[i], **(nested_kwargs[i]))
+            for i in range(0, chunk_size)
+        ]
     else:
-        return [NestedTensor(values=x, **extract_kwargs(inp)) for x in func(inp._values, **new_kwargs)]
+        return [
+            NestedTensor(values=x, **extract_kwargs(inp))
+            for x in func(inp._values, **new_kwargs)
+        ]
 
 
 @register_jagged_func(torch.ops.aten.unbind.int, "self: jt_all, dim: any?")
