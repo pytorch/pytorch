@@ -95,7 +95,6 @@ dtensor_fails = {
     xfail("__getitem__"),
     xfail("__rsub__"),
     xfail("_native_batch_norm_legit"),
-    xfail("_softmax_backward_data"),
     xfail("_upsample_bilinear2d_aa"),
     xfail("addbmm"),
     xfail("addmv"),
