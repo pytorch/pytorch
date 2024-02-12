@@ -213,9 +213,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             return dt.to_local() + 2
 
         ref = from_local_kwargs_fn(x)
-        opt_kwargs_fn = torch.compile(
-            from_local_kwargs_fn, backend=cnt, fullgraph=True
-        )
+        opt_kwargs_fn = torch.compile(from_local_kwargs_fn, backend=cnt, fullgraph=True)
         res = opt_kwargs_fn(x)
         self.assertEqual(res, ref)
         self.assertEqual(cnt.frame_count, 2)
