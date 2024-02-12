@@ -150,6 +150,27 @@ class AOTInductorModelBase {
 #endif // USE_CUDA
   }
 
+  std::unordered_map<std::string, AtenTensorHandle> run_const_fold(
+      DeviceStreamType stream,
+      AOTIProxyExecutorHandle proxy_executor,
+      bool initialization = false) {
+#ifdef USE_CUDA
+    if (!run_finished_) {
+      cudaEvent_t run_finished;
+      AOTI_RUNTIME_DEVICE_CHECK(cudaEventCreate(&run_finished));
+      run_finished_.emplace(run_finished);
+    }
+
+    auto* model = static_cast<Model*>(this);
+    auto folded_constants =
+        model->const_run_impl(stream, proxy_executor, initialization);
+    AOTI_RUNTIME_DEVICE_CHECK(cudaEventRecord(*run_finished_, stream));
+    return folded_constants;
+#else // !USE_CUDA
+    return {};
+#endif // USE_CUDA
+  }
+
   void load_constants() {
     size_t num_constants = this->num_constants();
     constants_map_->reserve(num_constants);

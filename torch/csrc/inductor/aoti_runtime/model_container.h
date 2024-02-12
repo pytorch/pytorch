@@ -90,7 +90,7 @@ class AOTInductorModelContainer {
       std::unique_lock constants_folding_lk(model_exec_mutex_);
       // Double locking to make sure constant folding is only ran once.
       if (!constant_folded_) {
-        auto folded_const_map = model->const_run_impl(
+        auto folded_const_map = model->run_const_fold(
             stream, proxy_executor, /* initialization = */ true);
         update_constant_buffer(
             folded_const_map,
@@ -158,7 +158,7 @@ class AOTInductorModelContainer {
       model_lk.unlock();
       std::unique_lock constants_folding_lk(model_exec_mutex_);
       try {
-        auto folded_const_map = model->const_run_impl(stream, proxy_executor);
+        auto folded_const_map = model->run_const_fold(stream, proxy_executor);
         update_constant_buffer(
             folded_const_map,
             /* use_inactive = */ false,
@@ -181,7 +181,7 @@ class AOTInductorModelContainer {
             constants_map, /* remap_constants_array= */ false);
         model->update_constants_array(constants_array);
 
-        auto folded_const_map = model->const_run_impl(stream, proxy_executor);
+        auto folded_const_map = model->run_const_fold(stream, proxy_executor);
         update_constant_buffer(
             folded_const_map,
             /* use_inactive = */ true,
