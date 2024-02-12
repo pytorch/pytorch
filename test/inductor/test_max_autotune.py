@@ -299,11 +299,9 @@ class TestMaxAutotune(TestCase):
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM75OrLater, "need sm_75")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
-    @parametrize("dynamic", (False,))
-    @parametrize("max_autotune_gemm_backends", ("ATen,Triton"))
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_default_backends_regular_mm(
-        self, dynamic: bool, max_autotune_gemm_backends: str
+        self, dynamic: bool = False, max_autotune_gemm_backends: str = "ATen,Triton"
     ):
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
@@ -524,7 +522,7 @@ class TestMaxAutotune(TestCase):
                     Y_jit = torch.compile(mm, dynamic=dynamic)(a, b)
                     assert torch.allclose(
                         Y, Y_jit
-                    ), f"Incorrect results, {Y.max()=}, {Y_jit.max()=}, {Y.min()=}, {Y_jit.min()=}, {Y.mean()=}, {Y_jit.mean()=}, {Y.size()=}, {Y_jit.size()=}"
+                    ), f"Incorrect results, {Y.max()=}, {Y_jit.max()=}, {Y.min()=}, {Y_jit.min()=}, {Y.mean()=}, {Y_jit.mean()=}, {Y.size()=}, {Y_jit.size()=}"  # noqa: B950
 
             autotuning_logs = glob.glob(tmpdir + "/*/*/autotuning_result_json_list.txt")
             assert len(autotuning_logs) >= 1
