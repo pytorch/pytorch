@@ -19,6 +19,7 @@
 #include <iterator> // istreambuf_iterator
 #include <cstdlib>
 #include <string>
+#include <fmt/format.h>
 
 // TODO: C++17 has the filesystem header, which may replace these
 #ifdef _WIN32
@@ -1001,10 +1002,9 @@ std::string generate_code(
   std::string extra_params = "";
   std::string extra_args = "";
   for (size_t i = 0; i < extra_args_typenames.size(); i++) {
-    auto type = std::string(extra_args_typenames[i]);
-    auto name = "extra_arg_" + std::to_string(i);
-    extra_params += "," + type + " " + name;
-    extra_args += ", " + name;
+    auto name = fmt::format("extra_arg_{}", i);
+    extra_params += fmt::format(",{} {}", extra_args_typenames[i], name);
+    extra_args += fmt::format(", {}", name);
   }
   env.s("extra_params", extra_params);
   env.s("extra_args", extra_args);
