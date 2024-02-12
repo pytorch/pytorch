@@ -64,6 +64,7 @@ def patch_file(filename, unexpected_successes, new_xfails, new_skips, unexpected
             print(
                 f"WARNING: we were unable to remove {test} from the expected failures list"
             )
+            continue
         assert test_failures[key][0] == "xfail"
         del test_failures[key]
 
