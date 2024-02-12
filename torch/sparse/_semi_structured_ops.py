@@ -1,7 +1,8 @@
 import contextlib
+
 import torch
 
-__all__  = [
+__all__ = [
     "fallback_dispatcher",
     "sparse24_values",
     "sparse24_indices",
@@ -12,6 +13,7 @@ __all__  = [
     "sparse24_addmm",
     "sparse24_linear",
 ]
+
 
 @contextlib.contextmanager
 def no_dispatch():

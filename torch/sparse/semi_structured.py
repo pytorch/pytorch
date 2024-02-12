@@ -1,4 +1,3 @@
-import contextlib
 import warnings
 from collections import namedtuple
 from typing import Any, Optional, Tuple, List, Callable, Dict
@@ -48,16 +47,17 @@ class SparseSemiStructuredTensor(torch.Tensor):
     Note that as such, this class cannot be insantiated directly.
 
     -`_DTYPE_SHAPE_CONSTRAINTS` - A dictionary holding backend specific dense/sparse min shape constraints
-    - `def from_dense` - backend specific compression routines
-    - `def _mm` - calls into _cslt_sparse_mm or _sparse_semi_structured_linear based on backend.
+    - `def from_dense()` - backend specific compression routines
+    - `def _mm()` - backend specifc mm op (either torch._cslt_sparse_mm or torch._sparse_semi_structured_linear)
     """
-    _DEFAULT_ALG_ID : int = 0
-    _DTYPE_SHAPE_CONSTRAINTS: Dict[torch.dtype, _SEMI_STRUCTURED_SPARSE_CONFIG]
-    _FORCE_CUTLASS : bool = True
-    _FUSE_TRANSPOSE : bool = False
-    _PROTOTYPE_WARNING_SHOWN : bool = False
 
-    SPARSE24_DISPATCH: Dict[Callable, Callable]
+    _DEFAULT_ALG_ID: int = 0
+    _DTYPE_SHAPE_CONSTRAINTS: Dict[torch.dtype, _SEMI_STRUCTURED_SPARSE_CONFIG]
+    _FORCE_CUTLASS: bool = True
+    _FUSE_TRANSPOSE: bool = False
+    _PROTOTYPE_WARNING_SHOWN: bool = False
+
+    SPARSE_DISPATCH: Dict[Callable, Callable]
 
     packed: Optional[torch.Tensor]
     meta: Optional[torch.Tensor]
@@ -188,20 +188,20 @@ class SparseSemiStructuredTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs) -> Any:
-        if func._overloadpacket not in cls.SPARSE24_DISPATCH:
+        if func._overloadpacket not in cls.SPARSE_DISPATCH:
             raise NotImplementedError(
                 f"{cls.__name__} only supports a specific set of operations, "
                 f"can't perform requested op ({func.__name__})"
             )
-        return cls.SPARSE24_DISPATCH[func._overloadpacket](func, types, args, kwargs)
+        return cls.SPARSE_DISPATCH[func._overloadpacket](func, types, args, kwargs)
 
     @classmethod
     def _load_dispatch_table(cls, custom_dispatch_table=None) -> None:
         """
         Loads the op overload sparse dispatch table for the current class.
         """
-        if getattr(cls, "SPARSE24_DISPATCH", None) is None:
-            cls.SPARSE24_DISPATCH = {
+        if getattr(cls, "SPARSE_DISPATCH", None) is None:
+            cls.SPARSE_DISPATCH = {
                 torch.ops.aten.values: sparse24_values,
                 torch.ops.aten.indices: sparse24_indices,
                 torch.ops.aten.is_same_size: fallback_dispatcher,
@@ -217,12 +217,12 @@ class SparseSemiStructuredTensor(torch.Tensor):
 
             if custom_dispatch_table:
                 for op in custom_dispatch_table:
-                    cls.SPARSE24_DISPATCH[op] = custom_dispatch_table[op]
+                    cls.SPARSE_DISPATCH[op] = custom_dispatch_table[op]
 
     @classmethod
     def _validate_device_dim_dtype_shape(cls, original_tensor) -> None:
         """
-        run a suite of checks when creating the compressed sparse tensor
+        Assert that the given tensor is valid for semi-structured sparse compression.
         """
         # check device
         if not original_tensor.is_cuda:
@@ -311,6 +311,7 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
     When _FORCE_CUTLASS is set, or when cuSPARSELt is not available, this subclass calls into _sparse_semi_structured_linear
     and sparse_semi_structured_from_dense for conversion to the compressed format.
     """
+
     _DTYPE_SHAPE_CONSTRAINTS = {
         torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 128, 16, 16),
         torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 64, 8, 8),
@@ -319,7 +320,9 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
     }
 
     @classmethod
-    def from_dense(cls, original_tensor : torch.Tensor) -> 'SparseSemiStructuredTensorCUTLASS':
+    def from_dense(
+        cls, original_tensor: torch.Tensor
+    ) -> "SparseSemiStructuredTensorCUTLASS":
         cls._validate_device_dim_dtype_shape(original_tensor)
         (
             sparse_tensor_cutlass,
@@ -382,6 +385,7 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
     cuSPARSELt also supports transposition fusion, which is necessary for performant 2:4 sparse training, as well
     as specifying alg_id, a config that affects the performance of the matmul depending on matmul sizes.
     """
+
     _DTYPE_SHAPE_CONSTRAINTS = {
         torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 32, 16, 16),
         torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 16, 8, 8),
@@ -430,20 +434,19 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
                 "This operation is only supported when A, B and C have the same data type."
             )
         if self.packed is None:
-            raise NotImplementedError(
-                f"`{self.__class__.__name__}` matmul: operation is not supported."
+            raise ValueError(
+                f"`{self.__class__.__name__}` matmul: packed not set"
             )
         else:
-            temp = torch._cslt_sparse_mm(
+            res = torch._cslt_sparse_mm(
                 self.packed,
                 B,
                 bias=bias,
                 transpose_result=self.fuse_transpose_cusparselt,
                 alg_id=self.alg_id_cusparselt,
             )
-            if self.fuse_transpose_cusparselt:
-                temp = temp.t()
-            return temp
+            return res.t() if self.fuse_transpose_cusparselt else res
+
 
 def to_sparse_semi_structured(
     original_tensor: torch.Tensor,
@@ -460,7 +463,7 @@ def to_sparse_semi_structured(
 
     Args:
         original_tensor (Tensor): the dense tensor to convert
-        transposed (bool, optional): whether the dense tensor is transposed.
+        transposed (bool, optional): deprecated arg to be removed in another release. Do not use.
     Returns:
         SparseSemiStructuredTensor: A sparse semi-structured tensor created from the given original_tensor
     Raises:
@@ -495,7 +498,10 @@ def to_sparse_semi_structured(
                 [-4370, -4370, -4370,  ..., -4370, -4370, -4370]], device='cuda:0', dtype=torch.int16))
     """
     if transposed:
-        raise DeprecationWarning("Setting transpose from to_sparse_semi_structured is deprecated and will be removed in a future relase, please call .t() on the instead.")
+        raise DeprecationWarning(
+            "Setting transpose from to_sparse_semi_structured is deprecated and will be removed in a future release.
+            "SparseSemiStructuredTensor only support contiguous input tensors. "
+        )
 
     sparse_subclass = (
         SparseSemiStructuredTensorCUTLASS
