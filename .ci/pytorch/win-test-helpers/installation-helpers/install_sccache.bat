@@ -1,5 +1,8 @@
 mkdir %TMP_DIR_WIN%\bin
 
+set SCCACHE_IDLE_TIMEOUT=0
+set SCCACHE_IGNORE_SERVER_IO_ERROR=1
+
 if "%REBUILD%"=="" (
   :check_sccache
   %TMP_DIR_WIN%\bin\sccache.exe --show-stats || (
