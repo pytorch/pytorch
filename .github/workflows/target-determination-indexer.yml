@@ -1,9 +1,6 @@
 name: Index PyTorch Tests for Target Determination
 
 on:
-  pull_request:
-    paths:
-      - .github/workflows/target-determination-indexer.yml
   workflow_dispatch:
   # TODO: Trigger every few hours
 
@@ -97,16 +94,7 @@ jobs:
             --nnodes=1 \
             --nproc-per-node=1 \
             indexer.py \
-            --experiment-name indexer-files \
-            --file
-
-          torchrun \
-            --standalone \
-            --nnodes=1 \
-            --nproc-per-node=1 \
-            indexer.py \
-            --experiment-name indexer-functions \
-            --function
+            --experiment-name indexer-files
 
       - name: Upload Index to S3
         shell: bash -l {0}
@@ -120,11 +108,6 @@ jobs:
           aws s3 cp \
             "indexer-files.zip" \
             "s3://target-determinator-assets/indexes/indexer-files.zip"
-
-          zip -r indexer-functions.zip indexer-functions
-          aws s3 cp \
-            "indexer-functions.zip" \
-            "s3://target-determinator-assets/indexes/indexer-functions.zip"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
