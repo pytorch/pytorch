@@ -106,7 +106,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         if isinstance(obj, staticmethod):
             func = obj.__get__(self.value)
-            return trace_rules.lookup(func).create_with_source(func, source=source)
+            if source is not None:
+                return trace_rules.lookup(func).create_with_source(func, source=source)
+            else:
+                return trace_rules.lookup(func)(func)
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif source and inspect.ismemberdescriptor(obj):
