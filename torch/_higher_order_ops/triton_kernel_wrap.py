@@ -167,7 +167,7 @@ def parse_ttir(ttir, kwargs):
     parser which further makes parsing much simpler.
     """
     # TODO(oulgen):
-    # - Support parsing for/while loops
+    # - Support parsing while loops
     # - Support closures (e.g. "tt.reduce")
 
     try:
@@ -193,30 +193,38 @@ def parse_ttir(ttir, kwargs):
 
         func_block: "tt.func" ("public"|"private") FN_NAME "(" /.+/ NEWLINE stmt* "}" LOC -> process_func
 
-        ?stmt: op | cond
+        ?stmt: op | if | for
 
-        cond: [assign_lhs "="] "scf.if" args rest stmt* "}" "else" "{" stmt* "}" LOC -> process_cond
+        if: [assign_lhs "="] "scf.if" args rest stmt* "}" "else" "{" stmt* "}" LOC -> process_if
+
+        for: [assign_lhs "="] "scf.for" args rest stmt* "}" LOC -> process_for
 
         op: OP_NAME LOC
           | [assign_lhs "="] OP_NAME [FN_NAME] args rest?  -> process_op
 
-        ?rest: (":" | "{" | "\\"" | "->" | "<") /.+/ NEWLINE
+        ?rest: (":" | "{" | "\\"" | "->" | "<" | "=") /.+/ NEWLINE
 
-        args: | "("? arg ("," arg)* ")"?
+        args: | "(" ")" | "("? arg ("," arg)* ")"?
 
-        ?arg: INTERMEDIATE | CONSTANT | PARAM | "[" arg "]" | arg_with_index
+        ?arg: INTERMEDIATE
+            | INTERMEDIATE_CONSTANT
+            | CONSTANT
+            | PARAM
+            | "[" arg "]"
+            | arg_with_index
 
         ?arg_with_index: arg "#" DIGIT+
 
-        ?assign_lhs: (INTERMEDIATE | CONSTANT) [":" DIGIT+]
+        ?assign_lhs: (INTERMEDIATE | INTERMEDIATE_CONSTANT) [":" DIGIT+]
 
         PARAM.5: "%arg" DIGIT+
         INTERMEDIATE.4: "%" DIGIT+
-        NAME: (LETTER | DIGIT | "_")+
-        CONSTANT: "%"? NAME+ ("<" DIGIT+ ">")?
+        INTERMEDIATE_CONSTANT.3: "%" NAME
+        CONSTANT: FLOAT | DIGIT+ | NAME ("<" DIGIT+ ">")?
 
-        FN_NAME: "@" NAME+
-        OP_NAME: "\\""? NAME "." NAME "\\""?
+        NAME: (LETTER | DIGIT | "_")+
+        FN_NAME: "@" (NAME | ESCAPED_STRING)
+        OP_NAME: "\\""? NAME ("." NAME)+ "\\""?
 
         LOC.5: "loc(#loc" DIGIT* ")"
 
@@ -225,6 +233,7 @@ def parse_ttir(ttir, kwargs):
         %import common.WS
         %import common.NEWLINE
         %import common.ESCAPED_STRING
+        %import common.FLOAT
         %ignore WS
     """
 
@@ -241,7 +250,8 @@ def parse_ttir(ttir, kwargs):
                 raise AssertionError(f"Tree node with {token.data}")
 
         if token is None or (
-            isinstance(token, lark.lexer.Token) and token.type == "CONSTANT"
+            isinstance(token, lark.lexer.Token)
+            and token.type in ("CONSTANT", "INTERMEDIATE_CONSTANT")
         ):
             nonlocal next_fake_intermediate
             next_fake_intermediate -= 1
@@ -291,7 +301,7 @@ def parse_ttir(ttir, kwargs):
                     extend_dict_list(ops, e)
             functions[name.value] = ops
 
-        def process_cond(self, ret, _args, _rest, *stmts):
+        def _process_scf(self, ret, stmts):
             ret = convert(ret)
             ops: Dict[Intermediate, List[Op]] = defaultdict(list)
             for e in stmts:
@@ -303,6 +313,12 @@ def parse_ttir(ttir, kwargs):
                 elif isinstance(e, dict):
                     extend_dict_list(ops, e)
             return ops
+
+        def process_if(self, ret, _args, _rest, *stmts):
+            return self._process_scf(ret, stmts)
+
+        def process_for(self, ret, _args, _rest, *stmts):
+            return self._process_scf(ret, stmts)
 
     parser = Lark(
         grammar, parser="lalr", maybe_placeholders=True, transformer=TransformOps()
@@ -418,7 +434,7 @@ def identify_mutated_tensors(kernel, kwargs):
     except Exception as e:
         import traceback
 
-        log.debug(
+        log.info(
             "Encountered an exception in identify_mutated_tensors, assuming every input is mutated"
         )
         log.debug(
