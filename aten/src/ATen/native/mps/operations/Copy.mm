@@ -277,7 +277,7 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
     stream->copy(sourceBuffer, destBuffer, src.nbytes(), src_byte_offset, dst_byte_offset, profile_id);
   } else {
     // Simulate cast to Complex on older MacOS by initializing real and imag parts
-    if (dst_.is_complex() && !supportsComplex()) {
+    if (dst_.is_complex() && !src.is_complex() && !supportsComplex()) {
       at::real(dst_) = src;
       at::imag(dst_) = at::zeros_like(src);
     } else if (dst_byte_offset) {

@@ -12,7 +12,7 @@ typedef NS_ENUM(NSUInteger, MPSGraphFFTScalingMode)
     MPSGraphFFTScalingModeUnitary       = 2L,
 };
 
-interface FakeMPSGraphFFTDescriptor : NSObject<NSCopying>
+@interface FakeMPSGraphFFTDescriptor : NSObject<NSCopying>
 @property (readwrite, nonatomic) BOOL inverse;
 @property (readwrite, nonatomic) MPSGraphFFTScalingMode scalingMode;
 @property (readwrite, nonatomic) BOOL roundToOddHermitean;
@@ -22,6 +22,9 @@ interface FakeMPSGraphFFTDescriptor : NSObject<NSCopying>
 @compatibility_alias MPSGraphFFTDescriptor FakeMPSGraphFFTDescriptor;
 
 @interface MPSGraph (SonomaOps)
+-(MPSGraphTensor * _Nonnull) conjugateWithTensor:(MPSGraphTensor * _Nonnull) tensor
+                                            name:(NSString * _Nullable) name;
+
 -(MPSGraphTensor * _Nonnull) fastFourierTransformWithTensor:(MPSGraphTensor * _Nonnull) tensor
                                                        axes:(NSArray<NSNumber *> * _Nonnull) axes
                                                  descriptor:(MPSGraphFFTDescriptor * _Nonnull) descriptor
@@ -36,10 +39,8 @@ interface FakeMPSGraphFFTDescriptor : NSObject<NSCopying>
                                                      axes:(NSArray<NSNumber *> * _Nonnull) axes
                                                descriptor:(MPSGraphFFTDescriptor * _Nonnull) descriptor
                                                      name:(NSString * _Nullable) name;
-
--(MPSGraphTensor *) conjugateWithTensor:(MPSGraphTensor *) tensor
-                                   name:(NSString * _Nullable) name;
 @end
+
 // define BFloat16 enums for MacOS13
 #define MPSDataTypeBFloat16 ((MPSDataType) (MPSDataTypeAlternateEncodingBit | MPSDataTypeFloat16))
 
