@@ -95,30 +95,30 @@ PyObject* THCPModule_setDevice_wrap(PyObject* self, PyObject* arg) {
 PyObject* THCPModule_exchangeDevice(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to exchangeDevice");
-  int64_t device = THPUtils_unpackLong(arg);
-  if (device < 0) {
+  auto device_index = THPUtils_unpackDeviceIndex(arg);
+  if (device_index < 0) {
     return THPUtils_packInt32(-1);
   }
 
   torch::utils::device_lazy_init(at::kCUDA);
-  int current_device = c10::cuda::ExchangeDevice(device);
+  auto current_device = c10::cuda::ExchangeDevice(device_index);
 
-  return THPUtils_packInt32(current_device);
+  return THPUtils_packDeviceIndex(current_device);
   END_HANDLE_TH_ERRORS
 }
 
 PyObject* THCPModule_maybeExchangeDevice(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to exchangeDevice");
-  int64_t device = THPUtils_unpackLong(arg);
-  if (device < 0) {
+  auto device_index = THPUtils_unpackDeviceIndex(arg);
+  if (device_index < 0) {
     return THPUtils_packInt32(-1);
   }
 
   torch::utils::device_lazy_init(at::kCUDA);
-  int current_device = c10::cuda::MaybeExchangeDevice(device);
+  auto current_device = c10::cuda::MaybeExchangeDevice(device_index);
 
-  return THPUtils_packInt32(current_device);
+  return THPUtils_packDeviceIndex(current_device);
   END_HANDLE_TH_ERRORS
 }
 
@@ -188,15 +188,13 @@ PyObject* THCPModule_getCurrentStream_wrap(
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       THPUtils_checkLong(device_index), "invalid argument to getCurrentStream");
-  int64_t device = THPUtils_unpackLong(device_index);
-  auto stream = at::cuda::getCurrentCUDAStream(device);
+  auto c10_device_index = THPUtils_unpackDeviceIndex(device_index);
+  auto stream = at::cuda::getCurrentCUDAStream(c10_device_index);
   PyObject* output_tuple = PyTuple_New(3);
   PyTuple_SetItem(
       output_tuple, 0, THPUtils_packInt64(static_cast<int64_t>(stream.id())));
   PyTuple_SetItem(
-      output_tuple,
-      1,
-      THPUtils_packInt64(static_cast<int64_t>(stream.device_index())));
+      output_tuple, 1, THPUtils_packDeviceIndex(stream.device_index()));
   PyTuple_SetItem(
       output_tuple,
       2,
@@ -211,8 +209,9 @@ PyObject* THCPModule_getCurrentStream_raw(
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       THPUtils_checkLong(device_index), "invalid argument to getCurrentStream");
-  int64_t device = THPUtils_unpackLong(device_index);
-  return PyLong_FromVoidPtr(at::cuda::getCurrentCUDAStream(device).stream());
+  auto c10_device_index = THPUtils_unpackDeviceIndex(device_index);
+  return PyLong_FromVoidPtr(
+      at::cuda::getCurrentCUDAStream(c10_device_index).stream());
   END_HANDLE_TH_ERRORS
 }
 
@@ -222,15 +221,13 @@ PyObject* THCPModule_getDefaultStream_wrap(
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       THPUtils_checkLong(device_index), "invalid argument to getDefaultStream");
-  int64_t device = THPUtils_unpackLong(device_index);
-  auto stream = at::cuda::getDefaultCUDAStream(device);
+  auto c10_device_index = THPUtils_unpackDeviceIndex(device_index);
+  auto stream = at::cuda::getDefaultCUDAStream(c10_device_index);
   PyObject* output_tuple = PyTuple_New(3);
   PyTuple_SetItem(
       output_tuple, 0, THPUtils_packInt64(static_cast<int64_t>(stream.id())));
   PyTuple_SetItem(
-      output_tuple,
-      1,
-      THPUtils_packInt64(static_cast<int64_t>(stream.device_index())));
+      output_tuple, 1, THPUtils_packDeviceIndex(stream.device_index()));
   PyTuple_SetItem(
       output_tuple,
       2,
@@ -513,7 +510,7 @@ PyObject* THCPModule_hasPrimaryContext(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       THPUtils_checkLong(arg), "invalid argument to has_primary_context");
-  int64_t device_index = static_cast<int64_t>(THPUtils_unpackLong(arg));
+  auto device_index = THPUtils_unpackDeviceIndex(arg);
   if (c10::cuda::hasPrimaryContext(device_index)) {
     Py_RETURN_TRUE;
   } else {
@@ -536,9 +533,9 @@ PyObject* THCPModule_setMemoryFraction(PyObject* _unused, PyObject* args) {
     return nullptr;
   }
   double fraction = PyFloat_AsDouble(fraction_o);
-  int64_t device = PyLong_AsLongLong(device_o);
+  auto device_index = THPUtils_unpackDeviceIndex(device_o);
 
-  c10::cuda::CUDACachingAllocator::setMemoryFraction(fraction, device);
+  c10::cuda::CUDACachingAllocator::setMemoryFraction(fraction, device_index);
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -553,7 +550,7 @@ PyObject* THCPModule_emptyCache(PyObject* _unused, PyObject* noargs) {
 PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to memory_allocated");
-  const int device = (int)THPUtils_unpackLong(arg);
+  const auto device_index = THPUtils_unpackDeviceIndex(arg);
 
   using c10::cuda::CUDACachingAllocator::DeviceStats;
   using c10::cuda::CUDACachingAllocator::Stat;
@@ -581,7 +578,7 @@ PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
   };
 
   const DeviceStats stats =
-      c10::cuda::CUDACachingAllocator::getDeviceStats(device);
+      c10::cuda::CUDACachingAllocator::getDeviceStats(device_index);
 
   py::dict result;
   result["num_alloc_retries"] = stats.num_alloc_retries;
@@ -610,8 +607,8 @@ PyObject* THCPModule_resetAccumulatedMemoryStats(
   TORCH_CHECK(
       THPUtils_checkLong(arg),
       "invalid argument to reset_accumulated_memory_stats");
-  const int device = (int)THPUtils_unpackLong(arg);
-  c10::cuda::CUDACachingAllocator::resetAccumulatedStats(device);
+  const auto device_index = THPUtils_unpackDeviceIndex(arg);
+  c10::cuda::CUDACachingAllocator::resetAccumulatedStats(device_index);
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -620,8 +617,8 @@ PyObject* THCPModule_resetPeakMemoryStats(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       THPUtils_checkLong(arg), "invalid argument to reset_peak_memory_stats");
-  const int device = (int)THPUtils_unpackLong(arg);
-  c10::cuda::CUDACachingAllocator::resetPeakStats(device);
+  const auto device_index = THPUtils_unpackDeviceIndex(arg);
+  c10::cuda::CUDACachingAllocator::resetPeakStats(device_index);
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
