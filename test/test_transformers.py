@@ -2898,6 +2898,7 @@ class TestSDPACudaOnly(NNTestCase):
 
         value_fudge_factor = 2
         grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad, value_fudge_factor)
+        '''
         print(f'{output_ref_atol=} {output_ref_rtol=}')
         print(f'{grad_q_ref_atol=} {grad_q_ref_rtol=}')
         print(f'{grad_k_ref_atol=} {grad_k_ref_rtol=}')
@@ -2919,6 +2920,7 @@ class TestSDPACudaOnly(NNTestCase):
                  grad_k_ref_rtol=grad_k_ref_rtol,
                  grad_v_ref_rtol=grad_v_ref_rtol,
                 )
+        '''
 
         self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_atol, rtol=output_ref_rtol)
         self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),

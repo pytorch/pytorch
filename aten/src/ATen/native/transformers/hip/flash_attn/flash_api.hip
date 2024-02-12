@@ -546,8 +546,6 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
   at::Tensor softmax_lse_cont = softmax_lse.contiguous();
   at::Tensor delta = at::empty_like(softmax_lse).contiguous();
 
-  std::cerr << "softmax_scale = " << softmax_scale << std::endl;
-
   int d_head = head_size_og;
   hipError_t err; // TODO: Error handling
   {
