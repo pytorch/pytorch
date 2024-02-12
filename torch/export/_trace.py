@@ -29,6 +29,7 @@ from torch._export.wrappers import _wrap_submodules
 from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._utils_internal import log_export_usage
 from torch.export.exported_program import OutputKind
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -496,6 +497,23 @@ def rewrite_non_persistent_buffers(
                 constants[spec.target] = orig_mod.get_buffer(spec.target)
 
 
+def _log_export_error(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            t = type(e)
+            error_type = t.__module__ + "." + t.__qualname__
+            log_export_usage(
+                event="export.error", error_type=error_type, error_message=str(e)
+            )
+            raise e
+
+    return wrapper
+
+
+@_log_export_error
 @_disable_prexisiting_fake_mode
 def _export(
     f: torch.nn.Module,
@@ -550,6 +568,11 @@ def _export(
         An ExportedProgram containing the traced method.
     """
     from .dynamic_shapes import _process_dynamic_shapes
+
+    flags = set()
+    flags.add("strict" if strict else "non_strict")
+    flags.add("pre_dispatch" if pre_dispatch else "aot_dispatch")
+    log_export_usage(event="export.enter", flags=flags)
 
     if constraints is not None:
         warnings.warn(

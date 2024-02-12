@@ -90,6 +90,10 @@ def set_pytorch_distributed_envs_from_justknobs():
     pass
 
 
+def log_export_usage(**kwargs):
+    pass
+
+
 TEST_MASTER_ADDR = "127.0.0.1"
 TEST_MASTER_PORT = 29500
 # USE_GLOBAL_DEPS controls whether __init__.py tries to load
