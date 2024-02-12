@@ -215,41 +215,62 @@ class TensorVariable(VariableTracker):
         install_guard(attr_source.make_guard(GuardBuilder.HASATTR))
         return VariableBuilder(tx, attr_source)(real_value)
 
+    def method_attr_ndim(self, tx):
+        if self.ndim is not None:
+            return ConstantVariable.create(self.ndim)
+        else:
+            return self.call_method(tx, "dim", [], {})
+
+    def method_attr_dtype(self, tx):
+        if self.dtype is not None:
+            return ConstantVariable.create(self.dtype)
+
+    def method_attr_device(self, tx):
+        if self.device is not None:
+            return ConstantVariable.create(self.device)
+
+    def method_attr_layout(self, tx):
+        if self.layout is not None:
+            return ConstantVariable.create(self.layout)
+
+    def method_attr_is_cuda(self, tx):
+        if self.device is not None:
+            return ConstantVariable.create(self.device.type == "cuda")
+
+    def method_attr_shape(self, tx):
+        if self.size is not None:
+            sizes = [variables.ConstantVariable.create(x) for x in self.size]
+            return SizeVariable(sizes)
+        else:
+            return self.call_method(tx, "size", [], {})
+
+    def method_attr_requires_grad(self, tx):
+        if self.requires_grad is not None:
+            return ConstantVariable.create(self.requires_grad)
+
+    def method_attr_is_quantized(self, tx):
+        if self.is_quantized is not None:
+            return ConstantVariable.create(self.is_quantized)
+
+    def method_attr_is_sparse(self, tx):
+        if self.is_sparse is not None:
+            return ConstantVariable.create(self.is_sparse)
+
+    def method_attr_data(self, tx):
+        return self.call_method(tx, "detach", [], {})
+
     def var_getattr(self, tx, name):
-        from . import ConstantVariable, UserDefinedClassVariable
+        from . import UserDefinedClassVariable
 
         if tx.strict_checks_enabled:
             if name in self._strict_mode_banned_ops():
                 unimplemented(f"Illegal getattr invocation {name} in strict mode")
 
-        result = None
-        if name == "ndim" and self.ndim is not None:
-            result = ConstantVariable.create(self.ndim)
-        elif name == "dtype" and self.dtype is not None:
-            result = ConstantVariable.create(self.dtype)
-        elif name == "device" and self.device is not None:
-            result = ConstantVariable.create(self.device)
-        elif name == "layout" and self.layout is not None:
-            result = ConstantVariable.create(self.layout)
-        elif name == "is_cuda" and self.device is not None:
-            result = ConstantVariable.create(self.device.type == "cuda")
-        elif name == "shape" and self.size is not None:
-            sizes = [variables.ConstantVariable.create(x) for x in self.size]
-            result = SizeVariable(sizes)
-        elif name == "requires_grad" and self.requires_grad is not None:
-            result = ConstantVariable.create(self.requires_grad)
-        elif name == "is_quantized" and self.is_quantized is not None:
-            result = ConstantVariable.create(self.is_quantized)
-        elif name == "is_sparse" and self.is_sparse is not None:
-            result = ConstantVariable.create(self.is_sparse)
-        elif name == "shape" and self.size is None:
-            result = self.call_method(tx, "size", [], {})
-        elif name == "ndim" and self.ndim is None:
-            result = self.call_method(tx, "dim", [], {})
-        elif name == "data":
-            result = self.call_method(tx, "detach", [], {})
         if name == "__class__":
             return UserDefinedClassVariable(self.python_type())
+
+        handler = getattr(self, f"method_attr_{name}", None)
+        result = handler(tx) if handler is not None else None
 
         # Add a guard for type matching, these guards are checked before tensor guards
         # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
@@ -722,53 +743,14 @@ class TensorVariable(VariableTracker):
             "register_post_accumulate_grad_hook", *args, **kwargs
         )
 
-    def _method_register_hook(self, name, *args, **kwargs):
+    def _method_register_hook(self, name, hook):
+        # Note - do not arbitrarily add hooks here - make sure they match the same contract
+        # see [On tensor.register_hook]
         from ..symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()
-        # Note - do not arbitrarily add hooks here - make sure they match the same contract
-        # see [On tensor.register_hook]
-        assert len(args) == 1 and not kwargs
-        fn_var = args[0]
-        if not isinstance(
-            fn_var,
-            (
-                variables.functions.FunctoolsPartialVariable,
-                variables.UserFunctionVariable,
-                variables.TorchInGraphFunctionVariable,
-                variables.NNModuleVariable,
-            ),
-        ):
-            unimplemented("Unexpected callable type passed to register_hook")
-
-        if isinstance(fn_var, variables.NestedUserFunctionVariable):
-            # NestedUserFunctionVariable don't carry their fn, but reconstruction builds it
-            # This should not be onerous to support when needed.
-            unimplemented("NYI - lambda variables as hooks")
-        elif isinstance(fn_var, variables.functions.FunctoolsPartialVariable):
-            fn = fn_var.as_python_constant()
-        else:
-            fn = fn_var.fn
-
-        handle_variable = variables.user_defined.RemovableHandleVariable(
-            mutable_local=variables.base.MutableLocal(),
-        )
 
         if not self.source:
-            # Intermediary
-            src = fn_var.source
-            if (
-                not src
-                and isinstance(fn_var, variables.functions.FunctoolsPartialVariable)
-                and fn_var.func.source
-            ):
-                src = fn_var.func.source
-
-            if not src:
-                unimplemented("No source for register_hook target fn")
-
-            tx.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
-
             if not compiled_autograd.compiled_autograd_enabled:
                 # TODO(voz):
                 # We can relax this by speculating the callable and ensuring that it doesn't modify arbitrary
@@ -791,7 +773,7 @@ class TensorVariable(VariableTracker):
 
             # This wraps our user provided fn with a function that intercedes and
             # uses our `invoke` higher order op to record a hook invocation in bwd graph.
-            fn = functools.partial(trace_wrapped, fn=fn)
+            fn = functools.partial(trace_wrapped, fn=hook.guard_as_python_constant())
 
             def _register_hook_trampoline(tensor):
                 hook_callable = getattr(tensor, name)
@@ -810,7 +792,10 @@ class TensorVariable(VariableTracker):
                 ),
             )
 
-        tx.output.side_effects.register_hook(self, fn_var, handle_variable, name)
+        handle_variable = variables.RemovableHandleVariable(
+            mutable_local=variables.base.MutableLocal(),
+        )
+        tx.output.side_effects.register_hook(self, hook, handle_variable, name)
         return handle_variable
 
     def method_requires_grad_(self, requires_grad=True):
@@ -904,7 +889,7 @@ class SymNodeVariable(VariableTracker):
 
 class NumpyNdarrayVariable(TensorVariable):
     """
-    Represents an np.ndarray, but backed by torch Tensor via torch._numpy.ndarray.
+    Represents a np.ndarray, but backed by torch Tensor via torch._numpy.ndarray.
     Use this for Tensor.numpy() call.
     """
 
@@ -980,6 +965,13 @@ class NumpyNdarrayVariable(TensorVariable):
             raise NotImplementedError()
         return result
 
+    @staticmethod
+    def patch_args(name, args, kwargs):
+        if name == "clip":
+            kwargs_rename = {"a_min": "min", "a_max": "max"}
+            kwargs = {kwargs_rename.get(k, k): v for k, v in kwargs.items()}
+        return args, kwargs
+
     def call_method(
         self,
         tx,
@@ -988,6 +980,8 @@ class NumpyNdarrayVariable(TensorVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from ..utils import numpy_method_wrapper
+
+        args, kwargs = self.patch_args(name, args, kwargs)
 
         if name in ["__len__", "size", "tolist"]:
             # delegate back to TensorVariable

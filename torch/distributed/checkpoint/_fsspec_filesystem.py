@@ -4,6 +4,7 @@
 import io
 import os
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Generator, Optional, Union
 
 import fsspec
@@ -52,6 +53,18 @@ class FileSystem(FileSystemBase):
     def mkdir(self, path: [str, os.PathLike]) -> None:
         self.fs.makedirs(path, exist_ok=True)
 
+    @classmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        if isinstance(checkpoint_id, Path):
+            return False
+
+        try:
+            url_to_fs(checkpoint_id)
+        except ValueError as e:
+            return False
+
+        return True
+
 
 class FsspecWriter(FileSystemWriter):
     """
@@ -93,9 +106,17 @@ class FsspecWriter(FileSystemWriter):
         self.fs = FileSystem()
         self.path = self.fs.init_path(path)
 
+    @classmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        return FileSystem.validate_checkpoint_id(checkpoint_id)
+
 
 class FsspecReader(FileSystemReader):
     def __init__(self, path: Union[str, os.PathLike]) -> None:
         super().__init__(path)
         self.fs = FileSystem()
         self.path = self.fs.init_path(path)
+
+    @classmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        return FileSystem.check(checkpoint_id)
