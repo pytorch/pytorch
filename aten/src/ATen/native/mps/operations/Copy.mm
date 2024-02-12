@@ -48,10 +48,13 @@ static void copy_cast_mps(at::Tensor& dst,
     string key = "copy_cast_mps" + getTensorsStringKey({src, dst});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, src);
+      auto outputTensor = inputTensor;
       if (isFloatingType(src.scalar_type()) && dstDType == MPSDataTypeUInt8) {
-        inputTensor = [mpsGraph castTensor:inputTensor toType:MPSDataTypeInt32 name:@"cast"];
+        outputTensor = [mpsGraph castTensor:inputTensor toType:MPSDataTypeInt32 name:@"cast"];
       }
-      auto outputTensor = [mpsGraph castTensor:inputTensor toType:dstDType name:@"cast"];
+      if (srcDType != dstDType) {
+        outputTensor = [mpsGraph castTensor:outputTensor toType:dstDType name:@"cast"];
+      }
       if (src.is_conj() != dst.is_conj()) {
         TORCH_CHECK(supportsComplex(), "MPS complex tensors conjugation needs MacOS14+");
         outputTensor = [mpsGraph conjugateWithTensor:outputTensor name:nil];
