@@ -130,6 +130,7 @@ jobs:
           SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           SCCACHE_REGION: us-east-1
           SCCACHE_LOG: trace
+          AWS_EC2_METADATA_DISABLED: true
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
           VC_YEAR: "2019"
