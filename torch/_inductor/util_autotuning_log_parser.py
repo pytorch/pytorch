@@ -19,7 +19,10 @@ class AutotuningLogParser:
     Parser which can be used to analyze the autotuning results
     written by DebugContext.log_autotuning_results(...)
 
-    requires pandas to be installed
+    requires pandas to be installed for analysis beyond log record parsing
+
+    Note: The parser is not designed to work with logs with dynamic dimensions. Use it
+    only on logs generated from torch.compile with dynamic=False
     """
 
     def __init__(
@@ -175,7 +178,7 @@ class AutotuningLogParser:
     @classmethod
     def parse_layout(cls, layout_str):
         match: Optional[re.Match[str]] = re.search(
-            r"size=\[([0-9]+), ([0-9]+)(, ([0-9]+))?\], stride=\[([0-9]+), ([0-9]+)(, ([0-9]+))?\]",
+            r"size=[\[\(]([0-9]+), ([0-9]+)(, ([0-9]+))?[\]\)], stride=[\[\(]([0-9]+), ([0-9]+)(, ([0-9]+))?[\]\)]",
             layout_str,
         )
         assert match is not None, f"Failed to parse layout: {layout_str}"
