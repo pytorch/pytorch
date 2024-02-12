@@ -47,6 +47,8 @@ class _StorageBase:
 
     def data_ptr(self) -> int: ...  # type: ignore[empty-body] # noqa: E704
 
+    def resizable(self) -> bool: ...  # type: ignore[empty-body] # noqa: E704
+
     # Defined in torch/csrc/generic/StorageSharing.cpp
     def _share_filename_cpu_(self, *args, **kwargs): ...  # noqa: E704
     def _share_fd_cpu_(self, *args, **kwargs): ...  # noqa: E704
@@ -956,6 +958,10 @@ class TypedStorage:
     # For internal use only, to avoid deprecation warning
     def _data_ptr(self):
         return self._untyped_storage.data_ptr()
+
+    def resizable(self):
+        _warn_typed_storage_removal()
+        return self._untyped_storage.resizable()
 
     def resize_(self, size):
         _warn_typed_storage_removal()
