@@ -488,6 +488,50 @@ class TestMaxAutotune(TestCase):
             if example_input:
                 example_input.close()
 
+    @unittest.skipIf(not SM75OrLater, "need sm_75")
+    @skipIfRocm
+    @parametrize("dynamic", (False, True))
+    def test_autotuning_log_parser_does_not_throw_for_default_backends(self, dynamic):
+        import glob
+        import tempfile
+
+        from torch._inductor.debug import DebugContext
+
+        def mm(a, b):
+            return a @ b
+
+        a = torch.randn((128, 256), dtype=torch.float32, device="cuda")
+        b = torch.randn((256, 128), dtype=torch.float32, device="cuda")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_patch = {
+                "max_autotune": True,
+                "autotune_in_subproc": False,
+                "benchmark_fusion": False,
+                "max_autotune_gemm_backends": "Triton,ATen",
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.version": "12.1",  # required to enable the Kernels we need
+                "trace.enabled": True,
+                "trace.debug_dir": tmpdir,
+                "trace.info_log": True,
+                "force_same_precision": True,
+                "trace.output_code": True,
+                "trace.log_autotuning_results": True,
+            }
+            with config.patch(conf_patch):
+                with DebugContext():
+                    Y = mm(a, b)
+                    Y_jit = torch.compile(mm, dynamic=dynamic)(a, b)
+                    assert torch.allclose(
+                        Y, Y_jit
+                    ), f"Incorrect results, {Y.max()=}, {Y_jit.max()=}, {Y.min()=}, {Y_jit.min()=}, {Y.mean()=}, {Y_jit.mean()=}, {Y.size()=}, {Y_jit.size()=}"
+
+            autotuning_logs = glob.glob(tmpdir + "/*/*/autotuning_result_json_list.txt")
+            assert len(autotuning_logs) >= 1
+            parser = AutotuningLogParser(autotuning_logs)
+            records = list(parser.get_records())
+            assert len(records) >= 1
+
     def test_triton_template_with_epilogues_and_dynamic_shape(self):
         def fn(
             x: torch.Tensor, w: torch.Tensor, bias: torch.Tensor, mul: torch.Tensor
