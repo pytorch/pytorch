@@ -66,29 +66,72 @@ else:
                 raise RuntimeError("No device mesh is currently active!")
             return self.mesh_stack[-1]
 
+        # def create_child_mesh(
+        #     self, device_mesh: "DeviceMesh", mesh_dim: int, mesh_dim_name: str
+        # ) -> "DeviceMesh":
+        #     # swap the current dim to the last dim then reshape to flatten out other
+        #     # dims, so we can just extract the list of ranks which contains cur_rank.
+        #     cur_rank = device_mesh.get_rank()
+        #     pg_ranks_by_dim = device_mesh.mesh.swapdims(-1, mesh_dim).reshape(
+        #         -1, device_mesh.mesh.size(mesh_dim)
+        #     )
+
+        #     for mesh_1d in pg_ranks_by_dim:
+        #         sub_mesh = DeviceMesh(
+        #             device_mesh.device_type,
+        #             mesh_1d,
+        #             mesh_dim_names=(mesh_dim_name,),
+        #         )
+        #         if cur_rank in mesh_1d:
+        #             res_sub_mesh = sub_mesh
+
+        #     res_sub_mesh._dim_group_infos = [device_mesh._dim_group_infos[mesh_dim]]  # type: ignore[possibly-undefined]
+        #     # Assign the current DeviceMesh as the parent of the child DeviceMesh.
+        #     self.child_to_parent_mapping[res_sub_mesh] = device_mesh
+        #     return res_sub_mesh
+
         def create_child_mesh(
-            self, device_mesh: "DeviceMesh", mesh_dim: int, mesh_dim_name: str
+            self, device_mesh: "DeviceMesh", mesh_dim_names: str,
         ) -> "DeviceMesh":
             # swap the current dim to the last dim then reshape to flatten out other
             # dims, so we can just extract the list of ranks which contains cur_rank.
+            mesh_dims = [
+                device_mesh.mesh_dim_names.index(not_none(mesh_dim_name))
+                for mesh_dim_name in mesh_dim_names
+            ]
             cur_rank = device_mesh.get_rank()
-            pg_ranks_by_dim = device_mesh.mesh.swapdims(-1, mesh_dim).reshape(
-                -1, device_mesh.mesh.size(mesh_dim)
-            )
+            mesh = device_mesh.mesh
+            all_mesh_dims = list(range(mesh.ndim))
+            for mesh_dim in mesh_dims:
+                # remove not pop b/c we want the value of the ind removed not it's position in the list
+                # because this list dynamically changes.
+                all_mesh_dims.remove(mesh_dim)
 
-            for mesh_1d in pg_ranks_by_dim:
-                sub_mesh = DeviceMesh(
-                    device_mesh.device_type,
-                    mesh_1d,
-                    mesh_dim_names=(mesh_dim_name,),
-                )
-                if cur_rank in mesh_1d:
+            mesh_sizes = [device_mesh.mesh.size(mesh_dim) for mesh_dim in mesh_dims]
+
+            pg_ranks_by_dim = device_mesh.mesh.permute(*all_mesh_dims,
+                                                    *mesh_dims).reshape(
+                                                        -1, *mesh_sizes)
+
+            for mesh_nd in pg_ranks_by_dim:
+                if cur_rank in mesh_nd:
+                    sub_mesh = DeviceMesh(
+                        device_mesh.device_type,
+                        mesh_nd,
+                        mesh_dim_names=mesh_dim_names,  # type: ignore
+                        _init_process_groups=False,
+                    )
                     res_sub_mesh = sub_mesh
 
-            res_sub_mesh._dim_group_infos = [device_mesh._dim_group_infos[mesh_dim]]  # type: ignore[possibly-undefined]
+            res_sub_mesh._dim_group_infos = [  # type: ignore
+                device_mesh._dim_group_infos[mesh_dim]
+                for mesh_dim in mesh_dims  # type: ignore
+            ]
+
             # Assign the current DeviceMesh as the parent of the child DeviceMesh.
             self.child_to_parent_mapping[res_sub_mesh] = device_mesh
-            return res_sub_mesh
+            return res_sub_mesh  # type: ignore
+
 
         def get_parent_mesh(self, device_mesh: "DeviceMesh") -> Optional["DeviceMesh"]:
             return self.child_to_parent_mapping.get(device_mesh, None)
@@ -340,7 +383,7 @@ else:
                 and self._flatten_mesh_list == other._flatten_mesh_list
             )
 
-        def __getitem__(self, mesh_dim_name: str) -> "DeviceMesh":
+        def __getitem__(self, mesh_dim_names: Union[str, List[str]]) -> "DeviceMesh":
             """
             Slice the current DeviceMesh based on the mesh_dim_name given to create a child
             DeviceMesh.
@@ -368,15 +411,46 @@ else:
                 >>> # of cross-host(dim 0), and within-host (dim 1).
                 >>> mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1, 2, 3],[4, 5, 6, 7]])
             """
-            if self.mesh.ndim == 1:
-                if self.mesh_dim_names and mesh_dim_name == self.mesh_dim_names[0]:
+            if not self.mesh_dim_names:
+                raise RuntimeError(
+                    "Cannot slice a DeviceMesh without mesh_dim_names."
+                )
+
+            if len(mesh_dim_names) > self.mesh_dim_names:
+                raise RuntimeError(
+                    f"Invalid mesh_dim_name {mesh_dim_names} specified.",
+                    f"Valid mesh_dim_names should be a contiguous subsequence of {self.mesh_dim_names}.",
+                )
+            # When the dimension slicing out is equal to the mesh dimensions of the current DeviceMesh,
+            # we simply return self if the given slicing is valid.
+            elif len(mesh_dim_names) == self.mesh.ndim:
+                if self.mesh.ndim == 1 and isinstance(mesh_dim_names, str):
+                    mesh_dim_names = [mesh_dim_names]
+                if mesh_dim_names == self.mesh_dim_names:
                     return self
                 else:
                     raise RuntimeError(
-                        f"Invalid mesh_dim_name {mesh_dim_name} specified."
+                        f"Invalid mesh_dim_name {mesh_dim_names} specified.",
+                        f"Valid mesh_dim_names should be a contiguous subsequence of {self.mesh_dim_names}.",
                     )
+            # Check if the user-provided slicing is a valid contiguous subsequence of the mesh_dim_names
+            # of the current DeviceMesh.
+            else:
+                try:
+                    outermost_dim_name = mesh_dim_names[0]
+                    outermost_dim_idx = self.mesh_dim_names.index(outermost_dim_name)
+                    is_valid_submesh = True
+                    for i, j in zip(range(len(mesh_dim_names)), range(outermost_dim_idx, len(mesh_dim_names))):
+                        if mesh_dim_names[i] != self.mesh_dim_names[j]:
+                            is_valid_submesh = False
+                            break
+                except ValueError as e:
+                    if not is_valid_submesh or e:
+                        raise RuntimeError(
+                            f"Invalid mesh_dim_names {mesh_dim_names} specified.",
+                            f"Valid mesh_dim_names should be a contiguous subsequence of {self.mesh_dim_names}.",
+                        )
 
-            mesh_dim = _mesh_resources.get_mesh_dim_by_name(self, mesh_dim_name)
             submesh = _mesh_resources.create_child_mesh(self, mesh_dim, mesh_dim_name)
 
             return submesh
