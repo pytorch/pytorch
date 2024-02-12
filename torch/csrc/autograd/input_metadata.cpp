@@ -57,16 +57,30 @@ static bool definitely_true(const c10::SymBool& b) {
   return b.has_hint() && b.guard_bool(__FILE__, __LINE__);
 }
 
-at::Tensor InputMetadata::maybe_expand(
+at::Tensor InputMetadata::maybe_reduce(
     const size_t i,
     at::Tensor grad,
     const std::function<std::string(const std::string&)>& format_error) const {
-  // TODO: NT shenanigans
-
   auto fail = [&]() {
     const auto message = incompatible_shape_error_message(i, grad);
     TORCH_CHECK(false, format_error(message.str()));
   };
+
+  // Nested tensor makes my brain explode, so I've just hard-coded the logic
+  // for this case, at risk of code duplication.  This logic does NOT do the
+  // careful oblivious logic as seen below
+  if (is_nested_ || is_cpp_nested_tensor() || grad.is_nested() ||
+      ::torch::autograd::is_cpp_nested_tensor(grad)) {
+    if (!is_same_shape(grad)) {
+      if (is_expandable_to_shape(grad)) {
+        return reduce_grad(grad);
+      } else {
+        fail();
+      }
+    } else {
+      return grad;
+    }
+  }
 
   auto shape = shape_as_dim_vector();
   auto desired = grad.sym_sizes();
