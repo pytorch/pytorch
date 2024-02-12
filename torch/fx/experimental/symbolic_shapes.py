@@ -3824,14 +3824,14 @@ class ShapeEnv:
 
         return fsummary, maybe_user_loc, maybe_extra_debug
 
-    def _log_guard(self, prefix: str, g):
+    def _log_guard(self, prefix: str, g, forcing_spec: bool):
         if self.log.isEnabledFor(logging.INFO):
             str_g = str(g)
             is_debug = config.extended_debug_guard_added is not None and str_g == config.extended_debug_guard_added
             fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
             self.log.info(
                 "%s %s [guard added]%s (%s)%s",
-                prefix,
+                prefix if not forcing_spec else f"{prefix} (forcing_spec)",
                 str_g,
                 maybe_user_loc,
                 format_frame(fsummary),
@@ -3842,7 +3842,7 @@ class ShapeEnv:
     @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
     def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None,
-                      expect_rational=True, size_oblivious: bool = False):
+                      expect_rational=True, size_oblivious: bool = False, *, forcing_spec: bool = False):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
@@ -3961,9 +3961,8 @@ class ShapeEnv:
             if not self._suppress_guards_tls():
                 stack = CapturedTraceback.extract(skip=1)
                 guard = ShapeGuard(g, stack)
+                # TODO: deal with duplicate guards somehow
                 self.guards.append(guard)
-                for s in g.free_symbols:
-                    self.symbol_guard_counter[s] += 1
         except Exception:
             if fresh:
                 self._remove_fx_node(node)
@@ -3974,7 +3973,23 @@ class ShapeEnv:
 
                 self._refine_ranges(guard)
 
-                self._log_guard("eval", g)
+                self._log_guard("eval", g, forcing_spec=forcing_spec)
+
+                for s in g.free_symbols:
+                    self.symbol_guard_counter[s] += 1
+                    # Forcing_spec to avoid infinite recursion
+                    if (
+                        not forcing_spec and
+                        config.symbol_guard_limit_before_specialize is not None and
+                        self.symbol_guard_counter[s] > config.symbol_guard_limit_before_specialize
+                    ):
+                        # Force specialization
+                        self.log.info(
+                            "symbol_guard_limit_before_specialize=%s exceeded on %s",
+                            config.symbol_guard_limit_before_specialize,
+                            s
+                        )
+                        self.evaluate_expr(s, forcing_spec=True)
             else:
                 self.log.debug("eval %s [guard suppressed]", g)
 
@@ -4040,6 +4055,7 @@ class ShapeEnv:
 
         if not self._suppress_guards_tls():
             # canonicalise to remove equations that are trivially equal
+            orig_expr = expr
             expr = canonicalize_bool_expr(expr)
             stack = CapturedTraceback.extract(skip=1)
             ra = RuntimeAssert(expr, msg, stack)
@@ -4054,7 +4070,7 @@ class ShapeEnv:
             # in ranges.  For example, i0 <= s0 is un-rangeable, because
             # we can't put s0 in the range.  So this is not very high
             # priority at the moment.
-            self._log_guard("runtime_assert", expr)
+            self._log_guard("runtime_assert", orig_expr, forcing_spec=False)
         else:
             self.log.debug("runtime_assert %s [guard suppressed]", expr)
 

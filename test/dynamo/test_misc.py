@@ -852,6 +852,42 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         else:
             self.assertExpectedInline(counts.op_count, """4""")
 
+    def test_user_defined_iter(self):
+        class Mod:
+            def __init__(self):
+                self.a = [torch.randn(2, 2), torch.randn(2, 2)]
+
+            def __iter__(self):
+                return iter(self.a)
+
+        def f(mod):
+            ret = []
+            for x in mod:
+                ret.append(x + 1)
+            return ret
+
+        mod = Mod()
+        counts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(counts, nopython=True)(f)
+        ref = f(mod)
+        res = opt_fn(mod)
+        res = opt_fn(mod)
+        res = opt_fn(mod)
+        res = opt_fn(mod)
+        self.assertTrue(same(ref, res))
+        self.assertEqual(counts.frame_count, 1)
+
+        mod.a.append(torch.randn(2, 2))
+        # `for x in mod` is inlined, where iter(m.a) creates a guard on the list length of m.a
+        # Mutating length of mod.a causes a re-compilation.
+        ref2 = f(mod)
+        res2 = opt_fn(mod)
+        res2 = opt_fn(mod)
+        res2 = opt_fn(mod)
+        res2 = opt_fn(mod)
+        self.assertTrue(same(ref2, res2))
+        self.assertEqual(counts.frame_count, 2)
+
     def test_compare_shapes_eq(self):
         def compare_shapes(a, b, to_list):
             x = list(a.unsqueeze(-1).shape) if to_list else a.shape
@@ -8026,6 +8062,30 @@ def ___make_guard_fn():
             return torch.split(values, sizes)
 
         f(torch.tensor([2, 3, 4]), torch.randn(9))
+
+    @unittest.expectedFailure
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_runtime_assert_replacement(self):
+        @torch.compile(backend="aot_eager")
+        def fn(x, y):
+            z = y.item()
+            torch._check(z == 3)
+            return x + z
+
+        fn(torch.randn(4), torch.tensor([3]))
+        self.assertRaises(RuntimeError, lambda: fn(torch.randn(4), torch.tensor([4])))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_cat_unbacked(self):
+        @torch.compile(backend="eager")
+        def fn(x, y):
+            z = y.item()
+            return torch.cat([x, torch.ones(z)])
+
+        fn(torch.randn(2, 3), torch.tensor([0]))
+        self.assertRaises(
+            RuntimeError, lambda: fn(torch.randn(2, 3), torch.tensor([1]))
+        )
 
     def test_simple_set_usage(self):
         def foo(x, y):
