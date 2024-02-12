@@ -357,7 +357,7 @@ class TestExport(TestCase):
                 torchdynamo.exc.UserError,
                 torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode,
             ),
-            "trying to get a value out of symbolic int",
+            "Could not guard on data-dependent expression",
         ):
             _ = export(M(), (torch.tensor([2, 3, 5]),))
 
@@ -451,7 +451,6 @@ class TestExport(TestCase):
         inps = (torch.ones(6, 4), torch.tensor(5), torch.tensor(4))
         self._test_export_same_as_eager(list_tensor_map, inps)
 
-    @testing.expectedFailureNonStrict
     def test_export_func_with_kwargs(self):
         def kw_func(arg1, arg2, kw1, kw2):
             return arg1 + arg2, kw1 + kw2
@@ -460,7 +459,6 @@ class TestExport(TestCase):
         kwargs = {"kw1": torch.ones(1, 1), "kw2": torch.ones(6, 4)}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    @testing.expectedFailureNonStrict
     def test_export_func_with_pytree_kwargs(self):
         def kw_func(arg1, arg2, a, b):
             return arg1 + a["kw1"] + b[0], arg2 + a["kw2"] + b[1]
@@ -472,7 +470,6 @@ class TestExport(TestCase):
         }
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    @testing.expectedFailureNonStrict
     def test_export_func_with_default_kwargs(self):
         def kw_func(arg1, arg2, a, b=1):
             return arg1 + arg2, a["kw1"] + a["kw2"] + b
@@ -495,7 +492,6 @@ class TestExport(TestCase):
         args = (torch.ones(2, 3), torch.ones(3, 4), torch.ones(2, 3), torch.ones(3, 4))
         self._test_export_same_as_eager(kw_func, args)
 
-    @testing.expectedFailureNonStrict
     def test_export_func_with_keyword_only_args(self):
         def kw_func(arg1, arg2, *args, kw1, kw2):
             return arg1 + args[0] + kw1, arg2 + args[1] + kw2
@@ -504,7 +500,6 @@ class TestExport(TestCase):
         kwargs = {"kw1": torch.ones(2, 3), "kw2": torch.ones(3, 4)}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    @testing.expectedFailureNonStrict
     def test_export_func_with_var_keyword_args(self):
         def kw_func(arg1, arg2, *args, kw1, kw2, **kwargs):
             return (
@@ -521,7 +516,6 @@ class TestExport(TestCase):
         }
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    @testing.expectedFailureNonStrict
     def test_export_func_with_var_keyword_pytree_args(self):
         def kw_func(arg1, arg2, *args, kw1, kw2, **kwargs):
             return (
@@ -1392,9 +1386,7 @@ def forward(self, arg_0):
 
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
-        with self.assertRaisesRegex(
-            RuntimeError, r"Deferred runtime assertion failed -u0 <= 0"
-        ):
+        with self.assertRaisesRegex(RuntimeError, r"Invalid value range for -1 between \[0,"):
             _ = ep.module()(torch.tensor(-1), torch.randn(4, 5))
 
         self.assertTrue(
@@ -1424,7 +1416,6 @@ def forward(self, arg_0):
             "torch.ops.aten._assert_async.msg", 2, exactly=True
         ).run(decompose_ep.graph_module.code)
 
-    @testing.expectedFailureNonStrict
     def test_mixed_input(self):
         def func(a, b, alpha: int):
             return torch.add(a, b, alpha=alpha)
@@ -3027,6 +3018,23 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             # under a new FakeTensorMode.
             ep = torch.export.export(m, (inp,))
 
+    def test_user_input_and_buffer_mutation(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("foo", torch.randn(4, 4))
+
+            def forward(self, x):
+                self.foo.add_(1)
+                x.add_(1)
+                return self.foo + x
+
+        mod = MyModule()
+        mod_copy = copy.deepcopy(mod)
+        ep = export(mod_copy, (torch.rand(4, 4),))
+
+        self.assertEqual(mod.foo, ep.module().foo)
+        self.assertEqual(mod(torch.ones(4, 4)), ep.module()(torch.ones(4, 4)))
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
