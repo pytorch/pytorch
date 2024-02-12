@@ -37,6 +37,9 @@ public:
   VecMask() : mask_(static_cast<T>(0)) {}
   VecMask(const VectorizedN<T, N>& mask) : mask_(mask) {}
 
+  template <int L = N, typename std::enable_if_t<L == 1, int> = 0>
+  VecMask(const Vectorized<T>& mask) : mask_(mask) {}
+
   template <typename U, int L>
   static VecMask<T, N> from(const VectorizedN<U, L>& b_vec) {
     __at_align__ U b_buf[size()];

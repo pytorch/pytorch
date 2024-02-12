@@ -787,15 +787,18 @@ class IndentedBuffer:
 
         return ctx()
 
-    def splice(self, other_code, strip=False):
+    def splice(self, other_code, strip=False, line_wrapper=None):
+        if line_wrapper is None:
+            line_wrapper = lambda x: x
         if isinstance(other_code, IndentedBuffer):
+            other_code_lines = [line_wrapper(line) for line in other_code._lines]
             dedent = float("inf")
-            for line in other_code._lines:
+            for line in other_code_lines:
                 if not isinstance(line, LineContext) and line:
                     dedent = min(dedent, len(line) - len(line.lstrip()))
             if math.isinf(dedent):
                 dedent = 0
-            for line in other_code._lines:
+            for line in other_code_lines:
                 if isinstance(line, LineContext):
                     self._lines.append(line)
                 else:
@@ -808,7 +811,7 @@ class IndentedBuffer:
                 return
             other_code = other_code.rstrip()
             for line in other_code.split("\n"):
-                self.writeline(line)
+                self.writeline(line_wrapper(line))
 
     def __repr__(self):
         return f"{type(self)}({self.getvalue()})"

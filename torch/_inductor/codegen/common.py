@@ -953,8 +953,8 @@ class CSE:
 
 
 class IndirectAssertLine(DeferredLineBase):
-    def __init__(self, indirect_assert, var, mask, size_map):
-        super().__init__("")
+    def __init__(self, line, indirect_assert, var, mask, size_map):
+        super().__init__(line)
         self.var = var
         self.mask = mask
         self.indirect_assert = indirect_assert
@@ -980,12 +980,11 @@ class IndirectAssertLine(DeferredLineBase):
             assert assert_max
             upper = size_str
 
-        self.line = self.indirect_assert(self.var, lower, upper, self.mask)
-        return self.line
+        return self.line.format(assert_line=self.indirect_assert(self.var, lower, upper, self.mask))
 
     def _new_line(self, line):
         return IndirectAssertLine(
-            self.indirect_assert, self.var, self.mask, self.size_map
+            line, self.indirect_assert, self.var, self.mask, self.size_map
         )
 
 
@@ -1223,6 +1222,7 @@ class Kernel(CodeGen):
                     else:
                         self.compute.writeline(
                             IndirectAssertLine(
+                                "{assert_line}",
                                 self.indirect_assert,
                                 var,
                                 mask,
