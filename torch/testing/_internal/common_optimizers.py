@@ -1068,6 +1068,18 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
             ),
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float32: tol(
+                            rtol=5.5e-4,
+                            atol=5e-5,
+                        )
+                    }
+                ),
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+            ),
         ),
     ),
     OptimizerInfo(

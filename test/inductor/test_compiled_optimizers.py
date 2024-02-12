@@ -182,7 +182,14 @@ def compile_opt(opt_compiled, closure=None, fullgraph=True):
 
 
 def check_optim(
-    test_cls, optim_cls, params_eager, params_compiled, state_eager, state_compiled
+    self,
+    optim_cls,
+    params_eager,
+    params_compiled,
+    state_eager,
+    state_compiled,
+    atol=None,
+    rtol=None,
 ):
     params_eager = list(params_eager)
     params_compiled = list(params_compiled)
@@ -198,15 +205,13 @@ def check_optim(
         rtol = 5.5e-4
         atol = 5e-5
 
-    test_cls.assertEqual(
-        list(params_eager), list(params_compiled), atol=atol, rtol=rtol
-    )
+    self.assertEqual(list(params_eager), list(params_compiled), atol=atol, rtol=rtol)
 
     # currently we don't mutate step properly until we resolve
     # https://github.com/pytorch/pytorch/issues/115679
     if optim_cls not in (Rprop, RMSprop, Adadelta):
         for p_eager, p_compiled in zip(params_eager, params_compiled):
-            test_cls.assertEqual(
+            self.assertEqual(
                 state_eager[p_eager],
                 state_compiled[p_compiled],
                 atol=atol,
@@ -219,6 +224,8 @@ def make_test(
     closure=None,
     kernel_count=2,
     device="cuda",
+    atol=None,
+    rtol=None,
     **kwargs,
 ):
     def test_fn(self):
