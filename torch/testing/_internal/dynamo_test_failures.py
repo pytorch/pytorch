@@ -352,18 +352,6 @@ dynamo_expected_failures = {
     "TestSDPACPU.test_fused_sdp_choice_cpu_type_dense_dropout_0_7_float64_cpu_float64",
     "TestSDPACPU.test_fused_sdp_choice_cpu_type_dense_dropout_0_0_float16_cpu_float16",
     "TestSDPACPU.test_fused_sdp_choice_cpu_type_dense_dropout_0_7_bfloat16_cpu_bfloat16",
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape0_cpu",  # Can't construct an AttrSource without a valid base source
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape1_cpu",  # Can't construct an AttrSource without a valid base source
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape2_cpu",  # Can't construct an AttrSource without a valid base source
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape3_cpu",  # Can't construct an AttrSource without a valid base source
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape0_cuda",  # Can't construct an AttrSource without a valid base source
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape1_cuda",  # Can't construct an AttrSource without a valid base source
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape2_cuda",  # Can't construct an AttrSource without a valid base source
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape3_cuda",  # Can't construct an AttrSource without a valid base source
-    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape2_cpu",  # Can't construct an AttrSource without a valid base source
-    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape3_cpu",  # Can't construct an AttrSource without a valid base source
-    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape1_cpu",  # Can't construct an AttrSource without a valid base source
-    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape0_cpu",  # Can't construct an AttrSource without a valid base source
     "TestAssertCloseSparseCOO.test_matching_coalesced",  # test_testing
     "TestImports.test_circular_dependencies",  # test_testing
     "TestAssertCloseSparseCSR.test_mismatching_crow_indices_msg",  # test_testing
