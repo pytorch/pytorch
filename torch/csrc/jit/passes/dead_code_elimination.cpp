@@ -19,11 +19,10 @@ class DeadCodeEliminator {
   explicit DeadCodeEliminator(
       std::shared_ptr<Graph> graph,
       DCESideEffectPolicy sideEffectPolicy,
-      bool UseAliasDb = true)
+      bool useAliasDb = true)
       : sideEffectPolicy_(sideEffectPolicy),
         graph_(std::move(graph)),
-        useAliasDb_(UseAliasDb)
-      : {}
+        useAliasDb_(useAliasDb) {}
   DeadCodeEliminator(DCESideEffectPolicy sideEffectPolicy)
       : sideEffectPolicy_(sideEffectPolicy) {}
 
@@ -464,7 +463,7 @@ void EliminateDeadCodeWithoutAliasDb(const std::shared_ptr<Graph>& graph) {
   DeadCodeEliminator(
       graph,
       DCESideEffectPolicy::DONT_DELETE_NODES_WITH_SIDE_EFFECTS,
-      /*UseAliasDb*/ false)
+      /*useAliasDb*/ false)
       .run(graph->block(), /*recurse=*/true);
   GRAPH_DUMP("After EliminateDeadCode: ", graph);
 }
