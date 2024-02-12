@@ -1819,9 +1819,9 @@ class ShapeEnv:
         self.replacements: Dict[sympy.Symbol, sympy.Expr] = {}  #
         # Set holds a % b expressions that evaluate to 0.
         self.divisible: Set[sympy.Expr] = set()
-        # Set that holds "size-like" expressions.  When we perform
+        # Set that holds "size-like" symbols.  When we perform
         # "size-oblivious" tests, these can be assumed to be >= 2.
-        self.size_like: Set[sympy.Expr] = set()
+        self.size_like: Set[sympy.Symbol] = set()
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_var: Dict[int, sympy.Expr] = {}
@@ -3272,7 +3272,9 @@ class ShapeEnv:
     def bound_sympy(self, expr: sympy.Expr, size_oblivious: bool = False) -> ValueRanges:
         var_to_range = {x: self.var_to_range.get(x, None) for x in expr.free_symbols}
         if size_oblivious:
-            var_to_range = {x: v & ValueRanges(2, sympy.oo) if x in self.size_like else v for (x, v) in self.size_like}
+            # Clamp values of size-like variables
+            for x in self.size_like & var_to_range.keys():
+                var_to_range[x] &= ValueRanges(2, sympy.oo)
         """Given a sympy expression, computes a ValueRanges bound for what values it can be"""
         return bound_sympy(expr, var_to_range)
 
@@ -3538,9 +3540,6 @@ class ShapeEnv:
                     self.var_to_range[b] = b_bound & self.var_to_range[b]
                     tgt_bound = self.bound_sympy(tgt)
                     assert issubset(tgt_bound, src_bound)
-                # Propagate size-likeness in this case
-                if a in self.size_like and b not in self.size_like and tgt.xreplace({b: 0}) == 0:
-                    self.size_like.add(b)
 
             # TODO: Should we propagate size-like-ness?
             #
@@ -3590,7 +3589,7 @@ class ShapeEnv:
                 return
             elif (
                 a in self.size_like and
-                not issubset(bound_sympy(tgt, size_oblivious=True), self.var_to_range[a] & ValueRanges(2, sympy.oo))
+                not issubset(self.bound_sympy(tgt, size_oblivious=True), self.var_to_range[a] & ValueRanges(2, sympy.oo))
             ):
                 self.log.debug("skipped set_replacement %s = %s (%s) "
                                "[VR for rhs not subset of lhs under size-oblivious]", a, tgt, msg)
@@ -3721,6 +3720,9 @@ class ShapeEnv:
                             self.var_to_range[i1] = SymPyValueRangeAnalysis.truediv(
                                 self.var_to_range[i0], ValueRanges.wrap(d)
                             )
+                            # Propagate size-like-ness
+                            if i0 in self.size_like:
+                                self.size_like.add(i1)
                             self._set_replacement(i0, d * i1, "divisibility")
 
             except NotImplementedError:
