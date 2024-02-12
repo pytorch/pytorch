@@ -3127,7 +3127,7 @@ LEGACY_MOD_INLINELIST = {
     "torch._functorch.apis",
     "torch._functorch.deprecated",
     "torch._higher_order_ops.cond",
-    "torch.ao.quantization.pt2e.eval_utils",
+    "torch.ao.quantization.pt2e.export_utils",
     "torch.ao.quantization.pt2e.qat_utils",
     "torch.ao.quantization.pt2e.representation.rewrite",
     "torch.ao.quantization.pt2e.utils",
