@@ -1115,8 +1115,7 @@ void ProcessGroupNCCL::shutdown() {
     return this->abort(abortReason);
   });
 
-  waitForFutureOrTimeout(
-      fut, options_->timeout, "ProcessGroup abort");
+  waitForFutureOrTimeout(fut, options_->timeout, "ProcessGroup abort");
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL aborts successfully.";
 
   // We need to wait for abort to finish before we can safely shut down
