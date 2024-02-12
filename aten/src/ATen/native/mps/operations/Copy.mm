@@ -7,6 +7,7 @@
 #include <ATen/ops/_copy_from_and_resize_native.h>
 #include <ATen/ops/_copy_from_native.h>
 #include <ATen/ops/imag.h>
+#include <ATen/ops/neg.h>
 #include <ATen/ops/real.h>
 #include <ATen/ops/view_as_real.h>
 #include <ATen/ops/zeros_like.h>
@@ -46,7 +47,8 @@ static void copy_cast_mps(at::Tensor& dst,
   MPSShape* srcShape = getMPSShape(src);
 
   @autoreleasepool {
-    string key = "copy_cast_mps" + getTensorsStringKey({src, dst});
+    const bool needs_conj = src.is_conj() != dst.is_conj();
+    string key = "copy_cast_mps" + getTensorsStringKey({src, dst}) + ":" + std::to_string(needs_conj);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, src);
       auto outputTensor = inputTensor;
@@ -56,7 +58,7 @@ static void copy_cast_mps(at::Tensor& dst,
       if (srcDType != dstDType) {
         outputTensor = [mpsGraph castTensor:outputTensor toType:dstDType name:@"cast"];
       }
-      if (src.is_conj() != dst.is_conj()) {
+      if (needs_conj) {
         TORCH_CHECK(supportsComplex(), "MPS complex tensors conjugation needs MacOS14+");
         outputTensor = [mpsGraph conjugateWithTensor:outputTensor name:nil];
       }
@@ -282,6 +284,15 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
       if (!src.is_complex()) {
         at::real(dst_).copy_(src);
         at::imag(dst_).fill_(0);
+      } else if (src.is_conj() || dst_.is_conj()) {
+        // One cannot take view of conjugated tensor, but for some reason real and imag views are fine
+        // Use this to implement a conjugation
+        at::real(dst_).copy_(at::real(src));
+        if (src.is_conj() != dst_.is_conj()) {
+          at::imag(dst_).copy_(at::neg(at::imag(src)));
+        } else {
+          at::imag(dst_).copy_(at::imag(src));
+        }
       } else {
         at::view_as_real(dst_).copy_(at::view_as_real(src));
       }
