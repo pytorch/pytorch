@@ -1658,8 +1658,8 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
   opmath_t beta = beta_.to<opmath_t>();
 
   auto r0 = result.accessor<scalar_t, 3>();
-  auto s0 = self.accessor<scalar_t, 3>();
-  auto m0 = mat2.accessor<scalar_t, 3>();
+  auto s0 = self.accessor<const scalar_t, 3>();
+  auto m0 = mat2.accessor<const scalar_t, 3>();
 
   int64_t grain_size = std::max(internal::GRAIN_SIZE / (is * js * ks), (int64_t)1);
   using opmath_t = at::opmath_type<scalar_t>;
@@ -1728,8 +1728,8 @@ static void baddbmm_with_gemm_(const Tensor &result, const Tensor &mat1, const T
         transpose_a ? TransposeType::Transpose : TransposeType::NoTranspose,
         transpose_b ? TransposeType::Transpose : TransposeType::NoTranspose,
         batch_size, m, n, k, alpha,
-        mat2.data_ptr<scalar_t>(), lda, mat2_strides[0],
-        mat1.data_ptr<scalar_t>(), ldb, mat1_strides[0],
+        mat2.const_data_ptr<scalar_t>(), lda, mat2_strides[0],
+        mat1.const_data_ptr<scalar_t>(), ldb, mat1_strides[0],
         beta,
         result.data_ptr<scalar_t>(), ldc, result_strides[0]);
   });

@@ -810,6 +810,9 @@ class IndentedBuffer:
             for line in other_code.split("\n"):
                 self.writeline(line)
 
+    def __repr__(self):
+        return f"{type(self)}({self.getvalue()})"
+
 
 class DeferredLineBase:
     """A line that can be 'unwritten' at a later time"""
@@ -1258,15 +1261,3 @@ def pass_execution_and_save(func, gm, msg):
             t,
             time_elapsed,
         )
-
-
-def is_collective(node):
-    from . import ir
-
-    return isinstance(node, ir.CollectiveKernel) or type(node) == ir._CollectiveKernel
-
-
-def is_wait(node):
-    from . import ir
-
-    return isinstance(node, ir.Wait) or type(node) == ir._WaitKernel

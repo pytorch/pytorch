@@ -614,9 +614,6 @@ def run_test_retries(
         else:
             sc_command = f"--sc={stepcurrent_key}"
         print_to_file("Retrying...")
-        # Print full c++ stack traces during retries
-        env = env or {}
-        env["TORCH_SHOW_CPP_STACKTRACES"] = "1"
         print_items = []  # do not continue printing them, massive waste of space
 
     consistent_failures = [x[1:-1] for x in num_failures.keys() if num_failures[x] >= 3]
@@ -1147,6 +1144,14 @@ def parse_args():
         action="store_true",
         help="Set a timeout based on the test times json file.  Only works if there are test times available",
         default=IS_CI and not strtobool(os.environ.get("NO_TEST_TIMEOUT", "False")),
+    )
+    parser.add_argument(
+        "--enable-td",
+        action="store_true",
+        help="Enables removing tests based on TD",
+        default=IS_CI
+        and os.getenv("BRANCH", "") != "main"
+        and not strtobool(os.environ.get("NO_TD", "False")),
     )
     parser.add_argument(
         "additional_unittest_args",
