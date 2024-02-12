@@ -261,6 +261,9 @@ class NoChangeTestCase(TestCase):
         # Test to repro issue with fx_graph_cse when
         # hash((primals_2, 1.0)) == hash((primals_2, 1))
 
+        if torch._dynamo.is_compiling():
+            self.skipTest("Unsupported if test run is compiled")
+
         def f(inpt, osize):
             size = inpt.shape[-1]
             s1 = size - 1
@@ -281,6 +284,7 @@ class NoChangeTestCase(TestCase):
 
         t = torch.rand(3, 100)
         _ = fn(t, 50)
+        assert len(gms) == 1, gms
         fx_g = gms[0]
         check(fx_g, None, 0, check_val=False, graph_input=True)
 
