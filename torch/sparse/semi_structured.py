@@ -1,6 +1,6 @@
 import warnings
 from collections import namedtuple
-from typing import Any, Optional, Tuple, List, Callable, Dict, Iterable
+from typing import Any, Optional, Tuple, List, Callable, Dict
 
 import torch
 from torch.sparse._semi_structured_conversions import (
@@ -9,14 +9,14 @@ from torch.sparse._semi_structured_conversions import (
 )
 from torch.sparse._semi_structured_ops import (
     fallback_dispatcher,
-    sparse24_values,
-    sparse24_indices,
-    sparse24_detach,
-    sparse24_t,
-    sparse24_view,
-    sparse24_mm,
-    sparse24_addmm,
-    sparse24_linear,
+    semi_sparse_values,
+    semi_sparse_indices,
+    semi_sparse_detach,
+    semi_sparse_t,
+    semi_sparse_view,
+    semi_sparse_mm,
+    semi_sparse_addmm,
+    semi_sparse_linear,
 )
 
 __all__ = [
@@ -169,7 +169,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
     @classmethod
     def __tensor_unflatten__(
         cls,
-        inner_tensors : List[torch.Tensor],
+        inner_tensors,
         tensor_meta : Tuple[torch.Size, bool, int, bool],
         outer_size,
         outer_stride,
@@ -199,23 +199,23 @@ class SparseSemiStructuredTensor(torch.Tensor):
         return cls.SPARSE_DISPATCH[func._overloadpacket](func, types, args, kwargs)
 
     @classmethod
-    def _load_dispatch_table(cls, custom_dispatch_table : Dict[Callable, Callable]=None) -> None:
+    def _load_dispatch_table(cls, custom_dispatch_table=None) -> None:
         """
         Loads the op overload sparse dispatch table for the current class.
         """
         if getattr(cls, "SPARSE_DISPATCH", None) is None:
             cls.SPARSE_DISPATCH = {
-                torch.ops.aten.values: sparse24_values,
-                torch.ops.aten.indices: sparse24_indices,
+                torch.ops.aten.values: semi_sparse_values,
+                torch.ops.aten.indices: semi_sparse_indices,
                 torch.ops.aten.is_same_size: fallback_dispatcher,
                 torch.ops.aten.detach_: fallback_dispatcher,
-                torch.ops.aten.detach: sparse24_detach,
-                torch.ops.aten.t: sparse24_t,
-                torch.ops.aten.view: sparse24_view,
-                torch.ops.aten.mm: sparse24_mm,
-                torch.ops.aten.matmul: sparse24_mm,
-                torch.ops.aten.addmm: sparse24_addmm,
-                torch.ops.aten.linear: sparse24_linear,
+                torch.ops.aten.detach: semi_sparse_detach,
+                torch.ops.aten.t: semi_sparse_t,
+                torch.ops.aten.view: semi_sparse_view,
+                torch.ops.aten.mm: semi_sparse_mm,
+                torch.ops.aten.matmul: semi_sparse_mm,
+                torch.ops.aten.addmm: semi_sparse_addmm,
+                torch.ops.aten.linear: semi_sparse_linear,
             }
             if custom_dispatch_table is not None:
                 cls.SPARSE_DISPATCH.update(custom_dispatch_table)
@@ -286,7 +286,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         else:
             return dense_input
 
-    def to_dense(self) -> torch.Tensor:
+    def to_dense(self):
         col = self.shape[-1]
         return torch.mm(self, torch.eye(col, dtype=self.dtype, device=self.device))
 
@@ -297,7 +297,9 @@ class SparseSemiStructuredTensor(torch.Tensor):
     def _mm(
         self,
         B: torch.Tensor,
+        *,
         bias: Optional[torch.Tensor] = None,
+        **kwargs,
     ) -> torch.Tensor:
         raise NotImplementedError
 
@@ -402,7 +404,7 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
             requires_grad=original_tensor.requires_grad,
         )
 
-    def to_dense(self) -> torch.Tensor:
+    def to_dense(self):
         assert self.meta is not None and self.packed is not None
         return (
             sparse_semi_structured_to_dense_cutlass(
@@ -416,11 +418,13 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
     def _mm(
         self,
         B: torch.Tensor,
+        *,
         bias: Optional[torch.Tensor] = None,
+        **kwargs
     ) -> torch.Tensor:
         if isinstance(B, SparseSemiStructuredTensor):
             raise ValueError(
-                "`Sparse24Tensor @ Sparse24Tensor` is not supported by the hardware"
+                "`SparseSemiStructuredTensor @ SparseSemiStructuredTensor` is not supported by the hardware"
             )
         cls_name = self.__class__.__name__
         if self.ndim != 2 or B.ndim != 2:
@@ -475,11 +479,13 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
     def _mm(
         self,
         B: torch.Tensor,
+        *,
         bias: Optional[torch.Tensor] = None,
+        **kwargs
     ) -> torch.Tensor:
         if isinstance(B, SparseSemiStructuredTensor):
             raise ValueError(
-                "`Sparse24Tensor @ Sparse24Tensor` is not supported by the hardware"
+                "`SparseSemiStructuredTensor @ SparseSemiStructuredTensor` is not supported by the hardware"
             )
         if self.ndim != 2 or B.ndim != 2:
             raise NotImplementedError(
@@ -499,7 +505,7 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
             )
         if self.packed is None:
             raise NotImplementedError(
-                f"`{self.__class__.__name__}` matmul: Operation not supported, packed is None"
+                f"`{self.__class__.__name__}` matmul: operation is not supported"
             )
         else:
             res = torch._cslt_sparse_mm(

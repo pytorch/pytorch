@@ -4,14 +4,14 @@ import torch
 
 __all__ = [
     "fallback_dispatcher",
-    "sparse24_values",
-    "sparse24_indices",
-    "sparse24_t",
-    "sparse24_view",
-    "sparse24_detach",
-    "sparse24_mm",
-    "sparse24_addmm",
-    "sparse24_linear",
+    "semi_sparse_values",
+    "semi_sparse_indices",
+    "semi_sparse_t",
+    "semi_sparse_view",
+    "semi_sparse_detach",
+    "semi_sparse_mm",
+    "semi_sparse_addmm",
+    "semi_sparse_linear",
 ]
 
 
@@ -29,7 +29,7 @@ def fallback_dispatcher(func, types, args, kwargs):
         return func(*args)
 
 
-def sparse24_values(func, types, args=(), kwargs=None) -> torch.Tensor:
+def semi_sparse_values(func, types, args=(), kwargs=None) -> torch.Tensor:
     assert len(args) == 1
     A = args[0]
     assert isinstance(A, torch.sparse.SparseSemiStructuredTensor)
@@ -42,7 +42,7 @@ def sparse24_values(func, types, args=(), kwargs=None) -> torch.Tensor:
         return A.packed.detach()
 
 
-def sparse24_indices(func, types, args=(), kwargs=None) -> torch.Tensor:
+def semi_sparse_indices(func, types, args=(), kwargs=None) -> torch.Tensor:
     assert len(args) == 1
     A = args[0]
     assert isinstance(A, torch.sparse.SparseSemiStructuredTensor)
@@ -56,7 +56,7 @@ def sparse24_indices(func, types, args=(), kwargs=None) -> torch.Tensor:
         return A.meta
 
 
-def sparse24_t(func, types, args=(), kwargs=None) -> torch.Tensor:
+def semi_sparse_t(func, types, args=(), kwargs=None) -> torch.Tensor:
     assert len(args) == 1
     self = args[0]
     assert isinstance(self, torch.sparse.SparseSemiStructuredTensor)
@@ -78,7 +78,7 @@ def sparse24_t(func, types, args=(), kwargs=None) -> torch.Tensor:
     )
 
 
-def sparse24_view(func, types, args=(), kwargs=None) -> torch.Tensor:
+def semi_sparse_view(func, types, args=(), kwargs=None) -> torch.Tensor:
     assert len(args) == 2
     self, shape = args
     if tuple(shape) != self.shape:
@@ -88,7 +88,7 @@ def sparse24_view(func, types, args=(), kwargs=None) -> torch.Tensor:
     return self
 
 
-def sparse24_detach(func, types, args, kwargs) -> torch.Tensor:
+def semi_sparse_detach(func, types, args, kwargs) -> torch.Tensor:
     assert len(args) == 1
     self = args[0]
     return self.__class__(
@@ -102,7 +102,7 @@ def sparse24_detach(func, types, args, kwargs) -> torch.Tensor:
     )
 
 
-def sparse24_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
+def semi_sparse_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
     assert len(args) == 2
     A, B = args
     if A.ndim != 2 or B.ndim != 2:
@@ -123,7 +123,7 @@ def sparse24_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
         return res[:row, :]
 
 
-def sparse24_addmm(func, types, args=(), kwargs=None) -> torch.Tensor:
+def semi_sparse_addmm(func, types, args=(), kwargs=None) -> torch.Tensor:
     assert len(args) == 3
     bias, A, B = args
     if A.ndim != 2 or B.ndim != 2:
@@ -146,7 +146,7 @@ def sparse24_addmm(func, types, args=(), kwargs=None) -> torch.Tensor:
     return result[:row, :]
 
 
-def sparse24_linear(func, types, args=(), kwargs=None) -> torch.Tensor:
+def semi_sparse_linear(func, types, args=(), kwargs=None) -> torch.Tensor:
     assert len(args) in [2, 3]
     A, B = args[:2]
     bias = args[2] if len(args) == 3 else None
@@ -157,7 +157,7 @@ def sparse24_linear(func, types, args=(), kwargs=None) -> torch.Tensor:
     if bias is None:
         res = A_2d @ B.t()
     else:
-        res = sparse24_addmm(
+        res = semi_sparse_addmm(
             func=None,
             types=None,
             args=[bias, A_2d, B.t()],
