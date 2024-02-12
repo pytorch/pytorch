@@ -1,8 +1,11 @@
 name: Index PyTorch Tests for Target Determination
 
 on:
-  pull_request: # temporary
-  # TODO: every few hours
+  pull_request:
+    paths:
+      - .github/workflows/target-determination-indexer.yml
+  workflow_dispatch:
+  # TODO: Trigger every few hours
 
 permissions:
   id-token: write
@@ -12,9 +15,6 @@ jobs:
   index:
     runs-on: linux.g5.4xlarge.nvidia.gpu # 1 GPU A10G 24GB each
     environment: target-determinator-env
-    # container:
-    #   image: pytorch/manylinux-builder:cuda12.1
-    #   options: '--gpus all'
     steps:
       - name: Clone PyTorch
         uses: actions/checkout@v3
@@ -31,8 +31,8 @@ jobs:
       - name: Clone Target Determination Code
         uses: actions/checkout@v3
         with:
-          repository: clee2000/llm-target-determinator
-          ref: csl/testing
+          repository: osalpekar/llm-target-determinator
+          ref: main
           path: llm-target-determinator
 
       - name: Setup Conda
@@ -55,7 +55,6 @@ jobs:
           conda activate tdenv
 
           cd "${GITHUB_WORKSPACE}"
-          ls
           pwd
           cd llm-target-determinator
           pip install -r requirements.txt
@@ -77,8 +76,10 @@ jobs:
           pip install awscli==1.32.18
           cd codellama/
           mkdir "CodeLlama-7b-Python"
-          aws s3 cp "s3://target-determinator-assets/CodeLlama-7b-Python" "CodeLlama-7b-Python" --recursive
-          ls
+          aws s3 cp \
+            "s3://target-determinator-assets/CodeLlama-7b-Python" \
+            "CodeLlama-7b-Python" \
+            --recursive
 
       - name: Run Indexer
         id: indexer
@@ -116,7 +117,15 @@ jobs:
           cd "${GITHUB_WORKSPACE}"/llm-target-determinator/assets
 
           zip -r indexer-files.zip indexer-files
-          aws s3 cp "indexer-files.zip" "s3://target-determinator-assets/indexes/indexer-files.zip"
+          aws s3 cp \
+            "indexer-files.zip" \
+            "s3://target-determinator-assets/indexes/indexer-files.zip"
 
           zip -r indexer-functions.zip indexer-functions
-          aws s3 cp "indexer-functions.zip" "s3://target-determinator-assets/indexes/indexer-functions.zip"
+          aws s3 cp \
+            "indexer-functions.zip" \
+            "s3://target-determinator-assets/indexes/indexer-functions.zip"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
