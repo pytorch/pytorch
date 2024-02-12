@@ -217,7 +217,8 @@ class SparseSemiStructuredTensor(torch.Tensor):
                 torch.ops.aten.addmm: sparse24_addmm,
                 torch.ops.aten.linear: sparse24_linear,
             }
-            cls.SPARSE_DISPATCH.update(custom_dispatch_table)
+            if custom_dispatch_table is not None:
+                cls.SPARSE_DISPATCH.update(custom_dispatch_table)
 
     @classmethod
     def _validate_device_dim_dtype_shape(cls, original_tensor : torch.Tensor) -> None:
@@ -437,7 +438,7 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
             return res[: self.shape[0]]
 
 
-class SparseSemiStructuredTensorCUSPARSELT(torch.sparse.SparseSemiStructuredTensor):
+class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
     """
     The cuSPARSELt backend expects the specified elements and the metadata to be stored in a single tensor:
     packed = [ specified elements of original tensor | metadata ]
