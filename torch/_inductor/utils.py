@@ -636,14 +636,27 @@ def has_incompatible_cudagraph_ops(gm):
 
 try:
     from triton.compiler.compiler import AttrsDescriptor as instance_descriptor
+    attrs_descriptor_available = True
 except ImportError:
     # To support older version of triton which does not have AttrsDescriptor
     # class
+    attrs_descriptor_available = False
     instance_descriptor = collections.namedtuple(  # type: ignore[no-redef]
         "instance_descriptor",
         ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
         defaults=[tuple(), tuple(), tuple(), tuple()],
     )
+
+# Dynamically adjust the class to handle optional attributes
+if attrs_descriptor_available:
+    original_init = instance_descriptor.__init__
+
+    def new_init(self, *args, **kwargs):
+        if "ids_of_folded_args" not in self.__annotations__:
+            kwargs.pop("ids_of_folded_args", None)
+        original_init(self, *args, **kwargs)
+
+    instance_descriptor.__init__ = new_init
 
 
 @functools.lru_cache(None)
