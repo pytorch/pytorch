@@ -266,6 +266,14 @@ class HigherOrderOperator(OperatorBase):
         for dispatch_key in _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS:
             self.fallthrough(dispatch_key)
 
+
+        # [NOTE] We have to register pre-dispatch key implementation
+        # because sometimes HOP use aot-dispatch tracing to detect certaion
+        # mutations. This is problematic when we are functionalizing HOP
+        # during pre-dispatch because when the inner tracer starts, it will see
+        # that PreDispatch key is still active. In that case, we just redispatch
+        # it to next key. This is only safe to do when PreDispatch key stack has no
+        # active modes.
         def _(*args, **kwargs):
             if _len_torch_dispatch_stack_pre_dispatch() == 0:
                 with torch._C._ExcludeDispatchKeyGuard(
