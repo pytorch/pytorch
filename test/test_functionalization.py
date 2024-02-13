@@ -1802,7 +1802,7 @@ def forward(self, x_1):
         out_test_cpp = _functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True)(x)
         self.assertEqual(out_ref, out_test)
         self.assertEqual(out_ref, out_test_cpp)
-        fx_g = make_fx(dispatch_functionalize(f, FunctionalTensorMode()))(x)
+        fx_g = make_fx(dispatch_functionalize(f))(x)
         fx_g_cpp = make_fx(_functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True))(x)
         self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
 
@@ -1847,7 +1847,7 @@ def forward(self, x_1):
         out_test_cpp = _functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True)(x)
         self.assertEqual(out_ref, out_test)
         self.assertEqual(out_test, out_test_cpp)
-        fx_g = make_fx(dispatch_functionalize(f, FunctionalTensorMode()))(x)
+        fx_g = make_fx(dispatch_functionalize(f))(x)
         fx_g_cpp = make_fx(_functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True))(x)
         self.assertExpectedInline(fx_g.code.strip(), """\
 def forward(self, arg0_1):
@@ -1876,7 +1876,7 @@ def forward(self, arg0_1):
         out_test_cpp = _functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True)(x)
         self.assertEqual(out_ref, out_test)
         self.assertEqual(out_ref, out_test_cpp)
-        fx_g = make_fx(dispatch_functionalize(f, FunctionalTensorMode()))(x)
+        fx_g = make_fx(dispatch_functionalize(f))(x)
         fx_g_cpp = make_fx(_functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True))(x)
         self.assertExpectedInline(fx_g.code.strip(), """\
 def forward(self, arg0_1):
