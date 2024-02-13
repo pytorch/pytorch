@@ -371,7 +371,9 @@ class SymNode:
             raise
 
     def expect_true(self, file, line):
-        if self.has_hint():
+        from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+        if self.has_hint() and not free_unbacked_symbols(self.expr):
             # OK to generate guards
             return self.guard_bool(file, line)
         # Generate a deferred runtime assert (this might actually end up doing
@@ -978,7 +980,7 @@ def _make_node_magic(method, func):
 
         # Create a FX node that corresponds to the operation being applied to
         # this node.
-        fx_node, _ = self.shape_env.create_fx_call_function(
+        fx_node, _ = self.shape_env._create_fx_call_function(
             op, (self.fx_node, other.fx_node)
         )
         return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
@@ -1014,7 +1016,7 @@ def _make_node_magic(method, func):
         else:
             pytype = self.pytype
 
-        fx_node, _ = self.shape_env.create_fx_call_function(op, (self.fx_node,))
+        fx_node, _ = self.shape_env._create_fx_call_function(op, (self.fx_node,))
         return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
 
     if method in unary_methods:
@@ -1052,7 +1054,7 @@ def _make_node_magic(method, func):
                 raise
 
             out = safe_expand(out)
-            fx_node, _ = pred_node.shape_env.create_fx_call_function(
+            fx_node, _ = pred_node.shape_env._create_fx_call_function(
                 sym_ite, (pred_node.fx_node, then_node.fx_node, else_node.fx_node)
             )
             return SymNode(
@@ -1094,7 +1096,7 @@ def _make_node_magic(method, func):
             args = [self.fx_node]
             if ndigits is not None:
                 args.append(ndigits)
-            fx_node, _ = self.shape_env.create_fx_call_function(op, tuple(args))
+            fx_node, _ = self.shape_env._create_fx_call_function(op, tuple(args))
             return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
 
         setattr(SymNode, f"_{method_attr}", round_impl)

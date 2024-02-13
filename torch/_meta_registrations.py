@@ -438,6 +438,7 @@ def meta__cslt_sparse_mm(
     transpose_result: bool = False,
 ):
     assert dense_B.dtype in {
+        torch.float32,
         torch.float16,
         torch.bfloat16,
         torch.int8,
@@ -454,9 +455,11 @@ def meta__cslt_sparse_mm(
         assert m == bias.size(0)
 
     if out_dtype is not None:
-        assert (
-            is_int8_input_type and out_dtype == torch.float16
-        ), "out_dtype is only supported for i8i8->fp16 matmul"
+        assert is_int8_input_type and out_dtype in {
+            torch.float16,
+            torch.bfloat16,
+            torch.int32,
+        }, "out_dtype is only supported for i8i8->fp16, bf16, or i32 matmul"
     output_shape = (n, m) if transpose_result else (m, n)
     result = dense_B.new_empty(output_shape, dtype=out_dtype)
     return result
@@ -6206,9 +6209,16 @@ _create_unary_float_meta_func(aten.special_scaled_modified_bessel_k1)
 
 _create_binary_float_meta_func(aten.special_chebyshev_polynomial_t)
 _create_binary_float_meta_func(aten.special_chebyshev_polynomial_u)
+_create_binary_float_meta_func(aten.special_chebyshev_polynomial_v)
+_create_binary_float_meta_func(aten.special_chebyshev_polynomial_w)
+_create_binary_float_meta_func(aten.special_shifted_chebyshev_polynomial_t)
+_create_binary_float_meta_func(aten.special_shifted_chebyshev_polynomial_u)
+_create_binary_float_meta_func(aten.special_shifted_chebyshev_polynomial_v)
+_create_binary_float_meta_func(aten.special_shifted_chebyshev_polynomial_w)
 _create_binary_float_meta_func(aten.special_hermite_polynomial_h)
 _create_binary_float_meta_func(aten.special_hermite_polynomial_he)
 _create_binary_float_meta_func(aten.special_laguerre_polynomial_l)
+_create_binary_float_meta_func(aten.special_legendre_polynomial_p)
 
 
 # We must also trigger meta registrations from PrimTorch ref
