@@ -533,17 +533,10 @@ struct NCCLTraceBuffer {
       update_state(*entry);
 
       if (compute_duration) {
-<<<<<<< HEAD
-        can_compute_duration = entry.time_discovered_completed_.has_value() &&
-            entry.start_ && entry.end_;
-        startEvent = entry.start_;
-        endEvent = entry.end_;
-=======
         can_compute_duration = entry->time_discovered_completed_.has_value() &&
             entry->start_ && entry->end_;
         startEvents = entry->start_;
         endEvents = entry->end_;
->>>>>>> 5429e507857 ([c10d][flight recorder] remove unintended assignment of entry)
       }
     }
 
