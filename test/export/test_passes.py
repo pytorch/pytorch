@@ -28,7 +28,7 @@ from torch.fx.passes.operator_support import OperatorSupport
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo, IS_WINDOWS
 from torch.utils import _pytree as pytree
-from torch._export.utils import sequential_split, nodes_filter, nodes_map, node_inline_, nodes_first, nodes_count
+from torch._export.utils import sequential_split, nodes_filter, nodes_map, node_inline_, nodes_count
 from torch._export.passes.replace_set_grad_with_hop_pass import (
     _is_set_grad_enabled_node, _is_set_grad_enabled_sub_mod, _replace_with_hop
 )
@@ -101,16 +101,6 @@ def _set_grad_enabled_tests():
             "ctx_manager_under_no_grad" : (_get_predispatch_module(SetGradCtxManager(), (x,), False), (x,)),
             "op" : (_get_predispatch_module(SetGradOp(), (x,)), (x,)),
             "op_under_no_grad" : (_get_predispatch_module(SetGradOp(), (x,), False), (x,))}
-
-def _is_set_grad_enabled_node(node: torch.fx.Node) -> bool:
-    return node and node.op == "call_function" and node.target == torch._C._set_grad_enabled
-
-def _is_set_grad_enabled_sub_mod(node: torch.fx.Node) -> bool:
-    if node.op == "call_module":
-        sub_gm = getattr(node.graph.owning_module, node.target)
-        first_non_ph_node = nodes_first(sub_gm.graph.nodes, lambda node: node.op != "placeholder")
-        return _is_set_grad_enabled_node(first_non_ph_node)
-    return False
 
 SET_GRAD_ENABLED_TESTS = _set_grad_enabled_tests()
 
