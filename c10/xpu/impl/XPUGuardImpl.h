@@ -11,32 +11,32 @@
 namespace c10::xpu::impl {
 
 struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
-  static constexpr DeviceType static_type = DeviceType::XPU;
+  static constexpr DeviceType static_type = kXPU;
 
   XPUGuardImpl() = default;
 
   explicit XPUGuardImpl(DeviceType t) {
-    TORCH_INTERNAL_ASSERT(t == DeviceType::XPU);
+    TORCH_INTERNAL_ASSERT(t == kXPU);
   }
 
   DeviceType type() const override {
-    return DeviceType::XPU;
+    return kXPU;
   }
 
   Device exchangeDevice(Device d) const override {
     TORCH_INTERNAL_ASSERT(d.is_xpu());
     auto old_device_index = c10::xpu::exchange_device(d.index());
-    return Device(DeviceType::XPU, old_device_index);
+    return Device(kXPU, old_device_index);
   }
 
   Device getDevice() const override {
     auto device = c10::xpu::current_device();
-    return Device(DeviceType::XPU, device);
+    return Device(kXPU, device);
   }
 
   c10::optional<Device> uncheckedGetDevice() const noexcept {
     auto device = c10::xpu::current_device();
-    return Device(DeviceType::XPU, device);
+    return Device(kXPU, device);
   }
 
   void setDevice(Device d) const override {
