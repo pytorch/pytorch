@@ -7,7 +7,6 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 """
 
 import collections
-import pprint
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -17,6 +16,7 @@ from torch import Tensor
 from torch._guards import DuplicateInputs, TracingContext
 from torch._prims_common import CUDARngStateHelper
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config
 from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
 
@@ -41,12 +41,7 @@ from .subclass_utils import (
     wrap_tensor_subclasses,
 )
 
-from .utils import (
-    call_func_at_runtime_with_args,
-    make_boxed_func,
-    partial_flatten_asdict,
-    strict_zip,
-)
+from .utils import call_func_at_runtime_with_args, make_boxed_func, strict_zip
 
 
 zip = strict_zip
@@ -639,14 +634,6 @@ def aot_wrapper_synthetic_base(
         return compiler_fn(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
 
     # export path: ban synthetic bases for now, add later if requested.
-    if requires_subclass_dispatch(flat_args, fw_metadata):
-        raise RuntimeError(
-            """\
-Encountered aliased inputs that are mutated in the graph, but at least one input/output
-to the graph is a tensor subclass. This is not supported today. You can try to
-remove the aliasing yourself as a workaround, or otherwise file an issue on github."""
-        )
-
     if aot_config.is_export:
         raise RuntimeError(
             f"""\
@@ -663,7 +650,7 @@ fw_metadata={str(fw_metadata)}
 
     # Update our forward metadata to take synthetic bases into account
     (
-        fw_metadata_updated,
+        _,
         aliased_arg_idx_with_metadata_mutations,
     ) = create_synthetic_base_metadata(
         fw_metadata, synthetic_base_info, flat_args, flat_args_with_synthetic_bases
@@ -713,16 +700,11 @@ fw_metadata={str(fw_metadata)}
         else:
             return flat_fn(*unpacked_args)
 
-    if config.debug_assert:
-        ref_fw_metadata = run_functionalized_fw_and_collect_metadata(
-            wrapped_flat_fn,
-            keep_input_mutations=fw_metadata.keep_input_mutations,
-            is_train=fw_metadata.is_train,
-        )(*flat_args_with_synthetic_bases)
-        assert ref_fw_metadata == fw_metadata_updated, (
-            f"ref_metadata={pprint.pformat(partial_flatten_asdict(ref_fw_metadata))}, "
-            f"\nactual_metadata={pprint.pformat(partial_flatten_asdict(fw_metadata_updated))}"
-        )
+    fw_metadata_updated = run_functionalized_fw_and_collect_metadata(
+        wrapped_flat_fn,
+        keep_input_mutations=fw_metadata.keep_input_mutations,
+        is_train=fw_metadata.is_train,
+    )(*flat_args_with_synthetic_bases)
 
     compiled_fn = compiler_fn(
         wrapped_flat_fn,
@@ -909,6 +891,15 @@ def merge_view_inputs(
         # For now, I'm banning a bunch of cases. We expect dynamo to properly detect these cases
         # and error out. We can fix them later.
         # These checks are transitive, so we don't need to check every pair.
+        for idx in aliased_input_indices:
+            curr_inp = fwd_inputs[idx]
+            if is_traceable_wrapper_subclass(curr_inp):
+                raise RuntimeError(
+                    """\
+Encountered duplicate inputs that are mutated in the graph, but at least one of these
+inputs is a tensor subclass. This is not supported today. You can try to
+remove the aliasing yourself as a workaround, or otherwise file an issue on github."""
+                )
         for idx1, idx2 in zip(
             aliased_input_indices, aliased_input_indices[1:], strict=False
         ):
