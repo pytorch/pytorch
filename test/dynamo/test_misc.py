@@ -8913,6 +8913,22 @@ def ___make_guard_fn():
 
         self.assertEqual(fn(x), compiled_fn(x))
 
+    def test_storage_return(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            y = torch.sin(x + 1)
+            storage = x.untyped_storage()
+            storage.resize_(0)
+            y = torch.cos(y)
+            return y, storage
+
+        x = torch.randn(10)
+        expected = torch.cos(torch.sin(x + 1))
+        y, s = fn(x)
+        self.assertEqual(y, expected)
+        self.assertEqual(x.untyped_storage().size(), 0)
+        self.assertIs(s, x.untyped_storage())
+
     def test_flat_name_to_original_fqn(self):
         class FooBarModule(torch.nn.Module):
             def __init__(self):
