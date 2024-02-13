@@ -148,7 +148,11 @@ def wrap_tensor_subclasses(
     # but `subclass_metas` will only correspond to subclass metatadata on `user_fw_outs`.
     # We then need to make sure that we return (*wrapped_user_fw_outs, *activations).
     if num_fw_outs_saved_for_bw is not None:
-        assert len(unwrapped_args) == num_args_tallied + num_fw_outs_saved_for_bw
+        assert len(unwrapped_args) == num_args_tallied + num_fw_outs_saved_for_bw, (
+            f"Expected the number actual unwrapped-subclass outputs {len(unwrapped_args)} to equal "
+            f"the number of args calculated from subclasses ({num_args_tallied}) plus the number of "
+            f"additional activations saved for the backward pass ({num_fw_outs_saved_for_bw})"
+        )
         activations = unwrapped_args[num_args_tallied:]
         if isinstance(wrapped_args, tuple) and isinstance(activations, tuple):
             return wrapped_args + activations
