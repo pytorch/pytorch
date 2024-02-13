@@ -255,6 +255,10 @@ class PyCodegen:
 
     create_load_output = _create_load_const
 
+    def create_load_method(self, name):
+        self.tx.output.update_co_names(name)
+        return create_instruction("LOAD_METHOD", argval=name)
+
     def create_load_attr(self, name) -> Instruction:
         if name not in self.code_options["co_names"]:
             self.code_options["co_names"] += (name,)
