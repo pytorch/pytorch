@@ -410,7 +410,11 @@ class GuardBuilder(GuardBuilderBase):
                     return base_guard_manager.get_key_value_manager(
                         source.index.index
                     ).get_value_manager(example_value)
-                return base_guard_manager.getitem_manager(source.index, example_value)
+
+                index = source.index
+                if source.index_is_slice:
+                    index = source.unpack_slice()
+                return base_guard_manager.getitem_manager(index, example_value)
             elif istype(source, ODictGetItemSource):
                 # Necessary to call dict_get_item_manager to call PyDict_GetItem
                 # instead of PyObject_GetItem which can trigger user code.
@@ -648,16 +652,22 @@ class GuardBuilder(GuardBuilderBase):
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
             code = list()
-            code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
+            self.TYPE_MATCH(guard)
             code.append(f"__math_isnan({ref})")
             self._produce_guard_code(guard, code)
+            self.get_guard_manager(guard).add_lambda_guard(
+                CLOSURE_VARS["__math_isnan"], self.get_verbose_code_parts(guard, code)
+            )
             return
         # Python math library doesn't support complex nan, so we need to use numpy
         elif istype(val, complex) and np.isnan(val):
             code = list()
-            code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
+            self.TYPE_MATCH(guard)
             code.append(f"__numpy_isnan({ref})")
             self._produce_guard_code(guard, code)
+            self.get_guard_manager(guard).add_lambda_guard(
+                CLOSURE_VARS["__numpy_isnan"], self.get_verbose_code_parts(guard, code)
+            )
             return
 
         code = list()
