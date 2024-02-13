@@ -311,6 +311,7 @@ def node_replace_(
 def node_inline_(call_mod_node: torch.fx.Node) -> None:
     """
     Inline the submodule of the given node into the parent module.
+    Note: we only support the case where submodule takes tensors inputs.
     """
     assert call_mod_node.op == "call_module"
     gm = call_mod_node.graph.owning_module
