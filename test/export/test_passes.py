@@ -475,10 +475,11 @@ def forward(self, arg_0):
         def _is_set_grad_enabled_node(node):
             return node.op == "call_function" and node.target == torch._C._set_grad_enabled
         new_gm = sequential_split(gm, _is_set_grad_enabled_node)
+        self.assertEqual(new_gm(*args), gm(*args))
         self.assertExpectedInline(new_gm.code.strip("\n"), """\
 def forward(self, arg_0):
-    sub, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
-    submod_0 = self.submod_0(sub);  sub = None
+    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    submod_0 = self.submod_0(arg0_1);  arg0_1 = None
     submod_1 = self.submod_1(submod_0);  submod_0 = None
     submod_2 = self.submod_2(submod_1)
     return pytree.tree_unflatten((submod_1, submod_2), self._out_spec)
