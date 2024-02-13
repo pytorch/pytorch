@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 log = logging.getLogger(__name__)
+sym_node_log = torch._logging.getArtifactLogger(__name__, "sym_node")
 
 
 __all__ = ["SymNode", "method_to_operator", "magic_methods"]
@@ -218,6 +219,9 @@ class SymNode:
     def abs(self) -> "SymNode":
         return self._abs()  # type: ignore[attr-defined]
 
+    def pos(self) -> "SymNode":
+        return self._pos()  # type: ignore[attr-defined]
+
     def round(self, ndigits=None) -> "SymNode":
         return self._round(ndigits)  # type: ignore[attr-defined]
 
@@ -367,7 +371,9 @@ class SymNode:
             raise
 
     def expect_true(self, file, line):
-        if self.has_hint():
+        from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+        if self.has_hint() and not free_unbacked_symbols(self.expr):
             # OK to generate guards
             return self.guard_bool(file, line)
         # Generate a deferred runtime assert (this might actually end up doing
@@ -392,6 +398,28 @@ class SymNode:
             _advise_is_size(SymInt(self))
         return r
 
+    def guard_size_oblivious(self, file, line):
+        """
+        Like guard_bool, but if we encounter unbacked symbols, if those symbols
+        are size-like, we will treat them as >= 2 for the purposes of the analysis.
+
+        This CHANGES the runtime semantics, but all size-oblivious sites have been
+        audited to ensure that the runtime semantics don't change in a material way.
+        Acceptable runtime semantic changes are, e.g., squeeze() no longer dropping
+        an unbacked one size, or a tensor reporting as non-contiguous even if it's
+        contiguous if it would have been reported contiguous due to being empty.
+        """
+        # TODO: use the file/line for some useful diagnostic on why a
+        # guard occurred
+        r = self.shape_env.evaluate_expr(
+            self.expr, self.hint, fx_node=self.fx_node, size_oblivious=True
+        )
+        try:
+            return bool(r)
+        except Exception:
+            log.warning("Failed to convert to bool: %s", r)
+            raise
+
     def bool_(self):
         return self.guard_bool("", 0)
 
@@ -407,6 +435,7 @@ class SymNode:
 
 # TODO: this probably needs the sizes-strides eval functions
 METHOD_TO_OPERATOR = {
+    "pos": operator.pos,
     "abs": operator.abs,
     "add": operator.add,
     "and": operator.and_,
@@ -444,6 +473,7 @@ unary_magic_methods = {
     "floor",
     "neg",
     "sym_not",
+    "pos",
 }
 
 
@@ -689,7 +719,7 @@ for name in math_op_names:
     fn.__qualname__ = fn.__name__ = priv_sympy_name
     setattr(current_module, priv_sympy_name, fn)
 
-del fn, name, priv_sympy_name
+del fn, name, priv_sympy_name  # type: ignore[possibly-undefined]
 
 
 def _sympy_abs(a):
@@ -724,6 +754,7 @@ def _sympy_is_integer(a):
 magic_methods = {
     **reflectable_magic_methods,
     "sym_not": operator.invert,
+    "pos": operator.pos,
     "eq": _sympy_eq,
     "ne": _sympy_ne,
     "gt": _sympy_gt,
@@ -747,7 +778,7 @@ for name in math_op_names:
     sym_name = f"sym_{name}"
     magic_methods[sym_name] = getattr(current_module, f"_sympy_{name}")
 
-del name, sym_name, math_op_names, current_module
+del name, sym_name, math_op_names, current_module  # type: ignore[possibly-undefined]
 
 
 def sympy_is_contiguous(sizes, strides):
@@ -922,6 +953,7 @@ def _make_node_magic(method, func):
             log.warning("failed to eval %s(%s, %s)", method, self.expr, other.expr)
             raise
         out = safe_expand(out)
+        sym_node_log.debug("%s %s %s -> %s", func, self.expr, other.expr, out)
         pytype: Type
         # This is not strictly correct. In Python, a**b may return complex when
         # a < 0 and b is a float: (-1)**2.1. Same for sympy.sqrt(-3.14). This
@@ -948,7 +980,7 @@ def _make_node_magic(method, func):
 
         # Create a FX node that corresponds to the operation being applied to
         # this node.
-        fx_node, _ = self.shape_env.create_fx_call_function(
+        fx_node, _ = self.shape_env._create_fx_call_function(
             op, (self.fx_node, other.fx_node)
         )
         return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
@@ -969,7 +1001,7 @@ def _make_node_magic(method, func):
         except Exception:
             log.warning("failed to eval %s(%s)", method, expr)
             raise
-
+        sym_node_log.debug("%s %s -> %s", func, expr, out)
         out_hint = None
         if self.hint is not None:
             out_hint = op(self.hint)
@@ -984,7 +1016,7 @@ def _make_node_magic(method, func):
         else:
             pytype = self.pytype
 
-        fx_node, _ = self.shape_env.create_fx_call_function(op, (self.fx_node,))
+        fx_node, _ = self.shape_env._create_fx_call_function(op, (self.fx_node,))
         return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
 
     if method in unary_methods:
@@ -1022,7 +1054,7 @@ def _make_node_magic(method, func):
                 raise
 
             out = safe_expand(out)
-            fx_node, _ = pred_node.shape_env.create_fx_call_function(
+            fx_node, _ = pred_node.shape_env._create_fx_call_function(
                 sym_ite, (pred_node.fx_node, then_node.fx_node, else_node.fx_node)
             )
             return SymNode(
@@ -1064,7 +1096,7 @@ def _make_node_magic(method, func):
             args = [self.fx_node]
             if ndigits is not None:
                 args.append(ndigits)
-            fx_node, _ = self.shape_env.create_fx_call_function(op, tuple(args))
+            fx_node, _ = self.shape_env._create_fx_call_function(op, tuple(args))
             return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
 
         setattr(SymNode, f"_{method_attr}", round_impl)
@@ -1166,7 +1198,7 @@ def _make_user_magic(method, user_type):
     # so that our internal logic can assume everything is nodes
 
     if method in magic_methods_on_operator_with_trailing_underscore:
-        method_attr = f"{method}_"
+        method_attr = f"sym_{method}"
     else:
         method_attr = method
 
@@ -1211,6 +1243,7 @@ def _make_user_magic(method, user_type):
         return wrap_node(getattr(self.node, method_attr)())
 
     def binary_magic_impl(self, other):
+        sym_node_log.debug("MAGIC %s %s %s", method, self, other)
         self = promote(self)
         other = promote(other)
         if is_constant(self):

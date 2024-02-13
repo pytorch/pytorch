@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 from .utils import (
     _gen_alignment_data,
     assert_,
