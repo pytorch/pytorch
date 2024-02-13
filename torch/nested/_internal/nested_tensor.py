@@ -3,7 +3,6 @@ from typing import Tuple
 import torch
 from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
-from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.utils.weak import WeakTensorKeyDictionary
 from typing import *  # noqa: F403
 import weakref
@@ -70,15 +69,18 @@ class NestedIntRegistry():
     #
     def __init__(self):
         self._equiv_set_counter = 0
-        self._equiv_set = WeakTensorKeyDictionary()
+        self._equiv_sets = WeakTensorKeyDictionary()
         self._version_counters = WeakTensorKeyDictionary()
 
     def maybe_create(self, vec, ctor_fn=None, equiv_set_from=None):
         # Given vec, return an associated nested int
-        mb_equiv_set = self._equiv_set.get(vec)
+        mb_equiv_set = self._equiv_sets.get(vec)
 
         if mb_equiv_set is not None:
-            assert self._version_counters[vec] == vec._version
+            # How can we create a nicer message for this?
+            assert self._version_counters[vec] == vec._version, (
+                "Detected that vec has been mutated. This is not allowed. "
+            )
             ret = mb_equiv_set["weak_nested_int"]()
             mb_vec = mb_equiv_set["weak_vec"]()
             if ret is None:
@@ -94,14 +96,19 @@ class NestedIntRegistry():
                 ret = _get_nested_int(mb_equiv_set["id"], mb_equiv_set["weak_vec"]())
                 mb_equiv_set["weak_nested_int"] = weakref.ref(ret)
             else:
-                assert mb_vec is not None
+                assert equiv_set_from is None, (
+                    "Expected equiv_set_from to be None if vec already has equiv_set"
+                )
+                assert mb_vec is not None, (
+                    "Expected vec to be alive if nested int is alive"
+                )
         else:
             if equiv_set_from is None:
                 equiv_set_id = self._equiv_set_counter
                 self._equiv_set_counter += 1
                 _ctor_fn = ctor_fn if ctor_fn is not None else _get_nested_int
                 ret = _ctor_fn(equiv_set_id, vec)
-                self._equiv_set[vec] = {
+                self._equiv_sets[vec] = {
                     "id": equiv_set_id,
                     "weak_nested_int": weakref.ref(ret),
                     "weak_vec": weakref.ref(vec),
@@ -109,29 +116,31 @@ class NestedIntRegistry():
                 }
                 self._version_counters[vec] = vec._version
             else:
-                equiv_set = self._equiv_set[equiv_set_from.node.nested_int_vec()]
+                assert ctor_fn is None
+                equiv_set = self._equiv_sets[equiv_set_from.node.nested_int_vec()]
                 ret = equiv_set["weak_nested_int"]()
                 assert ret is not None
-                self._equiv_set[vec] = equiv_set
+                self._equiv_sets[vec] = equiv_set
                 self._version_counters[vec] = vec._version
         return ret
 
     def maybe_set_metadata(self, vec, key, value):
-        equiv_set = self._equiv_set.get(vec)
+        equiv_set = self._equiv_sets.get(vec)
         assert equiv_set is not None
+        assert self._version_counters[vec] == vec._version, (
+            "Detected that vec has been mutated. This is not allowed. "
+        )
         if key not in equiv_set:
             equiv_set[key] = value
 
     def get_metadata(self, vec, key):
-        equiv_set = self._equiv_set.get(vec)
+        # Check version counter?
+        assert self._version_counters[vec] == vec._version, (
+            "Detected that vec has been mutated. This is not allowed. "
+        )
+        equiv_set = self._equiv_sets.get(vec)
         assert equiv_set is not None
         return equiv_set[key]
-
-    def print(self):
-        print("print registry start")
-        for k, v in self._nested_int_registry.items():
-            print(f"{k} -> {v()} ({self._nested_int_equiv_set[k]})")
-        print("print registry end")
 
 _nested_int_registry: Optional[NestedIntRegistry] = None
 
