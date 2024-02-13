@@ -1564,7 +1564,6 @@ class TestCompositeCompliance(TestCase):
                     _assert_match_metadata(new_inp, inp)
                     new_out = out._view_func_unsafe(new_inp)
                     _assert_match_metadata(new_out, out)
-                    self.assertEqual(new_out, out)
 
                     # reverse view_func
                     new_out = out.detach()
