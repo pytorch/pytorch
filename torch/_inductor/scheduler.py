@@ -2316,6 +2316,11 @@ class Scheduler:
                 if self.get_backend(device).ready_to_flush():
                     self.flush()
 
+        if self.current_device and self.current_device.type == "cuda":
+            # exit the outermost CUDA device guard. this is
+            # important for nested indentation codegen-ing.
+            V.graph.wrapper_code.codegen_device_guard_exit()
+
         self.flush()
 
     def is_unaligned_buffer(self, buf_name):
