@@ -1880,32 +1880,19 @@ class CppVecKernel(CppKernel):
         load_mask_str = None
         if load_mask:
             if not load_mask.is_vec:
-                # TODO: combine with opt_ctx.is_load_as_mask path below
-                # TODO: use ?: should be faster than masked load for scalar masks
+                # TODO: avoid hard-code torch.float
                 load_mask_str = f"{self._get_mask_type(torch.float)}::from({load_mask})"
             else:
                 load_mask_str = f"{self._get_mask_cast(load_mask, torch.float)}"
         loadbuf = f"{var} + {cexpr_index(index)}" if index != 0 else var
-        if dtype in (torch.uint8, torch.int8) and opt_ctx.is_load_int8_as_float:
-            assert self._get_num_vectors(torch.uint8) == 1
-            line = (
-                f"{load_mask_str}.template loadu<{cpp_type},{num_vectors}>({loadbuf})"
-                if load_mask_str
-                else f"at::vec::Vectorized<{cpp_type}>::loadu_one_fourth({loadbuf})"
-            )
-        elif opt_ctx.is_load_as_mask:
+        if dtype == torch.bool:
+            # TODO: should we consider load mask here?
             line = f"{self._get_mask_type()}::from({loadbuf})"
-        elif dtype in DTYPE_LOWP_FP:
-            line = (
-                f"{load_mask_str}.template loadu<{cpp_type},{num_vectors}>({loadbuf})"
-                if load_mask_str
-                else f"{self._get_vec_type(dtype)}::loadu({loadbuf}, {self.tiling_factor})"
-            )
         else:
             line = (
                 f"{load_mask_str}.template loadu<{cpp_type},{num_vectors}>({loadbuf})"
                 if load_mask_str
-                else f"{self._get_vec_type(dtype)}::loadu({loadbuf})"
+                else f"{self._get_vec_type(dtype)}::loadu({loadbuf}, {self.tiling_factor})"
             )
         return line
 
@@ -1966,14 +1953,12 @@ class CppVecKernel(CppKernel):
 
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         assert opt_ctx is not None
-        is_mask = opt_ctx.is_load_as_mask
         code = BracesBuffer()
         code.writeline("[&]")
         with self.swap_buffers(code), code.indent():
-            result_type = "float" if is_mask else f"{DTYPE_TO_CPP[dtype]}"
             result_size = get_result_size(dtype)
             result_declare = (
-                f"__at_align__ std::array<{result_type}, {result_size}> tmpbuf;"
+                f"__at_align__ std::array<{DTYPE_TO_CPP[dtype]}, {result_size}> tmpbuf;"
             )
             code.writeline(result_declare)
             if store_value:
@@ -2020,8 +2005,6 @@ class CppVecKernel(CppKernel):
                     if var is not None
                     else f"{index_c}"
                 )
-                if is_mask:
-                    rhs = f"{self._get_mask_type()}::from({rhs})"
                 if load_mask:
                     code.writeline(f"if ({load_mask})")
                     stack.enter_context(code.indent())
@@ -2062,9 +2045,6 @@ class CppVecKernel(CppKernel):
         assert isinstance(csevar, CppCSEVariable)
         csevar.update_on_args("load", (name, index), {})
         csevar.is_vec = True
-        if opt_ctx.is_load_as_mask:
-            csevar.dtype = torch.bool
-            opt_ctx.dtype = torch.bool
         return csevar
 
     def _get_store_line(
@@ -2549,110 +2529,21 @@ class CppVecKernelChecker(CppVecKernel):
         if schedule_log.isEnabledFor(logging.DEBUG):
             schedule_log.debug("Disabled vectorization: %s", msg)
         self.simd_vec = False
-
-    def is_mask(self, name: str, users: Dict[torch.fx.Node, None]):
-        load_type = V.graph.get_dtype(name)
-        if load_type == torch.bool:
-            return all(user.target in ("where", "masked") for user in users.keys())
-        elif load_type in (torch.uint8, torch.int8):
-            """
-            If the load value is torch.uint8/int8, then we only support the loaded
-            value is as the mask.
-            """
-            if not all(
-                user.target == "to_dtype" and user.args[-1] == torch.bool
-                for user in users.keys()
-            ):
-                return False
-
-            for to_dtype_node in users.keys():
-                assert to_dtype_node.target == "to_dtype"
-                if not all(
-                    user.target in ("where", "masked")
-                    for user in to_dtype_node.users.keys()
-                ):
-                    return False
-            return True
-        else:
-            return False
-
-    def is_load_int8_as_float(self, name: str, users: Dict[torch.fx.Node, None]):
-        """
-        Check:
-        1. load_type is torch.uint8 or torch.int8
-        2. has 1 user node of target to_dtype
-        3. dtype of to_dtype is torch.float
-        """
-        load_type = V.graph.get_dtype(name)
-        if load_type not in (torch.uint8, torch.int8):
-            return False
-        if len(users) == 1:
-            user = next(iter(users))
-            if (user.target == "to_dtype") and (user.args[-1] == torch.float):
-                return True
-            return False
-        return False
-
-    def can_store_fp32_as_int8(self, store_var: str, value_node: torch.fx.Node):
-        """
-        Check:
-        1. store_type is torch.uint8/torch.int8
-        2. value_node is of target to_dtype
-        3. dtype of to_dtype node is torch.uint8/torch.int8
-        """
-        store_type = V.graph.get_dtype(store_var)
-        if store_type not in (torch.uint8, torch.int8):
-            return False
-        if value_node.target == "to_dtype" and value_node.args[-1] in (
-            torch.uint8,
-            torch.int8,
-        ):
-            return True
-
-        return False
-
-    def is_load_integer_scalar_tensor(self, name: str, index: sympy.Expr):
-        load_dtype = V.graph.get_dtype(name)
-        buffer = V.graph.get_buffer(name)
-        return (
-            load_dtype in [torch.int32, torch.int64]
-            and isinstance(buffer, TensorBox)
-            and isinstance(buffer.data, StorageBox)
-            and (len(buffer.data.layout.size) == 0)
-            and (index == 0)
-        )
-
+    
     def load(self, name: str, index: sympy.Expr):
         with RecordOptimizationContext(__name__) as node_ctx:
             load_dtype = V.graph.get_dtype(name)
             opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
             assert opt_ctx
-            opt_ctx.dtype = load_dtype
-            opt_ctx.is_load_as_mask = self.is_mask(name, node_ctx.get_fx_node().users)
-            opt_ctx.is_load_int8_as_float = self.is_load_int8_as_float(
-                name, node_ctx.get_fx_node().users
-            )
 
+            opt_ctx.dtype = load_dtype
             var = self.cse.newvar()
 
             if len(self.itervars) == 0:
                 self.disable_vec("not a loop")
                 return var
 
-            if load_dtype in (torch.bool, torch.uint8, torch.int8) and not (
-                opt_ctx.is_load_as_mask or opt_ctx.is_load_int8_as_float
-            ):
-                if not opt_ctx.is_load_as_mask:
-                    self.disable_vec(f"{load_dtype} not loaded as mask")
-                elif not opt_ctx.is_load_int8_as_float:
-                    self.disable_vec(f"{load_dtype} not loaded as float")
-                return var
-
-            if (
-                (load_dtype not in self.load_supported_dtypes)
-                and not self.is_load_integer_scalar_tensor(name, index)
-                and index.has(self.itervars[self.tiling_idx])
-            ):
+            if load_dtype not in self.load_supported_dtypes:
                 self.disable_vec(f"{load_dtype} not supported by load")
                 return var
 
@@ -2676,12 +2567,6 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec(f"{store_dtype} not supported by store")
                 return self.simd_vec
 
-            if store_dtype in (torch.uint8, torch.int8):
-                value_node = node_ctx.get_fx_node().all_input_nodes[-1]
-                if not self.can_store_fp32_as_int8(name, value_node):
-                    self.disable_vec("not support store float32 as uint8/int8")
-                    return self.simd_vec
-
             assert "buf" in name
             index = self.rename_indexing(index)
 
@@ -2689,7 +2574,7 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec(f"store mode: {mode}")
                 return self.simd_vec
 
-            if index.is_number:
+            if index.is_number: # TODO: can we remove it?
                 self.disable_vec(f"constant store index: {index}")
             return self.simd_vec
 
