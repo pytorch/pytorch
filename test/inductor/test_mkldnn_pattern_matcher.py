@@ -106,7 +106,7 @@ class TestPatternMatcherBase(TestCase):
                 else prepare_pt2e(export_model, quantizer)
             )
             prepare_model(*inputs)
-            convert_model = convert_pt2e(prepare_model, fold_quantize=True)
+            convert_model = convert_pt2e(prepare_model)
             torch.ao.quantization.move_exported_model_to_eval(convert_model)
             return convert_model
 
