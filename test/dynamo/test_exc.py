@@ -166,7 +166,7 @@ from user code:
         self.assertExpectedInline(
             munge_exc(record.getMessage()),
             """\
-Graph break: 'skip function graph_break in file _dynamo/decorators.py' from user code at:
+Graph break: from user code at:
   File "test_exc.py", line N, in fn001
     return fn002(x)
   File "test_exc.py", line N, in fn002
@@ -257,9 +257,6 @@ Target Expressions:
   ==> (>= 9223372036854775806 s3)
 
 Failed Source Expressions:
-  ==> (!= 0 L['shape'][0])
-  ==> (!= 0 L['shape'][1])
-  ==> (!= 0 L['shape'][2])
   ==> (== (+ L['shape'][0] L['shape'][1] L['shape'][2]) L['x'].size()[0])""",
         )
 
