@@ -1169,10 +1169,27 @@ class Module:
                     "if a complex module does not work as expected.")
 
         def convert(t):
-            if convert_to_format is not None and t.dim() in (4, 5):
-                return t.to(device, dtype if t.is_floating_point() or t.is_complex() else None,
-                            non_blocking, memory_format=convert_to_format)
-            return t.to(device, dtype if t.is_floating_point() or t.is_complex() else None, non_blocking)
+            try:
+                if convert_to_format is not None and t.dim() in (4, 5):
+                    return t.to(
+                        device,
+                        dtype if t.is_floating_point() or t.is_complex() else None,
+                        non_blocking,
+                        memory_format=convert_to_format,
+                    )
+                return t.to(
+                    device,
+                    dtype if t.is_floating_point() or t.is_complex() else None,
+                    non_blocking,
+                )
+            except NotImplementedError as e:
+                if str(e) == "Cannot copy out of meta tensor; no data!":
+                    raise NotImplementedError(
+                        f"{e} Please use torch.nn.Module.to_empty() instead of torch.nn.Module.to() "
+                        f"when moving module from meta to a different device."
+                    ) from None
+                else:
+                    raise
 
         return self._apply(convert)
 
@@ -2019,6 +2036,7 @@ class Module:
         local_name_params = itertools.chain(self._parameters.items(), persistent_buffers.items())
         local_state = {k: v for k, v in local_name_params if v is not None}
         assign_to_params_buffers = local_metadata.get("assign_to_params_buffers", False)
+        use_swap_tensors = torch.__future__.get_swap_module_params_on_conversion()
 
         for name, param in local_state.items():
             key = prefix + name
@@ -2061,10 +2079,22 @@ class Module:
                                 setattr(self, name, torch.nn.Parameter(input_param))
                             else:
                                 setattr(self, name, input_param)
+                        elif use_swap_tensors:
+                            param_requires_grad = param.requires_grad
+                            new_input_param = param.module_load(input_param)
+                            if id(new_input_param) == id(input_param) or id(new_input_param) == id(param):
+                                raise RuntimeError("module_load returned one of self or other, please .detach() "
+                                                   "the result if returning one of the inputs in module_load")
+                            if (isinstance(param, torch.nn.Parameter) and
+                                    not isinstance(new_input_param, torch.nn.Parameter)):
+                                new_input_param = torch.nn.Parameter(new_input_param, requires_grad=param_requires_grad)
+                            torch.utils.swap_tensors(param, new_input_param)
+                            del new_input_param
                         else:
                             param.copy_(input_param)
                 except Exception as ex:
-                    error_msgs.append(f'While copying the parameter named "{key}", '
+                    action = "swapping" if use_swap_tensors else "copying"
+                    error_msgs.append(f'While {action} the parameter named "{key}", '
                                       f'whose dimensions in the model are {param.size()} and '
                                       f'whose dimensions in the checkpoint are {input_param.size()}, '
                                       f'an exception occurred : {ex.args}.'

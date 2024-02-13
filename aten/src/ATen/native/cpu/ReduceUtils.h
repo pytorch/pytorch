@@ -199,7 +199,7 @@ inline T update(const T& x, const T& y) {
 }
 
 template <typename scalar_t, ReductionType reduce>
-inline void update(scalar_t* out, scalar_t* data, int64_t K) {
+inline void update(scalar_t* out, const scalar_t* data, int64_t K) {
   using Vec = vec::Vectorized<vec_scalar_t<scalar_t>>;
   map2<scalar_t>(
       [](Vec x, Vec y) { return update<Vec, reduce>(x, y); },
@@ -211,7 +211,7 @@ inline void update(scalar_t* out, scalar_t* data, int64_t K) {
 
 template <typename scalar_t, ReductionType reduce,
           typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
-inline void update(at::opmath_type<scalar_t>* out, scalar_t* data, int64_t K) {
+inline void update(at::opmath_type<scalar_t>* out, const scalar_t* data, int64_t K) {
   using opmath_t = at::opmath_type<scalar_t>;
   using Vec = vec::Vectorized<opmath_t>;
   map_acc<scalar_t, opmath_t>(
