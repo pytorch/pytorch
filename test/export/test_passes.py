@@ -28,7 +28,7 @@ from torch.fx.passes.operator_support import OperatorSupport
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo, IS_WINDOWS
 from torch.utils import _pytree as pytree
-from torch._export.utils import sequential_split, nodes_filter, nodes_first
+from torch._export.utils import sequential_split, nodes_filter, nodes_first, nodes_map, node_inline_
 
 
 def count_call_function(graph: torch.fx.Graph, target: torch.ops.OpOverload) -> int:
@@ -502,6 +502,17 @@ def forward(self, add_1):
     sub = torch.ops.aten.sub.Tensor(add_1, 1);  add_1 = None
     return sub
     """)
+
+    def test_inline_(self):
+        def _is_set_grad_enabled_node(node):
+            return node.op == "call_function" and node.target == torch._C._set_grad_enabled
+
+        for gm, args in SET_GRAD_ENABLED_TESTS.values():
+            before_str = gm.print_readable(print_output=False)
+            new_gm = sequential_split(gm, _is_set_grad_enabled_node)
+            nodes_map(new_gm.graph.nodes, lambda node: node_inline_(node) if node.op == "call_module" else node)
+            after_reinplace_str = gm.print_readable(print_output=False)
+            self.assertEqual(before_str, after_reinplace_str)
 
 
 if __name__ == '__main__':
