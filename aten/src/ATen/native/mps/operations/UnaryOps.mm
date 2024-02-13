@@ -40,10 +40,10 @@
 #include <ATen/ops/logit_native.h>
 #include <ATen/ops/neg.h>
 #include <ATen/ops/neg_native.h>
+#include <ATen/ops/real.h>
 #include <ATen/ops/reciprocal_native.h>
 #include <ATen/ops/reshape.h>
 #include <ATen/ops/round_native.h>
-#include <ATen/ops/real.h>
 #include <ATen/ops/rsqrt_native.h>
 #include <ATen/ops/sgn_native.h>
 #include <ATen/ops/sigmoid_native.h>
@@ -499,6 +499,9 @@ TORCH_IMPL_FUNC(sgn_out_mps)(const Tensor& self, const Tensor& output) {
 Tensor& conj_physical_out_mps(const Tensor& self, Tensor& result) {
   TORCH_CHECK(self.is_complex());
   if (!mps::supportsComplex()) {
+    if (!result.is_same_size(self)) {
+      result.resize_(self.sizes());
+    }
     at::real(result).copy_(at::real(self));
     at::imag(result).copy_(at::neg(at::imag(self)));
   } else {
