@@ -41,10 +41,9 @@ def foreach_all_gather(
         (
             param_all_gather_input_dtypes,
             param_all_gather_input_numels,
-            same_dtype,
+            dtype,
         ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
-        if not same_dtype:
-            dtype = torch.uint8
+        if dtype == torch.uint8:
             all_gather_inputs = [
                 t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
             ]
@@ -229,21 +228,25 @@ def foreach_reduce_scatter_copy_in(
 
 def _get_all_gather_input_metadatas(
     param_all_gather_inputs: List[List[torch.Tensor]],
-) -> Tuple[List[List[torch.dtype]], List[List[int]], bool]:
+) -> Tuple[List[List[torch.dtype]], List[List[int]], torch.dtype]:
     param_all_gather_input_dtypes: List[List[torch.dtype]] = []
     param_all_gather_input_numels: List[List[int]] = []
-    dtype = param_all_gather_inputs[0][0].dtype
-    same_dtype = True
+    all_gather_dtype = param_all_gather_inputs[0][0].dtype
     for all_gather_inputs in param_all_gather_inputs:
         input_dtypes: List[torch.dtype] = []
         input_numels: List[int] = []
         for all_gather_input in all_gather_inputs:
-            same_dtype &= all_gather_input.dtype == dtype
+            if all_gather_input.dtype != all_gather_dtype:
+                all_gather_dtype = torch.uint8
             input_dtypes.append(all_gather_input.dtype)
             input_numels.append(all_gather_input.numel())
         param_all_gather_input_dtypes.append(input_dtypes)
         param_all_gather_input_numels.append(input_numels)
-    return param_all_gather_input_dtypes, param_all_gather_input_numels, same_dtype
+    return (
+        param_all_gather_input_dtypes,
+        param_all_gather_input_numels,
+        all_gather_dtype,
+    )
 
 
 def _div_if_needed(tensor: torch.Tensor, div_factor: float) -> None:
