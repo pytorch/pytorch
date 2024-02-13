@@ -394,7 +394,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
     def world_size(self) -> int:
         # Since these tests run with a larger transformer model, they may see
         # some numeric drift with >2 GPUs
-        return 2
+        return min(torch.cuda.device_count(), 2)
 
     @skip_if_lt_x_gpu(2)
     def test_train_parity_with_activation_checkpointing(self):
