@@ -1627,7 +1627,7 @@ static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, Tensor& infos
 #else
   char uplo = upper ? 'U' : 'L';
 
-  auto A_data = A.data_ptr<scalar_t>();
+  auto A_data = A.const_data_ptr<scalar_t>();
   auto b_data = b.data_ptr<scalar_t>();
   auto infos_data = infos.data_ptr<int>();
   auto A_mat_stride = matrixStride(A);
@@ -1640,9 +1640,9 @@ static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, Tensor& infos
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int info;
   for (const auto i : c10::irange(batch_size)) {
-    scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
+    const scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
-    lapackCholeskySolve<scalar_t>(uplo, n, nrhs, A_working_ptr, ldab, b_working_ptr, ldab, &info);
+    lapackCholeskySolve<scalar_t>(uplo, n, nrhs, const_cast<scalar_t*>(A_working_ptr), ldab, b_working_ptr, ldab, &info);
     infos_data[i] = info;
     if (info != 0) {
       return;
@@ -2088,7 +2088,7 @@ TORCH_IMPL_FUNC(lu_unpack_out)(const Tensor& LU,
       .resize_outputs(false)
       .declare_static_shape(pivots.sizes(), /*squash_dim=*/pivots.dim() - 1)
       .add_output(perm)
-      .add_owned_input(pivots.contiguous())
+      .add_owned_const_input(pivots.contiguous())
       .build();
 
     unpack_pivots_stub(pivots.device().type(), iter, std::min(m, n), m);

@@ -352,6 +352,41 @@ const char* FunctionalTensorWrapper::tensorimpl_type_name() const {
     return "FunctionalTensorWrapper";
 }
 
+void FunctionalTensorWrapper::copy_tensor_metadata(
+    const FunctionalTensorWrapper* src_impl,
+    FunctionalTensorWrapper* dest_impl,
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change) {
+    TensorImpl::copy_tensor_metadata(
+        src_impl,
+        dest_impl,
+        version_counter,
+        allow_tensor_metadata_change);
+
+    // FunctionalTensorWrapper-specific fields.
+    dest_impl->value_ = src_impl->value_;
+    dest_impl->level_ = src_impl->level_;
+    dest_impl->mutation_counter_ = src_impl->mutation_counter_;
+    dest_impl->mutation_hidden_from_autograd_counter_ = src_impl->mutation_hidden_from_autograd_counter_;
+    dest_impl->mutation_during_no_grad_or_inference_mode_ = src_impl->mutation_during_no_grad_or_inference_mode_;
+    dest_impl->has_metadata_mutation_ = src_impl->has_metadata_mutation_;
+    dest_impl->is_multi_output_view_ = src_impl->is_multi_output_view_;
+    dest_impl->was_storage_changed_ = src_impl->was_storage_changed_;
+    dest_impl->generation_ = src_impl->generation_;
+    dest_impl->view_metas_ = src_impl->view_metas_;
+}
+
+
+void FunctionalTensorWrapper::copy_tensor_metadata_and_refresh(
+    const FunctionalTensorWrapper* src_impl,
+    FunctionalTensorWrapper* dest_impl,
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change) const {
+    copy_tensor_metadata(src_impl, dest_impl, version_counter, allow_tensor_metadata_change);
+    dest_impl->refresh_numel();
+    dest_impl->refresh_contiguous();
+}
+
 template <typename VariableVersion>
 c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach_core(
     VariableVersion&& version_counter,
@@ -367,16 +402,11 @@ c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach_
   }
 
   auto impl = c10::make_intrusive<FunctionalTensorWrapper>(value_);
-  copy_tensor_metadata(
+  copy_tensor_metadata_and_refresh(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
       /*version_counter=*/std::forward<VariableVersion>(version_counter),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-  impl->level_ = level_;
-  impl->generation_ = generation_;
-  impl->view_metas_ = view_metas_;
-  impl->refresh_numel();
-  impl->refresh_contiguous();
   return impl;
 }
 
@@ -393,6 +423,18 @@ c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach(
   return shallow_copy_and_detach_core(
       std::move(version_counter), allow_tensor_metadata_change);
 }
+
+void FunctionalTensorWrapper::shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) {
+    AT_ASSERT(has_compatible_shallow_copy_type(impl->key_set()));
+    auto functional_impl =
+        static_cast<FunctionalTensorWrapper*>(impl.get());
+    copy_tensor_metadata_and_refresh(
+        /*src_impl=*/functional_impl,
+        /*dest_impl=*/this,
+        /*version_counter=*/version_counter(),
+        /*allow_tensor_metadata_change=*/allow_tensor_metadata_change());
+}
+
 
 c10::Device FunctionalTensorWrapper::device_custom() const {
   return value_.unsafeGetTensorImpl()->device();

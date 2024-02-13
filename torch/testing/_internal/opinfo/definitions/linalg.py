@@ -2400,6 +2400,12 @@ python_ref_db: List[OpInfo] = [
     # torch.linalg
     #
     PythonRefInfo(
+        "_refs.linalg.cross",
+        torch_opinfo_name="linalg.cross",
+        supports_out=True,
+        op_db=op_db
+    ),
+    PythonRefInfo(
         "_refs.linalg.diagonal",
         torch_opinfo_name="linalg.diagonal",
         supports_out=False,
