@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
@@ -218,8 +220,8 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_s
         bwd_outputs
     )
 
-    fwd_module = fx.GraphModule(joint_module, fwd_graph)
-    bwd_module = fx.GraphModule(joint_module, bwd_graph)
+    fwd_module = fx._lazy_graph_module._make_graph_module(joint_module, fwd_graph)
+    bwd_module = fx._lazy_graph_module._make_graph_module(joint_module, bwd_graph)
     return fwd_module, bwd_module
 
 
@@ -289,8 +291,8 @@ def default_partition(
                 saved_sym_nodes.extend(backward_usages)
             else:
                 saved_values.append(node)
-    saved_values = list({k: None for k in saved_values}.keys())
-    saved_sym_nodes = list({k: None for k in saved_sym_nodes}.keys())
+    saved_values = list(dict.fromkeys(saved_values).keys())
+    saved_sym_nodes = list(dict.fromkeys(saved_sym_nodes).keys())
 
     return _extract_fwd_bwd_modules(joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
 
@@ -690,9 +692,9 @@ def min_cut_rematerialization_partition(
                              if node.op != 'output'}
         unclaimed_nodes = {node for node in joint_module.graph.nodes
                            if node not in required_fw_nodes and node not in required_bw_nodes}
-        return fwd_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes
+        return fwd_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes, inputs
 
-    orig_fw_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes = classify_nodes(joint_module)
+    orig_fw_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes, inputs = classify_nodes(joint_module)
 
     # networkx blows up on graphs with no required backward nodes
     # Since there's nothing to partition anyway, and the default partitioner can "handle"
@@ -748,12 +750,6 @@ def min_cut_rematerialization_partition(
         print("Ops banned from rematerialization: ", ops_ignored)
         print()
 
-    # `AGGRESSIVE_RECOMPUTATION` is a mode that recomputes everything except
-    # random ops and compute-intensive ops.
-    # It's an internal-only debug mode and is not related to user-facing
-    # (selective) activation checkpointing.
-    AGGRESSIVE_RECOMPUTATION = False
-
     def is_materialized_backwards(node):
         cur_nodes = {node}
         while len(cur_nodes) > 0:
@@ -769,7 +765,7 @@ def min_cut_rematerialization_partition(
     def ban_recomputation(node):
         if "recompute" in node.meta:
             return node.meta["recompute"] == 0
-        elif AGGRESSIVE_RECOMPUTATION:
+        elif config.aggressive_recomputation:
             ignored_ops = random_ops + compute_intensive_ops
             return (node.op == 'call_function' and get_aten_target(node) in ignored_ops)
         else:
@@ -838,8 +834,18 @@ def min_cut_rematerialization_partition(
             continue
 
         if node in required_bw_nodes:
-            nx_graph.add_edge(node.name + "_in", "sink", capacity=math.inf)
-            continue
+            if node not in inputs:
+                nx_graph.add_edge(node.name + "_in", "sink", capacity=math.inf)
+                continue
+            # If someone saves a input for backward as-is and backward
+            # returns that tensor as-is as a grad input, then the node x would
+            # be both a required_bw_node and an input. In this case we
+            # (1) connect x_in to to the source, (2) x_out to the sink, and
+            # (3) assign the proper weight to the x_in-x_out edge, so that
+            # x would be part of cut nodes. A case where this happens is if
+            # NestedTensor saves a offset tensor as part of the singleton int
+            # in sizes.
+            nx_graph.add_edge(node.name + "_out", "sink", capacity=math.inf)
 
         if _is_primal(node) or _is_fwd_seed_offset(node):
             nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
