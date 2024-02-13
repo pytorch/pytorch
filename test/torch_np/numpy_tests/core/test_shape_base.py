@@ -206,7 +206,7 @@ class TestHstack(TestCase):
     def test_casting_and_dtype(self):
         a = np.array([1, 2, 3])
         b = np.array([2.5, 3.5, 4.5])
-        res = np.hstack((a, b), casting="unsafe", dtype=np.int64)
+        res = np.hstack(np.append(a, b), casting="unsafe", dtype=np.int64)
         expected_res = np.array([1, 2, 3, 2, 3, 4])
         assert_array_equal(res, expected_res)
 
