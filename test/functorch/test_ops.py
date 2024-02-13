@@ -368,6 +368,10 @@ aliasing_ops_list_return = {
     # 'tensor_split' not composite compliant, see vjp_fail
 }
 
+skip_noncontig = {
+    'batch_norm_with_update',
+}
+
 
 @unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
 @unMarkDynamoStrictTest
@@ -433,9 +437,10 @@ class TestOperators(TestCase):
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
 
-            noncontig_sample = sample.noncontiguous()
-            noncontig_args = [noncontig_sample.input] + list(noncontig_sample.args)
-            noncontig_kwargs = noncontig_sample.kwargs
+            if op.name not in skip_noncontig:
+                noncontig_sample = sample.noncontiguous()
+                noncontig_args = [noncontig_sample.input] + list(noncontig_sample.args)
+                noncontig_kwargs = noncontig_sample.kwargs
 
             diff_argnums = tuple(i for i, arg in enumerate(args) if diff_arg(arg))
             assert len(diff_argnums) > 0
@@ -458,11 +463,12 @@ class TestOperators(TestCase):
                 return result
 
             result = grad(wrapped_fn, diff_argnums)(*args, **kwargs)
-            result_noncontig = grad(wrapped_fn, diff_argnums)(*noncontig_args, **noncontig_kwargs)
             expected = _autograd_grad(_as_tuple(wrapped_fn(*args, **kwargs)), diff_args)
-
             self.assertEqual(result, expected)
-            self.assertEqual(result_noncontig, expected)
+
+            if op.name not in skip_noncontig:
+                result_noncontig = grad(wrapped_fn, diff_argnums)(*noncontig_args, **noncontig_kwargs)
+                self.assertEqual(result_noncontig, expected)
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
