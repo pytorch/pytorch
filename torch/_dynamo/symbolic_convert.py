@@ -591,7 +591,7 @@ def promote_exception_to_graph_break(inner_fn):
             return inner_fn(self, inst)
         except Unsupported:
             raise
-        except RuntimeError as e:
+        except torch._dynamo.exc.TorchRuntimeError as e:
             if self.is_instr_in_exception_handled_region(inst):
                 # If we are in a try block of a try-catch, promote the
                 # exception to graph break
@@ -617,6 +617,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     inline_depth: int
     inconsistent_side_effects: bool
     current_speculation: Optional[SpeculationEntry]
+    exn_range: List[Tuple[int, int]]  # Only used for version < py 3.11
 
     def mark_inconsistent_side_effects(self):
         """
@@ -1099,6 +1100,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.setup_or_before_with(inst)
 
     def SETUP_FINALLY(self, inst):
+        self.exn_range.append((inst.offset, inst.target.offset))
         self.block_stack.append(BlockStackEntry(inst.target))
 
     def BEGIN_FINALLY(self, inst):
@@ -1951,15 +1953,24 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         )
 
     def is_instr_in_exception_handled_region(self, inst):
-        if inst.offset is None or not hasattr(self.f_code, "co_exceptiontable"):
+        if inst.offset is None:
             return False
-        from torch._dynamo.bytecode_transformation import parse_exception_table
 
-        table = parse_exception_table(self.f_code.co_exceptiontable)
-        for entry in table:
-            if entry.start <= inst.offset < entry.end:
-                return True
-        return False
+        if sys.version_info < (3, 11):
+            for start, end in self.exn_range:
+                if start <= inst.offset < end:
+                    return True
+            return False
+        else:
+            if not hasattr(self.f_code, "co_exceptiontable"):
+                return False
+            from torch._dynamo.bytecode_transformation import parse_exception_table
+
+            table = parse_exception_table(self.f_code.co_exceptiontable)
+            for entry in table:
+                if entry.start <= inst.offset < entry.end:
+                    return True
+            return False
 
     def __init__(
         self,
@@ -1994,6 +2005,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.kw_names = None
         self.accept_prefix_inst = True
         self.prefix_insts = []
+        self.exn_range = []
 
         # Properties of the input/output code
         self.instructions: List[Instruction] = instructions
