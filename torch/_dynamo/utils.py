@@ -1565,6 +1565,9 @@ def ensure_graph_fake(e, tx):
 
 def get_fake_values_from_nodes(tx, nodes):
     def visit(n: torch.fx.Node):
+        if n.op == "call_function" and "example_value" not in n.meta:
+            return get_fake_value(n, tx)
+
         return n.meta["example_value"]
 
     args_kwargs = torch.fx.node.map_arg(nodes, visit)
@@ -1584,7 +1587,6 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     """
     from torch.utils._sympy.value_ranges import ValueRangeError
     from .exc import (
-        TorchRuntimeError,
         unimplemented,
         Unsupported,
         UserError,
@@ -1673,7 +1675,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
             )
         elif isinstance(cause, ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
-        raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
+        raise Unsupported(str(e)).with_traceback(e.__traceback__) from None
 
     if not allow_non_graph_fake:
         _ = tree_map_only(
@@ -1750,7 +1752,7 @@ def get_real_value(node, tracer):
     Run the actual computation represented by `node` and return the result.
     This will execute any dependent nodes in the graph as well.
     """
-    from .exc import TorchRuntimeError
+    from .exc import Unsupported
 
     cache = tracer.real_value_cache
     if node in cache:
@@ -1777,7 +1779,7 @@ def get_real_value(node, tracer):
         real_value = run_node(tracer, node, args, kwargs, nn_module)
         cache[node] = real_value
     except RuntimeError as e:
-        raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
+        raise Unsupported(str(e)).with_traceback(e.__traceback__) from None
     return real_value
 
 

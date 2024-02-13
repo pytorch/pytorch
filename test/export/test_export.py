@@ -357,7 +357,7 @@ class TestExport(TestCase):
                 torchdynamo.exc.UserError,
                 torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode,
             ),
-            "Could not guard on data-dependent expression",
+            "trying to get a value out of symbolic int",
         ):
             _ = export(M(), (torch.tensor([2, 3, 5]),))
 
@@ -1247,7 +1247,7 @@ def forward(self, arg_0):
             return y + n
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError,
+            torch._dynamo.exc.Unsupported,
             "Constraining SymFloat or Symbool is nyi",
         ):
             _ = export(WrapperModule(fn), (torch.rand(2, 2), torch.rand(2, 3)))

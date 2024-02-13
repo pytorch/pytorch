@@ -719,7 +719,7 @@ known_failures_re = re.compile(
 
 # Bugs needing investigation:
 known_failing_tests = {
-    "test_current_graph_task_execution_order",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function <
+    "test_current_graph_task_execution_order",  # torch._dynamo.exc.Unsupported: Failed running call_function <
     "test_input_buffer_accum",  # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
     "test_graph_save_on_cpu_cuda",  # AssertionError: 0 not greater than 0
     "test_graph_save_on_cpu",  # torch._dynamo.exc.BackendCompilerFailed: backend='inner_compiler' raised:
@@ -791,10 +791,10 @@ known_failing_tests = {
     "test_unrelated_inputs",  # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
     "test_will_engine_execute_node",  # RuntimeError: specifying inputs= with .backward() not yet implemented for compiled autograd
     "test_backward_to_node",  # RuntimeError: specifying inputs= with .backward() not yet implemented for compiled autograd
-    "test_anomaly_detect_nan",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function aten.add.Tensor(
+    "test_anomaly_detect_nan",  # torch._dynamo.exc.Unsupported: Failed running call_function aten.add.Tensor(
     "test_autograd_multiple_views_python",  # torch._dynamo.exc.Unsupported: call_function args: TensorVariable(
     "test_autograd_node_isinstance",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsInstance
-    "test_autograd_simple_views_python",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function
+    "test_autograd_simple_views_python",  # torch._dynamo.exc.Unsupported: Failed running call_function
     "test_callback_adds_callback",  # torch._dynamo.exc.Unsupported: call_method UserDefinedObjectVariable
     "test_callback_propagates_errors_from_device_thread",  # AssertionError: "blah" does not match "call_method
     "test_custom_autograd_no_early_free",  # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
@@ -806,7 +806,7 @@ known_failing_tests = {
     "test_custom_function_setup_context_multi_output",  # torch._dynamo.exc.Unsupported: call_function args
     "test_deep_reentrant",  # torch._dynamo.exc.InternalTorchDynamoError: '<' not supported between instances of
     "test_dont_materialize_grads",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsNone
-    "test_function_returns_undefined_tensor",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function
+    "test_function_returns_undefined_tensor",  # torch._dynamo.exc.Unsupported: Failed running call_function
     "test_grad_fn_prehooks",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
     "test_grad_fn_prehooks_multiple_outputs",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles:
     "test_grad_fn_prehooks_remove_hooks",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: RemovableHandle.remove
@@ -815,7 +815,7 @@ known_failing_tests = {
     "test_invalid_gradients",  # AssertionError: "expected shape" does not match "The size of tensor a (5) must match
     "test_mark_non_differentiable_mixed",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertTrue
     "test_materialize_grads",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
-    "test_naughty_autograd_function_stashing_ctx",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function
+    "test_naughty_autograd_function_stashing_ctx",  # torch._dynamo.exc.Unsupported: Failed running call_function
     "test_no_grad_copy",  # torch._dynamo.exc.Unsupported: call_function args: TensorVariable() SkipFunctionVariable()
     "test_no_grad_copy_sparse",  # torch._dynamo.exc.Unsupported: Tensor.data_ptr
     "test_reentrant_priority",  # torch._dynamo.exc.InternalTorchDynamoError: '<' not supported between instances of

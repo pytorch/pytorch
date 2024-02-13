@@ -5,6 +5,10 @@
 #if !defined(__MAC_14_0) && \
     (!defined(MAC_OS_X_VERSION_14_0) || (MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_14_0))
 
+@interface MPSGraph (SonomaOps)
+-(MPSGraphTensor * _Nonnull) conjugateWithTensor:(MPSGraphTensor * _Nonnull) tensor
+                                            name:(NSString * _Nullable) name;
+@end
 // define BFloat16 enums for MacOS13
 #define MPSDataTypeBFloat16 ((MPSDataType) (MPSDataTypeAlternateEncodingBit | MPSDataTypeFloat16))
 

@@ -49,10 +49,6 @@ class SkipFrame(TorchDynamoException):
     pass
 
 
-class TorchRuntimeError(TorchDynamoException):
-    pass
-
-
 class InvalidBackend(TorchDynamoException):
     def __init__(self, name):
         super().__init__(

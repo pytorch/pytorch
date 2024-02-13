@@ -90,7 +90,8 @@ void DistAutogradContext::accumulateGrad(
   // CUDA stream restoration from autograd function. Hence, we manually
   // call it here to get the streams correct.
   auto forward_stream =
-      torch::autograd::impl::grad_accumulator(variable)->stream();
+      torch::autograd::impl::grad_accumulator(variable)->stream(
+          grad.device().type());
   c10::OptionalStreamGuard stream_guard(forward_stream);
 
   // No higher order gradients supported in distributed autograd.
