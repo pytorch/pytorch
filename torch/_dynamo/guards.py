@@ -54,6 +54,7 @@ from torch.utils.weak import TensorWeakRef
 
 from . import config, convert_frame, exc, mutation_guard
 from .eval_frame import set_guard_error_hook
+from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .source import (
     AttrSource,
     ChainedSource,
@@ -1281,6 +1282,8 @@ def must_add_nn_module_guards(guard):
     )
 
 
+class DeletedGuardFn:
+    pass
 def get_guard_debug_info(code, guard, do_logging=True):
     extra = ""
     if guard.user_stack:
@@ -1325,11 +1328,6 @@ def get_tensor_guard_str(value, name, sizes, strides):
 # delicate handling for invalidating this check function when the
 # locals/globals get invalidated, so there's some extra state
 # we have to hold in this manager class.
-#
-# TODO: this object has reference cycle with itself, via check_fn which
-# references back to CheckFunction via ___guarded_code in closure_vars.
-# Ideally, there shouldn't be any ref cycle so that guards are
-# promptly disposed of.
 class CheckFunctionManager:
     def __init__(
         self,
@@ -1337,7 +1335,6 @@ class CheckFunctionManager:
         guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
     ):
         guards = output_graph.guards if output_graph else None
-        self.valid = True
         self._weakrefs: Dict[int, ReferenceType[object]] = {}
         self.output_graph = output_graph
 
@@ -1436,17 +1433,7 @@ class CheckFunctionManager:
         guards_log.debug("GUARDS:")
 
         # Don't report this guard, it's always the same, useless!
-        code_parts = ["___guarded_code.valid", "___check_global_state()"]
-
-        # Insert global state guard at the root
-        builder.add_python_lambda_leaf_guard_to_root(
-            ["___guarded_code.valid"],
-            ["___guarded_code.valid"],
-            {
-                "___guarded_code": self,
-            },
-            False,
-        )
+        code_parts = ["___check_global_state()"]
 
         self.guard_manager.root.add_global_state_guard(["Checking global state"])
         verbose_code_parts = code_parts[:]
@@ -1582,7 +1569,6 @@ class CheckFunctionManager:
             # we should only hit this case in NopTests()
             global_state = convert_frame.GlobalStateGuard()
         closure_vars = {
-            "___guarded_code": self,
             "___check_tensors": check_tensors_fn,
             "___check_tensors_verbose": check_tensors_verbose_fn,
             "___check_global_state": global_state.check,
@@ -1626,6 +1612,10 @@ class CheckFunctionManager:
         # Grab only G, but preserve "G" because guards access it as "G"
         guard_fn.global_scope = globals_for_guard_fn
         guard_fn.guard_fail_fn = guard_fail_fn
+        # will be populated by a non-owning reference to CacheEntry/ExtraState
+        # when the CacheEntry is constructed
+        guard_fn.cache_entry = None
+        guard_fn.extra_state = None
 
         # Attach some metadata useful for debugging.  TODO(janimesh) - Make a
         # class to separate out metadata for debugging. For example, the
@@ -1634,6 +1624,8 @@ class CheckFunctionManager:
         self.guard_manager.global_scope = globals_for_guard_fn
         self.guard_manager.guard_fail_fn = guard_fail_fn
         self.guard_manager.closure_vars = closure_vars
+        self.guard_manager.cache_entry = None
+        self.guard_manager.extra_state = None
 
         # TODO(janimesh) - It is unclear to me why do we even need these. Maybe
         # there is some circular ref because of GraphBuilder and CheckFnManager.
@@ -1643,11 +1635,21 @@ class CheckFunctionManager:
         return guard_fn
 
     def invalidate(self):
-        # A weakref is no longer valid, self.check_fn should return false
-        # TODO(janimesh) - Free up cache entry after the cache entry formation
-        # is in python, and the underlying data structure is a doubly linked
-        # list.
-        self.valid = False
+        # Some tests reveal that CheckFunctionManager has no attribute
+        # check_fn, but this case should not be of any concern.
+        # This case doesn't seem easy to repro.
+        if (
+            hasattr(self, "check_fn")
+            and self.check_fn is not DeletedGuardFn
+            and (cache_entry := self.check_fn.cache_entry) is not None
+            and (extra_state := self.check_fn.extra_state) is not None
+        ):
+            assert isinstance(cache_entry, CacheEntry)
+            assert isinstance(extra_state, ExtraState)
+            extra_state.invalidate(cache_entry)
+            self.check_fn.cache_entry = None
+            self.check_fn.extra_state = None
+            self.check_fn = DeletedGuardFn
 
     def id_ref(self, obj):
         """add a weakref, return the id"""
