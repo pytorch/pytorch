@@ -3500,6 +3500,7 @@ class ShapeEnv:
         """
 
         # Precondition: a == tgt
+        assert isinstance(a, sympy.Symbol)
 
         # Handles nested tensor symbolic variables which don't have
         # var_to_range bounds
@@ -3527,11 +3528,10 @@ class ShapeEnv:
             self.var_to_range[a] = src_bound & tgt_bound
 
             # Next, check if we can update the range of free symbols in tgt
-            # based on the range in a.  But only do it if:
+            # based on the range in a. But only do it if:
             #  - the source bound non-trivially improves over what we get out of
             #    the existing bounds.
-            #  - the replacement is univariate (multivariate makes my brain
-            #    explode)
+            #  - the replacement is univariate and we can invert the tgt expression
             if not issubset(tgt_bound, src_bound) and len(tgt.free_symbols) == 1:
                 b = next(iter(tgt.free_symbols))
                 # Try to invert the equality
@@ -3569,28 +3569,21 @@ class ShapeEnv:
             #
             #  - If the source has a non-trivial range, only substitute if
             #    we preserve this range.  Note that we may have propagated
-            #    the src_range to free variables in tgt, which helps us achieve
-            #    this.  This ensures we never "forget" about user defined ranges,
+            #    the src_range to free variables in tgt when tgt is univariate
+            #    and we could find an inverse, which helps us achieve this.
+            #    This ensures we never "forget" about user defined ranges,
             #    even if they end up being defined on composite formulas
             #    like s0 + s1.
             #
             #  - If the variable is unbacked, only substitute if the substitution
-            #    would preserve size-like-ness (no loss of information) OR we
-            #    would completely eliminate unbacked SymInts via the substitution
-            #    (because if you get rid of the unbacked symints, size-like-ness
-            #    doesn't matter anymore--you've got hints now, you can handle
-            #    guards directly).
-            #
-            #    Note that because we are very conservative about propagating
-            #    size-like-ness right now, this means something like u0 == u1 * 2
-            #    will NOT result in a substitution (but maybe in the future it
-            #    could)
+            #    would preserve the bounds also under size-like-ness conditions.
+
             if not issubset(tgt_bound, src_bound):
                 self.log.debug("skipped set_replacement %s = %s (%s) [%s not subset of %s]", a, tgt, msg, tgt_bound, src_bound)
                 return
             elif a in self.size_like:
                 tgt_bound_so = self.bound_sympy(tgt, size_oblivious=True)
-                src_bound_so = self.var_to_range[a] & ValueRanges(2, sympy.oo)
+                src_bound_so = self.bound_sympy(a, size_oblivious=True)
                 if not issubset(tgt_bound_so, src_bound_so):
                     self.log.debug("skipped set_replacement %s = %s (%s) "
                                    "[%s not subset of %s (size-oblivious conditions)]", a, tgt, msg, tgt_bound_so, src_bound_so)
