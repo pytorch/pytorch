@@ -1586,12 +1586,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         by further wrapping them as this graph's fakes.
     """
     from torch.utils._sympy.value_ranges import ValueRangeError
-    from .exc import (
-        unimplemented,
-        Unsupported,
-        UserError,
-        UserErrorType,
-    )
+    from .exc import unimplemented, Unsupported, UserError, UserErrorType
 
     op = node.op
 
