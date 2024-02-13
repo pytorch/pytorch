@@ -3218,16 +3218,6 @@ SKIP_DIRS.extend(filter(None, (_module_dir(m) for m in BUILTIN_SKIPLIST)))
 
 SKIP_DIRS_RE = re.compile(r"match nothing^")
 
-is_fbcode = importlib.import_module("torch._inductor.config").is_fbcode()
-# Skip fbcode paths(including torch.package paths) containing
-# one of the following strings.
-FBCODE_SKIP_DIRS = {
-    "torchrec/distributed",
-    "torchrec/fb/distributed",
-    "caffe2/torch/fb/sparsenn/pooled_embeddings_modules.py",
-}
-FBCODE_SKIP_DIRS_RE = re.compile(f".*({'|'.join(map(re.escape, FBCODE_SKIP_DIRS))})")
-
 
 def _recompile_re():
     global SKIP_DIRS_RE
@@ -3270,11 +3260,6 @@ def check_file(filename, is_inlined_call=False):
         return SkipResult(
             False,
             "inlined according trace_rules.MOD_INLINELIST",
-        )
-    if is_fbcode and bool(FBCODE_SKIP_DIRS_RE.match(filename)):
-        return SkipResult(
-            True,
-            "skipped according trace_rules.FBCODE_SKIP_DIRS",
         )
     if bool(SKIP_DIRS_RE.match(filename)):
         return SkipResult(True, "skipped according trace_rules.SKIP_DIRS")
