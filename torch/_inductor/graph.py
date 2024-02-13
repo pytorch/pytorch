@@ -118,8 +118,7 @@ def may_get_constant_buffer_dtype(constant_buffer):
 
 
 def is_magic_method(op):
-    magic_ops = {method_to_operator(m) for m in magic_methods}
-    return op in magic_ops
+    return op in map(method_to_operator, magic_methods)
 
 
 def getattr_recursive(obj, target):
