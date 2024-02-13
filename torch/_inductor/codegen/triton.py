@@ -14,6 +14,7 @@ from functools import lru_cache
 from typing import (
     Any,
     Callable,
+    cast,
     Counter,
     DefaultDict,
     Dict,
@@ -2686,15 +2687,16 @@ class TritonKernel(Kernel):
                 code.splice(self.imports_for_benchmark_kernel())
 
         argdefs, _, signature = self.args.python_argdefs()
-        # maps actual expression to SizeArg if its in sizevars replacements
+        # maps actual expression to SizeArg if it is in sizevars replacements
         for i, arg in enumerate(signature):
-            if (
-                isinstance(arg, SizeArg)
-                and arg.expr in V.graph.sizevars.inv_precomputed_replacements
-            ):
-                signature[i] = SizeArg(
-                    arg.name, V.graph.sizevars.inv_precomputed_replacements[arg.expr]
-                )
+            if isinstance(arg, SizeArg):
+                # mypy is unhappy about the sympy.Expr
+                # type for the key of the dict below
+                symbol = cast(sympy.Symbol, arg.expr)
+                if symbol in V.graph.sizevars.inv_precomputed_replacements:
+                    signature[i] = SizeArg(
+                        arg.name, V.graph.sizevars.inv_precomputed_replacements[symbol]
+                    )
 
         mutated_args = set()
         for mutation in self.mutations:
