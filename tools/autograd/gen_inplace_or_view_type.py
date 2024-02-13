@@ -4,7 +4,7 @@
 # if updates are needed in torch/csrc/autograd/autograd_not_implemented_fallback.cpp
 # The fallback is expected to mimick this codegen, so we should keep the two in sync.
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from torchgen.api import cpp
 from torchgen.api.autograd import (
@@ -172,7 +172,7 @@ for (auto ${view_idx} : c10::irange(${var}.size())) {
 
 SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_METADATA_CHANGE = CodeTemplate(
     """\
-std::unique_ptr<torch::autograd::ViewFunc> func(nullptr);
+std::function<at::Tensor(const at::Tensor&)> func=nullptr;
 std::function<at::Tensor(const at::Tensor&)> rev_func=nullptr;
 if (${is_view_with_metadata_change} ||
     !self.unsafeGetTensorImpl()->support_as_strided() ||
@@ -184,9 +184,11 @@ if (${is_view_with_metadata_change} ||
 """
 )
 
-REPLAY_VIEW_FUNC = CodeTemplate(
+REPLAY_VIEW_LAMBDA_FUNC = CodeTemplate(
     """\
-func = std::make_unique<${view_func_name}>(${view_func_args});
+func = [=](const at::Tensor& ${input_base}) {
+  return ${replay_view_call}${view_indexing};
+};
 """
 )
 
@@ -344,13 +346,24 @@ def get_view_info(f: NativeFunction) -> Optional[str]:
     return view_info
 
 
-def emit_view_func(
+# For view replay calls, we generate an ordinary Dispatcher::call() instead, because:
+#  - We want to replay the entire call into the op, including any previously-set dispatch keys (including autograd!).
+#  - The view replay call also is not part of the hot path.
+def emit_view_call(
+    f: NativeFunction, input_base: str, unpacked_args: Sequence[str]
+) -> str:
+    # View replay functions use the standard Dispatcher::call API.
+    return CALL_DISPATCH.substitute(
+        unambiguous_name=f.func.name.unambiguous_name(), unpacked_args=unpacked_args
+    )
+
+
+def emit_view_lambda(
     f: NativeFunction, bindings: List[Binding], view_idx: Optional[str] = None
 ) -> str:
     """Generate an additional lambda function to recover views in backward when as_strided is not supported.
     See Note [View + Inplace update for base tensor] and [View + Inplace update for view tensor] for more details.
     """
-    # TODO: Clean this logic up if we get rid of reverse view funcs or reify them.
     input_base = "input_base"
     replay_view_func = ""
     updated_args: List[str] = []
@@ -399,14 +412,11 @@ def emit_view_func(
         else:
             updated_args.append(arg)
 
-    from .gen_view_funcs import view_func_name
-
-    view_func_args = [b.name for b in bindings if b.name != "self"]
-    if view_idx is not None:
-        view_func_args.append(f"{view_idx}")
-    replay_view_func += REPLAY_VIEW_FUNC.substitute(
-        view_func_name=view_func_name(f, include_namespace=True),
-        view_func_args=view_func_args,
+    replay_view_call = emit_view_call(f, input_base, updated_args)
+    replay_view_func += REPLAY_VIEW_LAMBDA_FUNC.substitute(
+        input_base=input_base,
+        replay_view_call=replay_view_call,
+        view_indexing=("" if view_idx is None else f"[{view_idx}]"),
     )
 
     input_view = "input_view"
@@ -483,26 +493,26 @@ def emit_view_body(
         if is_tensor_list_type(return_info.type):
             creation_meta = get_creation_meta_in_mode("CreationMeta::MULTI_OUTPUT_NODE")
             view_idx = "view_idx"
-            view_func = emit_view_func(
+            view_lambda = emit_view_lambda(
                 f, extract_bindings(f), view_idx=view_idx
             ).strip()
             as_view_call = (
                 f"as_view(/* base */ {view_info}, /* output */ {var}[{view_idx}], "
                 "/* is_bw_differentiable */ true, /* is_fw_differentiable */ true, "
-                "/* view_func */ std::move(func), /* rev_view_func */ rev_func, "
+                "/* view_func */ func, /* rev_view_func */ rev_func, "
                 f"/* creation_meta */ {creation_meta});"
             )
             call += MULTI_OUTPUT_VIEW_ITERATION.substitute(
-                var=var, view_idx=view_idx, body=f"{view_func}\n{as_view_call}"
+                var=var, view_idx=view_idx, body=f"{view_lambda}\n{as_view_call}"
             )
             rhs_value = f"std::move({var})"
         else:
-            call += emit_view_func(f, extract_bindings(f), view_idx=None)
+            call += emit_view_lambda(f, extract_bindings(f), view_idx=None)
             creation_meta = get_creation_meta_in_mode("CreationMeta::DEFAULT")
             rhs_value = (
                 f"as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, "
                 "/* is_fw_differentiable */ true, "
-                f"/* view_func */ std::move(func), /* rev_view_func */ rev_func, /* creation_meta */ {creation_meta})"
+                f"/* view_func */ func, /* rev_view_func */ rev_func, /* creation_meta */ {creation_meta})"
             )
     else:
         # This could be supported but we don't need it at the moment, so keeping things simple.
