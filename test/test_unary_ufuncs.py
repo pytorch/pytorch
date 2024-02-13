@@ -20,6 +20,7 @@ from torch.testing._internal.common_utils import (
     skipIfNoSciPy,
     IS_WINDOWS,
     gradcheck,
+    is_iterable_of_tensors,
 )
 from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs,
@@ -433,7 +434,13 @@ class TestUnaryUfuncs(TestCase):
 
         torch_kwargs, _ = op.sample_kwargs(device, dtype, input)
         actual = op(input, **torch_kwargs)
-        expected = torch.stack([op(slice, **torch_kwargs) for slice in input])
+
+        expected_unstacked = [op(slice, **torch_kwargs) for slice in input]
+        if is_iterable_of_tensors(actual):
+            all_outs = [op(slice, **torch_kwargs) for slice in input]
+            expected = [torch.stack([out[i] for out in all_outs]) for i in range(len(actual))]
+        else:
+            expected = torch.stack([op(slice, **torch_kwargs) for slice in input])
 
         self.assertEqual(actual, expected)
 
