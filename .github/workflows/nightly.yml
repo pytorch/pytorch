@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - .github/workflows/nightly.yml
+      - .github/workflows/_linux-build.yml
 
 concurrency:
   group: ${{ github.workflow }}--${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
