@@ -10,6 +10,10 @@
 
 #include <ATen/native/Resize.h>
 
+#ifdef USE_CUDA
+#include <ATen/native/cuda/Resize.h>
+#endif
+
 namespace torch {
 namespace inductor {
 using namespace at;
@@ -83,7 +87,16 @@ static void accumulate_grad_(const Tensor& variable, const Tensor& new_grad) {
 
 static void resize_storage_bytes_(const Tensor& variable, SymInt new_size) {
   // similar to THPStorage_resize_ in StorageMethods.cpp, but is traceable
-  at::native::resize_bytes(variable.storage(), new_size);
+  if (variable.storage().device_type() == at::kCUDA) {
+#ifdef USE_CUDA
+    at::native::resize_bytes_cuda(
+        variable.storage().unsafeGetStorageImpl(), new_size.expect_int());
+#else
+    TORCH_CHECK(false, "built without USE_CUDA");
+#endif
+  } else {
+    at::native::resize_bytes_nocuda(variable.storage(), new_size);
+  }
 }
 
 TORCH_LIBRARY_FRAGMENT(inductor, m) {
