@@ -99,3 +99,5 @@ an experimental feature and is subject to change.
 For users which are used to using and sharing models in the `torch.save` format, the following utilities are pvoided:
 
 .. autofunction:: torch.distributed.checkpoint.format_utils.dcp_to_torch_save
+
+.. autofunction:: torch.distributed.checkpoint.format_utils.torch_save_to_dcp
