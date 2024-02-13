@@ -3897,6 +3897,39 @@ class TestNestedTensorSubclass(TestCase):
         output_dense = F.scaled_dot_product_attention(query._values, key._values, value._values)
         self.assertEqual(output._values, output_dense)
 
+    @dtypes(torch.float32, torch.double, torch.half)
+    def test_sdpa_with_packed_in_proj(self, device, dtype):
+        # shape (B, *, D)
+        input_packed = random_nt_from_dims(
+            [5, None, 10], device=device, dtype=dtype, layout=torch.jagged)
+
+        # Do input projection.
+        num_heads = 2
+        # should be multiple of 4 for efficient kernels (e.g. flash / mem-efficient)
+        head_dim = 8
+        qkv_linear = torch.nn.Linear(10, num_heads * head_dim * 3).to(device=device, dtype=dtype)
+
+        def in_proj(input_packed, qkv_linear=qkv_linear):
+            qkv_post_proj = qkv_linear(input_packed)
+            # these are non-contiguous to trigger _is_safe_to_get_storage_as_tensor()
+            q, k, v = qkv_post_proj.chunk(3, dim=-1)
+            q = q.unflatten(-1, [num_heads, head_dim]).transpose(-2, -3)
+            k = k.unflatten(-1, [num_heads, head_dim]).transpose(-2, -3)
+            v = v.unflatten(-1, [num_heads, head_dim]).transpose(-2, -3)
+            return q, k, v
+
+        q, k, v = in_proj(input_packed)
+        output = F.scaled_dot_product_attention(q, k, v, attn_mask=None)
+
+        # compare to individually running unbound components through
+        for in_component, out_component in zip(
+            input_packed.unbind(),
+            output.transpose(-2, -3).unbind()
+        ):
+            q, k, v = in_proj(in_component)
+            out = F.scaled_dot_product_attention(q, k, v).transpose(-2, -3)
+            self.assertEqual(out, out_component)
+
 
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
