@@ -147,19 +147,9 @@ class FSDPParam:
     def _init_dtype_attrs(self, param: nn.Parameter, mp_policy: MixedPrecisionPolicy):
         param_dtype, reduce_dtype = (mp_policy.param_dtype, mp_policy.reduce_dtype)
         self.orig_dtype = param.dtype
-        # Each saved dtype attribute should only be not `None` if it affects
-        # behavior (e.g. requiring casting); otherwise, clamp to `None`
-        if param_dtype is not None and param_dtype == self.orig_dtype:
-            # E.g. orig=compute=bf16
+        # Clamp `param_dtype` to `None` if no casting is required
+        if param_dtype == self.orig_dtype:
             param_dtype = None
-        # By default, gradients are computed in the compute dtype
-        if reduce_dtype is not None and (
-            # E.g. orig=compute=reduce=bf16
-            (param_dtype is None and reduce_dtype == self.orig_dtype)
-            # E.g. orig=fp32, compute=reduce=bf16
-            or (param_dtype is not None and reduce_dtype == param_dtype)
-        ):
-            reduce_dtype = None
         self.param_dtype = param_dtype
         self.reduce_dtype = reduce_dtype
         # None indicates that the mixed precision is not enabled

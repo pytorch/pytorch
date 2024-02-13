@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import run_tests
 class TestFullyShardMixedPrecisionTraining(FSDPTest):
     @property
     def world_size(self) -> int:
-        return min(2, torch.cuda.device_count())
+        return min(4, torch.cuda.device_count())
 
     def _init_models_and_optims(
         self,
@@ -58,9 +58,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
     def test_compute_dtype(self):
         self.run_subtests(
-            {
-                "reshard_after_forward": [False, True, 2],
-            },
+            {"reshard_after_forward": [False, True, 2]},
             self._test_compute_dtype,
         )
 
@@ -111,9 +109,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
     def test_reduce_dtype(self):
         self.run_subtests(
-            {
-                "reshard_after_forward": [False, True, 2],
-            },
+            {"reshard_after_forward": [False, True, 2]},
             self._test_reduce_dtype_fp32_reduce,
         )
 
