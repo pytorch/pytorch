@@ -267,6 +267,8 @@ aten::hardtanh.out
 aten::hypot
 aten::hypot.out
 aten::hypot_
+aten::i0
+aten::i0.out
 aten::i0_
 aten::igamma
 aten::igamma.out
