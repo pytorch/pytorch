@@ -1,5 +1,3 @@
-import itertools
-
 from typing import List, NamedTuple, Optional, Tuple
 
 import torch
@@ -43,16 +41,15 @@ def foreach_all_gather(
         (
             param_all_gather_input_dtypes,
             param_all_gather_input_numels,
+            same_dtype,
         ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
-        g = itertools.groupby(d for ds in param_all_gather_input_dtypes for d in ds)
-        if next(g, True) and not next(g, False):  # same dtype
-            dtype = param_all_gather_inputs[0][0].dtype
-            all_gather_inputs = [t for ts in param_all_gather_inputs for t in ts]
-        else:
+        if not same_dtype:
             dtype = torch.uint8
             all_gather_inputs = [
                 t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
             ]
+        else:
+            all_gather_inputs = [t for ts in param_all_gather_inputs for t in ts]
         inp_split_sizes = [t.numel() for t in all_gather_inputs]
         all_gather_input_numel = sum(inp_split_sizes)
         all_gather_output = torch.empty(
@@ -232,13 +229,21 @@ def foreach_reduce_scatter_copy_in(
 
 def _get_all_gather_input_metadatas(
     param_all_gather_inputs: List[List[torch.Tensor]],
-) -> Tuple[List[List[torch.dtype]], List[List[int]]]:
+) -> Tuple[List[List[torch.dtype]], List[List[int]], bool]:
     param_all_gather_input_dtypes: List[List[torch.dtype]] = []
     param_all_gather_input_numels: List[List[int]] = []
+    dtype = param_all_gather_inputs[0][0].dtype
+    same_dtype = True
     for all_gather_inputs in param_all_gather_inputs:
-        param_all_gather_input_dtypes.append([t.dtype for t in all_gather_inputs])
-        param_all_gather_input_numels.append([t.numel() for t in all_gather_inputs])
-    return param_all_gather_input_dtypes, param_all_gather_input_numels
+        input_dtypes: List[torch.dtype] = []
+        input_numels: List[int] = []
+        for all_gather_input in all_gather_inputs:
+            same_dtype &= all_gather_input.dtype == dtype
+            input_dtypes.append(all_gather_input.dtype)
+            input_numels.append(all_gather_input.numel())
+        param_all_gather_input_dtypes.append(input_dtypes)
+        param_all_gather_input_numels.append(input_numels)
+    return param_all_gather_input_dtypes, param_all_gather_input_numels, same_dtype
 
 
 def _div_if_needed(tensor: torch.Tensor, div_factor: float) -> None:
