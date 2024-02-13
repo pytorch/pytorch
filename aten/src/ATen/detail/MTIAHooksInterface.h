@@ -4,8 +4,6 @@
 
 #include <c10/util/Registry.h>
 
-#include <ATen/detail/AcceleratorHooksInterface.h>
-
 #include <string>
 
 namespace at {
@@ -19,7 +17,7 @@ constexpr const char* MTIA_HELP =
     "this error has occurred because you are trying "
     "to use some MTIA's functionality without MTIA extension included.";
 
-struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
+struct TORCH_API MTIAHooksInterface {
   virtual ~MTIAHooksInterface() = default;
 
   virtual void initMTIA() const {
@@ -39,14 +37,6 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
         "Cannot query detailed MTIA version without MTIA Extension for PyTorch.",
         MTIA_HELP);
   }
-
-  virtual bool hasPrimaryContext(DeviceIndex device_index) const override {
-    TORCH_CHECK(
-        false,
-        "Cannot check MTIA primary context without MTIA Extension for PyTorch.",
-        MTIA_HELP);
-  }
-
 };
 
 struct TORCH_API MTIAHooksArgs {};
