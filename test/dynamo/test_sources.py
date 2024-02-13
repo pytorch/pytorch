@@ -25,9 +25,12 @@ class SourceTests(torch._dynamo.test_case.TestCase):
     def test_property_closure(self):
         def external_property():
             closed_value = 7
+
             def internal_function(self):
                 return closed_value
+
             return internal_function
+
         class Elements:
             myprop = property(external_property())
 
@@ -41,6 +44,7 @@ class SourceTests(torch._dynamo.test_case.TestCase):
         a = func(e)
         b = torch.compile(func)(e)
         self.assertEqual(a, b)
+
 
 if __name__ == "__main__":
     torch._dynamo.test_case.run_tests()
