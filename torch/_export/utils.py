@@ -241,9 +241,10 @@ def get_buffer(
 
 
 def sequential_split(gm: torch.fx.GraphModule, node_call_back) -> torch.fx.GraphModule:
-    """ Splits the graph module into multiple submodules based on the node_call_back.
-        The node_call_back should return True if the node is a delimiter. Delimiter will be
-        the first node in the next submodule.
+    """
+    Splits the graph module into multiple submodules based on the node_call_back.
+    The node_call_back should return True if the node is a delimiter. Delimiter will be
+    the first node in the next submodule.
     """
     from torch.fx.passes.split_module import split_module
 
@@ -268,16 +269,16 @@ def sequential_split(gm: torch.fx.GraphModule, node_call_back) -> torch.fx.Graph
 
 
 def nodes_filter(nodes: List[torch.fx.Node], node_call_back) -> List[torch.fx.Node]:
-    """ Returns the nodes as a list that match the node_call_back."""
+    """Returns the nodes that match the node_call_back as a list."""
     return [node for node in nodes if node_call_back(node)]
 
 
 def nodes_first(
     nodes: List[torch.fx.Node], node_call_back=None
 ) -> Optional[torch.fx.Node]:
-    """ Returns the first node that matches the node_call_back.
-        If no node matches, returns None.
-        When node_call_back is None, returns the first node in the node list.
+    """
+    Returns the first node that matches the node_call_back. If no node matches, returns None.
+    When node_call_back is None, returns the first node in the node list.
     """
     ret = nodes_filter(nodes, node_call_back if node_call_back else lambda node: True)
     if len(ret) > 0:

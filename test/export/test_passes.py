@@ -88,15 +88,16 @@ def _set_grad_enabled_tests():
             return d, e
 
     x = torch.randn(2, 2)
+
     def _get_predispatch_module(mod, args, ambient_grad_enabled=True):
         with torch.set_grad_enabled(ambient_grad_enabled):
             return _export(mod, args, pre_dispatch=True).module()
 
 
-    return {"ctx_manager": (_get_predispatch_module(SetGradCtxManager(), (x,)), (x,)),
-            "ctx_manager_under_no_grad": (_get_predispatch_module(SetGradCtxManager(), (x,), False), (x,)),
-            "op":(_get_predispatch_module(SetGradOp(), (x,)), (x,)),
-            "op_under_no_grad":(_get_predispatch_module(SetGradOp(), (x,), False), (x,))}
+    return {"ctx_manager" : (_get_predispatch_module(SetGradCtxManager(), (x,)), (x,)),
+            "ctx_manager_under_no_grad" : (_get_predispatch_module(SetGradCtxManager(), (x,), False), (x,)),
+            "op" : (_get_predispatch_module(SetGradOp(), (x,)), (x,)),
+            "op_under_no_grad" : (_get_predispatch_module(SetGradOp(), (x,), False), (x,))}
 
 SET_GRAD_ENABLED_TESTS = _set_grad_enabled_tests()
 
@@ -458,7 +459,7 @@ def forward(self, arg_0):
             def _is_set_grad_enabled_sub_mod(node):
                 if node.op == "call_module":
                     subgm = getattr(node.graph.owning_module, node.target)
-                    first_non_ph= nodes_first(subgm.graph.nodes, lambda node: node.op != "placeholder")
+                    first_non_ph = nodes_first(subgm.graph.nodes, lambda node: node.op != "placeholder")
                     if first_non_ph and first_non_ph.op == "call_function" and first_non_ph.target == torch._C._set_grad_enabled:
                         return True
                 return False
@@ -470,6 +471,7 @@ def forward(self, arg_0):
 
     def test_sequential_split_graph(self):
         gm, args = SET_GRAD_ENABLED_TESTS["ctx_manager"]
+
         def _is_set_grad_enabled_node(node):
             return node.op == "call_function" and node.target == torch._C._set_grad_enabled
         new_gm = sequential_split(gm, _is_set_grad_enabled_node)
