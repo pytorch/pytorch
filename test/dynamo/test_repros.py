@@ -861,6 +861,16 @@ class MockModule(torch.nn.Module):
         return self.inner_fn(tensor.shape, (1, 2, 3))
 
 
+class IncByOne:
+    def __init__(self, x):
+        self.x = x + 1
+
+
+class IncByTwo:
+    def __init__(self, x):
+        self.x = x + 2
+
+
 class ReproTests(torch._dynamo.test_case.TestCase):
     def test_do_paste_mask(self):
         torch._dynamo.utils.counters.clear()
@@ -4131,6 +4141,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             pass
         else:
             self.fail("expected exception")
+
+    def test_udf_classes_reconstruction(self):
+        def fn(x):
+            o = T(5)
+            return o.x + x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        T = IncByOne
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+        # This should recompile
+        T = IncByTwo
+        self.assertEqual(fn(x), opt_fn(x))
 
 
 if __name__ == "__main__":
