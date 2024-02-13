@@ -79,7 +79,7 @@ def addmm_pattern(
 
 # addmm wrapper for testing purposes
 def call_addmm(bias, mat1, mat2, *args, **kwargs):
-    if len(bias.shape)==2 and bias.shape[0]==1:
+    if len(bias.shape) == 2 and bias.shape[0] == 1:
         bias = bias.squeeze(0)
     return aten.addmm(bias, mat1, mat2, *args, **kwargs)
 
@@ -180,7 +180,7 @@ def pad_addmm(
         res = res[:, :-n_padded_length]
     if explicit_transpose and input is not None:
         # in this case we used aten.mm and have to add bias and multiply in alpha and beta manually
-        if alpha==1 and beta==1:
+        if alpha == 1 and beta == 1:
             res = res + input
         else:
             res = alpha * res + beta * input
@@ -188,14 +188,14 @@ def pad_addmm(
 
 
 def addmm_replace(
-    input: Optional[Tensor], mat1: Tensor, mat2: Tensor, beta=1.0, alpha=1.0
+    input: Tensor, mat1: Tensor, mat2: Tensor, beta=1.0, alpha=1.0
 ) -> Tensor:
     k_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
     n_padded_length = get_padded_length(mat2.shape[1], get_alignment_size(mat2))
     m_padded_length = get_padded_length(mat1.shape[0], get_alignment_size(mat1))
     explicit_transpose = 0
     if torch._inductor.config.shape_pad_use_transpose:
-        if m_padded_length == 0 and n_padded_length != 0 and len(input.shape)>=2:
+        if m_padded_length == 0 and n_padded_length != 0 and len(input.shape) >= 2:
             explicit_transpose = True
             n_padded_length = 0
             m_padded_length = 0

@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, Optional, Tuple, TYPE_CHECKING
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
+from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
 if dist.is_available() or TYPE_CHECKING:
     from torch.distributed import distributed_c10d
@@ -175,7 +176,10 @@ def _gather_state_dict(
         # Call `wait()` to force the tensor to be synchronous with respect
         # to the main stream.
         # See the discussion in https://github.com/pytorch/pytorch/pull/117799.
-        return value.to_local().wait()
+        value = value.to_local()
+        if isinstance(value, AsyncCollectiveTensor):
+            value = value.wait()
+        return value
 
     return _iterate_state_dict(
         state_dict,
