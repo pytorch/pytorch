@@ -20,7 +20,7 @@ constexpr const char* MTIA_HELP =
     "to use some MTIA's functionality without MTIA extension included.";
 
 struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
-  virtual ~MTIAHooksInterface() override = default;
+  virtual ~MTIAHooksInterface() = default;
 
   virtual void initMTIA() const {
     TORCH_CHECK(
