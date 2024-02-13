@@ -2398,7 +2398,6 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         fn(x)
         self.assertEqual(len(records), 0)
 
-    @unittest.expectedFailure
     @xfailIfTorchDynamo
     @config.patch(capture_func_transforms=True)
     @make_logging_test(recompiles=True)
@@ -2425,7 +2424,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertIn(
             """\
     triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter().check_state((1,))  # with grad_increment_nesting() as level:  # _functorch/eager_transforms.py:1232 in grad_and_value_impl""",
+    - torch._functorch.pyfunctorch.compare_functorch_state([])      # with grad_increment_nesting() as level:  # _functorch/eager_transforms.py:1232 in grad_and_value_impl""",
             record.getMessage(),
         )
 
