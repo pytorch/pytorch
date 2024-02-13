@@ -153,8 +153,13 @@ def split_module(
             default_value = (
                 node.args[0] if len(node.args) > 0 else inspect.Signature.empty
             )
-            args = () if default_value is inspect.Signature.empty else (default_value,)
-            base_mod_env[node.name] = base_mod_graph.create_node('placeholder', name, args=args, type_expr=node.type)
+            if keep_original_node_name:
+                args = () if default_value is inspect.Signature.empty else (default_value,)
+                base_mod_env[node.name] = base_mod_graph.create_node('placeholder', node.name, args=args, type_expr=node.type)
+            else:
+                base_mod_env[node.name] = base_mod_graph.placeholder(
+                    node.target, type_expr=node.type, default_value=default_value
+                )
             base_mod_env[node.name].meta = node.meta.copy()
         elif node.op == "get_attr":
             base_mod_env[node.name] = base_mod_graph.get_attr(node.target)
