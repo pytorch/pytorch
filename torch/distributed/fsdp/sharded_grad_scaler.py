@@ -15,7 +15,7 @@ def _refresh_per_optimizer_state() -> Dict[str, Any]:
 
 
 def _is_supported_device(tensor: torch.Tensor) -> bool:
-    return tensor.is_cuda or tensor.device.type in ("xla", "cpu")
+    return tensor.is_cuda or tensor.device.type in ("xla", "cpu", "hpu")
 
 
 class _GeneralMultiDeviceReplicator(_MultiDeviceReplicator):
