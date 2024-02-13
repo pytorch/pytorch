@@ -91,6 +91,10 @@ def set_pytorch_distributed_envs_from_justknobs():
     pass
 
 
+def log_export_usage(**kwargs):
+    pass
+
+
 @functools.lru_cache(None)
 def max_clock_rate():
     from triton.testing import nvsmi

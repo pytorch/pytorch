@@ -7,6 +7,7 @@
 #include <ATen/ops/_copy_from_native.h>
 #include <ATen/ops/imag.h>
 #include <ATen/ops/real.h>
+#include <ATen/ops/view_as_real.h>
 #include <ATen/ops/zeros_like.h>
 
 namespace at::native {
@@ -271,8 +272,12 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
   } else {
     // Simulate cast to Complex on older MacOS by initializing real and imag parts
     if (dst_.is_complex() && !supportsComplex()) {
-      at::real(dst_) = src;
-      at::imag(dst_) = at::zeros_like(src);
+      if (!src.is_complex()) {
+        at::real(dst_).copy_(src);
+        at::imag(dst_).fill_(0);
+      } else {
+        at::view_as_real(dst_).copy_(at::view_as_real(src));
+      }
     } else if (dst_byte_offset) {
       auto tmp = at::empty(dst_.sizes(), dst_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
       auto tmpBuffer = getMTLBufferStorage(tmp);
