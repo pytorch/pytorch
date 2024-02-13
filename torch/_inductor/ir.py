@@ -284,6 +284,9 @@ class IRNode:
     def get_read_names(self):
         return {dep.name for dep in self.get_reads()}
 
+    def get_dtype(self):
+        return self.dtype
+
     def get_layout(self):
         raise NotImplementedError(f"get_layout() is not implemented by {type(self)}!")
 
@@ -321,7 +324,7 @@ class IRNode:
     # defined, while having no effect at runtime. We cannot create stub implementations here because other parts of
     # the code dynamically check for defined attributes.
     get_device: Callable[[], torch.device]
-    get_dtype: Callable[[], torch.dtype]
+    dtype: torch.dtype
     get_name: Callable[[], str]
     get_reads: Callable[[], Any]
     get_stride: Callable[[], Any]
@@ -387,9 +390,6 @@ class Loops(IRNode):
         self.origin_node = None
 
     __repr__ = __str__
-
-    def get_dtype(self):
-        return self.dtype
 
     def get_device(self):
         return self.device
@@ -1838,10 +1838,7 @@ class BaseView(IRNode):
 
     @property
     def dtype(self):
-        return self.data.get_dtype()
-
-    def get_dtype(self):
-        return self.dtype
+        return self.data.dtype
 
     def get_layout(self):
         return self.data.get_layout()
@@ -2270,9 +2267,6 @@ class ReinterpretView(BaseView):
     def dtype(self):
         return self.layout.dtype
 
-    def get_dtype(self):
-        return self.dtype
-
     def get_size(self):
         return list(self.layout.size)
 
@@ -2385,9 +2379,6 @@ class BaseConstant(IRNode):
 
     def get_size(self):
         return ()
-
-    def get_dtype(self):
-        return self.dtype
 
     def get_device(self):
         return self.device
@@ -2855,9 +2846,6 @@ class Buffer(IRNode):
     @property
     def dtype(self):
         return getattr(self.layout, "dtype", None)
-
-    def get_dtype(self):
-        return self.dtype
 
     def get_size(self):
         return list(self.layout.size)
