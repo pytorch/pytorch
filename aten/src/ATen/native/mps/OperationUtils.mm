@@ -3,6 +3,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
@@ -52,12 +53,20 @@ static inline void checkSupportsComplex() {
   TORCH_CHECK_TYPE(supportsComplex(), "MPS complex types are only supported on MacOS 14.0 or newer.");
 }
 
+static inline void checkSupportsBFloat16() {
+  TORCH_CHECK_TYPE(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
+                   "MPS bfloat16 type is supported on MacOS 14.0 or newer.");
+}
+
 MPSDataType getMPSDataType(ScalarType scalar_type) {
   switch (scalar_type) {
     case ScalarType::Float:
       return MPSDataTypeFloat32;
     case ScalarType::Half:
       return MPSDataTypeFloat16;
+    case ScalarType::BFloat16:
+      checkSupportsBFloat16();
+      return MPSDataTypeBFloat16;
     case ScalarType::Int:
       return MPSDataTypeInt32;
     case ScalarType::Long:
@@ -134,6 +143,9 @@ MPSDataType getMPSScalarType(ScalarType scalar_type) {
       return MPSDataTypeFloat32;
     case ScalarType::Half:
       return MPSDataTypeFloat16;
+    case ScalarType::BFloat16:
+      checkSupportsBFloat16();
+      return MPSDataTypeBFloat16;
     case ScalarType::Int:
       return MPSDataTypeInt32;
     case ScalarType::Long:
@@ -169,6 +181,8 @@ std::string getMPSTypeString(ScalarType scalar_type, bool short_name) {
       return short_name ? "f32" : "Float32";
     case ScalarType::Half:
       return short_name ? "f16" : "Float16";
+    case ScalarType::BFloat16:
+      return short_name ? "bf16" : "BFloat16";
     case ScalarType::Int:
       return short_name ? "i32" : "Int32";
     case ScalarType::Long:
@@ -405,6 +419,8 @@ MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
       return {.value.f = scalar.to<float>(), .size = sizeof(float), .type = type};
     case ScalarType::Half:
       return {.value.h = scalar.to<at::Half>(), .size = sizeof(short), .type = type};
+    case ScalarType::BFloat16:
+      return {.value.bf16 = scalar.to<at::BFloat16>(), .size = sizeof(short), .type = type};
     case ScalarType::Long:
       return {.value.i = scalar.to<int64_t>(), .size = sizeof(int64_t), .type = type};
     case ScalarType::Int:
