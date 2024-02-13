@@ -35,7 +35,7 @@ void initAOTIRunnerBindings(PyObject* module) {
       .def("get_call_spec", &AOTIModelContainerRunnerCuda::get_call_spec)
       .def(
           "get_constant_names_to_original_fqns",
-          &AOTIModelContainerRunnerCpu::getConstantNamesToOriginalFQNs)
+          &AOTIModelContainerRunnerCuda::getConstantNamesToOriginalFQNs)
       .def(
           "get_constant_names_to_dtypes",
           &AOTIModelContainerRunnerCuda::getConstantNamesToDtypes);
