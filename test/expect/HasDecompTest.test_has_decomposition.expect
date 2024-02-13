@@ -848,8 +848,6 @@ aten::lift_fresh_copy
 aten::lift_fresh_copy.out
 aten::linalg_cholesky_ex
 aten::linalg_cholesky_ex.L
-aten::linalg_cross
-aten::linalg_cross.out
 aten::linalg_eig
 aten::linalg_eig.out
 aten::linalg_householder_product

@@ -1371,6 +1371,28 @@ def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1
     return out + beta * self
 
 
+@register_decomposition(aten.linalg_cross)
+@out_wrapper()
+@pw_cast_for_opmath
+def linalg_cross(a: Tensor, b: Tensor, dim: int = -1):
+    a_, b_ = torch.broadcast_tensors(a, b)
+    dim = utils.canonicalize_dim(a_.ndim, dim)
+    a_0, a_1, a_2 = torch.split(a_, 1, dim=dim)
+    b_0, b_1, b_2 = torch.split(b_, 1, dim=dim)
+    return torch.cat(
+        [a_1*b_2 - a_2*b_1, a_2*b_0 - a_0*b_2, a_0*b_1 - a_1*b_0], dim=dim)
+    # cross_idx = torch.arange(3, device=a_.device)
+    # return torch.cat([
+    #         a_.index_select(dim, cross_idx[(i + 1) % 3])
+    #         * b_.index_select(dim, cross_idx[(i + 2) % 3])
+    #         - a_.index_select(dim, cross_idx[(i + 2) % 3])
+    #         * b_.index_select(dim, cross_idx[(i + 1) % 3])
+    #         for i in range(3)
+    #     ],
+    #     dim=dim,
+    # )
+
+
 @register_decomposition(aten.native_group_norm_backward.default)
 @pw_cast_for_opmath
 def native_group_norm_backward(
