@@ -8,7 +8,9 @@
 
 namespace c10::xpu {
 
-/// A variant of DeviceGuard that is specialized for XPU.
+/// A variant of DeviceGuard that is specialized for XPU. It is a little more
+/// efficient than DeviceGuard. However, it can only be used from code that
+/// links against XPU directly.
 struct XPUGuard {
   /// No default constructor; see Note [Omitted default constructor from RAII]
   explicit XPUGuard() = delete;
