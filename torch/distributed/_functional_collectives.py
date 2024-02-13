@@ -986,6 +986,7 @@ def all_reduce_inplace(
 
     return tensor.copy_(all_reduce(tensor, op, group, tag))
 
+
 def all_to_all_inplace(
     output: torch.Tensor,
     input: torch.Tensor,
@@ -998,20 +999,25 @@ def all_to_all_inplace(
     assert (
         not async_op
     ), "Can't remap async version of inplace op to functional collective"
-    return output.copy_(all_to_all_single(input, output_split_sizes, input_split_sizes, group, tag))
+    return output.copy_(
+        all_to_all_single(input, output_split_sizes, input_split_sizes, group, tag)
+    )
+
 
 def all_gather_inplace(
     tensor_list: List[torch.Tensor],
     tensor: torch.Tensor,
     group=None,
     async_op=False,
-    tag: str = ""
+    tag: str = "",
 ):
     assert (
         not async_op
     ), "Can't remap async version of inplace op to functional collective"
     output = all_gather_tensor(tensor, 0, group, tag)
-    for dst, src in zip(tensor_list, output.split([t.size(0) for t in tensor_list], dim=0)):
+    for dst, src in zip(
+        tensor_list, output.split([t.size(0) for t in tensor_list], dim=0)
+    ):
         dst.copy_(src)
     return tensor_list
 
@@ -1022,7 +1028,7 @@ def reduce_scatter_list(
     op=ReduceOp.SUM,
     group=None,
     async_op=False,
-    tag: str = ""
+    tag: str = "",
 ):
     assert (
         not async_op
@@ -1031,14 +1037,14 @@ def reduce_scatter_list(
 
 
 from torch.distributed.distributed_c10d import (
+    _all_gather_base as legacy_all_gather_base,
+    _reduce_scatter_base as legacy_reduce_scatter_base,
+    all_gather as legacy_all_gather,
     all_gather_into_tensor as legacy_allgather,
     all_reduce as legacy_allreduce,
-    reduce_scatter_tensor as legacy_reducescatter,
     all_to_all_single as legacy_all_to_all_single,
-    all_gather as legacy_all_gather,
-    _reduce_scatter_base as legacy_reduce_scatter_base,
-    _all_gather_base as legacy_all_gather_base,
     reduce_scatter as legacy_reduce_scatter_list,
+    reduce_scatter_tensor as legacy_reducescatter,
 )
 
 # This dict should contain sets of functions that dynamo is allowed to remap.
