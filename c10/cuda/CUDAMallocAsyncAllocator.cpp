@@ -9,10 +9,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace c10 {
-namespace cuda {
-namespace CUDACachingAllocator {
-namespace CudaMallocAsync {
+namespace c10::cuda::CUDACachingAllocator::CudaMallocAsync {
 
 #if CUDA_VERSION >= 11040
 // CUDA device allocator that uses cudaMallocAsync to implement
@@ -410,7 +407,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         OutOfMemoryError,
         size < one_exa_bytes,
         "CUDA out of memory. Tried to allocate more than 1EB memory.");
-    int device = 0;
+    c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     if (size != 0) {
@@ -824,7 +821,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     if (nbytes == 0) {
       return nullptr;
     }
-    int device = 0;
+    c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     mallocAsync(&r, device, nbytes, cuda::getCurrentCUDAStream(device));
@@ -835,7 +832,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     if (nbytes == 0) {
       return nullptr;
     }
-    int device = 0;
+    c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     mallocAsync(&r, device, nbytes, stream);
@@ -844,7 +841,8 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   void raw_delete(void* ptr) override {
     freeAsync(ptr);
   }
-  void enablePeerAccess(int dev, int dev_to_access) override {
+  void enablePeerAccess(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access)
+      override {
     // Double-checks allocator backend hasn't changed, which would definitely be
     // an error. cudaMallocAsync pools are unaffected by
     // cudaDeviceEnablePeerAccess. We need pool-specific enablement. See
@@ -898,7 +896,4 @@ CUDAAllocator* allocator() {
 
 #endif
 
-} // namespace CudaMallocAsync
-} // namespace CUDACachingAllocator
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda::CUDACachingAllocator::CudaMallocAsync

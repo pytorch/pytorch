@@ -26,6 +26,9 @@ from torch.distributed._state_dict_utils import (
     _offload_state_dict_to_cpu,
 )
 from torch.distributed._tensor import DTensor
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    _CHECKPOINT_PREFIX,
+)
 from torch.distributed.fsdp import (
     FullOptimStateDictConfig,
     FullStateDictConfig,
@@ -145,7 +148,7 @@ def _get_fqns(model: nn.Module, name: str, skip_ddp_prefix: bool = True) -> FQNS
         The canonical FQNs based on the model traversal.
     """
     if "." not in name:
-        return {name}
+        return {name.replace(_CHECKPOINT_PREFIX, "")}
 
     obj_names = name.split(".")
     fqn_obj_names = []
@@ -162,6 +165,8 @@ def _get_fqns(model: nn.Module, name: str, skip_ddp_prefix: bool = True) -> FQNS
                 flat_param = getattr(curr_obj, FLAT_PARAM)
                 if prefix:
                     prefix = f"{prefix}."
+                # FSDP already handles removal of checkpoint prefix, so we can return
+                # directly
                 return {f"{prefix}{fqn}" for fqn in flat_param._fqns}
             curr_obj = getattr(curr_obj, FSDP_WRAPPED_MODULE)
             if curr_obj_name != FSDP_WRAPPED_MODULE:
@@ -171,7 +176,7 @@ def _get_fqns(model: nn.Module, name: str, skip_ddp_prefix: bool = True) -> FQNS
             fqn_obj_names.append(curr_obj_name)
             curr_obj = getattr(curr_obj, curr_obj_name)
 
-    return {".".join(fqn_obj_names)}
+    return {".".join(fqn_obj_names).replace(_CHECKPOINT_PREFIX, "")}
 
 
 def _verify_options(

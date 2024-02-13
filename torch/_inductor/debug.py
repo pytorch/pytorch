@@ -80,7 +80,7 @@ def draw_buffers(nodes: List[BaseSchedulerNode], print_graph=False, fname=None):
         if isinstance(node, ir.ComputedBuffer):
             dtype = node.data.dtype
 
-        metadata = TensorMetadata(group, dtype, None, None, None, None, None)
+        metadata = TensorMetadata(group, dtype, None, None, None, None, None)  # type: ignore[arg-type]
         node.meta["tensor_meta"] = metadata
 
     if print_graph:

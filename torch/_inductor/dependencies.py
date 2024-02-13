@@ -5,6 +5,7 @@ import logging
 import re
 import typing
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from unittest.mock import patch
 
 import sympy
 
@@ -12,8 +13,15 @@ import torch
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
 from .codegen.common import index_prevent_reordering
-from .utils import get_dtype_size, sympy_index_symbol, sympy_str, sympy_subs, VarRanges
-from .virtualized import V
+from .utils import (
+    get_dtype_size,
+    reduction_num_outputs,
+    sympy_index_symbol,
+    sympy_str,
+    sympy_subs,
+    VarRanges,
+)
+from .virtualized import OpsHandler, ReductionType, V
 
 log = logging.getLogger(__name__)
 is_indirect = re.compile(r"indirect|tmp").search
@@ -22,7 +30,7 @@ Dep = Union["MemoryDep", "StarDep", "WeakDep"]
 
 class MemoryDep(typing.NamedTuple):
     name: str
-    index: sympy.Expr
+    index: sympy.Expr  # type: ignore[assignment]
     var_names: Tuple[sympy.Symbol, ...]
     size: Tuple[sympy.Expr, ...]
 
@@ -69,7 +77,7 @@ class MemoryDep(typing.NamedTuple):
         return isinstance(self.index, (int, sympy.Integer))
 
     def is_indirect(self) -> bool:
-        return any(is_indirect(v.name) for v in self.index.free_symbols)
+        return any(is_indirect(v.name) for v in self.index.free_symbols)  # type: ignore[attr-defined]
 
 
 class StarDep(typing.NamedTuple):
@@ -138,7 +146,7 @@ class WeakDep(typing.NamedTuple):
 
 
 class IndexExprDep(typing.NamedTuple):
-    index: sympy.Expr
+    index: sympy.Expr  # type: ignore[assignment]
     var_names: Tuple[sympy.Symbol, ...]
     size: Tuple[sympy.Expr, ...]
 
@@ -227,7 +235,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
                 k for k, v in zip(self._var_ranges.keys(), sizes) if v != 1
             )
             sizes = tuple(v for v in sizes if v != 1)
-            return index, var_names, sizes
+            return index, var_names, sizes  # type: ignore[return-value]
 
         # Try to further simplify the indexes even if simplify_loops didn't
         # convert it to the simplest form because of the interference from
@@ -261,7 +269,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
             # downstream users won't.  Normalize this away.
             new_vars.pop()
             new_sizes.pop()
-        return index, tuple(new_vars), tuple(new_sizes)
+        return index, tuple(new_vars), tuple(new_sizes)  # type: ignore[arg-type]
 
     def load(self, name: str, index: sympy.Expr) -> str:
         self._reads.add(MemoryDep(name, *self.canonicalize(index)))
@@ -442,3 +450,54 @@ def extract_input_node_reduction_ranges(
 
 def canonicalization_prefix():
     return "c"
+
+
+# ops handler which computes all the free unbacked symbols for an IR
+class FreeUnbackedSymbolsOpsHandler:
+    symbols: Set[sympy.Symbol]
+
+    def __init__(self):
+        self.symbols = set()
+
+    def __getattr__(self, name: str) -> Callable[..., Any]:
+        def inner(*args, **kwargs):
+            for a in itertools.chain(args, kwargs.values()):
+                if isinstance(a, (sympy.Expr, sympy.logic.boolalg.Boolean)):
+                    self.symbols |= free_unbacked_symbols(a)
+
+        return inner
+
+    def indirect_indexing(self, index_var, size, check=True) -> sympy.Symbol:
+        assert not isinstance(index_var, (sympy.Expr, sympy.logic.boolalg.Boolean))
+        self.symbols |= free_unbacked_symbols(size)
+        return sympy_index_symbol(f"({str(index_var)})")
+
+    def reduction(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: ReductionType,
+        value: Union[None, Tuple[None, ...]],
+    ) -> Union[None, Tuple[None, ...]]:
+        num_values = reduction_num_outputs(reduction_type)
+        return (None,) * num_values if num_values > 1 else None
+
+
+def _typecheck_FreeUnbackedSymbolsOpsHandler(
+    h: FreeUnbackedSymbolsOpsHandler,
+) -> OpsHandler[None]:
+    return h
+
+
+def extract_free_unbacked_symbols(fn: Callable[..., Any], index, rindex=None):
+    from .ir import FlexibleLayout
+
+    args = [index, rindex] if rindex is not None else [index]
+    handler = FreeUnbackedSymbolsOpsHandler()
+    # NB: I cargo culted the allow_indexing patch here, I don't understand why
+    # people do this all over
+    with V.set_ops_handler(handler), patch.object(
+        FlexibleLayout, "allow_indexing", True
+    ):
+        fn(*args)
+    return handler.symbols

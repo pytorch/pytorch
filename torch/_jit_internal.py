@@ -65,7 +65,7 @@ try:
 
     LockType = _thread.LockType
 except ImportError:
-    import _dummy_thread
+    import _dummy_thread  # type: ignore[import-not-found]
 
     LockType = _dummy_thread.LockType
 
@@ -105,9 +105,7 @@ def createResolutionCallbackFromEnv(lookup_base):
 
     def lookupInModule(qualified_name, module):
         if "." in qualified_name:
-            parts = qualified_name.split(".")
-            base = parts[0]
-            remaining_pieces = ".".join(parts[1:])
+            base, remaining_pieces = qualified_name.split(".", maxsplit=1)
             module_value = getattr(module, base)
             return lookupInModule(remaining_pieces, module_value)
         else:
@@ -937,7 +935,7 @@ _overloaded_methods: Dict[str, Dict[str, List[Callable]]] = {}  # noqa: T484
 
 
 # (qualified_name, class name) => class_fileno
-_overloaded_method_class_fileno = {}
+_overloaded_method_class_fileno: Dict[Tuple[str, str], int] = {}
 
 
 def _overload_method(func):
@@ -1099,8 +1097,10 @@ else:
 
 
 def is_final(ann) -> bool:
-    return ann.__module__ in {"typing", "typing_extensions"} and (
-        get_origin(ann) is Final or isinstance(ann, type(Final))
+    return (
+        hasattr(ann, "__module__")
+        and ann.__module__ in {"typing", "typing_extensions"}
+        and (get_origin(ann) is Final or isinstance(ann, type(Final)))
     )
 
 
