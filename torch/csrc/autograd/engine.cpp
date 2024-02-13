@@ -8,6 +8,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
 
+#include <ATen/DeviceAccelerator.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
@@ -46,8 +47,7 @@
 #include <unordered_set>
 #include <utility>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 namespace {
 static bool in_bad_autograd_fork =
@@ -991,10 +991,7 @@ void Engine::evaluate_function(
   // ensure they're safe to consume in the context of the present
   // func's stream (if applicable). So we guard onto that stream
   // before working with the grads in any capacity.
-  auto opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
-  if (!opt_parent_stream.has_value()) {
-    opt_parent_stream = (*func).stream(c10::DeviceType::PrivateUse1);
-  }
+  auto opt_parent_stream = (*func).stream();
   c10::OptionalStreamGuard parent_stream_guard{opt_parent_stream};
 
   // If exec_info_ is not empty, we have to instrument the execution
@@ -1012,10 +1009,7 @@ void Engine::evaluate_function(
           *func, InputBuffer::variables(std::move(inputs)));
     }
     if (auto* capture_vec = fn_info.captures_.get()) {
-      auto opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
-      if (!opt_parent_stream.has_value()) {
-        opt_parent_stream = (*func).stream(c10::DeviceType::PrivateUse1);
-      }
+      auto opt_parent_stream = (*func).stream();
       // Lock mutex for writing to graph_task->captured_vars_.
       std::lock_guard<std::mutex> lock(graph_task->mutex_);
       for (const auto& capture : *capture_vec) {
@@ -1107,10 +1101,7 @@ void Engine::evaluate_function(
       InputBuffer input_buffer(next.function->num_inputs());
 
       // Accumulates into buffer
-      auto opt_next_stream = next.function->stream(c10::DeviceType::CUDA);
-      if (!opt_next_stream.has_value()) {
-        opt_next_stream = next.function->stream(c10::DeviceType::PrivateUse1);
-      }
+      auto opt_next_stream = next.function->stream();
       input_buffer.add(
           next.input_nr, std::move(output), opt_parent_stream, opt_next_stream);
 
@@ -1126,10 +1117,7 @@ void Engine::evaluate_function(
       auto& input_buffer = not_ready_it->second;
 
       // Accumulates into buffer
-      auto opt_next_stream = next.function->stream(c10::DeviceType::CUDA);
-      if (!opt_next_stream.has_value()) {
-        opt_next_stream = next.function->stream(c10::DeviceType::PrivateUse1);
-      }
+      auto opt_next_stream = next.function->stream();
       input_buffer.add(
           next.input_nr, std::move(output), opt_parent_stream, opt_next_stream);
       if (is_ready) {
@@ -1161,10 +1149,7 @@ auto Engine::compute_dependencies(
     uint64_t min_topo_nr) -> void {
   // Computes the number of dependencies for each function which requires grad
   std::vector<Node*> queue{root};
-  bool might_use_cuda = at::globalContext().hasCUDA();
-  bool might_use_privateuse1 = at::isPrivateUse1HooksRegistered();
-  bool will_use_cuda = false;
-  bool will_use_privateuse1 = false;
+  bool will_use_accelerator = false;
 
   // Queue contains all nodes that will start propagating gradients.
   // We no longer have to expand functions that don't require grad.
@@ -1175,12 +1160,8 @@ auto Engine::compute_dependencies(
     if (fn->topological_nr() < min_topo_nr) {
       continue;
     }
-    if (might_use_cuda && !will_use_cuda) {
-      will_use_cuda = fn->stream(c10::DeviceType::CUDA).has_value();
-    }
-    if (might_use_privateuse1 && !will_use_privateuse1) {
-      will_use_privateuse1 =
-          fn->stream(c10::DeviceType::PrivateUse1).has_value();
+    if (!will_use_accelerator) {
+      will_use_accelerator = fn->stream().has_value();
     }
     for (const auto& edge : fn->next_edges()) {
       if (auto next_ptr = edge.function.get()) {
@@ -1192,21 +1173,11 @@ auto Engine::compute_dependencies(
     }
   }
 
-  if (will_use_cuda) {
-    // Collects current streams for CUDA/ROCM devices where this process has a
+  if (will_use_accelerator) {
+    // Collects current streams for devices where this process has a
     // context, so GraphTask::exec_post_processing can sync them with
     // leaf_streams.
-    task.stash_current_cuda_streams();
-  }
-
-  // Assume that two devices will not be used simultaneously.
-  TORCH_CHECK(
-      !(will_use_cuda && will_use_privateuse1),
-      "CUDA and privateuse1 cannot be used simultaneously in streaming backwards");
-
-  if (will_use_privateuse1) {
-    // Collects current streams for privateuse1.
-    task.stash_current_privateuse1_streams();
+    task.stash_current_streams();
   }
 }
 
@@ -1296,12 +1267,7 @@ auto Engine::execute(
     auto input = inputs.at(0);
 
     const auto input_stream = InputMetadata(input).stream();
-    auto opt_next_stream =
-        root_edges.at(0).function->stream(c10::DeviceType::CUDA);
-    if (!opt_next_stream.has_value()) {
-      opt_next_stream =
-          root_edges.at(0).function->stream(c10::DeviceType::PrivateUse1);
-    }
+    auto opt_next_stream = root_edges.at(0).function->stream();
     input_buffer.add(
         root_edges.at(0).input_nr,
         std::move(input),
@@ -1569,15 +1535,15 @@ void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
   thread_pool_shared_->work_.notify_one();
 }
 
-// Remembers current streams on all CUDA/ROCM devices where a context has been
-// created. Only called if Engine::execute detects at least one node runs on a
-// cuda/rocm stream.
-void GraphTask::stash_current_cuda_streams() {
-  const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
-  auto num_gpus = guard.deviceCount();
-  caller_current_streams_.resize(num_gpus);
-  if (num_gpus > 0) {
-    for (c10::DeviceIndex idx = 0; idx < num_gpus; idx++) {
+// Remembers current streams on all devices where a context has been created for
+// This function assumes the accelerator device is available.
+void GraphTask::stash_current_streams() {
+  const auto accelerator = at::getAccelerator(true).value();
+  const auto guard = c10::impl::VirtualGuardImpl{accelerator};
+  auto num_devices = guard.deviceCount();
+  caller_current_streams_.resize(num_devices);
+  if (num_devices > 0) {
+    for (c10::DeviceIndex idx = 0; idx < num_devices; idx++) {
 #if defined(USE_ROCM) && (ROCM_VERSION < 50000)
       // If the build targets ROCM, stash streams for all visible devices
       // unconditionally, to work around
@@ -1586,28 +1552,10 @@ void GraphTask::stash_current_cuda_streams() {
       // https://github.com/pytorch/pytorch/issues/59750 is fixed.
       if (true) {
 #else
-      if (at::detail::getCUDAHooks().hasPrimaryContext(idx)) {
+      if (at::globalContext().getAcceleratorHooksInterface().hasPrimaryContext(
+              idx)) {
 #endif
-        caller_current_streams_[idx] =
-            guard.getStream({c10::DeviceType::CUDA, idx});
-      } else {
-        caller_current_streams_[idx] = c10::nullopt;
-      }
-    }
-  }
-}
-
-// Remembers current streams on all devices where a context has been created for
-// privateuse1
-void GraphTask::stash_current_privateuse1_streams() {
-  const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::PrivateUse1};
-  auto num_devices = guard.deviceCount();
-  caller_current_streams_.resize(num_devices);
-  if (num_devices > 0) {
-    for (c10::DeviceIndex idx = 0; idx < num_devices; idx++) {
-      if (at::GetPrivateUse1HooksInterface()->hasPrimaryContext(idx)) {
-        caller_current_streams_[idx] =
-            guard.getStream({c10::DeviceType::PrivateUse1, idx});
+        caller_current_streams_[idx] = guard.getStream({accelerator, idx});
       } else {
         caller_current_streams_[idx] = c10::nullopt;
       }
@@ -1727,5 +1675,4 @@ void GraphTask::init_to_execute(
   }
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd
