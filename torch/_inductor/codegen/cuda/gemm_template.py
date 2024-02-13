@@ -504,7 +504,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             self.can_fuse_epilogue != supports_evt
         ):
             return None
-        if inductor_cuda_config.cutlass_only_evt_capable_ops and not supports_evt:
+        if inductor_cuda_config.cutlass_only_evt_capable_ops and not supports_evt:  # type: ignore[attr-defined]
             return None
         return op
 
