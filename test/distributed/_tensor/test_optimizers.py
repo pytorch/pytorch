@@ -428,17 +428,32 @@ class TestDTensorOptimizer(DTensorTestBase):
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
 
     @with_comms
-    def test_asgd_1d_sharding(self):
+    def test_adamax_1d_sharding(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
-        asgd_configs = [
+        adamax_configs = [
             {"lr": 0.1},
-            {"lr": 0.1, "weight_decay": 0.05},
-            {"lr": 0.1, "weight_decay": 0.05, "foreach": True},
-            {"lr": 0.1, "weight_decay": 0.05, "foreach": True, "maximize": True},
+            {"lr": 0.1, "betas": (0.6, 0.66)},
+            {"lr": 0.1, "betas": (0.6, 0.66), "eps": 1e-6},
+            {"lr": 0.1, "betas": (0.6, 0.66), "eps": 1e-6, "weight_decay": 0.05},
+            {
+                "lr": 0.1,
+                "betas": (0.6, 0.66),
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "foreach": True,
+            },
+            {
+                "lr": 0.1,
+                "betas": (0.6, 0.66),
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "foreach": True,
+                "maximize": True,
+            },
         ]
 
-        for config in asgd_configs:
+        for config in adamax_configs:
             mod = MLPModule(self.device_type)
             opt = torch.optim.Adamax(mod.parameters(), **config)
 
