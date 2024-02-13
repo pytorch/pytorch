@@ -37,7 +37,7 @@ jobs:
         device: ["cuda", "rocm"]
         include:
           - device: "rocm"
-            rocm_version: "5.7"
+            rocm_version: "6.0"
           - device: "cuda"
             rocm_version: ""
     timeout-minutes: 40
@@ -104,7 +104,7 @@ jobs:
 
           BUILD_ROCM=""
           if [[ "$BUILD_DEVICE" == "rocm" ]]; then
-            BUILD_ROCM="--build-rocm"
+            BUILD_ROCM="--build-rocm --rocm-version $ROCM_VERSION"
           fi
 
           RELEASE=""
