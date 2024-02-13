@@ -5403,6 +5403,13 @@ def accumulate_grad_(variable, new_grad):
     return variable
 
 
+@register_lowering(torch.ops.inductor.resize_storage_bytes_)
+def resize_storage_bytes_(variable, new_size):
+    variable.realize()
+    ir.ResizeStorageBytes(variable, new_size)
+    return variable
+
+
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 
 make_fallback(auto_functionalized)
