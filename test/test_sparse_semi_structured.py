@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     IS_WINDOWS,
 )
+
 import pytest
 
 from torch.utils._triton import has_triton
@@ -40,6 +41,7 @@ SEMI_STRUCTURED_SUPPORTED_DTYPES = [torch.float16, torch.bfloat16, torch.float32
 SEMI_STRUCTURED_SUPPORTED_BACKENDS = {}
 
 _IS_SM8X = False
+
 if torch.cuda.is_available():
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
     SEMI_STRUCTURED_SUPPORTED_BACKENDS["cutlass"] = SparseSemiStructuredTensorCUTLASS
@@ -68,16 +70,10 @@ atol_rtol_kw = {
 }
 
 def sparse24_largest_mask_2d(original):
-    pruning_inds = original.abs().view(-1, 4).argsort(dim=1)[:, :2]
-    asdf = original.clone()
-    asdf.view(-1, 4).scatter_(1, pruning_inds, torch.zeros_like(pruning_inds).to(original.dtype))
-    return asdf.bool()
+    return to_sparse_semi_structured(original, training=True).to_dense().bool()
 
 def sparsify24_dense(original):
-    pruning_inds = original.abs().view(-1, 4).argsort(dim=1)[:, :2]
-    asdf = original.clone()
-    asdf.view(-1, 4).scatter_(1, pruning_inds, torch.zeros_like(pruning_inds).to(original.dtype))
-    return asdf
+    return sparse24_largest_mask_2d(original) * original
 
 def rand_sparse_semi_structured_mask(
     r, c, dtype=torch.float16, device="cuda", choice=None
@@ -235,6 +231,31 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
         for dense_input_shape in [(1, 128), (64, 128), (128, 128), (64, 128, 128)]:
             SparseSemiStructuredTensorCompileTest._test_mlp_contiguous_relu_compile("cutlass", dense_input_shape)
 
+    @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
+    def test_sp24_meta(self) -> None:
+        x = torch.randn([1024, 512], device="meta", dtype=torch.float16)
+        x_s = to_sparse_semi_structured(x, training=True, backend="cusparselt")
+        assert x_s.shape == x.shape
+        x_s_t = x_s.t()
+        assert x_s_t.shape == x.t().shape
+
+
+    # @parametrize_backends
+    def test_sp24_compile(self) -> None:
+        x = torch.randn([1024, 512], device="cuda", dtype=torch.float16, requires_grad=True)
+        e = torch.eye(x.shape[0], x.shape[0], device="cuda", dtype=torch.float16)
+
+        def fn(x, e):
+            y = to_sparse_semi_structured(x, backend="cusparselt", training=True)
+            y = y.t()
+            return x @ y
+
+        # Eager
+        output = fn(x, e)
+        output.backward(output)
+        # Torch compile
+        output = torch.compile(fn)(x, e)
+        output.backward(output)
 
 class TestSparseSemiStructured(TestCase):
 
@@ -269,22 +290,18 @@ class TestSparseSemiStructured(TestCase):
 
         # Currently we don't support int matmul on GPU, so evaluate on CPU and copy over
         if dtype is torch.int8:
-            # This should fail
-            if backend == "cutlass":
-                with self.assertRaisesRegex(RuntimeError, "two_four_sgemm_cutlass_dispatch_layouts"):
-                    sparse_result = torch.mm(A_sparse, B)
-            else:
-                with self.assertRaisesRegex(RuntimeError,
-                                            "CUDA error: operation not supported when calling `cusparseLtMatmulDescriptorInit"):
-                    sparse_result = torch.mm(A_sparse, B)
+            regex = "two_four_sgemm_cutlass_dispatch_layouts" if backend == "cutlass" else "CUDA error: operation not supported when calling `cusparseLtMatmulDescriptorInit"
+
+            with self.assertRaisesRegex(RuntimeError, regex):
+                sparse_result = torch.mm(A_sparse, B)
         else:
             dense_result = torch.mm(A, B)
             sparse_result = torch.mm(A_sparse, B)
             assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
     @inference_dtypes
-    @parametrize("dense_input_shape", [(1, 128), (64, 128), (128, 128)])
     @parametrize_backends
+    @parametrize("dense_input_shape", [(1, 128), (64, 128), (128, 128)])
     def test_mm_sparse_first_NT(self, dense_input_shape, dtype, device, backend):
         """
         Ensure torch.mm(A_sparse, B.t()) is correct for float16/bfloat16
@@ -317,9 +334,9 @@ class TestSparseSemiStructured(TestCase):
             sparse_result = torch.mm(A_sparse, B.t())
             assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
-    @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
+    @inference_dtypes
     @parametrize("dense_input_shape", [(1, 128), (64, 128), (128, 128)])
-    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    @parametrize_backends
     def test_mm_sparse_first_TN(self, dtype, dense_input_shape, device, backend):
         """
         Ensure torch.mm(A_sparse.t(), B) throws error
@@ -335,9 +352,9 @@ class TestSparseSemiStructured(TestCase):
         ):
             torch.mm(A_sparse.t(), B)
 
-    @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
+    @inference_dtypes
     @parametrize("dense_input_shape", [(1, 128), (64, 128), (128, 128)])
-    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    @parametrize_backends
     def test_mm_sparse_second_NT(self, dense_input_shape, dtype, device, backend):
         """
         Ensure torch.mm(A, B_sparse.t()) is correct
@@ -357,9 +374,9 @@ class TestSparseSemiStructured(TestCase):
 
         assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
-    @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
+    @inference_dtypes
     @parametrize("dense_input_shape", [(1, 128), (64, 128), (128, 128)])
-    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    @parametrize_backends
     def test_mm_sparse_second_NN(self, dense_input_shape, dtype, device, backend):
         """
         Ensure torch.mm(A, B_sparse) throws error
@@ -377,7 +394,7 @@ class TestSparseSemiStructured(TestCase):
 
     @parametrize("dense_input_shape", [(1, 128), (64, 128), (128, 128), (64, 128, 128)])
     @parametrize("inference_mode", [subtest(True), subtest(False)])
-    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    @parametrize_backends
     def test_linear(self, dense_input_shape, inference_mode, device, backend):
         """
         Test nn.Linear has the same numerics
@@ -402,7 +419,7 @@ class TestSparseSemiStructured(TestCase):
         assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
     @parametrize("dense_input_shape", [(1, 128), (64, 128), (128, 128), (64, 128, 128)])
-    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    @parametrize_backends
     def test_mlp(self, device, dense_input_shape, backend):
         input = torch.rand(dense_input_shape, device=device).half()
         model = (
@@ -431,26 +448,23 @@ class TestSparseSemiStructured(TestCase):
 
         assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
-    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    @parametrize_backends
     def test_values(self, backend):
         A = rand_sparse_semi_structured_mask(128, 128)
         A_sparse = to_sparse_semi_structured(A, backend=backend)
         assert A_sparse.values().shape == (128, 64)
         assert (A_sparse.values() == 1).all()
 
-    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    @parametrize_backends
     def test_indices(self, backend):
         A = rand_sparse_semi_structured_mask(128, 128)
         A_sparse = to_sparse_semi_structured(A, backend=backend)
         assert A_sparse.indices().shape == (128, 8)
 
-    @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
-    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    @inference_dtypes
+    @parametrize_backends
     def test_min_sparse_shape(self, dtype, device, backend):
-        if backend == "cutlass":
-            config = SparseSemiStructuredTensorCUTLASS._DTYPE_SHAPE_CONSTRAINTS[dtype]
-        elif backend == "cusparselt":
-            config = SparseSemiStructuredTensorCUSPARSELT._DTYPE_SHAPE_CONSTRAINTS[dtype]
+        config = SEMI_STRUCTURED_SUPPORTED_BACKENDS[backend]._DTYPE_SHAPE_CONSTRAINTS[dtype]
         A = rand_sparse_semi_structured_mask(config.sparse_min_rows, config.sparse_min_cols, dtype=dtype, device=device)
         A_sparse = to_sparse_semi_structured(A, backend=backend)
         B = torch.rand((config.sparse_min_cols, config.dense_min_cols), device=device).to(dtype)
@@ -464,15 +478,15 @@ class TestSparseSemiStructured(TestCase):
             sparse_res = torch.mm(A_sparse, B)
         assert torch.allclose(sparse_res, dense_res, rtol=1e-3, atol=1e-3)
 
-    @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
-    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    @inference_dtypes
+    @parametrize_backends
     def test_unsupported_shape(self, dtype, device, backend):
         A = rand_sparse_semi_structured_mask(2, 2, dtype=dtype, device=device)
         with self.assertRaisesRegex(RuntimeError, "Error original_tensor.shape"):
             A_sparse = to_sparse_semi_structured(A, backend=backend)
 
     @dtypes(*all_types_and_complex())
-    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    @parametrize_backends
     def test_unsupported_dtype(self, dtype, device, backend):
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype, device=device)
 
@@ -482,7 +496,7 @@ class TestSparseSemiStructured(TestCase):
         else:
             A_sparse = to_sparse_semi_structured(A, backend=backend)
 
-    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    @parametrize_backends
     def test_unsupported_dim(self, device, backend):
         A = torch.rand(128, 128, 128, device=device, dtype=torch.float16)
 
@@ -533,7 +547,7 @@ class TestSparseSemiStructuredTraining(TestCase):
         )
         assert torch.allclose(y, y_ac, **atol_rtol_kw[dtype])
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @training_dtypes
     def test_pruning_algo_causal1122(self, dtype) -> None:
         inp = torch.tensor(
             [[4, 3, 2, 1], [-1, -3, 0.6, 0.5], [1, 2, 3, 4], [10, 2, -1, 5]],
@@ -551,8 +565,8 @@ class TestSparseSemiStructuredTraining(TestCase):
             [1, 0, 0, 1],
         ]
 
-    @dtypes(torch.float16, torch.bfloat16)
-    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    @training_dtypes
+    @parametrize_backends
     def test_pruning_algo_largest_abs_values_greedy(self, dtype, backend) -> None:
         inp = torch.tensor(
             [[4, 3, 2, 1], [-1, -3, 0.6, 0.5], [1, 2, 3, 4], [10, 2, -1, 5]],
@@ -600,12 +614,12 @@ class TestSparseSemiStructuredTraining(TestCase):
         assert xs2.grad is not None
         assert x.grad is None
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @training_dtypes
     def test_gemm(self, dtype) -> None:
         M, N, K = 32, 32, 64
         a = torch.randn([M, K], device="cuda", dtype=dtype)
         b = torch.randn([K, N], device="cuda", dtype=dtype)
-        mask = create_random_mask([M, K]).cuda()
+        mask = rand_sparse_semi_structured_mask(M, K, dtype=torch.bool)
 
         a.masked_fill_(~mask, 0)
 
@@ -617,8 +631,8 @@ class TestSparseSemiStructuredTraining(TestCase):
         assert torch.allclose(ref_out, sp24_out, **atol_rtol_kw[dtype])
 
 
-    @dtypes(torch.float16, torch.bfloat16)
-    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    @training_dtypes
+    @parametrize_backends
     def test_pack_both_ways_meta_correctness(self, dtype, backend) -> None:
         M, N = 128, 256
         # Construct x to make sure we always have exactly 8 elements per 4x4 tile
@@ -629,24 +643,25 @@ class TestSparseSemiStructuredTraining(TestCase):
         b = torch.randn([a.shape[1], 128], device="cuda", dtype=dtype)
         a_sparse = to_sparse_semi_structured(a, backend=backend, training=True)
 
-        mask_dense = sparse24_largest_mask_2d(a)
+        mask_dense = sparse24_largest_mask_2d(a).to(dtype)
 
         if backend == "cutlass":
             assert isinstance(a_sparse, SparseSemiStructuredTensorCUTLASS)
-            sparse_mask = to_sparse_semi_structured(mask_dense, backend=backend)
+            sparse_mask = to_sparse_semi_structured(mask_dense, backend=backend, training=True)
             assert torch.allclose(a_sparse.meta.view(torch.short), sparse_mask.meta)
+
         ref_gemm = (mask_dense * a) @ b
         pack_gemm = a_sparse @ b
         assert torch.allclose(ref_gemm, pack_gemm, **atol_rtol_kw[dtype])
 
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_pack_both_ways_id(dtype) -> None:
+    @training_dtypes
+    def test_pack_both_ways_id(self, dtype) -> None:
         N = 512
         torch.manual_seed(0)
         a = torch.randn([N, N], dtype=dtype, device="cuda")
         b = torch.eye(N, dtype=dtype, device="cuda")
 
-        packed, meta, packed_t, meta_t = torch.ops.xformers.sparse24_sparsify_both_ways(a)[
+        packed, meta, packed_t, meta_t = torch.ops.sparse.sparse24_sparsify_both_ways(a)[
             :4
         ]
         # Heuristic to ensure we pack the same values
@@ -654,25 +669,27 @@ class TestSparseSemiStructuredTraining(TestCase):
             packed.to(torch.float64).sum(), packed_t.to(torch.float64).sum()
         )
 
-        mask_dense = torch.ops.xformers.sparse24_largest_mask_2d(a.to(dtype))
+        mask_dense = sparse24_largest_mask_2d(a.to(dtype))
 
         ref_gemm = mask_dense * a
         # Test A@B
-        pack_gemm = torch.ops.xformers._sparse24_gemm(packed, b, meta)
+        pack_gemm = torch._sparse_semi_structured_linear(b.t(), packed, meta).t()
         max_diff = (ref_gemm - pack_gemm).abs().argmax()
         assert torch.allclose(
-            ref_gemm, pack_gemm
+            ref_gemm, pack_gemm,
+            **atol_rtol_kw[dtype]
         ), f"packed is wrong at pos: ({max_diff // N}, {max_diff % N})"
         # Test A.t@B
-        pack_gemm = torch.ops.xformers._sparse24_gemm(packed_t, b, meta_t)
-        pack_gemm = pack_gemm.transpose(0, 1)
+        pack_gemm = torch._sparse_semi_structured_linear(b.t(), packed_t, meta_t)
         max_diff = (ref_gemm - pack_gemm).abs().argmax()
+
         assert torch.allclose(
-            ref_gemm, pack_gemm
+            ref_gemm, pack_gemm,
+            **atol_rtol_kw[dtype]
         ), f"packed_t is wrong at pos: ({max_diff // N}, {max_diff % N})"
 
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_pack_both_ways_edge_case1(dtype) -> None:
+    @training_dtypes
+    def test_pack_both_ways_edge_case1(self, dtype) -> None:
         # In this case, the heuristic will keep 7 values out of 16
         # instead of 8. let's see how the kernel handles this
         quad = torch.tensor(
@@ -695,7 +712,7 @@ class TestSparseSemiStructuredTraining(TestCase):
         assert packed_t[0, 0].item() == 2
         assert packed_t[0, 1].item() == 0
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @training_dtypes
     def test_sp24_apply(self, dtype) -> None:
         M, N = 256, 1024
         x = torch.randn([M, N], dtype=dtype, device="cuda")
@@ -710,7 +727,7 @@ class TestSparseSemiStructuredTraining(TestCase):
         assert torch.allclose(packed, packed2)
         assert torch.allclose(packed_t, packed_t2)
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @training_dtypes
     def test_sp24_api_different_pattern(self, dtype) -> None:
         M, N = 256, 256
         x = torch.randn([M, N], dtype=dtype, device="cuda")
@@ -726,7 +743,7 @@ class TestSparseSemiStructuredTraining(TestCase):
         sy2 = sx.from_dense_like(y)
         assert isinstance(sx + sy2, SparseSemiStructuredTensor)
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @training_dtypes
     def test_sp24_api_different_pattern_transposed(self, dtype) -> None:
         N = 256
         x = torch.randn([N, N], dtype=dtype, device="cuda")
@@ -743,8 +760,8 @@ class TestSparseSemiStructuredTraining(TestCase):
         assert torch.allclose(sxt2.packed, sxt.packed)
         assert torch.allclose(sxt2.packed_t, sxt.packed_t)
 
-    @dtypes(torch.float16, torch.bfloat16)
-    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    @training_dtypes
+    @parametrize_backends
     def test_sp24_transpose_invariant(self, dtype, backend) -> None:
         M, N = 128, 256
 
@@ -792,8 +809,6 @@ class TestSparseSemiStructuredTraining(TestCase):
         a_s = to_sparse_semi_structured(a, training=True)
         b_s = to_sparse_semi_structured(b, training=True)
 
-        breakpoint()
-
         assert torch.allclose(a_s @ b, (a * a_m) @ b, **atol_rtol_kw[dtype])
         assert torch.allclose(a @ b_s, a @ (b * b_m), **atol_rtol_kw[dtype])
         assert torch.allclose(
@@ -822,7 +837,7 @@ class TestSparseSemiStructuredTraining(TestCase):
         with pytest.raises(NotImplementedError):
             assert torch.allclose(a_s @ b, (a * a_m) @ b, **atol_rtol_kw[a.dtype])
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @training_dtypes
     @parametrize("act", [F.gelu, F.relu])
     def test_sp24_api_mlp_act24_correctness(self, dtype, act) -> None:
         B, in_ft, hid_ft, out_ft = 256, 2048, 6144, 2048
@@ -846,7 +861,7 @@ class TestSparseSemiStructuredTraining(TestCase):
 
         # Run baseline
         x1 = x @ w1
-        x1 = sparse24_largest_mask_2d(x1)
+        x1 = sparsify24_dense(x1)
         x1 = act(x1)
         out = x1 @ w2
         out.backward(grad)
@@ -869,7 +884,7 @@ class TestSparseSemiStructuredTraining(TestCase):
             assert grad_ref is not None, grad_name
             assert torch.allclose(grad_calc, grad_ref, **atol_rtol_kw[dtype])
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @training_dtypes
     def test_sp24_api_swiglu_correctness(self, dtype) -> None:
         B, in_ft, hid_ft, out_ft = 256, 2048, 6144 // 2, 2048
         torch.manual_seed(0)
@@ -923,7 +938,7 @@ class TestSparseSemiStructuredTraining(TestCase):
             assert torch.allclose(grad_calc, grad_ref, **atol_rtol_kw[dtype])
 
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @training_dtypes
     @parametrize("input_rowmajor", [subtest(True), subtest(False)])
     def test_sparsify24_like_dense(self, dtype, input_rowmajor):
         M, N = 128, 256
@@ -938,8 +953,8 @@ class TestSparseSemiStructuredTraining(TestCase):
         )
 
 
-    @dtypes(torch.float16, torch.bfloat16)
-    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    @training_dtypes
+    @parametrize_backends
     def test_sparsify24_weights(self, dtype, backend):
         x = torch.randn([128, 512], dtype=dtype, device="cuda", requires_grad=True)
         w = torch.randn([1024, 512], dtype=dtype, device="cuda", requires_grad=True)
@@ -954,10 +969,9 @@ class TestSparseSemiStructuredTraining(TestCase):
         y.backward(y)
 
 
-
     @parametrize_backends
     @parametrize("with_bias", [False, True])
-    def test_linear_dispatch_inference_mode(backend: str, with_bias: bool) -> None:
+    def test_linear_dispatch_inference_mode(self, backend: str, with_bias: bool) -> None:
         B, ft_in, ft_out = 128, 256, 512
         x = torch.randn([B, ft_in], device="cuda", dtype=torch.float16)
         weight = torch.randn([ft_out, ft_in], device="cuda", dtype=torch.float16)
@@ -968,15 +982,11 @@ class TestSparseSemiStructuredTraining(TestCase):
         w_sparse = to_sparse_semi_structured(
             weight,
             backend=backend,
+            training = True
         )
         # NOTE: When in `inference_mode`, PyTorch no longer dispatches to `addmm`, but to `linear`
         # so we need to support that as well
         with torch.inference_mode():
-            # Does not support bias at the moment in CUTLASS backend
-            if bias is not None and backend == sp24.BACKEND_CUTLASS:
-                with pytest.raises(NotImplementedError):
-                    F.linear(x, w_sparse, bias)
-                return
             out = F.linear(x, w_sparse, bias)
         out_ref = F.linear(x, w_sparse.to_dense(), bias)
         assert torch.allclose(out, out_ref, **atol_rtol_kw[x.dtype])
@@ -993,7 +1003,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
             self.skipTest('CUTLASS not enabled')
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
+    @inference_dtypes
     def test_linear_cutlass(self, device, dtype):
 
         def run_test(batch_shape, m, n, k, device, dtype, dtype_out, add_bias, activation, rtol, atol):
@@ -1051,7 +1061,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
 
 
     @unittest.skipIf(not has_triton(), "Test needs triton and recent GPU arch")
-    @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
+    @inference_dtypes
     def test_conversions(self, device, dtype):
 
         def run_test(r, c, device, dtype):
@@ -1079,7 +1089,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
             run_test(r, c, device, dtype)
 
     @unittest.skipIf(not has_triton(), "Test needs triton and recent GPU arch")
-    @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
+    @inference_dtypes
     def test_conversions_all_patterns(self, device, dtype):
         r, c = 32, 128
 
@@ -1120,7 +1130,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         sparse_result = torch._cslt_sparse_mm(A_compressed, B.t(), out_dtype=out_dtype)
         assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @training_dtypes
     def test_cslt_sparse_mm_alpha(self, dtype, device):
         A = torch.Tensor([0, 0, 1, 1]).tile((128, 64)).to(dtype).cuda()
         B = torch.ones((256, 128), device=device).to(dtype)
@@ -1152,7 +1162,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         assert torch.allclose(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
     @parametrize("alg_id", range(CUSPARSELT_NUM_ALG_IDS))
-    @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
+    @inference_dtypes
     def test_cslt_sparse_mm_alg_id(self, device, dtype, alg_id):
         # alg_id=3 not supported for float32 dtype
         if dtype == torch.float32 and alg_id == 3:
@@ -1169,7 +1179,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
 
         assert torch.allclose(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
-    @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
+    @inference_dtypes
     def test_cslt_sparse_mm_search(self, device, dtype):
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
         A_compressed = torch._cslt_compress(A)
@@ -1182,7 +1192,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         # in cuSPARSELt v0.5.0 there are only 4 alg_ids total, so we should remove the +1 here when we update.
         assert alg_id in range(CUSPARSELT_NUM_ALG_IDS + 1)
 
-    @dtypes(torch.float16, torch.bfloat16)
+    @training_dtypes
     @parametrize("bias", [False, True])
     @parametrize("aligned", [True, False])
     @parametrize("amp", [True, False])
@@ -1252,41 +1262,13 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
 
 
 instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")
-instantiate_device_type_tests(TestSparseSemiStructuredTraining, globals(), only_for="cuda")
 instantiate_device_type_tests(TestSparseSemiStructuredCUTLASS, globals(), only_for="cuda")
 instantiate_device_type_tests(TestSparseSemiStructuredCUSPARSELT, globals(), only_for="cuda")
+instantiate_device_type_tests(TestSparseSemiStructuredTraining, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()
 
-# @torch_compile_tests
-# @cuda_only
-# def test_sp24_meta() -> None:
-#     x = torch.randn([1024, 512], device="meta", dtype=torch.float16)
-#     x_s = sp24.sparsify24(x, backend="cusparselt")
-#     assert x_s.shape == x.shape
-#     x_s_t = x_s.t()
-#     assert x_s_t.shape == x.t().shape
-
-
-# @torch_compile_tests
-# @cuda_sm80_only
-# @parametrize_backend
-# def test_sp24_compile(backend) -> None:
-#     x = torch.randn([1024, 512], device="cuda", dtype=torch.float16, requires_grad=True)
-#     e = torch.eye(x.shape[0], x.shape[0], device="cuda", dtype=torch.float16)
-
-#     def fn(x, e):
-#         y = sp24.sparsify24(x, backend=backend, gradient="24dense")
-#         y = y.t()
-#         return x @ y
-
-#     # Eager
-#     output = fn(x, e)
-#     output.backward(output)
-#     # Torch compile
-#     output = torch.compile(fn)(x, e)
-#     output.backward(output)
 
 
 # class _TransformerFFN(nn.Module):
