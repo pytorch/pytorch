@@ -1947,6 +1947,7 @@ out_symbolic_tensor_failures = {
     xfail('angle', ''),
     xfail('argmax', ''),
     xfail('argmin', ''),
+    xfail('batch_norm_with_update', ''),
     xfail('bmm', ''),
     xfail('cummax', ''),
     xfail('cummin', ''),

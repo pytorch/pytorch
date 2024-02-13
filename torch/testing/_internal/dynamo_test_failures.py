@@ -2986,6 +2986,7 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_reshape_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_norm_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive__native_batch_norm_legit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_batch_norm_with_update_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_reshape_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_new_ones_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_asin_cpu_float32",  # known py38 fail
@@ -3230,6 +3231,7 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_max_unpool2d_grad_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_abs_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace__native_batch_norm_legit_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_batch_norm_with_update_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_max_unpool3d_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_to_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_lu_unpack_cpu_float32",  # known py38 fail
@@ -4370,6 +4372,7 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_native_layer_norm_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_glu_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive__native_batch_norm_legit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_batch_norm_with_update_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_hermite_polynomial_he_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_softmax_with_dtype_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_gaussian_nll_loss_cpu_float32",  # known py38 fail
@@ -4951,6 +4954,7 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_qr_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive___rpow___cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out__native_batch_norm_legit_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_batch_norm_with_update_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_cauchy_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_poisson_nll_loss_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_max_binary_cpu_float32",  # known py38 fail
@@ -4963,6 +4967,7 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_mul_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_hfft2_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive__native_batch_norm_legit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_batch_norm_with_update_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_item_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_char_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_as_strided_partial_views_cpu_float32",  # known py38 fail  # noqa: B950

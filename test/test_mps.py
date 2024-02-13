@@ -11368,6 +11368,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.gelu',
         'nn.functional.glu',
         '_native_batch_norm_legit',
+        'batch_norm_with_update',
         'native_batch_norm',
         'softmax',
         '_softmax_backward_data',

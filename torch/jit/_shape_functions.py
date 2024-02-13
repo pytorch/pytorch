@@ -1431,6 +1431,11 @@ add_shape_compute_mapping(
     native_batch_norm,
 )
 add_shape_compute_mapping(
+    "batch_norm_with_update(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, float momentum, float eps, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, Tensor)",
+    native_batch_norm,
+)
+
+add_shape_compute_mapping(
     "aten::cross_entropy_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, SymInt ignore_index=-100, float label_smoothing=0.0) -> Tensor",
     cross_entropy_loss,
 )

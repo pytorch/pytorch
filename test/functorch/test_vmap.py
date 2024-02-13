@@ -3623,6 +3623,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         # which will be updated in place, were not batched.
         xfail('native_batch_norm'),
         xfail('_native_batch_norm_legit'),
+        xfail('batch_norm_with_update'),
         xfail('tril'),  # Exception not raised on error input
         xfail('triu'),  # Exception not raised on error input
         xfail('as_strided', 'partial_views'),
@@ -3662,6 +3663,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         # which will be updated in place, were not batched.
         xfail('native_batch_norm'),
         xfail('_native_batch_norm_legit'),
+        xfail('batch_norm_with_update'),
         xfail('histogram'),
         xfail('scatter_reduce', 'sum'),
         xfail('scatter_reduce', 'mean'),
