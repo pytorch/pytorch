@@ -2162,6 +2162,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
   r->trace_id_ = NCCLTraceBuffer::get()->record(
       uid_,
       seq_,
+      // create a string copy of profilingTitle
       profilingTitle,
       inputs,
       outputs,
