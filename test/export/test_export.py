@@ -364,7 +364,7 @@ class TestExport(TestCase):
                 torchdynamo.exc.UserError,
                 torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode,
             ),
-            "trying to get a value out of symbolic int",
+            "Could not guard on data-dependent expression",
         ):
             _ = export(M(), (torch.tensor([2, 3, 5]),))
 
