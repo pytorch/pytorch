@@ -184,12 +184,12 @@ jobs:
           git clean -fxd
         working-directory: pytorch
 
-      - name: Checkout pytorch/builder to builder dir
+      - name: Checkout atalman/builder to builder dir
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: add_triton_for_nightly_release
           submodules: recursive
-          repository: pytorch/builder
+          repository: atalman/builder
           path: builder
           quiet-checkout: true
 
