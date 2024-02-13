@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import contextlib
-from typing import Any
+from typing import Any, List, Tuple
 import torch
 import torch.utils._pytree as pytree
 from torch._C._functorch import (
@@ -218,14 +218,14 @@ def retrieve_current_functorch_interpreter() -> FuncTorchInterpreter:
     return coerce_cinterpreter(interpreter)
 
 
-def retrieve_all_functorch_interpreters() -> list[FuncTorchInterpreter]:
+def retrieve_all_functorch_interpreters() -> List[FuncTorchInterpreter]:
     cis = torch._C._functorch.get_interpreter_stack()
     if cis is None:
         return []
     return [coerce_cinterpreter(ci) for ci in cis]
 
 
-def compare_functorch_state(states: list[tuple[bool | int | str, ...]]) -> bool:
+def compare_functorch_state(states: List[Tuple[bool | int | str, ...]]) -> bool:
     # There are four possible cases covered here:
     # 1. Current stack empty AND stack when generated not empty -> Invalidate
     # 2. Current stack not empty AND stack when generated empty -> Invalidate
