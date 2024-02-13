@@ -2793,61 +2793,59 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
   tensor = tensor.coalesce();
   at::Tensor outputTensor =
       torch::zeros(tensor.sizes(), tensor.options().layout(torch::kStrided));
-}
-int dev_in_group = 0;
-auto work = collective(
-    tensor,
-    outputTensor,
-    [&](at::Tensor& input,
-        at::Tensor& output,
-        ncclComm_t comm,
-        at::cuda::CUDAStream& stream) {
-      auto ncclDataType = getNcclDataType(input.scalar_type());
-      auto ncclReduceOp =
-          getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
+  auto work = collective(
+      tensor,
+      outputTensor,
+      [&](at::Tensor& input,
+          at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        auto ncclDataType = getNcclDataType(input.scalar_type());
+        auto ncclReduceOp =
+            getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
 
-      size_t num_elements = output.numel();
-      auto indices = input.indices();
-      auto sizes = input.sizes();
-      int colSize = sizes[1];
-      auto rows = indices[0];
-      size_t blockCount = rows.sizes()[0];
-      auto recvIndices = indices[0] * colSize;
+        size_t num_elements = output.numel();
+        auto indices = input.indices();
+        auto sizes = input.sizes();
+        int colSize = sizes[1];
+        auto rows = indices[0];
+        size_t blockCount = rows.sizes()[0];
+        auto recvIndices = indices[0] * colSize;
 
-      // prevent output and recvIndices from being freed
-      c10::cuda::CUDACachingAllocator::recordStream(
-          output.storage().data_ptr(), stream);
-      c10::cuda::CUDACachingAllocator::recordStream(
-          recvIndices.storage().data_ptr(), stream);
-      auto result = ncclAllReduceSparseBlock(
-          input._values().data_ptr(), // sendbuff
-          recvIndices.data_ptr<int64_t>(), // recv_indices
-          blockCount, // block_count
-          colSize, // block_length
-          output.data_ptr(), // recvbuff
-          output.numel(), // recv_count
-          ncclDataType,
-          ncclReduceOp,
-          comm,
-          stream.stream());
-      return result;
-    },
-    [](at::cuda::CUDAStream& ncclStream,
-       c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
-    [&](at::cuda::CUDAStream& ncclStream,
-        c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {
-      // Convert output tensors to sparse and back into tensors.
-      at::cuda::CUDAStreamGuard guard(ncclStream);
-      if (opts.sparseIndices.has_value()) {
-        tensor = at::sparse_coo_tensor(
-            opts.sparseIndices.value(), outputTensor, tensor.sizes());
-      } else {
-        tensor = outputTensor.to_sparse();
-      }
-    },
-    OpType::_ALLREDUCE_SPARSE,
-    "nccl:all_reduce_sparse");
-return work;
+        // prevent output and recvIndices from being freed
+        c10::cuda::CUDACachingAllocator::recordStream(
+            output.storage().data_ptr(), stream);
+        c10::cuda::CUDACachingAllocator::recordStream(
+            recvIndices.storage().data_ptr(), stream);
+        auto result = ncclAllReduceSparseBlock(
+            input._values().data_ptr(), // sendbuff
+            recvIndices.data_ptr<int64_t>(), // recv_indices
+            blockCount, // block_count
+            colSize, // block_length
+            output.data_ptr(), // recvbuff
+            output.numel(), // recv_count
+            ncclDataType,
+            ncclReduceOp,
+            comm,
+            stream.stream());
+        return result;
+      },
+      [](at::cuda::CUDAStream& ncclStream,
+         c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
+      [&](at::cuda::CUDAStream& ncclStream,
+          c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {
+        // Convert output tensors to sparse and back into tensors.
+        at::cuda::CUDAStreamGuard guard(ncclStream);
+        if (opts.sparseIndices.has_value()) {
+          tensor = at::sparse_coo_tensor(
+              opts.sparseIndices.value(), outputTensor, tensor.sizes());
+        } else {
+          tensor = outputTensor.to_sparse();
+        }
+      },
+      OpType::_ALLREDUCE_SPARSE,
+      "nccl:all_reduce_sparse");
+  return work;
 #else
   // If the nccl branch is not "exp" then we just error
   C10_THROW_ERROR(
