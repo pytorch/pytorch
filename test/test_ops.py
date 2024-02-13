@@ -1870,7 +1870,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.nn.functional.group_norm',
         '_refs.nn.functional.mse_loss',
         '_refs.floor_divide',
-        '_refs.rsub',
         # duplicated as refs do not have decent support for advanced indexing
         '_refs.index_copy',
         '_refs.index_copy_',
@@ -1957,7 +1956,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.sum_to_size',
         # ref implementation missing kwargs
         '_refs.full_like',  # missing "layout"
-        '_refs.round',  # missing "decimals"
         '_refs.scalar_tensor',  # missing "layout"
         # other
         '_refs.block_diag',  # only refs._block_diag_iterable is in decomposition table

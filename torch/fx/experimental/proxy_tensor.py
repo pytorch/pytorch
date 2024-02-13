@@ -84,81 +84,6 @@ no_default = object()
 
 py_sym_types = (SymInt, SymFloat, SymBool)
 
-
-@dataclass
-class _SymExprHash:
-    """
-    Hash for a py_sym_types that will use the underlying sympy expression
-    """
-
-    sym_obj: py_sym_types
-
-    def __hash__(self) -> int:
-        return hash((type(self.sym_obj), self.sym_obj.node.expr))
-
-    def __eq__(self, value: "_SymExprHash") -> bool:
-        assert isinstance(value, _SymExprHash)
-        return self.sym_obj.node.expr == value.sym_obj.node.expr
-
-
-class _SymHashingDict:
-    """
-    Wrapper around a dictionary that will convert sym types to hash with _SymExprHash and reuse
-    existing sym proxies.
-
-    SymPy hash is not always reliable so optimistically hash sympy expression, and if those fail,
-    fallback to symnodes.
-
-    We only dedupe sym_size that are resolvable to an sym type that is an input to the graph to avoid
-    adding dependencies of graph intermediaries.
-    """
-    def __init__(self):
-        # optimistically hash sympy expressions, if those fail, fallback to symnodes
-        self.sym_node_dict = {}
-        self.sym_hash_dict = {}
-        self.sym_not_to_dedupe = set()
-        self.graph_input_symbols = set()
-
-    def add_input_symint_symbol(self, symbol: py_sym_types):
-        self.graph_input_symbols.update(symbol.node.expr.free_symbols)
-
-    def dont_hash_sym_expr(self, symbol: py_sym_types):
-        "Dont dedupe this expression with other SymInts which are"
-
-        self.sym_not_to_dedupe.add(symbol.node)
-
-    def __setitem__(self, key, value):
-        existing_node = key.node in self.sym_node_dict
-        dont_dedup = key.node in self.sym_not_to_dedupe
-        if not existing_node and not dont_dedup and key.node.expr.free_symbols.issubset(self.graph_input_symbols):
-            self.graph_input_symbols.update(key.node.expr.free_symbols)
-            self.sym_hash_dict.__setitem__(self._wrap_to_sym_expr_hash(key), value)
-        self.sym_node_dict[key.node] = value
-
-    def __getitem__(self, key):
-        if node_val := self.sym_node_dict.get(key.node, None):
-            return node_val
-
-        out = self.sym_hash_dict[self._wrap_to_sym_expr_hash(key)]
-        out()
-        return out
-
-    def __contains__(self, key):
-        return key.node in self.sym_node_dict or self._wrap_to_sym_expr_hash(key) in self.sym_hash_dict
-
-    def get(self, key, default=None):
-        if val := self.sym_node_dict.get(key.node, None):
-            return val
-
-        out = self.sym_hash_dict.get(self._wrap_to_sym_expr_hash(key), default)
-        if out is not None:
-            out()
-        return out
-
-    def _wrap_to_sym_expr_hash(self, key):
-        return _SymExprHash(key) if isinstance(key, py_sym_types) else key
-
-
 def is_sym_node(node):
     assert hasattr(node, 'meta'), "All nodes traced with proxy_tensor should have meta"
     return "val" in node.meta and isinstance(node.meta['val'], py_sym_types)
@@ -259,46 +184,18 @@ def track_tensor(tensor, proxy, *, constant, tracer):
         assert callable(proxy_callable)
         if isinstance(outer_s, SymInt):
             set_proxy_slot(outer_s, tracer, thunkify(proxy_callable, outer_s, *args))
-
     # The basic idea is that we need to associate each tensor/SymInt
     # with a Proxy.  How do we setup this association?  We just store
     # the proxy on the proxy slot of the object, keyed on the tracer
     # (so that if we have multiple tracers at the same time, they
     # don't clobber each other.)
-
-    # reuse existing sym int if it exists instead of inserting sym_size calls,
-    # which can interfere with graph passes / pattern-matching
-    def get_existing_proxy(s_inp):
-        if isinstance(s_inp, py_sym_types):
-            if p := tracer.symnode_tracker.get(s_inp, None):
-                return p
-
-        return None
-
-    def proxy_func(p, *args, **kwargs):
-        return p()
-
-    def dont_hash_sym_expr(s):
-        # Recompute the expressions that are computed from uses on tensors, otherwise we might induce
-        # a dependency on forward from backward.
-        if isinstance(s, py_sym_types):
-            tracer.symnode_tracker.dont_hash_sym_expr(s)
-
     for i, s in enumerate(tensor.shape):
-        if p := get_existing_proxy(s):
-            try_set_proxy_slot(s, functools.partial(proxy_func, p))
-        else:
-            dont_hash_sym_expr(s)
-            try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_size.int(proxy, i), x), i)
+        try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_size.int(proxy, i), x), i)
 
     for i, s in enumerate(tensor.stride()):
-        if p := get_existing_proxy(s):
-            try_set_proxy_slot(s, functools.partial(proxy_func, p))
-        else:
-            dont_hash_sym_expr(s)
-            try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_stride.int(proxy, i), x), i)
+        try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_stride.int(proxy, i), x), i)
 
-    dont_hash_sym_expr(tensor.storage_offset())
+    try_set_proxy_slot(tensor.numel(), lambda x: set_meta(torch.ops.aten.sym_numel.default(proxy), x))
     try_set_proxy_slot(tensor.storage_offset(), lambda x: set_meta(torch.ops.aten.sym_storage_offset.default(proxy), x))
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
 
@@ -573,12 +470,30 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
     return out
 
+class _SymNodeDict:
+    """
+    Wrapper around a dictionary that will hash SymInts with their nodes
+    """
+    def __init__(self):
+        self.sym_node_dict = {}
+
+    def __setitem__(self, key: py_sym_types, value: Any):
+        self.sym_node_dict[key.node] = value
+
+    def __getitem__(self, key: py_sym_types):
+        return self.sym_node_dict[key.node]
+
+    def __contains__(self, key: py_sym_types):
+        return key.node in self.sym_node_dict
+
+    def get(self, key: py_sym_types, default: Any = None):
+        return self.sym_node_dict.get(key.node, default)
 
 class PythonKeyTracer(Tracer):
     def __init__(self):
         super().__init__(autowrap_modules=())
         self.tensor_tracker = WeakTensorKeyDictionary()
-        self.symnode_tracker = _SymHashingDict()  # type: ignore[var-annotated]
+        self.symnode_tracker = _SymNodeDict()  # type: ignore[var-annotated]
         self.script_object_tracker = WeakIdKeyDictionary(dict=None, ref_type=_WeakHashRef)
 
     # In general, we don't want to make modules leaves. In principle, users of
@@ -633,6 +548,8 @@ def dispatch_trace(
         concrete_args: Optional[Tuple[Any, ...]] = None,
 ) -> GraphModule:
     graph = tracer.trace(root, concrete_args)
+    from torch._inductor.fx_passes.dedupe_symint_uses import dedupe_symints
+    dedupe_symints(graph)
     name = root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
     return fx._lazy_graph_module._make_graph_module(tracer.root, graph, name)
 
@@ -655,11 +572,6 @@ def wrap_key(f, tensors, tracer, pre_dispatch: bool):
         assert len(flat_proxies) == len(flat_tensors)
         with _pop_proxy_mode_temporarily() as m:
             assert isinstance(m, ProxyTorchDispatchMode)
-
-            for arg in flat_tensors:
-                if isinstance(arg, py_sym_types):
-                    tracer.symnode_tracker.add_input_symint_symbol(arg)
-
             track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
 
         out = f(*tensors)
