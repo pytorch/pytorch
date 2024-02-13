@@ -147,8 +147,6 @@ def _make_mismatch_msg(
     rel_diff: float,
     rel_diff_idx: Optional[Union[int, Tuple[int, ...]]] = None,
     rtol: float,
-    actual: Optional[torch.Tensor] = None,
-    expected: Optional[torch.Tensor] = None,
 ) -> str:
     """Makes a mismatch error message for numeric values.
 
@@ -175,8 +173,6 @@ def _make_mismatch_msg(
         diff: float,
         idx: Optional[Union[int, Tuple[int, ...]]],
         tol: float,
-        actual: Optional[torch.Tensor] = None,
-        expected: Optional[torch.Tensor] = None,
     ) -> str:
         if idx is None:
             msg = f"{type.title()} difference: {diff}"
@@ -184,8 +180,6 @@ def _make_mismatch_msg(
             msg = f"Greatest {type} difference: {diff} at index {idx}"
         if not equality:
             msg += f" (up to {tol} allowed)"
-        if actual is not None and expected is not None:
-            msg += f' actual value {actual[idx]}, expected {expected[idx]}'
         return msg + "\n"
 
     if identifier is None:
@@ -198,8 +192,8 @@ def _make_mismatch_msg(
     if extra:
         msg += f"{extra.strip()}\n"
 
-    msg += make_diff_msg(type="absolute", diff=abs_diff, idx=abs_diff_idx, tol=atol, actual=actual, expected=expected)
-    msg += make_diff_msg(type="relative", diff=rel_diff, idx=rel_diff_idx, tol=rtol, actual=actual, expected=expected)
+    msg += make_diff_msg(type="absolute", diff=abs_diff, idx=abs_diff_idx, tol=atol)
+    msg += make_diff_msg(type="relative", diff=rel_diff, idx=rel_diff_idx, tol=rtol)
 
     return msg.strip()
 
@@ -307,8 +301,6 @@ def make_tensor_mismatch_msg(
         rel_diff=max_rel_diff.item(),
         rel_diff_idx=unravel_flat_index(int(max_rel_diff_flat_idx)),
         rtol=rtol,
-        actual=actual,
-        expected=expected,
     )
 
 
