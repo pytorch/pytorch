@@ -789,12 +789,17 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def frexp(x):
+        cache_key = f"frexp({x})"
+        if cache_key in V.kernel.cse.cache:
+            return V.kernel.cse.cache[cache_key]
+
         code = BracesBuffer()
         exponent = V.kernel.cse.newvar()
         mantissa = V.kernel.cse.newvar()
         code.writeline(f"int32_t {exponent};")
         code.writeline(f"auto {mantissa} = std::frexp({x}, &{exponent});")
         V.kernel.compute.splice(code)
+        V.kernel.cse.cache[cache_key] = (mantissa, exponent)
         return mantissa, exponent
 
     @staticmethod

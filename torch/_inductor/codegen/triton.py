@@ -906,11 +906,16 @@ class TritonKernelOverrides(TritonOverrides):
 
     @staticmethod
     def frexp(x):
+        cache_key = f"frexp({x})"
+        if cache_key in V.kernel.cse.cache:
+            return V.kernel.cse.cache[cache_key]
+
         mantissa = V.kernel.cse.newvar()
         exponent = V.kernel.cse.newvar()
         V.kernel.compute.writeline(
             f"{mantissa}, {exponent} = triton_helpers.frexp({x})"
         )
+        V.kernel.cse.cache[cache_key] = (mantissa, exponent)
         return (mantissa, exponent)
 
 
