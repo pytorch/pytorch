@@ -1,3 +1,4 @@
+import functools
 import logging
 import os
 import sys
@@ -92,6 +93,13 @@ def set_pytorch_distributed_envs_from_justknobs():
 
 def log_export_usage(**kwargs):
     pass
+
+
+@functools.lru_cache(None)
+def max_clock_rate():
+    from triton.testing import nvsmi
+
+    return nvsmi(["clocks.max.sm"])[0]
 
 
 TEST_MASTER_ADDR = "127.0.0.1"
