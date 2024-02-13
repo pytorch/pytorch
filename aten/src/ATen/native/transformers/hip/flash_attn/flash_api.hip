@@ -69,8 +69,6 @@ namespace pytorch_flash {
 
 namespace {
 
-c10::once_flag fa_gcn_arch_override_flag;
-
 void check_gpu_arch(hipStream_t stream) {
   auto ret = aotriton::v2::flash::check_gpu(stream);
   if (hipSuccess != ret) {
@@ -78,11 +76,6 @@ void check_gpu_arch(hipStream_t stream) {
                   "FlashAttention only supports MI200/MI300X GPUs (gfx90a:sramecc+:xnack- or gfx94a:sramecc+:xnack-)")
   }
 }
-
-using T1 = aotriton::TensorView<1>;
-using T2 = aotriton::TensorView<2>;
-using T3 = aotriton::TensorView<3>;
-using T4 = aotriton::TensorView<4>;
 
 aotriton::DType cast_dtype(caffe2::TypeMeta t_dtype)
 {
@@ -523,7 +516,6 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     }
   }
 
-#if 1
   at::Tensor q_t = q.permute({0,2,1,3});
   at::Tensor k_t = k.permute({0,2,1,3});
   at::Tensor v_t = v.permute({0,2,1,3});
@@ -532,16 +524,6 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
   at::Tensor dk_t = dk.permute({0,2,1,3});
   at::Tensor dv_t = dv.permute({0,2,1,3});
   at::Tensor dout_t = dout.permute({0,2,1,3});
-#else
-  at::Tensor q_t = q.permute({0,2,1,3}).contiguous();
-  at::Tensor k_t = k.permute({0,2,1,3}).contiguous();
-  at::Tensor v_t = v.permute({0,2,1,3}).contiguous();
-  at::Tensor out_t = out.permute({0,2,1,3}).contiguous();
-  at::Tensor dq_t = dq.permute({0,2,1,3}).contiguous();
-  at::Tensor dk_t = dk.permute({0,2,1,3}).contiguous();
-  at::Tensor dv_t = dv.permute({0,2,1,3}).contiguous();
-  at::Tensor dout_t = dout.permute({0,2,1,3}).contiguous();
-#endif
 
   at::Tensor softmax_lse_cont = softmax_lse.contiguous();
   at::Tensor delta = at::empty_like(softmax_lse).contiguous();
