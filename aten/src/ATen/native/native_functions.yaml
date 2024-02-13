@@ -6475,6 +6475,7 @@
 # TODO: add these to core aten opset
 # return values are: output, save_mean, save_var, reserve
 # reserve tensor is only used in cudnn
+# note: for cudnn and miopen backends, input, weight, bias, running_mean, and running_var are all expected to be contiguous
 - func: batch_norm_with_update(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, float momentum, float eps, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, Tensor)
   dispatch:
     CPU: batch_norm_with_update_cpu

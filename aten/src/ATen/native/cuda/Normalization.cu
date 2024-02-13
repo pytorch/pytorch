@@ -491,20 +491,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_with_update_cuda(
   Tensor output, save_mean, save_var, reserve;
 
   BatchNormBackend backend = _select_batch_norm_backend(input, weight, bias, running_mean, running_var, /*training*/true, eps, cudnn_enabled);
-  auto weight_c = weight.contiguous();
-  auto bias_c = bias.contiguous();
-  auto rmean_c = running_mean.defined() ? running_mean.contiguous() : running_mean;
-  auto rvar_c = running_var.defined() ? running_var.contiguous() : running_var;
-
   if (backend == BatchNormBackend::Cudnn) {
-    auto input_c = input.contiguous(input.suggest_memory_format());
     std::tie(output, save_mean, save_var, reserve) =
-        at::cudnn_batch_norm(input_c, weight_c, bias_c, rmean_c, rvar_c, /*training*/true, momentum, eps);
+        at::cudnn_batch_norm(input, weight, bias, running_mean, running_var, /*training*/true, momentum, eps);
   } else if (backend == BatchNormBackend::Miopen) {
-    auto input_c = input.contiguous();
     reserve = at::empty({0}, input.options().dtype(kByte));
     std::tie(output, save_mean, save_var) =
-        at::miopen_batch_norm(input_c, weight_c, bias_c, rmean_c, rvar_c, /*training*/true, momentum, eps);
+        at::miopen_batch_norm(input, weight, bias, running_mean, running_var, /*training*/true, momentum, eps);
   } else {
     reserve = at::empty({0}, input.options().dtype(kByte));
     std::tie(output, save_mean, save_var) =
@@ -523,19 +516,12 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> batch_norm_with_update_cuda_out(
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
   BatchNormBackend backend = _select_batch_norm_backend(input, weight, bias, running_mean, running_var, /*training*/true, eps, cudnn_enabled);
-  auto weight_c = weight.contiguous();
-  auto bias_c = bias.contiguous();
-  auto rmean_c = running_mean.defined() ? running_mean.contiguous() : running_mean;
-  auto rvar_c = running_var.defined() ? running_var.contiguous() : running_var;
-
   if (backend == BatchNormBackend::Cudnn) {
-    auto input_c = input.contiguous(input.suggest_memory_format());
     std::tie(out, save_mean, save_var, reserve) =
-        at::cudnn_batch_norm_out(out, save_mean, save_var, reserve, input_c, weight_c, bias_c, rmean_c, rvar_c, /*training*/true, momentum, eps);
+        at::cudnn_batch_norm_out(out, save_mean, save_var, reserve, input, weight, bias, running_mean, running_var, /*training*/true, momentum, eps);
   } else if (backend == BatchNormBackend::Miopen) {
-    auto input_c = input.contiguous();
     std::tie(out, save_mean, save_var) =
-        at::miopen_batch_norm_out(out, save_mean, save_var, input_c, weight_c, bias_c, rmean_c, rvar_c, /*training*/true, momentum, eps);
+        at::miopen_batch_norm_out(out, save_mean, save_var, input, weight, bias, running_mean, running_var, /*training*/true, momentum, eps);
   } else {
     std::tie(out, save_mean, save_var) =
       batch_norm_cuda_out(input, weight_opt, bias_opt, running_mean, running_var, /*update*/true, momentum, eps, out, save_mean, save_var);

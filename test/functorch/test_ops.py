@@ -368,6 +368,10 @@ aliasing_ops_list_return = {
     # 'tensor_split' not composite compliant, see vjp_fail
 }
 
+skip_noncontig = {
+    'batch_norm_with_update',
+}
+
 
 @unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
 @unMarkDynamoStrictTest
@@ -433,9 +437,10 @@ class TestOperators(TestCase):
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
 
-            noncontig_sample = sample.noncontiguous()
-            noncontig_args = [noncontig_sample.input] + list(noncontig_sample.args)
-            noncontig_kwargs = noncontig_sample.kwargs
+            if op.name not in skip_noncontig:
+                noncontig_sample = sample.noncontiguous()
+                noncontig_args = [noncontig_sample.input] + list(noncontig_sample.args)
+                noncontig_kwargs = noncontig_sample.kwargs
 
             diff_argnums = tuple(i for i, arg in enumerate(args) if diff_arg(arg))
             assert len(diff_argnums) > 0
@@ -458,11 +463,12 @@ class TestOperators(TestCase):
                 return result
 
             result = grad(wrapped_fn, diff_argnums)(*args, **kwargs)
-            result_noncontig = grad(wrapped_fn, diff_argnums)(*noncontig_args, **noncontig_kwargs)
             expected = _autograd_grad(_as_tuple(wrapped_fn(*args, **kwargs)), diff_args)
-
             self.assertEqual(result, expected)
-            self.assertEqual(result_noncontig, expected)
+
+            if op.name not in skip_noncontig:
+                result_noncontig = grad(wrapped_fn, diff_argnums)(*noncontig_args, **noncontig_kwargs)
+                self.assertEqual(result_noncontig, expected)
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
@@ -476,7 +482,8 @@ class TestOperators(TestCase):
         skip('nn.functional.max_unpool2d'),  # fails everywhere except on windows
         skip('nn.functional.max_unpool3d'),  # fails everywhere except on mac
         xfail("native_batch_norm"),          # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
-        xfail("_native_batch_norm_legit"),    # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
+        xfail("_native_batch_norm_legit"),   # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
+        xfail("batch_norm_with_update"),     # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
 
         xfail('nn.functional.scaled_dot_product_attention'),
         xfail('torch.ops.aten._flash_attention_forward'),
@@ -830,6 +837,7 @@ class TestOperators(TestCase):
         xfail("to_sparse"),
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
+        xfail("batch_norm_with_update"),
     }))
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -921,6 +929,7 @@ class TestOperators(TestCase):
         skip('linalg.svdvals'),  # # really annoying thing where it passes correctness check but not has_batch_rule
         skip("native_batch_norm"),
         skip("_native_batch_norm_legit"),
+        skip("batch_norm_with_update"),
         xfail('__getitem__', ''),  # dynamic error
         xfail('nanquantile', device_type='cpu'),  # checks q via a .item() call
         xfail('nn.functional.gaussian_nll_loss'),  # checks var for if any value < 0
@@ -1045,6 +1054,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.batch_norm', 'without_cudnn'),
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
+        xfail("batch_norm_with_update"),
 
         # https://github.com/pytorch/pytorch/issues/96560
         # ROCm: NotImplementedError
@@ -1230,6 +1240,7 @@ class TestOperators(TestCase):
         xfail('sparse.mm', 'reduce'),
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
+        xfail("batch_norm_with_update"),
         xfail("native_dropout_backward"),
         xfail("index_fill"),  # aten::_unique hit the vmap fallback which is currently disabled
     }))
@@ -1306,6 +1317,7 @@ class TestOperators(TestCase):
         xfail('sparse.mm', 'reduce'),
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
+        xfail("batch_norm_with_update"),
         xfail('as_strided', 'partial_views'),
     }))
     def test_vjpvmap(self, device, dtype, op):
@@ -1564,6 +1576,7 @@ class TestOperators(TestCase):
         # place, were not batched.
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
+        xfail("batch_norm_with_update"),
         xfail('native_dropout_backward'),
     }))
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
