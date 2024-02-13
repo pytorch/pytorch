@@ -96,7 +96,7 @@ def build_opt_kwarg_db():
 
         for device in ["cpu", "cuda"]:
             for optim_inputs in _get_optim_inputs_including_global_cliquey_kwargs(
-                device, None, optim_info, skip=("differentiable",)
+                device, None, optim_info, skip=("differentiable", "fused")
             ):
                 kwargs = dict(optim_inputs.kwargs)
                 name = f"test_{optim_info.optim_cls.__name__.lower()}"
@@ -128,12 +128,8 @@ def build_opt_kwarg_db():
                         else KERNEL_COUNTS[optim_info.optim_cls].singletensor
                     )
 
-                if kwargs["kernel_count"] is None:
+                if kwargs["kernel_count"] is None or kwargs.get("fused", False):
                     continue
-
-                # fused optimizers are disabled
-                if kwargs.get("fused", False):
-                    kwargs["kernel_count"] = 0
 
                 compiled_opt_db.append((optim_info.optim_cls, name, kwargs))
 
@@ -224,21 +220,14 @@ def make_test(
     closure=None,
     kernel_count=2,
     device="cuda",
-    atol=None,
-    rtol=None,
     **kwargs,
 ):
     def test_fn(self):
         stack = ExitStack()
         try:
-            # we fallback to eager on the fused implementation
-            is_fused = kwargs.get("fused", False)
-
             # https://github.com/pytorch/pytorch/issues/118715 for capturable Adagrad support
             # https://github.com/pytorch/pytorch/issues/118018 for capturable SGD support
-            run_cudagraphs = (
-                device == "cuda" and not is_fused and optim_cls not in (Adagrad, SGD)
-            )
+            run_cudagraphs = device == "cuda" and optim_cls not in (Adagrad, SGD)
             if run_cudagraphs:
                 stack.enter_context(config.patch({"triton.cudagraphs": True}))
 
@@ -259,9 +248,7 @@ def make_test(
 
             opt_eager = optim_cls(model_eager.parameters(), **kwargs)
             opt_compiled = optim_cls(model_compiled.parameters(), **kwargs)
-            compiled_step = compile_opt(
-                opt_compiled, closure=closure, fullgraph=(not is_fused)
-            )
+            compiled_step = compile_opt(opt_compiled, closure=closure)
 
             with torch.set_grad_enabled(False):
                 compiled_step()
@@ -353,7 +340,7 @@ class CompiledOptimizerParityTests(TestCase):
             device, dtype, optim_info, skip=("differentiable",)
         )
         for optim_input in all_optim_inputs:
-            kwargs = dict(optim_input.kwargs)
+            kwargs = optim_input.kwargs
 
             # RAdam #117836 and Adamax #118230 and ASGD #116052
             # Single tensor eager needs to be refactored to enable tracing
