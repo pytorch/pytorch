@@ -315,7 +315,7 @@ void CUDAGraph::alloc_const_buffer(void** ptr, size_t size) {
       current_capturing_graph == this,
       "CUDAGraph::alloc_const_buffer can only be invoked on "
       "the currently capturing graph");
-  at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
+  c10::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
   C10_CUDA_CHECK(cudaMalloc(ptr, size));
   const_buffers_.push_back(*ptr);
 #else
