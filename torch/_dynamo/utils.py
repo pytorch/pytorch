@@ -50,6 +50,7 @@ from typing import (
     ValuesView,
 )
 
+from ..utils.hooks import RemovableHandle
 
 try:
     import numpy as np
@@ -1566,6 +1567,9 @@ def ensure_graph_fake(e, tx):
 
 def get_fake_values_from_nodes(tx, nodes):
     def visit(n: torch.fx.Node):
+        if n.op == "call_function" and "example_value" not in n.meta:
+            return get_fake_value(n, tx)
+
         return n.meta["example_value"]
 
     args_kwargs = torch.fx.node.map_arg(nodes, visit)
@@ -2496,3 +2500,11 @@ def maybe_enable_compiled_autograd(should_enable):
             yield ctx
     else:
         yield
+
+
+def invalid_removeable_handle():
+    # need a subclass so weakref works
+    class Invalid(dict):  # type: ignore[type-arg]
+        pass
+
+    return RemovableHandle(Invalid())
