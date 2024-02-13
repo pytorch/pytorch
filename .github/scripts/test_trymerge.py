@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Optional
 from unittest import main, mock, skip, TestCase
 from urllib.error import HTTPError
 
+from github_utils import gh_graphql
+
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 
 from trymerge import (
@@ -26,7 +28,6 @@ from trymerge import (
     get_drci_classifications,
     get_rockset_results,
     gh_get_team_members,
-    gh_graphql,
     GitHubPR,
     JobCheckState,
     main as trymerge_main,
@@ -433,6 +434,13 @@ class TestTryMerge(TestCase):
         self.assertGreater(len(approved_by), 0)
         assert pr._reviews is not None  # to pacify mypy
         self.assertGreater(len(pr._reviews), 100)
+
+    def get_co_authors(self, *args: Any) -> None:
+        """Tests that co-authors are recognized"""
+        pr = GitHubPR("pytorch", "pytorch", 118347)
+        authors = pr.get_authors()
+        self.assertIn("kit1980", authors)
+        self.assertIn("Co-authored-by:", pr.gen_commit_message())
 
     def test_get_checkruns_many_runs(self, *args: Any) -> None:
         """Tests that all checkruns can be fetched"""

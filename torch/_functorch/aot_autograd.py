@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import itertools
 from contextlib import nullcontext
 from functools import partial, wraps
@@ -601,18 +603,6 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False.""")
 
         compiled_fn = compiler_fn(flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata)
         if aot_config.is_export:
-            mutated_user_inp_locs = [
-                idx - aot_config.num_params_buffers
-                for idx in fw_metadata.mutated_inp_runtime_indices
-                if idx >= aot_config.num_params_buffers
-            ]
-            if len(mutated_user_inp_locs) > 0:
-                raise RuntimeError(f"""
-Found following user inputs located at {mutated_user_inp_locs} are mutated. This is currently banned in the aot_export workflow.
-If you need this functionality, please file a github issue.
-
-fw_metadata={str(fw_metadata)}""")
-
             # During export, we don't get back a callable - we get back the raw fx graph
             # (either a joint or an inference-only graph)
             assert isinstance(compiled_fn, torch.fx.GraphModule)
@@ -957,6 +947,7 @@ def aot_export_module(
         raise RuntimeError("pre_dispatch is not supported when trace_joint is True.")
     named_parameters = dict(mod.named_parameters(remove_duplicate=False))
     named_buffers = dict(mod.named_buffers(remove_duplicate=False))
+
     params_and_buffers = {
         **dict(named_parameters),
         **dict(named_buffers),
@@ -1136,13 +1127,13 @@ def aot_export_joint_simple(
     if len([x for x in metadata.output_info if x.output_type != OutputType.non_alias]) != 0:
         raise RuntimeError(f"aot_export_joint_simple does not support outputs that alias inputs. {str(metadata)}")
     # No pytrees
-    if type(in_spec) == pytree.LeafSpec:
+    if in_spec.is_leaf():
         raise RuntimeError(f"aot_export_joint_simple requires inputs to be a single list/tuple. in_spec={str(in_spec)}")
-    if len([x for x in in_spec.children_specs if type(x) != pytree.LeafSpec]) != 0:
+    if not all(child.is_leaf() for child in in_spec.children_specs):
         raise RuntimeError(f"aot_export_joint_simple requires individual inputs not to be pytrees. in_spec={str(in_spec)}")
-    if type(out_spec) == pytree.LeafSpec:
+    if out_spec.is_leaf():
         raise RuntimeError(f"aot_export_joint_simple requires outputs to be a single list/tuple. out_spec={str(out_spec)}")
-    if len([x for x in out_spec.children_specs if type(x) != pytree.LeafSpec]) != 0:
+    if not all(child.is_leaf() for child in out_spec.children_specs):
         raise RuntimeError(f"aot_export_joint_simple requires individual outputs not to be pytrees. out_spec={str(out_spec)}")
     # TODO: we might have to temporarily patch config.functionalize_rng
     # so that it doesn't run when we're exporting a higher order op.

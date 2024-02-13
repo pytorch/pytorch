@@ -452,17 +452,21 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         def test_open_device_tensor_type_fallback():
             torch.utils.rename_privateuse1_backend('foo')
             # create tensors located in custom device
-            x = torch.Tensor([1, 2, 3]).to('foo')
+            x = torch.Tensor([[1, 2, 3], [2, 3, 4]]).to('foo')
             y = torch.Tensor([1, 0, 2]).to('foo')
             # create result tensor located in cpu
-            z_cpu = torch.Tensor([0, 2, 1])
+            z_cpu = torch.Tensor([[0, 2, 1], [1, 3, 2]])
             # Check that our device is correct.
             device = self.module.custom_device()
             self.assertTrue(x.device == device)
             self.assertFalse(x.is_cpu)
             # call sub op, which will fallback to cpu
             z = torch.sub(x, y)
-
+            self.assertEqual(z_cpu, z)
+            # call index op, which will fallback to cpu
+            z_cpu = torch.Tensor([3, 1])
+            y = torch.Tensor([1, 0]).long().to('foo')
+            z = x[y, y]
             self.assertEqual(z_cpu, z)
 
         def test_open_device_tensorlist_type_fallback():

@@ -6,6 +6,7 @@ import enum
 import functools
 import getpass
 import inspect
+import io
 import itertools
 import logging
 import math
@@ -19,6 +20,7 @@ import tempfile
 import textwrap
 import time
 import unittest
+from datetime import datetime
 from io import StringIO
 from typing import (
     Any,
@@ -45,7 +47,6 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
 from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
-
 from . import config
 
 log = logging.getLogger(__name__)
@@ -331,7 +332,7 @@ def timed(
         synchronize(device)
     t1 = time.perf_counter()
     # GC the result after timing
-    assert result is not None
+    assert result is not None  # type: ignore[possibly-undefined]
     return t1 - t0
 
 
@@ -569,8 +570,8 @@ def sympy_subs(expr: sympy.Expr, replacements: Dict[sympy.Expr, Any]) -> sympy.E
         if isinstance(replacement, str):
             return sympy.Symbol(
                 replacement,
-                integer=replaced.is_integer,
-                nonnegative=replaced.is_nonnegative,
+                integer=replaced.is_integer,  # type: ignore[attr-defined]
+                nonnegative=replaced.is_nonnegative,  # type: ignore[attr-defined]
             )
         else:
             return replacement
@@ -582,11 +583,11 @@ def sympy_subs(expr: sympy.Expr, replacements: Dict[sympy.Expr, Any]) -> sympy.E
 
 
 def free_symbol_startswith(index: sympy.Expr, prefix: str):
-    return any(v.name.startswith(prefix) for v in index.free_symbols)
+    return any(v.name.startswith(prefix) for v in index.free_symbols)  # type: ignore[attr-defined]
 
 
 def free_symbol_has(index: sympy.Expr, pattern: str):
-    return any(pattern in v.name for v in index.free_symbols)
+    return any(pattern in v.name for v in index.free_symbols)  # type: ignore[attr-defined]
 
 
 def is_symbolic(a: Any) -> bool:
@@ -808,6 +809,9 @@ class IndentedBuffer:
             other_code = other_code.rstrip()
             for line in other_code.split("\n"):
                 self.writeline(line)
+
+    def __repr__(self):
+        return f"{type(self)}({self.getvalue()})"
 
 
 class DeferredLineBase:
@@ -1081,7 +1085,7 @@ def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
     assert isinstance(
         val, sympy.Expr
     ), "only support sympy.Expr as input to get_sympy_Expr_dtype"
-    if val.is_integer:
+    if val.is_integer:  # type: ignore[attr-defined]
         return torch.int64
     else:
         return torch.float64
@@ -1144,11 +1148,17 @@ def blue_text(msg):
     return _color_text(msg, "blue")
 
 
+@functools.lru_cache(None)
 def _max_clock_rate(msg):
-    import pynvml
+    try:
+        import pynvml
 
-    handle = torch.cuda._get_pynvml_handler(0)
-    return pynvml.nvmlDeviceGetMaxClockInfo(handle, 1)
+        handle = torch.cuda._get_pynvml_handler(0)
+        return pynvml.nvmlDeviceGetMaxClockInfo(handle, 1)
+    except Exception:
+        from triton.testing import nvsmi
+
+        return nvsmi(["clocks.max.sm"])[0]
 
 
 @functools.lru_cache(None)
@@ -1159,7 +1169,7 @@ def get_device_tflops(dtype):
 
     if inspect.signature(get_max_simd_tflops).parameters.get("clock_rate"):
         # Triton API change in https://github.com/openai/triton/pull/2293
-        cur_sm_clock = _max_clock_rate()
+        sm_clock = _max_clock_rate()
         if dtype in (torch.float16, torch.bfloat16):
             return get_max_tensorcore_tflops(dtype, sm_clock)
 
@@ -1230,3 +1240,35 @@ class Placeholder(enum.Enum):
     # The descriptive name of the triton kernel; when unique_kernel_names = False, this
     # placeholder will be replaced with a string with more information.
     DESCRIPTIVE_NAME = "DESCRIPTIVE_NAME"
+
+
+def pass_execution_and_save(func, gm, msg):
+    from .pattern_matcher import stable_topological_sort
+
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        delete=False,
+    ) as f:
+        before_io = io.StringIO()
+        after_io = io.StringIO()
+        print(f"Before:\n{gm.graph}", file=f)
+        print(gm.graph, file=before_io)
+        start_time = datetime.now()
+        func(gm.graph)
+        time_elapsed = datetime.now() - start_time
+        # recompile graph
+        stable_topological_sort(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        print(f"After:\n{gm.graph}", file=f)
+        print(gm.graph, file=after_io)
+        t = before_io.getvalue() == after_io.getvalue()
+        log.info(
+            "%s, save before/after graph to %s, graph before/after are the same = %s, time elapsed = %s",
+            msg,
+            f.name,
+            t,
+            time_elapsed,
+        )
