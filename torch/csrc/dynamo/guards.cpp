@@ -2020,6 +2020,7 @@ class GetAttrGuardAccessor : public GuardAccessor {
   bool check_nopybind(PyObject* obj) override { // borrowed ref
     PyObject* x = PyObject_GetAttr(obj, _attr_name); // new ref
     if (x == nullptr) {
+      PyErr_Clear();
       return false;
     }
     bool result = _guard_manager->check_nopybind(x);
@@ -2031,6 +2032,7 @@ class GetAttrGuardAccessor : public GuardAccessor {
       PyObject* obj) override { // borrowed ref
     PyObject* x = PyObject_GetAttr(obj, _attr_name); // new ref
     if (x == nullptr) {
+      PyErr_Clear();
       return GuardDebugInfo(
           false,
           std::string("get attr failed for attr name ") +
@@ -2124,7 +2126,7 @@ class GetItemGuardAccessor : public GuardAccessor {
     if (x == nullptr) {
       PyErr_Clear();
       // TODO (janimesh) - Better error message
-      return GuardDebugInfo(false, "KeyError", 0);
+      return GuardDebugInfo(false, std::string("KeyError ") + repr(), 0);
     }
     DEBUG_NULL_CHECK(x);
     GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
