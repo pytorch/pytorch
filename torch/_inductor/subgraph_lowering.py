@@ -9,9 +9,10 @@ from typing import List
 
 import torch
 
-from torch._inductor import ir
-from torch._inductor.exc import SubgraphLoweringException
-from torch._inductor.virtualized import ops, V, WrapperHandler
+from . import ir
+from .exc import SubgraphLoweringException
+from .ops_handler import SimpleCSEHandler
+from .virtualized import ops, V, WrapperHandler
 
 
 class PointwiseSubgraphLowering(torch.fx.Interpreter):
@@ -105,7 +106,7 @@ def lower_pointwise_subgraph(gm: torch.fx.GraphModule, inputs: List[InputDescrip
     # Do this by tracing through each individually and doing CSE
     tracer = torch.fx.Tracer()
     tracer.graph = torch.fx.Graph(tracer_cls=tracer.__class__)
-    trace_ops = TracingOpsHandler(tracer)
+    trace_ops = SimpleCSEHandler(TracingOpsHandler(tracer))
 
     outputs = subgraph.graph_outputs
 

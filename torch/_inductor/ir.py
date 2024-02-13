@@ -58,6 +58,7 @@ from .dependencies import (
     extract_read_writes,
     var_builder,
 )
+from .ops_handler import OpCounterCSE
 from .utils import (
     argsort,
     cache_on_self,
@@ -334,31 +335,6 @@ class IRNode:
     realize_hint: Callable[[], None]
 
 
-class _OpCounterCSE:
-    """Shim to count how many ops are used"""
-
-    def __init__(self, inner):
-        super().__init__()
-        self.parent_handler = inner
-        self.op_count = 0
-        self.var_names = {}
-
-    def __getattr__(self, name):
-        def inner(*args, **kwargs):
-            val = getattr(self.parent_handler, name)(*args, **kwargs)
-            if name == "indirect_indexing":
-                return val
-            if val not in self.var_names:
-                varname = f"tmp{self.op_count}"
-                self.op_count += 1
-                self.var_names[val] = varname
-                return varname
-            else:
-                return self.var_names[val]
-
-        return inner
-
-
 @dataclasses.dataclass
 class Loops(IRNode):
     device: torch.device
@@ -429,7 +405,7 @@ class Loops(IRNode):
     def inner_fn_opcount(self):
         from .ir import FlexibleLayout
 
-        opcounter = _OpCounterCSE(V.MockHandler())
+        opcounter = OpCounterCSE(V.MockHandler())
 
         with V.set_ops_handler(opcounter), patch.object(
             FlexibleLayout, "allow_indexing", True
