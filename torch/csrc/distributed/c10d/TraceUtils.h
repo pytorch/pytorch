@@ -535,8 +535,8 @@ struct NCCLTraceBuffer {
       if (compute_duration) {
         can_compute_duration = entry->time_discovered_completed_.has_value() &&
             entry->start_ && entry->end_;
-        startEvents = entry->start_;
-        endEvents = entry->end_;
+        startEvent = entry->start_;
+        endEvent = entry->end_;
       }
     }
 
