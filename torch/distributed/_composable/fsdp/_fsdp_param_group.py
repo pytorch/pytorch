@@ -9,6 +9,7 @@ import torch.nn as nn
 from torch.autograd.graph import Node
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
 from torch.utils._pytree import tree_flatten, tree_unflatten
+from torch.utils.hooks import RemovableHandle
 from ._fsdp_collectives import (
     AllGatherResult,
     foreach_all_gather,
@@ -17,6 +18,8 @@ from ._fsdp_collectives import (
 )
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo, TrainingState
 from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
+
+_ModuleToHandleDict = Dict[nn.Module, RemovableHandle]  # for state dict
 
 
 """
@@ -95,6 +98,10 @@ class FSDPParamGroup:
         self._init_mp_dtypes()
         self._module_fqn: Optional[str] = None  # prefixed from root module
 
+        # - Hook state
+        self._module_to_pre_save_state_dict_hook_handle: _ModuleToHandleDict = {}
+        self._module_to_pre_load_state_dict_hook_handle: _ModuleToHandleDict = {}
+
         # - Communication and communication/computation overlap
         self.comm_ctx = FSDPCommContext()
         # Group's indices in the shared post-forward order
@@ -148,6 +155,9 @@ class FSDPParamGroup:
         self._grad_postdivide_factor: float = (
             data_parallel_world_size / self._grad_predivide_factor
         )
+
+    def lazy_init(self):
+        self._register_state_dict_hooks()
 
     # Runtime #
     def unshard(self, async_op: bool = False):
@@ -370,6 +380,24 @@ class FSDPParamGroup:
         args = tree_unflatten(args_list, args_spec)
         kwargs = tree_unflatten(kwargs_list, kwargs_spec)
         return args, kwargs
+
+    def _register_state_dict_hooks(self) -> None:
+        assert len(self._module_to_pre_save_state_dict_hook_handle) == 0
+        assert len(self._module_to_pre_load_state_dict_hook_handle) == 0
+        modules_with_fsdp_params: Set[nn.Module] = {
+            fsdp_param._module_info.module for fsdp_param in self.fsdp_params
+        }
+
+        def to_sharded_hook(*args: Any, **kwargs: Any) -> None:
+            self._to_sharded()
+
+        for module in modules_with_fsdp_params:
+            self._module_to_pre_save_state_dict_hook_handle[
+                module
+            ] = module.register_state_dict_pre_hook(to_sharded_hook)
+            self._module_to_pre_load_state_dict_hook_handle[
+                module
+            ] = module._register_load_state_dict_pre_hook(to_sharded_hook)
 
     # Properties #
     @property
