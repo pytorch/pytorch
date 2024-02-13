@@ -271,7 +271,7 @@ class HigherOrderOperator(OperatorBase):
                 with torch._C._ExcludeDispatchKeyGuard(
                     torch._C.DispatchKeySet(DispatchKey.PreDispatch)
                 ):
-                    return cond_op(pred, true_fn, false_fn, operands)
+                    return self(*args, **kwargs)
             raise AssertionError(
                 """
                 Can't directly invoke cond_op implementation at PreDispatch key

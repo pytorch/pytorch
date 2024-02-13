@@ -97,6 +97,7 @@ def _get_current_dispatch_mode_stack():
     stack_len = _len_torch_dispatch_stack()
     return [_get_dispatch_stack_at(i) for i in range(stack_len)]
 
+# TODO (tmanlaibaatar) it doesn't need to take in dispatch key
 def _push_mode(mode, k: Optional[DispatchKey] = None):
     assert k is None or k == torch._C.DispatchKey.PreDispatch
     if k is None:
