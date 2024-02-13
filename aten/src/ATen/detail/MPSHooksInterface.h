@@ -4,7 +4,6 @@
 
 #include <c10/core/Allocator.h>
 #include <ATen/core/Generator.h>
-#include <ATen/detail/AcceleratorHooksInterface.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
 
@@ -12,7 +11,7 @@
 
 namespace at {
 
-struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
+struct TORCH_API MPSHooksInterface {
   // this fails the implementation if MPSHooks functions are called, but
   // MPS backend is not present.
   #define FAIL_MPSHOOKS_FUNC(func) \
@@ -87,9 +86,7 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   virtual double elapsedTimeOfEvents(uint32_t start_event_id, uint32_t end_event_id) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
-  virtual bool hasPrimaryContext(DeviceIndex device_index) const override {
-    FAIL_MPSHOOKS_FUNC(__func__);
-  }
+
   #undef FAIL_MPSHOOKS_FUNC
 };
 
