@@ -787,6 +787,12 @@ class IndentedBuffer:
 
         return ctx()
 
+    def do_indent(self, offset=1):
+        self._indent += offset
+
+    def do_unindent(self, offset=1):
+        self._indent -= offset
+
     def splice(self, other_code, strip=False):
         if isinstance(other_code, IndentedBuffer):
             dedent = float("inf")

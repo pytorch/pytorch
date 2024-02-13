@@ -251,9 +251,7 @@ class EnterDeviceContextManagerLine:
     device_idx: int
     last_seen_device_guard_index: Optional[int]
 
-    def codegen(
-        self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack
-    ) -> None:
+    def codegen(self, code: IndentedBuffer) -> None:
         if V.graph.cpp_wrapper:
             code.writeline("\n")
             if V.graph.aot_mode:
@@ -285,16 +283,14 @@ class EnterDeviceContextManagerLine:
             # Note _DeviceGuard has less overhead than device, but only accepts
             # integers
             code.writeline(f"with {V.graph.device_ops.device_guard(self.device_idx)}:")
-            device_cm_stack.enter_context(code.indent())
+            code.do_indent()
             code.writeline(V.graph.device_ops.set_device(self.device_idx))
 
 
 class ExitDeviceContextManagerLine:
-    def codegen(
-        self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack
-    ) -> None:
+    def codegen(self, code: IndentedBuffer) -> None:
         if not V.graph.cpp_wrapper:
-            device_cm_stack.close()
+            code.do_unindent()
 
 
 @dataclasses.dataclass
@@ -707,18 +703,16 @@ class WrapperCodeGen(CodeGen):
             else:
                 self.memory_plan_reuse()
 
-            device_cm_stack = contextlib.ExitStack()
             for line in self.lines:
-                if isinstance(line, MemoryPlanningLine):
-                    line.codegen(self.wrapper_call)
-                elif isinstance(
+                if isinstance(
                     line,
                     (
+                        MemoryPlanningLine,
                         EnterDeviceContextManagerLine,
                         ExitDeviceContextManagerLine,
                     ),
                 ):
-                    line.codegen(self.wrapper_call, device_cm_stack)
+                    line.codegen(self.wrapper_call)
                 else:
                     self.wrapper_call.writeline(line)
 
