@@ -480,7 +480,7 @@ def unset_functional_temporarily():
 # - Doing so means that it does not automatically compose with other
 #   functorch transforms, since these transforms always run above __torch_dispatch__.
 #   That's why this util lives here, and not in functorch.
-def dispatch_functionalize(func, mode):
+def dispatch_functionalize(func, mode: Optional[FunctionalTensorMode] = FunctionalTensorMode()):
     # TODO: pull these from aot autograd
     def to_fun(t):
         if isinstance(t, torch.Tensor):
@@ -546,9 +546,9 @@ class BaseFunctionalizeAPI(ABC):
 
 
 class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
-    def __init__(self, mode, pre_dispatch: bool = False) -> None:
+    def __init__(self, mode: Optional[FunctionalTensorMode] = None, pre_dispatch: bool = False) -> None:
         super().__init__()
-        self.mode = mode
+        self.mode = mode if mode else FunctionalTensorMode()
         self.pre_dispatch = pre_dispatch
 
     def wrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
@@ -566,7 +566,12 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
         return dispatch_functionalize(inner_f, self.mode)
 
     def redispatch_to_next(self) -> ContextManager:
-        return unset_functional_temporarily()
+        # [NOTE] We don't do anything here because at the time
+        # we exercise this path, we would have already popped the
+        # FunctionalTensorMode from mode stack. Since FunctionalTensorMode
+        # is now stateful, it is better to explicitly pass in correct mode
+        # directly instead of globally setting it.
+        return contextlib.nullcontext()
 
     def replace(self, input_tensor, output_tensor) -> None:
         assert isinstance(input_tensor, FunctionalTensor)

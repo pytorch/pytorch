@@ -338,14 +338,13 @@ def map_functionalize(ctx, f, xs, pos_args):
     unwrapped_args = ctx.unwrap_tensors(pos_args)
     wrapped_fn = ctx.functionalize(f)
 
-    with ctx.redispatch_to_next():
-        with disable_proxy_modes_tracing():
-            example_inputs = (*_unstack_pytree(unwrapped_xs)[0], *unwrapped_args)
-        if _has_potential_branch_input_mutation(f, example_inputs):
-            raise UnsupportedAliasMutationException("torch.map is mutating the input!")
+    with disable_proxy_modes_tracing():
+        example_inputs = (*_unstack_pytree(unwrapped_xs)[0], *unwrapped_args)
+    if _has_potential_branch_input_mutation(f, example_inputs):
+        raise UnsupportedAliasMutationException("torch.map is mutating the input!")
 
-        if _has_potential_branch_input_alias(f, example_inputs):
-            raise UnsupportedAliasMutationException("torch.map is aliasing the input!")
+    if _has_potential_branch_input_alias(f, example_inputs):
+        raise UnsupportedAliasMutationException("torch.map is aliasing the input!")
 
-        map_return = map_impl(wrapped_fn, unwrapped_xs, unwrapped_args)
-        return ctx.wrap_tensors(map_return)
+    map_return = map_impl(wrapped_fn, unwrapped_xs, unwrapped_args)
+    return ctx.wrap_tensors(map_return)

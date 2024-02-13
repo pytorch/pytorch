@@ -516,13 +516,12 @@ def triton_kernel_wrapper_mutation_functionalize(ctx, kernel_idx, grid, kwargs):
     # they are no longer equal. Fix this by graph breaking on this condition
     # earlier in dynamo.
     tensors_to_clone = identify_mutated_tensors(kernel, unwrapped_kwargs)
-    with ctx.redispatch_to_next():
-        unwrapped_outputs = triton_kernel_wrapper_functional(
-            kernel_idx=kernel_idx,
-            grid=grid,
-            kwargs=unwrapped_kwargs,
-            tensors_to_clone=tensors_to_clone,
-        )
+    unwrapped_outputs = triton_kernel_wrapper_functional(
+        kernel_idx=kernel_idx,
+        grid=grid,
+        kwargs=unwrapped_kwargs,
+        tensors_to_clone=tensors_to_clone,
+    )
 
     assert set(unwrapped_outputs.keys()).issubset(set(kwargs.keys()))
     for key, output_arg in unwrapped_outputs.items():
@@ -603,14 +602,13 @@ def triton_kernel_wrapper_functional_functionalize(
     ctx, kernel_idx, grid, kwargs, tensors_to_clone
 ):
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
-    with ctx.redispatch_to_next():
-        outputs = triton_kernel_wrapper_functional(
-            kernel_idx=kernel_idx,
-            grid=grid,
-            kwargs=unwrapped_kwargs,
-            tensors_to_clone=tensors_to_clone,
-        )
-        return ctx.wrap_tensors(outputs)
+    outputs = triton_kernel_wrapper_functional(
+        kernel_idx=kernel_idx,
+        grid=grid,
+        kwargs=unwrapped_kwargs,
+        tensors_to_clone=tensors_to_clone,
+    )
+    return ctx.wrap_tensors(outputs)
 
 
 triton_kernel_wrapper_mutation.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]

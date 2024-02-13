@@ -114,5 +114,4 @@ _trace_wrapped_op.py_impl(DispatchKey.Autograd)(
 @_trace_wrapped_op.py_functionalize_impl
 def _trace_wrapped_functionalized(ctx, *args, fn):
     unwrapped_args = ctx.unwrap_tensors(args)
-    with ctx.redispatch_to_next():
-        return ctx.wrap_tensors(_trace_wrapped_op(*unwrapped_args, fn=fn))
+    return ctx.wrap_tensors(_trace_wrapped_op(*unwrapped_args, fn=fn))

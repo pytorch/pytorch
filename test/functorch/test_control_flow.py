@@ -389,7 +389,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         if func_type == "cpp":
             fn = CppFunctionalizeAPI().functionalize(fn)
         elif func_type == "python":
-            fn = PythonFunctionalizeAPI(FunctionalTensorMode()).functionalize(fn)
+            fn = PythonFunctionalizeAPI().functionalize(fn)
             mode = FunctionalTensorMode()
         elif func_type == "functorch":
             fn = torch.func.functionalize(fn)

@@ -1798,7 +1798,7 @@ def forward(self, x_1):
             return out
         x = torch.randn(4)
         out_ref = f(x)
-        out_test = dispatch_functionalize(f, FunctionalTensorMode())(x)
+        out_test = dispatch_functionalize(f)(x)
         out_test_cpp = _functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True)(x)
         self.assertEqual(out_ref, out_test)
         self.assertEqual(out_ref, out_test_cpp)
@@ -1813,7 +1813,7 @@ def forward(self, x_1):
 
         x = torch.randn(4, dtype=torch.complex64)
         out_ref = f(x)
-        out_test = dispatch_functionalize(f, FunctionalTensorMode())(x)
+        out_test = dispatch_functionalize(f)(x)
         out_test_cpp = _functionalize(f, reapply_views=True, crossref=False)(x)
         self.assertEqual(out_ref[0], out_test[0])
         self.assertEqual(out_ref[1], out_test[1])
@@ -1827,7 +1827,7 @@ def forward(self, x_1):
 
         x = torch.randn(4, dtype=torch.complex64)
         out_ref = f(x)
-        out_test = dispatch_functionalize(f, FunctionalTensorMode())(x)
+        out_test = dispatch_functionalize(f)(x)
         out_test_cpp = _functionalize(f, reapply_views=True, crossref=False)(x)
         self.assertEqual(out_ref[0], out_test[0])
         self.assertEqual(out_ref[1], out_test[1])
@@ -1843,7 +1843,7 @@ def forward(self, x_1):
 
         x = torch.randn(4, dtype=torch.complex64)
         out_ref = f(x)
-        out_test = dispatch_functionalize(f, FunctionalTensorMode())(x)
+        out_test = dispatch_functionalize(f)(x)
         out_test_cpp = _functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True)(x)
         self.assertEqual(out_ref, out_test)
         self.assertEqual(out_test, out_test_cpp)
@@ -1872,7 +1872,7 @@ def forward(self, arg0_1):
 
         x = torch.randn(4)
         out_ref = f(x)
-        out_test = dispatch_functionalize(f, FunctionalTensorMode())(x)
+        out_test = dispatch_functionalize(f)(x)
         out_test_cpp = _functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True)(x)
         self.assertEqual(out_ref, out_test)
         self.assertEqual(out_ref, out_test_cpp)
@@ -1902,11 +1902,11 @@ def forward(self, arg0_1):
 
         x = torch.randn(4)
         out_ref = f(x)
-        out_test = dispatch_functionalize(f, FunctionalTensorMode())(x)
+        out_test = dispatch_functionalize(f)(x)
         out_test_cpp = _functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True)(x)
         self.assertEqual(out_ref, out_test)
         self.assertEqual(out_ref, out_test_cpp)
-        fx_g = make_fx(dispatch_functionalize(f, FunctionalTensorMode()))(x)
+        fx_g = make_fx(dispatch_functionalize(f))(x)
         fx_g_cpp = make_fx(_functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True))(x)
         self.assertExpectedInline(fx_g.code.strip(), """\
 def forward(self, arg0_1):
