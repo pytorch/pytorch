@@ -1891,9 +1891,15 @@ class DictGuardManager : public GuardManager {
     PyObject* items = PyDict_Items(obj); // new ref
     DEBUG_NULL_CHECK(items);
 
+    Py_ssize_t size = PyDict_Size(obj);
+
     bool failed_on_first = true;
-    for (size_t index : _indices) {
-      // Py_ssize_t index = _indices[i];
+    for (Py_ssize_t index : _indices) {
+      if (index >= size) {
+        result = false;
+        _fail_count += 1;
+        break;
+      }
       PyObject* item = PyList_GetItem(items, index); // borrowed ref
       DEBUG_NULL_CHECK(item);
       result = result && _key_value_managers[index]->check_nopybind(item);
@@ -1947,7 +1953,11 @@ class DictGuardManager : public GuardManager {
     DEBUG_NULL_CHECK(items);
 
     int num_guards_executed = debug_info.num_guards_executed;
-    for (size_t index : _indices) {
+    Py_ssize_t size = PyDict_Size(obj);
+    for (Py_ssize_t index : _indices) {
+      if (index >= size) {
+        return GuardDebugInfo(false, "index out of range", num_guards_executed);
+      }
       PyObject* item = PyList_GetItem(items, index); // borrowed ref
       DEBUG_NULL_CHECK(item);
       GuardDebugInfo debug_info =
