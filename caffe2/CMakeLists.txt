@@ -1526,6 +1526,35 @@ if(MSVC AND BUILD_SHARED_LIBS)
   target_compile_options(torch_cpu PRIVATE "-DONNX_BUILD_MAIN_LIB")
 endif()
 
+if(MSVC)
+  # CMAKE_CXX_FLAGS and CMAKE_C_FLAGS are shared between all CMake project and
+  # its sub-modules. sleef build will modify the CMAKE_CXX_FLAGS and CMAKE_C_FLAGS.
+  # Sleef lib need build as static lib and it will make pytorch caused the link
+  # conflict between /MD and /MT.
+  # So, I split the sleef build to sub-process, and make it isolated to pytorch build.
+  # TODO: Optimize CMake build @ sleef, and add sleef as submodule.
+  set(PARALLEL_ARGS)
+  include(ProcessorCount)
+  ProcessorCount(N)
+  if(NOT N EQUAL 0)
+    set(PARALLEL_ARGS -j${N})
+  endif()
+
+  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/sleef)
+  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/sleef/include)
+  add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/sleef/lib/sleef.lib
+    COMMAND ${CMAKE_COMMAND} -S ${TORCH_ROOT}/third_party/sleef -GNinja -DBUILD_SHARED_LIBS=OFF -DBUILD_DFT=OFF -DBUILD_GNUABI_LIBS=OFF -DBUILD_TESTS=OFF
+    COMMAND ${CMAKE_COMMAND} --build . ${PARALLEL_ARGS}
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/sleef
+    COMMENT "Build sleef library."
+  )
+  add_custom_target(sleef ALL DEPENDS ${CMAKE_BINARY_DIR}/sleef/lib/sleef.lib)
+
+  include_directories(${CMAKE_BINARY_DIR}/sleef/include)
+  target_link_libraries(torch_cpu PUBLIC ${CMAKE_BINARY_DIR}/sleef/lib/sleef.lib)
+  add_dependencies(torch_cpu sleef)
+endif()
+
 caffe2_interface_library(torch_cpu torch_cpu_library)
 
 if(USE_CUDA)
