@@ -9,7 +9,6 @@
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
-#include <torch/csrc/autograd/generated/ViewFuncs.h>
 #include <torch/library.h>
 
 #include <utility>
@@ -475,10 +474,13 @@ static Tensor _fw_primal(
     at::AutoDispatchBelowADInplaceOrView guard;
     return at::alias(self);
   })();
-  std::unique_ptr<torch::autograd::ViewFunc> func(nullptr);
+  std::function<at::Tensor(const at::Tensor&)> func = nullptr;
   std::function<at::Tensor(const at::Tensor&)> rev_func = nullptr;
   if (!self.unsafeGetTensorImpl()->support_as_strided()) {
-    func = std::make_unique<ViewViewFunc>(self.sym_sizes());
+    auto size_vec = self.sizes().vec();
+    func = [=](const at::Tensor& input_base) {
+      return input_base.view(size_vec);
+    };
     rev_func = [=](const at::Tensor& input_view) {
       TORCH_INTERNAL_ASSERT(
           false,
@@ -508,10 +510,13 @@ static Tensor _make_dual(
     at::AutoDispatchBelowADInplaceOrView guard;
     return at::alias(primal);
   })();
-  std::unique_ptr<torch::autograd::ViewFunc> func(nullptr);
+  std::function<at::Tensor(const at::Tensor&)> func = nullptr;
   std::function<at::Tensor(const at::Tensor&)> rev_func = nullptr;
   if (!primal.unsafeGetTensorImpl()->support_as_strided()) {
-    func = std::make_unique<ViewViewFunc>(primal.sym_sizes());
+    auto size_vec = primal.sizes().vec();
+    func = [=](const at::Tensor& input_base) {
+      return input_base.view(size_vec);
+    };
     rev_func = [=](const at::Tensor& input_view) {
       TORCH_INTERNAL_ASSERT(
           false,
