@@ -194,7 +194,7 @@ static void validateInputData(const TensorIteratorBase& iter,
   } else {
     TORCH_CHECK(c10::isIntegralType(scalar_type, /*includesBool=*/true) || scalar_type == ScalarType::Float ||
                     scalar_type == ScalarType::Half || scalar_type == ScalarType::ComplexFloat ||
-                    scalar_type == ScalarType::ComplexHalf,
+                    scalar_type == ScalarType::ComplexHalf || scalar_type == ScalarType::BFloat16,
                 getMPSTypeString(inputTensor) + std::string(" not supported for index.Tensor_out"));
   }
 }
