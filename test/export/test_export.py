@@ -1386,7 +1386,9 @@ def forward(self, arg_0):
 
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
-        with self.assertRaisesRegex(RuntimeError, r"Invalid value range for -1 between \[0,"):
+        with self.assertRaisesRegex(
+            RuntimeError, r"Deferred runtime assertion failed -u0 <= 0"
+        ):
             _ = ep.module()(torch.tensor(-1), torch.randn(4, 5))
 
         self.assertTrue(
