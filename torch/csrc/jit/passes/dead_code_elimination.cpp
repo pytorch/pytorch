@@ -18,10 +18,11 @@ class DeadCodeEliminator {
  public:
   explicit DeadCodeEliminator(
       std::shared_ptr<Graph> graph,
-      DCESideEffectPolicy sideEffectPolicy)
+      DCESideEffectPolicy sideEffectPolicy,
+      bool useAliasDb = true)
       : sideEffectPolicy_(sideEffectPolicy),
         graph_(std::move(graph)),
-        useAliasDb_(true) {}
+        useAliasDb_(useAliasDb) {}
   DeadCodeEliminator(DCESideEffectPolicy sideEffectPolicy)
       : sideEffectPolicy_(sideEffectPolicy) {}
 
@@ -456,6 +457,15 @@ void EliminateDeadCode(
   DeadCodeEliminator eliminator(sideEffectPolicy);
   eliminator.setDeleteCallback(std::move(cb));
   eliminator.run(block, /*recurse=*/true);
+}
+
+void EliminateDeadCodeWithoutAliasDb(const std::shared_ptr<Graph>& graph) {
+  DeadCodeEliminator(
+      graph,
+      DCESideEffectPolicy::DONT_DELETE_NODES_WITH_SIDE_EFFECTS,
+      /*useAliasDb*/ false)
+      .run(graph->block(), /*recurse=*/true);
+  GRAPH_DUMP("After EliminateDeadCode: ", graph);
 }
 
 } // namespace jit

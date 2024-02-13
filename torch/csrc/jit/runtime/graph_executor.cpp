@@ -46,6 +46,7 @@
 #include <torch/csrc/jit/runtime/logging.h>
 
 #include <cstdint>
+#include <iostream>
 #include <iterator>
 #include <memory>
 #include <mutex>
@@ -874,7 +875,8 @@ void runRequiredPasses(const std::shared_ptr<Graph>& g) {
   // add valid expand nodes when the shapes are stable
   RemoveExpands(g);
   CanonicalizeOps(g);
-  EliminateDeadCode(g);
+  std::cout << *g;
+  EliminateDeadCodeWithoutAliasDb(g);
 }
 
 void packGradient(const Gradient& gradient, Node* dnode) {
