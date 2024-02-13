@@ -28,7 +28,10 @@ from torch.fx.passes.operator_support import OperatorSupport
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo, IS_WINDOWS
 from torch.utils import _pytree as pytree
-from torch._export.utils import sequential_split, nodes_filter, nodes_first, nodes_map, node_inline_
+from torch._export.utils import sequential_split, nodes_filter, nodes_map, node_inline_
+from torch._export.passes.replace_set_grad_with_hop_pass import (
+    _is_set_grad_enabled_node, _is_set_grad_enabled_sub_mod, _replace_with_hop
+)
 
 
 def count_call_function(graph: torch.fx.Graph, target: torch.ops.OpOverload) -> int:
@@ -453,32 +456,21 @@ def forward(self, arg_0):
 
     def test_sequential_split(self):
         for gm, args in SET_GRAD_ENABLED_TESTS.values():
-            def _is_set_grad_enabled_node(node):
-                return node.op == "call_function" and node.target == torch._C._set_grad_enabled
-
-            def _is_set_grad_enabled_sub_mod(node):
-                if node.op == "call_module":
-                    subgm = getattr(node.graph.owning_module, node.target)
-                    first_non_ph = nodes_first(subgm.graph.nodes, lambda node: node.op != "placeholder")
-                    if first_non_ph and first_non_ph.op == "call_function" and first_non_ph.target == torch._C._set_grad_enabled:
-                        return True
-                return False
-
             set_grad_counts = len(nodes_filter(gm.graph.nodes, _is_set_grad_enabled_node))
             new_gm = sequential_split(gm, _is_set_grad_enabled_node)
             new_set_grad_counts = len(nodes_filter(new_gm.graph.nodes, _is_set_grad_enabled_sub_mod))
             self.assertEqual(set_grad_counts, new_set_grad_counts)
+            self.assertEqual(gm(*args), new_gm(*args))
 
     def test_sequential_split_graph(self):
         gm, args = SET_GRAD_ENABLED_TESTS["ctx_manager"]
 
-        def _is_set_grad_enabled_node(node):
-            return node.op == "call_function" and node.target == torch._C._set_grad_enabled
         new_gm = sequential_split(gm, _is_set_grad_enabled_node)
+        self.assertEqual(gm(*args), new_gm(*args))
         self.assertExpectedInline(new_gm.code.strip("\n"), """\
 def forward(self, arg_0):
-    sub, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
-    submod_0 = self.submod_0(sub);  sub = None
+    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    submod_0 = self.submod_0(arg0_1);  arg0_1 = None
     submod_1 = self.submod_1(submod_0);  submod_0 = None
     submod_2 = self.submod_2(submod_1)
     return pytree.tree_unflatten((submod_1, submod_2), self._out_spec)
@@ -504,15 +496,28 @@ def forward(self, add_1):
     """)
 
     def test_inline_(self):
-        def _is_set_grad_enabled_node(node):
-            return node.op == "call_function" and node.target == torch._C._set_grad_enabled
-
         for gm, args in SET_GRAD_ENABLED_TESTS.values():
             before_str = gm.print_readable(print_output=False)
             new_gm = sequential_split(gm, _is_set_grad_enabled_node)
             nodes_map(new_gm.graph.nodes, lambda node: node_inline_(node) if node.op == "call_module" else node)
-            after_reinplace_str = gm.print_readable(print_output=False)
-            self.assertEqual(before_str, after_reinplace_str)
+            after_inline_str = gm.print_readable(print_output=False)
+            self.assertEqual(before_str, after_inline_str)
+            self.assertEqual(gm(*args), new_gm(*args))
+
+    def test_replace_module_with_wrapper_call(self):
+        from torch._higher_order_ops.wrap import wrap_with_set_grad_enabled
+
+        for gm, args in SET_GRAD_ENABLED_TESTS.values():
+            new_gm = sequential_split(gm, _is_set_grad_enabled_node)
+            call_module_nodes = nodes_filter(new_gm.graph.nodes, _is_set_grad_enabled_sub_mod)
+            n_call_module_nodes = len(call_module_nodes)
+
+            nodes_map(call_module_nodes, _replace_with_hop)
+            wrap_nodes = nodes_filter(
+                new_gm.graph.nodes, lambda node: node.op == "call_function" and node.target is wrap_with_set_grad_enabled
+            )
+            self.assertEqual(len(wrap_nodes), n_call_module_nodes)
+            self.assertEqual(gm(*args), new_gm(*args))
 
 
 if __name__ == '__main__':
