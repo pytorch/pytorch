@@ -28,7 +28,7 @@ from torch.fx.passes.operator_support import OperatorSupport
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo, IS_WINDOWS
 from torch.utils import _pytree as pytree
-from torch._export.utils import sequential_split, nodes_filter, nodes_first, nodes_map, node_inline_, nodes_count
+from torch._export.utils import sequential_split, nodes_first, nodes_map, node_inline_, nodes_count
 
 
 def count_call_function(graph: torch.fx.Graph, target: torch.ops.OpOverload) -> int:
