@@ -89,7 +89,12 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             ref_loss = ref_model_bf16(inp.to(param_dtype)).sum()
             ref_loss.backward()
             for param in ref_model_bf16.parameters():
-                dist.all_reduce(param.grad)  # bf16 reduction
+                # Use reduce-scatter -> all-gather as all-reduce because for
+                # world size >=4, NCCL all-reduce shows numeric differences
+                # compared with NCCL reduce-scatter
+                output = torch.zeros_like(torch.chunk(param.grad, self.world_size)[0])
+                dist.reduce_scatter_tensor(output, param.grad)
+                dist.all_gather_into_tensor(param.grad, output)
                 param.grad.div_(self.world_size)
             for param_fp32, param_bf16 in zip(
                 ref_model.parameters(), ref_model_bf16.parameters()
