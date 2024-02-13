@@ -2419,14 +2419,6 @@ class ShapeEnv:
         # for validation.
         return SymBool(SymNode(sym, self, bool, None))
 
-    def _log_create_unbacked_symbol(self, prefix: str, symbol, vr: ValueRanges):
-        is_debug = config.extended_debug_create_symbol is not None and str(symbol) in config.extended_debug_create_symbol.split(',')
-        fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
-        log.info(
-            "%s %s [%s, %s]%s (%s)%s",
-            prefix, symbol, vr.lower, vr.upper, maybe_user_loc, format_frame(fsummary), maybe_extra_debug, stack_info=is_debug
-        )
-
     @record_shapeenv_event()
     def create_unbacked_symfloat(self):
         """Create a symbolic float without a hint value
@@ -2439,7 +2431,8 @@ class ShapeEnv:
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self._create_fx_placeholder_and_z3var(symbol, float)
 
-        self._log_create_unbacked_symbol("create_unbacked_symfloat", symbol, vr)
+        fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
+        log.info("create_unbacked_symfloat %s [%s, %s]%s (%s)", symbol, vr.lower, vr.upper, maybe_user_loc, format_frame(fsummary))
 
         return SymFloat(SymNode(symbol, self, float, None, fx_node=fx_node))
 
@@ -2455,7 +2448,8 @@ class ShapeEnv:
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self._create_fx_placeholder_and_z3var(symbol, int)
 
-        self._log_create_unbacked_symbol("create_unbacked_symint", symbol, vr)
+        fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
+        log.info("create_unbacked_symint %s [%s, %s]%s (%s)", symbol, vr.lower, vr.upper, maybe_user_loc, format_frame(fsummary))
 
         return SymInt(SymNode(symbol, self, int, None, fx_node=fx_node))
 
@@ -2477,7 +2471,8 @@ class ShapeEnv:
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self._create_fx_placeholder_and_z3var(symbol, bool)
 
-        self._log_create_unbacked_symbol("create_unbacked_symbool", symbol, vr)
+        fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
+        log.info("create_unbacked_symbool %s [%s, %s]%s (%s)", symbol, vr.lower, vr.upper, maybe_user_loc, format_frame(fsummary))
 
         return SymBool(SymNode(sympy.Eq(symbol, 1), self, bool, None, fx_node=fx_node))
 
@@ -2612,15 +2607,11 @@ class ShapeEnv:
 
             r = sympy_expr
 
-            is_debug = (
-                config.extended_debug_create_symbol is not None and
-                str(sympy_expr) in config.extended_debug_create_symbol.split(',')
-            )
-            fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
+            fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
             self.log.info(
-                "create_symbol %s = %s for %s %s%s (%s)%s",
+                "create_symbol %s = %s for %s %s%s (%s)",
                 sympy_expr, val, source.name(), range_str,
-                maybe_user_loc, format_frame(fsummary), maybe_extra_debug, stack_info=is_debug
+                maybe_user_loc, format_frame(fsummary)
             )
 
             self.counter["create_symbol"] += 1
@@ -3278,10 +3269,6 @@ class ShapeEnv:
             shape_groups[v].append(k)
         return shape_groups
 
-    def bound_sympy(self, expr: sympy.Expr) -> ValueRanges:
-        """Given a sympy expression, computes a ValueRanges bound for what values it can be"""
-        return bound_sympy(expr, {x: self.var_to_range.get(x, None) for x in expr.free_symbols})
-
     @_lru_cache
     def _maybe_evaluate_static(
         self, expr: "sympy.Expr", *, unbacked_only: bool = False, compute_hint: bool = False,
@@ -3482,150 +3469,42 @@ class ShapeEnv:
     def _make_data_dependent_error(self, expr, unhinted_expr):
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
-        size_like_symbols = []
         for s in expr.free_symbols:
             stacktrace = ''.join(self.var_to_stack[s].format())
             self.log.debug("Data dependent variable '%s' allocated at:\n%s", s, stacktrace)
-            if s in self.size_like:
-                size_like_symbols.append(s)
-        fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(True)
+        # cpp_stack = CapturedTraceback.extract(cpp=True)
         return GuardOnDataDependentSymNode(
-            f"Could not guard on data-dependent expression {expr} (unhinted: {unhinted_expr}).  "
-            f"(Size-like symbols: {', '.join(map(str, size_like_symbols)) or 'none'})\n\n"
-            "Potential framework code culprit (scroll up for full backtrace):\n"
-            f"{''.join(traceback.StackSummary.from_list([fsummary]).format())}\n"
-            "For more information, run with TORCH_LOGS=\"dynamic\"\n"
-            "For extended logs when we create symbols, also add "
-            f"TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL=\"{','.join(map(str, expr.free_symbols))}\"\n"
-            "If you suspect the guard was triggered from C++, add TORCHDYNAMO_EXTENDED_DEBUG_CPP=1\n"
-            "For more debugging help, see "
-            "https://docs.google.com/document/d/1HSuTTVvYH1pTew89Rtpeu84Ht3nQEFTYhAX3Ypa_xJs/edit?usp=sharing\n" +
-            maybe_extra_debug
+            # "C++ stack trace:\n" + ''.join(cpp_stack.format()) + "\n\n"
+            "It appears that you're trying to get a value out of symbolic int/float "
+            "whose value is data-dependent (and thus we do not know the true value.)  "
+            f"The expression we were trying to evaluate is {expr} (unhinted: {unhinted_expr}).  "
+            "For more information, run with TORCH_LOGS=\"+dynamic\".\n"
             # TODO: Help text about how to use our runtime tests to fix this
             # problem
         )
 
-    def _set_replacement(self, a: "sympy.Symbol", tgt: "sympy.Expr", msg: str) -> None:
+    def _set_replacement(self, a: "sympy.Symbol", expr: "sympy.Expr") -> None:
         """
         Adds or updates a replacement for a symbol.
-        Use this instead of `self.replacements[a] = tgt`.
+        Use this instead of `self.replacements[a] = expr`.
         """
-
-        # Precondition: a == tgt
-
-        # Handles nested tensor symbolic variables which don't have
-        # var_to_range bounds
-        tgt_bound = None
-        if a in self.var_to_range:
-            src_bound = self.var_to_range[a]
-
-            # If you have x in [2, maxint], then 2*x in [4, 2*maxint].
-            # But we don't really care that the max bound says we can
-            # go beyond the maximum integer size, because we aren't
-            # using bigints anyway.  Arguably, ValueRanges should know
-            # to do this truncation automaticaly (to avoid doing
-            # bigint compute in range analysis), but right now it doesn't
-            # so we need to get rid of some unnecessary precision.
-            int_range = ValueRanges(-sys.maxsize - 1, sys.maxsize - 1)
-
-            def issubset(x, y):
-                return (x & int_range).issubset(y & int_range)
-
-            # First, refine the value range of a based on the computed value range
-            # of tgt.  This is always OK to do, even if we decide not to do the
-            # substitution in the end.  This might be a no-op, if a already has
-            # a tighter bound
-            tgt_bound = self.bound_sympy(tgt)
-            self.var_to_range[a] = src_bound & tgt_bound
-
-            # Next, check if we can update the range of free symbols in tgt
-            # based on the range in a.  But only do it if:
-            #  - the source bound non-trivially improves over what we get out of
-            #    the existing bounds.
-            #  - the replacement is univariate (multivariate makes my brain
-            #    explode)
-            if not issubset(tgt_bound, src_bound) and len(tgt.free_symbols) == 1:
-                b = next(iter(tgt.free_symbols))
-                # Try to invert the equality
-                r = try_solve(sympy.Eq(a, tgt), b, floordiv_inequality=False)
-                if r is not None:
-                    b_bound = self.bound_sympy(r[1])
-                    self.var_to_range[b] = b_bound & self.var_to_range[b]
-                    tgt_bound = self.bound_sympy(tgt)
-                    assert issubset(tgt_bound, src_bound)
-
-            # TODO: Should we propagate size-like-ness?
-            #
-            # Pros: if u0 is size-like, intuitively u0 == u1 should cause u1
-            # to become size-like.
-            #
-            # Cons: if u0 is size-like, what about u0 - 1 == u1?  You CAN'T
-            # propagate in this case, because what if u0 == 0, then u1 is negative
-            # and clearly isn't a size.  So, at minimum, any f(x) whose value
-            # range isn't [0, inf] given x in [0, inf] cannot propagate
-            # size-like-ness.  But there are many situations where you could
-            # imagine u1 is going to be size-like and actually you just didn't
-            # have a refined enough value range on u0.  Since even innocuous
-            # looking arithmetic operations can destroy size-like-ness, it's
-            # best to not propagate it at all and force the user to annotate it
-            # as necessary.
-            #
-            # Compromise: we preserve size-like-ness only for exact equality
-            # and nothing else.
-            if a in self.size_like and isinstance(tgt, sympy.Symbol):
-                self.size_like.add(tgt)
-            elif isinstance(tgt, sympy.Symbol) and tgt in self.size_like:
-                self.size_like.add(a)
-
-            # Now, decide if we will do the substitution.
-            #
-            #  - If the source has a non-trivial range, only substitute if
-            #    we preserve this range.  Note that we may have propagated
-            #    the src_range to free variables in tgt, which helps us achieve
-            #    this.  This ensures we never "forget" about user defined ranges,
-            #    even if they end up being defined on composite formulas
-            #    like s0 + s1.
-            #
-            #  - If the variable is unbacked, only substitute if the substitution
-            #    would preserve size-like-ness (no loss of information) OR we
-            #    would completely eliminate unbacked SymInts via the substitution
-            #    (because if you get rid of the unbacked symints, size-like-ness
-            #    doesn't matter anymore--you've got hints now, you can handle
-            #    guards directly).
-            #
-            #    Note that because we are very conservative about propagating
-            #    size-like-ness right now, this means something like u0 == u1 * 2
-            #    will NOT result in a substitution (but maybe in the future it
-            #    could)
-            if not issubset(tgt_bound, src_bound):
-                self.log.debug("skipped set_replacement %s = %s (%s) [%s not subset of %s]", a, tgt, msg, tgt_bound, src_bound)
-                return
-            elif (
-                self.is_unbacked_symint(a) and
-                a in self.size_like and
-                free_unbacked_symbols(tgt) and
-                tgt not in self.size_like
-            ):
-                self.log.debug("skipped set_replacement %s = %s (%s) [rhs not size-like]", a, tgt, msg)
-                return
-
-        if config.print_specializations and isinstance(tgt, (sympy.Integer, sympy.Float)):
+        if config.print_specializations and isinstance(expr, (sympy.Integer, sympy.Float)):
             # specializing to a constant, which is likely unexpected
 
             # NOTE(avik): It is possible that we try logging the same specialization multiple times, e.g.,
             # when adding a to self.replacements, and again when simplifying an expression containing a.
             # Thus to avoid duplication, checking whether a is in self.replacements isn't enough; if it is,
-            # it must not already map to `tgt`. Fortunately this check is cheap because `tgt` is a constant.
-            if a not in self.replacements or tgt != self.replacements[a]:
-                self.log.warning("Specializing %s to %s", self.var_to_sources[a][0].name(), tgt)
+            # it must not already map to `expr`. Fortunately this check is cheap because `expr` is a constant.
+            if a not in self.replacements or expr != self.replacements[a]:
+                self.log.warning("Specializing %s to %s", self.var_to_sources[a][0].name(), expr)
                 self.log.debug("SPECIALIZATION", stack_info=True)
-        log.info("set_replacement %s = %s (%s) %s", a, tgt, msg, tgt_bound)
-        self.replacements[a] = tgt
+        log.info("set_replacement %s = %s", a, expr)
+        self.replacements[a] = expr
         self._update_version_counter()
 
-        # When specializing 'a == tgt', the equality should be also conveyed to
+        # When specializing 'a == expr', the equality should be also conveyed to
         # Z3, in case an expression uses 'a'.
-        self._add_target_expr(sympy.Eq(a, tgt))
+        self._add_target_expr(sympy.Eq(a, expr))
 
     def _add_divisible(self, expr: "sympy.Expr"):
         self.divisible.add(expr)
@@ -3645,7 +3524,7 @@ class ShapeEnv:
             return a
         res = self.replacements[a]
         cur_replace = {s: self._find(s) for s in res.free_symbols}
-        self._set_replacement(a, self.replacements[a].xreplace(cur_replace), "find")
+        self._set_replacement(a, self.replacements[a].xreplace(cur_replace))
         return self.replacements[a]
 
     @lru_cache(256)
@@ -3681,11 +3560,10 @@ class ShapeEnv:
                 if len(floor_div_atoms) > 0 and any(a.divisor != 1 for a in floor_div_atoms):
                     raise NotImplementedError
                 # short-circuit when no solving is needed
-
                 if isinstance(lhs, sympy.Symbol) and free_unbacked_symbols(lhs):
-                    self._set_replacement(lhs, self._find(rhs), "trivial_lhs")
+                    self._set_replacement(lhs, self._find(rhs))
                 elif isinstance(rhs, sympy.Symbol) and free_unbacked_symbols(rhs):
-                    self._set_replacement(rhs, self._find(lhs), "trivial_rhs")
+                    self._set_replacement(rhs, self._find(lhs))
                 else:
                     r = try_solve(expr, free[0], floordiv_inequality=False)
                     if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
@@ -3698,13 +3576,11 @@ class ShapeEnv:
                             # so this causes things to fail e.g.,
                             # test_split_unbacked_sizes
                             ok = len(free_unbacked_symbols(new_var)) <= 1
-                            msg = "solve_unbacked"
                         else:
                             # Never substitute backed with unbacked
                             ok = len(free_unbacked_symbols(new_var)) == 0
-                            msg = "solve_backed"
                         if ok:
-                            self._set_replacement(cast(sympy.Symbol, free[0]), new_var, msg)
+                            self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
             except NotImplementedError:
                 pass
         if expr.has(Mod):
@@ -3734,11 +3610,7 @@ class ShapeEnv:
                             self.var_to_range[i1] = SymPyValueRangeAnalysis.truediv(
                                 self.var_to_range[i0], ValueRanges.wrap(d)
                             )
-                            # Propagate size-like-ness
-                            if i0 in self.size_like:
-                                self.size_like.add(i1)
-                                self.size_like.add(d * i1)
-                            self._set_replacement(i0, d * i1, "divisibility")
+                            self._set_replacement(i0, d * i1)
 
             except NotImplementedError:
                 pass
@@ -3788,7 +3660,7 @@ class ShapeEnv:
             log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
 
 
-    def _get_stack_summary(self, is_debug: bool = False):
+    def _get_stack_summary(self):
         fsummary = None
         frame = inspect.currentframe()
         try:
@@ -3811,24 +3683,28 @@ class ShapeEnv:
         if user_tb:
             maybe_user_loc = " at " + format_frame(user_tb[-1])
 
-        maybe_extra_debug = ""
-        if is_debug and user_tb:
-            maybe_extra_debug = (
-                '\nUser Stack (most recent call last):\n' +
-                '  (snipped, see stack below for prefix)\n' +
-                ''.join(traceback.format_list(user_tb))
-            )
-        if is_debug and config.extended_debug_cpp:
-            cpp_stack = CapturedTraceback.extract(cpp=True)
-            maybe_extra_debug += "\nC++ stack trace:\n" + ''.join(cpp_stack.format())
-
-        return fsummary, maybe_user_loc, maybe_extra_debug
+        return fsummary, user_tb, maybe_user_loc
 
     def _log_guard(self, prefix: str, g, forcing_spec: bool):
         if self.log.isEnabledFor(logging.INFO):
+            fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
+
             str_g = str(g)
-            is_debug = config.extended_debug_guard_added is not None and str_g == config.extended_debug_guard_added
-            fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
+
+            # TODO: make this an artifact
+            is_debug = False
+            if config.extended_debug_guard_added is not None and str_g == config.extended_debug_guard_added:
+                is_debug = True
+            maybe_extra_debug = ""
+            if is_debug and user_tb:
+                maybe_extra_debug = (
+                    '\nUser Stack (most recent call last):\n' +
+                    '  (snipped, see stack below for prefix)\n' +
+                    ''.join(traceback.format_list(user_tb))
+                )
+            if is_debug:
+                cpp_stack = CapturedTraceback.extract(cpp=True)
+                maybe_extra_debug += "\nC++ stack trace:\n" + ''.join(cpp_stack.format())
             self.log.info(
                 "%s %s [guard added]%s (%s)%s",
                 prefix if not forcing_spec else f"{prefix} (forcing_spec)",

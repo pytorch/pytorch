@@ -955,7 +955,7 @@ class TestSymbolicTracing(TestCase):
         import torch.library
         from torch.library import Library
 
-        foo = Library("foo", "DEF")
+        foo = Library("foo", "DEF")  # noqa: TOR901
         foo.define("foo(Tensor self) -> Tensor")
 
         # Operator where meta and cpu disagree on strides
