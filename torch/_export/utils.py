@@ -284,3 +284,70 @@ def nodes_first(
     if len(ret) > 0:
         return ret[0]
     return None
+
+
+def nodes_count(nodes: List[torch.fx.Node], node_call_back) -> int:
+    """Returns the number of nodes that match the node_call_back."""
+    return len(nodes_filter(nodes, node_call_back))
+
+
+def nodes_map(nodes: List[torch.fx.Node], node_call_back) -> List[torch.fx.Node]:
+    """
+    Sequentially visit the nodes list and invoke node_call_back on each element.
+    Returns the nodes list after the node_call_back is invoked on each element.
+    """
+    for node in nodes:
+        node_call_back(node)
+    return nodes
+
+
+def node_replace_(
+    old_node: torch.fx.Node, new_node: torch.fx.Node, delete_old: bool = False
+) -> None:
+    """
+    Replace all uses of old_node with new_node.
+    """
+    old_node.replace_all_uses_with(new_node)
+    if delete_old:
+        old_node.users.clear()
+        old_node.graph.erase_node(old_node)
+
+
+def node_inline_(call_mod_node: torch.fx.Node) -> None:
+    """
+    Inline the submodule of the given node into the parent module.
+    Note: we only support the case where submodule takes tensors inputs.
+    """
+    assert call_mod_node.op == "call_module"
+    gm = call_mod_node.graph.owning_module
+
+    assert isinstance(call_mod_node.target, str)
+    sub_gm = getattr(gm, call_mod_node.target)
+
+    phs = (node for node in sub_gm.graph.nodes if node.op == "placeholder")
+    body = (
+        node for node in sub_gm.graph.nodes if node.op not in ("placeholder", "output")
+    )
+    output = [node for node in sub_gm.graph.nodes if node.op == "output"]
+
+    for ph, arg in zip(phs, call_mod_node.args):
+        assert isinstance(arg, torch.fx.Node)
+        node_replace_(ph, arg, delete_old=True)
+
+    with gm.graph.inserting_before(call_mod_node):
+        for node in body:
+            new_node = gm.graph.node_copy(node)
+            node_replace_(node, new_node, delete_old=True)
+
+        if len(output) > 0:
+            assert len(output) == 1 and len(output[0].args) == 1
+            new_output = output[0].args[0]
+            if isinstance(new_output, (tuple, list)):
+                new_output = gm.graph.call_function(tuple, args=new_output, kwargs={})
+            node_replace_(call_mod_node, new_output, delete_old=True)
+        else:
+            call_mod_node.graph.erase_node(call_mod_node)
+
+    gm.delete_all_unused_submodules()
+    gm.recompile()
+    return gm
