@@ -15,10 +15,6 @@
 #include <ATen/ops/_resize_output_native.h>
 #endif
 
-#ifdef USE_CUDA
-#include <ATen/native/cuda/Resize.h>
-#endif
-
 namespace at::native {
 
 // Returns true if resize is necessary
