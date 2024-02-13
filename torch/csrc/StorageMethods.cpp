@@ -141,7 +141,23 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
       "but got ",
       THPUtils_typename(number_arg));
   int64_t newsize = THPUtils_unpackLong(number_arg);
-  at::native::resize_bytes(storage, newsize);
+  c10::DeviceType device_type = storage.device_type();
+  if (device_type == at::kCUDA) {
+#ifdef USE_CUDA
+    ptrdiff_t size_bytes_i = newsize;
+    TORCH_CHECK(
+        !c10::overflows<size_t>(size_bytes_i),
+        "Requested storage size (",
+        size_bytes_i,
+        ") cannot be represented as a size_t");
+    const auto size_bytes = static_cast<size_t>(size_bytes_i);
+    at::native::resize_bytes_cuda(storage.unsafeGetStorageImpl(), size_bytes);
+#else
+    TORCH_CHECK(false, "built without USE_CUDA");
+#endif
+  } else {
+    at::native::resize_bytes_nocuda(storage, newsize);
+  }
   Py_INCREF(self);
   return self;
   END_HANDLE_TH_ERRORS

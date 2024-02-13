@@ -286,22 +286,11 @@ const Tensor& resize__symint(
   return _resize_(self, size, optional_memory_format);
 }
 
-void resize_bytes(const Storage& storage, c10::SymInt newsize) {
-  // dispatch to resize_bytes_cpu, resize_bytes_cuda, etc
+void resize_bytes_nocuda(const Storage& storage, c10::SymInt newsize) {
+  // handles all devices except cuda (which needs to be in a different .so)
   c10::DeviceType device_type = storage.device_type();
   if (device_type == at::kCPU) {
     at::native::resize_bytes_cpu(storage.unsafeGetStorageImpl(), newsize.expect_int());
-#ifdef USE_CUDA
-  } else if (device_type == at::kCUDA) {
-    ptrdiff_t size_bytes_i = newsize.expect_int();
-    TORCH_CHECK(
-        !c10::overflows<size_t>(size_bytes_i),
-        "Requested storage size (",
-        size_bytes_i,
-        ") cannot be represented as a size_t");
-    const auto size_bytes = static_cast<size_t>(size_bytes_i);
-    at::native::resize_bytes_cuda(storage.unsafeGetStorageImpl(), size_bytes);
-#endif
   } else if (device_type == at::kMeta) {
     at::native::resize_bytes_meta(storage.unsafeGetStorageImpl(), newsize);
   } else if (device_type == at::kPrivateUse1) {
