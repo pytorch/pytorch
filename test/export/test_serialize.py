@@ -326,7 +326,7 @@ class TestDeserialize(TestCase):
 
     def test_auto_functionalize(self):
         try:
-            lib = torch.library.Library("mylib", "FRAGMENT")
+            lib = torch.library.Library("mylib", "FRAGMENT")  # noqa: TOR901
             torch.library.define(
                 "mylib::foo1",
                 "(Tensor(a!) x, Tensor[] y, Tensor(b!) z, SymInt w, Tensor n) -> Tensor",
@@ -522,7 +522,7 @@ class TestDeserialize(TestCase):
     def test_tensor_tensor_list(self):
         try:
             from torch.library import Library
-            lib = Library("_export", "FRAGMENT")
+            lib = Library("_export", "FRAGMENT")  # noqa: TOR901
             lib.define(
                 "_test_tensor_tensor_list_output(Tensor x, Tensor y) -> (Tensor, Tensor[])",
                 tags=torch.Tag.pt2_compliant_tag)
