@@ -41,5 +41,12 @@ class MixedPrecisionPolicy:
     param_dtype: Optional[torch.dtype] = None
     reduce_dtype: Optional[torch.dtype] = None
     output_dtype: Optional[torch.dtype] = None
-    buffer_dtype: Optional[torch.dtype] = None  # placeholder
     cast_forward_inputs: bool = True
+
+    def __post_init__(self):
+        # Clamp `reduce_dtype` to `None` if no casting is required: since
+        # gradients are computed in `param_dtype`, if `reduce_dtype` matches,
+        # then we do not need extra casting
+        if self.param_dtype == self.reduce_dtype:
+            # Bypass the frozen dataclass checks
+            object.__setattr__(self, "reduce_dtype", None)
