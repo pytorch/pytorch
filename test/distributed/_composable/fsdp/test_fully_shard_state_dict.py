@@ -109,7 +109,7 @@ class TestFullyShardStateDict(FSDPTest):
         # Use that the parameters are currently sharded, meaning that their
         # data pointers correspond to the sharded parameter data
         param_name_to_data_ptr = {
-            n: p._local_tensor.data_ptr() for n, p in model.named_parameters()
+            n: p.to_local().data_ptr() for n, p in model.named_parameters()
         }
         ref_sharded_sizes = [p.size() for p in model.parameters()]
         state_dict = model.state_dict()
@@ -125,10 +125,10 @@ class TestFullyShardStateDict(FSDPTest):
             if param_name_to_data_ptr[param_name] == 0:
                 # Check that this is padding (added by DTensor)
                 self.assertGreater(self.rank, 0)
-                self.assertEqual(torch.count_nonzero(tensor._local_tensor).item(), 0)
+                self.assertEqual(torch.count_nonzero(tensor.to_local()).item(), 0)
             else:
                 self.assertEqual(
-                    tensor._local_tensor.data_ptr(), param_name_to_data_ptr[param_name]
+                    tensor.to_local().data_ptr(), param_name_to_data_ptr[param_name]
                 )
 
         # Verify that we can load a new state dict that contains DTensors with
@@ -139,17 +139,17 @@ class TestFullyShardStateDict(FSDPTest):
             new_state_dict[param_name] = dtensor.detach().clone().fill_(new_fill_value)
         for param in model.parameters():
             self.assertEqual(
-                param._local_tensor,
-                torch.ones_like(param._local_tensor) * old_fill_value,
+                param.to_local(),
+                torch.ones_like(param.to_local()) * old_fill_value,
             )
         model.load_state_dict(new_state_dict)
         for param_name, param in model.named_parameters():
             self.assertEqual(
-                param._local_tensor,
-                torch.ones_like(param._local_tensor) * new_fill_value,
+                param.to_local(),
+                torch.ones_like(param.to_local()) * new_fill_value,
             )
             self.assertEqual(
-                param._local_tensor.data_ptr(), param_name_to_data_ptr[param_name]
+                param.to_local().data_ptr(), param_name_to_data_ptr[param_name]
             )
 
 
