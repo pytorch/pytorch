@@ -304,6 +304,7 @@ core_sources_full_mobile_no_backend_interface_xplat = [
     "torch/csrc/jit/runtime/argument_spec.cpp",
     "torch/csrc/jit/runtime/autodiff.cpp",
     "torch/csrc/jit/runtime/graph_executor.cpp",
+    "torch/csrc/jit/runtime/update_disable_alias_db.cpp",
     "torch/csrc/jit/runtime/interpreter/frame.cpp",
     "torch/csrc/jit/runtime/interpreter/preprocess_graph.cpp",
     "torch/csrc/jit/runtime/interpreter.cpp",

@@ -456,3 +456,21 @@ class TestMisc(JitTestCase):
         self.assertTrue(len(complex_indices) > 0)
         self.assertTrue(len(Scalar_indices) > 0)
         self.assertTrue(complex_indices[0] > Scalar_indices[0])
+
+
+    def test_jit_disable_alias_db(self):
+        try:
+            torch._C._get_disable_alias_db(True)
+
+            @torch.jit.script
+            def foo(a):
+                li = []
+                li.append(a)
+                out = li[0]
+                out.add_(2)
+
+            FileCheck().check("add_").run(foo.graph)
+
+
+        finally:
+            torch._C._get_disable_alias_db(False)

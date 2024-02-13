@@ -25,6 +25,7 @@
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
 #include <torch/csrc/jit/python/python_sugared_value.h>
+#include <torch/csrc/jit/runtime/update_disable_alias_db.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
 #include <torch/csrc/jit/serialization/import.h>
@@ -2127,6 +2128,16 @@ void initJitScriptBindings(PyObject* module) {
         bool old_value = getGraphExecutorOptimize();
         if (new_setting) {
           setGraphExecutorOptimize(*new_setting);
+        }
+        return old_value;
+      },
+      py::arg("new_settings") = nullptr);
+  m.def(
+      "_get_disable_alias_db",
+      [](c10::optional<bool> new_setting = c10::nullopt) {
+        bool old_value = getDisableAliasDb();
+        if (new_setting) {
+          setDisableAliasDb(*new_setting);
         }
         return old_value;
       },

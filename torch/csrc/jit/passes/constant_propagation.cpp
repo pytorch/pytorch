@@ -428,7 +428,7 @@ bool ConstantPropagationImmutableTypes(std::shared_ptr<Graph>& graph) {
   ConstantPropagator cp = ConstantPropagator::NoAliasDb(graph);
   bool made_change = cp.run();
   if (made_change) {
-    EliminateDeadCode(graph);
+    EliminateDeadCodeWithoutAliasDb(graph);
   }
   GRAPH_DUMP("After ConstantPropagationImmutableTypes: ", graph);
   return made_change;

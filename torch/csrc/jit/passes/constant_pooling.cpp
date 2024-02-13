@@ -11,12 +11,18 @@ namespace jit {
 
 namespace {
 
+bool noMutableValues(at::ArrayRef<Value*> values) {
+  return std::none_of(values.begin(), values.end(), [](Value* v) {
+    return AliasDb::isMutableType(v);
+  });
+}
+
 // Very similar to the common subexpression elimination pass
 // Move all constants to the beginning of the graph, and deduplicate
 void ConstantPooling(
     Block* block,
     std::unordered_set<Node*, HashNode, EqualNode>& constants,
-    const AliasDb& aliasDb) {
+    const AliasDb* aliasDb) {
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     auto node = *it;
     // node may be moved to a different block so advance iterator now
@@ -46,9 +52,15 @@ void ConstantPooling(
       bool same_identity =
           (old_ivalue && new_ivalue && (old_ivalue->is(new_ivalue)));
 
-      if (!same_identity &&
-          !aliasDb.safeToChangeAliasingRelationship(
-              node->outputs(), existing->outputs())) {
+      if (aliasDb) {
+        if (!same_identity &&
+            !aliasDb->safeToChangeAliasingRelationship(
+                node->outputs(), existing->outputs())) {
+          continue;
+        }
+      } else if (
+          !noMutableValues(node->inputs()) ||
+          !noMutableValues(node->outputs())) {
         continue;
       }
 
@@ -69,7 +81,13 @@ void ConstantPooling(
 void ConstantPooling(const std::shared_ptr<Graph>& graph) {
   AliasDb aliasDb(graph);
   std::unordered_set<Node*, HashNode, EqualNode> constants;
-  ConstantPooling(graph->block(), constants, aliasDb);
+  ConstantPooling(graph->block(), constants, &aliasDb);
 }
+
+void ConstantPoolingImmutableTypes(const std::shared_ptr<Graph>& graph) {
+  std::unordered_set<Node*, HashNode, EqualNode> constants;
+  ConstantPooling(graph->block(), constants, nullptr);
+}
+
 } // namespace jit
 } // namespace torch
