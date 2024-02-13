@@ -1380,7 +1380,8 @@ def linalg_cross(a: Tensor, b: Tensor, dim: int = -1):
     a_0, a_1, a_2 = torch.split(a_, 1, dim=dim)
     b_0, b_1, b_2 = torch.split(b_, 1, dim=dim)
     return torch.cat(
-        [a_1*b_2 - a_2*b_1, a_2*b_0 - a_0*b_2, a_0*b_1 - a_1*b_0], dim=dim)
+        [a_1 * b_2 - a_2 * b_1, a_2 * b_0 - a_0 * b_2, a_0 * b_1 - a_1 * b_0], dim=dim
+    )
     # cross_idx = torch.arange(3, device=a_.device)
     # return torch.cat([
     #         a_.index_select(dim, cross_idx[(i + 1) % 3])
