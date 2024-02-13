@@ -743,9 +743,8 @@ def prof_func_call(*args, **kwargs):
 def prof_meth_call(*args, **kwargs):
     return prof_callable(meth_call, *args, **kwargs)
 
-# TODO fix when https://github.com/python/mypy/issues/2427 is address
-torch._C.ScriptFunction.__call__ = prof_func_call  # type: ignore[assignment]
-torch._C.ScriptMethod.__call__ = prof_meth_call  # type: ignore[assignment]
+torch._C.ScriptFunction.__call__ = prof_func_call  # type: ignore[method-assign]
+torch._C.ScriptMethod.__call__ = prof_meth_call  # type: ignore[method-assign]
 
 def _get_test_report_path():
     # allow users to override the test file location. We need this
@@ -1758,6 +1757,16 @@ def wrapSwapTensorsTest(swap=None):
                 fn(*args, **kwargs)
         return wrapper
     return dec_fn
+
+# test parametrizer for swapping
+class swap(_TestParametrizer):
+    def __init__(self, swap_values):
+        super().__init__()
+        self.swap_values = swap_values
+
+    def _parametrize_test(self, test, generic_cls, device_cls):
+        for swap in self.swap_values:
+            yield wrapSwapTensorsTest(swap)(test), f'swap_{swap}', {}, lambda _: []
 
 def skipIfCompiledWithoutNumpy(fn):
     # Even if the numpy module is present, if `USE_NUMPY=0` is used during the

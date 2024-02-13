@@ -3269,10 +3269,6 @@ class ShapeEnv:
             shape_groups[v].append(k)
         return shape_groups
 
-    def bound_sympy(self, expr: sympy.Expr) -> ValueRanges:
-        """Given a sympy expression, computes a ValueRanges bound for what values it can be"""
-        return bound_sympy(expr, {x: self.var_to_range.get(x, None) for x in expr.free_symbols})
-
     @_lru_cache
     def _maybe_evaluate_static(
         self, expr: "sympy.Expr", *, unbacked_only: bool = False, compute_hint: bool = False,
@@ -3487,127 +3483,28 @@ class ShapeEnv:
             # problem
         )
 
-    def _set_replacement(self, a: "sympy.Symbol", tgt: "sympy.Expr", msg: str) -> None:
+    def _set_replacement(self, a: "sympy.Symbol", expr: "sympy.Expr") -> None:
         """
         Adds or updates a replacement for a symbol.
-        Use this instead of `self.replacements[a] = tgt`.
+        Use this instead of `self.replacements[a] = expr`.
         """
-
-        # Precondition: a == tgt
-
-        # Handles nested tensor symbolic variables which don't have
-        # var_to_range bounds
-        tgt_bound = None
-        if a in self.var_to_range:
-            src_bound = self.var_to_range[a]
-
-            # If you have x in [2, maxint], then 2*x in [4, 2*maxint].
-            # But we don't really care that the max bound says we can
-            # go beyond the maximum integer size, because we aren't
-            # using bigints anyway.  Arguably, ValueRanges should know
-            # to do this truncation automaticaly (to avoid doing
-            # bigint compute in range analysis), but right now it doesn't
-            # so we need to get rid of some unnecessary precision.
-            int_range = ValueRanges(-sys.maxsize - 1, sys.maxsize - 1)
-
-            def issubset(x, y):
-                return (x & int_range).issubset(y & int_range)
-
-            # First, refine the value range of a based on the computed value range
-            # of tgt.  This is always OK to do, even if we decide not to do the
-            # substitution in the end.  This might be a no-op, if a already has
-            # a tighter bound
-            tgt_bound = self.bound_sympy(tgt)
-            self.var_to_range[a] = src_bound & tgt_bound
-
-            # Next, check if we can update the range of free symbols in tgt
-            # based on the range in a.  But only do it if:
-            #  - the source bound non-trivially improves over what we get out of
-            #    the existing bounds.
-            #  - the replacement is univariate (multivariate makes my brain
-            #    explode)
-            if not issubset(tgt_bound, src_bound) and len(tgt.free_symbols) == 1:
-                b = next(iter(tgt.free_symbols))
-                # Try to invert the equality
-                r = try_solve(sympy.Eq(a, tgt), b, floordiv_inequality=False)
-                if r is not None:
-                    b_bound = self.bound_sympy(r[1])
-                    self.var_to_range[b] = b_bound & self.var_to_range[b]
-                    tgt_bound = self.bound_sympy(tgt)
-                    assert issubset(tgt_bound, src_bound)
-
-            # TODO: Should we propagate size-like-ness?
-            #
-            # Pros: if u0 is size-like, intuitively u0 == u1 should cause u1
-            # to become size-like.
-            #
-            # Cons: if u0 is size-like, what about u0 - 1 == u1?  You CAN'T
-            # propagate in this case, because what if u0 == 0, then u1 is negative
-            # and clearly isn't a size.  So, at minimum, any f(x) whose value
-            # range isn't [0, inf] given x in [0, inf] cannot propagate
-            # size-like-ness.  But there are many situations where you could
-            # imagine u1 is going to be size-like and actually you just didn't
-            # have a refined enough value range on u0.  Since even innocuous
-            # looking arithmetic operations can destroy size-like-ness, it's
-            # best to not propagate it at all and force the user to annotate it
-            # as necessary.
-            #
-            # Compromise: we preserve size-like-ness only for exact equality
-            # and nothing else.
-            if a in self.size_like and isinstance(tgt, sympy.Symbol):
-                self.size_like.add(tgt)
-            elif isinstance(tgt, sympy.Symbol) and tgt in self.size_like:
-                self.size_like.add(a)
-
-            # Now, decide if we will do the substitution.
-            #
-            #  - If the source has a non-trivial range, only substitute if
-            #    we preserve this range.  Note that we may have propagated
-            #    the src_range to free variables in tgt, which helps us achieve
-            #    this.  This ensures we never "forget" about user defined ranges,
-            #    even if they end up being defined on composite formulas
-            #    like s0 + s1.
-            #
-            #  - If the variable is unbacked, only substitute if the substitution
-            #    would preserve size-like-ness (no loss of information) OR we
-            #    would completely eliminate unbacked SymInts via the substitution
-            #    (because if you get rid of the unbacked symints, size-like-ness
-            #    doesn't matter anymore--you've got hints now, you can handle
-            #    guards directly).
-            #
-            #    Note that because we are very conservative about propagating
-            #    size-like-ness right now, this means something like u0 == u1 * 2
-            #    will NOT result in a substitution (but maybe in the future it
-            #    could)
-            if not issubset(tgt_bound, src_bound):
-                self.log.debug("skipped set_replacement %s = %s (%s) [%s not subset of %s]", a, tgt, msg, tgt_bound, src_bound)
-                return
-            elif (
-                self.is_unbacked_symint(a) and
-                a in self.size_like and
-                free_unbacked_symbols(tgt) and
-                tgt not in self.size_like
-            ):
-                self.log.debug("skipped set_replacement %s = %s (%s) [rhs not size-like]", a, tgt, msg)
-                return
-
-        if config.print_specializations and isinstance(tgt, (sympy.Integer, sympy.Float)):
+        if config.print_specializations and isinstance(expr, (sympy.Integer, sympy.Float)):
             # specializing to a constant, which is likely unexpected
 
             # NOTE(avik): It is possible that we try logging the same specialization multiple times, e.g.,
             # when adding a to self.replacements, and again when simplifying an expression containing a.
             # Thus to avoid duplication, checking whether a is in self.replacements isn't enough; if it is,
-            # it must not already map to `tgt`. Fortunately this check is cheap because `tgt` is a constant.
-            if a not in self.replacements or tgt != self.replacements[a]:
-                self.log.warning("Specializing %s to %s", self.var_to_sources[a][0].name(), tgt)
+            # it must not already map to `expr`. Fortunately this check is cheap because `expr` is a constant.
+            if a not in self.replacements or expr != self.replacements[a]:
+                self.log.warning("Specializing %s to %s", self.var_to_sources[a][0].name(), expr)
                 self.log.debug("SPECIALIZATION", stack_info=True)
-        log.info("set_replacement %s = %s (%s) %s", a, tgt, msg, tgt_bound)
-        self.replacements[a] = tgt
+        log.info("set_replacement %s = %s", a, expr)
+        self.replacements[a] = expr
         self._update_version_counter()
 
-        # When specializing 'a == tgt', the equality should be also conveyed to
+        # When specializing 'a == expr', the equality should be also conveyed to
         # Z3, in case an expression uses 'a'.
-        self._add_target_expr(sympy.Eq(a, tgt))
+        self._add_target_expr(sympy.Eq(a, expr))
 
     def _add_divisible(self, expr: "sympy.Expr"):
         self.divisible.add(expr)
@@ -3627,7 +3524,7 @@ class ShapeEnv:
             return a
         res = self.replacements[a]
         cur_replace = {s: self._find(s) for s in res.free_symbols}
-        self._set_replacement(a, self.replacements[a].xreplace(cur_replace), "find")
+        self._set_replacement(a, self.replacements[a].xreplace(cur_replace))
         return self.replacements[a]
 
     @lru_cache(256)
@@ -3663,11 +3560,10 @@ class ShapeEnv:
                 if len(floor_div_atoms) > 0 and any(a.divisor != 1 for a in floor_div_atoms):
                     raise NotImplementedError
                 # short-circuit when no solving is needed
-
                 if isinstance(lhs, sympy.Symbol) and free_unbacked_symbols(lhs):
-                    self._set_replacement(lhs, self._find(rhs), "trivial_lhs")
+                    self._set_replacement(lhs, self._find(rhs))
                 elif isinstance(rhs, sympy.Symbol) and free_unbacked_symbols(rhs):
-                    self._set_replacement(rhs, self._find(lhs), "trivial_rhs")
+                    self._set_replacement(rhs, self._find(lhs))
                 else:
                     r = try_solve(expr, free[0], floordiv_inequality=False)
                     if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
@@ -3680,13 +3576,11 @@ class ShapeEnv:
                             # so this causes things to fail e.g.,
                             # test_split_unbacked_sizes
                             ok = len(free_unbacked_symbols(new_var)) <= 1
-                            msg = "solve_unbacked"
                         else:
                             # Never substitute backed with unbacked
                             ok = len(free_unbacked_symbols(new_var)) == 0
-                            msg = "solve_backed"
                         if ok:
-                            self._set_replacement(cast(sympy.Symbol, free[0]), new_var, msg)
+                            self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
             except NotImplementedError:
                 pass
         if expr.has(Mod):
@@ -3716,11 +3610,7 @@ class ShapeEnv:
                             self.var_to_range[i1] = SymPyValueRangeAnalysis.truediv(
                                 self.var_to_range[i0], ValueRanges.wrap(d)
                             )
-                            # Propagate size-like-ness
-                            if i0 in self.size_like:
-                                self.size_like.add(i1)
-                                self.size_like.add(d * i1)
-                            self._set_replacement(i0, d * i1, "divisibility")
+                            self._set_replacement(i0, d * i1)
 
             except NotImplementedError:
                 pass
