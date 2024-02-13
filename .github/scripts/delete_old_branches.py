@@ -95,11 +95,15 @@ query ($owner: String!, $repo: String!, $cursor: String) {
 
 
 def is_protected(branch: str) -> bool:
-    ESTIMATED_TOKENS[0] += 1
-    res = gh_fetch_json_dict(
-        f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/branches/{branch}"
-    )
-    return bool(res["protected"])
+    try:
+        ESTIMATED_TOKENS[0] += 1
+        res = gh_fetch_json_dict(
+            f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/branches/{branch}"
+        )
+        return bool(res["protected"])
+    except Exception as e:
+        print(f"[{branch}] Failed to fetch branch protections: {e}")
+        return True
 
 
 def convert_gh_timestamp(date: str) -> float:
@@ -234,14 +238,14 @@ def delete_branches() -> None:
     # updated in 90 days and the branch hasn't been updated in 1.5 years
     for base_branch, (date, sub_branches) in branches.items():
         print(f"[{base_branch}] Updated {(now - date) / SEC_IN_DAY} days ago")
+        if base_branch in keep_branches:
+            print(f"[{base_branch}] Has magic label or open PR, skipping")
+            continue
         pr = prs_by_branch.get(base_branch)
         if pr:
             print(
                 f"[{base_branch}] Has PR {pr['number']}: {pr['state']}, updated {(now - pr['updatedAt']) / SEC_IN_DAY} days ago"
             )
-            if base_branch in keep_branches:
-                print(f"[{base_branch}] Has magic label or open PR, skipping")
-                continue
             if (
                 now - pr["updatedAt"] < CLOSED_PR_RETENTION
                 or (now - date) < CLOSED_PR_RETENTION
