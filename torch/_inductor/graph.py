@@ -209,6 +209,7 @@ class GraphLowering(torch.fx.Interpreter):
         const_output_index=None,
         const_code=None,
         const_module=None,
+        name=None,
     ):
         super().__init__(gm)
 
@@ -271,7 +272,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.name_to_buffer: Dict[str, ir.Buffer] = {}
         self.name_to_users: DefaultDict[str, List[ir.IRNode]] = defaultdict(list)
         self.creation_time = time.time()
-        self.name = "GraphLowering"
+        self.name = name
         self.cpp_wrapper = cpp_wrapper
 
         # record multi_kernel choice for cpp_wrapper so the second pass knows
@@ -468,6 +469,37 @@ class GraphLowering(torch.fx.Interpreter):
 
         return True
 
+    def qualify_name(self, name: str) -> str:
+        """Prepend the given name with the graph name if any."""
+        if self.name is not None:
+            return f"{self.name}_{name}"
+        return name
+
+    def make_subgraph(
+        self,
+        gm: torch.fx.GraphModule,
+        example_inputs: List[torch.Tensor],
+        subgraph_name: str,
+    ) -> "GraphLowering":
+        """
+        Make a subgraph of the current graph with all inherited
+        parts, except the graph module (`gm`) and `example_inputs`.
+        The subgraphs are lowered separately, but intended to be
+        inlined in the parent graph's codegening. Hence the need
+        for maintaining the same `shape_env` and other properties.
+        The subgraph name is qualified by the parent graph's name.
+        """
+        return GraphLowering(
+            gm=gm,
+            example_inputs=example_inputs,
+            shape_env=self._shape_env,
+            cpp_wrapper=self.cpp_wrapper,
+            aot_mode=self.aot_mode,
+            extern_node_serializer=self.extern_node_serializer,
+            is_inference=self.is_inference,
+            name=self.qualify_name(subgraph_name),
+        )
+
     def find_nodes_prefer_channels_last(self):
         """
         The rule to decide if an node prefer channels last is simple.
@@ -573,7 +605,7 @@ class GraphLowering(torch.fx.Interpreter):
         return super().run(*args)
 
     def register_buffer(self, buffer: ir.Buffer):
-        name = f"buf{len(self.buffers)}"
+        name = self.qualify_name(f"buf{len(self.buffers)}")
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
         # Skip empty CPU tensor so that CUDA graphs can succeed, see https://github.com/pytorch/pytorch/pull/114144
@@ -582,7 +614,7 @@ class GraphLowering(torch.fx.Interpreter):
         return name
 
     def register_list(self, buffer_names: List[str]):
-        name = "list_" + "_".join(buffer_names)
+        name = self.qualify_name("list_" + "_".join(buffer_names))
         self.lists[name] = buffer_names
         return name
 
@@ -639,6 +671,7 @@ class GraphLowering(torch.fx.Interpreter):
                 name = f"constant{len(self.constants)}"
             if name[0].isdigit():
                 name = f"constant_{name}"
+            name = self.qualify_name(name)
             # We may generate a var name for each constant in the codegen.
             # Let's only keep sane characters.
             prefix = re.sub(r"[^a-zA-Z0-9_]", "_", name)
@@ -698,6 +731,7 @@ class GraphLowering(torch.fx.Interpreter):
         else:
             sizes, strides = self.symbolic_sizes_strides(example)
         # TODO(jansel): handle input aliasing
+        target = self.qualify_name(target)
         tensor = TensorBox.create(
             InputBuffer(
                 target,
@@ -1148,6 +1182,29 @@ class GraphLowering(torch.fx.Interpreter):
         V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
         self.scheduler.codegen()
         return self.wrapper_code.generate(self.is_inference)
+
+    def codegen_subgraph(self, parent_wrapper_code):
+        """
+        This is a more compact version of the `codegen()` above
+        where we codegen this graph as a subgraph of some parent
+        graph. The parent graph's wrapper is passed as an
+        argument: the intention is to inline codegening of the
+        subgraph in the parent's wrapper code (including the
+        generated kerenls). The wrapper code is not finalized
+        (via `.generate()` call), as this will be done in the
+        parent graph's `codegen()`.
+        """
+        from .scheduler import Scheduler
+
+        old_wrapper_code = self.wrapper_code
+        self.wrapper_code = parent_wrapper_code
+
+        try:
+            self.scheduler = Scheduler(self.buffers)
+            self.scheduler.codegen()
+        finally:
+            # restore the old wrapper code, just in case
+            self.wrapper_code = old_wrapper_code
 
     def count_bytes(self):
         from .scheduler import Scheduler
