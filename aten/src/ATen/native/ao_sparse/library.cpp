@@ -9,8 +9,8 @@
 TORCH_LIBRARY(sparse, m) {
   ao::sparse::register_linear_params();
 
-//   m.def(TORCH_SELECTIVE_SCHEMA(
-//       "sparse::qlinear(Tensor X, __torch__.torch.classes.sparse.LinearPackedParamsBase W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "sparse::qlinear(Tensor X, __torch__.torch.classes.sparse.LinearPackedParamsBase W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA(
       "sparse::qlinear_relu(Tensor X, __torch__.torch.classes.sparse.LinearPackedParamsBase W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y"));
 
