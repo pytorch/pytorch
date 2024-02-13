@@ -1,5 +1,3 @@
-import itertools
-
 from typing import List, NamedTuple, Optional, Tuple
 
 import torch
@@ -44,10 +42,8 @@ def foreach_all_gather(
             param_all_gather_input_dtypes,
             param_all_gather_input_numels,
         ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
-        g = itertools.groupby(d for ds in param_all_gather_input_dtypes for d in ds)
-        if next(g, True) and not next(g, False):  # same dtype
-            dtype = param_all_gather_inputs[0][0].dtype
-        else:
+        dtype = param_all_gather_inputs[0][0].dtype
+        if not all(t.dtype == dtype for ts in param_all_gather_inputs for t in ts):
             raise NotImplementedError(
                 f"Mixed dtype not supported yet: {param_all_gather_input_dtypes}"
             )
