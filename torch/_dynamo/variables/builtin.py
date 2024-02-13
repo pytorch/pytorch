@@ -99,6 +99,11 @@ def _polyfill_call_impl(name):
 class BuiltinVariable(VariableTracker):
     _SENTINEL = object()
 
+    @classmethod
+    def create_with_source(cls, value, source):
+        install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
+        return BuiltinVariable(value, source=source)
+
     @staticmethod
     @functools.lru_cache(None)
     def _constant_fold_functions():
@@ -925,7 +930,17 @@ class BuiltinVariable(VariableTracker):
                 mutable_local=MutableLocal(),
             )
 
-    call_iter = _call_iter_tuple_list
+    def call_iter(self, tx, obj, *args, **kwargs):
+        # Handle the case where we are iterating over a tuple, list or iterator
+        ret = self._call_iter_tuple_list(tx, obj, *args, **kwargs)
+
+        if ret is None:
+            # If the object doesn't implement a __iter__ method, it will be an error in eager mode when calling iter on it anyway.
+            # If the object implements a __iter__ method, inlining effectively forwards the call to another iter call
+            # (e.g. when __iter__ just returns iter(self.list)) or return a user-defined iterator.
+            return obj.call_method(tx, "__iter__", args, kwargs)
+        return ret
+
     call_tuple = _call_iter_tuple_list
     call_list = _call_iter_tuple_list
 
@@ -1672,11 +1687,16 @@ class BuiltinVariable(VariableTracker):
         ):
             return ConstantVariable.create(op(left.value, right.value))
 
-        if (
-            (isinstance(left, StreamVariable) and isinstance(right, StreamVariable))
-            or (isinstance(left, EventVariable) and isinstance(right, EventVariable))
-        ) and op is operator.eq:
-            return ConstantVariable(op(left.value, right.value))
+        if isinstance(left, (StreamVariable, EventVariable)) or isinstance(
+            right, (StreamVariable, EventVariable)
+        ):
+            if type(left) == type(right) and op is operator.eq:
+                return ConstantVariable(op(left.value, right.value))
+
+            if isinstance(right, ConstantVariable) or isinstance(
+                left, ConstantVariable
+            ):
+                return ConstantVariable(op(left.value, right.value))
 
         if op.__name__ == "is_":
             # If the two objects are of different type, we can safely return False

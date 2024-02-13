@@ -43,6 +43,54 @@ dynamo_expected_failures = {
     "TestIndexingCPU.test_index_cpu",
     "TestIndexingCPU.test_index_limits_cpu",
     "NumpyTestsCPU.test_boolean_indexing_weirdness_cpu",
+    "TestScript.test_torch_functional_tensordot_int",  # test_jit.py
+    "TestScript.test_python_call_non_tensor_wrong",  # test_jit.py
+    "TestTEFuserStatic.test_remove_output_used_only_in_size",  # test_jit_fuser_te.py
+    "TestScript.test_method_overloading",  # test_jit.py
+    "TestScript.test_pack_unpack_state",  # test_jit.py
+    "TestScript.test_string_device_implicit_conversion",  # test_jit.py
+    "TestScript.test_error_stacktrace_interface",  # test_jit.py
+    "TestScript.test_torchscript_multi_head_attn",  # test_jit.py
+    "TestTEFuserStatic.test_gelu",  # test_jit_fuser_te.py
+    "TestTEFuserDynamic.test_profiler",  # test_jit_fuser_te.py
+    "TestScript.test_is_scripting",  # test_jit.py
+    "TestScript.test_function_overloading_isinstance",  # test_jit.py
+    "TestJit.test_function_default_values",  # test_jit.py
+    "TestTEFuserDynamic.test_torch_to",  # test_jit_fuser_te.py
+    "TestScript.test_wrong_return_type",  # test_jit.py
+    "TestScript.test_type_annotation_module",  # test_jit.py
+    "TestScript.test_python_op_builtins",  # test_jit.py
+    "TestScript.test_nn_GRU",  # test_jit.py
+    "TestScript.test_function_overloads",  # test_jit.py
+    "TestScript.test_script_optional_none",  # test_jit.py
+    "TestScript.test_namedtuple_python",  # test_jit.py
+    "TestTEFuserStatic.test_profiler",  # test_jit_fuser_te.py
+    "TestScript.test_none_type_str",  # test_jit.py
+    "TestScript.test_isinstance_dynamic",  # test_jit.py
+    "TestScript.test_python_call",  # test_jit.py
+    "TestScript.test_parse_nested_names",  # test_jit.py
+    "TestScript.test_parse_tensor_constants",  # test_jit.py
+    "TestTEFuserDynamic.test_to_dtype",  # test_jit_fuser_te.py
+    "TestTEFuserStatic.test_to_dtype",  # test_jit_fuser_te.py
+    "TestScript.test_empty_tuple_str",  # test_jit.py
+    "TestScript.test_nn_LSTM_with_layers",  # test_jit.py
+    "TestScript.test_unused_decorator",  # test_jit.py
+    "TestTEFuserDynamic.test_remove_output_used_only_in_size",  # test_jit_fuser_te.py
+    "TestScript.test_no_self_arg_ignore_function",  # test_jit.py
+    "TestScript.test_tuple_str",  # test_jit.py
+    "TestScript.test_is_after_use",  # test_jit.py
+    "TestTEFuserStatic.test_torch_to",  # test_jit_fuser_te.py
+    "TestScript.test_nested_breaks",  # test_jit.py
+    "TestScript.test_infer_size",  # test_jit.py
+    "TestTEFuserDynamic.test_gelu",  # test_jit_fuser_te.py
+    "TestScript.test_conv_error",  # test_jit.py
+    "TestTEFuserStatic.test_skip_grad_in_check",  # test_jit_fuser_te.py
+    "TestScript.test_ignored_as_value",  # test_jit.py
+    "TestScript.test_unspecialized_any_binding",  # test_jit.py
+    "TestScript.test_namedtuple_default_values_using_factory_constructor",  # test_jit.py
+    "TestScript.test_dict_str",  # test_jit.py
+    "TestJit.test_batchnorm",  # test_jit.py
+    "TestTEFuserStatic.test_inlined_optimized_graph",  # test_jit_fuser_te.py
     "TestLinalgCPU.test_inverse_cpu_float32",
     "TestLinalgCPU.test_slogdet_errors_and_warnings_cpu_float32",
     "TestLinalgCPU.test_inverse_cpu_complex128",
@@ -352,24 +400,18 @@ dynamo_expected_failures = {
     "TestSDPACPU.test_fused_sdp_choice_cpu_type_dense_dropout_0_7_float64_cpu_float64",
     "TestSDPACPU.test_fused_sdp_choice_cpu_type_dense_dropout_0_0_float16_cpu_float16",
     "TestSDPACPU.test_fused_sdp_choice_cpu_type_dense_dropout_0_7_bfloat16_cpu_bfloat16",
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape0_cpu",
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape1_cpu",
-    "TestAttnMasksCPU.test_is_causal_and_mask_fails_cpu",
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape2_cpu",
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape3_cpu",
-    "TestAttnMasksCUDA.test_causal_variants_causal_variant_1_shape0_cuda",
-    "TestAttnMasksCUDA.test_causal_variants_causal_variant_1_shape1_cuda",
-    "TestAttnMasksCUDA.test_causal_variants_causal_variant_1_shape2_cuda",
-    "TestAttnMasksCUDA.test_causal_variants_causal_variant_1_shape3_cuda",
-    "TestAttnMasksCUDA.test_causal_variants_causal_variant_2_shape0_cuda",
-    "TestAttnMasksCUDA.test_causal_variants_causal_variant_2_shape1_cuda",
-    "TestAttnMasksCUDA.test_causal_variants_causal_variant_2_shape2_cuda",
-    "TestAttnMasksCUDA.test_causal_variants_causal_variant_2_shape3_cuda",
-    "TestAttnMasksCUDA.test_is_causal_and_mask_fails_cuda",
-    "TestAttnMasksCUDA.test_is_causal_equals_upper_left_shape0_cuda",
-    "TestAttnMasksCUDA.test_is_causal_equals_upper_left_shape1_cuda",
-    "TestAttnMasksCUDA.test_is_causal_equals_upper_left_shape2_cuda",
-    "TestAttnMasksCUDA.test_is_causal_equals_upper_left_shape3_cuda",
+    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape0_cpu",  # Can't construct an AttrSource without a valid base source
+    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape1_cpu",  # Can't construct an AttrSource without a valid base source
+    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape2_cpu",  # Can't construct an AttrSource without a valid base source
+    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape3_cpu",  # Can't construct an AttrSource without a valid base source
+    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape0_cuda",  # Can't construct an AttrSource without a valid base source
+    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape1_cuda",  # Can't construct an AttrSource without a valid base source
+    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape2_cuda",  # Can't construct an AttrSource without a valid base source
+    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape3_cuda",  # Can't construct an AttrSource without a valid base source
+    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape2_cpu",  # Can't construct an AttrSource without a valid base source
+    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape3_cpu",  # Can't construct an AttrSource without a valid base source
+    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape1_cpu",  # Can't construct an AttrSource without a valid base source
+    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape0_cpu",  # Can't construct an AttrSource without a valid base source
     "TestAssertCloseSparseCOO.test_matching_coalesced",  # test_testing
     "TestImports.test_circular_dependencies",  # test_testing
     "TestAssertCloseSparseCSR.test_mismatching_crow_indices_msg",  # test_testing
@@ -420,13 +462,7 @@ dynamo_expected_failures = {
     "TestAsArrayCPU.test_copy_list_cpu_complex128",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_int16",  # test_tensor_creation_ops
     "TestTensorCreationCPU.test_cartesian_prod_cpu",  # test_tensor_creation_ops
-    "TestSubclass.test_parametrization_non_wrapper_tensor_leave_parametrized_True",  # test_subclass
-    "TestSubclass.test_module_optimization_non_wrapper_tensor",  # test_subclass
-    "TestSubclass.test_serialization_non_wrapper_tensor_as_param_True",  # test_subclass
-    "TestSubclass.test_parametrization_non_wrapper_tensor_leave_parametrized_False",  # test_subclass
-    "TestSubclass.test_type_propagation_non_wrapper_tensor_as_param_False",  # test_subclass
     "TestSubclass.test_parametrization_base_tensor_leave_parametrized_True",  # test_subclass
-    "TestSubclass.test_type_propagation_non_wrapper_tensor_as_param_True",  # test_subclass
     "TestSubclass.test_parametrization_base_tensor_leave_parametrized_False",  # test_subclass
     "TestStatelessFunctionalAPI.test_reparametrize_module_fail_reset_to_original_torch_func",  # test_stateless
     "TestStatelessFunctionalAPI.test_reparametrized_module_change_parametrization_original_stateless",  # test_stateless
@@ -442,43 +478,11 @@ dynamo_expected_failures = {
     "TestSortAndSelectCPU.test_isin_cpu_int16",  # test_sort_and_select
     "TestSortAndSelectCPU.test_isin_cpu_int64",  # test_sort_and_select
     "TestSortAndSelectCPU.test_isin_cpu_float32",  # test_sort_and_select
-    "TestShapeOpsCPU.test_flip_cpu_float64",  # test_shape_ops
+    "TestShapeOpsCUDA.test_flip_cuda_float32",  # test_shape_ops
     "TestShapeOpsCPU.test_flip_cpu_float32",  # test_shape_ops
-    "TestShapeOpsCPU.test_flip_cpu_complex64",  # test_shape_ops
-    "TestShapeOpsCPU.test_flip_cpu_float16",  # test_shape_ops
-    "TestShapeOpsCPU.test_flip_cpu_complex128",  # test_shape_ops
-    "TestShapeOpsCPU.test_clamp_cpu_int64",  # test_shape_ops
-    "TestShapeOpsCPU.test_clamp_propagates_nans_cpu",  # test_shape_ops
-    "TestShapeOpsCPU.test_flip_cpu_bfloat16",  # test_shape_ops
-    "TestShapeOpsCPU.test_clamp_cpu_float32",  # test_shape_ops
     "TestSubclassSerialization.test_tensor_subclass_deepcopy",  # test_serialization
     "TestSubclassSerialization.test_tensor_subclass_getstate_overwrite",  # test_serialization
     "TestSubclassSerialization.test_tensor_subclass_wrapper_serialization",  # test_serialization
-    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_float32",  # test_scatter_gather_ops
-    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_int16",  # test_scatter_gather_ops
-    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_bfloat16",  # test_scatter_gather_ops
-    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_complex64",  # test_scatter_gather_ops
-    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_float64",  # test_scatter_gather_ops
-    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_bfloat16",  # test_scatter_gather_ops
-    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_complex128",  # test_scatter_gather_ops
-    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_float16",  # test_scatter_gather_ops
-    "TestScatterGatherCPU.test_scatter__reductions_cpu_float16",  # test_scatter_gather_ops
-    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_int32",  # test_scatter_gather_ops
-    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_int32",  # test_scatter_gather_ops
-    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_float32",  # test_scatter_gather_ops
-    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_int64",  # test_scatter_gather_ops
-    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_float16",  # test_scatter_gather_ops
-    "TestScatterGatherCPU.test_scatter__reductions_cpu_float32",  # test_scatter_gather_ops
-    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_uint8",  # test_scatter_gather_ops
-    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_uint8",  # test_scatter_gather_ops
-    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_int16",  # test_scatter_gather_ops
-    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_complex128",  # test_scatter_gather_ops
-    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_int8",  # test_scatter_gather_ops
-    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_float64",  # test_scatter_gather_ops
-    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_complex64",  # test_scatter_gather_ops
-    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_int64",  # test_scatter_gather_ops
-    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_int8",  # test_scatter_gather_ops
-    "TestScatterGatherCPU.test_scatter__reductions_cpu_complex64",  # test_scatter_gather_ops
     "TestCxxPytree.test_pytree_serialize_spec8",  # test_pytree
     "TestCxxPytree.test_pytree_serialize_spec9",  # test_pytree
     "TestCxxPytree.test_pytree_serialize_spec3",  # test_pytree
@@ -499,10 +503,7 @@ dynamo_expected_failures = {
     "TestNN.test_Sequential_append",  # test_nn
     "TestNNDeviceTypeCPU.test_nll_loss_all_ignored_cpu",  # test_nn
     "TestNN.test_ParameterList_replication",  # test_nn
-    "TestNNDeviceTypeCPU.test_CTCLoss_no_batch_dim_reduction_none_use_module_form_False_cpu",  # test_nn
     "TestNN.test_interpolate_buffer_overflow",  # test_nn
-    "TestNNDeviceTypeCPU.test_CTCLoss_no_batch_dim_reduction_mean_use_module_form_False_cpu",  # test_nn
-    "TestNN.test_batchnorm_raises_error_if_running_var_or_running_mean_have_forward_grad",  # test_nn
     "TestNNDeviceTypeCPU.test_nll_loss_byte_target_matches_long_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_module_to_empty_cpu_float32",  # test_nn
     "TestNNDeviceTypeCPU.test_nll_loss_empty_tensor_reduction_none_cpu",  # test_nn
@@ -514,7 +515,6 @@ dynamo_expected_failures = {
     "TestNN.test_Sequential_imul",  # test_nn
     "TestNN.test_upsampling_bfloat16",  # test_nn
     "TestNNDeviceTypeCPU.test_triplet_margin_with_distance_loss_cpu",  # test_nn
-    "TestNNDeviceTypeCPU.test_CTCLoss_no_batch_dim_reduction_sum_use_module_form_False_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_nll_loss_empty_tensor_reduction_sum_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_False_memory_format0_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_False_memory_format1_cpu",  # test_nn
@@ -595,54 +595,23 @@ dynamo_expected_failures = {
     "PackedSequenceTest.test_type_casts",  # nn/test_packed_sequence
     "PackedSequenceTest.test_pack_sequence",  # nn/test_packed_sequence
     "PackedSequenceTest.test_total_length",  # nn/test_packed_sequence
-    "TestModuleHooks.test_forward_pre_hooks_named_tuple_True",  # nn/test_module_hooks
-    "TestModuleHooks.test_full_backward_pre_hooks_named_tuple_True",  # nn/test_module_hooks
-    "TestModuleHooks.test_forward_hooks_named_tuple_False",  # nn/test_module_hooks
-    "TestModuleHooks.test_full_backward_hooks_named_tuple_False",  # nn/test_module_hooks
-    "TestModuleHooks.test_forward_hooks_named_tuple_True",  # nn/test_module_hooks
     "TestModuleHookNN.test_hook_inplace",  # nn/test_module_hooks
-    "TestModuleHooks.test_full_backward_hooks_named_tuple_True",  # nn/test_module_hooks
-    "TestModuleHooks.test_forward_pre_hooks_named_tuple_False",  # nn/test_module_hooks
-    "TestModuleHooks.test_full_backward_pre_hooks_named_tuple_False",  # nn/test_module_hooks
-    "TestLazyModules.test_lazy_batchnorm2d_state",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv3d",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv_transposed1d",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv2d",  # nn/test_lazy_modules
-    "TestLazyModules.test_lazy_instancenorm3d_state",  # nn/test_lazy_modules
-    "TestLazyModules.test_lazy_batchnorm3d_state",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv_transpose1d_pickle",  # nn/test_lazy_modules
-    "TestLazyModules.test_lazy_instancenorm2d",  # nn/test_lazy_modules
-    "TestLazyModules.test_lazy_instancenorm2d_state",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv3d_pickle",  # nn/test_lazy_modules
-    "TestLazyModules.test_lazy_batchnorm2d",  # nn/test_lazy_modules
-    "TestLazyModules.test_lazy_instancenorm1d",  # nn/test_lazy_modules
-    "TestLazyModules.test_lazy_batchnorm1d",  # nn/test_lazy_modules
-    "TestLazyModules.test_lazy_instancenorm1d_state",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv_transpose3d_pickle",  # nn/test_lazy_modules
-    "TestLazyModules.test_lazy_instancenorm3d",  # nn/test_lazy_modules
-    "TestLazyModules.test_lazy_batchnorm3d",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv2d_pickle",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv1d_pickle",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv1d",  # nn/test_lazy_modules
     "TestLazyModules.test_linear",  # nn/test_lazy_modules
-    "TestLazyModules.test_lazy_module_buffer",  # nn/test_lazy_modules
-    "TestLazyModules.test_lazy_batchnorm1d_state",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_batchnorm_with_dict_input",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv_transpose2d",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv_transpose2d_pickle",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv_transpose3d",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_linear_pickle",  # nn/test_lazy_modules
-    "TestNNInit.test_kaiming_normal_errors_on_inputs_smaller_than_2d",  # nn/test_init
-    "TestNNInit.test_xavier_normal_errors_on_inputs_smaller_than_2d",  # nn/test_init
-    "TestNNInit.test_ones_and_zeros",  # nn/test_init
-    "TestNNInit.test_eye",  # nn/test_init
-    "TestNNInit.test_kaiming_uniform_errors_on_inputs_smaller_than_2d",  # nn/test_init
-    "TestNNInit.test_dirac_only_works_on_3_4_5d_inputs",  # nn/test_init
-    "TestNNInit.test_sparse_only_works_on_2d_inputs",  # nn/test_init
-    "TestNNInit.test_constant",  # nn/test_init
-    "TestNNInit.test_xavier_uniform_errors_on_inputs_smaller_than_2d",  # nn/test_init
     "TestNNInit.test_xavier_uniform",  # nn/test_init
-    "TestNNInit.test_eye_only_works_on_2d_inputs",  # nn/test_init
     "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_bfloat16_cpu_int32_int64",  # nn/test_embedding
     "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int32_int64_bfloat16",  # nn/test_embedding
     "TestEmbeddingNNDeviceTypeCPU.test_EmbeddingBag_per_sample_weights_and_no_offsets_cpu_int32_float32",  # nn/test_embedding
@@ -859,50 +828,8 @@ dynamo_expected_failures = {
     "TestControlFlowTraced.test_map_functionalized",  # functorch/test_control_flow
     "TestControlFlowTraced.test_nested_map_cond_symbolic",  # functorch/test_control_flow
     "TestControlFlowTraced.test_nested_map_cond_real",  # functorch/test_control_flow
-    "TestJacCPU.test_against_reference_correctness_different_devices_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_against_reference_default_arg_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_against_reference_multi_input_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_against_reference_multi_input_multi_output_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_against_reference_simple_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_against_reference_unrelated_outputs_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_against_reference_zero_dim_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_argnums_defaults_to_zero_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_aux_pytree_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_chunk_jacrev_composition__preallocate_and_copy_False_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_chunk_jacrev_composition__preallocate_and_copy_True_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_dimensionality_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_empty_output_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_hessian_simple_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_inplace_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_jac_with_non_tensor_args_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_multiple_inputs_outputs_pytree_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_multiple_inputs_pytree_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_multiple_outputs_multiple_argnums_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_multiple_outputs_single_argnums_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_outputs_can_any_pytree_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_unrelated_input_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_unrelated_output_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestVmapJvpInplaceViewCPU.test_all_dual_base_inplace_cpu",  # functorch/test_eager_transforms.py
-    "TestVmapJvpInplaceViewCPU.test_all_dual_base_view_inplace_cpu",  # functorch/test_eager_transforms.py
-    "TestVmapJvpInplaceViewCPU.test_all_dual_no_view_cpu",  # functorch/test_eager_transforms.py
-    "TestVmapJvpInplaceViewCPU.test_right_dual_base_prop_cpu",  # functorch/test_eager_transforms.py
-    "TestVmapJvpInplaceViewCPU.test_right_dual_view_prop_cpu",  # functorch/test_eager_transforms.py
-    "TestHessianCPU.test_hessian_vectorize_correctness_multi_input_cpu",  # functorch/test_eager_transforms.py
-    "TestHessianCPU.test_hessian_vectorize_correctness_simple_cpu",  # functorch/test_eager_transforms.py
-    "TestHessianCPU.test_hessian_vectorize_correctness_unrelated_outputs_cpu",  # functorch/test_eager_transforms.py
-    "TestHessianCPU.test_jacfwd_different_levels_cpu",  # functorch/test_eager_transforms.py
-    "TestExamplesCorrectnessCPU.test_ensemble_regression_mechanism_functional_call_cpu",  # functorch/test_eager_transforms.py
-    "TestExamplesCorrectnessCPU.test_ensemble_regression_mechanism_make_functional_cpu",  # functorch/test_eager_transforms.py
-    "TestExamplesCorrectnessCPU.test_find_learning_rate_ensembling_AlphaDropout_mechanism_functional_call_cpu",  # functorch/test_eager_transforms.py
-    "TestExamplesCorrectnessCPU.test_find_learning_rate_ensembling_AlphaDropout_mechanism_make_functional_cpu",  # functorch/test_eager_transforms.py
-    "TestExamplesCorrectnessCPU.test_find_learning_rate_ensembling_Dropout_mechanism_functional_call_cpu",  # functorch/test_eager_transforms.py
-    "TestExamplesCorrectnessCPU.test_find_learning_rate_ensembling_Dropout_mechanism_make_functional_cpu",  # functorch/test_eager_transforms.py
-    "TestExamplesCorrectnessCPU.test_find_learning_rate_ensembling_FeatureAlphaDropout_mechanism_functional_call_cpu",  # functorch/test_eager_transforms.py
-    "TestExamplesCorrectnessCPU.test_find_learning_rate_ensembling_FeatureAlphaDropout_mechanism_make_functional_cpu",  # functorch/test_eager_transforms.py
-    "TestHigherOrderOperatorInteractionCPU.test_vmap_grad_sum_cpu",  # functorch/test_eager_transforms.py
     "TestFunctionalizeCPU.test_multioutput_view_cpu",  # functorch/test_eager_transforms.py
     "TestFunctionalizeCPU.test_simple_view_cpu",  # functorch/test_eager_transforms.py
-    "TestFunctionalizeCPU.test_vmap_functionalize_jvp_cpu",  # functorch/test_eager_transforms.py
     "TestMetaKernel.test_addmm_invalid_dtype",  # lazy/test_meta_kernel
     "TestVerifyCorrectness.test_incorrect_verify_true",  # dynamo/test_verify_correctness
     "TestVerifyCorrectness.test_torchscript",  # dynamo/test_verify_correctness
@@ -1263,10 +1190,8 @@ dynamo_expected_failures = {
     "AutogradFunctionTests.test_print_in_bwd",  # dynamo/test_autograd_function
     "AutogradFunctionTests.test_graph_break_if_lifted_free_variable",  # dynamo/test_autograd_function
     "AotAutogradFallbackTests.test_aot_sequence_nr",  # dynamo/test_aot_autograd
-    "TestTorchFunctionOverride.test_tensor_subclass_propagation",  # test_overrides
     "TestNamedTuple.test_max",  # test_overrides
     "TestTorchFunctionMode.test_mode_notimplemented_loop",  # test_overrides
-    "TestTorchFunctionMode.test_disable_enable_subclass",  # test_overrides
     "TestTorchFunctionOverride.test_mean_semantics",  # test_overrides
     "TestGradCheckOverride.test_gradcheck",  # test_overrides
     "TestTorchFunctionOverride.test_Tensor___cuda_array_interface_____get__",  # test_overrides
@@ -1280,7 +1205,6 @@ dynamo_expected_failures = {
     "TestVmapAPILegacy.test_accepts_nested_inputs",  # test_legacy_vmap
     "TestVmapAPILegacy.test_nested_out_dims",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_inplace_manyview_cpu",  # test_legacy_vmap
-    "TestVmapAPILegacy.test_functools_partial",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_unrelated_output_cpu",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_index_cpu",  # test_legacy_vmap
     "TestVmapAPILegacy.test_non_zero_in_dims",  # test_legacy_vmap
@@ -1291,7 +1215,7 @@ dynamo_expected_failures = {
     "TestVmapOperatorsLegacy.test_select",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_binary_pointwise_ops",  # test_legacy_vmap
     "TestVmapAPILegacy.test_non_tensor_output_raises",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_binary_cross_entropy_cpu",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_binary_cross_entropy_cpu",  # Cannot access storage of BatchedTensorImpl
     "TestVmapOperatorsLegacy.test_diagonal",  # test_legacy_vmap
     "TestVmapAPILegacy.test_nonzero_out_dims",  # test_legacy_vmap
     "TestVmapAPILegacy.test_unsupported_op_err_msg",  # test_legacy_vmap
@@ -1483,7 +1407,6 @@ dynamo_expected_failures = {
     "TestAOTAutograd.test_input_data_and_metadata_mutation_aliases_other_input",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_input_output_view_metadata_mutate_multiple",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_input_data_and_metadata_mutation",  # functorch/test_aotdispatch
-    "TestPythonKeyCPU.test_make_fx_vjp_cpu",  # functorch/test_aotdispatch
     "TestPartitioning.test_min_cut_partitioner_output_tensor_shape_tensor",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_input_output_view_simple",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_output_aliases_intermediate_multi_output_view",  # functorch/test_aotdispatch
@@ -1500,7 +1423,6 @@ dynamo_expected_failures = {
     "TestAOTAutograd.test_default_partitioner_saves_symints_not_tensors_for_bw",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_invalid_dupe",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_output_aliases_intermediate_and_returned_different_grad",  # functorch/test_aotdispatch
-    "TestPartitioning.test_min_cut_partitioner_recomputable_ops",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_output_all_alias_types",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_set__and_data_mutation_good",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_set__and_data_mutation_bad",  # functorch/test_aotdispatch
@@ -1516,7 +1438,6 @@ dynamo_expected_failures = {
     "TestAOTAutograd.test_invalid_dupe_fake",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_output_aliases_intermediate_multiple",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_input_mutation_alias_everything",  # functorch/test_aotdispatch
-    "TestPythonKeyCPU.test_make_fx_jacrev_cpu",  # functorch/test_aotdispatch
     "TestPartitioning.test_default_partitioner_output_tensor_shape_tensor",  # functorch/test_aotdispatch
     "TestPartitioning.test_contiguous",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_outputs_are_aliased",  # functorch/test_aotdispatch
@@ -1609,7 +1530,6 @@ dynamo_expected_failures = {
     "TestTorchDeviceTypeCPU.test_broadcast_fn_div_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_quint8",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_lt_cpu",  # test_torch
-    "TestTorchDeviceTypeCPU.test_memory_format_operators_cpu",  # test_torch
     "TestTorch.test_pin_memory",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_masked_fill_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool2d_cpu_float64",  # test_torch
@@ -1680,7 +1600,6 @@ dynamo_expected_failures = {
     "TestAutograd.test_increment_version",  # test_autograd
     "TestAutograd.test_record_function_callbacks",  # test_autograd
     "TestAutograd.test_save_on_cpu_and_checkpoint",  # test_autograd
-    "TestAutogradForwardMode.test_make_dual_torch_dispatch",  # test_autograd
     "TestAutogradDeviceTypeCPU.test_sparse_ctor_getter_backward_cpu_complex128",  # test_autograd
     "TestNestedCheckpoint.test_nested_checkpoint_non_tensor_inputs_and_outputs_early_stop_False",  # test_autograd
     "TestAutograd.test_gradcheck_nondeterministic",  # test_autograd
@@ -1717,7 +1636,6 @@ dynamo_expected_failures = {
     "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_inf_mode_inplace_op",  # test_autograd
     "TestAutograd.test_nested_anomaly_detect_nan",  # test_autograd
     "TestAutograd.test_nested_anomaly_printstack_cleanup",  # test_autograd
-    "TestAutograd.test_post_accumulate_grad_hook_gets_cleaned_up",  # test_autograd
     "TestAutogradInferenceMode.test_inference_mode_context_manager",  # test_autograd
     "TestAutograd.test_hook_none",  # test_autograd
     "TestAutograd.test_set_data_tensorimpl_type",  # test_autograd
@@ -1925,7 +1843,6 @@ dynamo_expected_failures = {
     "TestFakeQuantizeOps.test_learnable_forward_per_tensor_cuda",  # test_quantization
     "TestQuantizedTensor.test_repeat",  # test_quantization
     "TestStaticQuantizedModule.test_linear_leaky_relu",  # test_quantization
-    "TestBitsCPU.test_subclass_cpu",  # test_quantization
     "TestFakeQuantizeOps.test_learnable_backward_per_channel_cpu",  # test_quantization
     "TestFXNumericSuiteCoreAPIs.test_add_shadow_loggers_fun_ptq",  # test_quantization
     "TestQuantizeFx.test_static_lstm",  # test_quantization
@@ -2164,28 +2081,10 @@ dynamo_expected_failures = {
     "TestGenerateOpcheckTests.test_opcheck_bad_op",  # test_custom_ops
     "TestCustomOp.test_legacy_define",  # test_custom_ops
     "TestPythonRegistration.test_alias_analysis",  # test_python_dispatch
-    "TestPythonDispatch.test_torch_dispatch_mode_subclass_priority",  # test_python_dispatch
-    "TestPythonDispatch.test_strides_slow_path",  # test_python_dispatch
-    "TestPythonDispatch.test_invalid_ret",  # test_python_dispatch
-    "TestPythonDispatch.test_dim_slowpath",  # test_python_dispatch
     "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_conv2d_cpu",  # test_python_dispatch
-    "TestPythonDispatch.test_fancy_strides",  # test_python_dispatch
-    "TestPythonDispatch.test_layout_slow_path",  # test_python_dispatch
-    "TestPythonDispatch.test_dispatch_super_dont_autograd",  # test_python_dispatch
-    "TestPythonDispatch.test_sizes_slow_path",  # test_python_dispatch
     "TestPythonRegistration.test_finalizer",  # test_python_dispatch
-    "TestPythonDispatch.test_dispatch_super_call_list_arg",  # test_python_dispatch
-    "TestPythonDispatch.test_is_contiguous_slow_path",  # test_python_dispatch
-    "TestPythonRegistration.test_override_cpu_sum",  # test_python_dispatch
-    "TestPythonDispatch.test_mode_with_make_subclass",  # test_python_dispatch
-    "TestPythonDispatch.test_multiple_ops_subclass",  # test_python_dispatch
     "TestPythonDispatch.test_subclass_autograd_device_check",  # test_python_dispatch
-    "TestPythonDispatch.test_data_ptr_respects_numel_slow_path",  # test_python_dispatch
     "TestPythonDispatch.test_make_subclass_with_modes",  # test_python_dispatch
-    "TestPythonDispatch.test_dispatch_super_call",  # test_python_dispatch
-    "TestPythonDispatch.test_subclass_priority",  # test_python_dispatch
-    "TestPythonDispatch.test_exception_handling",  # test_python_dispatch
-    "TestPythonDispatch.test_list_ret",  # test_python_dispatch
     "LoggingTests.test_trace_source_nested",  # dynamo/test_logging
     "LoggingTests.test_guards_recompiles",  # dynamo/test_logging
     "LoggingTests.test_inductor_info",  # dynamo/test_logging
@@ -2209,14 +2108,67 @@ dynamo_expected_failures = {
     "LoggingTests.test_dynamo_info",  # dynamo/test_logging
     "LoggingTests.test_graph_breaks",  # dynamo/test_logging
     "LoggingTests.test_aot",  # dynamo/test_logging
-    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape2_cpu",  # test_transformers.py
-    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape3_cpu",  # test_transformers.py
-    "TestAttnBiasCPU.test_is_causal_and_mask_fails_cpu",  # test_transformers.py
-    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape1_cpu",  # test_transformers.py
-    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape0_cpu",  # test_transformers.py
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_float32",  # test_linalg.py
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_int64",  # test_linalg.py
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_complex64",  # test_linalg.py
+    "TestCompileTransformsCPU.test_compile_vmap_hessian_cpu",  # functorch/test_eager_transforms.py
+    "TestJvpCPU.test_primals_tangents_length_mismatch_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_out_of_bounds_argnums_jacfwd_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_jac_with_non_tensor_args_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_multiple_inputs_outputs_pytree_cpu",  # functorch/test_eager_transforms.py
+    "TestExamplesCorrectnessCPU.test_maml_regression_mechanism_functional_call_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_unrelated_input_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_inplace_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_multiple_outputs_single_argnums_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_simple_jacrev_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_empty_argnums_jacfwd_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_out_of_bounds_argnums_jacrev_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_against_reference_multi_input_cpu",  # functorch/test_eager_transforms.py
+    "TestExamplesCorrectnessCPU.test_resnet18_per_sample_grads_mechanism_functional_call_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_simple_not_flat_jacfwd_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_aux_pytree_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_argnums_tuple_jacfwd_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_argnums_effect_on_return_jacrev_cpu",  # functorch/test_eager_transforms.py
+    "TestGradTransformCPU.test_vjp_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_repeated_argnums_jacfwd_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_against_reference_unrelated_outputs_cpu",  # functorch/test_eager_transforms.py
+    "TestComposabilityCPU.test_vjp_vjp_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_argnums_defaults_to_zero_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_multiple_inputs_pytree_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_unrelated_output_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_empty_output_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_vmap_on_jac_simple_jacrev_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_dimensionality_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_repeated_argnums_jacrev_cpu",  # functorch/test_eager_transforms.py
+    "TestExamplesCorrectnessCPU.test_maml_regression_mechanism_make_functional_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_float_argnums_jacrev_cpu",  # functorch/test_eager_transforms.py
+    "TestExamplesCorrectnessCPU.test_resnet18_per_sample_grads_mechanism_make_functional_cpu",  # functorch/test_eager_transforms.py
+    "TestGradTransformCPU.test_grad_of_vjp_composition_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_against_reference_correctness_different_devices_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_outputs_can_any_pytree_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_simple_jacfwd_cpu",  # functorch/test_eager_transforms.py
+    "TestJvpCPU.test_nonempty_primals_and_tangents_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_negative_argnums_jacfwd_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_negative_argnums_jacrev_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_against_reference_multi_input_multi_output_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_multiple_outputs_multiple_argnums_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_simple_not_flat_jacrev_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_argnums_effect_on_return_jacfwd_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_against_reference_default_arg_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_against_reference_zero_dim_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_float_argnums_jacfwd_cpu",  # functorch/test_eager_transforms.py
+    "TestJvpCPU.test_jvp_inside_autograd_function_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_argnums_tuple_jacrev_cpu",  # functorch/test_eager_transforms.py
+    "TestComposabilityCPU.test_vmap_vjp_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_multiple_args_jacfwd_cpu",  # functorch/test_eager_transforms.py
+    "TestAutogradFunctionCPU.test_needs_input_grads_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_against_reference_simple_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_multiple_args_jacrev_cpu",  # functorch/test_eager_transforms.py
+    "TestJacCPU.test_empty_argnums_jacrev_cpu",  # functorch/test_eager_transforms.py
+    "TestJvpCPU.test_simple_cpu",  # functorch/test_eager_transforms.py
+    "TestJvpCPU.test_inputs_are_tuples_of_tensors_cpu",  # functorch/test_eager_transforms.py
+    "TestJvpCPU.test_disable_fwd_grad_outside_cpu",  # functorch/test_eager_transforms.py
+    "TestAOTDispatch.test_aot_dispatch_simple",  # functorch/test_aotdispatch.py
 }
 
 # see NOTE [dynamo_test_failures.py] for more details
@@ -2273,11 +2225,6 @@ dynamo_skips = {
     "TestAttnBiasCUDA.test_causal_variants_compile_causal_variant_CausalVariant_UPPER_LEFT_shape2_CUDA",  # known py38 fail
     "TestAttnBiasCUDA.test_causal_variants_compile_causal_variant_CausalVariant_UPPER_LEFT_shape1_CUDA",  # known py38 fail
     "TestTransformersCPU.test_decoder_padding_and_src_mask_bool_cpu",  # known py311 fail
-    "TestAttnBiasCPU.test_causal_variants_causal_variant_2_shape3_cpu",  # known py311 fail
-    "TestAttnBiasCPU.test_causal_variants_causal_variant_1_shape3_cpu",  # known py311 fail
-    "TestAttnBiasCPU.test_causal_variants_causal_variant_1_shape2_cpu",  # known py311 fail
-    "TestAttnBiasCPU.test_causal_variants_causal_variant_1_shape1_cpu",  # known py311 fail
-    "TestAttnBiasCPU.test_causal_variants_causal_variant_2_shape1_cpu",  # known py311 fail
     "TestSWAUtils.test_averaged_model_all_devices_ema_True",  # flaky
     "TestSWAUtils.test_averaged_model_exponential_use_multi_avg_fn_True_use_buffers_False",  # flaky
     "TestSWAUtils.test_averaged_model_exponential_use_multi_avg_fn_True_use_buffers_True",  # flaky
@@ -2963,28 +2910,11 @@ dynamo_skips = {
     "TestSparseCPU.test_to_dense_with_gradcheck_masked_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_coalesce_transpose_mm_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sum_cpu_int64",  # known py38 fail
-    "TestReductionsCPU.test_argminmax_multiple_cpu_float16",  # known py38 fail
-    "TestReductionsCPU.test_argminmax_multiple_cpu_int16",  # known py38 fail
     "TestReductionsCPU.test_histogramdd_cpu_float32",  # known py38 fail
-    "TestReductionsCPU.test_argminmax_multiple_cpu_int8",  # known py38 fail
     "TestReductionsCPU.test_tensor_compare_ops_empty_cpu",  # known py38 fail
-    "TestReductionsCPU.test_all_any_vs_numpy_cpu_float32",  # known py38 fail
-    "TestReductionsCPU.test_all_any_vs_numpy_cpu_float64",  # known py38 fail
-    "TestReductionsCPU.test_argminmax_multiple_cpu_float64",  # known py38 fail
     "TestReductionsCPU.test_all_any_vs_numpy_cpu_uint8",  # known py38 fail
-    "TestReductionsCPU.test_argminmax_multiple_cpu_uint8",  # known py38 fail
-    "TestReductionsCPU.test_all_any_vs_numpy_cpu_int8",  # known py38 fail
-    "TestReductionsCPU.test_all_any_vs_numpy_cpu_int16",  # known py38 fail
-    "TestReductionsCPU.test_all_any_vs_numpy_cpu_int32",  # known py38 fail
-    "TestReductionsCPU.test_argminmax_multiple_cpu_float32",  # known py38 fail
-    "TestReductionsCPU.test_all_any_vs_numpy_cpu_complex64",  # known py38 fail
-    "TestReductionsCPU.test_all_any_vs_numpy_cpu_int64",  # known py38 fail
-    "TestReductionsCPU.test_all_any_vs_numpy_cpu_complex128",  # known py38 fail
-    "TestReductionsCPU.test_argminmax_multiple_cpu_int64",  # known py38 fail
     "TestReductionsCPU.test_tensor_reduce_ops_empty_cpu",  # known py38 fail
-    "TestReductionsCPU.test_all_any_vs_numpy_cpu_float16",  # known py38 fail
     "TestReductionsCPU.test_all_any_vs_numpy_cpu_bool",  # known py38 fail
-    "TestReductionsCPU.test_argminmax_multiple_cpu_int32",  # known py38 fail
     "TestReductionsCPU.test_tensor_compare_ops_argmax_argmix_kthvalue_dim_empty_cpu",  # known py38 fail
     "TestReductionsCPU.test_histogram_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_broadcast_tensors_cpu_float32",  # known py38 fail
@@ -4195,6 +4125,9 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_eye_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_jiterator_2inputs_2outputs_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_diag_embed_cpu_float32",  # known py38 fail
+    "TestTEFuserDynamic.test_matmul",  # known py38 fail
+    "TestTEFuserStatic.test_unary_ops",  # known py311 fail
+    "TestTEFuserDynamic.test_unary_ops",  # known py311 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_softmin_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_fill_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_broadcast_tensors_cpu_float32",  # known py38 fail
@@ -6309,92 +6242,10 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cat_cpu_float32",  # known py38 fail
     "TestBasicsCPU.test_invalid_sparse_csr_values_cpu",  # known py38 fail
     "TestBasicsCPU.test_invalid_sparse_coo_values_cpu",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_uint8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_int64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_int16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_float64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int32_int8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_int8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int32_float64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_uint8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_uint8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int32_int32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_int8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_float16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int32_int16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_float32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_float32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_int8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_int32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_int8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_int32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_add_cpu",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_float32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_bool",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_bool",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_bool",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_int32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_float64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_float16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_int64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_float64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_int8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_bool",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_float64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_int16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_uint8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_float32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_int32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int32_int64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_int64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_bool",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_gradients_cpu_float64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_int64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_float64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_float16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int32_uint8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_int32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_float64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_int32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_float32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_int64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_int16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_float16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_float32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_bool",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int32_bool",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_int16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_int16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_int16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_int_tensor_pow_neg_ints_cpu",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_int8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_uint8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_uint8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_bool",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_float16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_float32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_float16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_int16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_uint8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_int64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_uint8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_float16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_int8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_bool",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_int32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_float16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_float64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_float64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_int16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int32_float32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_shift_limits_cpu_uint8",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_int64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int32_float16",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_float32",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_int64",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_int8",  # known py38 fail
     "TestBinaryUfuncsCPU.test_long_tensor_pow_floats_cpu",  # known py38 fail
-    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_int32",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_add_cpu",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_int_tensor_pow_neg_ints_cpu",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_shift_limits_cpu_uint8",  # known py38 fail
     "TestFXExperimental.test_optimize_for_inference_cpu",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int32",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int64",  # known py38 fail
@@ -6526,7 +6377,6 @@ dynamo_skips = {
     "TestNnapiBackend.test_hardtanh",  # test_jit
     "TestNnapiBackend.test_pointwise_binary_const",  # test_jit
     "TestSlice.test_tuple_slicing",  # test_jit
-    "TestNnapiBackend.test_adaptive_avg_pool2d",  # test_jit
     "TestTensorBuiltins.test_scalar_to_num_conversions",  # test_jit
     "TestNnapiBackend.test_pointwise_binary",  # test_jit
     "TestFrozenOptimizations.test_conv_bn_folding",  # test_jit.py
@@ -6541,6 +6391,10 @@ dynamo_skips = {
     "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_Q_operation1",
     "TestArgmax.test_combinations_data61",  # torch_np/test_ndarray_methods.py
     "TestArgmax.test_combinations_data58",  # torch_np/test_ndarray_methods.py
+    "TestPythonDispatch.test_list_ret",  # test_python_dispatch.py
+    "TestCustomOpTestingCPU.test_opcheck_fails_basic_cpu",  # test_custom_ops.py
+    "TestSaveLoadForOpVersion.test_versioned_div_tensor_out",  # test_jit.py
+    "TestAutograd.test_post_accumulate_grad_hook_gets_cleaned_up",  # test_autograd
 }
 
 

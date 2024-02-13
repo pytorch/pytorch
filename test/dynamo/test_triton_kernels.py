@@ -1044,8 +1044,7 @@ class MutationTests(torch._dynamo.test_case.TestCase):
                 "out_ptr": t,
                 "BLOCK_SIZE": 4,
             },
-            # TODO(oulgen): helper return values not implemented yet
-            ["in_ptr0", "in_ptr1", "out_ptr"],
+            ["out_ptr"],
         )
 
     @make_mutation_test
@@ -1077,8 +1076,43 @@ class MutationTests(torch._dynamo.test_case.TestCase):
                 "out_ptr": t,
                 "BLOCK_SIZE": 4,
             },
-            # TODO(oulgen): multiple return values not implemented yet
-            ["in_ptr0", "in_ptr1", "out_ptr"],
+            ["out_ptr"],
+        )
+
+    @make_mutation_test
+    def test_nested_cond_op_kernel():
+        @triton.jit
+        def nested_cond_op_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            if tl.program_id(0) == 0:
+                if tl.program_id(1) == 0:
+                    output = x + y
+                    tl.store(out_ptr + offsets, output, mask=mask)
+            else:
+                pass
+
+        t = torch.randn(4)
+        return (
+            nested_cond_op_kernel,
+            {
+                "in_ptr0": t,
+                "in_ptr1": t,
+                "out_ptr": t,
+                "n_elements": 4,
+                "BLOCK_SIZE": 4,
+            },
+            ["out_ptr"],
         )
 
 
@@ -1127,8 +1161,7 @@ if HAS_CUDA and HAS_LARK:
                 "BLOCK_SIZE": 4,
                 "ACTIVATION": "add_kernel",
             },
-            # TODO(oulgen): Multiple functions is not implemented yet
-            ["in_ptr0", "out_ptr"],
+            ["out_ptr"],
         ],
         [
             mul2_inplace_kernel,
@@ -1195,8 +1228,7 @@ if HAS_CUDA and HAS_LARK:
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
-            # TODO(oulgen): Dynamic control flow is not implemented yet
-            ["in_ptr0", "in_ptr1", "out_ptr"],
+            ["out_ptr"],
         ],
     ]
     for kernel, inputs, outputs in tests:
