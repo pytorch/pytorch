@@ -3,7 +3,12 @@
 #include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/debug_macros.h>
 #include <torch/csrc/dynamo/cpython_defs.h>
+#include <torch/csrc/utils/python_compat.h>
 
+#if IS_PYTHON_3_12_PLUS
+#define _PyCode_GetExtra PyUnstable_Code_GetExtra
+#define _PyCode_SetExtra PyUnstable_Code_SetExtra
+#endif
 
 Py_ssize_t extra_index = -1;
 
@@ -47,9 +52,7 @@ FrameState* extract_frame_state(ExtraState* extra_state) {
 
 ExtraState* get_extra_state(PyCodeObject* code) {
   ExtraState* extra = NULL;
-  #if !(IS_PYTHON_3_12_PLUS)
-    _PyCode_GetExtra((PyObject*)code, extra_index, (void**)&extra);
-  #endif
+  _PyCode_GetExtra((PyObject*)code, extra_index, (void**)&extra);
   return extra;
 }
 
@@ -65,9 +68,7 @@ void set_extra_state(PyCodeObject* code, ExtraState* extra_state) {
   CHECK(
       old_extra_state == NULL || old_extra_state == SKIP_CODE ||
       old_extra_state != extra_state);
-  #if !(IS_PYTHON_3_12_PLUS)
-    _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
-  #endif
+  _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
 }
 
 ExtraState* init_and_set_extra_state(PyCodeObject* code) {

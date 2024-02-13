@@ -50,12 +50,12 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Install correct Python version
   as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y python="$ANACONDA_PYTHON_VERSION"
 
+  # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
+  CONDA_COMMON_DEPS="astunparse pyyaml mkl=2021.4.0 mkl-include=2021.4.0 setuptools"
   if [ "$ANACONDA_PYTHON_VERSION" = "3.11" ] || [ "$ANACONDA_PYTHON_VERSION" = "3.12" ]; then
-    # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
-    CONDA_COMMON_DEPS="astunparse pyyaml mkl=2023.1.0 mkl-include=2023.1.0 setuptools"
     conda_install numpy=1.26.0 ${CONDA_COMMON_DEPS}
   else
-    CONDA_COMMON_DEPS="astunparse pyyaml mkl=2021.4.0 mkl-include=2021.4.0 setuptools"
+
     conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS}
   fi
 
