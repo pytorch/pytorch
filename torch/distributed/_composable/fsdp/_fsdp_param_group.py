@@ -10,6 +10,7 @@ from torch.autograd.graph import Node
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
+from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_collectives import (
     AllGatherResult,
     foreach_all_gather,
@@ -75,6 +76,9 @@ class AllGatherState(NamedTuple):
 class FSDPParamGroup:
     """This class represents a parameter group to communicate together."""
 
+    _orig_dtype: torch.dtype
+    _reduce_dtype: Optional[torch.dtype]
+
     def __init__(
         self,
         params: List[nn.Parameter],
@@ -82,11 +86,14 @@ class FSDPParamGroup:
         mesh_info: FSDPMeshInfo,
         post_forward_mesh_info: Optional[FSDPMeshInfo],
         device: torch.device,
+        mp_policy: MixedPrecisionPolicy,
     ):
         self.module = module  # permit ref cycle because 1:1 lifetime
         param_module_infos = _get_param_module_infos(params, module)
         self.fsdp_params = [
-            FSDPParam(param, module_info, mesh_info, post_forward_mesh_info, device)
+            FSDPParam(
+                param, module_info, mesh_info, post_forward_mesh_info, device, mp_policy
+            )
             for param, module_info in zip(params, param_module_infos)
         ]
         self.mesh_info = mesh_info
@@ -133,7 +140,15 @@ class FSDPParamGroup:
                 f"FSDP expects uniform original parameter dtype but got {orig_dtypes}"
             )
         self._orig_dtype = next(iter(orig_dtypes))
-        self._param_dtype = self._orig_dtype
+        reduce_dtypes = {fsdp_param.reduce_dtype for fsdp_param in self.fsdp_params}
+        if len(reduce_dtypes) != 1:
+            # This can be relaxed if we issue one reduce-scatter per reduce
+            # dtype (but we would need a way for users to specify multiple
+            # reduce dtypes)
+            raise AssertionError(
+                f"FSDP expects uniform reduce dtype but got {reduce_dtypes}"
+            )
+        self._reduce_dtype = next(iter(reduce_dtypes))
 
     def _init_grad_divide_factors(self):
         """
@@ -176,7 +191,6 @@ class FSDPParamGroup:
             async_op,
             *self.comm_ctx.get_all_gather_streams(self._training_state),
             self.device,
-            self._param_dtype,
         )
 
     def wait_for_unshard(self):
@@ -280,7 +294,7 @@ class FSDPParamGroup:
                 self._reduce_scatter_process_group,
                 self.comm_ctx.reduce_scatter_stream,
                 self._orig_dtype,
-                self._orig_dtype,
+                self._reduce_dtype,
                 self.device,
                 self._grad_predivide_factor,
                 self._grad_postdivide_factor,
