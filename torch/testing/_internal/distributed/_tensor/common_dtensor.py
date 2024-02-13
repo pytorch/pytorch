@@ -105,11 +105,11 @@ class Attention(nn.Module):
         keys = keys.transpose(1, 2)  # (bsz, n_heads, seq_len, head_dim)
         values = values.transpose(1, 2)  # (bsz, n_heads, seq_len, head_dim)
 
-        mask = None
-        if self.use_attn_mask and seq_len > 1:
-            mask = torch.full((seq_len, seq_len), float("-inf"), device=x.device)
-            mask = torch.triu(mask, diagonal=1)
-        output = F.scaled_dot_product_attention(queries, keys, values, mask, self.dropout_p if self.training else 0)
+        output = F.scaled_dot_product_attention(
+            queries, keys, values, None,
+            self.dropout_p if self.training else 0,
+            self.use_attn_mask,
+        )
         output = output.transpose(1, 2).contiguous().view(bsz, seq_len, -1)
         return self.resid_dropout(self.wo(output))
 
