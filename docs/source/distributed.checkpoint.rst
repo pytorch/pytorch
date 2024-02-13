@@ -95,3 +95,7 @@ an experimental feature and is subject to change.
 
 .. autoclass:: torch.distributed.checkpoint.state_dict.StateDictOptions
    :members:
+
+For users which are used to using and sharing models in the `torch.save` format, the following utilities are pvoided:
+
+.. autofunction:: torch.distributed.checkpoint.format_utils.dcp_to_torch_save
