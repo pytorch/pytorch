@@ -8,6 +8,8 @@
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/library.h>
 
+#include <ATen/native/Resize.h>
+
 namespace torch {
 namespace inductor {
 using namespace at;
@@ -79,6 +81,11 @@ static void accumulate_grad_(const Tensor& variable, const Tensor& new_grad) {
   }
 }
 
+static void resize_storage_bytes_(const Tensor& variable, SymInt new_size) {
+  // similar to THPStorage_resize_ in StorageMethods.cpp, but is traceable
+  at::native::resize_bytes(variable.storage(), new_size);
+}
+
 TORCH_LIBRARY_FRAGMENT(inductor, m) {
   m.def(
       "_mm_plus_mm(Tensor a, Tensor b, Tensor c, Tensor d, Tensor(t!) out) -> Tensor(t!)",
@@ -96,6 +103,11 @@ TORCH_LIBRARY_FRAGMENT(inductor, m) {
   m.def(
       "accumulate_grad_(Tensor variable, Tensor new_grad) -> ()",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, accumulate_grad_),
+      {at::Tag::pt2_compliant_tag});
+  m.def(
+      "resize_storage_bytes_(Tensor variable, SymInt new_size) -> ()",
+      dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, resize_storage_bytes_),
       {at::Tag::pt2_compliant_tag});
 }
 
