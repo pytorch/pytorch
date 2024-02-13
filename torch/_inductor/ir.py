@@ -1602,6 +1602,7 @@ class Scan(Loops):
     combine_fn: Callable[..., Any]
     reindex: Callable[[List[Expr], List[Expr]], List[Expr]]
     reduction_hint: ReductionHint
+    init: int
 
     # HACK we mimick reduction
 
@@ -1622,7 +1623,7 @@ class Scan(Loops):
     def store_reduction(self, output_name, indexer, vars, scan_vars):
         idx = self.reindex(vars, scan_vars)
         value = self.inner_fn(idx)
-        result = ops.scan(self.dtype, self.combine_fn, value)
+        result = ops.scan(self.dtype, self.combine_fn, value, self.init)
         return ops.store(output_name, indexer(idx), result)
 
     def get_reduction_type(self):
@@ -1662,6 +1663,7 @@ class Scan(Loops):
         size: List[Expr],
         axis: int,
         combine_fn: Callable[..., Any],
+        init: Any,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
     ) -> Optional["TensorBox"]:
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
@@ -1718,6 +1720,7 @@ class Scan(Loops):
                 scan_ranges=scan_ranges,
                 combine_fn=combine_fn,
                 reindex=reindex,
+                init=init,
                 reduction_hint=reduction_hint,
             )
         )
@@ -6866,13 +6869,15 @@ class LoopBodyBlock:
                 )
 
             @staticmethod
-            def scan(dtype_proxy, combine_fn: Callable[..., Any], value_proxy):
-                def shim(dtype, value):
-                    return V.ops.scan(dtype, combine_fn, value)
+            def scan(
+                dtype_proxy, combine_fn: Callable[..., Any], value_proxy, init_proxy
+            ):
+                def shim(dtype, value, init):
+                    return V.ops.scan(dtype, combine_fn, value, init)
 
                 name = self.body.add_submodule(shim, "scan")
                 return tracer.create_proxy(
-                    "call_module", name, (dtype_proxy, value_proxy), {}
+                    "call_module", name, (dtype_proxy, value_proxy, init_proxy), {}
                 )
 
             @staticmethod

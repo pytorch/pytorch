@@ -1391,6 +1391,7 @@ class Kernel(CodeGen):
         dtype: torch.dtype,
         combine_fn: Callable[[CSEVariable, CSEVariable], CSEVariable],
         value: CSEVariable,
+        init: int,
     ) -> CSEVariable:
         raise NotImplementedError()
 
@@ -1553,8 +1554,9 @@ class Kernel(CodeGen):
                 dtype: torch.dtype,
                 combine_fn: Callable[[CSEVariable, CSEVariable], CSEVariable],
                 value: CSEVariable,
+                init: int,
             ) -> CSEVariable:
-                return self.scan(dtype, combine_fn, value)
+                return self.scan(dtype, combine_fn, value, init)
 
             @staticmethod
             def bucketize(
