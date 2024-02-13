@@ -171,16 +171,16 @@ def semi_sparse_pointwise_op(
 ):
     self = None
     for tensor in args:
-        if isinstance(tensor, torch.sparse.SparseSemiStructuredTensor):
+        if isinstance(tensor, torch.sparse.SparseSemiStructuredTensorCUTLASS):
             self = tensor
     assert self is not None
     args_updated = []
     for i, tensor in enumerate(args):
         if isinstance(tensor, torch.Tensor):
-            if not isinstance(tensor, torch.sparse.SparseSemiStructuredTensor):
+            if not isinstance(tensor, torch.sparse.SparseSemiStructuredTensorCUTLASS):
                 if i in allow_sparsify_args_list:
                     # TODO figure this out
-                    tensor = self.from_sparse(tensor)
+                    tensor = self.from_dense_like(tensor)
                 else:
                     raise ValueError(
                         f"Operation {func.__module__}.{func.__name__} on Sparse24Tensor requires all operands to "
