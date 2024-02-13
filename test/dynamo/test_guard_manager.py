@@ -90,6 +90,36 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(guard({}))
         self.assertFalse(guard(5))
 
+    def test_equals_guard(self):
+        foo = 4
+        guard = guards.EQUALS_MATCH(foo, ["x == 4"])
+
+        self.assertTrue(guard(4))
+        self.assertFalse(guard(5))
+        self.assertFalse(guard("foo"))
+
+        # tuple
+        foo = (1, 2, 3)
+        guard = guards.EQUALS_MATCH(foo, ["x == foo"])
+        self.assertTrue(guard(foo))
+        self.assertTrue(guard((1, 2, 3)))
+        self.assertFalse(guard((1, 2, 3, 4)))
+        self.assertFalse(guard({}))
+
+        # list
+        foo = [1, 2, 3]
+        guard = guards.EQUALS_MATCH(foo, ["x == foo"])
+        self.assertTrue(guard(foo))
+        self.assertTrue(guard([1, 2, 3]))
+        self.assertFalse(guard([1, 2, 3, 4]))
+
+        # type
+        foo = int
+        guard = guards.EQUALS_MATCH(foo, ["x == foo"])
+        self.assertTrue(guard(foo))
+        self.assertTrue(guard(int))
+        self.assertFalse(guard(float))
+
     def test_guard_manager_leaf_guard(self):
         guard_manager = RootGuardManager()
         guard_manager.add_type_match_guard(id_type(5), ["type(x) == int"])
