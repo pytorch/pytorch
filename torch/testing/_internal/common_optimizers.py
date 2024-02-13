@@ -1068,6 +1068,12 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
             ),
+            # Note on tolerances:
+            # test_correctness_Adadelta_cuda_float32
+            # Mismatched elements: 10 / 100 (10.0%)
+            # Greatest absolute difference: 4.838220775127411e-05 at index (7, 4) (up to 1e-05 allowed)
+            # Greatest relative difference: 0.007270356640219688 at index (7, 2) (up to 1e-05 allowed)
+            # This is due to floating point ordering error + usage of sqrt
             DecorateInfo(
                 toleranceOverride(
                     {
