@@ -27,7 +27,6 @@ import sympy
 import torch
 from torch._dynamo.utils import dynamo_timed
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._triton import has_triton
 
 from . import comms, config, dependencies, ir, metrics
@@ -297,6 +296,9 @@ class BaseSchedulerNode:
         return self.node.get_device()
 
     def is_reduction(self):
+        return False
+
+    def is_split_scan(self):
         return False
 
     def is_template(self):
@@ -726,6 +728,14 @@ class SchedulerNode(BaseSchedulerNode):
         ), f"{type(self.node)=}"
         return bool(self.node.get_reduction_type())
 
+    def is_split_scan(self):
+        assert isinstance(
+            self.node, (ir.ComputedBuffer, ir.TemplateBuffer)
+        ), f"{type(self.node)=}"
+        return isinstance(self.node, ir.ComputedBuffer) and isinstance(
+            self.node.data, ir.SplitScan
+        )
+
     def is_template(self):
         return isinstance(self.node, ir.TemplateBuffer)
 
@@ -893,6 +903,10 @@ class FusedSchedulerNode(BaseSchedulerNode):
     @cache_on_self
     def is_reduction(self):
         return any(x.is_reduction() for x in self.snodes)
+
+    @cache_on_self
+    def is_split_scan(self):
+        return any(x.is_split_scan() for x in self.snodes)
 
     @cache_on_self
     def is_template(self):
@@ -1494,16 +1508,13 @@ class Scheduler:
 
         # make sure unbacked symints aren't dead-code-eliminated
         for node in V.graph.graph_outputs:
-            if isinstance(node, ir.ShapeAsConstantBuffer):
-                for s in free_unbacked_symbols(node.shape):
-                    assert (
-                        s in unbacked_symbol_to_origin_node
-                    ), f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
-                    node_name = unbacked_symbol_to_origin_node[s].node.name
-                    log.debug(
-                        "scheduling output %s for unbacked symint %s", node_name, s
-                    )
-                    add_user(node_name, OutputNode(StarDep(node_name)))
+            for s in node.get_unbacked_symbol_uses():
+                assert (
+                    s in unbacked_symbol_to_origin_node
+                ), f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
+                node_name = unbacked_symbol_to_origin_node[s].node.name
+                log.debug("scheduling output %s for unbacked symint %s", node_name, s)
+                add_user(node_name, OutputNode(StarDep(node_name)))
 
         # make sure input mutation isn't dead-code-eliminated
         for name in self.mutation_renames:
@@ -2300,6 +2311,11 @@ class Scheduler:
                 device = node.get_device()
                 if self.get_backend(device).ready_to_flush():
                     self.flush()
+
+        if self.current_device and self.current_device.type == "cuda":
+            # exit the outermost CUDA device guard. this is
+            # important for nested indentation codegen-ing.
+            V.graph.wrapper_code.codegen_device_guard_exit()
 
         self.flush()
 

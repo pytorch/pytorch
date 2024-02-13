@@ -518,6 +518,7 @@ static PyObject * THPVariable_xpu(PyObject* self, PyObject* args, PyObject* kwar
   auto device = r.isNone(0) ? at::Device(at::DeviceType::XPU) : r.device(0);
   auto opt_memory_format = r.memoryformatOptional(2);
   TORCH_CHECK(device.is_xpu(), "Invalid device, must be xpu device");
+  torch::utils::device_lazy_init(at::kXPU);
   return THPVariable_Wrap(dispatch_to(self_, device, r.toBool(1), false, opt_memory_format));
   END_HANDLE_TH_ERRORS
 }
