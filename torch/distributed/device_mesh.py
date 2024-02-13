@@ -69,12 +69,12 @@ else:
         def create_child_mesh(
             self,
             device_mesh: "DeviceMesh",
-            mesh_dim_names: str,
+            mesh_dim_names: Tuple[str],
         ) -> "DeviceMesh":
             # swap the current dim to the last dim then reshape to flatten out other
             # dims, so we can just extract the list of ranks which contains cur_rank.
             mesh_dims = [
-                device_mesh.mesh_dim_names.index(not_none(mesh_dim_name))
+                not_none(device_mesh.mesh_dim_names).index(mesh_dim_name)
                 for mesh_dim_name in mesh_dim_names
             ]
             cur_rank = device_mesh.get_rank()
@@ -96,19 +96,17 @@ else:
                     sub_mesh = DeviceMesh(
                         device_mesh.device_type,
                         mesh_nd,
-                        mesh_dim_names=mesh_dim_names,  # type: ignore
-                        _init_process_groups=False,
+                        mesh_dim_names=mesh_dim_names,
                     )
                     res_sub_mesh = sub_mesh
 
-            res_sub_mesh._dim_group_infos = [  # type: ignore
-                device_mesh._dim_group_infos[mesh_dim]
-                for mesh_dim in mesh_dims  # type: ignore
+            res_sub_mesh._dim_group_infos = [  # type: ignore[possibly-undefined]
+                device_mesh._dim_group_infos[mesh_dim] for mesh_dim in mesh_dims
             ]
 
             # Assign the current DeviceMesh as the parent of the child DeviceMesh.
             self.child_to_parent_mapping[res_sub_mesh] = device_mesh
-            return res_sub_mesh  # type: ignore
+            return res_sub_mesh
 
         def get_parent_mesh(self, device_mesh: "DeviceMesh") -> Optional["DeviceMesh"]:
             return self.child_to_parent_mapping.get(device_mesh, None)
@@ -216,7 +214,6 @@ else:
             mesh: Union[torch.Tensor, "ArrayLike"],
             *,
             mesh_dim_names: Optional[Tuple[str, ...]] = None,
-            _init_process_groups: bool = True,
         ) -> None:
             self.device_type = device_type
             if isinstance(mesh, torch.Tensor) and mesh.device.type != "cpu":
@@ -231,6 +228,7 @@ else:
             # private field to pre-generate DeviceMesh's hash
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
             self._hash = hash((self._flatten_mesh_list, self.mesh.shape, id(self)))
+            self._parent_mesh = _mesh_resources.get_parent_mesh(self)
 
             # Skip process group initialization if xla device.
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
@@ -239,10 +237,7 @@ else:
                 # already. The world pg is used for device mesh identity (rank) on each
                 # process (we need to know if the current global rank is in the mesh or not).
                 self._get_or_create_default_group()
-                # We need to temporarily bring _init_process_groups back, as we do not want to
-                # create new process group when slicing child mesh.
-                # TODO: Remove _init_process_groups after we change to reuse the subgroup when possible.
-                if _init_process_groups:
+                if not self._parent_mesh:
                     self._init_process_groups()
 
         def _get_or_create_default_group(self):
@@ -396,33 +391,34 @@ else:
             if not self.mesh_dim_names:
                 raise RuntimeError("Cannot slice a DeviceMesh without mesh_dim_names.")
 
-            if isinstance(mesh_dim_names, str):
-                mesh_dim_names = (mesh_dim_names,)
+            mesh_dim_names = (
+                (mesh_dim_names,) if isinstance(mesh_dim_names, str) else mesh_dim_names
+            )
 
-            error_msg = f"Invalid mesh_dim_name {mesh_dim_names} specified. Valid mesh_dim_names should be a contiguous subsequence of {self.mesh_dim_names}."
-
-            # Sanity check the given mesh_dim_names are valid.
-            if not set(mesh_dim_names).issubset(set(self.mesh_dim_names)):
-                raise RuntimeError(error_msg)
+            error_msg = (
+                f"Invalid mesh_dim_name {mesh_dim_names} specified. "
+                f"Valid mesh_dim_names should be a contiguous subsequence of {self.mesh_dim_names}."
+            )
 
             # When the dimension slicing out is equal to the mesh dimensions of the current DeviceMesh,
             # we simply return self if the given slicing is valid.
-            if len(mesh_dim_names) == len(self.mesh_dim_names):
-                if mesh_dim_names == self.mesh_dim_names:
-                    return self
-                else:
-                    raise RuntimeError(error_msg)
+            if mesh_dim_names == self.mesh_dim_names:
+                return self
             # Check if the user-provided slicing is a valid contiguous subsequence of the mesh_dim_names
             # of the current DeviceMesh.
-            else:
+            elif len(mesh_dim_names) < len(self.mesh_dim_names):
                 outermost_dim_name = mesh_dim_names[0]
+                if outermost_dim_name not in self.mesh_dim_names:
+                    raise ValueError(error_msg)
                 outermost_dim_idx = self.mesh_dim_names.index(outermost_dim_name)
                 for i, j in zip(
                     mesh_dim_names,
                     self.mesh_dim_names[outermost_dim_idx : len(mesh_dim_names)],
                 ):
                     if i != j:
-                        raise RuntimeError(error_msg)
+                        raise ValueError(error_msg)
+            else:
+                raise ValueError(error_msg)
 
             submesh = _mesh_resources.create_child_mesh(self, mesh_dim_names)
             return submesh
