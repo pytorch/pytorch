@@ -728,10 +728,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         if isinstance(subobj, property):
             # Rewrite the source being explicit about reading it statically.
-            source = (
-                AttrSource(self.source, name, get_static=True) if self.source else None
-            )
-            source = AttrSource(source, "fget")
+            if self.source:
+                source = AttrSource(self.source, name, get_static=True)
+                source = AttrSource(source, "fget")
             return variables.UserMethodVariable(
                 subobj.fget, self, source=source
             ).call_function(tx, [], {})
