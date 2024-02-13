@@ -385,4 +385,38 @@ inline at::vec::VectorizedN<int64_t,2> cvt_int32_to_int64(at::vec::Vectorized<in
   return result;
 }
 
+template <typename T, std::enable_if_t<std::is_same_v<T, int8_t> || std::is_same_v<T, uint8_t>, int> = 0>
+inline at::vec::Vectorized<int32_t> cvt_int8_to_int32(at::vec::Vectorized<T> src) {
+# if defined(CPU_CAPABILITY_AVX512)
+  auto src128 = _mm512_castsi512_si128(src);
+  if constexpr (std::is_same_v<T, int8_t>) {
+    return _mm512_cvtepi8_epi32(src128);
+  } else {
+    return _mm512_cvtepu8_epi32(src128);
+  }
+# elif defined(CPU_CAPABILITY_AVX2)
+  auto src128 = _mm256_castsi256_si128(src);
+  if constexpr (std::is_same_v<T, int8_t>) {
+    return _mm256_cvtepi8_epi32(src128);
+  } else {
+    return _mm256_cvtepu8_epi32(src128);
+  }
+# else
+  constexpr int int32_vec_size = at::vec::Vectorized<int32_t>::size();
+  constexpr int int8_vec_size = at::vec::Vectorized<T>::size();
+  __at_align__ int32_t result[int32_vec_size];
+  __at_align__ T src_buf[int8_vec_size];
+  src.store(src_buf);
+  for (int i = 0; i < int32_vec_size; i++) {
+    result[i] = static_cast<int32_t>(src_buf[i]);
+  }
+  return at::vec::Vectorized<int32_t>::loadu(result);
+# endif
+}
+
+template <typename T, std::enable_if_t<std::is_same_v<T, int8_t> || std::is_same_v<T, uint8_t>, int> = 0>
+inline at::vec::VectorizedN<int64_t, 2> cvt_int8_to_int64(at::vec::Vectorized<T> src) {
+  return cvt_int32_to_int64(cvt_int8_to_int32(src));
+}
+
 #endif

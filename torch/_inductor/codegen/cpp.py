@@ -1378,6 +1378,10 @@ class CppVecOverrides(CppOverrides):
             return f"cvt_int32_to_int64({x})"
         if opt_ctx_x.dtype == torch.int64 and dtype == torch.int32:
             return f"cvt_int64_to_int32({x})"
+        if opt_ctx_x.dtype in (torch.int8, torch.uint8) and dtype == torch.int32:
+            return f"cvt_int8_to_int32({x})"
+        if opt_ctx_x.dtype in (torch.int8, torch.uint8) and dtype == torch.int64:
+            return f"cvt_int8_to_int64({x})"
         # TODO(jgong5): support conversion for other types
         # currently we only allow load/store torch.uint8 and handle conversion there
         return f"({x})"
