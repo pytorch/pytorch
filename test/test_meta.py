@@ -709,7 +709,6 @@ meta_function_device_skips = defaultdict(dict)
 meta_function_device_expected_failures['cpu'] = {
     torch.native_batch_norm: {bf16, f16},
     torch._native_batch_norm_legit: {bf16, f16},
-    torch.batch_norm_with_update: {bf16, f16},
     torch.native_layer_norm: {bf16, f16},
 }
 
@@ -725,7 +724,6 @@ meta_function_device_expected_failures['cuda'] = {
 
 meta_function_device_skips['cpu'] = {
     torch.native_batch_norm: {f32, f64},
-    torch._native_batch_norm_legit: {f32, f64},
     torch.batch_norm_with_update: {f32, f64},
 }
 
