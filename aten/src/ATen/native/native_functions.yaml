@@ -5792,6 +5792,7 @@
   variants: function
   dispatch:
     CPU, CUDA: std_mean
+    MPS: std_mean_mps
   autogen: std_mean.correction_out
 
 - func: std_mean.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
@@ -6314,6 +6315,7 @@
   variants: function
   dispatch:
     CPU, CUDA: var_mean
+    MPS: var_mean_mps
   autogen: var_mean.correction_out
 
 - func: var_mean.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
