@@ -10,6 +10,7 @@
 
 namespace at::cuda {
 
+static thread_local CUDAGraph* current_capturing_graph = nullptr;
 static bool _cuda_graphs_debug = false;
 constexpr int kSynchronizeBusyWaitMillis = 10;
 
@@ -87,6 +88,8 @@ CUDAGraph::CUDAGraph()
 }
 
 void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capture_mode) {
+  TORCH_CHECK(current_capturing_graph == nullptr);
+  current_capturing_graph = this;
 #if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   TORCH_CHECK(!has_graph_exec_,
               "This CUDAGraph instance already owns a captured graph. "
@@ -242,6 +245,7 @@ void CUDAGraph::capture_end() {
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 or ROCM >= 5.3")
 #endif
+  current_capturing_graph = nullptr;
 }
 
 void CUDAGraph::replay() {
@@ -305,6 +309,20 @@ void CUDAGraph::debug_dump(const std::string& debug_path) {
 #endif
 }
 
+void CUDAGraph::alloc_const_buffer(void** ptr, size_t size) {
+#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
+  TORCH_CHECK(
+      current_capturing_graph == this,
+      "CUDAGraph::alloc_const_buffer can only be invoked on "
+      "the currently capturing graph");
+  at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
+  C10_CUDA_CHECK(cudaMalloc(ptr, size));
+  const_buffers_.push_back(*ptr);
+#else
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 or ROCM >= 5.3")
+#endif
+}
+
 void CUDAGraph::reset() {
 #if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   // I'd prefer these checks throw exceptions, not print warnings,
@@ -338,6 +356,9 @@ void CUDAGraph::reset() {
     C10_CUDA_CHECK_WARN(cudaGraphExecDestroy(graph_exec_));
     has_graph_exec_ = false;
   }
+  for (auto* ptr : const_buffers_) {
+    C10_CUDA_CHECK(cudaFree(ptr));
+  }
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 or ROCM >= 5.3")
 #endif
@@ -356,6 +377,10 @@ TORCH_CHECK(has_graph_exec_,
 
 CUDAGraph::~CUDAGraph() {
   reset();
+}
+
+CUDAGraph* get_current_capturing_graph() {
+  return current_capturing_graph;
 }
 
 } // namespace at::cuda

@@ -2,6 +2,7 @@
 #include <ATen/ceil_div.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGraph.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
@@ -168,28 +169,21 @@ std::tuple<DevArrayPack, c10::optional<at::Tensor>> pack_vectors(
     memcpy(buf_tensor.data_ptr<uint8_t>() + offsets[i], ptrs[i], sizes[i]);
   }
 
-  if (!is_capturing) {
-    // When not capturing, allocate a CUDA tensor and use it to store the
-    // packed vectors.
-    buf_tensor = buf_tensor.to(device, /*non_blocking=*/true);
-    pack.buffer_ptr = static_cast<char*>(buf_tensor.data_ptr());
-    return std::make_tuple(pack, buf_tensor);
-  } else {
-    // When capturing, the packed vectors will remain constant across
-    // invocations. We store them in a buffer allocated via cudaMalloc. The
-    // cudaMalloc and cudaMemcpy operations are only performed during capture
-    // and are ignored during replay.
-    // FIXME(yifu): the buffer is leaked. It would be ideal to be able to make
-    // the capturing CUDAGraph object track such allocations, since they have
-    // the same lifetime as the CUDAGraph object.
-    at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
-    C10_CUDA_CHECK(cudaMalloc(&pack.buffer_ptr, total_bytes));
+  if (is_capturing) {
+    // When capturing, use a constant buffer to hold the packed vectors
+    at::cuda::get_current_capturing_graph()->alloc_const_buffer(
+        reinterpret_cast<void**>(&pack.buffer_ptr), total_bytes);
     C10_CUDA_CHECK(cudaMemcpy(
         pack.buffer_ptr,
         buf_tensor.data_ptr(),
         total_bytes,
         cudaMemcpyHostToDevice));
     return std::make_tuple(pack, c10::optional<at::Tensor>(c10::nullopt));
+  } else {
+    // When not capturing, use a CUDA tensor to hold the packed vectors
+    buf_tensor = buf_tensor.to(device, /*non_blocking=*/true);
+    pack.buffer_ptr = static_cast<char*>(buf_tensor.data_ptr());
+    return std::make_tuple(pack, buf_tensor);
   }
 }
 
