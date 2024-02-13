@@ -1,10 +1,10 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+from enum import Enum
 from typing import cast, List, Optional, Sequence, Tuple
 
 import torch
 
 import torch.distributed.distributed_c10d as c10d
-from torch._decomp.decompositions import Reduction
 from torch.distributed._tensor.op_schema import (
     OpSchema,
     OpStrategy,
@@ -31,6 +31,12 @@ from torch.distributed.device_mesh import DeviceMesh
 
 
 aten = torch.ops.aten
+
+
+class Reduction(Enum):
+    NONE = 0
+    MEAN = 1
+    SUM = 2
 
 
 def _infer_reduction_dims(dims_arg: object, ndim: int) -> Optional[List[int]]:
