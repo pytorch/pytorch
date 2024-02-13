@@ -1114,11 +1114,9 @@ class UntypedStorageVariable(VariableTracker):
                 )
         if name == "resize_" and len(args) == 1:
             assert not kwargs
-            from ..external_utils import resize_storage_
-
             tx.output.create_proxy(
                 "call_function",
-                resize_storage_,
+                torch.ops.inductor.resize_storage_bytes_,
                 (self.from_tensor.as_proxy(), args[0].as_proxy()),
                 {},
             )
