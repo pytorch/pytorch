@@ -266,6 +266,21 @@ class HigherOrderOperator(OperatorBase):
         for dispatch_key in _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS:
             self.fallthrough(dispatch_key)
 
+        def _(*args, **kwargs):
+            if _len_torch_dispatch_stack_pre_dispatch() == 0:
+                with torch._C._ExcludeDispatchKeyGuard(
+                    torch._C.DispatchKeySet(DispatchKey.PreDispatch)
+                ):
+                    return cond_op(pred, true_fn, false_fn, operands)
+            raise AssertionError(
+                """
+                Can't directly invoke cond_op implementation at PreDispatch key
+                if there are active modes.
+                """
+            )
+
+        self.py_impl(torch._C.DispatchKey.PreDispatch)(_)
+
     def py_impl(self, k):
         if isinstance(k, torch._C.DispatchKey) and not self.non_fallthrough_keys.has(k):
             self.non_fallthrough_keys = self.non_fallthrough_keys.add(k)

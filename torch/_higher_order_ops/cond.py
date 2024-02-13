@@ -249,15 +249,21 @@ cond_op.py_impl(DispatchKey.Autograd)(
 )
 
 
-@cond_op.py_impl(DispatchKey.PreDispatch)
-def cond_pre_dispatch(pred, true_fn, false_fn, operands):
-    from torch._ops import _len_torch_dispatch_stack_pre_dispatch
+# @cond_op.py_impl(DispatchKey.PreDispatch)
+# def cond_pre_dispatch(pred, true_fn, false_fn, operands):
+#     from torch._ops import _len_torch_dispatch_stack_pre_dispatch
 
-    if _len_torch_dispatch_stack_pre_dispatch() == 0:
-        with torch._C._ExcludeDispatchKeyGuard(
-            torch._C.DispatchKeySet(DispatchKey.PreDispatch)
-        ):
-            return cond_op(pred, true_fn, false_fn, operands)
+#     if _len_torch_dispatch_stack_pre_dispatch() == 0:
+#         with torch._C._ExcludeDispatchKeyGuard(
+#             torch._C.DispatchKeySet(DispatchKey.PreDispatch)
+#         ):
+#             return cond_op(pred, true_fn, false_fn, operands)
+#     raise AssertionError(
+#         """
+#         Can't directly invoke cond_op implementation at PreDispatch key
+#         if there are active modes.
+#         """
+#     )
 
 
 @cond_op.py_impl(ProxyTorchDispatchMode)
