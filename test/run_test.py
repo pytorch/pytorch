@@ -1337,6 +1337,7 @@ def get_selected_tests(options) -> List[str]:
                 "functorch/test_dims",
                 "functorch/test_rearrange",
                 "functorch/test_parsing",
+                "functorch/test_memory_efficient_fusion",
                 "torch_np/numpy_tests/core/test_multiarray",
             ]
         )
