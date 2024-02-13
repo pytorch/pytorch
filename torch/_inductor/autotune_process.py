@@ -393,6 +393,9 @@ class BenchmarkRequest:
     """
     Only handle triton template benchmark for now. The extern kernel benchmark
     can be done inside the same process since they usually don't cause crash.
+
+    Important: Instances of this class and subclasses have to be serializable
+    across process boundaries. Do not put CUDA Tensors in here!
     """
 
     def __init__(
@@ -440,25 +443,25 @@ class BenchmarkRequest:
             output_tensor = self.output_tensor_meta.to_tensor()
 
         if debug:
-            create_tensor_elapse = time.time() - start_ts
+            create_tensor_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             start_ts = time.time()
 
         fn = self.make_run_fn(*input_tensors, output_tensor=output_tensor)
 
         if debug:
-            load_elapse = time.time() - start_ts
+            load_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             start_ts = time.time()
 
         out = do_bench(fn)
         torch.cuda.synchronize()  # shake out any CUDA errors
 
         if debug:
-            bench_elapse = time.time() - start_ts
+            bench_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             log.debug(
                 "InChildProcess %s: load %f, create tensor %f, bench %f",
                 str(self),
-                load_elapse,
-                create_tensor_elapse,
+                load_elapse,  # type: ignore[possibly-undefined]
+                create_tensor_elapse,  # type: ignore[possibly-undefined]
                 bench_elapse,
             )
         self.cleanup_run_fn()
@@ -483,6 +486,9 @@ class TestBenchmarkRequest(BenchmarkRequest):
 
 
 class TritonBenchmarkRequest(BenchmarkRequest):
+    # Important: Instances of this class have to be serializable
+    # across process boundaries. Do not put CUDA Tensors in here!
+
     def __init__(
         self,
         kernel_name: str,
@@ -539,6 +545,9 @@ class TritonBenchmarkRequest(BenchmarkRequest):
 
 
 class CUDABenchmarkRequest(BenchmarkRequest):
+    # Important: Instances of this class have to be serializable
+    # across process boundaries. Do not put CUDA Tensors in here!
+
     def __init__(
         self,
         kernel_name: str,
@@ -555,6 +564,13 @@ class CUDABenchmarkRequest(BenchmarkRequest):
         self.hash_key: str = ""
         self.source_file: str = ""
         self.hash_key, self.source_file = CUDACodeCache.write(self.source_code, "so")
+
+    def precompile(self):
+        # Prepopulate CUDACodeCache
+        # may happen in separate Threadpool
+        log.debug("Precompiling %s", self)
+        CUDACodeCache.load(self.source_code, "so")
+        log.debug("Done precompiling %s", self)
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor

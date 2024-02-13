@@ -6,12 +6,12 @@ import logging
 import operator
 from collections import ChainMap
 from functools import reduce
-from typing import Any, cast, Dict, List, Tuple, Union
+from typing import Any, cast, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed._tensor import DTensor
-from torch.distributed.checkpoint._dedup_tensors import dedup_tensors
+from torch.distributed.checkpoint._dedup_save_plans import dedup_save_plans
 from torch.distributed.checkpoint._nested_dict import (
     FLATTEN_MAPPING,
     flatten_state_dict,
@@ -65,12 +65,18 @@ class DefaultSavePlanner(SavePlanner):
         self,
         flatten_state_dict: bool = True,
         flatten_sharded_tensors: bool = True,
-        dedup_replicated_tensors: bool = True,
+        dedup_replicated_tensors: Optional[bool] = None,
     ) -> None:
         self.flatten_state_dict = flatten_state_dict
         self.flatten_sharded_tensors = flatten_sharded_tensors
-        self.dedup_replicated_tensors = dedup_replicated_tensors
         self.mappings = {}
+
+        if dedup_replicated_tensors is not None:
+            logger.warning(
+                "DefaultSavePlanner's `dedup_replicated_tensors` argument is being "
+                "deprecated, and no longer has any effect. Please remove this argument "
+                "from your call."
+            )
 
     def set_up_planner(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
         if self.flatten_state_dict:
@@ -91,8 +97,7 @@ class DefaultSavePlanner(SavePlanner):
     def create_global_plan(
         self, all_plans: List[SavePlan]
     ) -> Tuple[List[SavePlan], Metadata]:
-        if self.dedup_replicated_tensors:
-            all_plans = dedup_tensors(all_plans)
+        all_plans = dedup_save_plans(all_plans)
 
         global_plan, metadata = create_default_global_save_plan(all_plans)
 
