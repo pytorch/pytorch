@@ -566,8 +566,7 @@ struct NCCLTraceBuffer {
       duration = getDurationFromFirstEvent(*startEvents, *endEvents);
       guard.lock();
 
-      // Refresh the entry ref, see if it has been overwritten
-      entry = entries_.at(*id % max_entries_);
+      // check if the entry has been overwritten
       if (entry.id_ != *id) {
         LOG(INFO)
             << "retire_id abandoned for id " << *id
