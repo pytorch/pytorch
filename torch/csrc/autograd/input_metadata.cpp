@@ -53,10 +53,6 @@ at::Tensor InputMetadata::zeros_like() const {
   return at::zeros_symint(shape_as_dim_vector(), options_);
 }
 
-static bool definitely_true(const c10::SymBool& b) {
-  return b.has_hint() && b.guard_bool(__FILE__, __LINE__);
-}
-
 at::Tensor InputMetadata::maybe_reduce(
     const size_t i,
     at::Tensor grad,
@@ -99,7 +95,7 @@ at::Tensor InputMetadata::maybe_reduce(
     if (TORCH_GUARD_SIZE_OBLIVIOUS(size.sym_eq(1))) {
       // NB: we could short circuit this once needs_reduce is true but there's
       // no point since the reduction function will guard on this anyway
-      if (!definitely_true(size.sym_eq(target))) {
+      if (!c10::definitely_true(size.sym_eq(target), __FILE__, __LINE__)) {
         needs_reduce = true;
       }
     } else {
