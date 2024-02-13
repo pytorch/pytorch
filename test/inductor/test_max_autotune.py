@@ -498,8 +498,8 @@ class TestMaxAutotune(TestCase):
         def mm(a, b):
             return a @ b
 
-        a = torch.randn((128, 256), dtype=torch.float32, device="cuda")
-        b = torch.randn((256, 128), dtype=torch.float32, device="cuda")
+        a = torch.randn((128, 256), dtype=torch.float16, device="cuda")
+        b = torch.randn((256, 128), dtype=torch.float16, device="cuda")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             conf_patch = {
