@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   docs-build:
-    name: docs build
+    name: docs build test
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-jammy-py3.8-gcc11
