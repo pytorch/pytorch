@@ -144,6 +144,7 @@ class GlobalWeakRefSource(Source):
 @dataclasses.dataclass(frozen=True)
 class AttrSource(ChainedSource):
     member: str
+    get_static: bool = False
 
     def __post_init__(self):
         assert self.base, "Can't construct an AttrSource without a valid base source"
@@ -161,7 +162,9 @@ class AttrSource(ChainedSource):
         return self.base.guard_source()
 
     def name(self):
-        if not self.member.isidentifier():
+        if self.get_static:
+            return f"inspect.getattr_static({self.base.name()}, {self.member!r})"
+        elif not self.member.isidentifier():
             return f"getattr({self.base.name()}, {self.member!r})"
         return f"{self.base.name()}.{self.member}"
 
