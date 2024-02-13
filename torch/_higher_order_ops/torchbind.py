@@ -28,8 +28,8 @@ _orig_scriptmethod_call = torch.ScriptMethod.__call__
 
 
 def torchbind_method_redispatch(self, *args, **kwargs):
-    if isinstance(self.owner, torch.ScriptObject):
-        return call_torchbind(self.owner, self.name, *args, **kwargs)
+    if isinstance(self.raw_owner, torch.ScriptObject):
+        return call_torchbind(self.raw_owner, self.name, *args, **kwargs)
     return _orig_scriptmethod_call(self, *args, **kwargs)
 
 

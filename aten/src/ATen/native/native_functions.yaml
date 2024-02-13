@@ -478,6 +478,7 @@
 - func: conj_physical.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: conj_physical_out
+    MPS: conj_physical_out_mps
     SparseCPU, SparseCUDA: conj_physical_out_sparse
     SparseCsrCPU, SparseCsrCUDA: conj_physical_sparse_csr_out
   tags: pointwise
@@ -14440,6 +14441,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: split_with_sizes_copy_out
+    CUDA: split_with_sizes_copy_out_cuda
 
 - func: view_copy(Tensor self, SymInt[] size) -> Tensor
   variants: function
