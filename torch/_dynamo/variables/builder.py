@@ -1498,6 +1498,7 @@ def wrap_fx_proxy_cls(
         torch.sym_int,
         getattr,
         operator.getitem,
+        operator.eq,
         torch._utils._element_size,
         torch.seed,
         operator.mod,
