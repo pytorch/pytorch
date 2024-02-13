@@ -1462,6 +1462,21 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         triple = functools.partial(multiply, y=3)
         return triple(x)
 
+    @unittest.skipUnless(torch.distributed.is_available(), "requires torch.distributed")
+    @make_test
+    def test_flat_param_same_storage_size(x, y):
+        import torch.distributed.fsdp._flat_param as flat_param
+
+        if flat_param._same_storage_size(x, 100):
+            x = x + 1
+        else:
+            x = x - 1
+        if flat_param._same_storage_size(y, 123):
+            y = y + 1
+        else:
+            y = y - 1
+        return x, y
+
     @parametrize(
         "attr",
         (

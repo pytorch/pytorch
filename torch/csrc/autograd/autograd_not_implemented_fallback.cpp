@@ -530,14 +530,18 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
         (*stack)[stack->size() - num_returns + aliased_output_idx];
 
     // See NOTE [ View + Inplace detection ] for more details about this logic
-    // We always need this view_func because otherwise if we do in-place
-    // on this view, we would implicitly use AsStridedBackward instead
-    // of the NotImplemented node. For the cross-dtype/non-strided
-    // cases, we would create something like this anyway
-    auto error_msg =
-        ("Mutating the view " + op_name +
-         "which does not have a derivative implemented is forbidden.");
-    auto erroring_view_func = std::make_unique<ErroringViewFunc>(error_msg);
+    const auto erroring_view_func = [op_name = op_name](const at::Tensor&) {
+      // We always need this view_func because otherwise if we do in-place
+      // on this view, we would implicitly use AsStridedBackward instead
+      // of the NotImplemented node. For the cross-dtype/non-strided
+      // cases, we would create something like this anyway
+      TORCH_CHECK(
+          false,
+          "Mutating the view ",
+          op_name,
+          " which does not have a derivative implemented is forbidden.");
+      return at::Tensor();
+    };
 
     const auto erroring_rev_view_func = [op_name = op_name](const at::Tensor&) {
       TORCH_CHECK(
@@ -556,7 +560,7 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
             /* tensor=*/sub_output,
             /* is_bw_differentiable=*/true,
             /* is_fw_differentiable=*/true,
-            /* view_func=*/std::move(erroring_view_func),
+            /* view_func=*/erroring_view_func,
             /* rev_view_func=*/erroring_rev_view_func,
             /* creation_meta=*/
             InferenceMode::is_enabled()
@@ -573,7 +577,7 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
           /* tensor=*/std::move(aliased_output_iv).toTensor(),
           /* is_bw_differentiable=*/true,
           /* is_fw_differentiable=*/true,
-          /* view_func=*/std::move(erroring_view_func),
+          /* view_func=*/erroring_view_func,
           /* rev_view_func=*/erroring_rev_view_func,
           /* creation_meta=*/
           InferenceMode::is_enabled()
