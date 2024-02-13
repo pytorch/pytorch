@@ -1169,7 +1169,7 @@ def register_graph_pattern(
     return decorator
 
 
-def is_start_of_fx_graph(graph: torch.fx.GraphModule, node: torch.fx.Node) -> bool:
+def is_start_of_fx_graph(graph: torch.fx.Graph, node: torch.fx.Node) -> bool:
     # first node in the graph
     return node is next(iter(graph.nodes))
 
@@ -1188,7 +1188,7 @@ def is_mutation_op(node: torch.fx.Node) -> bool:
     return node.kwargs.get("out") is not None
 
 
-def get_mutation_region_id(graph: torch.fx.GraphModule, node: torch.fx.Node) -> int:
+def get_mutation_region_id(graph: torch.fx.Graph, node: torch.fx.Node) -> int:
     n = node
     while "mutation_region_id" not in n.meta and not is_start_of_fx_graph(graph, n):
         n = n.prev
