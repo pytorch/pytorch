@@ -40,7 +40,6 @@
 #include <c10/core/SymIntArrayRef.h>
 #include <structmember.h>
 #include <cstdint>
-#include <iostream>
 #include <memory>
 #include <utility>
 #include <vector>
