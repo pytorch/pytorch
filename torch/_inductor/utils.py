@@ -1149,19 +1149,6 @@ def blue_text(msg):
 
 
 @functools.lru_cache(None)
-def _max_clock_rate(msg):
-    try:
-        import pynvml
-
-        handle = torch.cuda._get_pynvml_handler(0)
-        return pynvml.nvmlDeviceGetMaxClockInfo(handle, 1)
-    except Exception:
-        from triton.testing import nvsmi
-
-        return nvsmi(["clocks.max.sm"])[0]
-
-
-@functools.lru_cache(None)
 def get_device_tflops(dtype):
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
@@ -1169,7 +1156,9 @@ def get_device_tflops(dtype):
 
     if inspect.signature(get_max_simd_tflops).parameters.get("clock_rate"):
         # Triton API change in https://github.com/openai/triton/pull/2293
-        sm_clock = _max_clock_rate()
+        from torch._utils_internal import max_clock_rate
+
+        sm_clock = max_clock_rate()
         if dtype in (torch.float16, torch.bfloat16):
             return get_max_tensorcore_tflops(dtype, sm_clock)
 
