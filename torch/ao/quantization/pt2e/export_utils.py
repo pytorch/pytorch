@@ -14,7 +14,7 @@ def model_is_exported(m: torch.fx.GraphModule) -> bool:
     Return True if the `torch.fx.GraphModule` was exported,
     False otherwise (e.g. if the model was FX symbolically traced).
     """
-    return any(["val" in n.meta for n in m.graph.nodes])
+    return any("val" in n.meta for n in m.graph.nodes)
 
 
 def _replace_dropout(m: torch.fx.GraphModule, train_to_eval: bool):
