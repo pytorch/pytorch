@@ -2424,7 +2424,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertIn(
             """\
     triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([])      # with grad_increment_nesting() as level:  # _functorch/eager_transforms.py:1232 in grad_and_value_impl""",
+    - torch._functorch.pyfunctorch.compare_functorch_state([])      # with grad_increment_nesting() as level:  # _functorch/eager_transforms.py:1228 in grad_and_value_impl""",
             record.getMessage(),
         )
 
@@ -2530,7 +2530,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertIn(
             """\
     triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])  # with grad_increment_nesting() as level:  # _functorch/eager_transforms.py:1232 in grad_and_value_impl""",
+    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])  # with grad_increment_nesting() as level:  # _functorch/eager_transforms.py:1228 in grad_and_value_impl""",
             record.getMessage(),
         )
 
@@ -2611,7 +2611,7 @@ class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_ : torch.Tensor):
+    def forward(self, s0 : torch.SymInt, L_x_ : torch.Tensor):
         child = L_x_
 
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
