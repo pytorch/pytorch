@@ -24,7 +24,7 @@ _wait_all
 
 """
 
-_use_native_funcol = "_USE_NATIVE_C10D_FUNCTIONAL" in os.environ
+_use_native_funcol = True  # "DISABLE_NATIVE_FUNCOL" not in os.environ
 
 
 # These are for testing purposes only and will be removed after we fully
@@ -34,16 +34,18 @@ def native_funcol_enabled():
 
 
 def enable_native_funcol():
-    global _use_native_funcol
-    os.environ["_USE_NATIVE_C10D_FUNCTIONAL"] = "1"
-    _use_native_funcol = True
+    # global _use_native_funcol
+    # os.environ["DISABLE_NATIVE_FUNCOL"] = "1"
+    # _use_native_funcol = True
+    pass
 
 
 def disable_native_funcol():
-    global _use_native_funcol
-    if "_USE_NATIVE_C10D_FUNCTIONAL" in os.environ:
-        del os.environ["_USE_NATIVE_C10D_FUNCTIONAL"]
-    _use_native_funcol = False
+    # global _use_native_funcol
+    # if "_USE_NATIVE_C10D_FUNCTIONAL" in os.environ:
+    #     del os.environ["_USE_NATIVE_C10D_FUNCTIONAL"]
+    # _use_native_funcol = False
+    pass
 
 
 logger = logging.getLogger(__name__)
