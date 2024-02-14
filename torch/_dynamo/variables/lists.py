@@ -556,6 +556,10 @@ class NamedTupleVariable(TupleVariable):
     def as_python_constant(self):
         return self.python_type()(*[x.as_python_constant() for x in self.items])
 
+    def as_proxy(self):
+        assert self.python_type() is not SizeVariable
+        return self.python_type()(*self._as_proxy())
+
     def reconstruct(self, codegen):
         create_fn = getattr(self.tuple_cls, "_make", self.tuple_cls)
         codegen.append_output(codegen._create_load_const(create_fn))

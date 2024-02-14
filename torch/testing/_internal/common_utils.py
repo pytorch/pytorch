@@ -743,9 +743,8 @@ def prof_func_call(*args, **kwargs):
 def prof_meth_call(*args, **kwargs):
     return prof_callable(meth_call, *args, **kwargs)
 
-# TODO fix when https://github.com/python/mypy/issues/2427 is address
-torch._C.ScriptFunction.__call__ = prof_func_call  # type: ignore[assignment]
-torch._C.ScriptMethod.__call__ = prof_meth_call  # type: ignore[assignment]
+torch._C.ScriptFunction.__call__ = prof_func_call  # type: ignore[method-assign]
+torch._C.ScriptMethod.__call__ = prof_meth_call  # type: ignore[method-assign]
 
 def _get_test_report_path():
     # allow users to override the test file location. We need this
