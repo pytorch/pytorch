@@ -545,7 +545,7 @@ class TestExport(TestCase):
         }
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    @testing.expectedFailureSerDer
+    @testing.expectedFailureSerDer  # we don't save placeholder metadata
     @testing.expectedFailureNonStrict
     def test_linear_conv(self):
         class MyLinear(torch.nn.Module):
@@ -1070,7 +1070,6 @@ class TestExport(TestCase):
             ):
                 _ = export(mod, inp)
 
-    @testing.expectedFailureSerDer
     def test_module(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
@@ -1108,7 +1107,6 @@ class TestExport(TestCase):
         self.assertTrue(torch.allclose(ep.module()(*inp_test)[0], ep_rexported.module()(*inp_test)[0]))
         self.assertTrue(torch.allclose(ep.module()(*inp_test)[1], ep_rexported.module()(*inp_test)[1]))
 
-    @testing.expectedFailureSerDer
     def test_module_with_dict_container_inp_out(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
@@ -1795,7 +1793,7 @@ def forward(self, arg_0):
                 2
             )
 
-    @testing.expectedFailureSerDer
+    @testing.expectedFailureSerDer  # We don't preserve metadata on graph module
     @testing.expectedFailureNonStrict
     def test_retrace_graph_level_meta_preservation(self):
         class Foo(torch.nn.Module):
@@ -2074,7 +2072,6 @@ def forward(self, arg_0):
         inp = torch.randn(2)
         self.assertTrue(torch.allclose(ep.module()(inp), torch.nonzero(inp)))
 
-    @testing.expectedFailureSerDer
     @testing.expectedFailureNonStrict
     def test_redundant_asserts(self):
         class Foo(torch.nn.Module):
@@ -2086,20 +2083,8 @@ def forward(self, arg_0):
         f = Foo()
 
         ep = export(f, (torch.tensor([3]),))
-        self.assertExpectedInline(
-            str(ep.graph_module.code).strip(),
-            """\
-def forward(self, arg0_1):
-    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
-    ge = _local_scalar_dense >= 0
-    scalar_tensor = torch.ops.aten.scalar_tensor.default(ge);  ge = None
-    _assert_async = torch.ops.aten._assert_async.msg(scalar_tensor, '_local_scalar_dense is outside of inline constraint [0, 9223372036854775807].');  scalar_tensor = None
-    le = _local_scalar_dense <= 9223372036854775807
-    scalar_tensor_1 = torch.ops.aten.scalar_tensor.default(le);  le = None
-    _assert_async_1 = torch.ops.aten._assert_async.msg(scalar_tensor_1, '_local_scalar_dense is outside of inline constraint [0, 9223372036854775807].');  scalar_tensor_1 = None
-    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
-    zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
-    return (zeros,)""",
+        FileCheck().check_count("torch.ops.aten._assert_async.msg", 2, exactly=True).run(
+            ep.graph_module.code
         )
 
     def test_non_arg_name_dynamic_shapes_api(self):
