@@ -1626,9 +1626,7 @@ def main():
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(["coverage", "erase"])
 
-    aggregated_heuristics: AggregatedHeuristics = AggregatedHeuristics(
-        unranked_tests=selected_tests
-    )
+    aggregated_heuristics: AggregatedHeuristics = AggregatedHeuristics(selected_tests)
 
     with open(
         REPO_ROOT / "test" / "test-reports" / "td_heuristic_rankings.log", "a"
