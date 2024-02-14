@@ -6,16 +6,21 @@
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
 
-template <typename T, int N=1>
+template <typename T, int N = 1>
 class VecMask {
-public:
+ public:
   using size_type = int;
-  static constexpr size_type size() { return VectorizedN<T, N>::size(); }
+  static constexpr size_type size() {
+    return VectorizedN<T, N>::size();
+  }
 
-private:
+ private:
   VectorizedN<T, N> mask_;
 
-  template <typename U, int L, std::enable_if_t<VectorizedN<U, L>::size() >= size(), int> = 0>
+  template <
+      typename U,
+      int L,
+      std::enable_if_t<VectorizedN<U, L>::size() >= size(), int> = 0>
   VectorizedN<U, L> loadu_helper(const U* ptr) const {
     __at_align__ U data[size()];
     __at_align__ T mask[size()];
@@ -33,7 +38,7 @@ private:
     return VectorizedN<U, L>::blendv(zeros, ones, cast<U, L>());
   }
 
-public:
+ public:
   VecMask() : mask_(static_cast<T>(0)) {}
   VecMask(const VectorizedN<T, N>& mask) : mask_(mask) {}
 
@@ -43,7 +48,7 @@ public:
   template <typename U, int L>
   static VecMask<T, N> from(const VectorizedN<U, L>& b_vec) {
     __at_align__ U b_buf[size()];
-    if constexpr(size() >= VectorizedN<U, L>::size()) {
+    if constexpr (size() >= VectorizedN<U, L>::size()) {
       b_vec.store(b_buf);
     } else {
       b_vec.store(b_buf, size());
@@ -62,7 +67,7 @@ public:
   static VecMask<T, N> from(U* b) {
     using int_t = int_same_size_t<T>;
     __at_align__ T mask[size()];
-    #pragma unroll
+#pragma unroll
     for (int i = 0; i < size(); i++) {
       *(int_t*)(mask + i) = b[i] ? ~(int_t)0 : (int_t)0;
     }
@@ -88,13 +93,15 @@ public:
   inline bool all_zero() const {
     __at_align__ T mask[size()];
     mask_.store(mask);
-    return std::all_of(mask, mask + size(), [](T m) { return m == static_cast<T>(0); });
+    return std::all_of(
+        mask, mask + size(), [](T m) { return m == static_cast<T>(0); });
   }
 
   inline bool all_masked() const {
     __at_align__ T mask[size()];
     mask_.store(mask);
-    return std::all_of(mask, mask + size(), [](T m) { return m != static_cast<T>(0); });
+    return std::all_of(
+        mask, mask + size(), [](T m) { return m != static_cast<T>(0); });
   }
 
   inline bool is_masked(int i) const {
@@ -112,35 +119,52 @@ public:
     return mask_[0];
   }
 
-  template <typename U, int L, std::enable_if_t<L >= 2 && VectorizedN<U, L>::size() >= size(), int> = 0>
+  template <
+      typename U,
+      int L,
+      std::enable_if_t<L >= 2 && VectorizedN<U, L>::size() >= size(), int> = 0>
   VectorizedN<U, L> loadu(const U* ptr) const {
     return loadu_helper<U, L>(ptr);
   }
 
-  template <typename U, int L, std::enable_if_t<L == 1 && Vectorized<U>::size() >= size(), int> = 0>
+  template <
+      typename U,
+      int L,
+      std::enable_if_t<L == 1 && Vectorized<U>::size() >= size(), int> = 0>
   Vectorized<U> loadu(const U* ptr) const {
     return loadu_helper<U, L>(ptr);
   }
 };
 
-#define VEC_MASK_DEFINE_UNARY_OP_GLOBAL(op)                       \
-  template <typename T, int N>                                       \
-  inline VecMask<T, N> op(const VecMask<T, N>& a) {          \
-    return op(VectorizedN<T, N>(a)); \
+#define VEC_MASK_DEFINE_UNARY_OP_GLOBAL(op)         \
+  template <typename T, int N>                      \
+  inline VecMask<T, N> op(const VecMask<T, N>& a) { \
+    return op(VectorizedN<T, N>(a));                \
   }
 
-#define VEC_MASK_DEFINE_BINARY_OP_GLOBAL(op)                                \
-  template <typename T, int N, typename V, int M, std::enable_if_t<VecMask<T, N>::size() == VecMask<V, M>::size(), int> = 0> \
-  inline VecMask<T, N> op(                                                 \
-      const VecMask<T, N>& a, const VecMask<V, M>& b) {                \
-      return op(VectorizedN<T, N>(a), VectorizedN<T, N>(b.template cast<T, N>())); \
+#define VEC_MASK_DEFINE_BINARY_OP_GLOBAL(op)                                  \
+  template <                                                                  \
+      typename T,                                                             \
+      int N,                                                                  \
+      typename V,                                                             \
+      int M,                                                                  \
+      std::enable_if_t<VecMask<T, N>::size() == VecMask<V, M>::size(), int> = \
+          0>                                                                  \
+  inline VecMask<T, N> op(const VecMask<T, N>& a, const VecMask<V, M>& b) {   \
+    return op(                                                                \
+        VectorizedN<T, N>(a), VectorizedN<T, N>(b.template cast<T, N>()));    \
   }
 
-#define VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(op, EXPR)                                \
-  template <typename T, int N, typename V, int M, std::enable_if_t<VecMask<T, N>::size() == VecMask<V, M>::size(), int> = 0> \
-  inline VecMask<T, N> op(                                                 \
-      const VecMask<T, N>& a, const VecMask<V, M>& b) {                \
-      return EXPR; \
+#define VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(op, EXPR)                  \
+  template <                                                                  \
+      typename T,                                                             \
+      int N,                                                                  \
+      typename V,                                                             \
+      int M,                                                                  \
+      std::enable_if_t<VecMask<T, N>::size() == VecMask<V, M>::size(), int> = \
+          0>                                                                  \
+  inline VecMask<T, N> op(const VecMask<T, N>& a, const VecMask<V, M>& b) {   \
+    return EXPR;                                                              \
   }
 
 VEC_MASK_DEFINE_UNARY_OP_GLOBAL(operator~)
@@ -148,7 +172,7 @@ VEC_MASK_DEFINE_BINARY_OP_GLOBAL(operator&)
 VEC_MASK_DEFINE_BINARY_OP_GLOBAL(operator|)
 VEC_MASK_DEFINE_BINARY_OP_GLOBAL(operator^)
 VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator>, a & ~b)
-VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator<, ~a & b)
+VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator<, ~a& b)
 VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator==, ~(a ^ b))
 VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator>=, (a == b) | (a > b))
 VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator<=, (a == b) | (a < b))

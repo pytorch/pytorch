@@ -7,6 +7,8 @@ import operator
 import types
 from typing import Dict, List
 
+from ..bytecode_transformation import create_call_method
+
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -1110,5 +1112,20 @@ class UntypedStorageVariable(VariableTracker):
                         {},
                     ),
                 )
+        if name == "resize_" and len(args) == 1:
+            assert not kwargs
+            tx.output.create_proxy(
+                "call_function",
+                torch.ops.inductor.resize_storage_bytes_,
+                (self.from_tensor.as_proxy(), args[0].as_proxy()),
+                {},
+            )
+            return self
 
         return super().call_method(tx, name, args, kwargs)
+
+    def reconstruct(self, codegen):
+        codegen(self.from_tensor)
+        codegen.append_output(codegen.create_load_method("untyped_storage"))
+        codegen.extend_output(create_call_method(0))
+        return ()

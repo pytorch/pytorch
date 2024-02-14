@@ -14,7 +14,6 @@ import sympy
 import torch
 import torch.fx
 from torch._inductor import dependencies
-from torch._inductor.ir import StorageBox, TensorBox
 from torch._prims_common import is_float_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
@@ -536,7 +535,10 @@ class CppCSEVariable(CSEVariable):
         self.dependent_itervars: Set[sympy.Symbol] = set()
 
     def __repr__(self):
-        return f"CppCSEVariable(name: {self.name}, bounds: {self.bounds}, is_vec: {self.is_vec}, dtype: {self.dtype}, dependent_itervars: {self.dependent_itervars})"
+        return (
+            f"CppCSEVariable(name: {self.name}, bounds: {self.bounds}, is_vec: {self.is_vec}, dtype: {self.dtype}, "
+            f"dependent_itervars: {self.dependent_itervars})"
+        )
 
     def update_on_args(self, name, args, kwargs):
         if name == "load":
@@ -968,7 +970,8 @@ class CppVecOverrides(CppOverrides):
                 scalars = [
                     arg
                     for arg in args
-                    if isinstance(arg, (int, sympy.Expr)) or (isinstance(arg, CppCSEVariable) and not arg.is_vec)
+                    if isinstance(arg, (int, sympy.Expr))
+                    or (isinstance(arg, CppCSEVariable) and not arg.is_vec)
                 ]
                 vectors = [
                     arg
@@ -1089,36 +1092,42 @@ class CppVecOverrides(CppOverrides):
     def eq(x, y):
         assert isinstance(V.kernel, CppVecKernel)
         assert isinstance(x, CppCSEVariable)
+        assert x.dtype is not None
         return f"{V.kernel._get_mask_type(x.dtype)}({x} == {y})"
 
     @staticmethod
     def ne(x, y):
         assert isinstance(V.kernel, CppVecKernel)
         assert isinstance(x, CppCSEVariable)
+        assert x.dtype is not None
         return f"{V.kernel._get_mask_type(x.dtype)}({x} != {y})"
 
     @staticmethod
     def lt(x, y):
         assert isinstance(V.kernel, CppVecKernel)
         assert isinstance(x, CppCSEVariable)
+        assert x.dtype is not None
         return f"{V.kernel._get_mask_type(x.dtype)}({x} < {y})"
 
     @staticmethod
     def gt(x, y):
         assert isinstance(V.kernel, CppVecKernel)
         assert isinstance(x, CppCSEVariable)
+        assert x.dtype is not None
         return f"{V.kernel._get_mask_type(x.dtype)}({x} > {y})"
 
     @staticmethod
     def le(x, y):
         assert isinstance(V.kernel, CppVecKernel)
         assert isinstance(x, CppCSEVariable)
+        assert x.dtype is not None
         return f"{V.kernel._get_mask_type(x.dtype)}({x} <= {y})"
 
     @staticmethod
     def ge(x, y):
         assert isinstance(V.kernel, CppVecKernel)
         assert isinstance(x, CppCSEVariable)
+        assert x.dtype is not None
         return f"{V.kernel._get_mask_type(x.dtype)}({x} >= {y})"
 
     @staticmethod
@@ -1340,6 +1349,7 @@ class CppVecOverrides(CppOverrides):
         assert node and isinstance(node, torch.fx.Node)
         opt_ctx_x = get_opt_ctx(node.args[1])
         assert opt_ctx_x
+        assert opt_ctx_x.dtype is not None
         assert isinstance(V.kernel, CppVecKernel)
         src_cpp_type = DTYPE_TO_CPP[opt_ctx_x.dtype]
         cpp_type = DTYPE_TO_CPP[dtype]
@@ -1469,7 +1479,9 @@ class CppVecOverrides(CppOverrides):
                 value = value.value
             csevar = V.kernel.arange(value, stride)
         else:
-            csevar = V.kernel._load_or_store_non_contiguous(None, index, dtype, V.kernel.compute)
+            csevar = V.kernel._load_or_store_non_contiguous(  # type: ignore[assignment]
+                None, index, dtype, V.kernel.compute
+            )
         csevar.update_on_args("index_expr", (expr, dtype), {})
         return csevar
 
@@ -1990,9 +2002,7 @@ class CppVecKernel(CppKernel):
                 assert not store_value, "unexpected store with load mask"
                 assert isinstance(self._load_mask, CppCSEVariable), self._load_mask
                 if self._load_mask.is_vec:
-                    load_mask = (
-                        f"{self._load_mask}.is_masked({itervar_inner})"
-                    )
+                    load_mask = f"{self._load_mask}.is_masked({itervar_inner})"
                 else:
                     load_mask = f"{self._load_mask} != 0"
             if codecache.is_gcc():
@@ -2005,12 +2015,12 @@ class CppVecKernel(CppKernel):
             with code.indent(), contextlib.ExitStack() as stack:
                 index_c = cexpr_index(index)
                 for indirect_var in replacements:
-                    index_c = re.sub(r'\b' + f"{indirect_var}" + r'\b', replacements[indirect_var], index_c)
-                rhs = (
-                    f"{var}[{index_c}]"
-                    if var is not None
-                    else f"{index_c}"
-                )
+                    index_c = re.sub(
+                        r"\b" + f"{indirect_var}" + r"\b",
+                        replacements[indirect_var],
+                        index_c,
+                    )
+                rhs = f"{var}[{index_c}]" if var is not None else f"{index_c}"
                 if load_mask:
                     code.writeline(f"if ({load_mask})")
                     stack.enter_context(code.indent())
@@ -2047,7 +2057,7 @@ class CppVecKernel(CppKernel):
             line = self._get_vec_load_line(var, index, dtype, self._load_mask)
             csevar = self.cse.generate(self.loads, line)  # type: ignore[assignment]
         else:
-            csevar = self._load_or_store_non_contiguous(var, index, dtype)
+            csevar = self._load_or_store_non_contiguous(var, index, dtype)  # type: ignore[assignment]
         assert isinstance(csevar, CppCSEVariable)
         csevar.update_on_args("load", (name, index), {})
         csevar.is_vec = True
@@ -2082,7 +2092,9 @@ class CppVecKernel(CppKernel):
             else:
                 code.writeline(f"{value}.store({var_expr}, {self.tiling_factor});")
         else:
-            self._load_or_store_non_contiguous(var, index, dtype, buffer=code, store_value=value)
+            self._load_or_store_non_contiguous(
+                var, index, dtype, buffer=code, store_value=value
+            )
         return code
 
     def store(self, name, index, value, mode=None):
@@ -2206,20 +2218,26 @@ initializer(omp_priv={{{self.reduction_init_vec(reduction_type, dtype)}}})
         code = IndentedBuffer()
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
-            code.writeline(f"{var}[{cexpr_index(index)}] = static_cast<{DTYPE_TO_CPP[out_dtype]}>({value});")
+            code.writeline(
+                f"{var}[{cexpr_index(index)}] = static_cast<{DTYPE_TO_CPP[out_dtype]}>({value});"
+            )
         else:
             # Vertical reduction
             if out_dtype != dtype:
                 if out_dtype in DTYPE_LOWP_FP and dtype == torch.float:
                     _lowp_fp_tmpvar_vec = f"{DTYPE_TO_CPP[out_dtype]}_{value}"
-                    code.writeline(f"auto {_lowp_fp_tmpvar_vec} = cvt_fp32_to_lowp_fp<{DTYPE_TO_CPP[out_dtype]}>({value});")
+                    code.writeline(
+                        f"auto {_lowp_fp_tmpvar_vec} = cvt_fp32_to_lowp_fp<{DTYPE_TO_CPP[out_dtype]}>({value});"
+                    )
                     value = _lowp_fp_tmpvar_vec
                 else:
                     raise AssertionError(
                         f"Unsupported reduction type from {dtype} to {out_dtype}"
                     )
             code.splice(self._get_store_line(value, var, index, out_dtype))
-        self.reduction_suffix.splice(code, line_wrapper=lambda line: DeferredLine(name, line))
+        self.reduction_suffix.splice(
+            code, line_wrapper=lambda line: DeferredLine(name, line)
+        )
 
     def broadcast(self, scalar_var: CppCSEVariable) -> CppCSEVariable:
         assert not scalar_var.is_vec
@@ -2239,10 +2257,9 @@ initializer(omp_priv={{{self.reduction_init_vec(reduction_type, dtype)}}})
         vec_var.is_vec = True
         return vec_var
 
-    def arange(
-        self, index: CppCSEVariable, stride: sympy.Symbol
-    ) -> CppCSEVariable:
+    def arange(self, index: CppCSEVariable, stride: sympy.Symbol) -> CppCSEVariable:
         assert not index.is_vec
+        assert index.dtype is not None
         csevar = self.cse.generate(
             self.compute,
             f"{self._get_vec_type(index.dtype)}::arange({index}, {stride})",
@@ -2298,13 +2315,14 @@ initializer(omp_priv={{{self.reduction_init_vec(reduction_type, dtype)}}})
     def indirect_assert(self, var, lower, upper, mask=None):
         assert not mask, "do not support mask in indirect_indexing assertion"
         assert isinstance(var, CppCSEVariable)
+        assert var.dtype is not None
         if not var.is_vec:
             return super().indirect_assert(var, lower, upper, mask)
+        lower_scalar = lower
+        upper_scalar = upper
         if lower:
-            lower_scalar = lower
             lower = f"{self._get_vec_type(var.dtype)}({lower})"
         if upper:
-            upper_scalar = upper
             upper = f"{self._get_vec_type(var.dtype)}({upper})"
         if lower and upper:
             cond = f"({lower} <= {var}) & ({var} < {upper})"
@@ -2526,7 +2544,7 @@ class CppVecKernelChecker(CppVecKernel):
         if schedule_log.isEnabledFor(logging.DEBUG):
             schedule_log.debug("Disabled vectorization: %s", msg)
         self.simd_vec = False
-    
+
     def load(self, name: str, index: sympy.Expr):
         with RecordOptimizationContext(__name__) as node_ctx:
             load_dtype = V.graph.get_dtype(name)
@@ -2714,7 +2732,11 @@ class CppVecKernelChecker(CppVecKernel):
                     if any(v == 0 for v in sizes.values()):
                         return True
 
-                    vars_ranges = {k: ValueRanges(0, v - 1) for k, v in sizes.items() if not isinstance(v, sympy.Expr) or v.is_number}
+                    vars_ranges = {
+                        k: ValueRanges(0, v - 1)
+                        for k, v in sizes.items()
+                        if not isinstance(v, sympy.Expr) or v.is_number
+                    }
                     if not vars_ranges or len(vars_ranges) != len(free_symbols):
                         i32_iinfo = torch.iinfo(torch.int32)
                         return (

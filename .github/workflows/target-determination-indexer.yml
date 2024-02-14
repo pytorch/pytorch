@@ -1,0 +1,114 @@
+name: Index PyTorch Tests for Target Determination
+
+on:
+  workflow_dispatch:
+  # TODO: Trigger every few hours
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  index:
+    runs-on: linux.g5.4xlarge.nvidia.gpu # 1 GPU A10G 24GB each
+    environment: target-determinator-env
+    steps:
+      - name: Clone PyTorch
+        uses: actions/checkout@v3
+        with:
+          path: pytorch
+
+      - name: Clone CodeLlama
+        uses: actions/checkout@v3
+        with:
+          repository: osalpekar/codellama
+          ref: main
+          path: codellama
+
+      - name: Clone Target Determination Code
+        uses: actions/checkout@v3
+        with:
+          repository: osalpekar/llm-target-determinator
+          ref: v0.0.1
+          path: llm-target-determinator
+
+      - name: Setup Conda
+        uses: conda-incubator/setup-miniconda@v2.1.1
+        with:
+          miniconda-version: "py39_4.12.0"
+          python-version: 3.9
+
+      - name: Install Requirements
+        shell: bash -l {0}
+        run: |
+          set -euxo pipefail
+
+          conda create \
+            --yes \
+            --quiet \
+            --name "tdenv" \
+            "python=3.9"
+
+          conda activate tdenv
+
+          cd "${GITHUB_WORKSPACE}"
+          pwd
+          cd llm-target-determinator
+          pip install -r requirements.txt
+          cd ../codellama
+          pip install -e .
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_target_determinator_s3_read_write
+          aws-region: us-east-1
+
+      - name: Fetch CodeLlama Checkpoint
+        shell: bash -l {0}
+        run: |
+          set -euxo pipefail
+
+          conda activate tdenv
+          pip install awscli==1.32.18
+          cd codellama/
+          mkdir "CodeLlama-7b-Python"
+          aws s3 cp \
+            "s3://target-determinator-assets/CodeLlama-7b-Python" \
+            "CodeLlama-7b-Python" \
+            --recursive
+
+      - name: Run Indexer
+        id: indexer
+        shell: bash -l {0}
+        run: |
+          set -euxo pipefail
+
+          conda activate tdenv
+          cd "${GITHUB_WORKSPACE}"/llm-target-determinator
+
+          python create_filelist.py
+
+          torchrun \
+            --standalone \
+            --nnodes=1 \
+            --nproc-per-node=1 \
+            indexer.py \
+            --experiment-name indexer-files
+
+      - name: Upload Index to S3
+        shell: bash -l {0}
+        if: ${{ steps.indexer.outcome == 'success' }}
+        run: |
+          set -euxo pipefail
+          conda activate tdenv
+          cd "${GITHUB_WORKSPACE}"/llm-target-determinator/assets
+
+          zip -r indexer-files.zip indexer-files
+          aws s3 cp \
+            "indexer-files.zip" \
+            "s3://target-determinator-assets/indexes/indexer-files.zip"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
