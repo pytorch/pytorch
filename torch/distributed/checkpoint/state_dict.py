@@ -471,6 +471,11 @@ def _get_optim_state_dict(
         if info.fsdp_modules:
             with info.fsdp_context():
                 osd = FSDP.optim_state_dict(model, optim, osd)
+
+            # We need to specially handle FlatParameter FSDP as
+            # FlatParameter FSDP converts the FQNs.
+            # There are no easy ways to do this conversion systematically.
+            # We can only use a string replacment without correctness check.
             if not osd:
                 continue
             for k in list(osd[STATE].keys()):
@@ -583,22 +588,29 @@ def _load_optim_state_dict(
     for optim in optimizers:
         optim_state_dict = _split_optim_state_dict(model, optim, state_dict, info)
         if info.fsdp_modules:
-            for key, _ in model.named_parameters():
-                fqns = _get_fqns(model, key)
-                fqns_with_compiler = _get_fqns(model, key, skip_compiler_prefix=False)
+            # We need to specially handle FlatParameter FSDP as
+            # FlatParameter FSDP converts the FQNs.
+            for original_fqn, _ in model.named_parameters():
+                fqns = _get_fqns(model, original_fqn)
+                fqns_with_compiler = _get_fqns(
+                    model, original_fqn, skip_compiler_prefix=False
+                )
                 if fqns == fqns_with_compiler:
                     continue
+
                 assert len(fqns) == 1
                 fqn = fqns.pop()
                 fqn_with_compiler = fqns_with_compiler.pop()
                 for g in optim_state_dict[PG]:
-                    params = [key.replace(fqn, fqn_with_compiler) for key in g[PARAMS]]
-                    g[PARAMS] = params
-                for k in list(optim_state_dict[STATE].keys()):
+                    val = cast(Dict[str, Any], g)
+                    params = [
+                        key.replace(fqn, fqn_with_compiler) for key in val[PARAMS]
+                    ]
+                    val[PARAMS] = params
+                osd_state = cast(DictValueType, optim_state_dict[STATE])
+                for k in list(osd_state.keys()):
                     if fqn in k:
-                        optim_state_dict[STATE][
-                            k.replace(fqn, fqn_with_compiler)
-                        ] = optim_state_dict[STATE].pop(k)
+                        osd_state[k.replace(fqn, fqn_with_compiler)] = osd_state.pop(k)
 
             with info.fsdp_context():
                 optim_state_dict = FSDP.optim_state_dict_to_load(
