@@ -1853,6 +1853,8 @@ class CppVecKernel(CppKernel):
             return f"at::vec::VectorizedN<{DTYPE_TO_CPP[dtype]},{num_vectors}>"
 
     def _get_mask_type(self, dtype: torch.dtype = torch.float) -> str:
+        if dtype == torch.bool:
+            return ""
         num_vectors = self._get_num_vectors(dtype)
         return f"at::vec::VecMask<{DTYPE_TO_CPP[dtype]},{num_vectors}>"
 
@@ -2238,19 +2240,15 @@ initializer(omp_priv={{{self.reduction_init_vec(reduction_type, dtype)}}})
         return vec_var
 
     def arange(
-        self, index: Union[sympy.Expr, CppCSEVariable], stride: sympy.Symbol
+        self, index: CppCSEVariable, stride: sympy.Symbol
     ) -> CppCSEVariable:
-        if isinstance(index, sympy.Expr):
-            index = cexpr(index)
-        else:
-            assert isinstance(index, CppCSEVariable)
-            assert not index.is_vec
+        assert not index.is_vec
         csevar = self.cse.generate(
             self.compute,
-            f"{self._get_vec_type(torch.int32)}::arange({index}, {stride})",
+            f"{self._get_vec_type(index.dtype)}::arange({index}, {stride})",
         )
         assert isinstance(csevar, CppCSEVariable)
-        csevar.dtype = torch.int32
+        csevar.dtype = index.dtype
         csevar.is_vec = True
         return csevar
 
@@ -2523,11 +2521,6 @@ class CppVecKernelChecker(CppVecKernel):
             torch.int32,
             torch.int64,
         ]
-        # Cache the dtypes of the store operation. If the store is mixing dtypes, the
-        # vectorization would not support it as it is hard to determine the vec dtype
-        self.store_dtypes: List[torch.dtype] = []
-        # The dtype is used for vectorization
-        self.vec_dtype: torch.dtype = torch.float32
 
     def disable_vec(self, msg=None):
         if schedule_log.isEnabledFor(logging.DEBUG):
@@ -2565,8 +2558,6 @@ class CppVecKernelChecker(CppVecKernel):
             assert opt_ctx
             opt_ctx.dtype = store_dtype
 
-            store_dtype = torch.float if store_dtype == torch.float32 else store_dtype
-            self.store_dtypes.append(store_dtype)
             if store_dtype not in self.store_supported_dtypes:
                 self.disable_vec(f"{store_dtype} not supported by store")
                 return self.simd_vec
@@ -2578,18 +2569,14 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec(f"store mode: {mode}")
                 return self.simd_vec
 
-            if index.is_number: # TODO: can we remove it?
-                self.disable_vec(f"constant store index: {index}")
             return self.simd_vec
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
-        if (
+        if not (
             (dtype == torch.float and src_dtype == torch.float)
             or (dtype == torch.int64 and src_dtype == torch.int64)
             and reduction_type in VECTORIZABLE_RTYPES
         ):
-            pass
-        else:
             self.disable_vec(
                 f"reduction: dtype {dtype}, src_dtype {src_dtype}, reduction_type {reduction_type}"
             )
@@ -2644,18 +2631,8 @@ class CppVecKernelChecker(CppVecKernel):
 
         class VecCheckerProxy:
             @staticmethod
-            def _bin_cmp_op(x, y):
-                current_node: torch.fx.Node = V.interpreter.current_node
-                if not self.is_supported_cmp(current_node):
-                    self.disable_vec(f"binary comparison op: {current_node}")
-                return self.simd_vec
-
-            @staticmethod
             def __getattr__(name):  # type: ignore[misc]
                 def inner(*args, **kwargs):
-                    if name in BIN_CMP_OPS:
-                        return VecCheckerProxy._bin_cmp_op(args, kwargs)
-
                     if name not in self.fast_vec_list:
                         self.disable_vec(f"op: {name}")
                     return self.simd_vec
@@ -2691,6 +2668,10 @@ class CppVecKernelChecker(CppVecKernel):
                         dtype == torch.int64
                         and val <= i32_iinfo.max
                         and val >= i32_iinfo.min
+                        and all(
+                            user.target in BIN_CMP_OPS
+                            for user in node_ctx.current_node.users
+                        )
                     ):
                         opt_ctx.dtype = torch.int32
 
@@ -2704,34 +2685,23 @@ class CppVecKernelChecker(CppVecKernel):
                             opt_ctx.dtype = torch.float32
 
                     supported_dtypes = [
-                        torch.float32,
-                        torch.int32,
-                        torch.int64,
+                        torch.float,
                         torch.bfloat16,
                         torch.float16,
                         torch.bool,
+                        torch.uint8,
+                        torch.int8,
+                        torch.int32,
+                        torch.int64,
                     ]
 
-                    if opt_ctx.dtype not in supported_dtypes or (
-                        opt_ctx.dtype == torch.int32
-                        and not all(
-                            user.target in BIN_CMP_OPS
-                            for user in node_ctx.current_node.users
-                        )
-                    ):
+                    if opt_ctx.dtype not in supported_dtypes:
                         self.disable_vec(f"constant dtype: {opt_ctx.dtype}")
                     return val
 
             @staticmethod
             def index_expr(expr, dtype):
                 assert len(self.ranges) == len(self.itervars)
-                if not len(self.ranges) or not all(
-                    not isinstance(range, sympy.Expr) or sympy.simplify(range).is_number
-                    for range in self.ranges
-                ):
-                    # if the range value is sympy.Expr, we might could not deduce the accurate loop interval.
-                    self.disable_vec(f"index_expr: {expr}, dtype {dtype}")
-                    return self.cse.newvar()
 
                 def can_use_int32():
                     free_symbols = list(expr.free_symbols)
@@ -2744,7 +2714,7 @@ class CppVecKernelChecker(CppVecKernel):
                     if any(v == 0 for v in sizes.values()):
                         return True
 
-                    vars_ranges = {k: ValueRanges(0, v - 1) for k, v in sizes.items()}
+                    vars_ranges = {k: ValueRanges(0, v - 1) for k, v in sizes.items() if not isinstance(v, sympy.Expr) or v.is_number}
                     if not vars_ranges or len(vars_ranges) != len(free_symbols):
                         i32_iinfo = torch.iinfo(torch.int32)
                         return (
@@ -2778,7 +2748,6 @@ class CppVecKernelChecker(CppVecKernel):
                     ):
                         opt_ctx.dtype = torch.int32
                     else:
-                        opt_ctx.dtype = dtype
                         self.disable_vec(f"index_expr: {expr}, dtype {dtype}")
 
                     tmp_var = self.cse.newvar()
@@ -2795,77 +2764,18 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def to_dtype(x, dtype, src_dtype=None):
-                with RecordOptimizationContext(__name__) as node_ctx:
-                    opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
-                    assert opt_ctx
-                    opt_ctx.dtype = dtype
-
-                    cur_node = node_ctx.get_fx_node()
-                    input_value: torch.fx.Node = cur_node.all_input_nodes[1]
-                    if dtype == torch.float:
-                        if input_value.target in [
-                            "load",
-                        ]:
-                            # Support masked_load for BF16/FP16. Because the legalization will
-                            # insert to_dtype to convert the BF16/FP16 input to FP32.
-                            dtype = (
-                                V.graph.get_dtype(input_value.args[1])  # type: ignore[arg-type]
-                                if input_value.target == "load"
-                                else input_value.args[-1]
-                            )
-                            if dtype in [
-                                torch.float16,
-                                torch.bfloat16,
-                                torch.float,
-                                torch.uint8,
-                                torch.int8,
-                                torch.int32,
-                                torch.int64,
-                            ]:
-                                # Convert from dtype to torch.float
-                                pass
-                            else:
-                                self.disable_vec(f"to_dtype: dtype {dtype}")
-                    elif dtype in DTYPE_LOWP_FP:
-                        if not all(usr.target == "store" for usr in cur_node.users):
-                            self.disable_vec(
-                                "to_dtype: bfloat16/float16 expecting users are all stores"
-                            )
-                            return x
-
-                        store_names = [usr.args[1] for usr in cur_node.users]
-                        if not all(
-                            V.graph.get_dtype(name) in [dtype] for name in store_names
-                        ):
-                            self.disable_vec(
-                                "to_dtype: expecting all stores into bfloat16 or float16"
-                            )
-                            return x
-                    elif dtype == torch.bool:
-                        pass
-                    elif dtype in (torch.uint8, torch.int8):
-                        # Only allow below 2 cases:
-                        # Case 1: to_int8 and store which corresponding to the single quant node
-                        # at last of fusion pattern.
-                        is_to_int8_and_store = all(
-                            usr.target in ["store"] for usr in cur_node.users
-                        )
-                        # Case 2: to_int8 and to_float which corresponding to pair of quant/dequant node
-                        # at middle of fusion pattern.
-                        is_to_int8_and_to_float = all(
-                            (
-                                usr.target in ["to_dtype"]
-                                and usr.args[2] == torch.float32
-                            )
-                            for usr in cur_node.users
-                        )
-                        if not (is_to_int8_and_store or is_to_int8_and_to_float):
-                            self.disable_vec(f"to_dtype: dtype {dtype}")
-                    elif dtype in [torch.int64, torch.int32]:
-                        pass
-                    else:
-                        self.disable_vec(f"to_dtype: dtype {dtype}")
-                    return x
+                if dtype not in [
+                    torch.float,
+                    torch.bfloat16,
+                    torch.float16,
+                    torch.bool,
+                    torch.uint8,
+                    torch.int8,
+                    torch.int32,
+                    torch.int64,
+                ]:
+                    self.disable_vec(f"to_dtype: {dtype}")
+                return x
 
         self.exit_stack.enter_context(V.set_ops_handler(VecCheckerProxy()))
         self.exit_stack.enter_context(V.set_kernel_handler(self))
