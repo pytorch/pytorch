@@ -486,9 +486,6 @@ dynamo_expected_failures = {
     "TestSortAndSelectCPU.test_isin_cpu_float32",  # test_sort_and_select
     "TestShapeOpsCUDA.test_flip_cuda_float32",  # test_shape_ops
     "TestShapeOpsCPU.test_flip_cpu_float32",  # test_shape_ops
-    # "TestSubclassSerialization.test_tensor_subclass_deepcopy",  # test_serialization
-    "TestSubclassSerialization.test_tensor_subclass_getstate_overwrite",  # test_serialization
-    "TestSubclassSerialization.test_tensor_subclass_wrapper_serialization",  # test_serialization
     "TestCxxPytree.test_pytree_serialize_spec8",  # test_pytree
     "TestCxxPytree.test_pytree_serialize_spec9",  # test_pytree
     "TestCxxPytree.test_pytree_serialize_spec3",  # test_pytree
@@ -562,7 +559,6 @@ dynamo_expected_failures = {
     "TestMkldnnCPU.test_conv2d_cpu",  # test_mkldnn
     "TestMkldnnCPU.test_batch_norm_3d_cpu",  # test_mkldnn
     "FakeTensorOperatorInvariants.test_like_ops",  # test_fake_tensor
-    "FakeTensorConverterTest.test_memoized_conversion_from_meta",  # test_fake_tensor
     "FakeTensorOperatorInvariants.test_non_kwarg_only_device",  # test_fake_tensor
     "FakeTensorOperatorInvariants.test_tensor_constructors_all_have_kwarg_device",  # test_fake_tensor
     "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_sum_nn_functional_conv1d_cpu_float64",  # test_expanded_weights  # noqa: B950
@@ -1557,7 +1553,6 @@ dynamo_expected_failures = {
     "TestTorch.test_upsample_nearest2d_meta",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_map_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool1d_cpu_float64",  # test_torch
-    "TestTorch.test_upsample_nearest1d_meta",  # test_torch
     "TestTorchDeviceTypeCPU.test_normal_kstest_cpu_float32",  # test_torch
     "TestTorchDeviceTypeCPU.test_normal_kstest_cpu_float64",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_pow_cpu",  # test_torch
@@ -2089,7 +2084,6 @@ dynamo_expected_failures = {
     "TestPythonRegistration.test_alias_analysis",  # test_python_dispatch
     "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_conv2d_cpu",  # test_python_dispatch
     "TestPythonRegistration.test_finalizer",  # test_python_dispatch
-    "TestPythonDispatch.test_subclass_autograd_device_check",  # test_python_dispatch
     "TestPythonDispatch.test_make_subclass_with_modes",  # test_python_dispatch
     "LoggingTests.test_trace_source_nested",  # dynamo/test_logging
     "LoggingTests.test_guards_recompiles",  # dynamo/test_logging
