@@ -108,7 +108,6 @@ from .functions import (
     CollectiveFunctionRewriteVariable,
     FunctoolsPartialVariable,
     TritonKernelVariable,
-    UserFunctionVariable,
     UserMethodVariable,
 )
 from .higher_order_ops import TorchHigherOrderOperatorVariable
@@ -756,7 +755,9 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return MethodWrapperVariable(value)
         elif issubclass(type(value), type):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            # This is a userdefined class, so install an ID_MATCH even if its a
+            # global variable.
+            self.install_guards(GuardBuilder.ID_MATCH)
             return UserDefinedClassVariable(
                 value,
                 source=self.source,
@@ -1856,8 +1857,6 @@ class SourcelessBuilder:
             return trace_rules.lookup_callable(value)(value)
         elif is_function_or_wrapper(value):
             return trace_rules.lookup(value)(value)
-        elif isinstance(value, types.FunctionType):
-            return UserFunctionVariable(value)
         elif isinstance(value, enum.Enum):
             return EnumVariable(value)
         elif isinstance(value, (type, abc.ABCMeta)):

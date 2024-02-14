@@ -1246,8 +1246,8 @@ def export(
 
                 with ambient_fake_mode, enable_python_dispatcher():
                     params_and_buffers = {
-                        **dict(named_parameters),
-                        **dict(named_buffers),
+                        **named_parameters,
+                        **named_buffers,
                     }
                     fake_params_buffers = dict()
 
@@ -1302,6 +1302,9 @@ def export(
             not disable_constraint_solver
             and (shape_env := getattr(fake_mode, "shape_env", None)) is not None
             and (dim_constraints := shape_env.dim_constraints) is not None
+            and not isinstance(
+                call_to_inspect, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
+            )
             and not trace_rules.check(call_to_inspect)
         ):
             dim_constraints.solve()
