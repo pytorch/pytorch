@@ -1150,6 +1150,40 @@ class MutationTests(torch._dynamo.test_case.TestCase):
         )
 
     @make_mutation_test
+    def test_add_for_loop2():
+        @triton.jit
+        def add_1_time_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            for i in range(0, BLOCK_SIZE):
+                i = tl.multiple_of(i, 1)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        t = torch.randn(4)
+        return (
+            add_1_time_kernel,
+            {
+                "in_ptr0": t,
+                "in_ptr1": t,
+                "out_ptr": t,
+                "n_elements": 4,
+                "BLOCK_SIZE": 4,
+            },
+            ["out_ptr"],
+        )
+
+    @make_mutation_test
     def test_add_nested_for_loop():
         @triton.jit
         def add_4_times_kernel(

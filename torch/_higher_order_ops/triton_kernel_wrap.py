@@ -197,7 +197,7 @@ def parse_ttir(ttir, kwargs):
         ?stmt: op | if | for | while | condition_stmt | label_stmt | cf_stmt
 
         if: [assign_lhs "="] "scf.if" args rest stmt* "}" "else" "{" stmt* "}" LOC -> process_if
-        for: [assign_lhs "="] "scf.for" args rest stmt* "}" LOC -> process_for
+        for: [assign_lhs "="] "scf.for" args rest stmt* "}" divisibility_annot? LOC -> process_for
         while: [assign_lhs "="] "scf.while" args rest stmt* "}" "do" "{" stmt* "}" LOC -> process_while
 
         condition_stmt: "scf.condition" "(" arg ")" args rest
@@ -209,6 +209,7 @@ def parse_ttir(ttir, kwargs):
           | [assign_lhs "="] OP_NAME [FN_NAME] args rest?  -> process_op
 
         ?rest: (":" | "{" | "\\"" | "->" | "<" | "=") /.+/ NEWLINE
+        divisibility_annot: "{" "tt.divisibility_arg1" /[^}]+/ "}"
 
         args: | "(" ")" | "("? arg ("," arg)* ")"?
 
@@ -443,7 +444,7 @@ def identify_mutated_tensors(kernel, kwargs):
     except Exception as e:
         import traceback
 
-        log.info(
+        warnings.warn(
             "Encountered an exception in identify_mutated_tensors, assuming every input is mutated"
         )
         log.debug(
