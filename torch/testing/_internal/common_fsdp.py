@@ -1244,11 +1244,6 @@ def test_compiled_fsdp():
             args[0].forward = torch.compile(args[0].forward)
             return torch.distributed._composable.fsdp.fully_shard(*args, **kwargs)
 
-        @staticmethod
-        def fully_shard_with_full_compile(*args, **kwargs):
-            module = torch.distributed._composable.fsdp.fully_shard(*args, **kwargs)
-            return torch.compile(module)
-
         # apply partial in order to use ``Enum.value``
         EAGER = partial(torch.distributed._composable.fsdp.fully_shard)
         COMPILED_COMPUTE = partial(fully_shard_with_compiled_compute)

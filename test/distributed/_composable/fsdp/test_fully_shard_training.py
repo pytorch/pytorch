@@ -337,6 +337,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         self.assertEqual(ref_nonroot_loss, nonroot_loss)
         self.assertEqual(ref_model(inp).sum(), model(inp).sum())
 
+    @skip_if_lt_x_gpu(2)
     @test_compiled_fsdp()
     def test_multi_forward_module(self):
         """
