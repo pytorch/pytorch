@@ -157,8 +157,7 @@ def torch_decomp_decompositions(func):
     from torch._decomp import decomposition_table
 
     decompositions = torch._decomp.decompositions
-    decomp_attrs = [getattr(decompositions, attr) for attr in dir(decompositions)]
-    return decomposition_table[func] in decomp_attrs
+    return decomposition_table[func].__name__ in dir(decompositions)
 
 
 def tree_flatten_only(ty: Type[T], tree: PyTree):
