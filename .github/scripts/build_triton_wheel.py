@@ -74,7 +74,6 @@ def build_triton(
     commit_hash: str,
     build_conda: bool = False,
     build_rocm: bool = False,
-    rocm_version: Optional[str] = None,
     py_version: Optional[str] = None,
     release: bool = False,
 ) -> Path:
@@ -167,11 +166,7 @@ def build_triton(
                 version=f"{version}",
                 expected_version=ROCM_TRITION_VERSION,
             )
-            check_call(
-                f"scripts/amd/setup_rocm_libs.sh {rocm_version}",
-                cwd=triton_basedir,
-                shell=True,
-            )
+            check_call("scripts/amd/setup_rocm_libs.sh", cwd=triton_basedir, shell=True)
             print("ROCm libraries setup for triton installation...")
 
         check_call(
@@ -196,7 +191,6 @@ def main() -> None:
     parser.add_argument("--build-rocm", action="store_true")
     parser.add_argument("--py-version", type=str)
     parser.add_argument("--commit-hash", type=str)
-    parser.add_argument("--rocm_version", type=str)
     parser.add_argument("--triton-version", type=str, default=read_triton_version())
     args = parser.parse_args()
 
@@ -207,7 +201,6 @@ def main() -> None:
         else read_triton_pin(args.build_rocm),
         version=args.triton_version,
         build_conda=args.build_conda,
-        rocm_version=args.rocm_version,
         py_version=args.py_version,
         release=args.release,
     )
