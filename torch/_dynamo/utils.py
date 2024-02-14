@@ -1563,10 +1563,10 @@ def ensure_graph_fake(e, tx):
     return e
 
 
-def get_fake_values_from_nodes(tx, nodes):
+def get_fake_values_from_nodes(tx, nodes, allow_non_graph_fake):
     def visit(n: torch.fx.Node):
         if n.op == "call_function" and "example_value" not in n.meta:
-            return get_fake_value(n, tx)
+            return get_fake_value(n, tx, allow_non_graph_fake)
 
         return n.meta["example_value"]
 
@@ -1600,7 +1600,9 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     if "example_value" in node.meta and is_fake(node.meta["example_value"]):
         return node.meta["example_value"]
 
-    args, kwargs = get_fake_values_from_nodes(tx, (node.args, node.kwargs))
+    args, kwargs = get_fake_values_from_nodes(
+        tx, (node.args, node.kwargs), allow_non_graph_fake
+    )
 
     nnmodule = None
     if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
