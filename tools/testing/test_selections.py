@@ -3,7 +3,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Callable, Dict, FrozenSet, List, Optional, Sequence, Tuple
 
 from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
 from tools.testing.test_run import ShardedTest, TestRun
@@ -69,6 +69,7 @@ def get_with_pytest_shard(
 
     for test in tests:
         duration = get_duration(test, test_file_times, test_class_times or {})
+<<<<<<< HEAD
 
         if duration and duration > THRESHOLD:
             num_shards = math.ceil(duration / THRESHOLD)
@@ -106,6 +107,55 @@ def get_duration(
     excluded = test.excluded()
     included_classes_duration = get_duration_for_classes(test.test_file, included)
     excluded_classes_duration = get_duration_for_classes(test.test_file, excluded)
+=======
+>>>>>>> 604ab3553c8 (small pull, alternate sharding)
+
+    if included_classes_duration is None or excluded_classes_duration is None:
+        # Didn't get the time for all classes, so time is unknown
+        return None
+
+    if included:
+        return included_classes_duration
+    assert (
+        excluded
+    ), f"TestRun {test} is not full file but doesn't have included or excluded classes"
+    if file_duration is None:
+        return None
+    return file_duration - excluded_classes_duration
+
+<<<<<<< HEAD
+
+def shard(
+    sharded_jobs: List[ShardJob],
+    tests: Sequence[TestRun],
+    test_file_times: Dict[str, float],
+    test_class_times: Dict[str, Dict[str, float]],
+=======
+def get_duration(
+    test: TestRun,
+    test_file_times: Dict[str, float],
+    test_class_times: Dict[str, Dict[str, float]],
+) -> Optional[float]:
+    file_duration = test_file_times.get(test.test_file, None)
+    if test.is_full_file():
+        return file_duration
+
+    def get_duration_for_classes(
+        test_file: str, test_classes: FrozenSet[str]
+    ) -> Optional[float]:
+        duration: float = 0
+
+        for test_class in test_classes:
+            class_duration = test_class_times.get(test_file, {}).get(test_class, None)
+            if class_duration is None:
+                return None
+            duration += class_duration
+        return duration
+
+    included = test.included()
+    excluded = test.excluded()
+    included_classes_duration = get_duration_for_classes(test.test_file, included)
+    excluded_classes_duration = get_duration_for_classes(test.test_file, excluded)
 
     if included_classes_duration is None or excluded_classes_duration is None:
         # Didn't get the time for all classes, so time is unknown
@@ -126,6 +176,7 @@ def shard(
     tests: Sequence[TestRun],
     test_file_times: Dict[str, float],
     test_class_times: Dict[str, Dict[str, float]],
+>>>>>>> 604ab3553c8 (small pull, alternate sharding)
     estimated_time_limit: Optional[float] = None,
     sort_by_time: bool = True,
     serial: bool = False,

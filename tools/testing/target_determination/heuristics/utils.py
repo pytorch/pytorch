@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import cast, Dict, List, Set, Union
 from warnings import warn
 
+from tools.testing.test_run import TestRun
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 
 
@@ -46,7 +48,9 @@ def query_changed_files() -> List[str]:
     return lines
 
 
-def normalize_ratings(ratings: Dict[str, float], max_value: float) -> Dict[str, float]:
+def normalize_ratings(
+    ratings: Dict[TestRun, float], max_value: float
+) -> Dict[TestRun, float]:
     # Takse the ratings, makes the max value into max_value, and proportionally
     # distributes the rest of the ratings.
     # Ex [1,2,3,4] and max_value 8 gets converted to [2,4,6,8]
