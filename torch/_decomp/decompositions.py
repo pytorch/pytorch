@@ -1923,6 +1923,7 @@ def batch_norm_with_update_functional(
     )
     return (output, save_mean, save_rstd, reserve, new_rm, new_rv)
 
+
 @register_decomposition(aten.batch_norm_no_update.default)
 def batch_norm_no_update(
     input: Tensor,
