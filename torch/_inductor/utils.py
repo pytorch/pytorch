@@ -810,6 +810,9 @@ class IndentedBuffer:
             for line in other_code.split("\n"):
                 self.writeline(line)
 
+    def __repr__(self):
+        return f"{type(self)}({self.getvalue()})"
+
 
 class DeferredLineBase:
     """A line that can be 'unwritten' at a later time"""
@@ -868,7 +871,7 @@ def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> 
 
 
 def _use_autotune_backend(backend: str) -> bool:
-    return backend.upper() in [  # noqa: C412
+    return backend.upper() in [
         x.strip() for x in config.max_autotune_gemm_backends.upper().split(",")
     ]
 

@@ -7,6 +7,7 @@ import torch
 
 import torch._inductor
 
+from torch._inductor import config
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -18,6 +19,11 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 from torch.testing._internal.triton_utils import requires_cuda
 
 aten = torch.ops.aten
+
+# Many tests inspect the generated_kernel_count and FX graph caching
+# will affect that metric if there are any cache hits.
+config.fx_graph_cache = False
+
 
 try:
     try:

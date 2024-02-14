@@ -73,6 +73,8 @@ def kwargs_to_settings(**kwargs):
 # that the logs are setup correctly and capturing the correct records.
 def make_logging_test(**kwargs):
     def wrapper(fn):
+        # Disable FX graph code cache since a cache hit could change the logs:
+        @torch._inductor.config.patch({"fx_graph_cache": False})
         def test_fn(self):
 
             torch._dynamo.reset()

@@ -17,6 +17,10 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 
 aten = torch.ops.aten
 
+# Turn off FX graph caching. For these tests, we need inductor compilation to occur
+# in order to increment the "select_algorithm_autotune" counter.
+inductor_config.fx_graph_cache = False
+
 
 def patches(fn):
     def skip_cache(self, choices, name, key, generate):

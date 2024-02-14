@@ -33,6 +33,11 @@ from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
+# Turn off FX graph caching. For these tests, we need inductor compilation to occur
+# in order to increment the "pattern_matcher_count" and "pattern_matcher_nodes"
+# counters.
+inductor_config.fx_graph_cache = False
+
 
 class TestPatternMatcher(TestCase):
     def common(

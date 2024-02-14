@@ -408,6 +408,7 @@ class TestGroupBatchFusion(TestCase):
             self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
             counters.clear()
 
+    @torch._inductor.config.patch({"fx_graph_cache": False})
     def test_pointwise_op_fusion(self):
         counters.clear()
         module = TestPoitwiseOps("cuda")
@@ -454,6 +455,7 @@ class TestBMMFusionModule(torch.nn.Module):
     post_grad_fusion_options={"batch_linear_post_grad": {"require_fbgemm": False}}
 )
 class TestPostGradBatchLinearFusion(TestCase):
+    @torch._inductor.config.patch({"fx_graph_cache": False})
     def test_batch_linear_post_grad_fusion(self):
         pt1_module = TestBMMFusionModule().cuda()
         inputs = []
