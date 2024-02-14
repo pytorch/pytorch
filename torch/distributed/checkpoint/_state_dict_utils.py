@@ -1,12 +1,15 @@
 import math
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
-from torch.distributed import distributed_c10d
-from torch.distributed._shard.sharded_tensor import ShardedTensor
-from torch.distributed._tensor import DTensor, Replicate
+from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+if dist.is_available() or TYPE_CHECKING:
+    from torch.distributed import distributed_c10d
+    from torch.distributed._shard.sharded_tensor import ShardedTensor
+    from torch.distributed._tensor import DTensor, Replicate
 
 
 def _all_gather_sharded_tensor(
@@ -170,7 +173,12 @@ def _gather_state_dict(
             device_mesh=value.device_mesh,
             placements=placements,
         )
+        # Call `wait()` to force the tensor is synchronous with respect
+        # to the main stream.
+        # See the discussion in https://github.com/pytorch/pytorch/pull/117799.
         value = value.to_local()
+        if isinstance(value, AsyncCollectiveTensor):
+            value = value.wait()
         return value
 
     return _iterate_state_dict(
