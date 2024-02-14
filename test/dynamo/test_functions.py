@@ -2366,7 +2366,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
                 # Cannot handle non single-elem
                 with self.assertRaises(ValueError):
                     fn(torch.tensor([val] * 2))
-                with self.assertRaises(torch._dynamo.exc.TorchRuntimeError):
+                with self.assertRaises(torch._dynamo.exc.Unsupported):
                     opt_fn(torch.tensor([val] * 2))
 
     def test_set_construction(self):

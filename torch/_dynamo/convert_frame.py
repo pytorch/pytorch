@@ -57,7 +57,6 @@ from .exc import (
     BackendCompilerFailed,
     format_error_msg,
     InternalTorchDynamoError,
-    TorchRuntimeError,
     UncapturedHigherOrderOpError,
     unimplemented,
     Unsupported,
@@ -670,7 +669,6 @@ def _compile(
             return guarded_code
         except (
             Unsupported,
-            TorchRuntimeError,
             BackendCompilerFailed,
             AssertionError,
             ConstraintViolationError,

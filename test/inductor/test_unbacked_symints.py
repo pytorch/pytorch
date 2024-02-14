@@ -43,7 +43,7 @@ class TestUnbackedSymints(TorchTestCase):
             return nz.expand([-1, 128])
 
         x = make_tensor(32, 4, device=device, dtype=torch.float32, exclude_zero=True)
-        with self.assertRaises(torch._dynamo.exc.TorchRuntimeError):
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
             actual = torch.compile(fn, fullgraph=True)(x)
 
     @skipCUDAIf(not HAS_CUDA, "requires cuda")
