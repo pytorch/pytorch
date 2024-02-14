@@ -21810,11 +21810,6 @@ python_ref_db = [
         torch_opinfo_name="reshape_as",
     ),
     PythonRefInfo(
-        "_refs.roll",
-        torch_opinfo_name="roll",
-        validate_view_consistency=False,
-    ),
-    PythonRefInfo(
         "_refs.rot90",
         torch_opinfo_name="rot90",
         validate_view_consistency=False,
