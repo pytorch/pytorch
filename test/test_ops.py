@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     noncontiguous_like,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
     TEST_WITH_TORCHDYNAMO,
     TEST_WITH_TORCHINDUCTOR,
     TEST_WITH_UBSAN,
@@ -484,6 +485,8 @@ class TestCommon(TestCase):
         # In this test, primTorch refs call into the refs namespace
         # For example, a ref with torch.foo in it will calls refs.foo instead
         # Direct calls to refs and prims are not affected
+        if TEST_WITH_ROCM and (op.name == "_refs.fft.ihfftn" or op.name == "_refs.fft.ihfft2") and dtype == torch.float16:
+            self.skipTest("Skipped on ROCm")
         self._ref_test_helper(lambda: TorchRefsMode(strict=True), device, dtype, op)
 
     # Tests that experimental Python References perform the same computation
@@ -496,6 +499,8 @@ class TestCommon(TestCase):
         # In this test, refs call into the torch namespace (after the initial invocation)
         # For example, a ref with torch.foo in it will call torch.foo instead of refs.foo
         # Direct calls to refs and prims are not translated
+        if TEST_WITH_ROCM and op.name == "_refs.fft.ihfftn" and dtype == torch.float16:
+            self.skipTest("Skipped on ROCm")
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
@@ -504,6 +509,8 @@ class TestCommon(TestCase):
     @parametrize('executor', ['aten',])
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_executor(self, device, dtype, op, executor):
+        if TEST_WITH_ROCM and (op.name == "_refs.fft.ihfftn" or op.name == "_refs.fft.ihfft2") and dtype == torch.float16:
+            self.skipTest("Skipped on ROCm")
         # skip zero-dim tensors for some composites of reduction operations and view
         skip_zero_dim_ops = [
             "_refs.logsumexp",
@@ -1564,6 +1571,7 @@ class TestCompositeCompliance(TestCase):
                     _assert_match_metadata(new_inp, inp)
                     new_out = out._view_func_unsafe(new_inp)
                     _assert_match_metadata(new_out, out)
+                    self.assertEqual(new_out, out)
 
                     # reverse view_func
                     new_out = out.detach()

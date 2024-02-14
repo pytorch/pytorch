@@ -1,10 +1,9 @@
-import copy
 import dataclasses
 import functools
+import inspect
 import logging
 import re
 import warnings
-from collections import OrderedDict
 from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -28,9 +27,10 @@ from torch._export.passes.lift_constants_pass import (
     rewrite_script_object_meta,
 )
 from torch._export.wrappers import _wrap_submodules
-from torch._functorch.aot_autograd import aot_export_module, GraphSignature
+from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._utils_internal import log_export_usage
 from torch.export.exported_program import OutputKind
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -146,14 +146,16 @@ def _replace_param_buffer_names(param_buffer_table, sig, constants):
             spec.target = param_buffer_table[spec.target]
 
 
-def _reorder_kwargs_by_names(
-    arg_names: List[str], args: Tuple[Any], kwargs: Dict[str, Any]
-):
-    assert len(arg_names) == len(args) + len(kwargs), (
-        f"Total number of arg names is expected to be {len(arg_names)} "
+def _convert_to_positional_args(orig_arg_names, args, kwargs):
+    assert len(orig_arg_names) == len(args) + len(kwargs), (
+        f"Total number of arg names is expected to be {len(orig_arg_names)} "
         f"but got {len(args)} positional args, {len(kwargs)} kwargs."
     )
-    return OrderedDict({kw_name: kwargs[kw_name] for kw_name in arg_names[len(args) :]})
+    reordered_kwargs = [kwargs[kw_name] for kw_name in orig_arg_names[len(args) :]]
+    return (
+        *args,
+        *reordered_kwargs,
+    )
 
 
 def _normalize_nn_module_stack(gm_torch_level, root_cls):
@@ -169,10 +171,14 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
             add_root = True
             if nn_module_stack := node.meta.get("nn_module_stack", {}):
                 path, ty = next(iter(nn_module_stack.values()))
-                assert issubclass(ty, torch.nn.Module)
-                # TODO Figure out why sometimes we have root sometimes we don't.
-                if path == root and ty is root_cls:
-                    add_root = False
+                # After deserializing the class `ty` might not exist anymore so
+                # it could be a string
+                if inspect.isclass(ty) and issubclass(ty, torch.nn.Module):
+                    # TODO Figure out why sometimes we have root sometimes we don't.
+                    if path == root and ty is root_cls:
+                        add_root = False
+                else:
+                    assert isinstance(ty, str)
             if add_root:
 
                 def normalize_path(path):
@@ -333,88 +339,6 @@ def _export_to_torch_ir(
     return gm_torch_level
 
 
-def _unlift_user_inputs_to_buffers(
-    gm_torch_level: torch.fx.GraphModule, aot_export_args
-) -> List[str]:
-    flat_args = pytree.tree_leaves(aot_export_args)
-    user_input_names = []
-    with gm_torch_level.graph.inserting_before():
-        for i, (arg, node) in enumerate(zip(flat_args, gm_torch_level.graph.nodes)):
-            assert node.op == "placeholder"
-            user_input_names.append(node.name)
-            if isinstance(arg, torch.Tensor):
-                assert not hasattr(gm_torch_level, node.name)
-                gm_torch_level.register_buffer(node.name, arg)
-                get_attr = gm_torch_level.graph.get_attr(node.name)
-                node.replace_all_uses_with(get_attr)
-                get_attr.meta = copy.copy(node.meta)
-
-    for node in list(gm_torch_level.graph.nodes):
-        if node.op == "placeholder":
-            assert len(node.users) == 0
-            gm_torch_level.graph.erase_node(node)
-    gm_torch_level.recompile()
-    return user_input_names
-
-
-def _lift_buffers_to_user_inputs(
-    gm: torch.fx.GraphModule,
-    graph_signature: GraphSignature,
-    user_input_names: List[str],
-) -> Dict[str, str]:
-    assert len(graph_signature.user_inputs) == 0
-    assert graph_signature.backward_signature is None
-    names = set(user_input_names)
-
-    placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
-    # user inputs are always added in the end
-    start = len(graph_signature.parameters)
-    end = start + len(graph_signature.buffers)
-    buffer_nodes = placeholders[start:end]
-    last_placeholder_node = placeholders[-1] if len(placeholders) > 0 else None
-    old_nodes: Dict[str, torch.fx.Node] = {}
-    for node in buffer_nodes:
-        buffer_name = graph_signature.inputs_to_buffers[node.name]
-        if buffer_name not in names:
-            continue
-        old_nodes[buffer_name] = node
-    replaces = {}
-    new_node_names: Dict[str, str] = {}
-    with gm.graph.inserting_after(last_placeholder_node):
-        for name in reversed(user_input_names):
-            new_node = gm.graph.placeholder(name)
-            new_node.target = new_node.name
-            new_node_names[name] = new_node.name
-            if name in old_nodes:
-                old_node = old_nodes[name]
-                new_node.meta = copy.copy(old_node.meta)
-                old_node.replace_all_uses_with(new_node)
-                replaces[old_node.name] = new_node.name
-    new_node_names = dict(reversed(new_node_names.items()))
-    for old_node in old_nodes.values():
-        gm.graph.erase_node(old_node)
-
-    gm.recompile()
-
-    graph_signature.buffers = [b for b in graph_signature.buffers if b not in names]
-    graph_signature.inputs_to_buffers = {
-        i: b for i, b in graph_signature.inputs_to_buffers.items() if b not in names
-    }
-    user_inputs_to_mutate = {
-        o: new_node_names[b]
-        for o, b in graph_signature.buffers_to_mutate.items()
-        if b in names
-    }
-    graph_signature.buffers_to_mutate = {
-        o: b for o, b in graph_signature.buffers_to_mutate.items() if b not in names
-    }
-    graph_signature.user_inputs.extend(new_node_names.values())  # type: ignore[arg-type]
-    graph_signature.user_outputs = [
-        replaces[o] if o in replaces else o for o in graph_signature.user_outputs
-    ]
-    return user_inputs_to_mutate  # type: ignore[return-value]
-
-
 def _export_non_strict(
     mod,
     fake_args,
@@ -439,10 +363,16 @@ def _export_non_strict(
     ), grad_safe_guard, _ignore_backend_decomps():  # type: ignore[attr-defined]
         gm, graph_signature = transform(aot_export_module)(
             mod,
-            (*fake_args, *fake_kwargs.values()),
+            fake_args,
             trace_joint=False,
             pre_dispatch=pre_dispatch,
+            kwargs=fake_kwargs,
         )
+    # TODO unfortunately preserving graph-level metadata is not
+    # working well with aot_export. So we manually copy it.
+    # (The node-level meta is addressed above.)
+    if isinstance(mod, torch.fx.GraphModule) and hasattr(mod, "meta"):
+        gm.meta.update(mod.meta)
 
     # NOTE: aot_export adds symint metadata for placeholders with int values;
     # since these become specialized, we replace such metadata with the original values
@@ -487,7 +417,7 @@ def _export_non_strict(
         inputs_to_buffers=graph_signature.inputs_to_buffers,  # type: ignore[arg-type]
         user_outputs=set(graph_signature.user_outputs),  # type: ignore[arg-type]
         buffer_mutations=graph_signature.buffers_to_mutate,  # type: ignore[arg-type]
-        user_input_mutations=gm.meta.get("user_inputs_to_mutate", {}),  # type: ignore[arg-type]
+        user_input_mutations=graph_signature.user_inputs_to_mutate,  # type: ignore[arg-type]
         grad_params=graph_signature.backward_signature.gradients_to_parameters if is_joint else {},  # type: ignore[arg-type, union-attr]
         grad_user_inputs=graph_signature.backward_signature.gradients_to_user_inputs if is_joint else {},  # type: ignore[arg-type, union-attr]
         loss_output=graph_signature.backward_signature.loss_output if is_joint else None,  # type: ignore[arg-type, union-attr]
@@ -572,6 +502,23 @@ def rewrite_non_persistent_buffers(
                 constants[spec.target] = orig_mod.get_buffer(spec.target)
 
 
+def _log_export_error(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            t = type(e)
+            error_type = t.__module__ + "." + t.__qualname__
+            log_export_usage(
+                event="export.error", error_type=error_type, error_message=str(e)
+            )
+            raise e
+
+    return wrapper
+
+
+@_log_export_error
 @_disable_prexisiting_fake_mode
 def _export(
     f: torch.nn.Module,
@@ -627,6 +574,11 @@ def _export(
     """
     from .dynamic_shapes import _process_dynamic_shapes
 
+    flags = set()
+    flags.add("strict" if strict else "non_strict")
+    flags.add("pre_dispatch" if pre_dispatch else "aot_dispatch")
+    log_export_usage(event="export.enter", flags=flags)
+
     if constraints is not None:
         warnings.warn(
             "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
@@ -644,7 +596,6 @@ def _export(
 
     if not strict:
         assert isinstance(f, torch.nn.Module)
-        assert len(kwargs) == 0, "keyword arguments NYI"
         out_spec = None
 
         module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
@@ -659,7 +610,9 @@ def _export(
             return "L__self__" + strip_root(x)
 
         def _tuplify_outputs(aot_export):
-            def _aot_export_non_strict(mod, args, **kwargs):
+            def _aot_export_non_strict(mod, args, kwargs=None, **flags):
+                kwargs = kwargs or {}
+
                 class Wrapper(torch.nn.Module):
                     def __init__(self, mod):
                         super().__init__()
@@ -686,7 +639,7 @@ def _export(
                 with _wrap_submodules(
                     wrapped_mod, new_preserved_call_signatures, module_call_specs
                 ):
-                    gm, sig = aot_export(wrapped_mod, args, **kwargs)
+                    gm, sig = aot_export(wrapped_mod, args, kwargs=kwargs, **flags)
 
                 sig.parameters = pytree.tree_map(strip_root, sig.parameters)
                 sig.buffers = pytree.tree_map(strip_root, sig.buffers)
@@ -713,15 +666,19 @@ def _export(
 
             return _aot_export_non_strict
 
-        fake_mode, fake_args, src_equalities, original_signature = make_fake_inputs(
-            f, args, constraints
-        )
+        (
+            fake_mode,
+            fake_args,
+            fake_kwargs,
+            src_equalities,
+            original_signature,
+        ) = make_fake_inputs(f, args, kwargs, constraints)
 
         fake_params_buffers = make_fake_params_buffers(
             fake_mode, _get_params_buffers(f)
         )
         ep_non_strict = _export_non_strict(
-            f, fake_args, {}, fake_params_buffers, transform=_tuplify_outputs
+            f, fake_args, fake_kwargs, fake_params_buffers, transform=_tuplify_outputs
         )
         range_constraints, equality_constraints = make_constraints(
             fake_mode, src_equalities, original_signature, ep_non_strict.gm
@@ -857,11 +814,11 @@ def _export(
     if out_spec.type not in (list, tuple):
         out_spec = pytree.TreeSpec(tuple, None, [out_spec])
 
-    orig_args = gm_torch_level.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
+    orig_arg_names = gm_torch_level.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
 
     gm_torch_level.graph._codegen = _PyTreeCodeGen(
         _PyTreeInfo(
-            orig_args,
+            orig_arg_names,
             gm_torch_level._in_spec,
             out_spec,
         )
@@ -871,31 +828,12 @@ def _export(
     if isinstance(f, torch.nn.Module):
         _normalize_nn_module_stack(gm_torch_level, type(f))
 
-    def _process_user_inputs(aot_export):
-        def _aot_export_strict(gm_torch_level: torch.fx.GraphModule, args, **kwargs):
-            user_input_names = _unlift_user_inputs_to_buffers(gm_torch_level, args)
-            gm, graph_signature = aot_export(gm_torch_level, (), **kwargs)
-            user_inputs_to_mutate = _lift_buffers_to_user_inputs(
-                gm, graph_signature, user_input_names
-            )
-            # TODO unfortunately preserving graph-level metadata is not
-            # working well with aot_export. So we manually copy it.
-            # (The node-level meta is addressed above.)
-            gm.meta.update(gm_torch_level.meta)
-            assert "user_inputs_to_mutate" not in gm.meta
-            gm.meta["user_inputs_to_mutate"] = user_inputs_to_mutate
-            return gm, graph_signature
-
-        return _aot_export_strict
-
-    # Note: aot_export_module doesn't accept kwargs, we'd like to reorder the kwargs as an OrderedDict
-    # to follow the order in orig_args and correctly call module
+    # NOTE: graph module expects only positional args
     ep_non_strict = _export_non_strict(
         gm_torch_level,
-        fake_args,
-        _reorder_kwargs_by_names(orig_args, fake_args, fake_kwargs),
+        _convert_to_positional_args(orig_arg_names, fake_args, fake_kwargs),
+        {},
         fake_params_buffers,
-        transform=_process_user_inputs,
         pre_dispatch=pre_dispatch,
     )
 

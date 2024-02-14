@@ -1,18 +1,16 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+from enum import Enum
 from typing import cast, List, Optional, Sequence, Tuple
 
 import torch
 
 import torch.distributed.distributed_c10d as c10d
-from torch._decomp.decompositions import Reduction
 from torch.distributed._tensor.op_schema import (
     OpSchema,
     OpStrategy,
-    OutputSharding,
     PlacementStrategy,
     RuntimeSchemaInfo,
 )
-from torch.distributed._tensor.ops.common_rules import pointwise_rule
 from torch.distributed._tensor.ops.utils import (
     as_list,
     generate_redistribute_costs,
@@ -21,7 +19,6 @@ from torch.distributed._tensor.ops.utils import (
     normalize_dims,
     normalize_to_torch_size,
     register_op_strategy,
-    register_prop_rule,
 )
 from torch.distributed._tensor.placement_types import (
     _Partial,
@@ -34,6 +31,12 @@ from torch.distributed.device_mesh import DeviceMesh
 
 
 aten = torch.ops.aten
+
+
+class Reduction(Enum):
+    NONE = 0
+    MEAN = 1
+    SUM = 2
 
 
 def _infer_reduction_dims(dims_arg: object, ndim: int) -> Optional[List[int]]:
@@ -261,25 +264,48 @@ def softmax_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     return output_strategy
 
 
-@register_prop_rule(
+@register_op_strategy(
     [
         aten._log_softmax_backward_data.default,
         aten._softmax_backward_data.default,
     ],
     schema_info=RuntimeSchemaInfo(2),
 )
-def softmax_bwd_rule(op_schema: OpSchema) -> OutputSharding:
-    grad_out_spec, out_spec, softmax_dim, _ = op_schema.args_schema
-    grad_out_spec = cast(DTensorSpec, grad_out_spec)
-    out_spec = cast(DTensorSpec, out_spec)
+def softmax_backward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+    grad_out_strategy, out_strategy, softmax_dim, _ = op_schema.args_schema
+    grad_out_strategy = cast(OpStrategy, grad_out_strategy)
+    out_strategy = cast(OpStrategy, out_strategy)
     softmax_dim = cast(int, softmax_dim)
-    grad_out_dim_map = grad_out_spec.dim_map
-    out_dim_map = out_spec.dim_map
-    if softmax_dim < len(grad_out_dim_map) and (
-        grad_out_dim_map[softmax_dim] >= 0 or out_dim_map[softmax_dim] >= 0
+    softmax_dim = normalize_dim(softmax_dim, grad_out_strategy.output_ndim)
+
+    grad_in_strategy = OpStrategy([])
+    for grad_out_placement_strat, out_placement_strat in zip(
+        grad_out_strategy.strategies, out_strategy.strategies
     ):
-        raise RuntimeError("Cannot run _softmax_backward_data on sharding dimension!")
-    return pointwise_rule(op_schema)
+        # follow the sharding of the grad_out or out depending on which has more shards
+        grad_out_src_spec = grad_out_placement_strat.output_spec
+        out_src_spec = out_placement_strat.output_spec
+        src_spec = (
+            grad_out_src_spec
+            if grad_out_src_spec.num_shards >= out_src_spec.num_shards
+            else out_src_spec
+        )
+
+        # make sure inputs are replicated along the softmax dim
+        tgt_spec = DTensorSpec(
+            mesh=mesh,
+            placements=replicate_reduction_dims(src_spec.placements, [softmax_dim]),
+        )
+        redist_grad_out_cost = generate_redistribute_costs(grad_out_strategy, tgt_spec)
+        redist_out_cost = generate_redistribute_costs(out_strategy, tgt_spec)
+        grad_in_strategy.strategies.append(
+            PlacementStrategy(
+                output_specs=tgt_spec,
+                redistribute_cost=[redist_grad_out_cost, redist_out_cost],
+            )
+        )
+
+    return grad_in_strategy
 
 
 @register_op_strategy(
@@ -322,8 +348,7 @@ def nll_loss_forward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
         )
 
         # target doesn't have channel dim, and it follows input on other dims
-        target_placement_strategy = target_strategy.strategies[idx]
-        target_src_spec = target_placement_strategy.output_spec
+        target_src_spec = target_strategy.strategies[idx].output_spec
         target_expected_spec = DTensorSpec(
             mesh=mesh,
             placements=_skip_dim(input_expected_spec.placements, channel_dim),
@@ -351,6 +376,9 @@ def nll_loss_forward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
 
         if reduction == Reduction.NONE.value:
             output_expected_spec = target_expected_spec
+            total_weight_expected_spec = DTensorSpec(
+                mesh=mesh, placements=tuple([Replicate()] * mesh.ndim)
+            )
         else:
             if reduction == Reduction.MEAN.value:
                 reduction_op = c10d.ReduceOp.AVG
@@ -378,15 +406,139 @@ def nll_loss_forward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
                 placements=out_placements,
             )
 
+            # whether reduction is sum or mean, the total weight has to be summed up if not replicated
+            total_weight_placements = map_placements_after_reduction(
+                target_expected_spec.placements,
+                reduce_dims,
+                reduce_dims_map,
+                c10d.ReduceOp.SUM,
+            )
+            total_weight_expected_spec = DTensorSpec(
+                mesh=mesh,
+                placements=total_weight_placements,
+            )
+
         output_strategy.strategies.append(
             PlacementStrategy(
-                output_specs=output_expected_spec,
+                output_specs=(output_expected_spec, total_weight_expected_spec),
                 input_specs=op_args_target_specs,
                 redistribute_cost=redistribute_costs,
             )
         )
 
     return output_strategy
+
+
+@register_op_strategy(
+    [aten.nll_loss_backward.default, aten.nll_loss2d_backward.default],
+    schema_info=RuntimeSchemaInfo(4),
+)
+def nll_loss_backward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+    assert len(op_schema.args_schema) == 7
+    (
+        grad_out_strategy,
+        input_strategy,
+        target_strategy,
+        weight_strategy,
+        reduction,
+        _,
+        total_weight_strategy,
+    ) = op_schema.args_schema
+    grad_out_strategy = cast(OpStrategy, grad_out_strategy)
+    input_strategy = cast(OpStrategy, input_strategy)
+    target_strategy = cast(OpStrategy, target_strategy)
+    reduction = cast(int, reduction)
+    total_weight_strategy = cast(OpStrategy, total_weight_strategy)
+
+    input_shape = input_strategy.output_shape
+    channel_dim = 1 if len(input_shape) >= 2 else 0
+
+    grad_in_strategy = OpStrategy([])
+    for idx, input_placement_strategy in enumerate(input_strategy.strategies):
+        op_args_target_specs = []
+        redistribute_costs = []
+
+        # make sure input is replicated along the channel dim
+        input_src_spec = input_placement_strategy.output_spec
+        input_expected_spec = DTensorSpec(
+            mesh=mesh,
+            placements=replicate_reduction_dims(
+                input_src_spec.placements, [channel_dim]
+            ),
+            tensor_meta=input_src_spec.tensor_meta,
+        )
+        op_args_target_specs.append(input_expected_spec)
+        redistribute_costs.append(
+            generate_redistribute_costs(input_strategy, input_expected_spec)
+        )
+
+        # target doesn't have channel dim, and it follows input on other dims
+        target_src_spec = target_strategy.strategies[idx].output_spec
+        target_expected_spec = DTensorSpec(
+            mesh=mesh,
+            placements=_skip_dim(input_expected_spec.placements, channel_dim),
+            tensor_meta=target_src_spec.tensor_meta,
+        )
+        op_args_target_specs.append(target_expected_spec)
+        redistribute_costs.append(
+            generate_redistribute_costs(target_strategy, target_expected_spec)
+        )
+
+        # grad_out follows target if there is no reduction;
+        # otherwise, it should be a replicated scalar.
+        grad_out_src_spec = grad_out_strategy.strategies[idx].output_spec
+        if reduction == Reduction.NONE.value:
+            grad_out_expected_spec = target_expected_spec
+        else:
+            grad_out_expected_spec = DTensorSpec(
+                mesh=mesh,
+                placements=_replicate_dims_start_at(grad_out_src_spec.placements),
+                tensor_meta=grad_out_src_spec.tensor_meta,
+            )
+        op_args_target_specs.insert(0, grad_out_expected_spec)
+        redistribute_costs.insert(
+            0, generate_redistribute_costs(grad_out_strategy, grad_out_expected_spec)
+        )
+
+        # weight tensor, if given, has to be a Tensor of size input_shape[channel_dim]
+        # make sure it is replicated
+        if weight_strategy is not None:
+            assert isinstance(weight_strategy, OpStrategy)
+            weight_src_spec = weight_strategy.strategies[idx].output_spec
+            weight_expected_spec = DTensorSpec(
+                mesh=mesh,
+                placements=_replicate_dims_start_at(weight_src_spec.placements),
+                tensor_meta=weight_src_spec.tensor_meta,
+            )
+            op_args_target_specs.append(weight_expected_spec)
+            redistribute_costs.append(
+                generate_redistribute_costs(weight_strategy, weight_expected_spec)
+            )
+
+        # total_weight should always be replicated
+        total_weight_src_spec = total_weight_strategy.strategies[idx].output_spec
+        total_weight_expected_spec = DTensorSpec(
+            mesh=mesh,
+            placements=_replicate_dims_start_at(total_weight_src_spec.placements),
+            tensor_meta=total_weight_src_spec.tensor_meta,
+        )
+        op_args_target_specs.append(total_weight_expected_spec)
+        redistribute_costs.append(
+            generate_redistribute_costs(
+                total_weight_strategy, total_weight_expected_spec
+            )
+        )
+
+        grad_in_expected_spec = input_expected_spec
+        grad_in_strategy.strategies.append(
+            PlacementStrategy(
+                output_specs=grad_in_expected_spec,
+                input_specs=op_args_target_specs,
+                redistribute_cost=redistribute_costs,
+            )
+        )
+
+    return grad_in_strategy
 
 
 @register_op_strategy(

@@ -1114,7 +1114,7 @@ class TestList(JitTestCase):
 
         def check_list(fn, li):
             if len(li) == 0:
-                self.checkScriptRaisesRegex(fn, (li,), Exception, "arg is an empty sequence")
+                self.checkScriptRaisesRegex(fn, (li,), Exception, "empty")
             else:
                 self.checkScript(fn, (li,))
 

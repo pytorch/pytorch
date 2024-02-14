@@ -113,6 +113,7 @@ CLOSURE_VARS = {
     # If not numpy array, piggy back on e.g. tensor guards to check type
     (lambda a: torch.as_tensor(a) if isinstance(a, (np.generic, np.ndarray)) else a),
     "torch": torch,
+    "inspect": inspect,
 }
 
 if sys.version_info[:2] <= (3, 8):
@@ -348,13 +349,13 @@ class GuardBuilder(GuardBuilderBase):
 
         self._produce_guard_code(guard, [code], provided_guarded_object=self.get(base))
 
-    def FUNCTORCH_CURRENT_LEVEL_MATCH(self, guard: Guard):
-        # Invalidate the graph if a call to vmap has been made prior to this
-        # This is super conservative as the interpreter stack may not contain
-        # vmap
-        code = [
-            "torch._C._functorch.maybe_current_level() is None",
-        ]
+    def FUNCTORCH_STACK_MATCH(self, guard: Guard):
+        # Invalidate functorch code if current level is different than
+        # the one when FX graph was generated
+        # if torch._C._functorch.peek_interpreter_stack() is not None:
+        cis = torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters()
+        states = [ci.get_state() for ci in cis]
+        code = [f"torch._functorch.pyfunctorch.compare_functorch_state({states})"]
         self._produce_guard_code(guard, code)
 
     def EQUALS_MATCH(self, guard: Guard):

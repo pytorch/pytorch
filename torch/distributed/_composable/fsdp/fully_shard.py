@@ -6,6 +6,7 @@ import torch.nn as nn
 
 from torch.distributed._composable import contract
 from torch.distributed._tensor import DeviceMesh
+from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
 from ._fsdp_init import (
     _get_device_from_mesh,
@@ -27,6 +28,7 @@ def fully_shard(
     *,
     mesh: Optional[DeviceMesh] = None,
     reshard_after_forward: Union[bool, int] = True,
+    mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
 ):
     """
     Shard module parameters across data parallel workers.
@@ -84,6 +86,9 @@ def fully_shard(
             between forward and backward, the registered parameters must be the
             sharded parameters. For ``False`` or an ``int``, this can be done
             by manually resharding via :meth:`reshard`.
+        mp_policy (MixedPrecisionPolicy): This controls the mixed precision
+            policy, which offers parameter/reduction mixed precision for this
+            module. See :class:`MixedPrecisionPolicy` for details.
     """
     if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
         raise ValueError(
@@ -102,14 +107,14 @@ def fully_shard(
     )
 
     state = fully_shard.state(module)
-    state.init(module, device)
+    state.init(module, device, mp_policy)
 
     managed_modules = _get_managed_modules(module)
     params, buffers = _get_managed_states(managed_modules)
     _move_states_to_device(params, buffers, device, mesh_info)
     if params:
         state._fsdp_param_group = FSDPParamGroup(
-            params, module, mesh_info, post_forward_mesh_info, device
+            params, module, mesh_info, post_forward_mesh_info, device, mp_policy
         )
 
     # for dynamo
@@ -150,7 +155,20 @@ class FSDP:
         to the module and freeing the unsharded parameters if needed. This
         method is *not* recursive.
         """
-        if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None:
-            raise AssertionError(f"No FSDP state found on {self}")
+        state = self._get_fsdp_state()
         if fsdp_param_group := state._fsdp_param_group:
             fsdp_param_group.reshard()
+
+    def set_is_last_backward(self, is_last_backward: bool) -> None:
+        """
+        Sets whether the next backward is the last one, meaning that FSDP
+        should wait for gradient reduction to finish and clear internal data
+        structures used for explicit prefetching.
+        """
+        state = self._get_fsdp_state()
+        state._state_ctx.is_last_backward = is_last_backward
+
+    def _get_fsdp_state(self) -> FSDPState:
+        if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None:
+            raise AssertionError(f"No FSDP state found on {self}")
+        return state
