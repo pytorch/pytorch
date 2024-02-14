@@ -27,13 +27,12 @@ import sympy
 import torch
 from torch._dynamo.utils import dynamo_timed
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._triton import has_triton
 
 from . import comms, config, dependencies, ir, metrics
 from .codegen.common import get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
-from .dependencies import StarDep, WeakDep
+from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
 from .sizevars import SimplifyIndexing
 from .utils import (
@@ -44,6 +43,8 @@ from .utils import (
     get_dtype_size,
     get_gpu_dram_gbps,
     green_text,
+    is_collective,
+    is_wait,
     red_text,
     sympy_product,
 )
@@ -295,6 +296,9 @@ class BaseSchedulerNode:
         return self.node.get_device()
 
     def is_reduction(self):
+        return False
+
+    def is_split_scan(self):
         return False
 
     def is_template(self):
@@ -581,6 +585,16 @@ class BaseSchedulerNode:
             # default to no reordering based on runtime
             return 0
 
+        # Collective kernels
+        if is_collective(self.node):
+            return estimate_nccl_collective_runtime(self.node)
+        elif is_wait(self.node):
+            # ir.Wait is only used for collective ops.
+            # The time needed for the collective op is already estimated and considered
+            # when we are processing the collective op IR node, so ir.Wait takes 0 time
+            # since it doesn't take extra time to get the result after the collective is completed.
+            return 0
+
         try:
             gpu_memory_bandwidth = get_gpu_dram_gbps()
             gpu_flops = get_device_tflops(dtype) * 10**12
@@ -625,16 +639,6 @@ class BaseSchedulerNode:
         ):
             # Return estimated runtime in nanoseconds (bytes / gbps)
             return self.get_read_write_buffers_sizes() / gpu_memory_bandwidth
-
-        # Collective kernels
-        if isinstance(self.node, ir.CollectiveKernel):
-            return estimate_nccl_collective_runtime(self)
-        elif isinstance(self.node, ir.Wait):
-            # ir.Wait is only used for collective ops.
-            # The time needed for the collective op is already estimated and considered
-            # when we are processing the collective op IR node, so ir.Wait takes 0 time
-            # since it doesn't take extra time to get the result after the collective is completed.
-            return 0
 
         return 0
 
@@ -723,6 +727,14 @@ class SchedulerNode(BaseSchedulerNode):
             self.node, (ir.ComputedBuffer, ir.TemplateBuffer)
         ), f"{type(self.node)=}"
         return bool(self.node.get_reduction_type())
+
+    def is_split_scan(self):
+        assert isinstance(
+            self.node, (ir.ComputedBuffer, ir.TemplateBuffer)
+        ), f"{type(self.node)=}"
+        return isinstance(self.node, ir.ComputedBuffer) and isinstance(
+            self.node.data, ir.SplitScan
+        )
 
     def is_template(self):
         return isinstance(self.node, ir.TemplateBuffer)
@@ -891,6 +903,10 @@ class FusedSchedulerNode(BaseSchedulerNode):
     @cache_on_self
     def is_reduction(self):
         return any(x.is_reduction() for x in self.snodes)
+
+    @cache_on_self
+    def is_split_scan(self):
+        return any(x.is_split_scan() for x in self.snodes)
 
     @cache_on_self
     def is_template(self):
@@ -1492,16 +1508,13 @@ class Scheduler:
 
         # make sure unbacked symints aren't dead-code-eliminated
         for node in V.graph.graph_outputs:
-            if isinstance(node, ir.ShapeAsConstantBuffer):
-                for s in free_unbacked_symbols(node.shape):
-                    assert (
-                        s in unbacked_symbol_to_origin_node
-                    ), f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
-                    node_name = unbacked_symbol_to_origin_node[s].node.name
-                    log.debug(
-                        "scheduling output %s for unbacked symint %s", node_name, s
-                    )
-                    add_user(node_name, OutputNode(StarDep(node_name)))
+            for s in node.get_unbacked_symbol_uses():
+                assert (
+                    s in unbacked_symbol_to_origin_node
+                ), f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
+                node_name = unbacked_symbol_to_origin_node[s].node.name
+                log.debug("scheduling output %s for unbacked symint %s", node_name, s)
+                add_user(node_name, OutputNode(StarDep(node_name)))
 
         # make sure input mutation isn't dead-code-eliminated
         for name in self.mutation_renames:
@@ -1996,26 +2009,32 @@ class Scheduler:
         We can fuse them if all the reads of node2 either match
         corresponding writes in node1, or are written by nodes that can
         be scheduled before the fusion of node1 and node2.
+
+        We also disable fusion of a write subsequent to a read if the reads
+        and writes do not align.
         """
         node1_names = node1.get_names()
         computed_deps = set()
         why = WhyNoFuse(node1, node2)
 
+        # StarDep doesn't match MemoryDep, different indices don't match
+        # However, broadcasting sometimes strips dimensions, and if that's the case
+        # we still can match unmet dep
+        # if there's indirect indexing, don't match it
+        def fusable_read_and_write(read: Dep, write: Dep):
+            return (
+                self.mutation_renames.get(read.name, read.name) == write.name
+                and (isinstance(read, MemoryDep) and isinstance(write, MemoryDep))
+                and not free_symbol_has(read.index, "tmp")
+                and not free_symbol_has(write.index, "tmp")
+                and read.index == write.index
+                and len(read.size) >= len(write.size)
+                and read.size[: len(write.size)] == write.size
+            )
+
         for rd in node2.unmet_dependencies:
             for cd in node1.read_writes.writes:
-                # StarDep doesn't match MemoryDep, different indices don't match
-                # However, broadcasting sometimes strips dimensions, and if that's the case
-                # we still can match unmet dep
-                # if there's indirect indexing, don't match it
-                if (
-                    rd.name == cd.name
-                    and type(rd) == type(cd)
-                    and not free_symbol_has(rd.index, "tmp")
-                    and not free_symbol_has(cd.index, "tmp")
-                    and rd.index == cd.index
-                    and len(rd.size) >= len(cd.size)
-                    and rd.size[: len(cd.size)] == cd.size
-                ):
+                if fusable_read_and_write(rd, cd):
                     computed_deps.add(rd)
 
         remaining_deps = {dep.name for dep in node2.unmet_dependencies - computed_deps}
@@ -2030,6 +2049,19 @@ class Scheduler:
             if node1_names & self.name_to_fused_node[name].ancestors:
                 why("intermediate nodes between node1 & node2")
                 return False
+
+        # similar to can_inplace, if we are going to fuse a write subsequent to a read
+        # require that the indexing and size is the same
+        for write in node2.read_writes.writes:
+            for read in node1.read_writes.reads:
+                if write.name != self.mutation_renames.get(read.name, read.name):
+                    continue
+
+                # bail on StarDep
+                if not fusable_read_and_write(read=read, write=write):
+                    why("fusing a write into a read with different indexing formula")
+                    return False
+
         return True
 
     def score_fusion(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
@@ -2280,6 +2312,11 @@ class Scheduler:
                 if self.get_backend(device).ready_to_flush():
                     self.flush()
 
+        if self.current_device and self.current_device.type == "cuda":
+            # exit the outermost CUDA device guard. this is
+            # important for nested indentation codegen-ing.
+            V.graph.wrapper_code.codegen_device_guard_exit()
+
         self.flush()
 
     def is_unaligned_buffer(self, buf_name):
@@ -2324,7 +2361,7 @@ class BaseScheduling:
         """
         raise NotImplementedError()
 
-    def codegen_nodes(self, nodes: List[BaseSchedulerNode]):
+    def codegen_nodes(self, nodes: List[SchedulerNode]):
         """
         Generate a kernel given a list of pre-fused nodes.
         """
