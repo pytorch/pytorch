@@ -1859,6 +1859,18 @@ def device_hint(tensor):
     else:
         return None
 
+def wrap_output_with_input_device_(x, common_device):
+    # wrap meta tensor
+    if common_device is not None and x.device.type == "meta":
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        fake_mode = FakeTensorMode()
+        fake_mode.in_kernel_invocation = True
+        converter = fake_mode.fake_tensor_converter
+        return converter.from_meta_and_device(fake_mode, x, common_device)
+
+    return x
+
 @register_decomposition(aten._to_copy)
 @out_wrapper()
 def _to_copy(
@@ -1891,8 +1903,10 @@ def _to_copy(
         dtype_converted = True
 
     currentIsFake = isinstance(x, torch._subclasses.FakeTensor)
-    if inputIsFake:
-        assert currentIsFake
+    if dtype_converted and inputIsFake and not currentIsFake:
+        # In case of dtype promotion, faketensor could be converted into tensor.
+        # Need to convert into faketensor if input was a faketensor.
+        x = wrap_output_with_input_device_(x, common_device)
 
     if memory_format is not None:  # no ref/prim for memory format
         return torch.clone(x, memory_format=memory_format)
