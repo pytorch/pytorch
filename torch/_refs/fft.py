@@ -66,7 +66,7 @@ def _promote_type_fft(
         dtype = torch.get_default_dtype()
 
     allowed_types = [torch.float32, torch.float64]
-    maybe_support_half = device.type in ["cuda", "meta"] and not torch.version.hip
+    maybe_support_half = device.type in ["cuda", "meta"]
 
     if maybe_support_half:
         allowed_types.append(torch.float16)
