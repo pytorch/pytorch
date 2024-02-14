@@ -456,3 +456,33 @@ class TestMisc(JitTestCase):
         self.assertTrue(len(complex_indices) > 0)
         self.assertTrue(len(Scalar_indices) > 0)
         self.assertTrue(complex_indices[0] > Scalar_indices[0])
+
+
+    def test_jit_disable_alias_db(self):
+        try:
+            torch._C._get_disable_alias_db(True)
+
+            @torch.jit.script
+            def foo(a):
+                li = []
+                li.append(a)
+                out = li[0]
+                out.add_(2)
+
+            FileCheck().check("add_").run(foo.graph)
+
+        finally:
+            torch._C._get_disable_alias_db(False)
+
+    def test_constant_pooling_immutable(self):
+        @torch.jit.script
+        def foo():
+            x = torch.ones([20])
+            y = torch.ones([20])
+            return (torch.rand([20]) + x) + y
+
+        self.run_pass('constant_propagation', foo.graph)
+        self.run_pass('constant_pooling_immutable_types', foo.graph)
+        FileCheck().check_count("Float(20", 2, exactly=True).run(foo.graph)
+        self.run_pass('constant_pooling', foo.graph)
+        FileCheck().check_count("Float(20", 1, exactly=True).run(foo.graph)

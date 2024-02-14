@@ -9,6 +9,11 @@ namespace jit {
 // but leaves tuples in place across if statements, loops, and as inputs/outputs
 TORCH_API void LowerSimpleTuples(const std::shared_ptr<Graph>& graph);
 
+// like LowerSimpleTuples but will DCE without AliasDb (more conservative but
+// faster)
+TORCH_API void LowerSimpleTuplesWithoutAliasDb(
+    const std::shared_ptr<Graph>& graph);
+
 // removes _all_ tuples and raises an error if some cannot be removed
 // this is used by ONNX to ensure there are not tuples before conversion,
 // but will not work on graphs whose inputs contain tuples.

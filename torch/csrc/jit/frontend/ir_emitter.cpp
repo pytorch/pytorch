@@ -24,10 +24,13 @@
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/passes/replacement_of_old_operators.h>
+#include <torch/csrc/jit/python/update_graph_executor_opt.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
+#include <torch/csrc/jit/runtime/update_disable_alias_db.h>
 #include <torch/csrc/jit/testing/hooks_for_testing.h>
 
 #include <torch/csrc/jit/ir/constants.h>
@@ -5677,7 +5680,11 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   eraseListLiterals(to_clean);
 
   // remove any uses of tuples that we inserted that are not needed
-  LowerSimpleTuples(to_clean);
+  if (getDisableAliasDb()) {
+    LowerSimpleTuples(to_clean);
+  } else {
+    LowerSimpleTuplesWithoutAliasDb(to_clean);
+  }
 
   // full constant propagation runs ops with mutable inputs if it can
   // prove that the inputs are not mutated anywhere in the graph.
@@ -5686,11 +5693,16 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   // to run nodes it was not able to previously, and the graph may change
   // (jitter) So we run only constant prop w immutable types here bc
   // successive runs of immutable constant prop does not change the graph
-  ConstantPropagationImmutableTypes(to_clean);
+  ConstantPropagationImmutableTypes(
+      to_clean, /*dce_with_alias_db*/ !getDisableAliasDb());
 
   // Constant Pooling pass must be after ConstantPropogation, which can create
   // new constants that needs to be pooled.
-  ConstantPooling(to_clean);
+  if (getDisableAliasDb()) {
+    ConstantPoolingImmutableTypes(to_clean);
+  } else {
+    ConstantPooling(to_clean);
+  }
 
   // For jitter
   CanonicalizeOutputs(to_clean);

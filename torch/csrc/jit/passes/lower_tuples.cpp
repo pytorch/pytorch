@@ -338,5 +338,12 @@ void LowerSimpleTuples(const std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("After LowerSimpleTuples: ", graph);
   EliminateDeadCode(graph);
 }
+
+void LowerSimpleTuplesWithoutAliasDb(const std::shared_ptr<Graph>& graph) {
+  LowerSimpleTuples(graph->block());
+  GRAPH_DUMP("After LowerSimpleTuples: ", graph);
+  EliminateDeadCodeWithoutAliasDb(graph);
+}
+
 } // namespace jit
 } // namespace torch

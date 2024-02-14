@@ -26,6 +26,10 @@ TORCH_API void EliminateDeadCode(
     const std::shared_ptr<Graph>& graph,
     DCESideEffectPolicy sideEffectPolicy =
         DCESideEffectPolicy::DONT_DELETE_NODES_WITH_SIDE_EFFECTS);
+
+TORCH_API void EliminateDeadCodeWithoutAliasDb(
+    const std::shared_ptr<Graph>& graph);
+
 TORCH_API void EliminateDeadCode(
     Block* block,
     bool recurse = true,
@@ -38,5 +42,6 @@ TORCH_API void EliminateDeadCode(
     std::function<void(const std::unordered_set<const Value*>&)> cb,
     DCESideEffectPolicy sideEffectPolicy =
         DCESideEffectPolicy::DONT_DELETE_NODES_WITH_SIDE_EFFECTS);
+
 } // namespace jit
 } // namespace torch

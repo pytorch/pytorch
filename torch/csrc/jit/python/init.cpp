@@ -489,6 +489,10 @@ void initJITBindings(PyObject* module) {
           py::arg("value_name_pairs") =
               std::vector<std::pair<std::string, std::string>>())
       .def("_jit_pass_constant_pooling", ConstantPooling)
+      .def(
+          "_jit_pass_constant_pooling_immutable_types",
+          ConstantPoolingImmutableTypes)
+      .def("_jit_pass_dce_without_alias_db", EliminateDeadCodeWithoutAliasDb)
       // RemoveInplaceOps is used by CoreML so it must be removed with care.
       .def("_jit_pass_propagate_dtype", DtypePropagation)
       .def("_jit_pass_propagate_device", DeviceTypePropagation)

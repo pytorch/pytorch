@@ -44,6 +44,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/jit/python/update_graph_executor_opt.h>
 #include <torch/csrc/jit/runtime/logging.h>
+#include <torch/csrc/jit/runtime/update_disable_alias_db.h>
 
 #include <cstdint>
 #include <iterator>
@@ -874,7 +875,11 @@ void runRequiredPasses(const std::shared_ptr<Graph>& g) {
   // add valid expand nodes when the shapes are stable
   RemoveExpands(g);
   CanonicalizeOps(g);
-  EliminateDeadCode(g);
+  if (getDisableAliasDb()) {
+    EliminateDeadCodeWithoutAliasDb(g);
+  } else {
+    EliminateDeadCode(g);
+  }
 }
 
 void packGradient(const Gradient& gradient, Node* dnode) {
