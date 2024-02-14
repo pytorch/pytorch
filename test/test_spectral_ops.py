@@ -120,8 +120,6 @@ def skip_helper_for_fft(device, dtype):
 
     if device_type == 'cpu':
         raise unittest.SkipTest("half and complex32 are not supported on CPU")
-    if TEST_WITH_ROCM:
-        raise unittest.SkipTest("half and complex32 are not supported on ROCM")
     if not SM53OrLater:
         raise unittest.SkipTest("half and complex32 are only supported on CUDA device with SM>53")
 
