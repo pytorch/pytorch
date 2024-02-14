@@ -30,11 +30,11 @@ CUDA Environment Variables
   * - ``TORCH_ALLOW_TF32_CUBLAS_OVERRIDE``
     - If set to ``1``, forces TF32 enablement, overrides ``set_float32_matmul_precision`` setting.
   * - ``NVIDIA_TF32_OVERRIDE``
-    - If set to ``1``, disables TF32 globally across all kernels, overriding all PyTorch setting.
+    - If set to ``0``, disables TF32 globally across all kernels, overriding all PyTorch settings.
   * - ``TORCH_NCCL_USE_COMM_NONBLOCKING``
     - If set to ``1``, enables non-blocking error handling in NCCL.
   * - ``TORCH_NCCL_AVOID_RECORD_STREAMS``
-    - If set to ``1``, enbales fallback to record streams-based synchronization behavior in NCCL.
+    - If set to ``0``, enables fallback to record streams-based synchronization behavior in NCCL.
   * - ``TORCH_CUDNN_V8_API_DEBUG``
     - If set to ``1``, sanity check whether cuDNN V8 is being used.
   * - ``CUDNN_ERRATA_JSON_FILE``
