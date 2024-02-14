@@ -562,7 +562,7 @@ class TestOperators(TestCase):
                                      test_noncontig=op.name not in skip_noncontig)
 
     def jvp_opinfo_test(self, fn, sample, output_process_fn,
-                        clone_inputs, fixme_ref_jvp_local):
+                        clone_inputs, fixme_ref_jvp_local, test_noncontig):
         # NB: we used requires_grad=True to determine where the primals are,
         # but don't need that information otherwise
         args = (sample.input,) + sample.args

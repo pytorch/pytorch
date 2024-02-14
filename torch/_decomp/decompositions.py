@@ -1865,7 +1865,9 @@ def _get_batch_norm_reserve_tensor(
     reserve_size = 0
     if backend == torch._C._BatchNormBackend.Cudnn:  # type: ignore[attr-defined]
         reserve_size = torch._C._get_cudnn_batch_norm_reserve_space_size(input)  # type: ignore[attr-defined]
-    return torch.empty(reserve_size, dtype=torch.uint8, layout=input.layout, device=input.device)
+    return torch.empty(
+        reserve_size, dtype=torch.uint8, layout=input.layout, device=input.device
+    )
 
 
 @register_decomposition(aten.batch_norm_with_update.default)
