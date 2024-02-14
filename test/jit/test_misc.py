@@ -471,6 +471,18 @@ class TestMisc(JitTestCase):
 
             FileCheck().check("add_").run(foo.graph)
 
-
         finally:
             torch._C._get_disable_alias_db(False)
+
+    def test_constant_pooling_immutable(self):
+        @torch.jit.script
+        def foo():
+            x = torch.ones([20])
+            y = torch.ones([20])
+            return (torch.rand([20]) + x) + y
+
+        self.run_pass('constant_propagation', foo.graph)
+        self.run_pass('constant_pooling_immutable_types', foo.graph)
+        FileCheck().check_count("Float(20", 2, exactly=True).run(foo.graph)
+        self.run_pass('constant_pooling', foo.graph)
+        FileCheck().check_count("Float(20", 1, exactly=True).run(foo.graph)

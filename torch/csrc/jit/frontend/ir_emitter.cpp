@@ -5699,8 +5699,9 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   // new constants that needs to be pooled.
   if (getDisableAliasDb()) {
     ConstantPoolingImmutableTypes(to_clean);
+  } else {
+    ConstantPooling(to_clean);
   }
-  { ConstantPooling(to_clean); }
 
   // For jitter
   CanonicalizeOutputs(to_clean);
