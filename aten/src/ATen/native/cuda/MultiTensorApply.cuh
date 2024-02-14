@@ -81,7 +81,7 @@ __device__ __forceinline__ void load_store(
 // arguments, but it led to multiple kernel launches and lower sustained
 // occupancy.
 struct DevArrayPack {
-  static constexpr size_t max_arrays = 8;
+  static constexpr size_t max_arrays = 16;
   // The buffer size is selected to ensure that the combined argument size of
   // multi_tensor_apply_dev_array_pack_kernel does not exceed
   // max_kernel_arg_size for all template specializations. This is enforced at
@@ -202,6 +202,7 @@ struct TensorListMetadata {
       std::vector<size_t>& block_to_tensor,
       std::vector<size_t>& block_to_chunk,
       const at::Device& device) {
+    static_assert(n + 3 <= DevArrayPack::max_arrays);
     return pack_vectors(
         device, addresses, numel_for_tensor, block_to_tensor, block_to_chunk);
   }
@@ -277,6 +278,7 @@ struct FusedOptimizerTensorListMetadata {
       std::vector<size_t>& block_to_tensor,
       std::vector<size_t>& block_to_chunk,
       const at::Device& device) {
+    static_assert(n + 4 <= DevArrayPack::max_arrays);
     return pack_vectors(
         device,
         addresses,
