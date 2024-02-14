@@ -2,9 +2,11 @@
 # Owner(s): ["oncall: distributed"]
 
 from copy import deepcopy
+import itertools
 import torch
 import torch.distributed as dist
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
+import torch.nn.functional as F
+from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard, distribute_tensor
 import torch.distributed._functional_collectives as funcol
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
@@ -12,6 +14,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 )
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
+    loss_parallel,
     parallelize_module,
     PrepareModuleInput,
     RowwiseParallel,
@@ -341,6 +344,47 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         output.sum().backward()
         self.assertEqual(model.embedding.weight.grad, model.fc.weight.grad)
         self.assertEqual(id(model.embedding.weight.grad), id(model.fc.weight.grad))
+
+    @with_comms
+    def test_loss_parallel(self):
+        device_mesh = self.build_device_mesh()
+
+        channel_size, channel_dim = 16, 1
+        test_setup = [
+            (2, (8, channel_size), (8,)),  # calling aten.nll_loss_forward
+            (3, (8, channel_size, 12), (8, 12)),  # calling aten.nll_loss2d_forward
+        ]
+        for input_ndim, input_size, target_size in test_setup:
+            x = torch.rand(*input_size, device=self.device_type, requires_grad=True)
+            target = torch.randint(channel_size, target_size, device=self.device_type)
+
+            shard_dims = list(range(input_ndim))
+            reductions = ["none", "mean", "sum"]
+            for shard_dim, reduction in itertools.product(shard_dims, reductions):
+                dist_x = distribute_tensor(x, device_mesh, [Shard(shard_dim)])
+                y = F.cross_entropy(x, target, reduction=reduction)
+                with loss_parallel():
+                    if shard_dim == channel_dim:
+                        dist_y = F.cross_entropy(dist_x, target, reduction=reduction)
+                        self.assertTrue(dist_y.placements[0].is_replicate())
+                        self.assertEqual(dist_y.to_local(), y)
+
+                        if reduction == "none":
+                            y.sum().backward()
+                            dist_y.sum().backward()
+                        else:
+                            y.backward()
+                            dist_y.backward()
+                        self.assertTrue(dist_x.grad.placements[0].is_shard(shard_dim))
+                        self.assertEqual(dist_x.grad.full_tensor(), x.grad)
+                        x.grad.zero_()
+                    else:
+                        with self.assertRaisesRegex(
+                            ValueError,
+                            "loss_parallel",
+                        ):
+                            dist_y = F.cross_entropy(dist_x, target, reduction=reduction)
+
 
 
 instantiate_parametrized_tests(DistTensorParallelExampleTest)
