@@ -1357,8 +1357,7 @@ if HAS_CUDA and HAS_LARK:
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
-            # TODO(oulgen): While loops not implemented yet
-            ["in_ptr0", "in_ptr1", "out_ptr"],
+            ["out_ptr"],
         ],
         [
             cond_op_kernel,
