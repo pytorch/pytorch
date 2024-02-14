@@ -582,7 +582,7 @@ void broadcast(
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; i++) {
-    int device = tensors[i].get_device();
+    auto device = tensors[i].get_device();
     device_guard.set_index(device);
     // Default to the current stream
     const auto stream = (streams.empty() || !streams[i])
@@ -634,7 +634,7 @@ void reduce(
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
   for (const auto i : c10::irange(len)) {
-    int device = inputs[i].device().index();
+    auto device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
     const auto stream = (streams.empty() || !streams[i])
@@ -688,7 +688,7 @@ void all_reduce(
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
   for (const auto i : c10::irange(len)) {
-    int device = inputs[i].device().index();
+    auto device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
     const auto stream = (streams.empty() || !streams[i])
@@ -730,7 +730,7 @@ void reduce_scatter(
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
   for (const auto i : c10::irange(len)) {
-    int device = inputs[i].device().index();
+    auto device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
     const auto stream = (streams.empty() || !streams[i])
@@ -771,7 +771,7 @@ void all_gather(
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
   for (const auto i : c10::irange(len)) {
-    int device = inputs[i].device().index();
+    auto device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
     const auto stream = (streams.empty() || !streams[i])

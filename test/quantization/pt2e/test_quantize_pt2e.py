@@ -1744,7 +1744,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
     def test_observer_callback(self):
         from torch.library import Library, impl
-        test_lib = Library("test_int4", "DEF")
+        test_lib = Library("test_int4", "DEF")  # noqa: TOR901
         test_lib.define("quantize_per_tensor_int4(Tensor input, float scale, int zero_point) -> Tensor")
 
         @impl(test_lib, "quantize_per_tensor_int4", "CompositeExplicitAutograd")
