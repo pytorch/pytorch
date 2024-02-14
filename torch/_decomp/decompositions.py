@@ -4435,7 +4435,7 @@ def roll(a: Tensor, shifts, dims=()) -> Tensor:
     size = a.shape[dim]
     start = (size - shifts[0]) % size
     idx = torch.arange(size, device=a.device)
-    return a.index_select(dim, (start + idx) % size)
+    return a.index_select(dim, torch.fmod(start + idx, size))
 
 
 @register_decomposition([aten.baddbmm])

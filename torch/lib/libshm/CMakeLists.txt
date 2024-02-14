@@ -29,7 +29,7 @@ set_target_properties(shm PROPERTIES
   PREFIX "lib"
   IMPORT_PREFIX "lib"
   CXX_STANDARD 17)
-target_link_libraries(shm PUBLIC torch)
+target_link_libraries(shm PUBLIC torch caffe2::openmp torch::cudnn caffe2::cublas CUDA::cusparse CUDA::cufft /usr/local/cuda-12.0.0/extras/CUPTI/lib64/libcupti.so)
 
 if(UNIX AND NOT APPLE)
   include(CheckLibraryExists)
