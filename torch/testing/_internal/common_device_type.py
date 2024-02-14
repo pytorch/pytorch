@@ -18,7 +18,8 @@ from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, TEST_MPS, \
     _TestParametrizer, compose_parametrize_fns, dtype_name, \
     TEST_WITH_MIOPEN_SUGGEST_NHWC, NATIVE_DEVICES, skipIfTorchDynamo, \
-    get_tracked_input, clear_tracked_input, PRINT_REPRO_ON_FAILURE
+    get_tracked_input, clear_tracked_input, PRINT_REPRO_ON_FAILURE, \
+    TEST_WITH_TORCHINDUCTOR
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, \
     TEST_CUSPARSE_GENERIC, TEST_HIPSPARSE_GENERIC, _get_torch_rocm_version
 from torch.testing._internal.common_dtype import get_all_dtypes
@@ -931,7 +932,7 @@ class ops(_TestParametrizer):
                         finally:
                             clear_tracked_input()
 
-                    if self.skip_if_dynamo:
+                    if self.skip_if_dynamo and not TEST_WITH_TORCHINDUCTOR:
                         test_wrapper = skipIfTorchDynamo("Policy: we don't run OpInfo tests w/ Dynamo")(test_wrapper)
 
                     # Initialize info for the last input seen. This is useful for tracking
