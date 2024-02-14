@@ -56,7 +56,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
 
 def dcp_to_torch_save(
     dcp_checkpoint_dir: Union[str, os.PathLike],
-    torch_save_fn: Union[str, os.PathLike],
+    torch_save_path: Union[str, os.PathLike],
 ):
     """
     Given a directory containing a DCP checkpoint, this function will convert it into a
@@ -64,9 +64,12 @@ def dcp_to_torch_save(
 
     Args:
         dcp_checkpoint_dir: Directory containing the DCP checkpoint.
-        torch_save_fn: Filename to store the converted Torch save file.
+        torch_save_path: Filename to store the converted Torch save file.
+
+    .. warning::
+        To avoid OOM, it's recommended to only run this function on a single rank.
     """
-    sd = {}
+    sd: STATE_DICT_TYPE = {}
     storage_reader = FileSystemReader(dcp_checkpoint_dir)
 
     _load_state_dict(
@@ -75,22 +78,23 @@ def dcp_to_torch_save(
         planner=_EmptyStateDictLoadPlanner(),
         no_dist=True,
     )
-    torch.save(sd, torch_save_fn)
+    torch.save(sd, torch_save_path)
 
 
 def torch_save_to_dcp(
-    torch_save_fn: Union[str, os.PathLike], dcp_checkpoint_dir: Union[str, os.PathLike]
+    torch_save_path: Union[str, os.PathLike],
+    dcp_checkpoint_dir: Union[str, os.PathLike],
 ):
     """
     Given the location of a torch save file, converts it into a DCP checkpoint.
 
     Args:
-        torch_save_fn: Filename to store the converted Torch save file.
+        torch_save_path: Filename to store the converted Torch save file.
         dcp_checkpoint_dir: Directory containing the DCP checkpoint.
 
     .. warning::
         To avoid OOM, it's recommended to only run this function on a single rank.
     """
 
-    state_dict = torch.load(torch_save_fn)
+    state_dict = torch.load(torch_save_path)
     dcp.save(state_dict, checkpoint_id=dcp_checkpoint_dir, no_dist=True)
