@@ -246,9 +246,12 @@ def mps_ops_modifier(ops):
         'as_strided_scatter',
         'broadcast_tensors',
         'broadcast_to',
+        'chalf',
         'cfloat',
         'chunk',
         'clone',
+        'conj',
+        'conj_physical',
         'contiguous',
         'diag',
         'diag_embed',
@@ -266,6 +269,7 @@ def mps_ops_modifier(ops):
         'flatten',
         'fill',
         'full',
+        'H',
         'hsplit',
         'imag',
         'isfinite',
@@ -279,6 +283,7 @@ def mps_ops_modifier(ops):
         'logspace',
         'linspacetensor_overload',
         'logspacetensor_overload',
+        'mH',
         'mT',
         'masked_scatter',
         'masked_select',
@@ -315,6 +320,7 @@ def mps_ops_modifier(ops):
         'squeeze',
         'squeezemultiple',
         'sub',
+        'svd',
         't',
         'tensor_split',
         'transpose',
@@ -347,10 +353,10 @@ def mps_ops_modifier(ops):
         'asin',
         'atan',
         'atanh',
+        'bfloat16',
         'bool',
         'cartesian_prod',
         'cat',
-        'chalf',
         'char',
         'column_stack',
         'combinations',
@@ -392,7 +398,9 @@ def mps_ops_modifier(ops):
         'masked_fill',
         'masked.mean',
         'masked.prod',
+        'masked.std',
         'masked.sum',
+        'masked.var',
         'mean',
         'ne',
         'neg',
@@ -413,10 +421,10 @@ def mps_ops_modifier(ops):
         'sin',
         'sinh',
         'sqrt',
+        'square',
         'stack',
         'sum',
         'sum_to_size',
-        'square',
         'tan',
         'tanh',
         'trace',
@@ -551,13 +559,13 @@ def mps_ops_modifier(ops):
         # - MPS output: tensor([102.6681, inf])
         # In the latter case, inf is probably correct (this is what scipy does).
         'polygamma': [torch.float32, torch.uint8],
-        'polygammapolygamma_n_0': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'polygammapolygamma_n_2': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'polygammapolygamma_n_1': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'polygammapolygamma_n_3': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'polygammapolygamma_n_4': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'special.polygamma': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'special.polygammaspecial_polygamma_n_0': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
+        'polygammapolygamma_n_0': [torch.float32, torch.int16, torch.int8],
+        'polygammapolygamma_n_2': [torch.float32, torch.int16, torch.int8],
+        'polygammapolygamma_n_1': [torch.float32, torch.int16, torch.int8],
+        'polygammapolygamma_n_3': [torch.float32, torch.int16, torch.int8],
+        'polygammapolygamma_n_4': [torch.float32, torch.int16, torch.int8],
+        'special.polygamma': [torch.float32, torch.int16, torch.int32, torch.int8],
+        'special.polygammaspecial_polygamma_n_0': [torch.float32, torch.int16, torch.int8],
 
         # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
         'tan': [torch.float32],
@@ -614,13 +622,13 @@ def mps_ops_modifier(ops):
         # - MPS output: tensor([102.6681, inf])
         # In the latter case, inf is probably correct (this is what scipy does).
         'polygamma': [torch.float32, torch.uint8],
-        'polygammapolygamma_n_0': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'polygammapolygamma_n_2': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'polygammapolygamma_n_1': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'polygammapolygamma_n_3': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'polygammapolygamma_n_4': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'special.polygamma': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'special.polygammaspecial_polygamma_n_0': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
+        'polygammapolygamma_n_0': [torch.float32, torch.int16, torch.int8],
+        'polygammapolygamma_n_2': [torch.float32, torch.int16, torch.int8],
+        'polygammapolygamma_n_1': [torch.float32, torch.int16, torch.int8],
+        'polygammapolygamma_n_3': [torch.float32, torch.int16, torch.int8],
+        'polygammapolygamma_n_4': [torch.float32, torch.int16, torch.int8],
+        'special.polygamma': [torch.float32, torch.int16, torch.int32, torch.int8],
+        'special.polygammaspecial_polygamma_n_0': [torch.float32, torch.int16, torch.int8],
     }
 
     # Those ops are not expected to work
@@ -794,8 +802,6 @@ def mps_ops_modifier(ops):
         'special.spherical_bessel_j0': None,
         'special.xlog1py': None,
         'special.zeta': None,
-        'std_mean': None,
-        'std_meanunbiased': None,
         'svd_lowrank': None,
         'symeig': None,
         'take': None,
@@ -809,7 +815,7 @@ def mps_ops_modifier(ops):
         'geometric_': None,
         'log_normal_': None,
         'log_normal': None,
-        'bfloat16': None,
+        'bfloat16': [] if product_version >= 14.0 else None,
         'cdouble': None,
         'double': None,
         'nn.functional.softminwith_dtype': None,
@@ -11351,7 +11357,7 @@ class TestConsistency(TestCaseMPS):
         '__rdiv__', '__rmul__',
         'nn.functional.huber_loss',
         'true_divide', 'kron',
-        'gradient', 'var', 'std', 'ldexp',
+        'gradient', 'var', 'std', 'std_mean', 'ldexp',
         'linalg.vector_norm', 'lerp',
         'addr', 'var_mean',
         'var_mean_unbiased',
@@ -11657,7 +11663,7 @@ class TestCommon(TestCase):
     def test_tensor_creation(self, device, dtype):
         def ones(device):
             return torch.ones((2, 2), dtype=dtype, device=device)
-        if dtype not in MPS_DTYPES + [torch.complex64]:
+        if dtype not in MPS_DTYPES + ([torch.bfloat16, torch.complex64] if product_version > 14.0 else [torch.complex64]):
             with self.assertRaises(TypeError):
                 ones(device)
         else:
