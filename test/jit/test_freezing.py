@@ -2271,6 +2271,65 @@ class TestFrozenOptimizations(JitTestCase):
             self.assertEqual(mod_eager(inp), scripted_mod(inp))
             self.assertEqual(mod_eager(inp), scripted_mod(inp))
 
+    def test_bn_not_broadcast_with_linear(self):
+        module_pairs = [(nn.Linear, nn.BatchNorm1d), (nn.Linear, nn.BatchNorm2d), (nn.Linear, nn.BatchNorm3d)]
+        use_tracing = [True, False]
+        linear_in = 3
+        # (linear_out, bn_in)
+        # case 1: linear_out < bn_in
+        # case 2: linear_out > bn_in
+        # case 3: linear_out != bn_in && linear_out = 1
+        dims = [(2, 4), (4, 2), (1, 2)]
+
+        for modules, tracing, dim in product(module_pairs, use_tracing, dims):
+            linear_out, bn_in = dim[0], dim[1]
+
+            linear = modules[0](linear_in, linear_out)
+            bn = modules[1](bn_in)
+            mod_eager = nn.Sequential(linear, bn).eval()
+
+            N, C = 3, bn_in
+            input_shape = [N, C]
+            if modules[1] == nn.BatchNorm1d:
+                H = linear_in
+                input_shape.append(H)
+            elif modules[1] == nn.BatchNorm2d:
+                H, W = 4, linear_in
+                input_shape.append(H)
+                input_shape.append(W)
+            elif modules[1] == nn.BatchNorm3d:
+                D, H, W = 4, 4, linear_in
+                input_shape.append(D)
+                input_shape.append(H)
+                input_shape.append(W)
+
+            inp = torch.rand(input_shape)
+
+            if tracing:
+                scripted_mod = torch.jit.trace(mod_eager, (inp))
+            else:
+                scripted_mod = torch.jit.script(mod_eager)
+
+            self.run_pass("inline", scripted_mod.graph)
+            self.run_pass("peephole", scripted_mod.graph)
+            self.run_pass("constant_propagation", scripted_mod.graph)
+
+            FileCheck().check("linear").check("batch").run(scripted_mod.graph)
+            self.run_pass("fold_frozen_linear_bn", scripted_mod.graph)
+            FileCheck().check("linear").check("aten::batch_norm").run(scripted_mod.graph)
+
+            frozen_mod = torch.jit.freeze(scripted_mod)
+            self.run_pass("fold_frozen_linear_bn", frozen_mod.graph)
+            # successfully skipped folding
+            FileCheck().check("linear").check("aten::batch_norm").run(frozen_mod.graph)
+
+            self.assertEqual(mod_eager(inp), frozen_mod(inp))
+            self.assertEqual(mod_eager(inp), frozen_mod(inp))
+
+            # successfully failed folding
+            with self.assertRaisesRegex(AssertionError, "To fuse, linear.out_features == bn.num_features or bn.num_features == 1"):
+                nn.utils.fusion.fuse_linear_bn_eval(linear, bn)
+
     @skipCUDAMemoryLeakCheckIf(True)
     @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
     def test_linear_bn_folding_autocast_scenario_cuda(self):
