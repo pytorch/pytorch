@@ -553,7 +553,7 @@ class FxGraphHashDetails:
         self.deterministic_algorithms_settings = (
             torch.are_deterministic_algorithms_enabled(),
             torch.is_deterministic_algorithms_warn_only_enabled(),
-            torch.utils.deterministic.fill_uninitialized_memory,
+            torch.utils.deterministic.fill_uninitialized_memory,  # type: ignore[attr-defined]
         )
 
         # Global settings affecting matmul codegen.
