@@ -276,7 +276,7 @@ enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", ""
 max_fusion_size = 64
 
 # max number of inputs to generate cat as a pointwise op with masked laods
-max_pointwise_cat_inputs = 128
+max_pointwise_cat_inputs = 8
 
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
@@ -560,6 +560,10 @@ class triton:
         "Z": 1024,
         "R": 4096 * (16 if multi_kernel else 1),
     }
+
+    # Minimum RBLOCK to be used for a TritonSplitScanKernel
+    # NOTE: This also indirectly controls the size of workspace buffer required
+    min_split_scan_rblock = 256
 
     # Store the generated cubin files for cpp wrapper code to load
     store_cubin = False

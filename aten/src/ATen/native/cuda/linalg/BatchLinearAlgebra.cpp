@@ -2443,7 +2443,7 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
       .resize_outputs(false)
       .declare_static_shape(pivots_->sizes(), /*squash_dim=*/pivots_->dim() - 1)
       .add_output(perm)
-      .add_input(*pivots_)
+      .add_const_input(*pivots_)
       .build();
     unpack_pivots_stub(pivots_->device().type(), iter, n, n);
 
