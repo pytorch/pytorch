@@ -15,10 +15,12 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     FSDPTest,
+    # FSDPMaybeCompileTest,
     FSDPTestMultiThread,
     MLP,
     patch_all_gather,
     patch_reduce_scatter,
+    test_compiled_fsdp,
 )
 from torch.testing._internal.common_utils import get_cycles_per_ms, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -26,7 +28,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     Transformer,
     TransformerBlock,
 )
-from torch.utils._triton import has_triton
 
 
 class TestFullyShardForwardInputs(FSDPTestMultiThread):
@@ -173,6 +174,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         return min(8, torch.cuda.device_count())
 
     @skip_if_lt_x_gpu(2)
+    @test_compiled_fsdp()
     def test_train_parity_single_group(self):
         """Tests train parity with DDP for a single FSDP group."""
         self.run_subtests(
@@ -290,6 +292,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
+    @test_compiled_fsdp()
     def test_non_root_forward_backward(self):
         """
         Tests running forward/backward through the root and then through a
@@ -335,6 +338,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         self.assertEqual(ref_nonroot_loss, nonroot_loss)
         self.assertEqual(ref_model(inp).sum(), model(inp).sum())
 
+    @test_compiled_fsdp()
     def test_multi_forward_module(self):
         """
         Tests parity with DDP when running a module that participates multiple
@@ -376,72 +380,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 losses[-1].backward()
                 _optim.step()
             self.assertEqual(losses[0], losses[1])
-
-    @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(
-        not has_triton(), "Inductor on GPU needs Triton and recent GPU arch"
-    )
-    def test_train_parity_with_compile(self):
-        # Increase the cache size limit since it is shared across subtests
-        import torch._dynamo
-
-        torch._dynamo.config.cache_size_limit = 16
-        self.run_subtests(
-            {"reshard_after_forward": [True], "backend": ["aot_eager", "inductor"]},
-            self._test_train_parity_with_compile,
-        )
-
-    def _test_train_parity_with_compile(
-        self,
-        reshard_after_forward: bool,
-        backend: str,
-    ):
-        foreach = True
-        torch.manual_seed(42)
-        vocab_size = 1024
-        with torch.device(torch.device("cuda")):
-            model_args = ModelArgs(
-                n_layers=3,
-                n_heads=4,
-                vocab_size=vocab_size,
-                dropout_p=0.0,
-            )
-            model = Transformer(model_args)
-        ref_model = copy.deepcopy(model).cuda()
-        for block in ref_model.modules():
-            if isinstance(block, TransformerBlock):
-                block.forward = torch.compile(block.forward, backend=backend)
-        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=foreach)
-        for block in model.modules():
-            if isinstance(block, TransformerBlock):
-                block.forward = torch.compile(block.forward, backend=backend)
-                fully_shard(block, reshard_after_forward=reshard_after_forward)
-        fully_shard(model, reshard_after_forward=reshard_after_forward)
-        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=foreach)
-        if self.rank == 0:
-            print(model)
-
-        # Reuse the same input across iterations to avoid loss explosion from
-        # trying to learn from random inputs
-        torch.manual_seed(42 + self.rank)
-        inp = torch.randint(0, vocab_size, (2, 16), device="cuda")
-        # Gradients drift apart on the 5th iteration for inductor backend
-        num_iters = 8 if backend == "aot_eager" else 4
-        for iter_idx in range(num_iters):
-            if self.rank == 0:
-                print(f"Iter index: {iter_idx}")
-            losses: List[torch.Tensor] = []
-            for _model in (ref_model, model):
-                losses.append(_model(inp).sum())
-                losses[-1].backward()
-            self.assertEqual(losses[0], losses[1])
-            for param in ref_model.parameters():
-                if param.grad is not None:
-                    dist.all_reduce(param.grad)
-                    param.grad.div_(self.world_size)
-            for _optim in (ref_optim, optim):
-                _optim.step()
-                _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
 
 
 class TestFullyShardSharedParams(FSDPTest):
