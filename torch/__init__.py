@@ -808,8 +808,10 @@ def use_deterministic_algorithms(mode: builtins.bool, *, warn_only: builtins.boo
     .. note:: :func:`torch.set_deterministic_debug_mode` offers an alternative
         interface for this feature.
 
+    Please note setting ``mode=True` is detrimental to performance.
+
     The following normally-nondeterministic operations will act
-    deterministically when ``mode=True``:
+    deterministically when ``mode=True``.
 
         * :class:`torch.nn.Conv1d` when called on CUDA tensor
         * :class:`torch.nn.Conv2d` when called on CUDA tensor
