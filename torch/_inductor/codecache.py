@@ -1958,7 +1958,11 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 
     @classmethod
     def load_pybinding(
-        cls, argtypes: List[str], source_code: str, cuda: bool = False
+        cls,
+        argtypes: List[str],
+        source_code: str,
+        cuda: bool = False,
+        num_outputs: int = -1,
     ) -> Any:
         """
         Wrap a C++ function in fast Python bindings.
@@ -1976,7 +1980,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         )
         suffix = cls.suffix_template % (
             cls.entry_function,
-            cls.extra_parse_arg,
+            cls.extra_parse_arg % num_outputs if cls.extra_parse_arg else "",
             cls.entry_function,
             len(argtypes),
             len(argtypes),
@@ -2003,9 +2007,31 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     extra_parse_arg = textwrap.dedent(
         """
         #include <torch/csrc/autograd/python_variable.h>
+        #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
         template <> inline std::vector<at::Tensor> parse_arg<std::vector<at::Tensor>>(PyObject* args, size_t n) {
             return THPVariable_UnpackList(PyTuple_GET_ITEM(args, n));
+        }
+
+        std::vector<at::Tensor> inductor_entry_cpp(std::vector<at::Tensor>&& inputs) {
+            auto input_handles =
+                torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
+            // For outputs, we only allocate a vector to hold returned tensor handles,
+            // not allocating the actual output tensor storage here
+            std::vector<AtenTensorHandle> output_handles(%s);
+
+            try {
+                inductor_entry_impl(input_handles.data(), output_handles.data());
+            } catch(std::exception const& e) {
+                PyErr_SetString(PyExc_RuntimeError, e.what());
+                return {};
+            } catch(...) {
+                PyErr_SetString(PyExc_RuntimeError, "unhandled error");
+                return {};
+            }
+
+            return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
+                output_handles.data(), output_handles.size());
         }
         """
     )
