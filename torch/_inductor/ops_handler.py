@@ -577,8 +577,8 @@ class KernelFormatterHandler:
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[str, tuple[str, ...]],
-    ) -> Union[str, tuple[str, ...]]:
+        value: Union[str, Tuple[str, ...]],
+    ) -> Union[str, Tuple[str, ...]]:
         line = self.parent_handler.reduction(dtype, src_dtype, reduction_type, value)
         num_values = reduction_num_outputs(reduction_type)
         varnames = [f"tmp{next(self.var_counter)}" for _ in range(num_values)]
