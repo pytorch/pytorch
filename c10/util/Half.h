@@ -45,6 +45,10 @@
 #include <sycl/sycl.hpp> // for SYCL 2020
 #endif
 
+#if defined(__ARM_FEATURE_FP16_SCALAR_ARITHMETIC) && !defined(C10_MOBILE)
+#include <arm_neon.h>
+#endif
+
 namespace c10 {
 
 namespace detail {
@@ -323,6 +327,26 @@ inline uint16_t fp16_ieee_from_fp32_value(float f) {
       (sign >> 16) |
       (shl1_w > UINT32_C(0xFF000000) ? UINT16_C(0x7E00) : nonsign));
 }
+
+#if defined(__ARM_FEATURE_FP16_SCALAR_ARITHMETIC) && !defined(C10_MOBILE)
+// According to https://godbolt.org/z/8s14GvEjo it would translate to single
+// fcvt s0, h0
+inline float sve_fp16_to_fp32_value(uint16_t h) {
+  union {
+    uint16_t h;
+    float16_t f16;
+  } x = {h};
+  return x.f16;
+}
+
+inline uint16_t sve_fp32_to_fp16_value(float f) {
+  union {
+    float16_t f16;
+    uint16_t h;
+  } x = {static_cast<float16_t>(f)};
+  return x.h;
+}
+#endif
 
 } // namespace detail
 
