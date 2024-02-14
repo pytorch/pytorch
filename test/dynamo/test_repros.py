@@ -28,20 +28,22 @@ import torch._dynamo.utils
 
 import torch._functorch.config
 import torch.library
-
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import CompileCounter, rand_strided, same
 from torch.nn import functional as F
+
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
+    TEST_WITH_ROCM,
 )
 
 
 _orig_module_call = torch.nn.Module.__call__
 
 # Custom operator that only supports CPU and Meta
-lib = torch.library.Library("test_sample", "DEF")
+lib = torch.library.Library("test_sample", "DEF")  # noqa: TOR901
 lib.define("foo(Tensor self) -> Tensor")
 lib.impl("foo", torch.sin, "CPU")
 
@@ -857,6 +859,16 @@ class MockModule(torch.nn.Module):
 
         torch.add(tensor, tensor)
         return self.inner_fn(tensor.shape, (1, 2, 3))
+
+
+class IncByOne:
+    def __init__(self, x):
+        self.x = x + 1
+
+
+class IncByTwo:
+    def __init__(self, x):
+        self.x = x + 2
 
 
 class ReproTests(torch._dynamo.test_case.TestCase):
@@ -3998,6 +4010,57 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 # frame_count should stay at 1.
                 self.assertEqual(cnt.frame_count, 1)
 
+    @unittest.skipIf(
+        TEST_WITH_ROCM or not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "flash attention not supported",
+    )
+    def test_flash_attn_backward_mixed_strides(self):
+        # in this repro, "grad_out" and "value" are transposed tensors,
+        # but "key" and "value" are contiguous
+        def gen_inputs(device):
+            return (
+                torch.randn(
+                    2, 513, 16, 64, dtype=torch.float16, device=device
+                ).transpose(1, 2),
+                torch.randn(2, 16, 513, 64, dtype=torch.float16, device=device),
+                torch.randn(2, 16, 513, 64, dtype=torch.float16, device=device),
+                torch.randn(
+                    2, 513, 16, 64, dtype=torch.float16, device=device
+                ).transpose(1, 2),
+                torch.randn(2, 16, 513, 64, dtype=torch.float16, device=device),
+                torch.randn(2, 16, 513, device=device),
+                None,
+                None,
+                513,
+                513,
+                0.0,
+                False,
+                torch.tensor(1, dtype=torch.int64),
+                torch.tensor(1, dtype=torch.int64),
+            )
+
+        inps_cuda = gen_inputs("cuda")
+        inps_meta = gen_inputs("meta")
+        (
+            out1_ref,
+            out2_ref,
+            out3_ref,
+        ) = torch.ops.aten._scaled_dot_product_flash_attention_backward(
+            *inps_cuda, scale=0.125
+        )
+        from torch._meta_registrations import meta__scaled_dot_product_flash_backward
+
+        out1_test, out2_test, out3_test = meta__scaled_dot_product_flash_backward(
+            *inps_meta, scale=0.125
+        )
+
+        self.assertEqual(out1_ref.shape, out1_test.shape)
+        self.assertEqual(out1_ref.stride(), out1_test.stride())
+        self.assertEqual(out2_ref.shape, out2_test.shape)
+        self.assertEqual(out2_ref.stride(), out2_test.stride())
+        self.assertEqual(out3_ref.shape, out3_test.shape)
+        self.assertEqual(out3_ref.stride(), out3_test.stride())
+
     def test_user_ctor_ctx_manager(self):
         class UserCtxManager:
             def __enter__(self):
@@ -4078,6 +4141,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             pass
         else:
             self.fail("expected exception")
+
+    def test_udf_classes_reconstruction(self):
+        def fn(x):
+            o = T(5)
+            return o.x + x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        T = IncByOne
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+        # This should recompile
+        T = IncByTwo
+        self.assertEqual(fn(x), opt_fn(x))
 
 
 if __name__ == "__main__":
