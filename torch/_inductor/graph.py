@@ -441,7 +441,7 @@ class GraphLowering(torch.fx.Interpreter):
         #
         # The following heuristics skip using channels-last if the model contains
         # grouped convolution with in-channels > 1.
-        if any(is_grouped(n) for n in conv_nodes):
+        if any(map(is_grouped, conv_nodes)):
             log.debug(
                 "Skip layout opt because found grouped convolution with >1 in_channels!"
             )
@@ -454,7 +454,7 @@ class GraphLowering(torch.fx.Interpreter):
         # - phlippe_densenet (slightly worse)
         # - Background_Matting (1.22x -> 0.821x)
         # - pytorch_CycleGAN_and_pix2pix (1.597x -> 1.294x)
-        if any(is_in_out_channel(n) for n in conv_nodes):
+        if any(map(is_in_out_channel, conv_nodes)):
             log.debug(
                 "Skip layout opt because some convolutions have smaller out_channel"
             )
@@ -462,7 +462,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         # Following models are skipped due to this:
         # - functorch_maml_omniglot
-        if all(is_small_channel(n) for n in conv_nodes):
+        if all(map(is_small_channel, conv_nodes)):
             log.debug("Skip layout opt because all convolution channels are too small")
             return False
 
