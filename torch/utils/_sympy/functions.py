@@ -113,9 +113,10 @@ class ModularIndexing(sympy.Function):
         # This assert just tries to figure out how fare are we from being right
         # We try to prove that modulus is positive and that we can't prove that b / d is negative
         # This is the range when trunc and
-        assert (modulus.is_positive and
-                not (fuzzy_or([fuzzy_and([base.is_positive, divisor.is_negative]),
-                               fuzzy_and([base.is_negative, divisor.is_positive])]))), (base, divisor, modulus)
+        if all(not isinstance(s, sympy.Wild) for s in (base, divisor, modulus)):
+            assert (modulus.is_positive and
+                    not (fuzzy_or([fuzzy_and([base.is_positive, divisor.is_negative]),
+                                   fuzzy_and([base.is_negative, divisor.is_positive])]))), (base, divisor, modulus)
 
         if base == 0 or modulus == 1:
             return sympy.Integer(0)
