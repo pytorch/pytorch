@@ -1,12 +1,17 @@
 name: Index PyTorch Tests for Target Determination
 
 on:
+  pull_request:
   workflow_dispatch:
   # TODO: Trigger every few hours
 
 permissions:
   id-token: write
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
 
 jobs:
   index:
@@ -28,7 +33,7 @@ jobs:
       - name: Clone Target Determination Code
         uses: actions/checkout@v3
         with:
-          repository: osalpekar/llm-target-determinator
+          repository: clee2000/csl/partition_large_files
           ref: v0.0.1
           path: llm-target-determinator
 
@@ -98,7 +103,7 @@ jobs:
 
       - name: Upload Index to S3
         shell: bash -l {0}
-        if: ${{ steps.indexer.outcome == 'success' }}
+        if: false
         run: |
           set -euxo pipefail
           conda activate tdenv
