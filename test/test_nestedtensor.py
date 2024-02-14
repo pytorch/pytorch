@@ -11,7 +11,10 @@ import numpy as np
 import torch
 import torch.nn
 import torch.nn.functional as F
-from torch.testing._internal.common_cuda import SM70OrLater, SM80OrLater
+from torch.testing._internal.common_cuda import (
+    SM70OrLater, SM80OrLater, PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
+)
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
@@ -19,6 +22,7 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     onlyCUDA,
     skipCUDAIf,
+    skipCUDAIfRocm,
     skipMeta,
     PYTORCH_CUDA_MEMCHECK,
 )
@@ -29,6 +33,7 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     instantiate_parametrized_tests,
     IS_FBCODE,
+    IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfSlowGradcheckEnv,
@@ -3828,7 +3833,10 @@ class TestNestedTensorSubclass(TestCase):
             if not (str(device).startswith("cuda") and dtype == torch.bfloat16):
                 check_forward_backward()
 
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    # Guarding with sqrt() doesn't work on ROCm?
+    @skipCUDAIfRocm
     @onlyCUDA
     @dtypes(*([torch.float16, torch.bfloat16, torch.float32] if SM80OrLater
             else [torch.float16, torch.float32]))
@@ -3898,7 +3906,13 @@ class TestNestedTensorSubclass(TestCase):
         output_dense = F.scaled_dot_product_attention(query._values, key._values, value._values)
         self.assertEqual(output._values, output_dense)
 
-    @dtypes(torch.float32, torch.double, torch.half)
+    @onlyCUDA
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION and not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Platform doesn't support flash or mem-efficient attention"
+    )
+    @dtypes(*([torch.float16, torch.bfloat16, torch.float32] if SM80OrLater
+            else [torch.float16, torch.float32]))
     def test_sdpa_with_packed_in_proj(self, device, dtype):
         # shape (B, *, D)
         input_packed = random_nt_from_dims(
@@ -3929,7 +3943,13 @@ class TestNestedTensorSubclass(TestCase):
         ):
             q, k, v = in_proj(in_component)
             out = F.scaled_dot_product_attention(q, k, v).transpose(-2, -3)
-            self.assertEqual(out, out_component)
+
+            # Low Precision Math Reference
+            out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
+                q, k, v)[0].transpose(-2, -3)
+            output_ref_atol, output_ref_rtol = get_tolerances(out, out_lp_ref)
+
+            self.assertEqual(out, out_component, atol=output_ref_atol, rtol=output_ref_rtol)
 
 
 instantiate_parametrized_tests(TestNestedTensor)
