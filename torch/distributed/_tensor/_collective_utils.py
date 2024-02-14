@@ -189,11 +189,11 @@ class MeshTopoInfo:
         # 2. we assume gpu arch is Ampere or Hopper
         # 3. we assume collectives are all ring base algo for now
         num_devices_per_host = _mesh_resources.num_devices_per_host(mesh.device_type)
-        # the base bw number, GB/s
+        # the base bw number (intra-node), GB/s
         base_bw = 87.7
         mesh_dim_bandwidth = [base_bw] * mesh.ndim
-        # latency by default start with inter-node
-        mesh_dim_latency = [2.7] * mesh.ndim
+        # the latency in terms of us (intra-node, nv-link)
+        mesh_dim_latency = [0.6] * mesh.ndim
         mesh_dim_devices = [1] * mesh.ndim
 
         total_num_devices = 1
@@ -201,14 +201,14 @@ class MeshTopoInfo:
             num_devices = mesh.size(mesh_dim)
             mesh_dim_devices[mesh_dim] = num_devices
             total_num_devices *= num_devices
-            if total_num_devices <= num_devices_per_host:
-                # magic number for intra-host communication bandwidth/latency factor
+            if total_num_devices > num_devices_per_host:
+                # magic number for inter-host communication bandwidth/latency factor
                 # This number assumes latest GPU arch, i.e. Ampere or Hopper
                 # TODO: see if we need to tweak this or offer a way for user
                 # to specify the bandwidths/latency
                 mesh_dim_bandwidth[mesh_dim] *= 0.22
-                # set to nvlink latency for intra-host
-                mesh_dim_latency[mesh_dim] = 0.6
+                # set to ethernet latency for inter-host
+                mesh_dim_latency[mesh_dim] = 2.7
 
         return MeshTopoInfo(
             mesh, mesh_dim_devices, mesh_dim_bandwidth, mesh_dim_latency
@@ -228,7 +228,7 @@ def allgather_cost(bytes_gb: float, mesh_topo: MeshTopoInfo, mesh_dim: int) -> f
 def allreduce_cost(bytes_gb: float, mesh_topo: MeshTopoInfo, mesh_dim: int) -> float:
     num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[mesh_dim]
     mesh_dim_bandwidth = mesh_topo.mesh_dim_bandwidth[mesh_dim]
-    # allreduce have 2x comm bytes compare to allgather/reduce_scatter
+    # allreduce have almost 2x comm bytes compare to allgather/reduce_scatter
     num_hops = 2 * num_devices_on_mesh_dim - 1
 
     latency = 6.6 + num_hops * mesh_topo.mesh_dim_latency[mesh_dim]
