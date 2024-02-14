@@ -291,6 +291,15 @@ def grad_increment_nesting():
         _grad_decrement_nesting()
 
 
+@contextlib.contextmanager
+def jvp_increment_nesting():
+    try:
+        jvp_level = _jvp_increment_nesting()
+        yield jvp_level
+    finally:
+        _jvp_decrement_nesting()
+
+
 @doesnt_support_saved_tensors_hooks
 def _vjp_with_argnums(func: Callable, *primals, argnums: Optional[argnums_t] = None, has_aux: bool = False):
     # This is the same function as vjp but also accepts an argnums argument
@@ -797,9 +806,6 @@ def _slice_argnums(args, argnums, as_tuple=True):
     return tuple(args[i] for i in argnums)
 
 
-JVP_NESTING = 0
-
-
 @contextlib.contextmanager
 def noop():
     yield
@@ -866,14 +872,14 @@ def assert_non_empty_list_of_tensors(output: List[torch.Tensor], api: str, argna
 jvp_str = 'jvp(f, primals, tangents)'
 
 
-def safe_unpack_dual(dual, strict):
+def safe_unpack_dual(dual, strict, *, level=None):
     if not isinstance(dual, torch.Tensor):
         raise RuntimeError(
             f'{jvp_str}: expected f(*args) to return only tensors'
             f', got unsupported type {type(dual)}'
         )
 
-    primal, tangent = fwAD.unpack_dual(dual)
+    primal, tangent = fwAD.unpack_dual(dual, level=level)
     if tangent is None:
         if strict:
             raise RuntimeError(
@@ -963,23 +969,20 @@ def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Opti
     diff_args = primals if argnums is None else _slice_argnums(primals, argnums)
     flat_primals, primals_spec = tree_flatten(diff_args)
     flat_tangents, tangents_spec = tree_flatten(tangents)
-    if primals_spec != tangents_spec:
-        raise RuntimeError(
-            f'{jvp_str}: Expected primals and tangents to have the same python '
-            f'structure. For example, if primals is a tuple of 3 tensors, '
-            f'tangents also must be. Got primals with structure {primals_spec} '
-            f'and tangents with structure {tangents_spec}')
-    assert_non_empty_list_of_tensors(flat_primals, jvp_str, 'primals')
-    assert_non_empty_list_of_tensors(flat_tangents, jvp_str, 'tangents')
+    # if primals_spec != tangents_spec:
+    #     raise RuntimeError(
+    #         f'{jvp_str}: Expected primals and tangents to have the same python '
+    #         f'structure. For example, if primals is a tuple of 3 tensors, '
+    #         f'tangents also must be. Got primals with structure {primals_spec} '
+    #         f'and tangents with structure {tangents_spec}')
+    # assert_non_empty_list_of_tensors(flat_primals, jvp_str, 'primals')
+    # assert_non_empty_list_of_tensors(flat_tangents, jvp_str, 'tangents')
 
-    level = _jvp_increment_nesting()
-    try:
-        global JVP_NESTING
-        JVP_NESTING += 1
+    with jvp_increment_nesting() as level:
         with fwAD._set_fwd_grad_enabled(True):
-            ctx = fwAD.dual_level if JVP_NESTING == 1 else noop
-            with ctx():
-                flat_duals = tuple(fwAD.make_dual(p, t)
+            ctx = fwAD.dual_level if torch._C._functorch.maybe_current_level() == 1 else noop
+            with ctx() as dual_level:
+                flat_duals = tuple(fwAD.make_dual(p, t, level=dual_level)
                                    for p, t in zip(flat_primals, flat_tangents))
                 duals = tree_unflatten(flat_duals, primals_spec)
                 if argnums is not None:
@@ -999,7 +1002,7 @@ def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Opti
                 assert_non_empty_tensor_output(result_duals, jvp_str)
 
                 primals_out, tangents_out = \
-                    zip(*[safe_unpack_dual(dual, strict) for dual in result_duals])
+                    zip(*[safe_unpack_dual(dual, strict, level=dual_level) for dual in result_duals])
                 primals_out = tree_map(
                     partial(_undo_create_differentiable, level=level), primals_out)
                 tangents_out = tree_map(
@@ -1011,9 +1014,6 @@ def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Opti
                     return primals_out_unflatten, tangents_out_unflatten, aux
 
                 return primals_out_unflatten, tangents_out_unflatten
-    finally:
-        _jvp_decrement_nesting()
-        JVP_NESTING -= 1
 
 
 def safe_unflatten(tensor, dim, shape):

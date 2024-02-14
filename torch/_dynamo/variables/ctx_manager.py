@@ -190,6 +190,121 @@ class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
         return variables.ConstantVariable.create(None)
 
 
+class JvpIncrementNestingCtxManagerVariable(ContextWrappingVariable):
+    """represents torch.func.jvp increment/decrement nesting"""
+
+    # A guard is needed as the grad level is baked into the torch FX graph
+    # This is fine if jvp is only called from within the function
+    # being compiled. But the FX graph may be invalid in the case of a jvp
+    # call from eager that calls the compiled function, as the jvp levels
+    # may be different.
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)
+
+    @staticmethod
+    def create(tx, **kwargs):
+        var = JvpIncrementNestingCtxManagerVariable(
+            target_values=None,
+            initial_values=None,
+            **kwargs,
+        )
+        return var
+
+    def enter(self, tx):
+        install_guard(self._guards_singleton)
+        jvp_level = torch._C._functorch._jvp_increment_nesting()
+        self.set_cleanup_hook(tx, lambda: torch._C._functorch._jvp_decrement_nesting())
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch._C._functorch._jvp_increment_nesting,
+            (),
+            {},
+        )
+        return variables.ConstantVariable.create(jvp_level)
+
+    def exit(self, tx, *args):
+        self.state.cleanup()
+        tx.output.create_node(
+            "call_function", torch._C._functorch._jvp_decrement_nesting, (), {}
+        )
+        return variables.ConstantVariable.create(None)
+
+
+class SetFwdGradEnabledContextManager(ContextWrappingVariable):
+    """"""
+
+    @staticmethod
+    def create(tx, target_values, **kwargs):
+        return SetFwdGradEnabledContextManager(
+            target_values=target_values,
+            initial_values=None,
+            **kwargs,
+        )
+
+    def enter(self, tx):
+        [mode] = self.target_values
+        self.prev_state = torch._C._is_fwd_grad_enabled()
+        torch._C._set_fwd_grad_enabled(mode)
+        self.set_cleanup_hook(
+            tx,
+            lambda: torch._C._set_fwd_grad_enabled(self.prev_state),
+        )
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch._C._set_fwd_grad_enabled,
+            (mode,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+    def exit(self, tx, *args):
+        self.state.cleanup()
+        tx.output.create_node(
+            "call_function",
+            torch._C._set_fwd_grad_enabled,
+            (self.prev_state,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+
+class DualLevelContextManager(ContextWrappingVariable):
+    """"""
+
+    @staticmethod
+    def create(tx, **kwargs):
+        return DualLevelContextManager(
+            target_values=None,
+            initial_values=None,
+            **kwargs,
+        )
+
+    def enter(self, tx):
+        self.new_level = torch._C._enter_dual_level()
+        torch.autograd.forward_ad._current_level = self.new_level
+        self.set_cleanup_hook(
+            tx,
+            lambda: torch._C._exit_dual_level(self.new_level),
+        )
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch._C._enter_dual_level,
+            (),
+            {},
+        )
+        return variables.ConstantVariable.create(self.new_level)
+
+    def exit(self, tx, *args):
+        self.state.cleanup()
+        torch.autograd.forward_ad._current_level = self.new_level - 1
+        tx.output.create_node(
+            "call_function",
+            torch._C._exit_dual_level,
+            (self.new_level,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+
 class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     """represents torch.func.grad increment/decrement nesting"""
 
