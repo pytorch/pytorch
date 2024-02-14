@@ -365,7 +365,7 @@ def get_submodule_folders():
     with open(git_modules_path) as f:
         return [
             os.path.join(cwd, line.split("=", 1)[1].strip())
-            for line in f.readlines()
+            for line in f
             if line.strip().startswith("path")
         ]
 
