@@ -156,11 +156,11 @@ class ModularIndexing(sympy.Function):
 
     def _eval_is_nonnegative(self):
         p, q = self.args[:2]
-        return fuzzy_eq(p.is_nonnegative, q.is_nonnegative)
+        return fuzzy_eq(p.is_nonnegative, q.is_nonnegative)  # type: ignore[attr-defined]
 
     def _eval_is_positive(self):
         p, q = self.args[:2]
-        return fuzzy_eq(p.is_positive, q.is_positive)
+        return fuzzy_eq(p.is_positive, q.is_positive)  # type: ignore[attr-defined]
 
 
 class Where(sympy.Function):
