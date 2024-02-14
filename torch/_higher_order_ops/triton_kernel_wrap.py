@@ -154,6 +154,8 @@ def generate_ttir(kernel, kwargs):
 
     src = ASTSource(kernel, signature, constants, specialization)
     ttir_module = src.make_ir(options, context)
+    if not ttir_module.verify():
+        raise Exception("Verification for TTIR module has failed")
     return str(ttir_module), ordered_tensor_names
 
 
