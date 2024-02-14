@@ -2294,7 +2294,8 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
   r->trace_id_ = NCCLTraceBuffer::get()->record(
       uid_,
       seq_,
-      profilingTitle,
+      // create a string copy of profilingTitle
+      profilingTitle ? profilingTitle : "",
       inputs,
       outputs,
       r->ncclStartEvents_.get(),
