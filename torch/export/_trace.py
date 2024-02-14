@@ -1,5 +1,6 @@
 import dataclasses
 import functools
+import inspect
 import logging
 import re
 import warnings
@@ -170,10 +171,14 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
             add_root = True
             if nn_module_stack := node.meta.get("nn_module_stack", {}):
                 path, ty = next(iter(nn_module_stack.values()))
-                assert issubclass(ty, torch.nn.Module)
-                # TODO Figure out why sometimes we have root sometimes we don't.
-                if path == root and ty is root_cls:
-                    add_root = False
+                # After deserializing the class `ty` might not exist anymore so
+                # it could be a string
+                if inspect.isclass(ty) and issubclass(ty, torch.nn.Module):
+                    # TODO Figure out why sometimes we have root sometimes we don't.
+                    if path == root and ty is root_cls:
+                        add_root = False
+                else:
+                    assert isinstance(ty, str)
             if add_root:
 
                 def normalize_path(path):
