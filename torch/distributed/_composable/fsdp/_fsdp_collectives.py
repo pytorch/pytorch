@@ -25,7 +25,6 @@ def foreach_all_gather(
     all_gather_copy_in_stream: torch.cuda.Stream,
     all_gather_stream: torch.cuda.Stream,
     device: torch.device,
-    dtype: torch.dtype,
 ) -> Optional[AllGatherResult]:
     world_size, rank = group.size(), group.rank()
     # - Copy in
@@ -33,6 +32,11 @@ def foreach_all_gather(
         param_all_gather_inputs = [
             fsdp_param.all_gather_input for fsdp_param in fsdp_params
         ]
+        dtype = param_all_gather_inputs[0].dtype
+        if not all(t.dtype == dtype for t in param_all_gather_inputs):
+            raise NotImplementedError(
+                f"Mixed dtype not supported yet: {[t.dtype for t in param_all_gather_inputs]}"
+            )
         inp_split_sizes = [inp.numel() for inp in param_all_gather_inputs]
         all_gather_input_numel = sum(inp_split_sizes)
         all_gather_output = torch.empty(

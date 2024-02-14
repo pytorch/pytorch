@@ -4,6 +4,7 @@ import functools
 import itertools
 import logging
 import math
+import operator
 import os
 import pprint
 import textwrap
@@ -27,7 +28,6 @@ import sympy
 import torch
 from torch._dynamo.utils import dynamo_timed
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._triton import has_triton
 
 from . import comms, config, dependencies, ir, metrics
@@ -1509,16 +1509,13 @@ class Scheduler:
 
         # make sure unbacked symints aren't dead-code-eliminated
         for node in V.graph.graph_outputs:
-            if isinstance(node, ir.ShapeAsConstantBuffer):
-                for s in free_unbacked_symbols(node.shape):
-                    assert (
-                        s in unbacked_symbol_to_origin_node
-                    ), f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
-                    node_name = unbacked_symbol_to_origin_node[s].node.name
-                    log.debug(
-                        "scheduling output %s for unbacked symint %s", node_name, s
-                    )
-                    add_user(node_name, OutputNode(StarDep(node_name)))
+            for s in node.get_unbacked_symbol_uses():
+                assert (
+                    s in unbacked_symbol_to_origin_node
+                ), f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
+                node_name = unbacked_symbol_to_origin_node[s].node.name
+                log.debug("scheduling output %s for unbacked symint %s", node_name, s)
+                add_user(node_name, OutputNode(StarDep(node_name)))
 
         # make sure input mutation isn't dead-code-eliminated
         for name in self.mutation_renames:
@@ -2248,9 +2245,13 @@ class Scheduler:
                 self.origin_to_index.update({n: i for i, n in enumerate(n.graph.nodes)})
             return self.origin_to_index[n]
 
-        origins = {(get_order(e), e) for n in node.get_nodes() for e in n.node.origins}
+        # Use a dict to have ordering
+        origins = {
+            (get_order(e), e): None for n in node.get_nodes() for e in n.node.origins
+        }
+        origins = list(origins.keys())
         if origins:
-            _, last = max(origins, key=lambda x: x[0])
+            _, last = max(origins, key=operator.itemgetter(0))
             V.graph.wrapper_code.enter_context(last)
 
     @dynamo_timed
@@ -2315,6 +2316,11 @@ class Scheduler:
                 device = node.get_device()
                 if self.get_backend(device).ready_to_flush():
                     self.flush()
+
+        if self.current_device and self.current_device.type == "cuda":
+            # exit the outermost CUDA device guard. this is
+            # important for nested indentation codegen-ing.
+            V.graph.wrapper_code.codegen_device_guard_exit()
 
         self.flush()
 
