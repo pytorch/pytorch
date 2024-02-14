@@ -109,6 +109,14 @@ class ModularIndexing(sympy.Function):
 
     @classmethod
     def eval(cls, base, divisor, modulus):
+        # See https://github.com/pytorch/pytorch/issues/119883
+        # This assert just tries to figure out how fare are we from being right
+        # We try to prove that modulus is positive and that we can't prove that b / d is negative
+        # This is the range when trunc and
+        assert (modulus.is_positive and
+                not (fuzzy_or([fuzzy_and([base.is_positive, divisor.is_negative]),
+                               fuzzy_and([base.is_negative, divisor.is_positive])]))), (base, divisor, modulus)
+
         if base == 0 or modulus == 1:
             return sympy.Integer(0)
 
@@ -156,11 +164,11 @@ class ModularIndexing(sympy.Function):
 
     def _eval_is_nonnegative(self):
         p, q = self.args[:2]
-        return fuzzy_eq(p.is_nonnegative, q.is_nonnegative)
+        return fuzzy_eq(p.is_nonnegative, q.is_nonnegative)  # type: ignore[attr-defined]
 
     def _eval_is_positive(self):
         p, q = self.args[:2]
-        return fuzzy_eq(p.is_positive, q.is_positive)
+        return fuzzy_eq(p.is_positive, q.is_positive)  # type: ignore[attr-defined]
 
 
 class Where(sympy.Function):
