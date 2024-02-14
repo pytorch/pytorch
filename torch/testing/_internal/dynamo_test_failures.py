@@ -1140,7 +1140,6 @@ dynamo_expected_failures = {
     "TestTorchFunctionMode.test_nested_modes_with_python_has_torch_function",  # test_overrides
     "TestPickle.test_pickle",  # test_overrides
     "TestGradNewOnesOverride.test_newones",  # test_overrides
-    "TestTorchFunctionOverride.test_precedence_semantics",  # test_overrides
     "TestNamedTupleAPI.test_namedtuple_return",  # test_namedtuple_return_api
     "TestVmapAPILegacy.test_accepts_nested_inputs",  # test_legacy_vmap
     "TestVmapAPILegacy.test_nested_out_dims",  # test_legacy_vmap
