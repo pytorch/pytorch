@@ -254,10 +254,10 @@ def dynamo_timed(original_function=None, phase_name=None):
                 frame_key = str(curr_frame)
                 if frame_key not in frame_phase_timing:
                     frame_phase_timing[frame_key] = {}
-                assert (
-                    phase_name not in frame_phase_timing[frame_key]
-                ), f"Duplicate phase name {phase_name} for frame {frame_key}"
-                frame_phase_timing[frame_key][phase_name] = time_spent
+                if phase_name not in frame_phase_timing[frame_key]:
+                    frame_phase_timing[frame_key][phase_name] = time_spent
+                else:
+                    frame_phase_timing[frame_key][phase_name] += time_spent
             return r
 
         return time_wrapper
