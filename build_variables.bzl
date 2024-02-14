@@ -747,6 +747,7 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/optim/schedulers/step_lr.cpp",
     "torch/csrc/api/src/serialize/input-archive.cpp",
     "torch/csrc/api/src/serialize/output-archive.cpp",
+    "torch/csrc/api/src/xpu.cpp",
 ]
 
 libtorch_python_cuda_core_sources = [
@@ -765,6 +766,11 @@ libtorch_python_cuda_sources = libtorch_python_cuda_core_sources + [
     "torch/csrc/cuda/python_nccl.cpp",
     "torch/csrc/cuda/shared/cudnn.cpp",
     "torch/csrc/cuda/Tensor.cpp",
+]
+
+libtorch_python_xpu_sources = [
+    "torch/csrc/xpu/Module.cpp",
+    "torch/csrc/xpu/Stream.cpp",
 ]
 
 libtorch_python_core_sources = [
@@ -802,9 +808,11 @@ libtorch_python_core_sources = [
     "torch/csrc/autograd/python_variable.cpp",
     "torch/csrc/autograd/python_variable_indexing.cpp",
     "torch/csrc/dynamo/python_compiled_autograd.cpp",
+    "torch/csrc/dynamo/cache_entry.cpp",
     "torch/csrc/dynamo/cpp_shim.cpp",
     "torch/csrc/dynamo/cpython_defs.c",
     "torch/csrc/dynamo/eval_frame.c",
+    "torch/csrc/dynamo/extra_state.cpp",
     "torch/csrc/dynamo/guards.cpp",
     "torch/csrc/dynamo/init.cpp",
     "torch/csrc/functorch/init.cpp",
@@ -862,7 +870,7 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/init.cpp",
     "torch/csrc/utils/throughput_benchmark.cpp",
     "torch/csrc/utils.cpp",
-    "torch/csrc/utils/cuda_lazy_init.cpp",
+    "torch/csrc/utils/device_lazy_init.cpp",
     "torch/csrc/utils/invalid_arguments.cpp",
     "torch/csrc/utils/nested.cpp",
     "torch/csrc/utils/object_ptr.cpp",
@@ -948,6 +956,7 @@ aten_cpu_non_globed_sources = [
 aten_cpu_non_globed_headers = [
     "aten/src/ATen/CPUGeneratorImpl.h",
     "aten/src/ATen/NumericUtils.h",
+    "aten/src/ATen/detail/AcceleratorHooksInterface.h",
     "aten/src/ATen/detail/CUDAHooksInterface.h",
     "aten/src/ATen/detail/MPSHooksInterface.h",
     "aten/src/ATen/detail/HIPHooksInterface.h",
@@ -962,6 +971,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/AccumulateType.cpp",
     "aten/src/ATen/LegacyBatchedTensorImpl.cpp",
     "aten/src/ATen/CPUGeneratorImpl.cpp",
+    "aten/src/ATen/DeviceAccelerator.cpp",
     "aten/src/ATen/Context.cpp",
     "aten/src/ATen/DLConvertor.cpp",
     "aten/src/ATen/EmptyTensor.cpp",
