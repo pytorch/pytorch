@@ -3073,6 +3073,7 @@ def register_meta_foreach(ops):
         aten._foreach_log1p,
         aten._foreach_log2,
         aten._foreach_neg,
+        aten._foreach_norm,
         aten._foreach_reciprocal,
         aten._foreach_round,
         aten._foreach_sigmoid,
