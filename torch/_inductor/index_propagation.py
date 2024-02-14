@@ -127,7 +127,10 @@ class SymPyOps:
             return NotImplemented
         # In these cases, remainder in Python == remainder in C++, so this transformation
         # is sound
-        if x.expr.is_positive is not None and x.expr.is_positive == y.expr.is_positive:
+        if (
+            x.expr.is_nonnegative is not None
+            and x.expr.is_nonnegative == y.expr.is_positive
+        ):
             result_expr = ModularIndexing(x.expr, sympy.Integer(1), y.expr)
             return TypedExpr(result_expr, result_type)
         return NotImplemented
@@ -272,10 +275,11 @@ class IndexPropagation:
             index = index.value.expr
             # If SymPy can prove that idx >= 0, the Where below will evaluate to zero
             # Alas, SymPy can't prove that index >= when we do ModularIndexing...
-            if (isinstance(index, ModularIndexing) and
-               index.args[1] == 1 and
-               index.args[0].is_positive is not None and
-               index.args[0].is_positive == index.args[2].is_positive):
+            if (
+                isinstance(index, ModularIndexing)
+                and index.args[1] == 1
+                and index.args[2].is_positive
+            ):
                 return index
             return index + Where(index >= 0, 0, size)
         return self.fallback("indirect_indexing", (index, size, check), {}).value
