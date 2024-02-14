@@ -122,9 +122,9 @@ def auto_functionalized_dense(
     out = _mutable_op(**new_kwargs)
 
     if isinstance(out, tuple):
-        return (*out, *result)
+        return (*out, *result)  # type: ignore[return-value]
     else:
-        return (out, *result)
+        return (out, *result)  # type: ignore[return-value]
 
 
 @auto_functionalized.py_impl(FakeTensorMode)
@@ -209,9 +209,10 @@ def do_auto_functionalize(
             normalized_kwargs[arg.name] = arg.default_value
 
     unwrapped_kwargs = ctx.unwrap_tensors(normalized_kwargs)  # type: ignore[arg-type]
-    unwrapped_outs = auto_functionalized(
-        op, **unwrapped_kwargs  # type: ignore[arg-type]
-    )
+    with ctx.redispatch_to_next():
+        unwrapped_outs = auto_functionalized(
+            op, **unwrapped_kwargs  # type: ignore[arg-type]
+        )
 
     # List of the name of args that get mutated (according to the schema)
     mutable_args_names = get_mutable_arg_names(op)

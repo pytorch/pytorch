@@ -265,7 +265,6 @@ class HigherOrderOperator(OperatorBase):
         for dispatch_key in _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS:
             self.fallthrough(dispatch_key)
 
-
         # [NOTE] We have to register pre-dispatch key implementation
         # because sometimes HOP use aot-dispatch tracing to detect certaion
         # mutations. This is problematic when we are functionalizing HOP

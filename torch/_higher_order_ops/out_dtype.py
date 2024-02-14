@@ -164,5 +164,7 @@ def out_dtype_fake_tensor_mode(
 @out_dtype.py_functionalize_impl
 def out_dtype_func(ctx, op, output_dtype, *args):
     unwrapped_args = tuple(ctx.unwrap_tensors(arg) for arg in args)
-    res = out_dtype(op, output_dtype, *unwrapped_args)
+
+    with ctx.redispatch_to_next():
+        res = out_dtype(op, output_dtype, *unwrapped_args)
     return ctx.wrap_tensors(res)

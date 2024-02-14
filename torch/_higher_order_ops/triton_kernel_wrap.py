@@ -602,13 +602,14 @@ def triton_kernel_wrapper_functional_functionalize(
     ctx, kernel_idx, grid, kwargs, tensors_to_clone
 ):
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
-    outputs = triton_kernel_wrapper_functional(
-        kernel_idx=kernel_idx,
-        grid=grid,
-        kwargs=unwrapped_kwargs,
-        tensors_to_clone=tensors_to_clone,
-    )
-    return ctx.wrap_tensors(outputs)
+    with ctx.redispatch_to_next():
+        outputs = triton_kernel_wrapper_functional(
+            kernel_idx=kernel_idx,
+            grid=grid,
+            kwargs=unwrapped_kwargs,
+            tensors_to_clone=tensors_to_clone,
+        )
+        return ctx.wrap_tensors(outputs)
 
 
 triton_kernel_wrapper_mutation.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]

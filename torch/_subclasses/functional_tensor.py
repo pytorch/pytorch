@@ -480,7 +480,7 @@ def unset_functional_temporarily():
 # - Doing so means that it does not automatically compose with other
 #   functorch transforms, since these transforms always run above __torch_dispatch__.
 #   That's why this util lives here, and not in functorch.
-def dispatch_functionalize(func, mode: Optional[FunctionalTensorMode] = FunctionalTensorMode()):
+def dispatch_functionalize(func, mode: FunctionalTensorMode = FunctionalTensorMode()):
     # TODO: pull these from aot autograd
     def to_fun(t):
         if isinstance(t, torch.Tensor):
@@ -546,7 +546,9 @@ class BaseFunctionalizeAPI(ABC):
 
 
 class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
-    def __init__(self, mode: Optional[FunctionalTensorMode] = None, pre_dispatch: bool = False) -> None:
+    def __init__(
+        self, mode: Optional[FunctionalTensorMode] = None, pre_dispatch: bool = False
+    ) -> None:
         super().__init__()
         self.mode = mode if mode else FunctionalTensorMode()
         self.pre_dispatch = pre_dispatch
