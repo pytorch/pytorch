@@ -202,6 +202,8 @@ manual_torch_name_rule_map = {
     "torch.backends.mha.get_fastpath_enabled": UserFunctionVariable,
     "torch._C._functorch._add_batch_dim": TorchInGraphFunctionVariable,
     "torch._C._functorch._remove_batch_dim": TorchInGraphFunctionVariable,
+    "torch._C._functorch._wrap_for_grad": TorchInGraphFunctionVariable,
+    "torch._C._functorch._unwrap_for_grad": TorchInGraphFunctionVariable,
     "torch._C._functorch.is_batchedtensor": TorchInGraphFunctionVariable,
 }
 
