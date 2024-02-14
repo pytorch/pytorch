@@ -1862,13 +1862,10 @@ def _get_batch_norm_reserve_tensor(
     backend = torch._C._select_batch_norm_backend(  # type: ignore[attr-defined]
         input, weight, bias, running_mean, running_var, True, eps, cudnn_enabled
     )
+    reserve_size = 0
     if backend == torch._C._BatchNormBackend.Cudnn:  # type: ignore[attr-defined]
         reserve_size = torch._C._get_cudnn_batch_norm_reserve_space_size(input)  # type: ignore[attr-defined]
-        return torch.empty(
-            reserve_size, dtype=torch.uint8, layout=input.layout, device=input.device
-        )
-    else:
-        return torch.empty(0, dtype=torch.uint8)
+    return torch.empty(reserve_size, dtype=torch.uint8, layout=input.layout, device=input.device)
 
 
 @register_decomposition(aten.batch_norm_with_update.default)
@@ -1909,18 +1906,20 @@ def batch_norm_with_update_functional(
     momentum: float,
     eps: float,
     cudnn_enabled: bool,
-) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
-    return batch_norm_with_update(
+) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    new_rm = running_mean.clone()
+    new_rv = running_var.clone()
+    (output, save_mean, save_rstd, reserve) = batch_norm_with_update(
         input,
         weight,
         bias,
-        running_mean.clone(),
-        running_var.clone(),
+        new_rm,
+        new_rv,
         momentum,
         eps,
         cudnn_enabled,
     )
-
+    return (output, save_mean, save_rstd, reserve, new_rm, new_rv)
 
 @register_decomposition(aten.batch_norm_no_update.default)
 def batch_norm_no_update(
