@@ -808,6 +808,8 @@ def use_deterministic_algorithms(mode: builtins.bool, *, warn_only: builtins.boo
     .. note:: :func:`torch.set_deterministic_debug_mode` offers an alternative
         interface for this feature.
 
+    .. note:: Setting ``mode=True` is detrimental to performance.
+
     The following normally-nondeterministic operations will act
     deterministically when ``mode=True``:
 
