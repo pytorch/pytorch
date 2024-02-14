@@ -35,6 +35,26 @@ class WorkRegistry {
     return work;
   }
 
+  ~WorkRegistry() {
+    // If there are still unwaited work objects, their corresponding process
+    // groups should have already been destroyed at this stage. Any attempts to
+    // wait for these work objects or to destroy them will only result in
+    // confusing errors. Therefore, we simply issue a warning and intentionally
+    // allow the unwaited work objects to leak.
+    if (!registry_.empty()) {
+      TORCH_WARN(
+          "At the time of process termination, there are still ",
+          registry_.size(),
+          " unwaited c10d_functional collective calls. "
+          "Please review your program to ensure c10d_functional.wait_tensor() "
+          "is invoked on all tensors returned from c10d_functional collective "
+          "ops before they are used.");
+    }
+    for (auto it = registry_.begin(); it != registry_.end(); ++it) {
+      it->second.release();
+    }
+  }
+
  private:
   std::unordered_map<
       c10::weak_intrusive_ptr<c10::StorageImpl>,
