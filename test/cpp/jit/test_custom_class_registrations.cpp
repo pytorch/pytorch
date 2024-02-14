@@ -280,6 +280,16 @@ struct ReLUClass : public torch::CustomClassHolder {
   }
 };
 
+struct ContainsTensor : public torch::CustomClassHolder {
+  explicit ContainsTensor(at::Tensor t) : t_(t) {}
+
+  at::Tensor get() {
+    return t_;
+  }
+
+  at::Tensor t_;
+};
+
 TORCH_LIBRARY(_TorchScriptTesting, m) {
   m.class_<ScalarTypeClass>("_ScalarTypeClass")
       .def(torch::init<at::ScalarType>())
@@ -446,6 +456,19 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
           /* __setstate__ */
           [](ElementwiseInterpreter::SerializationType state) {
             return ElementwiseInterpreter::__setstate__(std::move(state));
+          });
+
+  m.class_<ContainsTensor>("_ContainsTensor")
+      .def(torch::init<at::Tensor>())
+      .def("get", &ContainsTensor::get)
+      .def_pickle(
+          // __getstate__
+          [](const c10::intrusive_ptr<ContainsTensor>& self) -> at::Tensor {
+            return self->t_;
+          },
+          // __setstate__
+          [](at::Tensor data) -> c10::intrusive_ptr<ContainsTensor> {
+            return c10::make_intrusive<ContainsTensor>(std::move(data));
           });
 }
 
