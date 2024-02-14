@@ -15,7 +15,6 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     FSDPTest,
-    # FSDPMaybeCompileTest,
     FSDPTestMultiThread,
     MLP,
     patch_all_gather,
