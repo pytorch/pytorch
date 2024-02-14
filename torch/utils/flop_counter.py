@@ -95,13 +95,28 @@ def conv_flop_count(
     Returns:
         int: the number of flops
     """
+    assert x_shape[0] == out_shape[0], f"{x_shape}, {w_shape}, {out_shape}"
+    if not transposed:
+        assert w_shape[1] == x_shape[1] and w_shape[0] == out_shape[1]
+    else:
+        assert w_shape[0] == x_shape[1] and w_shape[1] == out_shape[1]
+
     batch_size = x_shape[0]
     conv_shape = (x_shape if transposed else out_shape)[2:]
-    c_out, c_in, *dims = w_shape
+    c_out, c_in, *filter_size = w_shape
 
+    """
+    General idea here is that for a regular conv, for each point in the output
+    spatial dimension we convolve the filter with something (hence
+    `prod(conv_shape) * prod(filter_size)` ops). Then, this gets multiplied by
+    1. batch_size, 2. the cross product of input and weight channels.
+
+    For the transpose, it's not each point in the *output* spatial dimension but
+    each point in the *input* spatial dimension.
+    """
     # NB(chilli): I don't think this properly accounts for padding :think:
     # NB(chilli): Should be 2 * c_in - 1 technically for FLOPs.
-    flop = batch_size * prod(conv_shape) * c_out * prod(dims) * 2 * c_in
+    flop = prod(conv_shape) * prod(filter_size) * batch_size * c_out * c_in * 2
     return flop
 
 @register_flop_formula([aten.convolution, aten._convolution])
@@ -109,8 +124,6 @@ def conv_flop(x_shape, w_shape, _bias, _stride, _padding, _dilation, transposed,
     """Count flops for convolution."""
     return conv_flop_count(x_shape, w_shape, out_shape, transposed=transposed)
 
-def transpose_shape(shape):
-    return [shape[1], shape[0]] + list(shape[2:])
 
 @register_flop_formula(aten.convolution_backward)
 def conv_backward_flop(
@@ -131,9 +144,17 @@ def conv_backward_flop(
     if output_mask[0]:
         grad_input_shape = get_shape(out_shape[0])
         flop_count += conv_flop_count(grad_out_shape, w_shape, grad_input_shape, not transposed)
+
+    def t(shape):
+        return [shape[1], shape[0]] + list(shape[2:])
     if output_mask[1]:
         grad_weight_shape = get_shape(out_shape[1])
-        flop_count += conv_flop_count(transpose_shape(x_shape), grad_out_shape, grad_weight_shape, transposed)
+        # Not confident about the transposes but am confident about the general
+        # structure.
+        if transposed:
+            flop_count += conv_flop_count(t(grad_out_shape), t(x_shape), t(grad_weight_shape), False)
+        else:
+            flop_count += conv_flop_count(t(x_shape), t(grad_out_shape), t(grad_weight_shape), False)
 
     return flop_count
 
@@ -221,7 +242,7 @@ def get_suffix_str(number):
     # Find the index of the appropriate suffix based on the number of digits
     # with some additional overflow.
     # i.e. 1.01B should be displayed as 1001M, not 1.001B
-    index = max(0, min(len(suffixes) - 1, (len(str(number)) - 3) // 3))
+    index = max(0, min(len(suffixes) - 1, (len(str(number)) - 2) // 3))
     return suffixes[index]
 
 def convert_num_with_suffix(number, suffix):
@@ -276,6 +297,7 @@ class FlopCounterMode(TorchDispatchMode):
         self.flop_counts: Dict[str, Dict[Any, int]] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
         self.parents = ["Global"]
+        self.in_backward = False
         self.display = display
         if custom_mapping is None:
             custom_mapping = {}
@@ -329,13 +351,14 @@ class FlopCounterMode(TorchDispatchMode):
         class PushState(torch.autograd.Function):
             @staticmethod
             def forward(ctx, *args):
-                assert self.parents[-1] == name
+                assert self.parents[-1] == name, f"{self.parents[-1]} is not {name}"
                 self.parents.pop()
                 args = tree_map(lambda x: x.clone() if isinstance(x, torch.Tensor) else x, args)
                 return args
 
             @staticmethod
             def backward(ctx, *grad_outs):
+                self.in_backward = True
                 self.parents.append(name)
                 return grad_outs
 
@@ -345,6 +368,9 @@ class FlopCounterMode(TorchDispatchMode):
         class PopState(torch.autograd.Function):
             @staticmethod
             def forward(ctx, *args):
+                if self.in_backward:
+                    self.parents = ["Global"]
+                    self.in_backward = True
                 self.parents.append(name)
                 args = tree_map(lambda x: x.clone() if isinstance(x, torch.Tensor) else x, args)
                 return args
@@ -370,7 +396,7 @@ class FlopCounterMode(TorchDispatchMode):
         Returns:
             Dict[str, Dict[Any, int]]: The flop counts as a dictionary.
         """
-        return dict(self.flop_counts)
+        return {k: dict(v) for k, v in self.flop_counts.items()}
 
     def get_table(self, depth=None):
         if depth is None:
