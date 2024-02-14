@@ -624,7 +624,7 @@ def run_test_retries(
         if not (
             IS_MACOS
             and len(command) >= 2
-            and command[2] == "inductor/test_torchinductor_opinfo.py"
+            and command[2].startswith(INDUCTOR_TEST_PREFIX)
         ):
             env = env or {}
             env["TORCH_SHOW_CPP_STACKTRACES"] = "1"
