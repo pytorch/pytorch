@@ -4,6 +4,7 @@
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/utils/disable_torch_function.h>
+#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_symnode.h>
 #include <torch/extension.h>
@@ -545,7 +546,16 @@ static PyObject* dict_version(PyObject* dummy, PyObject* args) {
   if (!PyDict_Check(obj)) {
     return nullptr;
   }
+#if IS_PYTHON_3_12_PLUS
+  TORCH_CHECK(false, "Dynamo does not support CPython 3.12 yet.");
+  return nullptr;
+#else
+  // ma_version_tag is deprecated since 3.12. We will need to transition
+  // to use the appropriate API for later versions.
+  // This warning is an error on some clang builds, so we have to ifdef it
+  // away for now.
   return THPUtils_packUInt64(((PyDictObject*)obj)->ma_version_tag);
+#endif
 }
 
 static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
