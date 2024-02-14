@@ -685,25 +685,25 @@ def get_state_dict(
     optimizer parameter IDs to the canonical FQNs.
 
     Example:
+        >>> # xdoctest: +SKIP
+        >>> import torch
+        >>> from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+        >>> from torch.nn.parallel import DistributedDataParallel as DDP
+        >>> from torch.distributed.checkpoint.state_dict import get_state_dict
 
-        import torch
-        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-        from torch.nn.parallel import DistributedDataParallel as DDP
-        from torch.distributed.checkpoint.state_dict import get_state_dict
-
-        fsdp_model = FSDP(copy.deepcopy(model))
-        fsdp_optim = torch.optim.Adam(model.parameters(), lr=1e-3)
-        ddp_model = DDP(copy.deepcopy(model))
-        ddp_optim = torch.optim.Adam(model.parameters(), lr=1e-3)
+        >>> fsdp_model = FSDP(copy.deepcopy(model))
+        >>> fsdp_optim = torch.optim.Adam(model.parameters(), lr=1e-3)
+        >>> ddp_model = DDP(copy.deepcopy(model))
+        >>> ddp_optim = torch.optim.Adam(model.parameters(), lr=1e-3)
 
 
-        ddp_state_dict, ddp_optim_state_dict = get_state_dict(ddp_model, ddp_optim)
-        fsdp_state_dict, fsdp_optim_state_dict = get_state_dict(fsdp_model, fsdp_optim)
+        >>> ddp_state_dict, ddp_optim_state_dict = get_state_dict(ddp_model, ddp_optim)
+        >>> fsdp_state_dict, fsdp_optim_state_dict = get_state_dict(fsdp_model, fsdp_optim)
 
-        # if we simply call ddp_model.state_dict() and fsdp_model.state_dict(),
-        # the asserts will fail.
-        assert ddp_state_dict == fsdp_state_dict
-        assert ddp_optim_state == fsdp_optim_state_dict
+        >>> # if we simply call ddp_model.state_dict() and fsdp_model.state_dict(),
+        >>> # the asserts will fail.
+        >>> assert ddp_state_dict == fsdp_state_dict
+        >>> assert ddp_optim_state == fsdp_optim_state_dict
 
 
     Args:
@@ -718,6 +718,8 @@ def get_state_dict(
 
     Returns:
         ``Tuple`` that contain model state_dict and optimizer state_dict.
+
+    :rtype: typing.Tuple[typing.Dict[str, ValueType], OptimizerStateType]
     """
 
     with gc_context():
