@@ -80,6 +80,14 @@ install_ubuntu() {
         fi
     fi
 
+    # ROCm 6.0 had a regression where journal_mode was enabled on the kdb files resulting in permission errors at runtime
+    if [[ $(ver $ROCM_VERSION) -ge $(ver 6.0) ]]; then
+        for kdb in /opt/rocm/share/miopen/db/*.kdb
+        do
+            sqlite3 $kdb "PRAGMA journal_mode=off; PRAGMA VACUUM;"
+        done
+    fi
+
     # Cleanup
     apt-get autoclean && apt-get clean
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
@@ -149,6 +157,14 @@ install_centos() {
       else
         yum install -y ${MIOPENKERNELS}
       fi
+  fi
+
+  # ROCm 6.0 had a regression where journal_mode was enabled on the kdb files resulting in permission errors at runtime
+  if [[ $(ver $ROCM_VERSION) -ge $(ver 6.0) ]]; then
+      for kdb in /opt/rocm/share/miopen/db/*.kdb
+      do
+          sqlite3 $kdb "PRAGMA journal_mode=off; PRAGMA VACUUM;"
+      done
   fi
 
   # Cleanup

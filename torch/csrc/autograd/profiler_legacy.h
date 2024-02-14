@@ -1,13 +1,10 @@
 #pragma once
 
 #include <cstdint>
-#include <forward_list>
 #include <iostream>
 #include <memory>
 #include <mutex>
-#include <sstream>
 #include <string>
-#include <tuple>
 #include <vector>
 
 #include <torch/csrc/Export.h>
@@ -44,7 +41,7 @@ struct TORCH_API LegacyEvent {
         kind_(kind),
         thread_id_(thread_id),
         handle_(handle),
-        shapes_(shapes),
+        shapes_(std::move(shapes)),
         node_id_(node_id),
         is_async_(is_async) {
     record(record_cuda);
@@ -64,20 +61,20 @@ struct TORCH_API LegacyEvent {
       int64_t cpu_ns,
       bool cuda_recorded,
       int64_t cuda_memory_usage = 0,
-      int device = -1,
+      c10::DeviceIndex device = -1,
       double cuda_us = -1)
       : cpu_ns_(cpu_ns),
         name_(std::move(name)),
         kind_(kind),
         thread_id_(thread_id),
         handle_(handle),
-        shapes_(shapes),
+        shapes_(std::move(shapes)),
         cpu_memory_usage_(cpu_memory_usage),
         cuda_memory_usage_(cuda_memory_usage),
         device_(device),
         node_id_(node_id),
         is_remote_(is_remote),
-        cuda_us_(cuda_us) {
+        cuda_us_(static_cast<int64_t>(cuda_us)) {
     // Sanity check values that were deserialized
     TORCH_INTERNAL_ASSERT(cpu_ns_ > 0);
     if (cuda_recorded) {
@@ -131,7 +128,7 @@ struct TORCH_API LegacyEvent {
   }
 
   void setCpuUs(int64_t cpu_us) {
-    cpu_ns_ = static_cast<double>(cpu_us) * 1000.0;
+    cpu_ns_ = cpu_us * 1000;
   }
 
   double cpuUs() const {
@@ -144,7 +141,7 @@ struct TORCH_API LegacyEvent {
     return cuda_event != nullptr || (isRemote() && device_ != -1);
   }
 
-  int device() const {
+  c10::DeviceIndex device() const {
     return device_;
   }
 
@@ -265,7 +262,7 @@ struct TORCH_API LegacyEvent {
   std::vector<std::vector<int64_t>> shapes_;
   int64_t cpu_memory_usage_ = 0;
   int64_t cuda_memory_usage_ = 0;
-  int device_ = -1;
+  c10::DeviceIndex device_ = -1;
   torch::profiler::impl::ProfilerVoidEventStub cuda_event = nullptr;
   int node_id_ = 0;
   bool is_remote_ = false;
@@ -298,7 +295,6 @@ struct RangeEventList {
 
   std::vector<LegacyEvent> consolidate() {
     std::lock_guard<std::mutex> lock(mutex_);
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<LegacyEvent> result;
     result.insert(
         result.begin(),
@@ -394,7 +390,6 @@ struct TORCH_API TLSLegacyProfilerGuard {
     enableProfilerLegacy(cfg);
   }
   ~TLSLegacyProfilerGuard() {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     thread_event_lists event_lists =
         disableProfilerLegacy(profilerDisableOptions_);
     if (cb_) {
@@ -408,6 +403,7 @@ struct TORCH_API TLSLegacyProfilerGuard {
 
  private:
   c10::optional<std::function<void(const thread_event_lists&)>> cb_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const c10::optional<ProfilerDisableOptions> profilerDisableOptions_;
 };
 

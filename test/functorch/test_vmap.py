@@ -979,7 +979,6 @@ class TestVmapAPI(TestCase):
         jacobian = vmap(vjp_mul)(batched_v)
         self.assertEqual(jacobian, torch.diagflat(y))
 
-    @xfailIfTorchDynamo
     def test_functools_partial(self):
         x = torch.randn(3)
         y = torch.randn(2, 3)
@@ -1726,7 +1725,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
             x = torch.randn(B0, 0, 3)
             vmap(lambda x: x.as_strided([3], [1]))(x)
 
-    @xfailIfTorchDynamo
     def test_nll_loss(self):
         test = self._vmap_test
         op = F.nll_loss
@@ -1744,7 +1742,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(functools.partial(op, reduction='sum'), (y, t), in_dims=(0, None))
         test(functools.partial(op, reduction='none'), (y, t), in_dims=(0, None))
 
-    @xfailIfTorchDynamo
     def test_adaptive_avg_pool2d(self):
         test = self._vmap_test
         op = functools.partial(F.adaptive_avg_pool2d, output_size=(3, 3))
@@ -2657,6 +2654,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(vmap(lambda t: op(t, [4, 8, 9, 34, 29], 1), in_dims=2)),
              (torch.rand(B1, 2, B0, 64, B2),), in_dims=2)
 
+    @skipIfTorchDynamo("really slow")
     def test_split(self):
         test = self._vmap_view_test
         op = torch.split
@@ -3174,7 +3172,6 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._test_arithmetic(torch.div, device)
         self._test_arithmetic(lambda x, y: x / y, device)
 
-    @xfailIfTorchDynamo
     def test_binary_cross_entropy(self, device):
         x = F.sigmoid(torch.randn(3, 2, device=device, requires_grad=True))
         target = torch.rand(3, 2, device=device)
@@ -3184,7 +3181,6 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._batched_grad_test(op, (x,), {})
         self._batched_grad_grad_test(op, (x,), {})
 
-    @xfailIfTorchDynamo
     def test_log_softmax(self, device):
         op = functools.partial(torch.log_softmax, dim=-1)
         x = torch.randn(3, 2, device=device, requires_grad=True)
