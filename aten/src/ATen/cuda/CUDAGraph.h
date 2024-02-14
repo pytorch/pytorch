@@ -32,12 +32,6 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void enable_debug_mode();
   void debug_dump(const std::string& debug_path);
 
-  // Allocate a device buffer that persists throughout replays.
-  // The allocation only occurs during capturing, and is skipped
-  // during replays. The allocated buffers are managed by the CUDAGraph object
-  // and share the same lifetime as the CUDAGraph object.
-  void alloc_const_buffer(void** ptr, size_t size);
-
   protected:
 #if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   cudaGraph_t graph_ = NULL;
@@ -91,11 +85,8 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // RNG state trackers
   at::Tensor seed_extragraph_;
   at::Tensor offset_extragraph_;
-  std::vector<void*> const_buffers_;
   uint64_t wholegraph_increment_;
 };
-
-TORCH_CUDA_CPP_API CUDAGraph* get_current_capturing_graph();
 
 } // namespace cuda
 } // namespace at
