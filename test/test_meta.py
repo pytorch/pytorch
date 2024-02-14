@@ -724,7 +724,6 @@ meta_function_device_expected_failures['cuda'] = {
 
 meta_function_device_skips['cpu'] = {
     torch.native_batch_norm: {f32, f64},
-    torch.batch_norm_with_update: {f32, f64},
 }
 
 meta_function_device_skips['cuda'] = {

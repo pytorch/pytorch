@@ -13004,6 +13004,8 @@ op_db: List[OpInfo] = [
                             "TestCompositeCompliance", "test_forward_ad"),
                # batch_norm_with_update expects contiguous inputs for cudnn and miopen
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type="cuda"),
+               # batch_norm_with_update does not have python bindings
+               DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
            )
            ),
     OpInfo('nn.functional.cosine_similarity',
