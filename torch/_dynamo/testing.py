@@ -155,7 +155,9 @@ def debug_dump(name, code: types.CodeType, extra="") -> None:
         )
 
 
-def debug_insert_nops(frame, cache_size, hooks, _) -> Optional[GuardedCode]:
+def debug_insert_nops(
+    frame, cache_size, hooks, _, *, skip: int = 0
+) -> Optional[GuardedCode]:
     """used to debug jump updates"""
 
     def insert_nops(instructions, code_options):

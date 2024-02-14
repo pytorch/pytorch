@@ -309,6 +309,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 f"test_report_{self._testMethodName}"
                 f"_op_level_debug_{self.op_level_debug}"
                 f"_dynamic_axes_{self.dynamic_shapes}"
+                f"_model_type_{self.model_type}"
                 ".sarif"
             )
 
@@ -460,7 +461,6 @@ MIN_ONNX_OPSET_VERSION = 9
 MAX_ONNX_OPSET_VERSION = _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET
 TESTED_OPSETS = range(MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION + 1)
 
-# TODO(titaiwang): Change this when more versions are supported
 # The min onnx opset version to test for
 FX_MIN_ONNX_OPSET_VERSION = 18
 # The max onnx opset version to test for
