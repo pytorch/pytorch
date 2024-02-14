@@ -1335,7 +1335,6 @@ Please take a look at `Limitations of Symbolic Tracing <https://pytorch.org/docs
 .. py:module:: torch.ao.quantization.observer
 .. py:module:: torch.ao.quantization.pt2e.duplicate_dq_pass
 .. py:module:: torch.ao.quantization.pt2e.export_utils
-.. py:module:: torch.ao.quantization.pt2e.export_utils.model_is_exported
 .. py:module:: torch.ao.quantization.pt2e.graph_utils
 .. py:module:: torch.ao.quantization.pt2e.port_metadata_pass
 .. py:module:: torch.ao.quantization.pt2e.prepare

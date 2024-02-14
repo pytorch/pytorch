@@ -299,6 +299,8 @@ coverage_ignore_functions = [
     "node_arg_is_bias",
     "node_arg_is_weight",
     "return_arg_list",
+    # torch.ao.quantization.pt2e.export_utils
+    "model_is_exported",
     # torch.ao.quantization.pt2e.graph_utils
     "find_sequential_partitions",
     "get_equivalent_types",
