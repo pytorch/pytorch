@@ -5,12 +5,7 @@ from torchgen.api import cpp
 from torchgen.api.types import DispatcherSignature
 from torchgen.code_template import CodeTemplate
 from torchgen.context import with_native_function
-from torchgen.model import (
-    Argument,
-    NativeFunction,
-    SchemaKind,
-    TensorOptionsArguments,
-)
+from torchgen.model import Argument, NativeFunction, SchemaKind, TensorOptionsArguments
 from torchgen.utils import FileManager
 
 # Note [Manual Backend kernels]
