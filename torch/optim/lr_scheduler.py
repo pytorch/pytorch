@@ -492,7 +492,7 @@ class ConstantLR(LRScheduler):
         >>> # lr = 0.025   if epoch == 2
         >>> # lr = 0.025   if epoch == 3
         >>> # lr = 0.05    if epoch >= 4
-        >>> scheduler = ConstantLR(self.opt, factor=0.5, total_iters=4)
+        >>> scheduler = ConstantLR(optimizer, factor=0.5, total_iters=4)
         >>> for epoch in range(100):
         >>>     train(...)
         >>>     validate(...)
@@ -556,7 +556,7 @@ class LinearLR(LRScheduler):
         >>> # lr = 0.0375   if epoch == 2
         >>> # lr = 0.04375  if epoch == 3
         >>> # lr = 0.05    if epoch >= 4
-        >>> scheduler = LinearLR(self.opt, start_factor=0.5, total_iters=4)
+        >>> scheduler = LinearLR(optimizer, start_factor=0.5, total_iters=4)
         >>> for epoch in range(100):
         >>>     train(...)
         >>>     validate(...)
@@ -656,9 +656,9 @@ class SequentialLR(LRScheduler):
         >>> # lr = 0.9     if epoch == 2
         >>> # lr = 0.81    if epoch == 3
         >>> # lr = 0.729   if epoch == 4
-        >>> scheduler1 = ConstantLR(self.opt, factor=0.1, total_iters=2)
-        >>> scheduler2 = ExponentialLR(self.opt, gamma=0.9)
-        >>> scheduler = SequentialLR(self.opt, schedulers=[scheduler1, scheduler2], milestones=[2])
+        >>> scheduler1 = ConstantLR(optimizer, factor=0.1, total_iters=2)
+        >>> scheduler2 = ExponentialLR(optimizer, gamma=0.9)
+        >>> scheduler = SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[2])
         >>> for epoch in range(100):
         >>>     train(...)
         >>>     validate(...)
@@ -769,7 +769,7 @@ class PolynomialLR(LRScheduler):
         >>> # lr = 0.00050   if epoch == 2
         >>> # lr = 0.00025   if epoch == 3
         >>> # lr = 0.0       if epoch >= 4
-        >>> scheduler = PolynomialLR(self.opt, total_iters=4, power=1.0)
+        >>> scheduler = PolynomialLR(optimizer, total_iters=4, power=1.0)
         >>> for epoch in range(100):
         >>>     train(...)
         >>>     validate(...)
@@ -893,8 +893,8 @@ class ChainedScheduler(LRScheduler):
         >>> # lr = 0.729    if epoch == 2
         >>> # lr = 0.6561   if epoch == 3
         >>> # lr = 0.59049  if epoch >= 4
-        >>> scheduler1 = ConstantLR(self.opt, factor=0.1, total_iters=2)
-        >>> scheduler2 = ExponentialLR(self.opt, gamma=0.9)
+        >>> scheduler1 = ConstantLR(optimizer, factor=0.1, total_iters=2)
+        >>> scheduler2 = ExponentialLR(optimizer, gamma=0.9)
         >>> scheduler = ChainedScheduler([scheduler1, scheduler2])
         >>> for epoch in range(100):
         >>>     train(...)

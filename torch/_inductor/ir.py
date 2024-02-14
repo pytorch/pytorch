@@ -332,6 +332,7 @@ class IRNode:
     make_indexer: Callable[[], Callable[[Any], Any]]
     mark_reuse: Callable[[int], None]
     realize_hint: Callable[[], None]
+    get_unbacked_symbol_uses: Callable[[], Set[sympy.Symbol]]
 
 
 class _OpCounterCSE:
@@ -1824,6 +1825,9 @@ def is_stride_order_storage_and_layout(x, stride_order):
 class BaseView(IRNode):
     data: IRNode
 
+    def get_unbacked_symbol_uses(self):
+        return self.data.get_unbacked_symbol_uses()
+
     def make_reindexer(self):
         raise NotImplementedError(f"make_reindexer NYI on {self}")
 
@@ -2295,6 +2299,13 @@ class ReinterpretView(BaseView):
 
     def freeze_layout(self):
         pass
+
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+        return (
+            free_unbacked_symbols(self.layout.size)
+            | free_unbacked_symbols(self.layout.stride)
+            | free_unbacked_symbols(self.layout.offset)
+        )
 
     def codegen_reference(self, writer=None):
         # reinterpret_tensor is similar to as_strided except:
@@ -3057,6 +3068,9 @@ class ConstantBuffer(InputBuffer):
 
 
 class NoneAsConstantBuffer(IRNode):
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+        return set()
+
     def codegen_reference(self, writer=None):
         return V.graph.wrapper_code.none_str
 
@@ -3065,6 +3079,9 @@ class ShapeAsConstantBuffer(IRNode):
     def __init__(self, shape):
         super().__init__()
         self.shape = shape
+
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+        return free_unbacked_symbols(self.shape)
 
     def codegen_reference(self, writer=None):
         return V.graph.wrapper_code.expr_printer(V.graph.sizevars.simplify(self.shape))
@@ -4627,6 +4644,13 @@ class FallbackKernel(ExternKernelAlloc):
             # We assume here that HOPs with FallbackKernel are functional.
             # This may not always be true! HOPs must individually opt-in to
             # FallbackKernel, so please check this if you opt-in.
+            return
+
+        if "_c10d_functional" in self.op_overload.name():
+            # _c10d_functional kernels are lowered into _CollectiveKernel which
+            # derives from FallbackKernel for the cpp codegen. The kernels
+            # don't pass the can_auto_functionalize check, but their mutation
+            # is handled properly by _CollectiveKernel.
             return
 
         schema = self.op_overload._schema
@@ -6514,6 +6538,9 @@ class MutableBox(IRNode):
     def realize(self):
         return self.data.realize()
 
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+        return self.data.get_unbacked_symbol_uses()
+
     def codegen_reference(self, writer=None):
         return self.data.codegen_reference(writer)
 
@@ -7487,6 +7514,8 @@ class _CollectiveKernel(FallbackKernel):
     def create_inplace(
         cls, kernel, inputs: Union[TensorBox, List[TensorBox]], *args, **kwargs
     ) -> None:
+        cpp_kernel_name = kernel._name
+        python_kernel_name = cpp_kernel_name.replace("::", ".")
         with V.graph.fake_mode:
             (
                 example_output,
@@ -7504,6 +7533,8 @@ class _CollectiveKernel(FallbackKernel):
             non_tensor_args,
             unflatten_args,
         )
+        packed.cpp_kernel_name = cpp_kernel_name
+        packed.python_kernel_name = python_kernel_name
 
         def mark_mutation(x):
             if isinstance(x.data, BaseView):
@@ -7538,6 +7569,8 @@ class _CollectiveKernel(FallbackKernel):
     def create_out_of_place(
         cls, kernel, inputs: Union[TensorBox, List[TensorBox]], *args, **kwargs
     ):
+        cpp_kernel_name = kernel._name
+        python_kernel_name = cpp_kernel_name.replace("::", ".")
         with V.graph.fake_mode:
             (
                 example_output,
@@ -7557,6 +7590,8 @@ class _CollectiveKernel(FallbackKernel):
                 non_tensor_args,
                 unflatten_args,
             )
+            packed.cpp_kernel_name = cpp_kernel_name
+            packed.python_kernel_name = python_kernel_name
             packed.outputs = [
                 MultiOutput(
                     cls.tensor_to_layout(tensor),
@@ -7574,6 +7609,8 @@ class _CollectiveKernel(FallbackKernel):
                 non_tensor_args,
                 unflatten_args,
             )
+            packed.cpp_kernel_name = cpp_kernel_name
+            packed.python_kernel_name = python_kernel_name
             packed.outputs = [packed]
             return packed
 

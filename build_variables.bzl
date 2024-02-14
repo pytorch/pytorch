@@ -24,7 +24,6 @@ def libtorch_generated_sources(gencode_pattern):
         "torch/csrc/autograd/generated/VariableType_2.cpp",
         "torch/csrc/autograd/generated/VariableType_3.cpp",
         "torch/csrc/autograd/generated/VariableType_4.cpp",
-        "torch/csrc/autograd/generated/ViewFuncs.cpp",
         "torch/csrc/autograd/generated/TraceType_0.cpp",
         "torch/csrc/autograd/generated/TraceType_1.cpp",
         "torch/csrc/autograd/generated/TraceType_2.cpp",
@@ -771,6 +770,7 @@ libtorch_python_cuda_sources = libtorch_python_cuda_core_sources + [
 
 libtorch_python_xpu_sources = [
     "torch/csrc/xpu/Module.cpp",
+    "torch/csrc/xpu/Stream.cpp",
 ]
 
 libtorch_python_core_sources = [
@@ -956,6 +956,7 @@ aten_cpu_non_globed_sources = [
 aten_cpu_non_globed_headers = [
     "aten/src/ATen/CPUGeneratorImpl.h",
     "aten/src/ATen/NumericUtils.h",
+    "aten/src/ATen/detail/AcceleratorHooksInterface.h",
     "aten/src/ATen/detail/CUDAHooksInterface.h",
     "aten/src/ATen/detail/MPSHooksInterface.h",
     "aten/src/ATen/detail/HIPHooksInterface.h",
