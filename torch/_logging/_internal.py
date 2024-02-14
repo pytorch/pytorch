@@ -735,11 +735,11 @@ class TorchLogsFormatter(logging.Formatter):
             record.traceid = f" [{trace_id}]"
 
         glog_level_to_abbr = {
-            'DEBUG': 'V',  # V is for VERBOSE in glog
-            'INFO': 'I',
-            'WARNING': 'W',
-            'ERROR': 'E',
-            'CRITICAL': 'C',
+            "DEBUG": "V",  # V is for VERBOSE in glog
+            "INFO": "I",
+            "WARNING": "W",
+            "ERROR": "E",
+            "CRITICAL": "C",
         }
 
         shortlevel = glog_level_to_abbr.get(record.levelname, record.levelname)
