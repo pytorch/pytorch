@@ -2248,9 +2248,9 @@ class Scheduler:
                 self.origin_to_index.update({n: i for i, n in enumerate(n.graph.nodes)})
             return self.origin_to_index[n]
 
-        origins = [(get_order(e), e) for n in node.get_nodes() for e in n.node.origins]
+        origins = {(get_order(e), e) for n in node.get_nodes() for e in n.node.origins}
         if origins:
-            _, last = max(origins)
+            _, last = max(origins, key=lambda x: x[0])
             V.graph.wrapper_code.enter_context(last)
 
     @dynamo_timed
