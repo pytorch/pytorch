@@ -127,7 +127,6 @@ class OnnxRegistry:
         ] = defaultdict(list)
         # FIXME: Avoid importing onnxscript into torch
         from onnxscript.function_libs.torch_lib import (  # type: ignore[import]  # noqa: F401
-            ops,  # TODO(titaiwang): get rid of this import
             registration,
         )
 
@@ -150,7 +149,6 @@ class OnnxRegistry:
 
         return self._opset_version
 
-    # TODO(titaiwang): subject to change if multiple opset_version is supported in torchlib
     def _initiate_registry_from_torchlib(
         self, torchlib_registry: torchlib_registry.Registry
     ):
@@ -421,7 +419,6 @@ class ResolvedExportOptions(ExportOptions):
                 )
             )
 
-            # TODO(titaiwang, bowbao): Better way to annotate `onnxscript` types in diagnostics.
             from torch.onnx._internal.fx import onnxfunction_dispatcher
 
             self.op_level_debug = resolve(options.op_level_debug, False)
@@ -790,14 +787,22 @@ class ONNXProgram:
             >>> print(onnx_program.model_signature)
             ExportGraphSignature(
                 input_specs=[
-                    InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg0_1'), target='conv1.weight'),
-                    InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg1_1'), target='conv2.weight'),
-                    InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg2_1'), target='fc1.weight'),
-                    InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg3_1'), target='fc2.weight'),
-                    InputSpec(kind=<InputKind.BUFFER: 3>, arg=TensorArgument(name='arg4_1'), target='my_buffer2'),
-                    InputSpec(kind=<InputKind.BUFFER: 3>, arg=TensorArgument(name='arg5_1'), target='my_buffer1'),
-                    InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='l_x_'), target=None),
-                    InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='arg1'), target=None)
+                    InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg0_1'),
+                              target='conv1.weight', persistent=None),
+                    InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg1_1'),
+                              target='conv2.weight', persistent=None),
+                    InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg2_1'),
+                              target='fc1.weight', persistent=None),
+                    InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg3_1'),
+                              target='fc2.weight', persistent=None),
+                    InputSpec(kind=<InputKind.BUFFER: 3>, arg=TensorArgument(name='arg4_1'),
+                              target='my_buffer2', persistent=True),
+                    InputSpec(kind=<InputKind.BUFFER: 3>, arg=TensorArgument(name='arg5_1'),
+                              target='my_buffer1', persistent=True),
+                    InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='arg6_1'),
+                              target=None, persistent=None),
+                    InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='arg7_1'),
+                              target=None, persistent=None)
                 ],
                 output_specs=[
                     OutputSpec(kind=<OutputKind.BUFFER_MUTATION: 3>, arg=TensorArgument(name='add'), target='my_buffer2'),
@@ -1145,7 +1150,7 @@ class Exporter:
         self.model_args = model_args
         self.model_kwargs = model_kwargs
 
-        # TODO: Retire FXSymbolicTracer
+        # TODO: https://github.com/pytorch/pytorch/issues/107714
         # NOTE: FXSymbolicTracer would fail in this assert, as it does not use `enable_fake_mode`
         from torch.onnx._internal.fx import fx_symbolic_graph_extractor
 

@@ -1479,7 +1479,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             output_names=["output_0"],
         )
 
-    # TODO: Enable after https://github.com/onnx/onnx/pull/5741 or after ONNX 1.15.1+ is released
+    # TODO: Enable maxpool-ceil family after ONNX 1.15.1+ is bumped
     @skipIfUnsupportedMaxOpsetVersion(9)
     def test_maxpool_1d_ceil_corner(self):
         model = torch.nn.MaxPool1d(
@@ -1488,7 +1488,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 3, 32)
         self.run_test(model, x)
 
-    # TODO: Enable after https://github.com/onnx/onnx/pull/5741 or after ONNX 1.15.1+ is released
     @skipIfUnsupportedMaxOpsetVersion(9)
     def test_maxpool_2d_ceil_corner(self):
         model = torch.nn.MaxPool2d(
@@ -1501,7 +1500,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 3, 32, 32)
         self.run_test(model, x)
 
-    # TODO: Enable after https://github.com/onnx/onnx/pull/5741 or after ONNX 1.15.1+ is released
     @skipIfUnsupportedMaxOpsetVersion(9)
     def test_maxpool_3d_ceil_corner(self):
         model = torch.nn.MaxPool3d(
@@ -1515,7 +1513,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 3, 51, 52, 45)
         self.run_test(model, x)
 
-    # TODO: Enable after https://github.com/onnx/onnx/pull/5741 or after ONNX 1.15.1+ is released
     @skipIfUnsupportedMaxOpsetVersion(9)
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_maxpool_1d_ceil_corner_with_indices(self):
@@ -1525,7 +1522,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 3, 32)
         self.run_test(model, x)
 
-    # TODO: Enable after https://github.com/onnx/onnx/pull/5741 or after ONNX 1.15.1+ is released
     @skipIfUnsupportedMaxOpsetVersion(9)
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_maxpool_2d_ceil_corner_with_indices(self):
@@ -1539,7 +1535,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 3, 32, 32)
         self.run_test(model, x)
 
-    # TODO: Enable after https://github.com/onnx/onnx/pull/5741 or after ONNX 1.15.1+ is released
     @skipIfUnsupportedMaxOpsetVersion(9)
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_maxpool_3d_ceil_corner_with_indices(self):
@@ -7620,6 +7615,14 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(model, (embedding_matrix, x, offset, w))
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    @unittest.skip(
+        "This test is broken with ONNXRuntime(17): "
+        "when running with onnxruntime 1.17.0 this test fails with the following error:"
+        "FAIL : Non-zero status code returned while running If node. "
+        "Name:'/If' Status Message: if.cc:253 Compute "
+        "If nodes condition input must have exactly one element"
+        "https://github.com/pytorch/pytorch/issues/119442"
+    )
     def test_embedding_bag_2d_per_sample_weights(self):
         class EmbeddingModel(torch.nn.Module):
             def forward(self, embedding_matrix, input, weights):

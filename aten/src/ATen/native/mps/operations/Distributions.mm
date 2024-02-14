@@ -133,11 +133,7 @@ Tensor& random_mps_impl(Tensor& self,
     }
 
     Placeholder outputPlaceholder = Placeholder(cachedGraph->resultTensor, self);
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData(),
-    };
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return self;
@@ -235,7 +231,7 @@ Tensor& uniform_mps_(Tensor& self, double from, double to, c10::optional<Generat
     scalar_type = ScalarType::Float;
   else if (scalar_type == ScalarType::ComplexHalf)
     scalar_type = ScalarType::Half;
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(scalar_type, "check_uniform_bounds", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, scalar_type, "check_uniform_bounds", [&] {
     const auto min = static_cast<double>(std::numeric_limits<scalar_t>::lowest());
     const auto max = static_cast<double>(std::numeric_limits<scalar_t>::max());
     TORCH_CHECK(from <= to, "uniform_ expects to return a [from, to) range, but found from=", from, " > to=", to);
@@ -325,17 +321,15 @@ Tensor& random_mps_(Tensor& self, int64_t from, c10::optional<int64_t> to_opt, c
     to = *to_opt;
     TORCH_CHECK(from < to, "random_mps_ expects 'from' to be less than 'to', but got from=", from, " >= to=", to);
     if (isFloatingType(input_dtype)) {
-      AT_DISPATCH_FLOATING_TYPES_AND2(
-          at::ScalarType::Half, at::ScalarType::BFloat16, input_dtype, "random_update_from_to", [&] {
-            from = templates::update_from<scalar_t>(from);
-            to = templates::update_to<scalar_t>(to);
-            TORCH_CHECK(
-                from < to,
-                "random_mps_ expects 'from' casted to dtype to be less than 'to' casted to dtype, but got from=",
-                from,
-                " >= to=",
-                to);
-          });
+      AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input_dtype, "random_update_from_to", [&] {
+        from = templates::update_from<scalar_t>(from);
+        to = templates::update_to<scalar_t>(to);
+        TORCH_CHECK(from < to,
+                    "random_mps_ expects 'from' casted to dtype to be less than 'to' casted to dtype, but got from=",
+                    from,
+                    " >= to=",
+                    to);
+      });
       templates::check_from_to_in_range(from, to - 1, self.dtype());
     }
   } else if (from != std::numeric_limits<int64_t>::lowest()) {
@@ -575,10 +569,7 @@ static Tensor& multinomial_with_replacement_mps_kernel(const Tensor& self,
       cachedGraph->stateTensor : stateTensorData,
       probPlaceholder.getMPSGraphTensor() : probPlaceholder.getMPSGraphTensorData()
     };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return result;
