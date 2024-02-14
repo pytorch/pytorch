@@ -27,7 +27,6 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_1d_sharded_parity,
     FSDPTest,
-    # FSDPMaybeCompileTest,
     FSDPTestMultiThread,
     MLP,
     patch_all_gather,
