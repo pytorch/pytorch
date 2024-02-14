@@ -717,7 +717,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.op_count == 3
         assert same(outputs, correct_outputs)
 
-    def test_dynamo_rewrite_dist_all_gather(self):
+    def test_dynamo_rewrite_dist_all_gather_list(self):
 
         def func(inp, out, *, pg):
             torch.distributed.all_gather(
