@@ -31,7 +31,7 @@ class ParallelStyle(ABC):
 
 class ColwiseParallel(ParallelStyle):
     """
-    Partition a compatible nn.Module in a row-wise fashion. Currently supports nn.Linear and nn.Embedding.
+    Partition a compatible nn.Module in a column-wise fashion. Currently supports nn.Linear and nn.Embedding.
     Users can compose it together with RowwiseParallel to achieve the sharding of more complicated modules.
     (i.e. MLP, Attention)
 
