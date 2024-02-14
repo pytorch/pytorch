@@ -6,9 +6,10 @@ import unittest
 import torch
 from torch import nn
 
-from torch.sparse.semi_structured import (
-    _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG,
+from torch.sparse import (
     SparseSemiStructuredTensor,
+    SparseSemiStructuredTensorCUSPARSELT,
+    SparseSemiStructuredTensorCUTLASS,
     to_sparse_semi_structured,
 )
 
@@ -36,7 +37,7 @@ from torch.utils._triton import has_triton
 CUSPARSELT_NUM_ALG_IDS = 4
 CUSPARSELT_MIXED_DTYPE_SUPPORT = [torch.float16, torch.bfloat16, torch.int32]
 
-SEMI_STRUCTURED_SUPPORTED_DTYPES = _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG.keys()
+SEMI_STRUCTURED_SUPPORTED_DTYPES = [torch.float16, torch.bfloat16, torch.float32, torch.int8]
 SEMI_STRUCTURED_SUPPORTED_BACKENDS = []
 
 _IS_SM8X = False
@@ -315,7 +316,7 @@ class TestSparseSemiStructured(TestCase):
 
         with self.assertRaisesRegex(
             NotImplementedError,
-            r"arg0: SparseSemiStructuredTensor\(.*transposed=True",
+            r"`SparseSemiStructuredTensor.*` matmul: operation is not supported",
         ):
             torch.mm(A_sparse.t(), B)
 
@@ -357,7 +358,7 @@ class TestSparseSemiStructured(TestCase):
 
         with self.assertRaisesRegex(
             NotImplementedError,
-            r"arg1: SparseSemiStructuredTensor\(.*transposed=False",
+            r"`SparseSemiStructuredTensor.*` matmul: operation is not supported",
         ):
             sparse_result = torch.mm(A, B_sparse)
 
@@ -438,7 +439,10 @@ class TestSparseSemiStructured(TestCase):
     @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
     def test_min_sparse_shape(self, dtype, device, backend):
         SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
-        config = _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG[dtype]
+        if backend == "cutlass":
+            config = SparseSemiStructuredTensorCUTLASS._DTYPE_SHAPE_CONSTRAINTS[dtype]
+        elif backend == "cusparselt":
+            config = SparseSemiStructuredTensorCUSPARSELT._DTYPE_SHAPE_CONSTRAINTS[dtype]
         A = rand_sparse_semi_structured_mask(config.sparse_min_rows, config.sparse_min_cols, dtype=dtype, device=device)
         A_sparse = to_sparse_semi_structured(A)
         B = torch.rand((config.sparse_min_cols, config.dense_min_cols), device=device).to(dtype)
