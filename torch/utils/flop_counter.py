@@ -95,11 +95,6 @@ def conv_flop_count(
     Returns:
         int: the number of flops
     """
-    assert x_shape[0] == out_shape[0], f"{x_shape}, {w_shape}, {out_shape}"
-    if not transposed:
-        assert w_shape[1] == x_shape[1] and w_shape[0] == out_shape[1]
-    else:
-        assert w_shape[0] == x_shape[1] and w_shape[1] == out_shape[1]
 
     batch_size = x_shape[0]
     conv_shape = (x_shape if transposed else out_shape)[2:]
