@@ -387,7 +387,7 @@ struct NCCLTraceBuffer {
                 // update state information
     size_t pg_id_;
     size_t seq_id_; // as tracked by the process group
-    const char* profiling_name_;
+    std::string profiling_name_;
 
     std::shared_ptr<torch::CapturedTraceback> traceback_;
     // we borrow pointers to start_ and end_ so we can query the state
@@ -430,7 +430,7 @@ struct NCCLTraceBuffer {
   c10::optional<size_t> record(
       size_t pg_id,
       size_t seq_id,
-      const char* profiling_name,
+      std::string profiling_name,
       const std::vector<at::Tensor>& inputs,
       const std::vector<at::Tensor>& outputs,
       Event* start,
@@ -446,7 +446,7 @@ struct NCCLTraceBuffer {
         id_,
         pg_id,
         seq_id,
-        profiling_name == nullptr ? "" : profiling_name,
+        std::move(profiling_name),
         std::move(traceback),
         std::move(start),
         std::move(end),
@@ -528,15 +528,15 @@ struct NCCLTraceBuffer {
 
     std::unique_lock<std::mutex> guard(mutex_);
 
-    auto& entry = entries_.at(*id % max_entries_);
-    if (entry.id_ == *id) {
-      update_state(entry);
+    Entry* entry = &entries_.at(*id % max_entries_);
+    if (entry->id_ == *id) {
+      update_state(*entry);
 
       if (compute_duration) {
-        can_compute_duration = entry.time_discovered_completed_.has_value() &&
-            entry.start_ && entry.end_;
-        startEvent = entry.start_;
-        endEvent = entry.end_;
+        can_compute_duration = entry->time_discovered_completed_.has_value() &&
+            entry->start_ && entry->end_;
+        startEvent = entry->start_;
+        endEvent = entry->end_;
       }
     }
 
@@ -548,21 +548,21 @@ struct NCCLTraceBuffer {
       duration = getDurationFromEvent(*startEvent, *endEvent);
       guard.lock();
 
-      // Refresh the entry ref, see if it has been overwritten
-      entry = entries_.at(*id % max_entries_);
-      if (entry.id_ != *id) {
+      // Refresh the entry pointer, see if the entry has been overwritten
+      entry = &entries_.at(*id % max_entries_);
+      if (entry->id_ != *id) {
         LOG(INFO)
             << "retire_id abandoned for id " << *id
             << ", event was overwritten while waiting to compute duration.";
         return;
       }
       if (duration.has_value()) {
-        entry.duration_ = duration.value();
+        entry->duration_ = duration.value();
       }
     }
 
-    entry.retired_ = true;
-    entry.start_ = entry.end_ = nullptr;
+    entry->retired_ = true;
+    entry->start_ = entry->end_ = nullptr;
   }
 
   std::string dump() {
