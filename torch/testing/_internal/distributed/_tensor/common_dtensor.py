@@ -78,6 +78,7 @@ class ModelArgs:
     dropout_p: float = 0.1
     use_attn_mask: bool = True
     weight_tying: bool = True
+    checkpoint_activations: bool = False
 
 class Attention(nn.Module):
     def __init__(self, args: ModelArgs):
@@ -155,6 +156,7 @@ class Transformer(nn.Module):
         self.output = nn.Linear(args.dim, args.vocab_size, bias=False)
         if args.weight_tying:
             self.output.weight = self.tok_embeddings.weight
+        self.checkpoint_activations = args.checkpoint_activations
 
     def forward(self, tokens):
         _bsz, seq_len = tokens.size()
@@ -165,7 +167,10 @@ class Transformer(nn.Module):
         h = h + p
         h = self.dropout(h)
         for layer in self.layers:
-            h = layer(h)
+            if self.checkpoint_activations:
+                h = torch.utils.checkpoint.checkpoint(layer, h, use_reentrant=False)
+            else:
+                h = layer(h)
         h = self.norm(h)
         output = self.output(h).float()
         return output
