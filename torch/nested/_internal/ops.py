@@ -561,23 +561,18 @@ def chunk_default(func, *args, **kwargs):
         chunk_size = math.ceil(dim0_size / chunks)
 
         # get _offsets of the chunks
-        chunk_offsets = [
-            inp._offsets[i * chunk_size + 1 : (i + 1) * chunk_size + 1]
-            - inp._offsets[i * chunk_size]
-            for i in range(chunks)
-        ]
-        chunk_offsets = [F.pad(x, (1, 0), value=0) for x in chunk_offsets]
+        lengths = inp._offsets.diff()
+        chunked_lengths = lengths.chunk(chunks)
+        chunked_offsets = [torch.cumsum(x, dim=0) for x in chunked_lengths]
+        chunked_offsets = [F.pad(x, (1, 0), value=0) for x in chunked_offsets]
         nested_kwargs = [
             {"offsets": per_offsets, "_ragged_idx": inp._ragged_idx}
-            for per_offsets in chunk_offsets
+            for per_offsets in chunked_offsets
         ]
 
         # get _values of the chunks
-        chunk_values = [inp._values[: chunk_offsets[0][-1]]]
-        for i in range(1, chunk_size):
-            chunk_values.append(
-                inp._values[chunk_offsets[i - 1][-1] : chunk_offsets[i][-1]]
-            )
+        split_sizes = [x.sum().item() for x in chunked_lengths]
+        chunk_values = inp._values.split(split_sizes)
 
         return [
             NestedTensor(values=chunk_values[i], **(nested_kwargs[i]))

@@ -3298,6 +3298,7 @@ class TestNestedTensorSubclass(TestCase):
                 self.assertEqual(chunks[i].shape[0], B - chunk_size * (NUM_CHUNKS - 1))
             offsets_expected = nt._offsets[i * chunk_size + 1 : (i + 1) * chunk_size + 1] - nt._offsets[i * chunk_size]
             self.assertEqual(chunks[i]._offsets[1:], offsets_expected)
+        self.assertEqual(nt._values, torch.cat([x._values for x in chunks], dim=0))
 
         # chunk on ragged dim not supported
         with self.assertRaisesRegex(RuntimeError, "chunk.* not supported for NestedTensor on dim=0 or dim=1"):
