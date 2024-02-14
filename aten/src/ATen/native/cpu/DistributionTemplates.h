@@ -142,7 +142,8 @@ static void normal_fill_16(scalar_t *data, const scalar_t mean, const scalar_t s
     const scalar_t u1 = 1 - data[j]; // [0, 1) -> (0, 1] for log.
     const scalar_t u2 = data[j + 8];
     const scalar_t radius = std::sqrt(-2 * std::log(u1));
-    const scalar_t theta = 2.0f * c10::pi<double> * u2;
+    const scalar_t two_pi = 2.0f * c10::pi<double> ;
+    const scalar_t theta = two_pi * u2;
     data[j] = radius * std::cos(theta) * std + mean;
     data[j + 8] = radius * std::sin(theta) * std + mean;
   }
@@ -151,14 +152,14 @@ static void normal_fill_16(scalar_t *data, const scalar_t mean, const scalar_t s
 static void normal_fill_16_vectorize(float *data,const Vectorized<float> &two_pi,const Vectorized<float> &one,const Vectorized<float> &minus_two,const Vectorized<float> &mean,const Vectorized<float> &std) {
   using Vec = Vectorized<float>;
   Vec u1=one-Vec::loadu(data);
-  Vec u2=Vec::loadu(data+Vec::size());
+  Vec u2=Vec::loadu(data+8);
   Vec radius=(minus_two * u1.log());
   radius=radius.sqrt();
   Vec theta=two_pi * u2;
   Vec output_vec=radius * theta.cos() * std + mean;
   Vec output_vec2=radius * theta.sin() * std + mean;
   output_vec.store(data);
-  output_vec2.store(data+Vec::size());
+  output_vec2.store(data+8);
 }
 
 template <typename scalar_t, typename RNG>
