@@ -3218,6 +3218,8 @@ SKIP_DIRS.extend(filter(None, (_module_dir(m) for m in BUILTIN_SKIPLIST)))
 
 SKIP_DIRS_RE = re.compile(r"match nothing^")
 
+is_fbcode = importlib.import_module("torch._inductor.config").is_fbcode()
+
 
 def _recompile_re():
     global SKIP_DIRS_RE
