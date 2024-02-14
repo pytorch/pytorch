@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 import torch
 
@@ -258,8 +258,6 @@ class inference_mode(_DecoratorContextManager):
     def __init__(self, mode: bool = True) -> None:
         if not torch._jit_internal.is_scripting():
             super().__init__()
-        # Holds a context manager that can enable or disable inference mode
-        self._inference_mode_raii_context: Optional[torch._C._InferenceMode] = None
         self.mode = mode
 
     def __new__(cls, mode=True):
