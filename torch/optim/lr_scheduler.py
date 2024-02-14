@@ -968,8 +968,8 @@ class ReduceLROnPlateau(LRScheduler):
         patience (int): The number of allowed epochs with no improvement after
             which the learning rate will be reduced. For example, if `patience = 2`,
             then we will tolerate 2 epochs with no improvement, and will only
-            decrease the LR after the 3rd epoch (starting from the 4th epoch) 
-            if the loss still hasn't improved. In other words, the learning rate reduction 
+            decrease the LR after the 3rd epoch (starting from the 4th epoch)
+            if the loss still hasn't improved. In other words, the learning rate reduction
             occurs after `patience + 1` epochs without improvement. Default: 10.
         threshold (float): Threshold for measuring the new optimum,
             to only focus on significant changes. Default: 1e-4.
