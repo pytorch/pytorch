@@ -170,9 +170,15 @@ std::tuple<DevArrayPack, c10::optional<at::Tensor>> pack_vectors(
   }
 
   if (is_capturing) {
-    // When capturing, use a constant buffer to hold the packed vectors
-    at::cuda::get_current_capturing_graph()->alloc_const_buffer(
-        reinterpret_cast<void**>(&pack.buffer_ptr), total_bytes);
+    // The dynamically allocated buffer can be considered an extension of the
+    // kernel argument. Therefore, when used with CUDA graph, the buffer should
+    // remain constant across replays and have the same lifetime as the
+    // captured graph. By allocating the buffer via
+    // CUDACachingAllocator::raw_alloc and allowing it to "leak", a region in
+    // the CUDA graph's pool is reserved for the duration of the graph's
+    // lifetime.
+    pack.buffer_ptr = static_cast<char*>(
+        c10::cuda::CUDACachingAllocator::raw_alloc(total_bytes));
     C10_CUDA_CHECK(cudaMemcpy(
         pack.buffer_ptr,
         buf_tensor.data_ptr(),
