@@ -29,8 +29,8 @@ jobs:
       - name: Clone Target Determination Code
         uses: actions/checkout@v3
         with:
-          repository: clee2000/csl/partition_large_files
-          ref: v0.0.1
+          repository: clee2000/llm-target-determinator
+          ref: csl/partition_large_files
           path: llm-target-determinator
 
       - name: Setup Conda
