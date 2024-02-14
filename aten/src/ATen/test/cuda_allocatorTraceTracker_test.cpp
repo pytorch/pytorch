@@ -26,7 +26,15 @@ static void allocateLargeBuffer() {
   auto buffer = allocator->allocate(_500mb);
 }
 
+TEST(AllocatorTraceTracker, AttachBeforeInit) {
+  EXPECT_THROW(
+      c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
+          &SegmentAllocTraceTracker),
+      ::std::exception);
+}
+
 TEST(AllocatorTraceTracker, TrackMallocFree) {
+  c10::cuda::CUDACachingAllocator::init(1);
   c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
       &SegmentAllocTraceTracker);
   c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
@@ -46,6 +54,5 @@ TEST(AllocatorTraceTracker, TrackMallocFree) {
 
 int main(int argc, char* argv[]) {
   ::testing::InitGoogleTest(&argc, argv);
-  c10::cuda::CUDACachingAllocator::init(1);
   return RUN_ALL_TESTS();
 }
