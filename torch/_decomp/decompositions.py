@@ -1897,13 +1897,11 @@ def _to_copy(
             x = torch._prims.convert_element_type(x, dtype)
             dtype_converted = True
         x = torch._prims.device_put(x, device)
+
     if dtype is not None and not dtype_converted:
         x = torch._prims.convert_element_type(x, dtype)
         dtype_converted = True
-    # In case of dtype promotion, faketensor converted into tensor.
-    # Need to convert into faketensor if input was a faketensor.
-    if dtype_converted:
-        x = wrap_output_with_input_device_(x, common_device)
+
     if memory_format is not None:  # no ref/prim for memory format
         return torch.clone(x, memory_format=memory_format)
     return x

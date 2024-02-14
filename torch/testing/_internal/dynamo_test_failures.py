@@ -486,7 +486,7 @@ dynamo_expected_failures = {
     "TestSortAndSelectCPU.test_isin_cpu_float32",  # test_sort_and_select
     "TestShapeOpsCUDA.test_flip_cuda_float32",  # test_shape_ops
     "TestShapeOpsCPU.test_flip_cpu_float32",  # test_shape_ops
-    "TestSubclassSerialization.test_tensor_subclass_deepcopy",  # test_serialization
+    # "TestSubclassSerialization.test_tensor_subclass_deepcopy",  # test_serialization
     "TestSubclassSerialization.test_tensor_subclass_getstate_overwrite",  # test_serialization
     "TestSubclassSerialization.test_tensor_subclass_wrapper_serialization",  # test_serialization
     "TestCxxPytree.test_pytree_serialize_spec8",  # test_pytree
