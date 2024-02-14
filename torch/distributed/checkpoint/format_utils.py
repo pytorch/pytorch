@@ -54,8 +54,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
 
 def dcp_to_torch_save(
     dcp_checkpoint_dir: Union[str, os.PathLike],
-    torch_save_fn: Union[str, os.PathLike],
-    coordinator_rank: int = 0,
+    torch_save_path: Union[str, os.PathLike],
 ):
     """
     Given a directory containing a DCP checkpoint, this function will convert it into a
@@ -63,15 +62,13 @@ def dcp_to_torch_save(
 
     Args:
         dcp_checkpoint_dir: Directory containing the DCP checkpoint.
-        torch_save_fn: Filename to store the converted Torch save file.
-        coordinator_rank: Rank that will perform the conversion. Ignored
-            if dist is not available.
+        torch_save_path: Filename to store the converted Torch save file.
 
     .. warning::
         To avoid OOM, it's recommended to only run this function on a single rank.
     """
 
-    sd = {}
+    sd: STATE_DICT_TYPE = {}
     storage_reader = FileSystemReader(dcp_checkpoint_dir)
 
     _load_state_dict(
@@ -80,4 +77,4 @@ def dcp_to_torch_save(
         planner=_EmptyStateDictLoadPlanner(),
         no_dist=True,
     )
-    torch.save(sd, torch_save_fn)
+    torch.save(sd, torch_save_path)
