@@ -329,22 +329,30 @@ inline uint16_t fp16_ieee_from_fp32_value(float f) {
 }
 
 #if defined(__ARM_FEATURE_FP16_SCALAR_ARITHMETIC) && !defined(C10_MOBILE)
+constexpr inline float16_t fp16_from_bits(uint16_t h) {
+  union {
+    uint16_t as_bits;
+    float16_t as_value;
+  } fp16 = {h};
+  return fp16.as_value;
+}
+
+constexpr inline uint16_t fp16_to_bits(float16_t f) {
+  union {
+    float16_t as_value;
+    uint16_t as_bits;
+  } fp16 = {.as_value = f};
+  return fp16.as_bits;
+}
+
 // According to https://godbolt.org/z/8s14GvEjo it would translate to single
 // fcvt s0, h0
 inline float sve_fp16_to_fp32_value(uint16_t h) {
-  union {
-    uint16_t h;
-    float16_t f16;
-  } x = {h};
-  return x.f16;
+  return static_cast<float>(fp16_from_bits(h));
 }
 
 inline uint16_t sve_fp32_to_fp16_value(float f) {
-  union {
-    float16_t f16;
-    uint16_t h;
-  } x = {static_cast<float16_t>(f)};
-  return x.h;
+  return fp16_to_bits(static_cast<float16_t>(f));
 }
 #endif
 
