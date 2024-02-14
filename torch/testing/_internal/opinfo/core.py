@@ -2509,6 +2509,8 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
             "_refs.fft.irfft2",
         ]:
             shapes = ((2, 8, 9), (33,))
+            low = -1.0
+            high = 1.0
         elif self.name in [
             "fft.hfftn",
             "fft.irfftn",
