@@ -318,11 +318,15 @@ developer_warnings = is_fbcode() or is_nightly_or_source
 # the default to spawn.
 worker_start_method = "fork"
 
+fuse_ddp_communication = True
 
-# Fuse the allredue collectives.
-allreduce_fusion = True
-allreduce_fusion_with_coalescing = True
-allreduce_fusion_bucket_size = 25
+fuse_ddp_communication_passes = [
+    # "fuse_ddp_with_concat_op",
+    "fuse_ddp_with_coalescing_op",
+    "schedule_comm_wait",
+]
+
+ddp_fusion_bucket_size = 25
 
 
 def decide_compile_threads():

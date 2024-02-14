@@ -881,7 +881,7 @@ class DistributedDataParallel(Module, Joinable):
         if self._use_python_reducer:
             self._register_accum_grad_hook()
 
-        torch._inductor.config.allreduce_fusion_bucket_size = bucket_cap_mb
+        torch._inductor.config.ddp_fusion_bucket_size = bucket_cap_mb
 
     def _register_accum_grad_hook(self):
         import torch.distributed._functional_collectives as fcol
