@@ -1452,6 +1452,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             self.assertEqual(backend.comm_split_count(), 1)
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_comm_split_subgroup(self):
         # Test `ncclCommSplit` for smaller subgroups of the world when
         # we've passed a specific device_id to init_process_group.
