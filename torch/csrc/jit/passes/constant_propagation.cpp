@@ -424,11 +424,17 @@ bool ConstantPropagation(
   return made_change;
 }
 
-bool ConstantPropagationImmutableTypes(std::shared_ptr<Graph>& graph) {
+bool ConstantPropagationImmutableTypes(
+    std::shared_ptr<Graph>& graph,
+    bool dce_with_alias_db) {
   ConstantPropagator cp = ConstantPropagator::NoAliasDb(graph);
   bool made_change = cp.run();
   if (made_change) {
-    EliminateDeadCodeWithoutAliasDb(graph);
+    if (dce_with_alias_db) {
+      EliminateDeadCodeWithoutAliasDb(graph);
+    } else {
+      EliminateDeadCode(graph);
+    }
   }
   GRAPH_DUMP("After ConstantPropagationImmutableTypes: ", graph);
   return made_change;

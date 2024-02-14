@@ -5693,7 +5693,8 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   // to run nodes it was not able to previously, and the graph may change
   // (jitter) So we run only constant prop w immutable types here bc
   // successive runs of immutable constant prop does not change the graph
-  ConstantPropagationImmutableTypes(to_clean);
+  ConstantPropagationImmutableTypes(
+      to_clean, /*dce_with_alias_db*/ !getDisableAliasDb());
 
   // Constant Pooling pass must be after ConstantPropogation, which can create
   // new constants that needs to be pooled.
