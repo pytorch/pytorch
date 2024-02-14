@@ -5,7 +5,7 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 
-from typing import List, Set, Tuple, TYPE_CHECKING, Union
+from typing import Dict, List, Set, Tuple, TYPE_CHECKING, Union
 
 from torch._inductor import config
 from torch._inductor.utils import get_benchmark_name
@@ -60,7 +60,7 @@ def reset():
     disable_cpp_wrapper = 0
 
 
-REGISTERED_METRIC_TABLES = {}
+REGISTERED_METRIC_TABLES: Dict[str, MetricTable] = {}
 
 
 @dataclass
@@ -143,6 +143,21 @@ MetricTable.register_table(
         "graph_id",
         "num_nodes_before_fusion",
         "num_nodes_after_fusion",
+    ],
+)
+
+# track the perf difference between persistent reduction and non-persistent
+# reductions
+MetricTable.register_table(
+    "persistent_red_perf",
+    [
+        "kernel1_name",
+        "kernel2_name",
+        "kernel1_latency",
+        "kernel2_latency",
+        "size_hints",
+        "reduction_hint",
+        "speedup",
     ],
 )
 

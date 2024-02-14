@@ -1,8 +1,8 @@
-from typing import List, Type
+from typing import List, Optional, Type
 
 __all__ = ["SymDispatchMode", "handle_sym_dispatch", "sym_function_mode"]
 
-SYM_FUNCTION_MODE = None
+SYM_FUNCTION_MODE: Optional["SymDispatchMode"] = None
 
 
 # SymDispatchMode gets invoked whenever an operation is processed on

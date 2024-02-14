@@ -72,7 +72,7 @@ class TensorParallelTest(DTensorTestBase):
         inputs = (torch.randn(7, 3, requires_grad=False).to(device=self.device_type),)
         with torch.no_grad():
             res = model(*inputs)
-        exported_program = torch._export.export(
+        exported_program = torch.export.export(
             model,
             inputs,
             constraints=None,
@@ -111,7 +111,7 @@ class TensorParallelTest(DTensorTestBase):
 
         with torch.inference_mode():
             res = model(*inputs)
-        exported_program = torch._export.export(
+        exported_program = torch.export.export(
             model,
             inputs,
             constraints=None,
@@ -148,7 +148,7 @@ class TensorParallelTest(DTensorTestBase):
 
         with torch.inference_mode():
             res = model(*inputs)
-        exported_program = torch._export.export(
+        exported_program = torch.export.export(
             model,
             inputs,
             constraints=None,

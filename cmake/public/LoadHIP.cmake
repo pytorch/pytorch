@@ -243,4 +243,29 @@ if(HIP_FOUND)
     endif()
   endif()
 
+  # check whether HIP declares new types
+  set(file "${PROJECT_BINARY_DIR}/hip_new_types.cc")
+  file(WRITE ${file} ""
+    "#include <hip/library_types.h>\n"
+    "int main() {\n"
+    "    hipDataType baz = HIP_R_8F_E4M3_FNUZ;\n"
+    "    return 0;\n"
+    "}\n"
+    )
+
+  try_compile(hipblaslt_compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
+    CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${ROCM_INCLUDE_DIRS}"
+    COMPILE_DEFINITIONS -D__HIP_PLATFORM_AMD__ -D__HIP_PLATFORM_HCC__
+    OUTPUT_VARIABLE hipblaslt_compile_output)
+
+  if(hipblaslt_compile_result)
+    set(HIP_NEW_TYPE_ENUMS ON)
+    #message("HIP is using new type enums: ${hipblaslt_compile_output}")
+    message("HIP is using new type enums")
+  else()
+    set(HIP_NEW_TYPE_ENUMS OFF)
+    #message("HIP is NOT using new type enums: ${hipblaslt_compile_output}")
+    message("HIP is NOT using new type enums")
+  endif()
+
 endif()

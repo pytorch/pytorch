@@ -243,7 +243,7 @@ def __torch_function__(self, orig, cls, args, kwargs=empty_dict):
 
 
 def positional(self, *dims):
-    from . import Dim, Tensor
+    from . import Dim, DimensionBindError, Tensor
 
     ptensor, levels = self._tensor, llist(self._levels)
     flat_dims = llist()

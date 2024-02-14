@@ -23,11 +23,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/MaybeOwned.h>
 
-namespace at {
-namespace native {
-namespace sparse {
-namespace impl {
-namespace cuda {
+namespace at::native::sparse::impl::cuda {
 
 namespace {
 
@@ -586,7 +582,7 @@ void spmm(
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
-#if !(AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_52_API())
+#if !(AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API())
   addmm_out_legacy(mat1, mat2, beta, alpha, result);
 #else
   c10::MaybeOwned<Tensor> result_ = prepare_dense_matrix_for_cusparse(result);
@@ -1431,7 +1427,7 @@ void sampled_addmm_out_sparse_csr(
     const Scalar& beta,
     const Scalar& alpha,
     const at::sparse_csr::SparseCsrTensor& C) {
-#if !(AT_USE_CUSPARSE_GENERIC_SDDMM() || AT_USE_HIPSPARSE_GENERIC_52_API())
+#if !(AT_USE_CUSPARSE_GENERIC_SDDMM() || AT_USE_HIPSPARSE_GENERIC_API())
   TORCH_CHECK(
       false,
       "Calling sampled_addmm with sparse GPU tensors requires compiling ",
@@ -1515,8 +1511,4 @@ void sampled_addmm_out_sparse_csr(
 #endif
 }
 
-} // namespace cuda
-} // namespace impl
-} // namespace sparse
-} // namespace native
-} // namespace at
+} // namespace at::native::sparse::impl::cuda

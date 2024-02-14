@@ -5,7 +5,7 @@ import warnings
 from dataclasses import dataclass
 import torch
 import torchgen
-from torch._C import _len_torch_dispatch_stack, _get_dispatch_stack_at,\
+from torch._C import _len_torch_dispatch_stack, _get_dispatch_stack_at, \
     _pop_torch_dispatch_stack, _push_on_torch_dispatch_stack, DispatchKey
 
 
@@ -78,6 +78,19 @@ def _get_current_dispatch_mode():
     if stack_len > 0:
         return _get_dispatch_stack_at(stack_len - 1)
     return None
+
+
+def _detect_functional_mode():
+    from torch._ops import _get_dispatch_mode_pre_dispatch
+    pre_dispatch_functional_mode = _get_dispatch_mode_pre_dispatch(torch._C._TorchDispatchModeKey.FUNCTIONAL)
+    post_dispatch_functional_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
+
+    assert (pre_dispatch_functional_mode is None) or (post_dispatch_functional_mode is None)
+
+    if pre_dispatch_functional_mode is None:
+        return post_dispatch_functional_mode
+
+    return pre_dispatch_functional_mode
 
 
 def _get_current_dispatch_mode_stack():

@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import collections
 import warnings
 from functools import partial, wraps

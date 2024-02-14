@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import collections
 from enum import Enum
 from typing import Any, Callable, Dict, List
@@ -212,7 +214,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         elif istype(value, tuple):
             result = tuple(cls.apply(fn, v, cache, skip_fn) for v in value)
         elif istype(value, (dict, collections.OrderedDict)):
-            assert "__name__" not in value, "_nonvar_fields should have excluded this"
             result = {
                 k: cls.apply(fn, v, cache, skip_fn) for k, v in list(value.items())
             }
@@ -230,11 +231,41 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         return str(self)
 
     def python_type(self):
+        """
+        Abstract method to be implemented by subclasses of VariableTracker.
+
+        This method should return the type represented by the instance of the subclass.
+        The purpose is to provide a standardized way to retrieve the Python type information
+        of the variable being tracked.
+
+        Returns:
+            type: The Python type (such as int, str, list, etc.) of the variable tracked by
+                the subclass. If the type cannot be determined or is not relevant,
+                leaving it undefined or invoking super() is always sound.
+
+        Note:
+            This is an abstract method and may be overridden in subclasses.
+
+        Example:
+            class SetVariable(VariableTracker):
+                def python_type(self):
+                    return set
+
+        Raises:
+            NotImplementedError: If the method is not implemented in a subclass.
+        """
         raise NotImplementedError(f"{self} has no type")
 
     def as_python_constant(self):
         """For constants"""
         raise NotImplementedError(f"{self} is not a constant")
+
+    def guard_as_python_constant(self):
+        """Similar to as_python_constant(), but add ID_MATCH guards to try to force things to become constants"""
+        try:
+            return self.as_python_constant()
+        except NotImplementedError as e:
+            unimplemented(str(e))
 
     def is_python_constant(self):
         try:
@@ -340,7 +371,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         raise unimplemented(f"call_method {self} {name} {args} {kwargs}")
 
     def rename(self, tx, name):
-        self.user_code_variable_name = tx.output.new_var(name)
         return self
 
     def realize(self) -> "VariableTracker":
@@ -364,13 +394,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         *,
         source: Source = None,
         mutable_local: MutableLocal = None,
-        user_code_variable_name: str = None,
         parents_tracker: ParentsTracker = None,
     ):
         super().__init__()
         self.source = source
         self.mutable_local = mutable_local
-        self.user_code_variable_name = user_code_variable_name
         self.parents_tracker = parents_tracker
 
     def __post_init__(self, *args, **kwargs):

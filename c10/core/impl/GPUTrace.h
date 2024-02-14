@@ -2,8 +2,7 @@
 
 #include <c10/core/impl/PyInterpreter.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 struct C10_API GPUTrace {
   // On the x86 architecture the atomic operations are lock-less.
@@ -26,5 +25,4 @@ struct C10_API GPUTrace {
   }
 };
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

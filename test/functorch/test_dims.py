@@ -10,7 +10,7 @@ from functorch.dim import Tensor, Dim, dims, dimlists, stack, DimensionBindError
 from attn_ft import BertSelfAttention as BertSelfAttentionA, Linear
 from attn_positional import BertSelfAttention as BertSelfAttentionB
 
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_CUDA
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_CUDA, skipIfTorchDynamo
 
 from unittest import skip, skipIf
 import torch
@@ -71,6 +71,7 @@ def gpu_time(lmb, name, r=100):
     print(name, elapsed / r)
     return elapsed / r
 
+@skipIfTorchDynamo("Bad interaction")
 class TestMin(TestCase):
 
     def setUp(self):

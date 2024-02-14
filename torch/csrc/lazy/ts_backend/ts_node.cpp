@@ -91,7 +91,7 @@ TSOpVector TensorList::Lower(
     std::shared_ptr<torch::jit::GraphFunction> function,
     TSLoweringContext* loctx) const {
   std::vector<torch::jit::Value*> tensor_list;
-  CHECK(!operands().empty());
+  TORCH_CHECK(!operands().empty());
   for (const torch::lazy::Output& operand : operands()) {
     tensor_list.emplace_back(loctx->GetOutputOp(operand));
   }

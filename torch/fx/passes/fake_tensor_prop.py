@@ -30,7 +30,17 @@ class FakeTensorProp(torch.fx.Interpreter):
         self._mode = mode
 
     def run_node(self, n: Node):
+        import sympy
+        from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
         result = super().run_node(n)
+        sym = None
+        if (
+            'val' in n.meta and
+            isinstance(v := n.meta['val'], torch.SymInt) and
+            isinstance(v.node.expr, sympy.Symbol) and free_unbacked_symbols(v)
+        ):
+            sym = v
 
         def extract_val(obj):
             if isinstance(obj, FakeTensor):
@@ -47,6 +57,8 @@ class FakeTensorProp(torch.fx.Interpreter):
         meta = map_aggregate(result, extract_val)
         if meta is not None:
             n.meta['val'] = meta
+            if sym is not None:
+                torch._check(meta == v)
         return result
 
     def propagate(self, *args):

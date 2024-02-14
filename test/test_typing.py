@@ -67,7 +67,7 @@ def _run_mypy() -> Dict[str, List[str]]:
                 directory,
             ]
         )
-        assert not stderr, directory
+        assert not stderr, stderr
         stdout = stdout.replace("*", "")
 
         # Parse the output

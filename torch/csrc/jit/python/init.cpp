@@ -1249,6 +1249,11 @@ void initJITBindings(PyObject* module) {
             return a->expect_size(file, line);
           })
       .def(
+          "guard_size_oblivious",
+          [](c10::SymNode a, const char* file, int64_t line) {
+            return a->guard_size_oblivious(file, line);
+          })
+      .def(
           "has_hint",
           [](c10::SymNode a) {
             return a->has_hint();

@@ -123,11 +123,7 @@ static bool is_pow_of_two(int64_t x) {
   return (x & (x - 1)) == 0;
 }
 
-#if defined(USE_ROCM)
-    using cufft_size_type = int;
-#else
-    using cufft_size_type = long long int;
-#endif
+using cufft_size_type = long long int;
 
 using CuFFTDimVector = c10::SmallVector<cufft_size_type, at::kDimVectorStaticSize>;
 
@@ -299,25 +295,6 @@ public:
     // See NOTE [ cuFFT Embedded Strides ] in native/cuda/SpectralOps.cu.
 
     const bool simple_layout = in_layout.simple && out_layout.simple;
-
-#if defined(USE_ROCM)
-    hipfftType exec_type = [&]{
-      if (dtype == kFloat) {
-        switch (fft_type) {
-          case CuFFTTransformType::C2C: return HIPFFT_C2C;
-          case CuFFTTransformType::R2C: return HIPFFT_R2C;
-          case CuFFTTransformType::C2R: return HIPFFT_C2R;
-        }
-      } else if (dtype == kDouble) {
-        switch (fft_type) {
-          case CuFFTTransformType::C2C: return HIPFFT_Z2Z;
-          case CuFFTTransformType::R2C: return HIPFFT_D2Z;
-          case CuFFTTransformType::C2R: return HIPFFT_Z2D;
-        }
-      }
-      TORCH_CHECK(false, "hipFFT doesn't support transforms of type: ", dtype);
-    }();
-#else
     cudaDataType itype, otype, exec_type;
     const auto complex_input = cufft_complex_input(fft_type);
     const auto complex_output = cufft_complex_output(fft_type);
@@ -336,7 +313,6 @@ public:
     } else {
       TORCH_CHECK(false, "cuFFT doesn't support tensor of type: ", dtype);
     }
-#endif
 
     // disable auto allocation of workspace to use THC allocator
     CUFFT_CHECK(cufftSetAutoAllocation(plan(), /* autoAllocate */ 0));
@@ -350,29 +326,15 @@ public:
       // by assuming istride = ostride = 1.
       //
       // See NOTE [ cuFFT Embedded Strides ] in native/cuda/SpectralOps.cu.
-#if defined(USE_ROCM)
-      CUFFT_CHECK(hipfftMakePlanMany(plan(), signal_ndim, signal_sizes.data(),
-        /* inembed */ nullptr, /* base_istride */ 1, /* idist */ 1,
-        /* onembed */ nullptr, /* base_ostride */ 1, /* odist */ 1,
-        exec_type, batch, &ws_size_t));
-#else
       CUFFT_CHECK(cufftXtMakePlanMany(plan(), signal_ndim, signal_sizes.data(),
         /* inembed */ nullptr, /* base_istride */ 1, /* idist */ 1, itype,
         /* onembed */ nullptr, /* base_ostride */ 1, /* odist */ 1, otype,
         batch, &ws_size_t, exec_type));
-#endif
     } else {
-#if defined(USE_ROCM)
-      CUFFT_CHECK(hipfftMakePlanMany(plan(), signal_ndim, signal_sizes.data(),
-        in_layout.embed.data(), in_layout.stride, in_layout.dist,
-        out_layout.embed.data(), out_layout.stride, out_layout.dist,
-        exec_type, batch, &ws_size_t));
-#else
       CUFFT_CHECK(cufftXtMakePlanMany(plan(), signal_ndim, signal_sizes.data(),
             in_layout.embed.data(), in_layout.stride, in_layout.dist, itype,
             out_layout.embed.data(), out_layout.stride, out_layout.dist, otype,
             batch, &ws_size_t, exec_type));
-#endif
     }
     ws_size = static_cast<int64_t>(ws_size_t);
   }

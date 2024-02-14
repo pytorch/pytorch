@@ -118,6 +118,10 @@ hf_clip,eager_fail_to_run,0
 
 
 
+hf_distil_whisper,pass,0
+
+
+
 lennard_jones,pass,0
 
 
@@ -155,10 +159,6 @@ nvidia_deeprecommender,pass,0
 
 
 opacus_cifar10,pass,0
-
-
-
-phi_1_5,pass,0
 
 
 
@@ -274,7 +274,7 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,29
+vision_maskrcnn,pass,28
 
 
 

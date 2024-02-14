@@ -114,6 +114,9 @@ def broadcast_shapes(*shapes):
                 if max_len < s:
                     max_len = s
         result = [1] * max_len
+
+        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
         for shape in shapes:
             if isinstance(shape, (int, torch.SymInt)):
                 shape = (shape,)
@@ -121,7 +124,9 @@ def broadcast_shapes(*shapes):
                 for i in range(-1, -1 - len(shape), -1):
                     if shape[i] < 0:
                         raise RuntimeError(f"Trying to create tensor with negative dimension ({shape[i]}): ({shape[i]})")
-                    if shape[i] == 1 or shape[i] == result[i]:
+                    # NB: result is initialized to 1 so this is effectively an
+                    # equals one test
+                    if guard_size_oblivious(shape[i] == 1) or guard_size_oblivious(shape[i] == result[i]):
                         continue
                     if result[i] != 1:
                         raise RuntimeError("Shape mismatch: objects cannot be broadcast to a single shape")
@@ -1689,7 +1694,7 @@ def norm(input, p: Optional[Union[float, str]] = "fro", dim=None, keepdim=False,
             else:
                 return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype, out=out)  # type: ignore[attr-defined]
 
-def unravel_index(indices: Tensor, shape: Union[int, Sequence[int], torch.Size]) -> List[Tensor]:
+def unravel_index(indices: Tensor, shape: Union[int, Sequence[int], torch.Size]) -> Tuple[Tensor, ...]:
     r"""Converts a tensor of flat indices into a tuple of coordinate tensors that
     index into an arbitrary tensor of the specified shape.
 

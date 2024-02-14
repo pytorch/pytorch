@@ -1,36 +1,34 @@
 #include <ATen/native/vulkan/api/Adapter.h>
-#include <c10/util/irange.h>
 
 #include <bitset>
+#include <cstring>
 #include <iomanip>
 #include <sstream>
+#include <utility>
 
 namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
 
-PhysicalDevice::PhysicalDevice(const VkPhysicalDevice physical_device_handle)
+PhysicalDevice::PhysicalDevice(VkPhysicalDevice physical_device_handle)
     : handle(physical_device_handle),
       properties{},
       memory_properties{},
       queue_families{},
       num_compute_queues(0),
       has_unified_memory(false),
-      has_timestamps(false),
-      timestamp_period(0) {
+      has_timestamps(properties.limits.timestampComputeAndGraphics),
+      timestamp_period(properties.limits.timestampPeriod) {
   // Extract physical device properties
   vkGetPhysicalDeviceProperties(handle, &properties);
   vkGetPhysicalDeviceMemoryProperties(handle, &memory_properties);
-
-  has_timestamps = properties.limits.timestampComputeAndGraphics;
-  timestamp_period = properties.limits.timestampPeriod;
 
   // Check if there are any memory types have both the HOST_VISIBLE and the
   // DEVICE_LOCAL property flags
   const VkMemoryPropertyFlags unified_memory_flags =
       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
-  for (const uint32_t i : c10::irange(memory_properties.memoryTypeCount)) {
+  for (size_t i = 0; i < memory_properties.memoryTypeCount; ++i) {
     if (memory_properties.memoryTypes[i].propertyFlags | unified_memory_flags) {
       has_unified_memory = true;
       break;
@@ -46,8 +44,7 @@ PhysicalDevice::PhysicalDevice(const VkPhysicalDevice physical_device_handle)
       handle, &queue_family_count, queue_families.data());
 
   // Find the total number of compute queues
-  for (const uint32_t family_i : c10::irange(queue_families.size())) {
-    const VkQueueFamilyProperties& properties = queue_families[family_i];
+  for (const VkQueueFamilyProperties& properties : queue_families) {
     // Check if this family has compute capability
     if (properties.queueFlags & VK_QUEUE_COMPUTE_BIT) {
       num_compute_queues += properties.queueCount;
@@ -98,10 +95,10 @@ VkDevice create_logical_device(
   queues_to_get.reserve(num_queues_to_create);
 
   uint32_t remaining_queues = num_queues_to_create;
-  for (const uint32_t family_i :
-       c10::irange(physical_device.queue_families.size())) {
+  for (uint32_t family_i = 0; family_i < physical_device.queue_families.size();
+       ++family_i) {
     const VkQueueFamilyProperties& queue_properties =
-        physical_device.queue_families[family_i];
+        physical_device.queue_families.at(family_i);
     // Check if this family has compute capability
     if (queue_properties.queueFlags & VK_QUEUE_COMPUTE_BIT) {
       const uint32_t queues_to_init =
@@ -117,7 +114,7 @@ VkDevice create_logical_device(
           queue_priorities.data(), // pQueuePriorities
       });
 
-      for (const uint32_t queue_i : c10::irange(queues_to_init)) {
+      for (size_t queue_i = 0; queue_i < queues_to_init; ++queue_i) {
         // Use this to get the queue handle once device is created
         queues_to_get.emplace_back(family_i, queue_i);
       }
@@ -159,7 +156,7 @@ VkDevice create_logical_device(
       nullptr, // pEnabledFeatures
   };
 
-  VkDevice handle;
+  VkDevice handle = nullptr;
   VK_CHECK(vkCreateDevice(
       physical_device.handle, &device_create_info, nullptr, &handle));
 
@@ -172,7 +169,7 @@ VkDevice create_logical_device(
   for (const std::pair<uint32_t, uint32_t>& queue_idx : queues_to_get) {
     VkQueue queue_handle = VK_NULL_HANDLE;
     VkQueueFlags flags =
-        physical_device.queue_families[queue_idx.first].queueFlags;
+        physical_device.queue_families.at(queue_idx.first).queueFlags;
     vkGetDeviceQueue(handle, queue_idx.first, queue_idx.second, &queue_handle);
     queues.push_back({queue_idx.first, queue_idx.second, flags, queue_handle});
     // Initial usage value
@@ -243,7 +240,7 @@ std::string get_queue_family_properties_str(const VkQueueFlags flags) {
 // DeviceHandle
 //
 
-DeviceHandle::DeviceHandle(const VkDevice device) : handle_(device) {}
+DeviceHandle::DeviceHandle(VkDevice device) : handle_(device) {}
 
 DeviceHandle::DeviceHandle(DeviceHandle&& other) noexcept
     : handle_(other.handle_) {
@@ -251,7 +248,7 @@ DeviceHandle::DeviceHandle(DeviceHandle&& other) noexcept
 }
 
 DeviceHandle::~DeviceHandle() {
-  if C10_LIKELY (VK_NULL_HANDLE == handle_) {
+  if (VK_NULL_HANDLE == handle_) {
     return;
   }
   vkDestroyDevice(handle_, nullptr);
@@ -262,11 +259,11 @@ DeviceHandle::~DeviceHandle() {
 //
 
 Adapter::Adapter(
-    const VkInstance instance,
-    const PhysicalDevice& physical_device,
+    VkInstance instance,
+    PhysicalDevice physical_device,
     const uint32_t num_queues)
     : queue_usage_mutex_{},
-      physical_device_(physical_device),
+      physical_device_(std::move(physical_device)),
       queues_{},
       queue_usage_{},
       queue_mutexes_{},
@@ -289,7 +286,7 @@ Adapter::Queue Adapter::request_queue() {
 
   uint32_t min_usage = UINT32_MAX;
   uint32_t min_used_i = 0;
-  for (const uint32_t i : c10::irange(queues_.size())) {
+  for (size_t i = 0; i < queues_.size(); ++i) {
     if (queue_usage_[i] < min_usage) {
       min_used_i = i;
       min_usage = queue_usage_[i];
@@ -301,7 +298,7 @@ Adapter::Queue Adapter::request_queue() {
 }
 
 void Adapter::return_queue(Adapter::Queue& compute_queue) {
-  for (const uint32_t i : c10::irange(queues_.size())) {
+  for (size_t i = 0; i < queues_.size(); ++i) {
     if ((queues_[i].family_index == compute_queue.family_index) &&
         (queues_[i].queue_index == compute_queue.queue_index)) {
       std::lock_guard<std::mutex> lock(queue_usage_mutex_);
@@ -313,8 +310,8 @@ void Adapter::return_queue(Adapter::Queue& compute_queue) {
 
 void Adapter::submit_cmd(
     const Adapter::Queue& device_queue,
-    const VkCommandBuffer cmd,
-    const VkFence fence) {
+    VkCommandBuffer cmd,
+    VkFence fence) {
   const VkSubmitInfo submit_info{
       VK_STRUCTURE_TYPE_SUBMIT_INFO, // sType
       nullptr, // pNext
@@ -336,7 +333,7 @@ void Adapter::submit_cmd(
 void Adapter::submit_cmds(
     const Adapter::Queue& device_queue,
     const std::vector<VkCommandBuffer>& cmds,
-    const VkFence fence) {
+    VkFence fence) {
   const VkSubmitInfo submit_info{
       VK_STRUCTURE_TYPE_SUBMIT_INFO, // sType
       nullptr, // pNext
@@ -397,7 +394,7 @@ std::string Adapter::stringize() const {
 
   ss << "  Memory Info {" << std::endl;
   ss << "    Memory Types [" << std::endl;
-  for (const auto i : c10::irange(mem_props.memoryTypeCount)) {
+  for (size_t i = 0; i < mem_props.memoryTypeCount; ++i) {
     ss << "      "
        << " [Heap " << mem_props.memoryTypes[i].heapIndex << "] "
        << get_memory_properties_str(mem_props.memoryTypes[i].propertyFlags)
@@ -405,7 +402,7 @@ std::string Adapter::stringize() const {
   }
   ss << "    ]" << std::endl;
   ss << "    Memory Heaps [" << std::endl;
-  for (const auto i : c10::irange(mem_props.memoryHeapCount)) {
+  for (size_t i = 0; i < mem_props.memoryHeapCount; ++i) {
     ss << "      " << mem_props.memoryHeaps[i].size << std::endl;
   }
   ss << "    ]" << std::endl;

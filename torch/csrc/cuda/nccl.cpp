@@ -279,8 +279,9 @@ ArrayRef<ncclComm_t> get_communicators(TensorList inputs) {
   };
   device_list devices = fmap(inputs, get_device);
   auto it = _communicators.find(devices);
-  if (it == _communicators.end())
-    std::tie(it, std::ignore) = _communicators.emplace(devices, devices);
+  if (it == _communicators.end()) {
+    it = _communicators.emplace(devices, devices).first;
+  }
   return it->second.ref();
 }
 
@@ -415,20 +416,18 @@ AutoNcclGroup::AutoNcclGroup() {
   (c10::cuda::getFreeMutex())->lock();
 #endif
   comm_nonblocking_ = false;
+  comm_ = nullptr;
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
   detail::NCCL_CHECK(ncclGroupStart());
 #endif
 }
 
-AutoNcclGroup::AutoNcclGroup(
-    std::vector<ncclComm_t>& comms,
-    bool comm_nonblocking) {
+AutoNcclGroup::AutoNcclGroup(ncclComm_t comm, bool comm_nonblocking) {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR < 2)
   // nccl < 2.0 cannot be called concurrently with cudaFree
   (c10::cuda::getFreeMutex())->lock();
 #endif
-  // TODO(eqy): can we make comms_ reference?
-  comms_ = comms;
+  comm_ = comm;
   comm_nonblocking_ = comm_nonblocking;
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
   detail::NCCL_CHECK(ncclGroupStart());
@@ -437,10 +436,10 @@ AutoNcclGroup::AutoNcclGroup(
 
 AutoNcclGroup::~AutoNcclGroup() noexcept(false) {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-  if (!comm_nonblocking_) {
-    detail::NCCL_CHECK(ncclGroupEnd());
+  if (comm_nonblocking_ && comm_ != nullptr) {
+    detail::NCCL_CHECK_TIMEOUT(ncclGroupEnd(), comm_);
   } else {
-    detail::NCCL_CHECK_TIMEOUT(ncclGroupEnd(), comms_);
+    detail::NCCL_CHECK(ncclGroupEnd());
   }
 #endif
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR < 2)
@@ -584,7 +583,7 @@ void broadcast(
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; i++) {
-    int device = tensors[i].get_device();
+    auto device = tensors[i].get_device();
     device_guard.set_index(device);
     // Default to the current stream
     const auto stream = (streams.empty() || !streams[i])
@@ -636,7 +635,7 @@ void reduce(
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
   for (const auto i : c10::irange(len)) {
-    int device = inputs[i].device().index();
+    auto device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
     const auto stream = (streams.empty() || !streams[i])
@@ -690,7 +689,7 @@ void all_reduce(
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
   for (const auto i : c10::irange(len)) {
-    int device = inputs[i].device().index();
+    auto device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
     const auto stream = (streams.empty() || !streams[i])
@@ -732,7 +731,7 @@ void reduce_scatter(
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
   for (const auto i : c10::irange(len)) {
-    int device = inputs[i].device().index();
+    auto device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
     const auto stream = (streams.empty() || !streams[i])
@@ -773,7 +772,7 @@ void all_gather(
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
   for (const auto i : c10::irange(len)) {
-    int device = inputs[i].device().index();
+    auto device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
     const auto stream = (streams.empty() || !streams[i])

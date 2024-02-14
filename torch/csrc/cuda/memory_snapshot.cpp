@@ -68,7 +68,7 @@ std::vector<IValue> ivalue_symbolize(
     for (const auto& e : t) {
       l.push_back(all_frames.at(e));
     }
-    py_unique_frames.push_back(std::move(l));
+    py_unique_frames.emplace_back(std::move(l));
   }
 
   std::vector<IValue> result;
@@ -132,7 +132,7 @@ static void checkOptionIn(
 void _record_memory_history(
     c10::optional<std::string> enabled,
     c10::optional<std::string> context,
-    std::string stacks,
+    const std::string& stacks,
     size_t max_entries) {
   if (enabled) {
     checkOptionIn(

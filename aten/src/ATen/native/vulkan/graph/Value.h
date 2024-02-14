@@ -1,5 +1,7 @@
 #pragma once
 
+// @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
+
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Context.h>
@@ -39,7 +41,8 @@ struct Value final {
     TensorRef as_tensorref;
 
     Payload() : u() {}
-    ~Payload() {}
+    // NOLINTNEXTLINE
+    ~Payload(){};
   };
 
  public:
@@ -98,7 +101,7 @@ struct Value final {
   // Tensor
   //
 
-  Value(vTensor&& t) : tag(TypeTag::TENSOR) {
+  explicit Value(vTensor&& t) : tag(TypeTag::TENSOR) {
     new (&payload.as_tensor) vTensor(std::move(t));
   }
 
@@ -107,7 +110,7 @@ struct Value final {
   }
 
   inline vTensor& toTensor() {
-    VKGRAPH_CHECK(
+    VK_CHECK_COND(
         isTensor(),
         "Expected value to have type TENSOR, got ",
         tag,
@@ -119,7 +122,7 @@ struct Value final {
   // Staging
   //
 
-  Value(api::StorageBuffer&& t) : tag(TypeTag::STAGING) {
+  explicit Value(api::StorageBuffer&& t) : tag(TypeTag::STAGING) {
     new (&payload.as_staging) api::StorageBuffer(std::move(t));
   }
 
@@ -128,7 +131,7 @@ struct Value final {
   }
 
   inline api::StorageBuffer& toStaging() {
-    VKGRAPH_CHECK(
+    VK_CHECK_COND(
         isStaging(),
         "Expected value to have type STAGING, got ",
         tag,
@@ -140,7 +143,7 @@ struct Value final {
   // TensorRef
   //
 
-  Value(TensorRef&& t) : tag(TypeTag::TENSORREF) {
+  explicit Value(TensorRef&& t) : tag(TypeTag::TENSORREF) {
     payload.as_tensorref = std::move(t);
   }
 
@@ -149,7 +152,7 @@ struct Value final {
   }
 
   inline TensorRef& toTensorRef() {
-    VKGRAPH_CHECK(
+    VK_CHECK_COND(
         isTensorRef(),
         "Expected value to have type TENSORREF, got ",
         tag,

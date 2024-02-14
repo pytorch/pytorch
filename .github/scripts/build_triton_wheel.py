@@ -109,7 +109,7 @@ def build_triton(
                 print("source:\n  path: .\n", file=meta)
                 print(
                     "build:\n  string: py{{py}}\n  number: 1\n  script: cd python; "
-                    "python setup.py install --single-version-externally-managed --record=record.txt\n",
+                    "python setup.py install --record=record.txt\n",
                     " script_env:\n   - MAX_JOBS\n",
                     file=meta,
                 )

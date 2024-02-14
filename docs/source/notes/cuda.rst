@@ -1,7 +1,12 @@
+.. meta::
+   :description: A guide to torch.cuda, a PyTorch module to run CUDA operations
+   :keywords: memory management, PYTORCH_CUDA_ALLOC_CONF, optimize PyTorch, CUDA
+
 .. _cuda-semantics:
 
 CUDA semantics
 ==============
+
 
 :mod:`torch.cuda` is used to set up and run CUDA operations. It keeps track of
 the currently selected GPU, and all CUDA tensors you allocate will by default be
@@ -415,8 +420,8 @@ underlying allocation patterns produced by your code.
 
 .. _cuda-memory-envvars:
 
-Environment variables
-^^^^^^^^^^^^^^^^^^^^^
+Optimizing memory usage  with ``PYTORCH_CUDA_ALLOC_CONF``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Use of a caching allocator can interfere with memory checking tools such as
 ``cuda-memcheck``.  To debug memory errors using ``cuda-memcheck``, set

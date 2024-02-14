@@ -58,7 +58,7 @@ The following types define the planner interface used during checkpoint:
 .. autoclass:: torch.distributed.checkpoint.SavePlan
   :members:
 
-.. autoclass:: torch.distributed.checkpoint.WriteItem
+.. autoclass:: torch.distributed.checkpoint.planner.WriteItem
   :members:
 
 We provide a filesystem based storage layer:

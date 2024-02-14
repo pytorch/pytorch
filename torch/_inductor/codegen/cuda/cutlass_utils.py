@@ -119,9 +119,10 @@ class CUTLASSArgs:
     generator_target = ""
     kernels = "all"
     ignore_kernels = ""
-    kernel_filter_file = None
-    selected_kernel_list = None
-    interface_dir = None
+    # TODO: these three look dead?
+    kernel_filter_file: None = None
+    selected_kernel_list: None = None
+    interface_dir: None = None
     filter_by_cc = True
     disable_full_archs_compilation = False
 
@@ -180,7 +181,7 @@ def gen_ops() -> List[Any]:
 
 def dtype_match(
     torch_dtype: Optional[torch.dtype],
-    cutlass_dtype: "cutlass_library.library.DataType",  # type: ignore[name-defined]
+    cutlass_dtype: "cutlass_library.library.DataType",  # type: ignore[name-defined]  # noqa: F821
 ) -> bool:
     # Import cutlass python scripts.
     assert try_import_cutlass()

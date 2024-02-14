@@ -164,19 +164,15 @@ class DistTensorParallelExampleTest(DTensorTestBase):
     def test_transformer_training(self, is_seq_parallel=False):
         # Step 1: Initialize single-gpu models and optimizers.
 
-        model_args = ModelArgs(
-            # Disable dropout in the test since we cannot reproduce the same random
-            # behaviors when comparing single-gpu models with multi-gpu models.
-            dropout_p=0.0,
-            # TODO: Weight_tying works fine under inputs and models of small size.
-            # Test error would surpass the allowed limit when tuning up model size.
-            # Need to investigate if this is normal, e.g. due to precision issues.
-            weight_tying=False,
-        )
+        # Disable dropout in the test since we cannot reproduce the same random
+        # behaviors when comparing single-gpu models with multi-gpu models.
+        model_args = ModelArgs(dropout_p=0.0)
 
-        # Reset random seeds to ensure two models have the same initialization.
-        torch.manual_seed(5)
-        model = Transformer(model_args).to(self.device_type)
+        # float64 precision is needed for the computation results on the single-gpu
+        # model and the distributed model to be asserted equal, especially when
+        # model size is large and various operations (e.g., positional embedding,
+        # weight tying, etc.) are performed.
+        model = Transformer(model_args).to(device=self.device_type, dtype=torch.float64)
         model_tp = deepcopy(model)
         self._check_module(model, model_tp)
 
@@ -271,7 +267,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         optim_tp = torch.optim.Adam(model_tp.parameters(), lr=LR)
 
         # Initialize input and make sure all ranks have the same input.
-        inp_size = [4, 8]  # [batch_size, seq_len]
+        inp_size = [8, 12]  # [batch_size, seq_len]
         if is_seq_parallel:
             assert inp_size[1] % self.world_size == 0
         torch.manual_seed(0)
@@ -298,6 +294,53 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         output = model(inp)
         output_tp = model_tp(inp)
         self.assertEqual(output, output_tp)
+
+    @with_comms
+    def test_weight_tying(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Initialize different weights for embedding and fc.
+                torch.manual_seed(1)
+                self.embedding = torch.nn.Embedding(16, 8)
+                torch.manual_seed(2)
+                self.fc = torch.nn.Linear(8, 16)
+
+            def forward(self, x):
+                return self.fc(self.embedding(x))
+
+        model = TestModule().to(self.device_type)
+        parallelize_plan = {
+            "embedding": ColwiseParallel(),
+            "fc": RowwiseParallel(),
+        }
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        parallelize_module(model, device_mesh, parallelize_plan)
+
+        input_size = [5]
+        torch.manual_seed(0)
+        inp = torch.randint(16, input_size, device=self.device_type)
+
+        # Without weight tying.
+        self.assertNotEqual(
+            model.embedding.weight.to_local(), model.fc.weight.to_local()
+        )
+        output = model(inp)
+        output.sum().backward()
+        self.assertNotEqual(
+            model.embedding.weight.grad.to_local(), model.fc.weight.grad.to_local()
+        )
+        model.zero_grad()
+
+        # With weight tying.
+        model.fc.weight = model.embedding.weight
+
+        self.assertEqual(model.embedding.weight, model.fc.weight)
+        self.assertEqual(id(model.embedding.weight), id(model.fc.weight))
+        output = model(inp)
+        output.sum().backward()
+        self.assertEqual(model.embedding.weight.grad, model.fc.weight.grad)
+        self.assertEqual(id(model.embedding.weight.grad), id(model.fc.weight.grad))
 
 
 instantiate_parametrized_tests(DistTensorParallelExampleTest)

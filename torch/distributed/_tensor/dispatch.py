@@ -199,7 +199,7 @@ class OpDispatcher:
         if output_sharding.output_spec is None:
             if op_call == aten.equal.default:
                 obj_list = [None for _ in range(dist.get_world_size())]
-                dist.all_gather_object(obj_list, local_results)
+                dist.all_gather_object(obj_list, local_results)  # type: ignore[possibly-undefined]
                 obj_list = list(filter(lambda x: x is not None, obj_list))
                 # perform reduce on the collection with AND op
                 local_results = functools.reduce(operator.and_, obj_list, True)
@@ -229,7 +229,7 @@ class OpDispatcher:
             assert len(out_dts) >= 1, "out variant should have at least one out arg"
             return tuple(out_dts) if len(out_dts) > 1 else out_dts[0]
         else:
-            return self.wrap(local_results, output_sharding.output_spec)
+            return self.wrap(local_results, output_sharding.output_spec)  # type: ignore[possibly-undefined]
 
     @staticmethod
     def redistribute_local_args(

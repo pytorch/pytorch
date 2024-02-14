@@ -3,7 +3,7 @@ import functools
 from typing import List, Optional
 
 import torch
-from torch._dynamo.external_utils import call_hook
+from torch._dynamo.external_utils import call_backward, call_hook
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import counters, lazy_format_graph_code
 from torch._logging import getArtifactLogger
@@ -14,7 +14,7 @@ from torch.fx.experimental.proxy_tensor import (
     decompose,
     disable_autocast_cache,
     disable_proxy_modes_tracing,
-    fetch_tensor_proxy,
+    fetch_object_proxy,
     ProxyTorchDispatchMode,
     PythonKeyTracer,
     track_tensor_tree,
@@ -91,6 +91,41 @@ class AutogradCompilerInstance:
         self.stack.enter_context(disable_proxy_modes_tracing(enable_current=True))
         return inputs, sizes
 
+    def proxy_call_backward(
+        self,
+        inputs,
+        output_metadatas,
+        saved_tensors,
+        backward_idx: int,
+    ):
+        assert self.hooks_proxy is not None
+        backward_fn = self.hooks_proxy[backward_idx]  # type: ignore[index]
+        proxies = self.fx_tracer.create_proxy(
+            kind="call_function",
+            target=call_backward,
+            args=(
+                backward_fn,
+                self.to_proxy(saved_tensors),
+                *self.to_proxy(inputs),
+            ),
+            kwargs={},
+        )
+
+        with disable_proxy_modes_tracing():
+            # create fake Tensors
+            grad_ins: List[Optional[torch.Tensor]] = []
+            for output_metadata in output_metadatas:
+                if output_metadata is None:
+                    grad_ins.append(None)
+                    continue
+
+                layout, device, dtype, size = output_metadata
+                grad_ins.append(
+                    torch.empty(size=size, dtype=dtype, layout=layout, device=device)
+                )
+            self.bind_tensors_to_proxies(grad_ins, proxies)
+        return tuple(grad_ins)
+
     def proxy_call_hook(self, hook, *args):
         return self.fx_tracer.create_proxy(
             "call_function",
@@ -104,7 +139,7 @@ class AutogradCompilerInstance:
 
     def tensor_pre_hook(self, inputs, hook_id, i: int):
         assert self.hooks_proxy is not None
-        hook = self.hooks_proxy[hook_id]
+        hook = self.hooks_proxy[hook_id]  # type: ignore[index]
         proxy = self.proxy_call_hook(
             hook,
             inputs[i],
@@ -116,7 +151,7 @@ class AutogradCompilerInstance:
 
     def pre_hook(self, inputs, hook_id):
         assert self.hooks_proxy is not None
-        hook = self.hooks_proxy[hook_id]
+        hook = self.hooks_proxy[hook_id]  # type: ignore[index]
         proxies = self.proxy_call_hook(
             hook,
             inputs,
@@ -128,7 +163,7 @@ class AutogradCompilerInstance:
 
     def post_hook(self, outputs, inputs, hook_id):
         assert self.hooks_proxy is not None
-        hook = self.hooks_proxy[hook_id]
+        hook = self.hooks_proxy[hook_id]  # type: ignore[index]
         proxies = self.proxy_call_hook(
             hook,
             outputs,
@@ -142,7 +177,7 @@ class AutogradCompilerInstance:
     def post_acc_grad_hook(self, input, hook_id):
         assert isinstance(input, torch.Tensor)
         assert self.hooks_proxy is not None
-        hook = self.hooks_proxy[hook_id]
+        hook = self.hooks_proxy[hook_id]  # type: ignore[index]
         proxies = self.proxy_call_hook(
             hook,
             input,
@@ -176,7 +211,7 @@ class AutogradCompilerInstance:
         if isinstance(t, tuple):
             return tuple(self.to_proxy(x) for x in t)
         assert isinstance(t, (torch.Tensor, torch.SymInt))
-        return fetch_tensor_proxy(self.fx_tracer)(t).proxy
+        return fetch_object_proxy(self.fx_tracer)(t).proxy
 
     def bind_tensors_to_proxies(self, tensors, proxies):
         if isinstance(proxies, torch.fx.Proxy):
@@ -187,18 +222,35 @@ class AutogradCompilerInstance:
 
 compiled_autograd_enabled = False
 
+# We may have code like:
+# with enable(compiler_fn):
+#   ...
+#   with disable():
+#     ...
+#   ...
+# The disable() call just want to disable compiled autograd temporarily.
+# But overall the feature is enabled.
+#
+# The code covered by the disable context manager has no way to know if
+# compiled autograd is overall eanbled. Use another variable
+# compiled_autograd_enabled_count to indicate how many times compiled
+# autograd has been enabled in the call stack for this purpose.
+compiled_autograd_enabled_count = 0
+
 
 @contextlib.contextmanager
 def enable(compiler_fn):
     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
         functools.partial(AutogradCompilerInstance, compiler_fn)
     )
-    global compiled_autograd_enabled
+    global compiled_autograd_enabled, compiled_autograd_enabled_count
     compiled_autograd_enabled = True
+    compiled_autograd_enabled_count += 1
     try:
         with torch.autograd.set_multithreading_enabled(False):
             yield
     finally:
+        compiled_autograd_enabled_count -= 1
         if not prior:
             compiled_autograd_enabled = False
         torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)

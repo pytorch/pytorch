@@ -420,8 +420,7 @@ MessageLogger::~MessageLogger() {
 
 #endif // !C10_USE_GLOG
 
-namespace c10 {
-namespace detail {
+namespace c10::detail {
 namespace {
 
 void setLogLevelFlagFromEnv() {
@@ -467,5 +466,4 @@ void setLogLevelFlagFromEnv() {
 }
 
 } // namespace
-} // namespace detail
-} // namespace c10
+} // namespace c10::detail

@@ -430,6 +430,45 @@ class TestExecutionTrace(TestCase):
         assert found_root_node
         assert loop_count == expected_loop_events
 
+    @unittest.skipIf(IS_WINDOWS, 'torch.compile does not support WINDOWS')
+    def test_execution_trace_with_pt2(self):
+
+        class ConvAndRelu(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = nn.Linear(4096, 4096)
+                self.relu = nn.ReLU(inplace=True)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = self.linear(x)
+                x = self.relu(x)
+                return x
+
+        # Create a temp file to save execution trace data.
+        fp = tempfile.NamedTemporaryFile('w+t', suffix='.et.json', delete=False)
+        fp.close()
+
+        test_module = torch.compile(ConvAndRelu())
+
+        x = torch.rand(128, 4096)
+        et = ExecutionTraceObserver()
+        et.register_callback(fp.name)
+        et.start()
+        test_module.forward(x)
+        et.stop()
+
+        assert fp.name == et.get_output_file_path()
+        et.unregister_callback()
+        nodes = self.get_execution_trace_root(fp.name)
+
+        found_root_node = False
+        for n in nodes:
+            assert "name" in n
+            if "[pytorch|profiler|execution_trace|process]" in n["name"]:
+                found_root_node = True
+
+        assert found_root_node
+
     def test_execution_trace_start_stop(self):
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
         # Create a temp file to save execution trace data.

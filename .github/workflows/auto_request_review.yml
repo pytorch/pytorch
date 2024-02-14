@@ -3,11 +3,13 @@ name: Auto Request Review
 on:
   pull_request:
     types: [opened, ready_for_review, reopened]
-
 jobs:
   auto-request-review:
     # Don't run on forked repos
     if: ${{ !github.event.pull_request.head.repo.fork }}
+    permissions:
+      contents: read
+      pull-requests: write
     name: Auto Request Review
     runs-on: ubuntu-latest
     steps:

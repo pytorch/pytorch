@@ -80,7 +80,7 @@ def draw_buffers(nodes: List[BaseSchedulerNode], print_graph=False, fname=None):
         if isinstance(node, ir.ComputedBuffer):
             dtype = node.data.dtype
 
-        metadata = TensorMetadata(group, dtype, None, None, None, None, None)
+        metadata = TensorMetadata(group, dtype, None, None, None, None, None)  # type: ignore[arg-type]
         node.meta["tensor_meta"] = metadata
 
     if print_graph:
@@ -273,8 +273,7 @@ def enable_aot_logging():
     stack.enter_context(patch("functorch.compile.config.debug_partitioner", True))
 
     path = os.path.join(get_debug_dir(), "torchinductor")
-    if not os.path.exists(path):
-        os.makedirs(path)
+    os.makedirs(path, exist_ok=True)
 
     fh = logging.FileHandler(
         os.path.join(

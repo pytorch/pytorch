@@ -3,10 +3,6 @@
 
 #if AT_CUDNN_ENABLED()
 
-#include <ATen/native/cudnn/Macros.h>
-
-#if HAS_CUDNN_V8()
-
 #include <ATen/ATen.h>
 #include <torch/library.h>
 #include <ATen/native/quantized/cudnn/utils.h>
@@ -15,6 +11,8 @@
 #include <c10/core/QScheme.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
+
+int register_linear_params();
 
 c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightCudnn::prepack(
         at::Tensor weight,
@@ -50,6 +48,7 @@ class QLinearPackWeightInt8Cudnn final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
+  register_linear_params();
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_prepack"), TORCH_FN(QLinearPackWeightInt8Cudnn::run));
 }
 
@@ -58,6 +57,5 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
 } // namespace native
 } // namespace at
 
-#endif  // HAS_CUDNN_V8
 #endif  // AT_CUDNN_ENABLED
 #endif  // USE_CUDA

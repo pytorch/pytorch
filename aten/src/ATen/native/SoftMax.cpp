@@ -637,8 +637,8 @@ Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const c10::
     input = input.view(1);
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      at::ScalarType::BFloat16, input.scalar_type(), "masked_softmax", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::BFloat16, at::ScalarType::Half, input.scalar_type(), "masked_softmax", [&] {
         host_softmax<
             scalar_t,
             false /* LogSoftMax */,
@@ -670,8 +670,8 @@ Tensor masked_softmax_backward_cpu(
   mask = mask.dim() == 0 ? mask.view(1) : mask;
 
   Tensor grad_input = at::empty_like(grad, grad.options());
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      at::ScalarType::BFloat16, grad.scalar_type(), "masked_softmax_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::BFloat16, at::ScalarType::Half, grad.scalar_type(), "masked_softmax_backward", [&] {
         host_softmax_backward<
             scalar_t,
             false /* LogSoftMax */,

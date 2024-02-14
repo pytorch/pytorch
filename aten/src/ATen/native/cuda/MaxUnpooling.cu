@@ -51,8 +51,8 @@ __global__ void max_unpooling2d_forward_kernel(
 
 template <typename T>
 __global__ void max_unpooling3d_forward_kernel(
-    PackedTensorAccessor64<T, 4> input,
-    PackedTensorAccessor64<int64_t, 4> indices,
+    PackedTensorAccessor64<const T, 4> input,
+    PackedTensorAccessor64<const int64_t, 4> indices,
     T* output,
     const int64_t oT,
     const int64_t oH,
@@ -64,8 +64,8 @@ __global__ void max_unpooling3d_forward_kernel(
   int64_t slice = (blockIdx.z + offsetZ) / input.size(1); // input slice/feature
   int64_t outputImageSize = oT * oH * oW;
   if (iRow < input.size(2) && iColumn < input.size(3)) {
-    T val = input[slice][iFrame][iRow][iColumn];
-    int64_t index = indices[slice][iFrame][iRow][iColumn];
+    const T val = input[slice][iFrame][iRow][iColumn];
+    const int64_t index = indices[slice][iFrame][iRow][iColumn];
     CUDA_KERNEL_ASSERT(index >= 0 && index < outputImageSize);
     output[slice * oT * oH * oW + index] = val;
   }
@@ -370,8 +370,8 @@ Tensor& max_unpooling3d_forward_out_cuda(const Tensor& self_,
               block,
               0,
               at::cuda::getCurrentCUDAStream()>>>(
-              self.packed_accessor64<scalar_t, 4>(),
-              indices.packed_accessor64<int64_t, 4>(),
+              self.packed_accessor64<const scalar_t, 4>(),
+              indices.packed_accessor64<const int64_t, 4>(),
               output.mutable_data_ptr<scalar_t>(),
               oT,
               oH,

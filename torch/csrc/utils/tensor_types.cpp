@@ -78,13 +78,18 @@ std::string type_to_string(const at::DeprecatedTypeProperties& type) {
 at::TensorOptions options_from_string(const std::string& str) {
   static std::string cuda_prefix("torch.cuda.");
   static std::string xpu_prefix("torch.xpu.");
+  static std::string privateUser_prefix(
+      std::string(parse_privateuseone_backend()) + ".");
   static c10::once_flag cpu_once;
   static c10::once_flag cuda_once;
   static c10::once_flag xpu_once;
+  static c10::once_flag privateUser1_once;
   static std::unordered_map<std::string, at::DeprecatedTypeProperties*> cpu_map;
   static std::unordered_map<std::string, at::DeprecatedTypeProperties*> xpu_map;
   static std::unordered_map<std::string, at::DeprecatedTypeProperties*>
       cuda_map;
+  static std::unordered_map<std::string, at::DeprecatedTypeProperties*>
+      privateUser1_map;
 
   const std::unordered_map<std::string, at::DeprecatedTypeProperties*>* map =
       nullptr;
@@ -115,6 +120,17 @@ at::TensorOptions options_from_string(const std::string& str) {
       }
     });
     map = &xpu_map;
+  } else if (
+      std::mismatch(
+          privateUser_prefix.begin(), privateUser_prefix.end(), str.begin())
+          .first == privateUser_prefix.end()) {
+    // torch.foo. foo is privateUser1 name
+    c10::call_once(privateUser1_once, []() {
+      for (auto type : autograd::VariableType::allPrivateUser1Types()) {
+        privateUser1_map.emplace(type_to_string(*type), type);
+      }
+    });
+    map = &privateUser1_map;
   } else {
     c10::call_once(cpu_once, []() {
       for (auto type : autograd::VariableType::allCPUTypes()) {
@@ -125,9 +141,7 @@ at::TensorOptions options_from_string(const std::string& str) {
   }
 
   auto it = map->find(str);
-  if (it == map->end()) {
-    throw ValueError("invalid type: '%s'", str.c_str());
-  }
+  TORCH_CHECK_VALUE(it != map->end(), "invalid type: '", str, "'");
   return it->second->options();
 }
 

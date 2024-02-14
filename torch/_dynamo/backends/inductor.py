@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 from torch._dynamo import register_backend
 
 

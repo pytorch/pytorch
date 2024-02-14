@@ -6,8 +6,7 @@
 
 #include <c10/util/hash.h>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 struct Node;
 
@@ -38,8 +37,7 @@ struct Edge {
   /// The identifier of a particular input to the function.
   uint32_t input_nr;
 };
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd
 
 // The idiomatic way of enabling use of a custom type as the key of hash
 // containers in C++11. This method removes the requirement of having to pass

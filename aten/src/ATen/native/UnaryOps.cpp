@@ -868,7 +868,7 @@ Tensor& logical_not_out(const Tensor& self, Tensor& result) {
   TensorIterator iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(result)
-    .add_input(self)
+    .add_const_input(self)
     .build();
   logical_not_stub(iter.device_type(), iter);
   return result;
@@ -964,7 +964,7 @@ std::tuple<Tensor&, Tensor&> frexp_out(const Tensor& self,
   auto iter = TensorIteratorConfig()
     .add_output(mantissa)
     .add_output(exponent)
-    .add_input(self)
+    .add_const_input(self)
     .check_all_same_dtype(false)
     .set_check_mem_overlap(true)
     .build();

@@ -546,6 +546,7 @@ struct VaryingShape {
       return c10::nullopt;
     }
     std::vector<T> sizes;
+    sizes.reserve(dims_.value().size());
     for (auto d : *dims_) {
       if (!d) {
         return c10::nullopt;

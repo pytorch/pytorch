@@ -6,9 +6,7 @@
 
 #include <mutex>
 
-namespace c10 {
-namespace cuda {
+namespace c10::cuda {
 C10_CUDA_API const char* get_cuda_check_suffix() noexcept;
 C10_CUDA_API std::mutex* getFreeMutex();
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda

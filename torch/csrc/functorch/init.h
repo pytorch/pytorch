@@ -1,12 +1,7 @@
-#include <pybind11/pybind11.h>
-#include <torch/csrc/utils/pybind.h>
+#include <Python.h>
 
-namespace torch {
-namespace functorch {
-namespace impl {
+namespace torch::functorch::impl {
 
 void initFuncTorchBindings(PyObject* module);
 
 }
-} // namespace functorch
-} // namespace torch

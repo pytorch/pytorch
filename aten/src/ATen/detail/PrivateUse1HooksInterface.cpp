@@ -18,4 +18,19 @@ TORCH_API at::PrivateUse1HooksInterface* GetPrivateUse1HooksInterface() {
   return privateuse1_hooks;
 }
 
+TORCH_API bool isPrivateUse1HooksRegistered() {
+  return privateuse1_hooks != nullptr;
 }
+
+namespace detail {
+
+TORCH_API const at::PrivateUse1HooksInterface& getPrivateUse1Hooks() {
+  TORCH_CHECK(
+      privateuse1_hooks != nullptr,
+      "Please register PrivateUse1HooksInterface by `RegisterPrivateUse1HooksInterface` first.");
+  return *privateuse1_hooks;
+}
+
+} // namespace detail
+
+} // namespace at

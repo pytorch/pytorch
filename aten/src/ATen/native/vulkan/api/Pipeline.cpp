@@ -75,22 +75,18 @@ VkImageLayout vk_layout(
           return VK_IMAGE_LAYOUT_GENERAL;
       }
       break;
-
     case PipelineStage::TRANSFER:
       switch (access) {
         case MemoryAccessType::READ:
           return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-
         case MemoryAccessType::WRITE:
           return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-
         default:
-          TORCH_INTERNAL_ASSERT(false, "Invalid!");
+          VK_THROW("Invalid memory access type for transfer stage!");
       }
       break;
-
     default:
-      TORCH_INTERNAL_ASSERT(false, "Invalid!");
+      VK_THROW("Cannot determine appropriate image layout");
   }
 
   return VK_IMAGE_LAYOUT_UNDEFINED;
@@ -101,8 +97,8 @@ VkImageLayout vk_layout(
 //
 
 PipelineLayout::PipelineLayout(
-    const VkDevice device,
-    const VkDescriptorSetLayout descriptor_layout)
+    VkDevice device,
+    VkDescriptorSetLayout descriptor_layout)
     : device_(device), handle_{VK_NULL_HANDLE} {
   // TODO: Enable push constants
   const VkPipelineLayoutCreateInfo pipeline_layout_create_info{
@@ -125,7 +121,7 @@ PipelineLayout::PipelineLayout(PipelineLayout&& other) noexcept
 }
 
 PipelineLayout::~PipelineLayout() {
-  if C10_LIKELY (VK_NULL_HANDLE == handle_) {
+  if (VK_NULL_HANDLE == handle_) {
     return;
   }
   vkDestroyPipelineLayout(device_, handle_, nullptr);
@@ -148,11 +144,12 @@ void swap(PipelineLayout& lhs, PipelineLayout& rhs) noexcept {
 //
 
 ComputePipeline::ComputePipeline(
-    const VkDevice device,
+    VkDevice device,
     const ComputePipeline::Descriptor& descriptor,
-    const VkPipelineCache pipeline_cache)
+    VkPipelineCache pipeline_cache)
     : device_(device), handle_{VK_NULL_HANDLE} {
-  constexpr VkSpecializationMapEntry specialization_map_entires[3]{
+  // NOLINTNEXTLINE
+  constexpr VkSpecializationMapEntry specialization_map_entries[3]{
       // X
       {
           0u,
@@ -175,7 +172,7 @@ ComputePipeline::ComputePipeline(
 
   const VkSpecializationInfo specialization_info{
       3u, // mapEntryCount
-      specialization_map_entires, // pMapEntries
+      specialization_map_entries, // pMapEntries
       sizeof(descriptor.local_work_group), // dataSize
       &descriptor.local_work_group, // pData
   };
@@ -215,7 +212,7 @@ ComputePipeline::ComputePipeline(ComputePipeline&& other) noexcept
 }
 
 ComputePipeline::~ComputePipeline() {
-  if C10_LIKELY (VK_NULL_HANDLE == handle_) {
+  if (VK_NULL_HANDLE == handle_) {
     return;
   }
   vkDestroyPipeline(device_, handle_, nullptr);
@@ -246,13 +243,12 @@ bool operator==(
 // PipelineLayoutCache
 //
 
-PipelineLayoutCache::PipelineLayoutCache(const VkDevice device)
+PipelineLayoutCache::PipelineLayoutCache(VkDevice device)
     : cache_mutex_{}, device_(device), cache_{} {}
 
 PipelineLayoutCache::PipelineLayoutCache(PipelineLayoutCache&& other) noexcept
-    : cache_mutex_{}, device_(other.device_) {
+    : cache_mutex_{}, device_(other.device_), cache_(std::move(other.cache_)) {
   std::lock_guard<std::mutex> lock(other.cache_mutex_);
-  cache_ = std::move(other.cache_);
 }
 
 PipelineLayoutCache::~PipelineLayoutCache() {
@@ -264,7 +260,7 @@ VkPipelineLayout PipelineLayoutCache::retrieve(
   std::lock_guard<std::mutex> lock(cache_mutex_);
 
   auto it = cache_.find(key);
-  if C10_UNLIKELY (cache_.cend() == it) {
+  if (cache_.cend() == it) {
     it = cache_.insert({key, PipelineLayoutCache::Value(device_, key)}).first;
   }
 
@@ -280,7 +276,7 @@ void PipelineLayoutCache::purge() {
 // ComputePipelineCache
 //
 
-ComputePipelineCache::ComputePipelineCache(const VkDevice device)
+ComputePipelineCache::ComputePipelineCache(VkDevice device)
     : cache_mutex_{},
       device_(device),
       pipeline_cache_{VK_NULL_HANDLE},
@@ -301,9 +297,9 @@ ComputePipelineCache::ComputePipelineCache(
     ComputePipelineCache&& other) noexcept
     : cache_mutex_{},
       device_(other.device_),
-      pipeline_cache_(other.pipeline_cache_) {
+      pipeline_cache_(other.pipeline_cache_),
+      cache_(std::move(other.cache_)) {
   std::lock_guard<std::mutex> lock(other.cache_mutex_);
-  cache_ = std::move(other.cache_);
 
   other.pipeline_cache_ = VK_NULL_HANDLE;
 }
@@ -311,7 +307,7 @@ ComputePipelineCache::ComputePipelineCache(
 ComputePipelineCache::~ComputePipelineCache() {
   purge();
 
-  if C10_LIKELY (VK_NULL_HANDLE == pipeline_cache_) {
+  if (VK_NULL_HANDLE == pipeline_cache_) {
     return;
   }
   vkDestroyPipelineCache(device_, pipeline_cache_, nullptr);
@@ -323,7 +319,7 @@ VkPipeline ComputePipelineCache::retrieve(
   std::lock_guard<std::mutex> lock(cache_mutex_);
 
   auto it = cache_.find(key);
-  if C10_UNLIKELY (cache_.cend() == it) {
+  if (cache_.cend() == it) {
     it = cache_
              .insert(
                  {key,

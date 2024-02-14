@@ -36,7 +36,7 @@ def filtered_configs(
     m = max(
         next_power_of_2(
             V.graph.sizevars.size_hint(
-                m, fallback=torch._inductor.config.unbacked_symint_fallback
+                m, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
             )
         ),
         min_block_size,
@@ -44,7 +44,7 @@ def filtered_configs(
     n = max(
         next_power_of_2(
             V.graph.sizevars.size_hint(
-                n, fallback=torch._inductor.config.unbacked_symint_fallback
+                n, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
             )
         ),
         min_block_size,
@@ -52,7 +52,7 @@ def filtered_configs(
     k = max(
         next_power_of_2(
             V.graph.sizevars.size_hint(
-                k, fallback=torch._inductor.config.unbacked_symint_fallback
+                k, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
             )
         ),
         min_block_size,

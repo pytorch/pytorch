@@ -263,6 +263,13 @@ def create_synthetic_base_metadata(
     )
 
 
+def _get_last_mem_address(x):
+    out = x.storage_offset()
+    for size, stride in zip(x.size(), x.stride()):
+        out += (size - 1) * stride
+    return out
+
+
 # Assumption: x and y are known to share a storage, and we are trying to determine
 # if their memory is actually completely disjoint, based on sizes/strides/storage_offset
 def _tensors_definitely_do_not_overlap(x, y):
@@ -282,6 +289,11 @@ def _tensors_definitely_do_not_overlap(x, y):
         else:
             # definitely no overlap
             return True
+
+    # Short-circuit: if last memory address of x is < start of y, then not overlapping.
+    x_last = _get_last_mem_address(x)
+    if x_last < y.storage_offset():
+        return True
 
     if x.dim() == 2 and y.dim() == 2 and x.stride(1) == 1 and y.stride(1) == 1:
         # This cases is needed for the shampoo optimizer.

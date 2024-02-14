@@ -268,7 +268,11 @@ const Tensor& indices) {
     int64_t isizeH = input_.size(2);
     int64_t isizeW = input_.size(3);
 
-    int64_t istrideD = input_.stride(1);
+    // In the kernel, the batch and channel dimensions are treated as if they
+    // are flattened and istrideD is used as the stride of this flattened dim
+    // Handle the edge case where input_.size(1) == 1, where despite passing the
+    // contiguity check the stride might not be H * W
+    int64_t istrideD = isizeH * isizeW;
     int64_t istrideH = input_.stride(2);
     int64_t istrideW = input_.stride(3);
 

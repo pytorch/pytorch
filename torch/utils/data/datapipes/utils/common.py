@@ -8,9 +8,7 @@ from io import IOBase
 
 from functools import partial
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
-
-
-from torch.utils.data._utils.serialization import DILL_AVAILABLE
+from torch.utils._import_utils import dill_available
 
 __all__ = [
     "validate_input_col",
@@ -138,7 +136,7 @@ def _check_unpickable_fn(fn: Callable):
         fn = fn.func
 
     # Local function
-    if _is_local_fn(fn) and not DILL_AVAILABLE:
+    if _is_local_fn(fn) and not dill_available():
         warnings.warn(
             "Local function is not supported by pickle, please use "
             "regular python function or functools.partial instead."
@@ -146,7 +144,7 @@ def _check_unpickable_fn(fn: Callable):
         return
 
     # Lambda function
-    if hasattr(fn, "__name__") and fn.__name__ == "<lambda>" and not DILL_AVAILABLE:
+    if hasattr(fn, "__name__") and fn.__name__ == "<lambda>" and not dill_available():
         warnings.warn(
             "Lambda function is not supported by pickle, please use "
             "regular python function or functools.partial instead."

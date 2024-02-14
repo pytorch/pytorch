@@ -22,7 +22,7 @@ void cpu_adaptive_avg_pool(
   auto input = input_.contiguous();
   auto output = output_.contiguous();
 
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   int64_t ndim = input.ndimension();
@@ -36,7 +36,7 @@ void cpu_adaptive_avg_pool(
   // parallel on dim of N, C
   at::parallel_for(0, channels, 0, [&](int64_t begin, int64_t end) {
     for (const auto c : c10::irange(begin, end)) {
-      scalar_t* input_ptr = input_data + c * input_height * input_width;
+      const scalar_t* input_ptr = input_data + c * input_height * input_width;
       scalar_t* output_ptr = output_data + c * output_height * output_width;
 
       for (const auto oh : c10::irange(output_height)) {
@@ -77,7 +77,7 @@ cpu_adaptive_avg_pool_channels_last(
   auto input = input_.contiguous(memory_format);
   auto output = output_.contiguous(memory_format);
 
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   int64_t nbatch = input.size(0);
@@ -121,7 +121,7 @@ cpu_adaptive_avg_pool_channels_last(
       // Pass II: compute local sum
       for (const auto ih : c10::irange(ih0, ih1)) {
         for (const auto iw : c10::irange(iw0, iw1)) {
-          scalar_t* in = input_data + n * input_height * input_width * channels +
+          const scalar_t* in = input_data + n * input_height * input_width * channels +
               ih * input_width * channels + iw * channels;
 
           int64_t d2 = 0;
@@ -164,7 +164,7 @@ cpu_adaptive_avg_pool_channels_last(
   auto input = input_.contiguous(memory_format);
   auto output = output_.contiguous(memory_format);
 
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   int64_t nbatch = input.size(0);
@@ -212,7 +212,7 @@ cpu_adaptive_avg_pool_channels_last(
       // Pass II: compute local sum
       for (const auto ih : c10::irange(ih0, ih1)) {
         for (const auto iw : c10::irange(iw0, iw1)) {
-          scalar_t* in = input_data + n * input_height * input_width * channels +
+          const scalar_t* in = input_data + n * input_height * input_width * channels +
               ih * input_width * channels + iw * channels;
 
           int64_t d2 = 0;

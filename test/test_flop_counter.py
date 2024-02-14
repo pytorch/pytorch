@@ -2,7 +2,7 @@
 
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_TORCHDYNAMO
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
 import torch.utils.flop_counter
 import torch.nn.functional as F
 import unittest
@@ -172,7 +172,8 @@ class TestFlopCounter(TestCase):
             T(4, 5).cos()
 
     @unittest.skipIf(not HAS_CUDA, "CUDA not available")
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION or not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+                     "Does not support all SDPA backends (pre-SM80 hardware on CUDA)")
     def test_sdpa(self):
         batch_size = 4
         n_heads = 8

@@ -6,15 +6,13 @@ import dataclasses
 import warnings
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import py_sym_types
 
-KNOWN_TYPES = tuple(
-    [torch.Tensor, int, str, float, bool, type(None)] + list(py_sym_types)
-)
+KNOWN_TYPES = [torch.Tensor, int, str, float, bool, type(None)] + list(py_sym_types)
 
 original_zip = zip
 
@@ -119,22 +117,23 @@ def call_func_at_runtime_with_args(f, args, steal_args=False, disable_amp=False)
 class PytreeThunk:
     spec: Optional[pytree.TreeSpec] = None
     # These are some kinda dumb microoptimizations that save about 3-4 us of overhead.
-    is_simple = (
-        None  # if the output spec is a tuple/list, we won't bother unflattening it.
-    )
-    is_really_simple = None  # if the output spec is a LeafSpec
+    is_simple: Optional[
+        bool
+    ] = None  # if the output spec is a tuple/list, we won't bother unflattening it.
+    is_really_simple: Optional[bool] = None  # if the output spec is a LeafSpec
 
-    def set(self, spec):
+    def set(self, spec: pytree.TreeSpec) -> None:
         assert self.spec is None or self.spec == spec
-        self.spec = spec
-        if type(self.spec) in [tuple, list] and all(
-            isinstance(i, pytree.LeafSpec) for i in spec.children_specs
+        assert spec is not None
+        self.spec: pytree.TreeSpec = spec
+        if self.spec.type in {tuple, list} and all(
+            child.is_leaf() for child in spec.children_specs
         ):
             self.is_simple = True
-        if isinstance(self.spec, pytree.LeafSpec):
+        if self.spec.is_leaf():
             self.is_really_simple = True
 
-    def unflatten(self, x):
+    def unflatten(self, x: List[Any]) -> Any:
         if self.is_really_simple:
             return x[0]
         if self.is_simple:

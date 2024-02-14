@@ -9,7 +9,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/frontend/tracer.h>
-#include <torch/csrc/utils/cuda_lazy_init.h>
+#include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/out_types.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -61,7 +61,7 @@ inline Tensor dispatch_range(
     const Scalar& end,
     const Scalar& step,
     const TensorOptions& options) {
-  torch::utils::maybe_initialize_cuda(options);
+  torch::utils::maybe_initialize_device(options);
   pybind11::gil_scoped_release no_gil;
   DeviceGuard device_guard(options.device());
   return torch::range(start, end, step, options);

@@ -876,6 +876,9 @@ class EnforceUnique:
         self.seen = set()
 
     def see(self, *key):
+        r"""
+        Observe a key and raise an error if it is seen multiple times.
+        """
         if key in self.seen:
             raise RuntimeError("duplicate key: " + str(key))
         self.seen.add(key)
@@ -962,23 +965,27 @@ class KinetoStepTracker:
 
     We fix this by adding a layer of abstraction before calling step()
     to the kineto library. The idea is to maintain steps per requester in a dict:
-    ```
-    {
-       "ProfilerStep": 100,  # triggered by profiler step() call
-       "Optimizer1Step": 100,   # Optimizer 1 or 2 are just examples, could be SGD, Adam etc
-       "Optimizer2Step": 100,
-    }
-    ```
+
+    .. code-block::
+
+        {
+           "ProfilerStep": 100,  # triggered by profiler step() call
+           "Optimizer1Step": 100,   # Optimizer 1 or 2 are just examples, could be SGD, Adam etc
+           "Optimizer2Step": 100,
+        }
+
     To figure out the global step count just take the max of dict values (100).
 
     If one of the count increments the max will go up.
-    ```
-    {
-       "ProfilerStep": 100,
-       "Optimizer1Step": 101,   # Optimizer1 got incremented first say
-       "Optimizer2Step": 100,
-    }
-    ```
+
+    .. code-block::
+
+        {
+           "ProfilerStep": 100,
+           "Optimizer1Step": 101,   # Optimizer1 got incremented first say
+           "Optimizer2Step": 100,
+        }
+
     Then global step count is 101
     We only call the kineto step() function when global count increments.
 
@@ -991,10 +998,16 @@ class KinetoStepTracker:
 
     @classmethod
     def init_step_count(cls, requester: str):
+        r"""
+        Initialize for a given requester.
+        """
         cls._step_dict[requester] = cls._current_step
 
     @classmethod
     def erase_step_count(cls, requester: str) -> bool:
+        r"""
+        Remove a given requester.
+        """
         return cls._step_dict.pop(requester, None) is not None
 
     @classmethod
@@ -1023,4 +1036,7 @@ class KinetoStepTracker:
 
     @classmethod
     def current_step(cls) -> int:
+        r"""
+        Get the latest step for any requester
+        """
         return cls._current_step

@@ -27,7 +27,7 @@ void cpu_avg_pool(
   auto input = input_.contiguous();
   auto output = output_.contiguous();
 
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   int64_t numel = output.numel();
@@ -50,7 +50,7 @@ void cpu_avg_pool(
       output_data[i] = static_cast<scalar_t>(0);
 
       // local pointers
-      scalar_t* input_ptr = input_data + c * input_height * input_width;
+      const scalar_t* input_ptr = input_data + c * input_height * input_width;
 
       // compute the mean of the input image...
       int64_t ih0 = oh * dH - padH;
@@ -115,7 +115,7 @@ void cpu_avg_pool_channels_last(
   auto input = input_.contiguous(memory_format);
   auto output = output_.contiguous(memory_format);
 
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   int64_t nbatch = input.size(0);
@@ -179,7 +179,7 @@ void cpu_avg_pool_channels_last(
       // Pass II: compute local sum
       for (const auto ih : c10::irange(ih0, ih1)) {
         for (const auto iw : c10::irange(iw0, iw1)) {
-          scalar_t* in = input_data + n * input_height * input_width * channels +
+          const scalar_t* in = input_data + n * input_height * input_width * channels +
               ih * input_width * channels + iw * channels;
 
           int64_t d2 = 0;
@@ -229,7 +229,7 @@ void cpu_avg_pool_channels_last(
   auto input = input_.contiguous(memory_format);
   auto output = output_.contiguous(memory_format);
 
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   int64_t nbatch = input.size(0);
@@ -303,7 +303,7 @@ void cpu_avg_pool_channels_last(
       // Pass II: compute local sum
       for (const auto ih : c10::irange(ih0, ih1)) {
         for (const auto iw : c10::irange(iw0, iw1)) {
-          scalar_t* in = input_data + n * input_height * input_width * channels +
+          const scalar_t* in = input_data + n * input_height * input_width * channels +
               ih * input_width * channels + iw * channels;
 
           int64_t d2 = 0;

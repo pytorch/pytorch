@@ -16,11 +16,6 @@ set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocol
 
 set INSTALLER_DIR=%SCRIPT_HELPERS_DIR%\installation-helpers
 
-
-call %INSTALLER_DIR%\install_mkl.bat
-if errorlevel 1 exit /b
-if not errorlevel 0 exit /b
-
 call %INSTALLER_DIR%\install_magma.bat
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
@@ -32,6 +27,10 @@ if not errorlevel 0 exit /b
 :: Miniconda has been installed as part of the Windows AMI with all the dependencies.
 :: We just need to activate it here
 call %INSTALLER_DIR%\activate_miniconda3.bat
+if errorlevel 1 exit /b
+if not errorlevel 0 exit /b
+
+call pip install mkl-include==2021.4.0 mkl-devel==2021.4.0
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 
@@ -89,8 +88,8 @@ set SCCACHE_IGNORE_SERVER_IO_ERROR=1
 sccache --stop-server
 sccache --start-server
 sccache --zero-stats
-set CC=sccache-cl
-set CXX=sccache-cl
+set CMAKE_C_COMPILER_LAUNCHER=sccache
+set CMAKE_CXX_COMPILER_LAUNCHER=sccache
 
 set CMAKE_GENERATOR=Ninja
 

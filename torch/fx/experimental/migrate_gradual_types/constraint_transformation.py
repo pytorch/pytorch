@@ -403,7 +403,7 @@ def generate_calc_product(constraint, counter):
     for p in all_possibilities:
         p = list(p)
         # this tells us there is a dynamic variable
-        contains_dyn = not(all(constraint.op == op_neq for constraint in p))
+        contains_dyn = not all(constraint.op == op_neq for constraint in p)
         if contains_dyn:
             mid_var = [Dyn]
             total_constraints = lhs + mid_var + rhs
@@ -1017,7 +1017,7 @@ def gen_broadcasting_constraints(e1: TVar, e2: TVar, e11: TVar, e12: TVar, i: in
     """
     dims, counter = gen_lists_of_dims(4, i, counter)
     [d1, d2, d3, d4] = dims
-    nat_dims_i = gen_nat_constraints(list(itertools.chain(*dims)))
+    nat_dims_i = gen_nat_constraints(list(itertools.chain.from_iterable(dims)))
 
     initialize_tensors_constraints = create_equality_constraints_for_broadcasting(e1, e2, e11, e12,
                                                                                   d1, d2, d3, d4)

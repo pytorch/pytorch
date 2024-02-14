@@ -287,7 +287,7 @@ def parse_args(*arg_descriptors: _ValueDescriptor):
                 arg_names = [None] * len(args)  # type: ignore[list-item]
                 fn_name = None
             args = [
-                _parse_arg(arg, arg_desc, arg_name, fn_name)  # type: ignore[assignment]
+                _parse_arg(arg, arg_desc, arg_name, fn_name)  # type: ignore[method-assign]
                 for arg, arg_desc, arg_name in zip(args, arg_descriptors, arg_names)
             ]
             # only support _outputs in kwargs

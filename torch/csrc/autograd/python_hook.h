@@ -8,8 +8,7 @@ namespace torch::dynamo::autograd {
 class SwapSavedVariables;
 } // namespace torch::dynamo::autograd
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 struct PyFunctionTensorPreHook : public FunctionPreHook {
   PyFunctionTensorPreHook(PyObject* dict, size_t value_idx);
@@ -53,5 +52,4 @@ struct PyFunctionTensorPostAccGradHooks : public PostAccumulateGradHook {
   PyObject* dict;
 };
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

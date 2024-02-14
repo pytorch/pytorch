@@ -227,7 +227,7 @@ const at::cuda::NVRTC& CUDAHooks::nvrtc() const {
 }
 
 DeviceIndex current_device() {
-  int device;
+  c10::DeviceIndex device = 0;
   cudaError_t err = c10::cuda::GetDevice(&device);
   if (err == cudaSuccess) {
     return device;

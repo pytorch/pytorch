@@ -4,7 +4,7 @@ import sys
 import unittest
 
 from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_GPU
 
 try:
     import triton  # noqa: F401
@@ -32,5 +32,5 @@ class TestTritonHeuristics(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA:
+    if IS_LINUX and HAS_GPU:
         run_tests()

@@ -29,6 +29,11 @@ class RendezvousConnectionError(RendezvousError):
 class RendezvousStateError(RendezvousError):
     """Raised when the state of a rendezvous is corrupt."""
 
+class RendezvousGracefulExitError(RendezvousError):
+    """Raised when node wasn't not included in rendezvous and gracefully exits.
+
+    Exception is a mechanism to exit the stack, however does not mean a failure.
+    """
 
 class RendezvousHandler(ABC):
     """Main rendezvous interface.

@@ -717,10 +717,10 @@ resize_out(out, sizes, strides, options);
             f"{textwrap.indent(class_ctor_str, indent)}",
             f"{textwrap.indent(self.gen_class_set_output_functions(k, parent_class, generate_super), indent)}",
             "    const Tensor& maybe_get_output(int64_t output_idx) override {",
-            f"      return {output_value};\n",
+            f"      return {output_value};\n",  # type: ignore[possibly-undefined]  # TODO: audit
             "    }",
-            f"    std::array<{output_type}, {len(f.func.returns)}> outputs_;",
-            f"{textwrap.indent(proxy_field, indent)}",
+            f"    std::array<{output_type}, {len(f.func.returns)}> outputs_;",  # type: ignore[possibly-undefined]  # TODO: audit
+            f"{textwrap.indent(proxy_field, indent)}",  # type: ignore[possibly-undefined]  # TODO: audit
             f"{textwrap.indent(guard_field, indent)}",
             "};",
         )
@@ -962,7 +962,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 else:
                     refs = ", ".join(a.name for a in f.func.arguments.out)
                     ret_expr = f"std::forward_as_tuple({refs})"
-            sig_body.append(f"return {ret_expr};")
+            sig_body.append(f"return {ret_expr};")  # type: ignore[possibly-undefined]  # TODO: audit
 
             sig_body_str = "\n".join(sig_body)
 

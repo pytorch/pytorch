@@ -287,6 +287,18 @@ class SideEffects:
         assert isinstance(ctx, variables.AutogradFunctionContextVariable)
         self.save_for_backward.append((ctx, args))
 
+    def track_tensor_variables_from_runahead_side_effects(self, other):
+        # In higher order ops we want to keep track of tensors seen in the
+        # speculate_subgraph so that we don't lift them again as a new input in
+        # other speculate_subgraph or in the root tracer.
+        for other_item in other.keepalive:
+            other_id = id(other_item)
+            other_variable = other.id_to_variable[other_id]
+            if other_id not in self.id_to_variable and isinstance(
+                other_variable, variables.TensorVariable
+            ):
+                self.track_object_existing(other_item, other_variable)
+
     def prune_dead_object_new(self, tx):
         live_new_objects = set()
         skip_obj = None
@@ -338,7 +350,7 @@ class SideEffects:
                 cg.extend_output(create_call_function(0, True))
                 cg.add_cache(var)
                 if isinstance(var.mutable_local, AttributeMutationNew):
-                    var.mutable_local.source = LocalSource(cg.tempvars[var])
+                    var.mutable_local.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
             elif isinstance(var.mutable_local, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
@@ -374,7 +386,17 @@ class SideEffects:
             )
 
     def register_hook(self, tensor, hook, handle, name):
+        assert isinstance(tensor, variables.TensorVariable)
+        assert isinstance(hook, variables.VariableTracker)
+        assert (
+            isinstance(handle, variables.RemovableHandleVariable)
+            and handle.mutable_local
+        )
+        assert hasattr(torch.Tensor, name)
         idx = len(self.tensor_hooks.keys())
+        # duplicate index possible because of self.remove_hook()
+        while idx in self.tensor_hooks:
+            idx += 1
         self.tensor_hooks[idx] = (tensor, hook, handle, name)
         assert not handle.idx
         handle.idx = idx
@@ -427,27 +449,10 @@ class SideEffects:
             cg.extend_output([cg.create_load_attr(name)])
             cg(hook)
             cg.extend_output(create_call_function(1, True))
-            # Let's go over how handles work.
-            #
-            # A handle is created from invoking `register_hook` on a tensor. A handle can be referenced at any
-            # time after that, or never. In dynamo, we track and associate a name with a handle (user_code_variable_name) to
-            # determine if a handle is accessed. If a handle has no user_code_variable_name, we just pop the produced value
-            # off the top of the stack, discarding the handle.
-            #
-            # If a handle is seen, we store it under that name. This is extremely important, because, the handle
-            # can be generated at any time after this point, and can be generated multiple times! If we were to defer
-            # actual codegen of the handle object until we saw a codegen call to it - then we would end up generating multiple
-            # register_hook calls, which is incorrect. This turns the codegen reconstruct(handle) call for the handle into
-            # essentially a lookup.
-            if (
-                hasattr(handle, "user_code_variable_name")
-                and handle.user_code_variable_name
-            ):
-                # register_hook stored with variable name assigned to the handle
-                cg.extend_output([cg.create_store(handle.user_code_variable_name)])
-            else:
-                # register_hook stored w/o a variable name assigned to the handle
-                cg.extend_output([create_instruction("POP_TOP")])
+
+            # Adding the handle to the cache means RemovableHandleVariable().reconstruct() will
+            # be associated with the return value of register_hook().  This consumes the top of stack.
+            cg.add_cache(handle)
 
     def codegen_update_mutated(self, cg: PyCodegen):
         suffixes = []
@@ -455,7 +460,7 @@ class SideEffects:
             if isinstance(var, variables.ListVariable):
                 # old[:] = new
                 cg(var, allow_cache=False)
-                cg(var.mutable_local.source)
+                cg(var.mutable_local.source)  # type: ignore[attr-defined]
                 cg.extend_output(
                     [
                         cg.create_load_const(None),
@@ -468,11 +473,11 @@ class SideEffects:
                 cg.tx.output.update_co_names("clear")
                 cg.tx.output.update_co_names("update")
 
-                cg(var.mutable_local.source)
+                cg(var.mutable_local.source)  # type: ignore[attr-defined]
                 cg.extend_output([create_instruction("LOAD_METHOD", argval="update")])
                 cg(var, allow_cache=False)
 
-                cg(var.mutable_local.source)
+                cg(var.mutable_local.source)  # type: ignore[attr-defined]
                 cg.extend_output([create_instruction("LOAD_METHOD", argval="clear")])
 
                 suffixes.append(
@@ -512,7 +517,7 @@ class SideEffects:
             elif isinstance(var, variables.TupleIteratorVariable):
                 for _ in range(var.index):
                     cg.load_import_from(utils.__name__, "iter_next")
-                    cg(var.mutable_local.source)
+                    cg(var.mutable_local.source)  # type: ignore[attr-defined]
                     cg.extend_output(create_call_function(1, True))
                     cg.append_output(create_instruction("POP_TOP"))
             else:

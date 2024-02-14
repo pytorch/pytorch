@@ -879,7 +879,7 @@ class TestFakeQuantizeOps(TestCase):
             Y_prime.backward(dout)
             np.testing.assert_allclose(
                 dX.cpu().detach().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
-            assert(X.grad.dtype == float_type)
+            assert X.grad.dtype == float_type
 
 
     def test_backward_per_channel_cachemask_cpu(self):

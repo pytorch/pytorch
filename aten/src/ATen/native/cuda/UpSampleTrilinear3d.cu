@@ -43,7 +43,7 @@ __global__ void upsample_trilinear3d_out_frame(
     const accscalar_t rheight,
     const accscalar_t rwidth,
     const bool align_corners,
-    const PackedTensorAccessor64<scalar_t, 5> idata,
+    const PackedTensorAccessor64<const scalar_t, 5> idata,
     PackedTensorAccessor64<scalar_t, 5> odata) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
 
@@ -269,7 +269,7 @@ static void upsample_trilinear3d_out_cuda_template(
       input.scalar_type(), "upsample_trilinear3d_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = input.packed_accessor64<scalar_t, 5>();
+        auto idata = input.packed_accessor64<const scalar_t, 5>();
         auto odata = output.packed_accessor64<scalar_t, 5>();
 
         const accscalar_t rdepth = area_pixel_compute_scale<accscalar_t>(
@@ -296,7 +296,7 @@ static void upsample_trilinear3d_out_cuda_template(
 }
 
 static void upsample_trilinear3d_backward_out_cuda_template(
-    const Tensor& grad_input,
+    const Tensor& grad_input_,
     const Tensor& grad_output_,
     IntArrayRef output_size,
     IntArrayRef input_size,
@@ -304,7 +304,7 @@ static void upsample_trilinear3d_backward_out_cuda_template(
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  TensorArg grad_input_arg{grad_input, "grad_input", 1},
+  TensorArg grad_input_arg{grad_input_, "grad_input_", 1},
       grad_output_arg{grad_output_, "grad_output_", 2};
   checkAllSameGPU(
       "upsample_trilinear3d_backward_out_cuda",
@@ -321,7 +321,8 @@ static void upsample_trilinear3d_backward_out_cuda_template(
   Tensor grad_output = grad_output_.contiguous();
 
   // A contiguous tensor is required for the kernel launch config
-  grad_input.contiguous();
+  Tensor grad_input = grad_input_.contiguous();
+
   // Numbers are added atomically to grad_input tensor from multiple threads,
   // so it has to be initialized to zero.
   grad_input.zero_();
@@ -363,6 +364,10 @@ static void upsample_trilinear3d_backward_out_cuda_template(
                 odata,
                 idata_ptr);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+        if (!grad_input_.is_contiguous()) {
+            grad_input_.copy_(grad_input);
+        }
       });
 }
 

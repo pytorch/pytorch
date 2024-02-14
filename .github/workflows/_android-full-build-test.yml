@@ -157,7 +157,7 @@ jobs:
           docker cp "${GITHUB_WORKSPACE}/build_android_install_x86_32" "${ID_X86_32}:/var/lib/jenkins/workspace/build_android_install_x86_32"
 
           # run gradle buildRelease
-          (echo "./.circleci/scripts/build_android_gradle.sh" | docker exec \
+          (echo "./scripts/build_android_gradle.sh" | docker exec \
             -e BUILD_ENVIRONMENT="pytorch-linux-focal-py3-clang9-android-ndk-r21e-gradle-build" \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \

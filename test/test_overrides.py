@@ -217,7 +217,7 @@ class SubTensor(torch.Tensor):
     """
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
-        if(kwargs is None):
+        if kwargs is None:
             kwargs = {}
 
         if func not in HANDLED_FUNCTIONS_SUB:
@@ -368,7 +368,7 @@ class TensorLike:
     """
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
-        if(kwargs is None):
+        if kwargs is None:
             kwargs = {}
 
         if func not in HANDLED_FUNCTIONS_TENSOR_LIKE:

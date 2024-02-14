@@ -79,6 +79,27 @@ def from_python_type_to_onnx_attribute_type(
     return _PYTHON_TYPE_TO_ONNX_ATTRIBUTE_TYPE.get(dtype)
 
 
+def from_python_type_to_onnx_tensor_element_type(type: type):
+    """
+    Converts a Python type to the corresponding ONNX tensor element type.
+    For example, `from_python_type_to_onnx_tensor_element_type(float)` returns
+    `onnx.TensorProto.FLOAT`.
+
+    Args:
+      type (type): The Python type to convert.
+
+    Returns:
+      int: The corresponding ONNX tensor element type.
+
+    """
+    _PYTHON_TYPE_TO_ONNX_TENSOR_ELEMENT_TYPE = {
+        float: onnx.TensorProto.FLOAT,  # type: ignore[attr-defined]
+        int: onnx.TensorProto.INT64,  # type: ignore[attr-defined]
+        bool: onnx.TensorProto.BOOL,  # type: ignore[attr-defined]
+    }
+    return _PYTHON_TYPE_TO_ONNX_TENSOR_ELEMENT_TYPE.get(type)
+
+
 def is_torch_symbolic_type(value: Any) -> bool:
     return isinstance(value, (torch.SymBool, torch.SymInt, torch.SymFloat))
 
@@ -112,6 +133,7 @@ _TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS: Dict[
     int: {"tensor(int16)", "tensor(int32)", "tensor(int64)"},
     float: {"tensor(float16)", "tensor(float)", "tensor(double)"},
     bool: {"tensor(int32)", "tensor(int64)", "tensor(bool)"},
+    complex: {"tensor(float)", "tensor(double)"},
     torch.complex32: {"tensor(float16)"},
     torch.complex64: {"tensor(float)"},
     torch.complex128: {"tensor(double)"},
@@ -127,7 +149,7 @@ _PYTHON_TYPE_TO_TORCH_DTYPE = {
     bool: torch.bool,
     int: torch.int64,
     float: torch.float32,
-    complex: torch.complex32,
+    complex: torch.complex64,
 }
 
 _COMPLEX_TO_FLOAT: Dict[torch.dtype, torch.dtype] = {

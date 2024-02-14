@@ -226,7 +226,9 @@ void fractional_max_pool3d_backward_out_cuda_template(
       gradInput_.size(0));
     dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
       gradOutput.scalar_type(),
       "fractional_max_pool3d_backward_out_frame",
       [&] {
@@ -285,7 +287,9 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cuda) (
     input_.size(0));
   dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+    at::ScalarType::Half,
+    at::ScalarType::BFloat16,
     input.scalar_type(),
     "fractional_max_pool3d_out_frame",
     [&]{

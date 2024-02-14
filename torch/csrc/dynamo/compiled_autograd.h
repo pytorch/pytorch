@@ -371,6 +371,10 @@ class CompiledNodeArgs {
         typeid(*node), _specialization_key, _specialization_key_size);
   }
 
+  int add_backward(c10::SafePyObject&& obj) {
+    return _compiler.emplace_hook(std::move(obj));
+  }
+
   void add_tensor_pre_hook(c10::SafePyObject&& obj, int index) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
     collect_size(fn_id);

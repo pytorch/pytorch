@@ -10,7 +10,6 @@
 #include <torch/library.h>
 
 #include <fstream>
-#include <list>
 #include <mutex>
 #include <sstream>
 #include <string>

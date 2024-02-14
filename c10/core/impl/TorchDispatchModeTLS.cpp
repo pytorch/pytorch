@@ -6,8 +6,7 @@
 
 #include <utility>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 thread_local TorchDispatchModeTLS torchDispatchModeState;
 
@@ -192,5 +191,4 @@ std::string to_string(TorchDispatchModeKey mode_key) {
   }
 }
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

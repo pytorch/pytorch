@@ -180,7 +180,10 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cuda) (
             input_.size(0));
   dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+    at::ScalarType::Half,
+    at::ScalarType::BFloat16,
+    input.scalar_type(),
     "fractional_max_pool2d_out_cuda_frame",
     [&] {
       auto devInput = input_.packed_accessor64<scalar_t, 4>();
@@ -252,7 +255,10 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_backward_cuda)(
   dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
 
   auto devIndices = indices_.packed_accessor64<int64_t, 4>();
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(gradOutput.scalar_type(),
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+    at::ScalarType::Half,
+    at::ScalarType::BFloat16,
+    gradOutput.scalar_type(),
     "fractional_max_pool2d_backward_out_cuda_frame",
     [&] {
       auto devGradInput = gradInput_.packed_accessor64<scalar_t, 4>();

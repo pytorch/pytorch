@@ -186,7 +186,7 @@ __device__ void countRadixUsingMask(
     int radixDigitPos,
     index_t sliceSize,
     index_t withinSliceStride,
-    scalar_t* data) {
+    const scalar_t* data) {
   // Clear out per-thread counts from a previous round
 #pragma unroll
   for (int i = 0; i < RadixSize; ++i) {
@@ -256,7 +256,7 @@ constexpr int RADIX_MASK = (RADIX_SIZE - 1);
 template <typename scalar_t, typename bitwise_t, typename index_t>
 __device__ scalar_t findPattern(
     scalar_t* smem,
-    scalar_t* data,
+    const scalar_t* data,
     index_t sliceSize,
     index_t withinSliceStride,
     bitwise_t desired,
@@ -304,7 +304,7 @@ __device__ scalar_t findPattern(
 // Returns the top-Kth element found in the data using radix selection
 template <typename scalar_t, typename bitwise_t, typename index_t>
 __device__ void radixSelect(
-    scalar_t* data,
+    const scalar_t* data,
     index_t k,
     bool largest,
     index_t sliceSize,

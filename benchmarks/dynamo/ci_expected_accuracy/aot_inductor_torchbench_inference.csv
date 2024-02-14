@@ -50,7 +50,7 @@ dcgan,pass,0
 
 
 
-demucs,eager_fail_to_run,0
+demucs,pass,0
 
 
 
@@ -122,23 +122,23 @@ functorch_maml_omniglot,pass,0
 
 
 
-hf_Albert,pass,0
+hf_Albert,fail_to_run,0
 
 
 
-hf_Bart,pass,0
+hf_Bart,fail_to_run,0
 
 
 
-hf_BigBird,fail_accuracy,0
+hf_BigBird,fail_to_run,0
 
 
 
-hf_DistilBert,pass,0
+hf_DistilBert,fail_to_run,0
 
 
 
-hf_GPT2,pass,0
+hf_GPT2,fail_to_run,0
 
 
 
@@ -146,7 +146,7 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
-hf_T5,pass,0
+hf_T5,fail_to_run,0
 
 
 
@@ -158,11 +158,15 @@ hf_T5_large,pass_due_to_skip,0
 
 
 
-hf_Whisper,pass,0
+hf_Whisper,fail_to_run,0
 
 
 
 hf_clip,eager_fail_to_run,0
+
+
+
+hf_distil_whisper,fail_to_run,0
 
 
 
@@ -207,10 +211,6 @@ nanogpt,pass,0
 
 
 nvidia_deeprecommender,pass,0
-
-
-
-phi_1_5,model_fail_to_load,0
 
 
 
@@ -282,7 +282,7 @@ squeezenet1_1,pass,0
 
 
 
-stable_diffusion_text_encoder,pass,0
+stable_diffusion_text_encoder,fail_to_run,0
 
 
 

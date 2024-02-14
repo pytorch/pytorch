@@ -216,7 +216,7 @@ static void topk_kernel(
     .declare_static_shape(sizes, /*squash_dims=*/dim)
     .add_output(values)
     .add_output(indices)
-    .add_input(self)
+    .add_const_input(self)
     .build();
 
   auto mode_values_stride = values.strides()[dim];

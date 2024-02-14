@@ -25,7 +25,7 @@ def maybe_dupe_op(x):
 
 
 aten = torch.ops.aten
-lib = torch.library.Library("custom", "DEF")
+lib = torch.library.Library("custom", "DEF")  # noqa: TOR901
 lib.define("maybe_dupe_op(Tensor a) -> (Tensor, Tensor)")
 lib.impl("maybe_dupe_op", maybe_dupe_op, "CPU")
 lib.impl("maybe_dupe_op", maybe_dupe_op, "Meta")
@@ -687,6 +687,27 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         actual_output = aot_fn()
         self.assertEqual(ref_output, actual_output)
 
+    def test_grad_inputs_alias_inputs(self):
+        class Test(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.save_for_backward(x)
+                return y
+
+            @staticmethod
+            def backward(ctx, grad):
+                (x,) = ctx.saved_tensors
+                return x, grad
+
+        def fn(x, y):
+            return Test.apply(x, y)
+
+        x = torch.ones(1, requires_grad=True)
+        y = torch.ones(1, requires_grad=True)
+        compiled_fn = torch.compile(fn, backend="aot_eager")
+        out = compiled_fn(x, y)
+        out.sum().backward()
+
     @expectedFailureDynamic  # https://github.com/pytorch/pytorch/issues/103539
     @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     @patch("torch._functorch.config.debug_assert", True)
@@ -884,6 +905,25 @@ SeqNr|OrigAten|SrcFn
 """
             ),
         )
+
+    def test_split_with_sizes_aot_autograd_cleans_up_traceback_meta(self):
+        from torch._functorch.aot_autograd import setup_stacktrace_preservation_hooks
+
+        def fn(result, split_sizes):
+            rs = torch.ops.aten.split_with_sizes(result, split_sizes.tolist())
+            return rs
+
+        example_inputs = (
+            torch.randn(32, requires_grad=True),
+            torch.tensor((7, 16, 9)),
+        )
+        outs = fn(*example_inputs)
+        setup_stacktrace_preservation_hooks([out.grad_fn for out in outs])
+        with fx_traceback.preserve_node_meta():
+            (outs[0].sum() + outs[1].sum() + outs[2].sum()).backward()
+
+        self.assertNotIn("grad_fn_seq_nr", fx_traceback.current_meta)
+        self.assertNotIn("in_grad_fn", fx_traceback.current_meta)
 
     # https://github.com/pytorch/pytorch/issues/110121
     def test_aot_export_joint_simple_repro(self):

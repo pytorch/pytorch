@@ -1992,7 +1992,7 @@ void linalg_eigh_magma(const Tensor& eigenvalues, const Tensor& eigenvectors, co
 }
 
 void linalg_eigh_kernel(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
-#if defined(USE_LINALG_SOLVER) && !defined(USE_ROCM)
+#if defined(USE_LINALG_SOLVER)
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
     case at::LinalgBackend::Magma:
@@ -2443,7 +2443,7 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
       .resize_outputs(false)
       .declare_static_shape(pivots_->sizes(), /*squash_dim=*/pivots_->dim() - 1)
       .add_output(perm)
-      .add_input(*pivots_)
+      .add_const_input(*pivots_)
       .build();
     unpack_pivots_stub(pivots_->device().type(), iter, n, n);
 

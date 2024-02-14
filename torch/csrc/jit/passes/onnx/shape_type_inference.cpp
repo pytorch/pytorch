@@ -1968,8 +1968,6 @@ void UpdateReliable(
       nodeTypeReliableForTracer.end();
   if (!inferred && !isTypeReliableForTracer &&
       !output->node()->kind().is_onnx() && no_type_warning) {
-    // TODO(84661): This warning comes before setType in symbolic_fn.
-    // tracked in #84661
     TORCH_WARN(
         "The shape inference of ",
         output->node()->kind().toDisplayString(),

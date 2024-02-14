@@ -739,9 +739,12 @@ class FractionalMaxPool2d(Module):
         kernel_size: the size of the window to take a max over.
                      Can be a single number k (for a square kernel of k x k) or a tuple `(kh, kw)`
         output_size: the target output size of the image of the form `oH x oW`.
-                     Can be a tuple `(oH, oW)` or a single number oH for a square image `oH x oH`
+                     Can be a tuple `(oH, oW)` or a single number oH for a square image `oH x oH`.
+                     Note that we must have :math:`kH + oH - 1 <= H_{in}` and :math:`kW + oW - 1 <= W_{in}`
         output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
-                      This has to be a number or tuple in the range (0, 1)
+                      This has to be a number or tuple in the range (0, 1).
+                      Note that we must have :math:`kH + (output\_ratio\_H * H_{in}) - 1 <= H_{in}`
+                      and :math:`kW + (output\_ratio\_W * W_{in}) - 1 <= W_{in}`
         return_indices: if ``True``, will return the indices along with the outputs.
                         Useful to pass to :meth:`nn.MaxUnpool2d`. Default: ``False``
 
@@ -1081,7 +1084,7 @@ class AdaptiveMaxPool1d(_AdaptiveMaxPoolNd):
 
     output_size: _size_1_t
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.adaptive_max_pool1d(input, self.output_size, self.return_indices)
 
 

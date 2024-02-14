@@ -53,6 +53,68 @@ at::Tensor InputMetadata::zeros_like() const {
   return at::zeros_symint(shape_as_dim_vector(), options_);
 }
 
+at::Tensor InputMetadata::maybe_reduce(
+    const size_t i,
+    at::Tensor grad,
+    const std::function<std::string(const std::string&)>& format_error) const {
+  auto fail = [&]() {
+    const auto message = incompatible_shape_error_message(i, grad);
+    TORCH_CHECK(false, format_error(message.str()));
+  };
+
+  // Nested tensor makes my brain explode, so I've just hard-coded the logic
+  // for this case, at risk of code duplication.  This logic does NOT do the
+  // careful oblivious logic as seen below
+  if (is_nested_ || is_cpp_nested_tensor() || grad.is_nested() ||
+      ::torch::autograd::is_cpp_nested_tensor(grad)) {
+    if (!is_same_shape(grad)) {
+      if (is_expandable_to_shape(grad)) {
+        return reduce_grad(grad);
+      } else {
+        fail();
+      }
+    } else {
+      return grad;
+    }
+  }
+
+  auto shape = shape_as_dim_vector();
+  auto desired = grad.sym_sizes();
+
+  size_t ndim = shape.size();
+  size_t target_dim = desired.size();
+  if (ndim > target_dim) {
+    fail();
+  }
+  bool needs_reduce = false;
+  for (const auto i : c10::irange(ndim)) {
+    const auto& size = shape[ndim - i - 1];
+    const auto& target = desired[target_dim - i - 1];
+    // The conditions here are written carefully so that we are able to
+    // infer deferred runtime asserts
+    if (TORCH_GUARD_SIZE_OBLIVIOUS(size.sym_eq(1))) {
+      // NB: we could short circuit this once needs_reduce is true but there's
+      // no point since the reduction function will guard on this anyway
+      if (!c10::definitely_true(size.sym_eq(target), __FILE__, __LINE__)) {
+        needs_reduce = true;
+      }
+    } else {
+      if (!size.sym_eq(target).expect_true(__FILE__, __LINE__)) {
+        fail();
+      }
+    }
+  }
+  if (ndim != target_dim) {
+    needs_reduce = true;
+  }
+
+  if (needs_reduce) {
+    return reduce_grad(grad);
+  } else {
+    return grad;
+  }
+}
+
 bool InputMetadata::is_same_shape(const at::Tensor& grad) const {
   if (!is_nestedness_same(grad)) {
     return false;

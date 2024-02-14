@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import os
