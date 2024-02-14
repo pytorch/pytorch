@@ -346,6 +346,9 @@ class GetItemSource(ChainedSource):
 
 @dataclasses.dataclass(frozen=True)
 class ConstDictKeySource(GetItemSource):
+    def is_dict_key(self):
+        return True
+
     def reconstruct(self, codegen):
         return [
             *codegen.create_load_import_from(utils.__name__, "dict_keys_getitem"),
@@ -355,7 +358,8 @@ class ConstDictKeySource(GetItemSource):
         ]
 
     def name(self):
-        return f"___dict_keys_getitem({self.base.name()}, {self.index!r})"
+        # The list creation will be CSE'd by PyExprCSEPass
+        return f"list({self.base.name()}.keys())[{self.index!r}]"
 
 
 @dataclasses.dataclass(frozen=True)
