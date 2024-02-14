@@ -31,7 +31,6 @@ template <
     int res_arg_index = 0>
 struct LpNormFunctor {
   using opmath_t = typename at::opmath_type<T>;
-  template <template <int> class TensorListMetadata>
   __device__ __forceinline__ void operator()(
       int chunk_size,
       TensorListMetadata<depth>& tl,
