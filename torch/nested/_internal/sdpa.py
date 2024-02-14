@@ -341,7 +341,7 @@ def _is_safe_to_get_storage_as_tensor(tensor: torch.Tensor):
     # Returns a boolean indicating if contiguous needs to be called for input
     assert isinstance(tensor, NestedTensor)
     offsets = tensor.offsets()
-    strides = tensor._stride
+    strides = tensor._strides
 
     n_tensors = offsets.size(0) - 1
     if n_tensors <= 1:
