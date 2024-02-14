@@ -45,8 +45,8 @@ def default_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
         default_strategy.append(
             PlacementStrategy(
                 output_spec=DTensorSpec(
-                    mesh=strategy.out_spec.mesh,
-                    placements=strategy.out_spec.placements,
+                    mesh=strategy.output_spec.mesh,
+                    placements=strategy.output_spec.placements,
                 )
             )
         )
