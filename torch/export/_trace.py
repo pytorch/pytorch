@@ -286,11 +286,15 @@ def _export_to_torch_ir(
     preserve_module_call_signature: Tuple[str, ...] = (),
     disable_constraint_solver: bool = False,
     restore_fqn: bool = True,
+    _log_export_usage: bool = True,
 ) -> torch.fx.GraphModule:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
     operations inside and produce a torch.fx.GraphModule in torch IR.
     """
+
+    if _log_export_usage:
+        log_export_usage(event="export.private_api", flags={"_export_to_torch_ir"})
 
     constraints = constraints or []
     kwargs = kwargs or {}
@@ -318,6 +322,7 @@ def _export_to_torch_ir(
                     assume_static_by_default=True,
                     tracing_mode="symbolic",
                     disable_constraint_solver=disable_constraint_solver,
+                    _log_export_usage=_log_export_usage,
                 )(
                     *args,
                     **kwargs,
@@ -580,6 +585,7 @@ def _export(
     log_export_usage(event="export.enter", flags=flags)
 
     if constraints is not None:
+        log_export_usage(event="export.private_api", flags={"constraints"})
         warnings.warn(
             "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
             "and will not be supported in the future. "
@@ -744,6 +750,7 @@ def _export(
         constraints,
         preserve_module_call_signature=preserve_module_call_signature,
         restore_fqn=False,  # don't need to restore because we will do it later
+        _log_export_usage=False,
     )
 
     # We detect the fake_mode by looking at gm_torch_level's placeholders, this is the fake_mode created in dynamo.
