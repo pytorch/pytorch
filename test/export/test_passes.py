@@ -30,7 +30,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorc
 from torch.utils import _pytree as pytree
 from torch._export.utils import sequential_split, nodes_filter, nodes_map, node_inline_, nodes_count
 from torch._export.passes.replace_set_grad_with_hop_pass import (
-    _is_set_grad_enabled_node, _is_set_grad_enabled_sub_mod, _replace_with_hop
+    _is_set_grad_enabled_node, _is_set_grad_enabled_sub_mod
 )
 
 
@@ -470,12 +470,10 @@ class TestPasses(TestCase):
 def forward(self, arg_0):
     arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
-    _set_grad_enabled = torch._C._set_grad_enabled(True)
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
-    add_1 = torch.ops.aten.add.Tensor(sum_1, 1);  sum_1 = None
-    _set_grad_enabled_2 = torch._C._set_grad_enabled(True)
+    submod_4 = self.submod_2
+    add_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(False, submod_4, sum_1);  submod_4 = sum_1 = None
     sub = torch.ops.aten.sub.Tensor(add_1, 1)
     return pytree.tree_unflatten((add_1, sub), self._out_spec)
     """)
@@ -484,12 +482,10 @@ def forward(self, arg_0):
 def forward(self, arg_0):
     arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
-    _set_grad_enabled = torch._C._set_grad_enabled(True)
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
-    add_1 = torch.ops.aten.add.Tensor(sum_1, 1);  sum_1 = None
-    _set_grad_enabled_2 = torch._C._set_grad_enabled(True)
+    submod_4 = self.submod_2
+    add_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(False, submod_4, sum_1);  submod_4 = sum_1 = None
     sub = torch.ops.aten.sub.Tensor(add_1, 1)
     return pytree.tree_unflatten((add_1, sub), self._out_spec)
     """)
@@ -501,9 +497,8 @@ def forward(self, arg_0):
     add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
-    _set_grad_enabled = torch._C._set_grad_enabled(False)
-    add_1 = torch.ops.aten.add.Tensor(sum_1, 1);  sum_1 = None
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
+    submod_3 = self.submod_1
+    add_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(False, submod_3, sum_1);  submod_3 = sum_1 = None
     sub = torch.ops.aten.sub.Tensor(add_1, 1)
     return pytree.tree_unflatten((add_1, sub), self._out_spec)
     """)
@@ -512,16 +507,47 @@ def forward(self, arg_0):
 def forward(self, arg_0):
     arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
     add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
-    _set_grad_enabled = torch._C._set_grad_enabled(True)
-    sin = torch.ops.aten.sin.default(add);  add = None
-    sum_1 = torch.ops.aten.sum.default(sin);  sin = None
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
+    submod_5 = self.submod_1
+    sum_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
     add_1 = torch.ops.aten.add.Tensor(sum_1, 1);  sum_1 = None
-    _set_grad_enabled_2 = torch._C._set_grad_enabled(True)
-    sub = torch.ops.aten.sub.Tensor(add_1, 1)
-    _set_grad_enabled_3 = torch._C._set_grad_enabled(False)
+    submod_6 = self.submod_3
+    sub = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_6, add_1);  submod_6 = None
     return pytree.tree_unflatten((add_1, sub), self._out_spec)
     """)
+        mod, args = SET_GRAD_ENABLED_TESTS["ctx_manager_multi_dep"]
+        self.assertExpectedInline(mod.code.strip("\n"), """\
+def forward(self, arg_0):
+    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+    sin = torch.ops.aten.sin.default(add)
+    sum_1 = torch.ops.aten.sum.default(sin);  sin = None
+    cos = torch.ops.aten.cos.default(add);  add = None
+    sum_2 = torch.ops.aten.sum.default(cos);  cos = None
+    submod_3 = self.submod_1
+    wrap_with_set_grad_enabled = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(False, submod_3, sum_1, sum_2);  submod_3 = sum_1 = sum_2 = None
+    add_1 = wrap_with_set_grad_enabled[0]
+    add_2 = wrap_with_set_grad_enabled[1];  wrap_with_set_grad_enabled = None
+    sub = torch.ops.aten.sub.Tensor(add_1, 1)
+    sub_1 = torch.ops.aten.sub.Tensor(add_2, 1)
+    return pytree.tree_unflatten((add_1, add_2, sub, sub_1), self._out_spec)
+    """)  # noqa: B950
+        mod, args = SET_GRAD_ENABLED_TESTS["ctx_manager_multi_dep_no_grad"]
+        self.assertExpectedInline(mod.code.strip("\n"), """\
+def forward(self, arg_0):
+    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+    submod_5 = self.submod_1
+    wrap_with_set_grad_enabled = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
+    sum_1 = wrap_with_set_grad_enabled[0]
+    sum_2 = wrap_with_set_grad_enabled[1];  wrap_with_set_grad_enabled = None
+    add_1 = torch.ops.aten.add.Tensor(sum_1, 1);  sum_1 = None
+    add_2 = torch.ops.aten.add.Tensor(sum_2, 1);  sum_2 = None
+    submod_6 = self.submod_3
+    wrap_with_set_grad_enabled_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_6, add_1, add_2);  submod_6 = None
+    sub = wrap_with_set_grad_enabled_1[0]
+    sub_1 = wrap_with_set_grad_enabled_1[1];  wrap_with_set_grad_enabled_1 = None
+    return pytree.tree_unflatten((add_1, add_2, sub, sub_1), self._out_spec)
+    """)  # noqa: B950
 
     def test_sequential_split(self):
         for gm, args in SEQUENTIAL_SPLIT_INLINE_TESTS.values():
@@ -582,21 +608,6 @@ def forward(self, sin, cos):
             nodes_map(new_gm.graph.nodes, lambda node: node_inline_(node) if node.op == "call_module" else node)
             after_inline_str = new_gm.print_readable(print_output=False)
             self.assertEqual(before_str, after_inline_str)
-            self.assertEqual(gm(*args), new_gm(*args))
-
-    def test_replace_module_with_wrapper_call(self):
-        from torch._higher_order_ops.wrap import wrap_with_set_grad_enabled
-
-        for gm, args in SET_GRAD_ENABLED_TESTS.values():
-            new_gm = sequential_split(gm, _is_set_grad_enabled_node)
-            call_module_nodes = nodes_filter(new_gm.graph.nodes, _is_set_grad_enabled_sub_mod)
-            n_call_module_nodes = len(call_module_nodes)
-
-            nodes_map(call_module_nodes, _replace_with_hop)
-            wrap_nodes = nodes_filter(
-                new_gm.graph.nodes, lambda node: node.op == "call_function" and node.target is wrap_with_set_grad_enabled
-            )
-            self.assertEqual(len(wrap_nodes), n_call_module_nodes)
             self.assertEqual(gm(*args), new_gm(*args))
 
 if __name__ == '__main__':
