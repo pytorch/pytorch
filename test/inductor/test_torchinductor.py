@@ -590,6 +590,8 @@ def check_model_gpu(
             kwargs,
             atol=atol,
             rtol=rtol,
+            grad_atol=grad_atol,
+            grad_rtol=grad_rtol,
             exact_dtype=exact_dtype,
             nopython=nopython,
             reference_in_float=reference_in_float,
