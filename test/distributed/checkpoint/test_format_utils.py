@@ -22,20 +22,20 @@ class TestFormatUtils(DTensorTestBase):
         model = Transformer(ModelArgs())
         dcp.save({"model": model}, checkpoint_id=self.temp_dir)
 
-        torch_fn = self.temp_dir + "/model.pt"
-        dcp_to_torch_save(self.temp_dir, torch_fn)
+        torch_path = self.temp_dir + "/model.pt"
+        dcp_to_torch_save(self.temp_dir, torch_path)
 
-        loaded_sd = torch.load(torch_fn)
+        loaded_sd = torch.load(torch_path)
         self.assertEqual(loaded_sd, {"model": model.state_dict()})
 
     @with_temp_dir
     def test_torch_save_to_dcp(self) -> None:
         model = Transformer(ModelArgs())
         sd = {"model": model.state_dict()}
-        torch_fn = self.temp_dir + "/model.pt"
-        torch.save(sd, torch_fn)
+        torch_path = self.temp_dir + "/model.pt"
+        torch.save(sd, torch_path)
 
-        torch_save_to_dcp(torch_fn, self.temp_dir)
+        torch_save_to_dcp(torch_path, self.temp_dir)
 
         model = Transformer(ModelArgs())
         dcp.load({"model": model}, checkpoint_id=self.temp_dir)
