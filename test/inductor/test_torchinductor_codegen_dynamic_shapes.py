@@ -332,15 +332,12 @@ test_failures = {
 if TEST_WITH_ROCM:
     test_failures.update(
         {
-            "test_cumsum_dynamic_shapes": TestFailure(("cpu", "cuda")),
-            "test_cumsum_no_mask_dynamic_shapes": TestFailure(("cpu", "cuda")),
             "test_split_cumsum_dynamic_shapes": TestFailure(("cpu", "cuda")),
             "test_split_cumsum_low_prec_dynamic_shapes": TestFailure(("cpu", "cuda")),
             "test_split_cumprod_dynamic_shapes": TestFailure(("cpu", "cuda")),
             "test_split_cumprod_low_prec_dynamic_shapes": TestFailure(("cpu", "cuda")),
         }
     )
-
 
 DynamicShapesCodegenCommonTemplate = make_dynamic_cls(
     CommonTemplate, xfail_prop="_expected_failure_codegen_dynamic"

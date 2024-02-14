@@ -154,6 +154,8 @@ def generate_ttir(kernel, kwargs):
 
     src = ASTSource(kernel, signature, constants, specialization)
     ttir_module = src.make_ir(options, context)
+    if not ttir_module.verify():
+        raise Exception("Verification for TTIR module has failed")
     return str(ttir_module), ordered_tensor_names
 
 
@@ -167,7 +169,6 @@ def parse_ttir(ttir, kwargs):
     parser which further makes parsing much simpler.
     """
     # TODO(oulgen):
-    # - Support parsing while loops
     # - Support closures (e.g. "tt.reduce")
 
     try:
@@ -193,16 +194,22 @@ def parse_ttir(ttir, kwargs):
 
         func_block: "tt.func" ("public"|"private") FN_NAME "(" /.+/ NEWLINE stmt* "}" LOC -> process_func
 
-        ?stmt: op | if | for
+        ?stmt: op | if | for | while | condition_stmt | label_stmt | cf_stmt
 
         if: [assign_lhs "="] "scf.if" args rest stmt* "}" "else" "{" stmt* "}" LOC -> process_if
+        for: [assign_lhs "="] "scf.for" args rest stmt* "}" divisibility_annot? LOC -> process_for
+        while: [assign_lhs "="] "scf.while" args rest stmt* "}" "do" "{" stmt* "}" LOC -> process_while
 
-        for: [assign_lhs "="] "scf.for" args rest stmt* "}" LOC -> process_for
+        condition_stmt: "scf.condition" "(" arg ")" args rest
+        label_stmt: LABEL ":" "// pred:" LABEL
+                  | LABEL "(" /.+/ NEWLINE
+        cf_stmt: "cf" "." NAME /.+/ NEWLINE
 
         op: OP_NAME LOC
           | [assign_lhs "="] OP_NAME [FN_NAME] args rest?  -> process_op
 
         ?rest: (":" | "{" | "\\"" | "->" | "<" | "=") /.+/ NEWLINE
+        divisibility_annot: "{" "tt.divisibility_arg1" /[^}]+/ "}"
 
         args: | "(" ")" | "("? arg ("," arg)* ")"?
 
@@ -221,10 +228,12 @@ def parse_ttir(ttir, kwargs):
         INTERMEDIATE.4: "%" DIGIT+
         INTERMEDIATE_CONSTANT.3: "%" NAME
         CONSTANT: FLOAT | DIGIT+ | NAME ("<" DIGIT+ ">")?
+        LABEL: "^bb" DIGIT+
 
         NAME: (LETTER | DIGIT | "_")+
+        NON_CF_NAME: /(?!(cf))/ NAME
         FN_NAME: "@" (NAME | ESCAPED_STRING)
-        OP_NAME: "\\""? NAME ("." NAME)+ "\\""?
+        OP_NAME: "\\""? NON_CF_NAME ("." NAME)+ "\\""?
 
         LOC.5: "loc(#loc" DIGIT* ")"
 
@@ -318,6 +327,9 @@ def parse_ttir(ttir, kwargs):
             return self._process_scf(ret, stmts)
 
         def process_for(self, ret, _args, _rest, *stmts):
+            return self._process_scf(ret, stmts)
+
+        def process_while(self, ret, _args, _rest, *stmts):
             return self._process_scf(ret, stmts)
 
     parser = Lark(
@@ -432,7 +444,7 @@ def identify_mutated_tensors(kernel, kwargs):
     except Exception as e:
         import traceback
 
-        log.info(
+        warnings.warn(
             "Encountered an exception in identify_mutated_tensors, assuming every input is mutated"
         )
         log.debug(
