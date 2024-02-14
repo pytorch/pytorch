@@ -21,7 +21,6 @@ from torch._prims_common import (
 )
 from torch._prims_common.wrappers import (
     _maybe_convert_to_dtype,
-    _safe_copy_out,
     elementwise_type_promotion_wrapper,
     out_wrapper,
 )
