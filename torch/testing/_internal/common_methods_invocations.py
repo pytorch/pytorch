@@ -19525,6 +19525,10 @@ python_ref_db = [
         torch_opinfo_name="lerp",
     ),
     PythonRefInfo(
+        "_refs.view_copy",
+        torch_opinfo_name="view_copy",
+    ),
+    PythonRefInfo(
         "_refs.ones",
         torch_opinfo_name="ones",
         skips=(
