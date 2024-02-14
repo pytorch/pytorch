@@ -1673,7 +1673,7 @@ def main():
             s += "".join(f"    {test}\n" for test in parallel)
             return s.strip()
 
-    test_batch = TestBatch("all_tests", selected_tests, False)
+    test_batch = TestBatch("all_tests", test_prioritizations.get_all_tests(), False)
 
     print_to_stderr(test_batch)
 
