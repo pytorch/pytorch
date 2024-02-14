@@ -105,7 +105,7 @@ jobs:
 
           BUILD_ROCM=""
           if [[ "$BUILD_DEVICE" == "rocm" ]]; then
-            BUILD_ROCM="--build-rocm --rocm_version $ROCM_VERSION"
+            BUILD_ROCM="--build-rocm --rocm_version \"$ROCM_VERSION\""
           fi
 
           RELEASE=""
