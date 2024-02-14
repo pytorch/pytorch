@@ -2377,7 +2377,7 @@ DropoutState& get_dropout_state(
   static std::mutex state_cache_mut;
 
   AT_ASSERT(options.device().is_cuda());
-  int device = options.device().index();
+  auto device = options.device().index();
 
   std::unique_lock<std::mutex> lock{state_cache_mut};
   auto& state = dropout_state_cache.at(device);
