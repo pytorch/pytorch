@@ -1,5 +1,6 @@
 import dataclasses
 import math
+import operator
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Type
 
 import torch
@@ -342,9 +343,30 @@ def node_inline_(call_mod_node: torch.fx.Node) -> None:
         if len(output) > 0:
             assert len(output) == 1 and len(output[0].args) == 1
             new_output = output[0].args[0]
-            if isinstance(new_output, (tuple, list)):
-                new_output = gm.graph.call_function(tuple, args=new_output, kwargs={})
-            node_replace_(call_mod_node, new_output, delete_old=True)
+
+            if isinstance(new_output, torch.fx.Node):
+                node_replace_(call_mod_node, new_output, delete_old=True)
+            elif isinstance(new_output, (list, tuple)):
+                # Inline the get_item calls for the output node.
+                get_item_users = nodes_filter(
+                    list(call_mod_node.users.keys()),
+                    lambda node: node.op == "call_function"
+                    and node.target == operator.getitem,
+                )
+                # get_item_node.args[1] is the idx referring to new_output[idx]
+                nodes_map(
+                    get_item_users,
+                    lambda get_item_node: node_replace_(
+                        get_item_node,
+                        new_output[get_item_node.args[1]],
+                        delete_old=True,
+                    ),
+                )
+                call_mod_node.graph.erase_node(call_mod_node)
+            else:
+                raise NotImplementedError(
+                    f"Unsupported output type {type(new_output)}. Expect it to be a Node or a list/tuple of Nodes."
+                )
         else:
             call_mod_node.graph.erase_node(call_mod_node)
 
