@@ -5,7 +5,7 @@
 import functools
 import operator
 from dataclasses import dataclass
-from typing import List
+from typing import List, TypeVar
 
 import torch
 
@@ -13,6 +13,8 @@ from . import ir
 from .exc import SubgraphLoweringException
 from .ops_handler import SimpleCSEHandler
 from .virtualized import ops, V, WrapperHandler
+
+T = TypeVar("T")
 
 
 class PointwiseSubgraphLowering(torch.fx.Interpreter):
@@ -69,7 +71,7 @@ class InputDescriptor:
     device: torch.device
 
 
-class TracingOpsHandler(WrapperHandler):
+class TracingOpsHandler(WrapperHandler[T]):
     def __init__(self, tracer):
         parent = tracer.create_proxy("placeholder", "ops", (), {})
         super().__init__(parent)
@@ -99,7 +101,7 @@ def lower_pointwise_subgraph(gm: torch.fx.GraphModule, inputs: List[InputDescrip
         for i, desc in enumerate(inputs)
     ]
     subgraph = PointwiseSubgraphLowering(gm, root_graph_lowering=V.graph)
-    with V.set_graph_handler(subgraph):
+    with V.set_graph_handler(subgraph):  # type: ignore[arg-type]
         subgraph.run(*graph_inputs)
 
     # Combine multiple pointwise computations into a single graph module

@@ -653,7 +653,7 @@ class SimpleCSEHandler(WrapperHandler[T]):
         self.mock = MockHandler()
 
     def indirect_indexing(self, *args, **kwargs) -> sympy.Expr:
-        return super().indirect_indexing(*args, **kwargs)
+        return super().indirect_indexing(*args, **kwargs)  # type: ignore[misc]
 
     def store(self, *args, **kwargs) -> T:
         raise NotImplementedError("store not implemented")
@@ -661,7 +661,7 @@ class SimpleCSEHandler(WrapperHandler[T]):
     def store_reduction(self, *args, **kwargs) -> T:
         raise NotImplementedError("store not implemented")
 
-    def __getattr__(self, name):
+    def __getattr__(self, name) -> Callable[..., Any]:
         def inner(*args, **kwargs):
             key = getattr(self.mock, name)(*args, **kwargs)
             val = self.cse_cache.get(key)
@@ -673,7 +673,3 @@ class SimpleCSEHandler(WrapperHandler[T]):
             return val
 
         return inner
-
-
-def _typecheck_SimpleCSEHandler(h: SimpleCSEHandler[T]) -> OpsHandler[T]:
-    return h
