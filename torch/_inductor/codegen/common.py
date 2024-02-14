@@ -35,7 +35,6 @@ from ..utils import (
     free_symbol_startswith,
     IndentedBuffer,
     sympy_dot,
-    sympy_index_symbol,
     sympy_subs,
     unique,
 )

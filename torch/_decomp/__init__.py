@@ -323,6 +323,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.index_copy_,
             aten.index_fill,
             aten.index_fill_,
+            aten.isin,
             aten.isneginf,
             aten.isposinf,
             aten.l1_loss,
