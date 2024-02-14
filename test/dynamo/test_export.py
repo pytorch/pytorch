@@ -4411,7 +4411,7 @@ def forward(self, x, b, y):
         def fn(x, in_list):
             return x + in_list.index(2)
 
-        inputs = (torch.ones(2,2), [1, 2])
+        inputs = (torch.ones(2, 2), [1, 2])
         graph, _ = torch._dynamo.export(fn)(*inputs)
         out = graph(*inputs)
         self.assertEqual(out, torch.ones(2, 2) + 1)
