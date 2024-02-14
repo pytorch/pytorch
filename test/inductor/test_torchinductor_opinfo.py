@@ -314,6 +314,7 @@ inductor_override_kwargs = {
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
     ("cross", "cuda", f16): {"grad_atol": 5e-4, "grad_rtol": 0.003},
+    ("linalg.cross", "cuda", f16): {"grad_atol": 5e-4, "grad_rtol": 0.003},
     ("addr", "cuda", f16): {"reference_in_float": True},
     ("baddbmm", "cuda", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
     ("angle", "cuda", f64): {"reference_in_float": True},
