@@ -139,7 +139,7 @@ class TestDynamismExpression(TestCase):
         # Being able to export means shape is preserved as static
         export(WrapperModule(branch_on_shape), inp)
 
-
+@unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestExport(TestCase):
     def _test_export_same_as_eager(self, f, args, kwargs=None):
