@@ -332,7 +332,6 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
 
 class CompiledOptimizerParityTests(TestCase):
     @optims(optim_db, dtypes=[torch.float32])
-    @requires_cuda
     def test_correctness(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(

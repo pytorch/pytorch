@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
 )
+from torch.testing._internal.triton_utils import requires_cuda
 from torch.utils._foreach_utils import (
     _get_foreach_kernels_supported_devices,
     _get_fused_kernels_supported_devices,
@@ -1011,6 +1012,14 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adadelta,
         optim_error_inputs_func=optim_error_inputs_func_adadelta,
         supported_impls=("foreach", "differentiable"),
+        decorators=(
+            DecorateInfo(
+                requires_cuda,
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+                device_type="cuda",
+            ),
+        ),
         skips=(
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1094,6 +1103,14 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_adagrad,
         supported_impls=("foreach", "differentiable"),
         supports_sparse_on=("cpu"),
+        decorators=(
+            DecorateInfo(
+                requires_cuda,
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+                device_type="cuda",
+            ),
+        ),
         skips=(
             DecorateInfo(
                 skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
@@ -1157,6 +1174,14 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adam,
         optim_error_inputs_func=optim_error_inputs_func_adam,
         supported_impls=("foreach", "differentiable", "fused"),
+        decorators=(
+            DecorateInfo(
+                requires_cuda,
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+                device_type="cuda",
+            ),
+        ),
         skips=(
             DecorateInfo(
                 skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
@@ -1213,6 +1238,12 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
             ),
+            DecorateInfo(
+                requires_cuda,
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+                device_type="cuda",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1221,6 +1252,14 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_adamax,
         supported_impls=("foreach", "differentiable"),
         only_supports_capturable_on_foreach=True,  # Remove this line when #117836 is done!
+        decorators=(
+            DecorateInfo(
+                requires_cuda,
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+                device_type="cuda",
+            ),
+        ),
         skips=(
             DecorateInfo(
                 skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
@@ -1364,6 +1403,12 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_step_all_hooks",
             ),
+            DecorateInfo(
+                requires_cuda,
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+                device_type="cuda",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1371,6 +1416,14 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adamw,
         optim_error_inputs_func=optim_error_inputs_func_adamw,
         supported_impls=("foreach", "differentiable", "fused"),
+        decorators=(
+            DecorateInfo(
+                requires_cuda,
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+                device_type="cuda",
+            ),
+        ),
         skips=(
             DecorateInfo(
                 skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
@@ -1435,6 +1488,14 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_asgd,
         supported_impls=("foreach", "differentiable"),
         only_supports_capturable_on_foreach=True,  # Remove this line when #116052 is done!
+        decorators=(
+            DecorateInfo(
+                requires_cuda,
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+                device_type="cuda",
+            ),
+        ),
         skips=(
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1504,6 +1565,14 @@ optim_db: List[OptimizerInfo] = [
         step_requires_closure=True,
         supports_param_groups=False,
         supports_multiple_devices=False,
+        decorators=(
+            DecorateInfo(
+                requires_cuda,
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+                device_type="cuda",
+            ),
+        ),
         skips=(
             # Fails on MacOS 13.2.1 in CI https://github.com/pytorch/pytorch/issues/117094
             DecorateInfo(
@@ -1545,6 +1614,14 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_nadam,
         optim_error_inputs_func=optim_error_inputs_func_nadam,
         supported_impls=("foreach", "differentiable"),
+        decorators=(
+            DecorateInfo(
+                requires_cuda,
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+                device_type="cuda",
+            ),
+        ),
         skips=(
             DecorateInfo(
                 skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
@@ -1624,6 +1701,14 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_radam,
         supported_impls=("foreach", "differentiable"),
         only_supports_capturable_on_foreach=True,  # Remove this line when #118230 is done!
+        decorators=(
+            DecorateInfo(
+                requires_cuda,
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+                device_type="cuda",
+            ),
+        ),
         skips=(
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1786,6 +1871,14 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_rmsprop,
         optim_error_inputs_func=optim_error_inputs_func_rmsprop,
         supported_impls=("foreach", "differentiable"),
+        decorators=(
+            DecorateInfo(
+                requires_cuda,
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+                device_type="cuda",
+            ),
+        ),
         skips=(
             DecorateInfo(
                 skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
@@ -1866,6 +1959,14 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_rprop,
         optim_error_inputs_func=optim_error_inputs_func_rprop,
         supported_impls=("foreach", "differentiable"),
+        decorators=(
+            DecorateInfo(
+                requires_cuda,
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+                device_type="cuda",
+            ),
+        ),
         skips=(
             DecorateInfo(
                 skipIfMps,  # Rprop doesn't update for non-contiguous, see #118117
@@ -1937,6 +2038,14 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_sgd,
         supported_impls=("foreach", "differentiable", "fused"),
         supports_sparse_on=("cpu", "cuda"),
+        decorators=(
+            DecorateInfo(
+                requires_cuda,
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+                device_type="cuda",
+            ),
+        ),
         skips=(
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -2037,6 +2146,14 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_sparseadam,
         supported_impls=(),
         only_supports_sparse_grads=True,
+        decorators=(
+            DecorateInfo(
+                requires_cuda,
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+                device_type="cuda",
+            ),
+        ),
         skips=(
             DecorateInfo(
                 skipIfMps,  # SparseAdam does not support MPS
