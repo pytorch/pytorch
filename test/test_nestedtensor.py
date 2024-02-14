@@ -12,8 +12,7 @@ import torch
 import torch.nn
 import torch.nn.functional as F
 from torch.testing._internal.common_cuda import (
-    SM70OrLater, SM80OrLater, PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
+    SM70OrLater, SM80OrLater, PLATFORM_SUPPORTS_FUSED_ATTENTION,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -3908,7 +3907,7 @@ class TestNestedTensorSubclass(TestCase):
 
     @onlyCUDA
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION and not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        not PLATFORM_SUPPORTS_FUSED_ATTENTION,
         "Platform doesn't support flash or mem-efficient attention"
     )
     @dtypes(*([torch.float16, torch.bfloat16, torch.float32] if SM80OrLater

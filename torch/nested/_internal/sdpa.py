@@ -290,7 +290,6 @@ def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal):
             if math_sdp_enabled() and _can_use_math_sdpa_jagged(params):
                 return SDPBackend.MATH
 
-    breakpoint()
     log.warning("Memory efficient kernel not used because:")
     can_use_efficient_attention(params, debug=True)
     _can_use_efficient_sdpa_jagged(params, debug=True)
