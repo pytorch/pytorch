@@ -11,13 +11,14 @@ import numpy as np
 import torch
 import torch.nn
 import torch.nn.functional as F
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import SM70OrLater, SM80OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
+    skipCUDAIf,
     skipMeta,
     PYTORCH_CUDA_MEMCHECK,
 )
@@ -2879,7 +2880,7 @@ class TestNestedTensorAutograd(TestCase):
         data = (a, b)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
-    # TODO: OOM https://github.com/pytorch/pytorch/issues/95562
+    # https://github.com/pytorch/pytorch/issues/95562
     @skipIfSlowGradcheckEnv
     @parametrize("size", [1024, 1023, 513, 512, 256, 128, 32, 4, 2])
     def test_layer_norm_backward(self, device, size):
@@ -2896,7 +2897,7 @@ class TestNestedTensorAutograd(TestCase):
         data = (a, b, c)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
-    # TODO: OOM https://github.com/pytorch/pytorch/issues/95562
+    # https://github.com/pytorch/pytorch/issues/95562
     @skipIfSlowGradcheckEnv
     # Could either mark slow or reduce size
     @parametrize("size", [128, 32, 4, 2])
@@ -3353,6 +3354,21 @@ class TestNestedTensorSubclass(TestCase):
         for t_size in t_sizes:
             t = torch.rand(t_size, requires_grad=True, device=device, dtype=torch.float64)
             gradcheck(grad_test_func, inputs=(t, *ts), check_batched_grad=False)
+
+    def test_threshold_backward(self, device):
+        ts1 = self._get_list_for_jagged_tensor(((2, 3, 4), 16), device=device, requires_grad=False)
+        ts2 = self._get_list_for_jagged_tensor(((2, 3, 4), 16), device=device, requires_grad=False)
+
+        nt1, offsets = jagged_from_list(ts1, None)
+        nt2, offsets = jagged_from_list(ts2, offsets)
+        buf1 = buffer_from_jagged(nt1).detach().clone()
+        buf2 = buffer_from_jagged(nt2).detach().clone()
+
+        res_nt = torch.ops.aten.threshold_backward(nt1, nt2, 0.0)
+        res_dense = torch.ops.aten.threshold_backward(buf1, buf2, 0.0)
+
+        self.assertEqual(res_dense, buffer_from_jagged(res_nt))
+
 
     @parametrize("keepdim", [False, True])
     def test_sum_int_DimList(self, device, keepdim):
@@ -3880,11 +3896,10 @@ class TestNestedTensorSubclass(TestCase):
             if not (str(device).startswith("cuda") and dtype == torch.bfloat16):
                 check_forward_backward()
 
-    # This requires NT -> NT views to work in inductor, which is a TODO
-    @unittest.expectedFailure  # noqa: E301
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @onlyCUDA
-    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if
-                 SM80OrLater else [torch.float16, torch.float32])
+    @dtypes(*([torch.float16, torch.bfloat16, torch.float32] if SM80OrLater
+            else [torch.float16, torch.float32]))
     def test_sdpa_compile(self, device, dtype):
         batch_size = 1
         emb_dims = 1024
@@ -3910,9 +3925,9 @@ class TestNestedTensorSubclass(TestCase):
         k_d2 = key(x_d2).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
         v_d2 = value(x_d2).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
 
-        q_nt = query(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
-        k_nt = key(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
-        v_nt = value(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
+        q_nt = query(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).detach().transpose(1, 2)
+        k_nt = key(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).detach().transpose(1, 2)
+        v_nt = value(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).detach().transpose(1, 2)
 
         # High Precision Math Reference
         q_d1_f32 = q_d1.to(torch.float32)
