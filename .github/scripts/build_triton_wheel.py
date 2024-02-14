@@ -170,7 +170,7 @@ def build_triton(
             check_call(
                 f"scripts/amd/setup_rocm_libs.sh {rocm_version}",
                 cwd=triton_basedir,
-                shell=True
+                shell=True,
             )
             print("ROCm libraries setup for triton installation...")
 
