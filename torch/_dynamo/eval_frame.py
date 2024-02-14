@@ -592,6 +592,8 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
 
 
 def check_if_dynamo_supported():
+    if sys.platform == "win32":
+        raise RuntimeError("Windows not yet supported for torch.compile")
     if sys.version_info >= (3, 12):
         raise RuntimeError("Python 3.12+ not yet supported for torch.compile")
 
@@ -599,21 +601,6 @@ def check_if_dynamo_supported():
 def is_dynamo_supported():
     try:
         check_if_dynamo_supported()
-        return True
-    except Exception:
-        return False
-
-
-def check_if_inductor_supported():
-    check_if_dynamo_supported()
-
-    if sys.platform == "win32":
-        raise RuntimeError("Windows not yet supported for inductor")
-
-
-def is_inductor_supported():
-    try:
-        check_if_inductor_supported()
         return True
     except Exception:
         return False

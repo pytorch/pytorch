@@ -9,7 +9,7 @@ from torch.export import export
 
 from torch._export.verifier import SpecViolationError, Verifier
 from torch.export.exported_program import InputKind, InputSpec, TensorArgument
-from torch.testing._internal.common_utils import run_tests, TestCase, IS_WINDOWS
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 @unittest.skipIf(not is_dynamo_supported(), "dynamo isn't supported")
 class TestVerifier(TestCase):
@@ -56,7 +56,6 @@ class TestVerifier(TestCase):
         with self.assertRaises(SpecViolationError):
             verifier.check(ep)
 
-    @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
     def test_verifier_higher_order(self) -> None:
         class Foo(torch.nn.Module):
             def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -77,7 +76,6 @@ class TestVerifier(TestCase):
         verifier = Verifier()
         verifier.check(ep)
 
-    @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
     def test_verifier_nested_invalid_module(self) -> None:
         class Foo(torch.nn.Module):
             def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
