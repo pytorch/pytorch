@@ -90,17 +90,34 @@ def _set_grad_enabled_tests():
                 e = d - 1
             return d, e
 
+    class SetGradCtxManagerMultiDep(torch.nn.Module):
+        def forward(self, x):
+            x = x + 1
+            with torch.enable_grad():
+                c1 = x.sin().sum()
+                c2 = x.cos().sum()
+            with torch.no_grad():
+                d1 = c1 + 1
+                d2 = c2 + 1
+            with torch.enable_grad():
+                e1 = d1 - 1
+                e2 = d2 - 1
+            return d1, d2, e1, e2
+
     x = torch.randn(2, 2)
 
     def _get_predispatch_module(mod, args, ambient_grad_enabled=True):
         with torch.set_grad_enabled(ambient_grad_enabled):
             return _export(mod, args, pre_dispatch=True).module()
 
-
-    return {"ctx_manager" : (_get_predispatch_module(SetGradCtxManager(), (x,)), (x,)),
-            "ctx_manager_under_no_grad" : (_get_predispatch_module(SetGradCtxManager(), (x,), False), (x,)),
-            "op" : (_get_predispatch_module(SetGradOp(), (x,)), (x,)),
-            "op_under_no_grad" : (_get_predispatch_module(SetGradOp(), (x,), False), (x,))}
+    return {
+        "ctx_manager" : (_get_predispatch_module(SetGradCtxManager(), (x,)), (x,)),
+        "ctx_manager_under_no_grad" : (_get_predispatch_module(SetGradCtxManager(), (x,), False), (x,)),
+        "ctx_manager_multi_dep" : (_get_predispatch_module(SetGradCtxManagerMultiDep(), (x,)), (x,)),
+        "ctx_manager_multi_dep_no_grad" : (_get_predispatch_module(SetGradCtxManagerMultiDep(), (x,), False), (x,)),
+        "op" : (_get_predispatch_module(SetGradOp(), (x,)), (x,)),
+        "op_under_no_grad" : (_get_predispatch_module(SetGradOp(), (x,), False), (x,))
+    }
 
 SET_GRAD_ENABLED_TESTS = _set_grad_enabled_tests()
 
@@ -500,7 +517,7 @@ def forward(self, add_1):
             before_str = gm.print_readable(print_output=False)
             new_gm = sequential_split(gm, _is_set_grad_enabled_node)
             nodes_map(new_gm.graph.nodes, lambda node: node_inline_(node) if node.op == "call_module" else node)
-            after_inline_str = gm.print_readable(print_output=False)
+            after_inline_str = new_gm.print_readable(print_output=False)
             self.assertEqual(before_str, after_inline_str)
             self.assertEqual(gm(*args), new_gm(*args))
 
