@@ -3468,14 +3468,20 @@ class InputsKernel(Buffer):
             op_counts=collections.Counter(),
         )
 
-    @staticmethod
-    def unwrap_storage_for_input(x):
+    @classmethod
+    def unwrap_storage_for_input(cls, x):
         if isinstance(x, TensorBox):
             x = x.data
         if isinstance(x, StorageBox):
             x = x.data
         if isinstance(x, BaseView) and not isinstance(x, ReinterpretView):
             x = ExternKernel.realize_input(x)
+        if isinstance(x, TensorBox):
+            # when converting to ReinterpretView fails in the
+            # realize_input call above, the result will be wrapped
+            # into TensorBox / StorageBox pair as a result of the
+            # cls.copy_input call; so we should unwrap recursively
+            return cls.unwrap_storage_for_input(x)
         assert isinstance(x, (Buffer, ReinterpretView)), x
         return x
 
