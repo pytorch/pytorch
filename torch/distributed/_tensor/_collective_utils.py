@@ -183,9 +183,9 @@ class MeshTopoInfo:
     @staticmethod
     @lru_cache(None)
     def build_from_mesh(mesh: DeviceMesh) -> "MeshTopoInfo":
-        # Generate bandwidth list for intra-host/inter-host communication pattern
-        # Note that we made bunch of assumptions made here for simplicity:
-        # 1. we assume the mesh is homogeneous
+        # Generate mesh topology info for intra-host/inter-host communication pattern
+        # Note that we made bunch of assumptions for simplicity:
+        # 1. we assume the mesh is homogeneous, and it's gpu/nccl model
         # 2. we assume gpu arch is Ampere or Hopper
         # 3. we assume collectives are all ring base algo for now
         num_devices_per_host = _mesh_resources.num_devices_per_host(mesh.device_type)
@@ -202,12 +202,12 @@ class MeshTopoInfo:
             mesh_dim_devices[mesh_dim] = num_devices
             total_num_devices *= num_devices
             if total_num_devices <= num_devices_per_host:
-                # magic number for intra-host communication bandwidth factor
+                # magic number for intra-host communication bandwidth/latency factor
                 # This number assumes latest GPU arch, i.e. Ampere or Hopper
                 # TODO: see if we need to tweak this or offer a way for user
-                # to specify the bandwidths
+                # to specify the bandwidths/latency
                 mesh_dim_bandwidth[mesh_dim] *= 0.22
-                # set to nvlink latency
+                # set to nvlink latency for intra-host
                 mesh_dim_latency[mesh_dim] = 0.6
 
         return MeshTopoInfo(
