@@ -5,6 +5,7 @@ import unittest
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import List, Any
+from re import escape
 
 import torch
 import torch._dynamo as torchdynamo
@@ -326,11 +327,11 @@ class TestUnflatten(TestCase):
                 return a
 
         export_module = torch.export.export(Mod(), (torch.randn((2, 3)),))
-        with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\] to be equal to 2, but got 6"):
+        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[0] to be equal to 2, but got 6")):
             export_module.module()(torch.randn(6, 6))
 
         unflattened = unflatten(export_module)
-        with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\] to be equal to 2, but got 6"):
+        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[0] to be equal to 2, but got 6")):
             unflattened(torch.randn(6, 6))
 
     def test_unflatten_with_inplace_compile(self):

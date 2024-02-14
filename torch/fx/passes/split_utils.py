@@ -62,6 +62,7 @@ def split_by_tags(
     gm: torch.fx.GraphModule,
     tags: List[str],
     return_fqn_mapping: bool = False,
+    return_tuple: bool = False,
     GraphModuleCls: Type[torch.fx.GraphModule] = torch.fx.GraphModule,
 ) -> Union[torch.fx.GraphModule, Tuple[torch.fx.GraphModule, Dict[str, str]]]:
     """
@@ -256,11 +257,14 @@ def split_by_tags(
     for comp in all_components:
         outs = tuple(map(node_remapping.__getitem__, comp.orig_outputs))
 
-        # Take care of the args of FX output node. If there's a single
-        # output then the output node args is like (output_single), else
-        # if there're multiple outputs then the output node args is like
-        # ((output_0, output_1, ...)).
-        comp.graph.output(outs[0] if len(outs) == 1 else outs)
+        if return_tuple:
+            comp.graph.output(outs)
+        else:
+            # Take care of the args of FX output node. If there's a single
+            # output then the output node args is like (output_single), else
+            # if there're multiple outputs then the output node args is like
+            # ((output_0, output_1, ...)).
+            comp.graph.output(outs[0] if len(outs) == 1 else outs)
 
         comp.gm, comp_orig_to_split_fqn_mapping = lift_subgraph_as_module(
             gm, subgraph=comp.graph, comp_name=comp.name
@@ -274,7 +278,7 @@ def split_by_tags(
             kwargs=None,
         )
 
-        if len(outs) == 1:
+        if len(outs) == 1 and not return_tuple:
             main_remapping[comp.orig_outputs[0]] = main_node
         else:
             for i, o in enumerate(comp.orig_outputs):

@@ -41,7 +41,6 @@ import dataclasses
 import functools
 import gc
 import itertools
-import logging
 import operator
 import sys
 import threading
@@ -102,7 +101,8 @@ else:
         pass
 
 
-log = logging.getLogger(__name__)
+log = torch._logging.getArtifactLogger(__name__, "cudagraphs")
+
 
 from . import config
 
@@ -369,7 +369,10 @@ def cudagraphify_impl(model, inputs, static_input_idxs, *args, **kwargs):
         if fn is not None:
             return fn(inputs)
 
-        log.info("recording cudagraph tree for %s", int_key)
+        if int_key is None:
+            log.info("recording cudagraph tree for graph without symints")
+        else:
+            log.info("recording cudagraph tree for symint key %s", int_key)
 
         # first get indices we need to check to align, then update our static inputs,
         # and finally copy
