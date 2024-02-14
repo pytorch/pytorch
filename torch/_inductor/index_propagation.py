@@ -258,5 +258,12 @@ class IndexPropagation:
         if isinstance(index, IndexPropVar) and index.is_symbolic:
             # If we are turning a indirect indexing into direct, we need to wrap it.
             index = index.value.expr
+            # If SymPy can prove that idx >= 0, the Where below will evaluate to zero
+            # Alas, SymPy can't prove that index >= when we do ModularIndexing...
+            if (isinstance(index, ModularIndexing) and
+               index.args[1] == 1 and
+               index.args[0].is_positive is not None and
+               index.args[0].is_positive == index.args[2].is_positive):
+                return index
             return index + Where(index >= 0, 0, size)
         return self.fallback("indirect_indexing", (index, size, check), {}).value
