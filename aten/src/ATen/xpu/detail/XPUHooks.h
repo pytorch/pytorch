@@ -16,6 +16,7 @@ struct XPUHooks : public at::XPUHooksInterface {
   int getGlobalIdxFromDevice(const at::Device& device) const override;
   Device getDeviceFromPtr(void* data) const override;
   int getNumGPUs() const override;
+  void deviceSynchronize(DeviceIndex device_index) const override;
 };
 
 } // namespace at::xpu::detail
