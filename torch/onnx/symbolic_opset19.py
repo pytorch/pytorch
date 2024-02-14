@@ -5,6 +5,23 @@ Note [ONNX Operators that are added/updated in opset 19]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 https://github.com/onnx/onnx/blob/main/docs/Changelog.md#version-19-of-the-default-onnx-operator-set
 New operators:
+AveragePool
+Cast
+CastLike
+Constant
+DeformConv
+DequantizeLinear
+Equal
+Identity
+If
+Loop
+Pad
+QuantizeLinear
+Reshape
+Resize
+Scan
+Shape
+Size
 """
 
 
