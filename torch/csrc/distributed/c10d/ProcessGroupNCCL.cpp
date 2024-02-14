@@ -1938,7 +1938,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     rank = p2pRank;
   }
   // Get the device index
-  int deviceIndex = device.index();
+  auto deviceIndex = device.index();
   gpuGuard.set_index(deviceIndex);
 #ifdef NCCL_HAS_COMM_SPLIT
   if (options_->split_from) {
