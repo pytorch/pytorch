@@ -30,7 +30,7 @@ def test_cpu():
 
 HAS_CPU = LazyVal(test_cpu)
 
-HAS_CUDA = torch.cuda.is_available() and has_triton()
+HAS_CUDA = torch.cuda.is_available()
 
 HAS_GPU = HAS_CUDA
 
