@@ -787,9 +787,18 @@ class IndentedBuffer:
 
         return ctx()
 
+    def do_indent(self, offset=1):
+        self._indent += offset
+
+    def do_unindent(self, offset=1):
+        self._indent -= offset
+
     def splice(self, other_code, strip=False, line_wrapper=None):
+        def default_line_wrapper(x):
+            return x
+
         if line_wrapper is None:
-            line_wrapper = lambda x: x
+            line_wrapper = default_line_wrapper
         if isinstance(other_code, IndentedBuffer):
             other_code_lines = [line_wrapper(line) for line in other_code._lines]
             dedent = float("inf")
@@ -1159,9 +1168,9 @@ def get_device_tflops(dtype):
 
     if inspect.signature(get_max_simd_tflops).parameters.get("clock_rate"):
         # Triton API change in https://github.com/openai/triton/pull/2293
-        from triton.testing import nvsmi
+        from torch._utils_internal import max_clock_rate
 
-        sm_clock = nvsmi(["clocks.max.sm"])[0]
+        sm_clock = max_clock_rate()
         if dtype in (torch.float16, torch.bfloat16):
             return get_max_tensorcore_tflops(dtype, sm_clock)
 

@@ -142,8 +142,10 @@ class VectorizedN {
       int64_t count = size()) {
     VectorizedN<T, N> result;
     for (int i = 0; i < N; ++i) {
-      result.values[i] =
-          Vectorized<T>::set(a.values[i], b.values[i], std::min(count, (int64_t)Vectorized<T>::size()));
+      result.values[i] = Vectorized<T>::set(
+          a.values[i],
+          b.values[i],
+          std::min(count, (int64_t)Vectorized<T>::size()));
       count -= Vectorized<T>::size();
       if (count <= 0) {
         break;
@@ -164,8 +166,8 @@ class VectorizedN {
   static VectorizedN<T, N> loadu(const void* ptr, int64_t count) {
     VectorizedN<T, N> result;
     for (int i = 0; i < N; ++i) {
-      result.values[i] =
-          Vectorized<T>::loadu(ptr, std::min(count, (int64_t)Vectorized<T>::size()));
+      result.values[i] = Vectorized<T>::loadu(
+          ptr, std::min(count, (int64_t)Vectorized<T>::size()));
       ptr = static_cast<const T*>(ptr) + Vectorized<T>::size();
       count -= Vectorized<T>::size();
       if (count <= 0) {

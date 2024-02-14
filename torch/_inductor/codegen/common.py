@@ -35,7 +35,6 @@ from ..utils import (
     free_symbol_startswith,
     IndentedBuffer,
     sympy_dot,
-    sympy_index_symbol,
     sympy_subs,
     unique,
 )
@@ -1257,7 +1256,9 @@ class IndirectAssertLine(DeferredLineBase):
             assert assert_max
             upper = size_str
 
-        return self.line.format(assert_line=self.indirect_assert(self.var, lower, upper, self.mask))
+        return self.line.format(
+            assert_line=self.indirect_assert(self.var, lower, upper, self.mask)
+        )
 
     def _new_line(self, line):
         return IndirectAssertLine(
@@ -1412,7 +1413,7 @@ class Kernel(CodeGen):
             cond = f"({lower} <= {var}) & ({var} < {upper})"
             cond_print = f"{lower} <= {var} < {upper}"
         elif lower:
-            cond = f"{lower} <= {self.var}"
+            cond = f"{lower} <= {var}"
             cond_print = cond
         else:
             assert upper
@@ -1420,7 +1421,7 @@ class Kernel(CodeGen):
             cond_print = cond
 
         if mask:
-            cond = f"({cond}) | ~{self.mask}"
+            cond = f"({cond}) | ~{mask}"
 
         return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
 
