@@ -7,6 +7,7 @@ import operator
 import types
 from typing import Dict, List
 
+from ..bytecode_transformation import create_call_method
 
 try:
     import numpy as np
@@ -817,6 +818,11 @@ class TensorVariable(VariableTracker):
                 InstructionTranslator.current_tx(), "new_empty", args, kwargs
             )
 
+    def method_untyped_storage(self):
+        return UntypedStorageVariable(
+            self, self.as_proxy().node.meta["example_value"].untyped_storage()
+        )
+
     def rename(self, tx, name):
         self.proxy.node._rename(name)
         return super().rename(tx, name)
@@ -836,8 +842,6 @@ class SymNodeVariable(VariableTracker):
         proxy.node.meta["example_value"] = sym_num
 
         if isinstance(sym_num, (sympy.Integer, int, bool)):
-            if isinstance(sym_num, sympy.Integer):
-                breakpoint()
             sym_num = int(sym_num) if isinstance(sym_num, sympy.Integer) else sym_num
             return ConstantVariable.create(sym_num)
 
@@ -882,7 +886,7 @@ class SymNodeVariable(VariableTracker):
             tx.output.create_proxy(
                 "call_method",
                 name,
-                *proxy_args_kwargs([self] + list(args), kwargs),
+                *proxy_args_kwargs([self, *args], kwargs),
             ),
         )
 
@@ -1062,3 +1066,68 @@ class TensorSubclassVariable(VariableTracker):
 
     def python_type(self):
         return type(self.value)
+
+
+class UntypedStorageVariable(VariableTracker):
+    _nonvar_fields = {
+        "example_value",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        from_tensor: TensorVariable,
+        example_value: torch.UntypedStorage,
+        **kwargs,
+    ):
+        super().__init__(**kwargs),
+        self.from_tensor = from_tensor
+        # Example_value will always have device="meta"
+        self.example_value = example_value
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "size":
+            assert not args
+            assert not kwargs
+            result = self.example_value.size()
+            if not has_free_symbols(result):
+                # avoid creating a node in the graph
+                return ConstantVariable.create(int(result))
+            else:
+                from ..external_utils import untyped_storage_size
+                from .builder import wrap_fx_proxy
+
+                return wrap_fx_proxy(
+                    tx,
+                    tx.output.create_proxy(
+                        "call_function",
+                        untyped_storage_size,
+                        (self.from_tensor.as_proxy(),),
+                        {},
+                    ),
+                )
+        if name == "resize_" and len(args) == 1:
+            assert not kwargs
+            from ..external_utils import resize_storage_
+
+            tx.output.create_proxy(
+                "call_function",
+                resize_storage_,
+                (self.from_tensor.as_proxy(), args[0].as_proxy()),
+                {},
+            )
+            return self
+
+        return super().call_method(tx, name, args, kwargs)
+
+    def reconstruct(self, codegen):
+        codegen(self.from_tensor)
+        codegen.append_output(codegen.create_load_method("untyped_storage"))
+        codegen.extend_output(create_call_method(0))
+        return ()

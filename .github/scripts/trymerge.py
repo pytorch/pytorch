@@ -2083,8 +2083,7 @@ def merge(
 
     check_for_sev(pr.org, pr.project, skip_mandatory_checks)
 
-    if skip_mandatory_checks or can_skip_internal_checks(pr, comment_id):
-        # do not wait for any pending signals if PR is closed as part of co-development process
+    if skip_mandatory_checks:
         gh_post_pr_comment(
             pr.org,
             pr.project,
