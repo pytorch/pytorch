@@ -121,6 +121,58 @@ def _set_grad_enabled_tests():
 
 SET_GRAD_ENABLED_TESTS = _set_grad_enabled_tests()
 
+def _sequential_split_inline_tests():
+    from torch.export._trace import _export
+
+    class Simple(torch.nn.Module):
+        def forward(self, x):
+            x = x + 1
+            c = x.sin().sum()
+            d = c + 1
+            e = d - 1
+            return d, e
+
+    class MultiDep(torch.nn.Module):
+        def forward(self, x1, x2):
+            x1 = x1 + 1
+            x2 = x2 + 1
+            c1 = x1.sin()
+            c2 = x2.cos()
+            d1 = c1 + 1
+            d2 = c2 + 1
+            e1 = d1 - 1
+            e2 = d2 - 1
+            return d1, d2, e1, e2
+
+    def _get_predispatch_module(mod, args):
+        return _export(mod, args, pre_dispatch=True).module()
+
+    def _insert_dilimiter_nodes(gm: torch.fx.GraphModule, step: int = 1):
+        insert_locs = []
+        for i, node in enumerate(nodes_filter(gm.graph.nodes, lambda n: n.op == "call_function")):
+            if i % step == 0:
+                insert_locs.append(node)
+
+        for i, node in enumerate(insert_locs):
+            with gm.graph.inserting_before(node):
+                gm.graph.call_function(torch._C._set_grad_enabled, (True if i % 2 == 0 else False,), {})
+        return gm
+
+    x = torch.randn(2, 2)
+    simple = _get_predispatch_module(Simple(), (x,))
+    simple1 = _get_predispatch_module(Simple(), (x,))
+    multi_dep = _get_predispatch_module(MultiDep(), (x, x.sin()))
+    multi_dep1 = _get_predispatch_module(MultiDep(), (x, x.sin()))
+    return {
+        'simple_step1': (_insert_dilimiter_nodes(simple1, 1), (x,)),
+        'simple_step2': (_insert_dilimiter_nodes(simple, 2), (x,)),
+        'multi_dep_step2': (_insert_dilimiter_nodes(multi_dep, 2), (x, x.sin())),
+        'multi_dep_step3': (_insert_dilimiter_nodes(multi_dep1, 3), (x, x.sin())),
+    }
+
+SEQUENTIAL_SPLIT_INLINE_TESTS = _sequential_split_inline_tests()
+
+
 @skipIfTorchDynamo("recursively running dynamo on export is unlikely")
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
 class TestPasses(TestCase):
@@ -472,7 +524,7 @@ def forward(self, arg_0):
     """)
 
     def test_sequential_split(self):
-        for gm, args in SET_GRAD_ENABLED_TESTS.values():
+        for gm, args in SEQUENTIAL_SPLIT_INLINE_TESTS.values():
             set_grad_counts = nodes_count(gm.graph.nodes, _is_set_grad_enabled_node)
             new_gm = sequential_split(gm, _is_set_grad_enabled_node)
             new_set_grad_counts = nodes_count(new_gm.graph.nodes, _is_set_grad_enabled_sub_mod)
@@ -480,40 +532,51 @@ def forward(self, arg_0):
             self.assertEqual(gm(*args), new_gm(*args))
 
     def test_sequential_split_graph(self):
-        gm, args = SET_GRAD_ENABLED_TESTS["ctx_manager"]
+        gm, args = SEQUENTIAL_SPLIT_INLINE_TESTS["multi_dep_step2"]
 
         new_gm = sequential_split(gm, _is_set_grad_enabled_node)
         self.assertEqual(gm(*args), new_gm(*args))
         self.assertExpectedInline(new_gm.code.strip("\n"), """\
-def forward(self, arg_0):
-    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
-    submod_0 = self.submod_0(arg0_1);  arg0_1 = None
-    submod_1 = self.submod_1(submod_0);  submod_0 = None
-    submod_2 = self.submod_2(submod_1)
-    return pytree.tree_unflatten((submod_1, submod_2), self._out_spec)
-    """)
-        self.assertExpectedInline(new_gm.submod_0.code.strip("\n"), """\
-def forward(self, arg0_1):
-    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
-    sin = torch.ops.aten.sin.default(add);  add = None
-    sum_1 = torch.ops.aten.sum.default(sin);  sin = None
-    return sum_1
+def forward(self, arg_0, arg_1):
+    arg0_1, arg1_1, = fx_pytree.tree_flatten_spec(([arg_0, arg_1], {}), self._in_spec)
+    submod_1 = self.submod_1(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+    getitem = submod_1[0]
+    getitem_1 = submod_1[1];  submod_1 = None
+    submod_2 = self.submod_2(getitem, getitem_1);  getitem = getitem_1 = None
+    getitem_2 = submod_2[0]
+    getitem_3 = submod_2[1];  submod_2 = None
+    submod_3 = self.submod_3(getitem_2, getitem_3);  getitem_2 = getitem_3 = None
+    getitem_4 = submod_3[0]
+    getitem_5 = submod_3[1];  submod_3 = None
+    submod_4 = self.submod_4(getitem_4, getitem_5)
+    getitem_6 = submod_4[0]
+    getitem_7 = submod_4[1];  submod_4 = None
+    return pytree.tree_unflatten((getitem_4, getitem_5, getitem_6, getitem_7), self._out_spec)
     """)
         self.assertExpectedInline(new_gm.submod_1.code.strip("\n"), """\
-def forward(self, sum_1):
-    _set_grad_enabled = torch._C._set_grad_enabled(False)
-    add_1 = torch.ops.aten.add.Tensor(sum_1, 1);  sum_1 = None
-    return add_1
+def forward(self, arg0_1, arg1_1):
+    _set_grad_enabled = torch._C._set_grad_enabled(True)
+    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+    add_1 = torch.ops.aten.add.Tensor(arg1_1, 1);  arg1_1 = None
+    return (add, add_1)
     """)
         self.assertExpectedInline(new_gm.submod_2.code.strip("\n"), """\
-def forward(self, add_1):
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
-    sub = torch.ops.aten.sub.Tensor(add_1, 1);  add_1 = None
-    return sub
+def forward(self, add, add_1):
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
+    sin = torch.ops.aten.sin.default(add);  add = None
+    cos = torch.ops.aten.cos.default(add_1);  add_1 = None
+    return (sin, cos)
+    """)
+        self.assertExpectedInline(new_gm.submod_3.code.strip("\n"), """\
+def forward(self, sin, cos):
+    _set_grad_enabled_2 = torch._C._set_grad_enabled(True)
+    add_2 = torch.ops.aten.add.Tensor(sin, 1);  sin = None
+    add_3 = torch.ops.aten.add.Tensor(cos, 1);  cos = None
+    return (add_2, add_3)
     """)
 
     def test_inline_(self):
-        for gm, args in SET_GRAD_ENABLED_TESTS.values():
+        for gm, args in SEQUENTIAL_SPLIT_INLINE_TESTS.values():
             before_str = gm.print_readable(print_output=False)
             new_gm = sequential_split(gm, _is_set_grad_enabled_node)
             nodes_map(new_gm.graph.nodes, lambda node: node_inline_(node) if node.op == "call_module" else node)
