@@ -141,16 +141,24 @@ class LocalElasticAgent(SimpleElasticAgent):
         log_dir: Optional[str] = None,
         log_line_prefix_template: Optional[str] = None,
         local_ranks_filter: Optional[Set[int]] = None,
+        log_for_fb_tupperware: bool = False,
     ):
         super().__init__(spec, exit_barrier_timeout)
         self._start_method = start_method
         self._pcontext: Optional[PContext] = None
         rdzv_run_id = spec.rdzv_handler.get_run_id()
         self._rdzv_handler = spec.rdzv_handler
-        self._log_dir = self._make_log_dir(log_dir, rdzv_run_id)
+        if log_for_fb_tupperware:
+            # log directory is assumed to exist already, do not
+            # create sub directory
+            self._log_dir = log_dir
+        else:
+            self._log_dir = self._make_log_dir(log_dir, rdzv_run_id)
+        self._rdzv_run_id = rdzv_run_id
         self._log_line_prefix_template = log_line_prefix_template
         self._local_ranks_filter = local_ranks_filter
         self._worker_watchdog: Optional[timer.FileTimerServer] = None
+        self._log_for_fb_tupperware = log_for_fb_tupperware
 
     def _make_log_dir(self, log_dir: Optional[str], rdzv_run_id: str):
         base_log_dir = log_dir or tempfile.mkdtemp(prefix="torchelastic_")
@@ -285,9 +293,12 @@ class LocalElasticAgent(SimpleElasticAgent):
 
         # scaling events do not count towards restarts (gets same attempt #)
         # remove existing log dir if this restart is due to a scaling event
-        attempt_log_dir = os.path.join(self._log_dir, f"attempt_{restart_count}")
-        shutil.rmtree(attempt_log_dir, ignore_errors=True)
-        os.makedirs(attempt_log_dir)
+        if self._log_for_fb_tupperware:
+            attempt_log_dir = self._log_dir
+        else:
+            attempt_log_dir = os.path.join(self._log_dir, f"attempt_{restart_count}")
+            shutil.rmtree(attempt_log_dir, ignore_errors=True)
+            os.makedirs(attempt_log_dir)
 
         self._setup_local_watchdog(envs=envs)
 
@@ -303,6 +314,7 @@ class LocalElasticAgent(SimpleElasticAgent):
             redirects=spec.redirects,
             tee=spec.tee,
             local_ranks_filter=self._local_ranks_filter,
+            log_for_fb_tupperware=(self._rdzv_run_id, restart_count) if self._log_for_fb_tupperware else None,
         )
 
         return self._pcontext.pids()

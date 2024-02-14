@@ -104,6 +104,7 @@ def start_processes(
     redirects: Union[Std, Dict[int, Std]] = Std.NONE,
     tee: Union[Std, Dict[int, Std]] = Std.NONE,
     local_ranks_filter: Optional[Set[int]] = None,
+    log_for_fb_tupperware: Optional[Tuple[int, int]] = None,  # rdzv_run_id, restart_count
 ) -> PContext:
     """
     Start ``n`` copies of ``entrypoint`` processes with the provided options.
@@ -199,7 +200,7 @@ def start_processes(
 
     """
     # listdir raises FileNotFound or NotADirectoryError so no need to check manually
-    if log_dir != os.devnull and os.listdir(log_dir):
+    if log_for_fb_tupperware is None and log_dir != os.devnull and os.listdir(log_dir):
         raise RuntimeError(
             f"log_dir: {log_dir} is not empty, please provide an empty log_dir"
         )
@@ -239,14 +240,25 @@ def start_processes(
             error_files[local_rank] = os.devnull
             envs[local_rank]["TORCHELASTIC_ERROR_FILE"] = ""
         else:
-            clogdir = os.path.join(log_dir, str(local_rank))
-            os.mkdir(clogdir)
+            if log_for_fb_tupperware:
+                clogdir = log_dir
+            else:
+                clogdir = os.path.join(log_dir, str(local_rank))
+                os.mkdir(clogdir)
+
+            if log_for_fb_tupperware is not None:
+                log_filename_prefix = (
+                    f"dedicated_log_elastic_{log_for_fb_tupperware[0]}_"
+                    f"attempt_{log_for_fb_tupperware[1]}_rank_{local_rank}_"
+                )
+            else:
+                log_filename_prefix = ""
 
             rd = redirs[local_rank]
             if (rd & Std.OUT) == Std.OUT:
-                stdouts[local_rank] = os.path.join(clogdir, "stdout.log")
+                stdouts[local_rank] = os.path.join(clogdir, f"{log_filename_prefix}stdout.log")
             if (rd & Std.ERR) == Std.ERR:
-                stderrs[local_rank] = os.path.join(clogdir, "stderr.log")
+                stderrs[local_rank] = os.path.join(clogdir, f"{log_filename_prefix}stderr.log")
 
             t = ts[local_rank]
             if t & Std.OUT == Std.OUT:
@@ -267,7 +279,7 @@ def start_processes(
                 if stderrs[local_rank] == SYS_STREAM:
                     stderrs[local_rank] = os.devnull
 
-            error_file = os.path.join(clogdir, "error.json")
+            error_file = os.path.join(clogdir, f"{log_filename_prefix}error.json")
             error_files[local_rank] = error_file
             log.info("Setting worker%s reply file to: %s", local_rank, error_file)
             envs[local_rank]["TORCHELASTIC_ERROR_FILE"] = error_file

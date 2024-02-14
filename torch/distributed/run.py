@@ -728,6 +728,8 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
 
     log_line_prefix_template = os.getenv("TORCHELASTIC_LOG_LINE_PREFIX_TEMPLATE")
 
+    log_for_fb_tupperware = os.getenv("TORCHELASTIC_LOG_FOR_FB_TUPPERWARE", "") == "1"
+
     rdzv_configs = _parse_rendezvous_config(args.rdzv_conf)
 
     if args.rdzv_backend == "static":
@@ -763,6 +765,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
         log_line_prefix_template=log_line_prefix_template,
         local_addr=args.local_addr,
         local_ranks_filter=ranks,
+        log_for_fb_tupperware=log_for_fb_tupperware,
     )
 
     with_python = not args.no_python

@@ -89,6 +89,12 @@ class LaunchConfig:
     metrics_cfg: Dict[str, str] = field(default_factory=dict)
     local_addr: Optional[str] = None
     local_ranks_filter: Optional[Set[int]] = None
+    # This triggers an alternative file layout for how we put log files into
+    # log_dir; specifically, all log files are prefixed with dedicated_log_
+    # and placed in the top-level directory (no subdirectory structure).
+    # If you think this is generally useful, we can refactor this into some
+    # more generic flags (e.g., log_use_flat_structure and log_name_prefix)
+    log_for_fb_tupperware: bool = False
 
     def __post_init__(self):
         default_timeout = 900
@@ -253,6 +259,7 @@ def launch_agent(
         log_dir=config.log_dir,
         log_line_prefix_template=config.log_line_prefix_template,
         local_ranks_filter=config.local_ranks_filter,
+        log_for_fb_tupperware=config.log_for_fb_tupperware,
     )
 
     shutdown_rdzv = True
