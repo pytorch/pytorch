@@ -427,6 +427,46 @@ class TestDTensorOptimizer(DTensorTestBase):
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
 
+    @with_comms
+    def test_adamax_1d_sharding(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        adamax_configs = [
+            {"lr": 0.1},
+            {"lr": 0.1, "betas": (0.6, 0.66)},
+            {"lr": 0.1, "betas": (0.6, 0.66), "eps": 1e-6},
+            {"lr": 0.1, "betas": (0.6, 0.66), "eps": 1e-6, "weight_decay": 0.05},
+            {
+                "lr": 0.1,
+                "betas": (0.6, 0.66),
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "foreach": True,
+            },
+            {
+                "lr": 0.1,
+                "betas": (0.6, 0.66),
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "foreach": True,
+                "maximize": True,
+            },
+        ]
+
+        for config in adamax_configs:
+            mod = MLPModule(self.device_type)
+            opt = torch.optim.Adamax(mod.parameters(), **config)
+
+            dist_mod = distribute_module(
+                deepcopy(mod), mesh, shard_fn, input_fn, output_fn
+            )
+            dist_opt = torch.optim.Adamax(dist_mod.parameters(), **config)
+
+            # use ones to make sure the single machine model have the same input
+            # on different ranks
+            inp = torch.ones(8, 10, device=self.device_type)
+            self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
+
 
 if __name__ == "__main__":
     run_tests()
