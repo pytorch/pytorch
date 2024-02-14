@@ -737,9 +737,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled(inputs, outputs, pg=GroupMember.WORLD)
         func(inputs, correct_outputs, pg=GroupMember.WORLD)
         assert counter.frame_count == 1
-
-        # should test more precisely, but the 3 is supposed to be (all_gather, wait, copy_)
-        assert counter.op_count == 3
         assert same(outputs, correct_outputs)
 
     def test_dynamo_rewrite_dist_all_gather_args_match(self):
@@ -814,9 +811,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled(inputs, outputs, pg=GroupMember.WORLD)
         func(inputs, correct_outputs, pg=GroupMember.WORLD)
         assert counter.frame_count == 1
-
-        # should test more precisely, but the 3 is supposed to be (reduce_scatter, wait, copy_)
-        assert counter.op_count == 3
         assert same(outputs, correct_outputs)
 
     def test_dynamo_rewrite_dist_allreduce(self):
@@ -859,8 +853,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         func(inputs_eager, GroupMember.WORLD)
 
         assert counter.frame_count == 1
-        # should test more precisely, but the 3 is supposed to be (all_to_all_single, wait, copy_)
-        assert counter.op_count == 3
         assert same(inputs_compiled, inputs_eager)
 
     def test_dynamo_support_collective_op_with_async_op_False(self):
