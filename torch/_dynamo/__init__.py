@@ -21,7 +21,6 @@ from .eval_frame import (
     explain,
     export,
     is_dynamo_supported,
-    is_inductor_supported,
     optimize,
     optimize_assert,
     OptimizedModule,
