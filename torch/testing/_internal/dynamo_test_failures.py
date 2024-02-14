@@ -43,6 +43,54 @@ dynamo_expected_failures = {
     "TestIndexingCPU.test_index_cpu",
     "TestIndexingCPU.test_index_limits_cpu",
     "NumpyTestsCPU.test_boolean_indexing_weirdness_cpu",
+    "TestScript.test_torch_functional_tensordot_int",  # test_jit.py
+    "TestScript.test_python_call_non_tensor_wrong",  # test_jit.py
+    "TestTEFuserStatic.test_remove_output_used_only_in_size",  # test_jit_fuser_te.py
+    "TestScript.test_method_overloading",  # test_jit.py
+    "TestScript.test_pack_unpack_state",  # test_jit.py
+    "TestScript.test_string_device_implicit_conversion",  # test_jit.py
+    "TestScript.test_error_stacktrace_interface",  # test_jit.py
+    "TestScript.test_torchscript_multi_head_attn",  # test_jit.py
+    "TestTEFuserStatic.test_gelu",  # test_jit_fuser_te.py
+    "TestTEFuserDynamic.test_profiler",  # test_jit_fuser_te.py
+    "TestScript.test_is_scripting",  # test_jit.py
+    "TestScript.test_function_overloading_isinstance",  # test_jit.py
+    "TestJit.test_function_default_values",  # test_jit.py
+    "TestTEFuserDynamic.test_torch_to",  # test_jit_fuser_te.py
+    "TestScript.test_wrong_return_type",  # test_jit.py
+    "TestScript.test_type_annotation_module",  # test_jit.py
+    "TestScript.test_python_op_builtins",  # test_jit.py
+    "TestScript.test_nn_GRU",  # test_jit.py
+    "TestScript.test_function_overloads",  # test_jit.py
+    "TestScript.test_script_optional_none",  # test_jit.py
+    "TestScript.test_namedtuple_python",  # test_jit.py
+    "TestTEFuserStatic.test_profiler",  # test_jit_fuser_te.py
+    "TestScript.test_none_type_str",  # test_jit.py
+    "TestScript.test_isinstance_dynamic",  # test_jit.py
+    "TestScript.test_python_call",  # test_jit.py
+    "TestScript.test_parse_nested_names",  # test_jit.py
+    "TestScript.test_parse_tensor_constants",  # test_jit.py
+    "TestTEFuserDynamic.test_to_dtype",  # test_jit_fuser_te.py
+    "TestTEFuserStatic.test_to_dtype",  # test_jit_fuser_te.py
+    "TestScript.test_empty_tuple_str",  # test_jit.py
+    "TestScript.test_nn_LSTM_with_layers",  # test_jit.py
+    "TestScript.test_unused_decorator",  # test_jit.py
+    "TestTEFuserDynamic.test_remove_output_used_only_in_size",  # test_jit_fuser_te.py
+    "TestScript.test_no_self_arg_ignore_function",  # test_jit.py
+    "TestScript.test_tuple_str",  # test_jit.py
+    "TestScript.test_is_after_use",  # test_jit.py
+    "TestTEFuserStatic.test_torch_to",  # test_jit_fuser_te.py
+    "TestScript.test_nested_breaks",  # test_jit.py
+    "TestScript.test_infer_size",  # test_jit.py
+    "TestTEFuserDynamic.test_gelu",  # test_jit_fuser_te.py
+    "TestScript.test_conv_error",  # test_jit.py
+    "TestTEFuserStatic.test_skip_grad_in_check",  # test_jit_fuser_te.py
+    "TestScript.test_ignored_as_value",  # test_jit.py
+    "TestScript.test_unspecialized_any_binding",  # test_jit.py
+    "TestScript.test_namedtuple_default_values_using_factory_constructor",  # test_jit.py
+    "TestScript.test_dict_str",  # test_jit.py
+    "TestJit.test_batchnorm",  # test_jit.py
+    "TestTEFuserStatic.test_inlined_optimized_graph",  # test_jit_fuser_te.py
     "TestLinalgCPU.test_inverse_cpu_float32",
     "TestLinalgCPU.test_slogdet_errors_and_warnings_cpu_float32",
     "TestLinalgCPU.test_inverse_cpu_complex128",
@@ -1469,7 +1517,6 @@ dynamo_expected_failures = {
     "TestTorchDeviceTypeCPU.test_broadcast_fn_div_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_quint8",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_lt_cpu",  # test_torch
-    "TestTorchDeviceTypeCPU.test_memory_format_operators_cpu",  # test_torch
     "TestTorch.test_pin_memory",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_masked_fill_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool2d_cpu_float64",  # test_torch
@@ -1576,7 +1623,6 @@ dynamo_expected_failures = {
     "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_inf_mode_inplace_op",  # test_autograd
     "TestAutograd.test_nested_anomaly_detect_nan",  # test_autograd
     "TestAutograd.test_nested_anomaly_printstack_cleanup",  # test_autograd
-    "TestAutograd.test_post_accumulate_grad_hook_gets_cleaned_up",  # test_autograd
     "TestAutogradInferenceMode.test_inference_mode_context_manager",  # test_autograd
     "TestAutograd.test_hook_none",  # test_autograd
     "TestAutograd.test_set_data_tensorimpl_type",  # test_autograd
@@ -2024,7 +2070,6 @@ dynamo_expected_failures = {
     "TestPythonRegistration.test_alias_analysis",  # test_python_dispatch
     "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_conv2d_cpu",  # test_python_dispatch
     "TestPythonRegistration.test_finalizer",  # test_python_dispatch
-    "TestPythonRegistration.test_override_cpu_sum",  # test_python_dispatch
     "TestPythonDispatch.test_subclass_autograd_device_check",  # test_python_dispatch
     "TestPythonDispatch.test_make_subclass_with_modes",  # test_python_dispatch
     "LoggingTests.test_trace_source_nested",  # dynamo/test_logging
@@ -2050,6 +2095,11 @@ dynamo_expected_failures = {
     "LoggingTests.test_dynamo_info",  # dynamo/test_logging
     "LoggingTests.test_graph_breaks",  # dynamo/test_logging
     "LoggingTests.test_aot",  # dynamo/test_logging
+    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape2_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape3_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_is_causal_and_mask_fails_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape1_cpu",  # test_transformers.py
+    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape0_cpu",  # test_transformers.py
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_float32",  # test_linalg.py
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_int64",  # test_linalg.py
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_complex64",  # test_linalg.py
@@ -2167,6 +2217,11 @@ dynamo_skips = {
     "TestAttnBiasCUDA.test_causal_variants_compile_causal_variant_CausalVariant_UPPER_LEFT_shape2_CUDA",  # known py38 fail
     "TestAttnBiasCUDA.test_causal_variants_compile_causal_variant_CausalVariant_UPPER_LEFT_shape1_CUDA",  # known py38 fail
     "TestTransformersCPU.test_decoder_padding_and_src_mask_bool_cpu",  # known py311 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_2_shape3_cpu",  # known py311 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_1_shape3_cpu",  # known py311 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_1_shape2_cpu",  # known py311 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_1_shape1_cpu",  # known py311 fail
+    "TestAttnBiasCPU.test_causal_variants_causal_variant_2_shape1_cpu",  # known py311 fail
     "TestSWAUtils.test_averaged_model_all_devices_ema_True",  # flaky
     "TestSWAUtils.test_averaged_model_exponential_use_multi_avg_fn_True_use_buffers_False",  # flaky
     "TestSWAUtils.test_averaged_model_exponential_use_multi_avg_fn_True_use_buffers_True",  # flaky
@@ -4067,6 +4122,9 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_eye_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_jiterator_2inputs_2outputs_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_diag_embed_cpu_float32",  # known py38 fail
+    "TestTEFuserDynamic.test_matmul",  # known py38 fail
+    "TestTEFuserStatic.test_unary_ops",  # known py311 fail
+    "TestTEFuserDynamic.test_unary_ops",  # known py311 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_softmin_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_fill_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_broadcast_tensors_cpu_float32",  # known py38 fail
@@ -6333,6 +6391,7 @@ dynamo_skips = {
     "TestPythonDispatch.test_list_ret",  # test_python_dispatch.py
     "TestCustomOpTestingCPU.test_opcheck_fails_basic_cpu",  # test_custom_ops.py
     "TestSaveLoadForOpVersion.test_versioned_div_tensor_out",  # test_jit.py
+    "TestAutograd.test_post_accumulate_grad_hook_gets_cleaned_up",  # test_autograd
 }
 
 

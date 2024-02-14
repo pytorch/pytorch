@@ -25,7 +25,7 @@ def maybe_dupe_op(x):
 
 
 aten = torch.ops.aten
-lib = torch.library.Library("custom", "DEF")
+lib = torch.library.Library("custom", "DEF")  # noqa: TOR901
 lib.define("maybe_dupe_op(Tensor a) -> (Tensor, Tensor)")
 lib.impl("maybe_dupe_op", maybe_dupe_op, "CPU")
 lib.impl("maybe_dupe_op", maybe_dupe_op, "Meta")
