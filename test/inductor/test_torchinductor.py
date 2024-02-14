@@ -1407,11 +1407,11 @@ class CommonTemplate:
             return x.cumsum(0), x.cumsum(1)
 
         # Persistent reductions
-        self.common(fn, (torch.rand(16, 32),), check_lowp=not TEST_WITH_ROCM)
-        self.common(fn, (torch.rand(20, 30),), check_lowp=not TEST_WITH_ROCM)
+        self.common(fn, (torch.rand(16, 32),), check_lowp=True)
+        self.common(fn, (torch.rand(20, 30),), check_lowp=True)
 
         # Non-persistent reduction
-        self.common(fn, (torch.rand(100, 4000),), check_lowp=not TEST_WITH_ROCM)
+        self.common(fn, (torch.rand(100, 4000),), check_lowp=True)
 
     def test_cumsum_zero_dim(self):
         def fn(x):
