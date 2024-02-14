@@ -956,6 +956,7 @@ aten_cpu_non_globed_sources = [
 aten_cpu_non_globed_headers = [
     "aten/src/ATen/CPUGeneratorImpl.h",
     "aten/src/ATen/NumericUtils.h",
+    "aten/src/ATen/detail/AcceleratorHooksInterface.h",
     "aten/src/ATen/detail/CUDAHooksInterface.h",
     "aten/src/ATen/detail/MPSHooksInterface.h",
     "aten/src/ATen/detail/HIPHooksInterface.h",
