@@ -7,10 +7,12 @@ import itertools
 import os
 import re
 import sys
+import warnings
 from abc import ABC, abstractmethod
 from contextlib import nullcontext
 from copy import deepcopy
 from enum import auto, Enum
+from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from unittest import mock
 
@@ -36,6 +38,7 @@ from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import FILE_SCHEMA, get_cycles_per_ms
+from torch.utils._triton import has_triton
 
 
 class FSDPInitMode(Enum):
@@ -1232,6 +1235,41 @@ class FSDPTest(MultiProcessTestCase):
                 exact_device=True,
                 msg="FSDP did not match DDP",
             )
+
+
+def test_compiled_fsdp():
+    class FullyShardPatch(Enum):
+        @staticmethod
+        def fully_shard_with_compiled_compute(*args, **kwargs):
+            args[0].forward = torch.compile(args[0].forward)
+            return torch.distributed._composable.fsdp.fully_shard(*args, **kwargs)
+
+        @staticmethod
+        def fully_shard_with_full_compile(*args, **kwargs):
+            module = torch.distributed._composable.fsdp.fully_shard(*args, **kwargs)
+            return torch.compile(module)
+
+        # apply partial in order to use ``Enum.value``
+        EAGER = partial(torch.distributed._composable.fsdp.fully_shard)
+        COMPILED_COMPUTE = partial(fully_shard_with_compiled_compute)
+        # add FULL for tracing FSDP
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for fully_shard_patch in FullyShardPatch:
+                if fully_shard_patch != FullyShardPatch.EAGER and not has_triton():
+                    warnings.warn("Inductor on GPU needs Triton and recent GPU arch")
+                    continue
+                with mock.patch(
+                    f"{func.__module__}.{torch.distributed._composable.fsdp.fully_shard.__name__}",
+                    fully_shard_patch.value,
+                ):
+                    func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 class SkipModule(nn.Module):
