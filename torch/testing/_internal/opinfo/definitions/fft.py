@@ -825,7 +825,7 @@ python_ref_db: List[OpInfo] = [
         torch_opinfo_name="fft.fftshift",
         skips=(
             # TODO Move fftshift to decomps
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
         ),
     ),
     PythonRefInfo(
@@ -834,7 +834,7 @@ python_ref_db: List[OpInfo] = [
         torch_opinfo_name="fft.ifftshift",
         skips=(
             # TODO Move ifftshift to decomps
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
         ),
     ),
 ]
