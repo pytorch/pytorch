@@ -540,7 +540,10 @@ class CppCSEVariable(CSEVariable):
         self.dependent_itervars: Set[sympy.Symbol] = set()
 
     def __repr__(self):
-        return f"CppCSEVariable(name: {self.name}, bounds: {self.bounds}, is_vec: {self.is_vec}, dtype: {self.dtype}, dependent_itervars: {self.dependent_itervars})"
+        return (
+            f"CppCSEVariable(name: {self.name}, bounds: {self.bounds}, is_vec: {self.is_vec}, dtype: {self.dtype}, "
+            f"dependent_itervars: {self.dependent_itervars})"
+        )
 
     def update_on_args(self, name, args, kwargs):
         if name == "load":
@@ -1082,36 +1085,42 @@ class CppVecOverrides(CppOverrides):
     def eq(x, y):
         assert isinstance(V.kernel, CppVecKernel)
         assert isinstance(x, CppCSEVariable)
+        assert x.dtype is not None
         return f"{V.kernel._get_mask_type(x.dtype)}({x} == {y})"
 
     @staticmethod
     def ne(x, y):
         assert isinstance(V.kernel, CppVecKernel)
         assert isinstance(x, CppCSEVariable)
+        assert x.dtype is not None
         return f"{V.kernel._get_mask_type(x.dtype)}({x} != {y})"
 
     @staticmethod
     def lt(x, y):
         assert isinstance(V.kernel, CppVecKernel)
         assert isinstance(x, CppCSEVariable)
+        assert x.dtype is not None
         return f"{V.kernel._get_mask_type(x.dtype)}({x} < {y})"
 
     @staticmethod
     def gt(x, y):
         assert isinstance(V.kernel, CppVecKernel)
         assert isinstance(x, CppCSEVariable)
+        assert x.dtype is not None
         return f"{V.kernel._get_mask_type(x.dtype)}({x} > {y})"
 
     @staticmethod
     def le(x, y):
         assert isinstance(V.kernel, CppVecKernel)
         assert isinstance(x, CppCSEVariable)
+        assert x.dtype is not None
         return f"{V.kernel._get_mask_type(x.dtype)}({x} <= {y})"
 
     @staticmethod
     def ge(x, y):
         assert isinstance(V.kernel, CppVecKernel)
         assert isinstance(x, CppCSEVariable)
+        assert x.dtype is not None
         return f"{V.kernel._get_mask_type(x.dtype)}({x} >= {y})"
 
     @staticmethod
@@ -1333,6 +1342,7 @@ class CppVecOverrides(CppOverrides):
         assert node and isinstance(node, torch.fx.Node)
         opt_ctx_x = get_opt_ctx(node.args[1])
         assert opt_ctx_x
+        assert opt_ctx_x.dtype is not None
         assert isinstance(V.kernel, CppVecKernel)
         src_cpp_type = DTYPE_TO_CPP[opt_ctx_x.dtype]
         cpp_type = DTYPE_TO_CPP[dtype]
@@ -1980,9 +1990,7 @@ class CppVecKernel(CppKernel):
             if self._load_mask is not None:
                 assert isinstance(self._load_mask, CppCSEVariable), self._load_mask
                 if self._load_mask.is_vec:
-                    load_mask = (
-                        f"{self._load_mask}.is_masked({itervar_inner})"
-                    )
+                    load_mask = f"{self._load_mask}.is_masked({itervar_inner})"
                 else:
                     load_mask = f"{self._load_mask} != 0"
             index = sympy_subs(index, replacements)  # type: ignore[arg-type]

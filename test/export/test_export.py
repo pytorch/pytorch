@@ -71,6 +71,14 @@ except ImportError:
 from torch.export import export
 
 
+torch.library.define("testlib::returns_tensor_symint", "(Tensor x) -> (Tensor, SymInt)")
+
+@torch.library.impl("testlib::returns_tensor_symint", "cpu")
+@torch.library.impl_abstract("testlib::returns_tensor_symint")
+def returns_tensor_symint_impl(x):
+    return x, x.shape[0]
+
+
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestDynamismExpression(TestCase):
     def test_export_inline_constraints(self):
@@ -132,7 +140,7 @@ class TestDynamismExpression(TestCase):
         # Being able to export means shape is preserved as static
         export(WrapperModule(branch_on_shape), inp)
 
-@unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
+
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestExport(TestCase):
     def _test_export_same_as_eager(self, f, args, kwargs=None):
@@ -1386,9 +1394,7 @@ def forward(self, arg_0):
 
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
-        with self.assertRaisesRegex(
-            RuntimeError, r"Deferred runtime assertion failed -u0 <= 0"
-        ):
+        with self.assertRaisesRegex(RuntimeError, r"Invalid value range for -1 between \[0,"):
             _ = ep.module()(torch.tensor(-1), torch.randn(4, 5))
 
         self.assertTrue(
@@ -3037,6 +3043,14 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         self.assertEqual(mod.foo, ep.module().foo)
         self.assertEqual(mod(torch.ones(4, 4)), ep.module()(torch.ones(4, 4)))
+
+    def test_symint_tensor_return(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.testlib.returns_tensor_symint(x)[0]
+
+        self._test_export_same_as_eager(Module(), (torch.randn(4, 4),))
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
