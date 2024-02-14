@@ -124,7 +124,7 @@ class TestPassInfra(TestCase):
         input_tensor1 = torch.tensor(5.0)
         input_tensor2 = torch.tensor(6.0)
 
-        ep_before = torch._export.export(my_module, (input_tensor1, input_tensor2))
+        ep_before = torch.export.export(my_module, (input_tensor1, input_tensor2))
         from torch.fx.passes.infra.pass_base import PassResult
 
         def modify_input_output_pass(gm):

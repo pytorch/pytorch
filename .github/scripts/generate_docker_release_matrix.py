@@ -4,7 +4,7 @@
 
 Will output a condensed version of the matrix. Will include fllowing:
     * CUDA version short
-    * CUDA full verison
+    * CUDA full version
     * CUDNN version short
     * Image type either runtime or devel
     * Platform linux/arm64,linux/amd64
