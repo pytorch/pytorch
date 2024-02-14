@@ -2163,7 +2163,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       uid_,
       seq_,
       // create a string copy of profilingTitle
-      profilingTitle? profilingTitle : "",
+      profilingTitle ? profilingTitle : "",
       inputs,
       outputs,
       r->ncclStartEvent_.get(),
