@@ -4760,7 +4760,10 @@ class TestCompileTransforms(TestCase):
     @skipIfRocm(msg="test leaks memory on ROCm")
     # torch.compile is not supported on Windows
     # Triton only supports GPU with SM70 or later.
-    @expectedFailureIf((IS_ARM64 and not IS_MACOS) or IS_WINDOWS or (TEST_CUDA and not SM70OrLater))
+    @expectedFailureIf((IS_ARM64 and not IS_MACOS) or
+                       IS_WINDOWS or
+                       (TEST_CUDA and not SM70OrLater) or
+                       (sys.version_info >= (3, 12)))
     def test_compile_vmap_hessian(self, device):
         # The model and inputs are a smaller version
         # of code at benchmark repo:
@@ -4789,8 +4792,8 @@ class TestCompileTransforms(TestCase):
         actual = opt_fn(params_and_buffers, x)
         self.assertEqual(actual, expected)
 
-    # torch.compile is not supported on Windows
-    @expectedFailureIf(IS_WINDOWS)
+    # torch.compile is not supported on Windows or on Python 3.12+
+    @expectedFailureIf(IS_WINDOWS or (sys.version_info >= (3, 12)))
     @torch._dynamo.config.patch(suppress_errors=False)
     @torch._dynamo.config.patch(capture_func_transforms=True)
     @skipIfTorchDynamo("Do not test torch.compile on top of torch.compile")
