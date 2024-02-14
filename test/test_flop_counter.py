@@ -131,7 +131,33 @@ class TestFlopCounter(TestCase):
 
         self.assertExpectedInline(get_total_flops(mode), """750""")
 
+    def test_convs(self):
+        def assert_equivalence(f, expected_forward=None):
+            mode = FlopCounterMode()
+            with mode:
+                f()
+            conv_forward_flops = mode.get_flop_counts()['Global'][torch.ops.aten.convolution]
+            conv_backward_flops = mode.get_flop_counts()['Global'][torch.ops.aten.convolution_backward]
 
+            self.assertEqual(conv_forward_flops * 2, conv_backward_flops)
+            if expected_forward is not None:
+                self.assertEqual(conv_forward_flops, expected_forward)
+
+        x = torch.rand(1, 1, 2, 2, requires_grad=True)
+        weight = torch.randn(1, 1, 2, 2, requires_grad=True)
+        assert_equivalence(lambda: F.conv_transpose2d(x, weight).sum().backward(), 32)
+
+        x = torch.rand(1, 1, 2, 2, requires_grad=True)
+        weight = torch.randn(1, 1, 1, 1, requires_grad=True)
+        assert_equivalence(lambda: F.conv2d(x, weight).sum().backward(), 8)
+
+        for in_channels in [1, 3, 7]:
+            for out_channels in [1, 3, 7]:
+                x = torch.rand(1, in_channels, 4, 4, requires_grad=True)
+                weight = torch.randn(out_channels, in_channels, 2, 2, requires_grad=True)
+                assert_equivalence(lambda: F.conv2d(x, weight).sum().backward())
+                transposed_weight = torch.randn(in_channels, out_channels, 2, 2, requires_grad=True)
+                assert_equivalence(lambda: F.conv_transpose2d(x, transposed_weight).sum().backward())
 
     @skipIfNoTorchVision
     def test_module(self):
@@ -146,6 +172,18 @@ class TestFlopCounter(TestCase):
         layer1_conv_back_flops = mode.flop_counts['ResNet.layer1'][torch.ops.aten.convolution_backward]
         self.assertExpectedInline(str(layer1_conv_flops), """924844032""")
         self.assertExpectedInline(str(layer1_conv_back_flops), """1849688064""")
+
+
+    def test_conv_transpose_loop(self):
+        x = torch.rand(1, 4, 30, 2)
+        model = torch.nn.ConvTranspose2d(4, 8, (2, 2), stride=2)
+
+        mode = FlopCounterMode(model)
+        with mode:
+            for i in range(50):
+                out = model(x)
+                out.sum().backward()
+        self.assertExpectedInline(str(mode.get_total_flops()), """1536000""")
 
     def test_custom(self):
         mode = FlopCounterMode(custom_mapping={torch.ops.aten.add: lambda *args, out_shape: 5})
