@@ -469,12 +469,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 for t in args:
                     if isinstance(t, TensorBox):
                         device = t.data.get_device()
-                        if isinstance(t.data, ir.BaseView):
-                            unaliased = t.data.unwrap_view()
-                            alias_counts[unaliased.get_name()] += 1
-                            alias_group = max(
-                                alias_counts[unaliased.get_name()], alias_group
-                            )
+                        break
                 assert (
                     device is not None
                 ), "foreach op should have at least one tensor arg"
