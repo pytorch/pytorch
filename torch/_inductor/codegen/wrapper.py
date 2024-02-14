@@ -3343,8 +3343,10 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         if grid_uses_symbolic_shapes:
             self.writeline(f"if ({grid_name}.is_non_zero()) {{")
         kernel_var_name = f"kernels.{name}" if V.graph.aot_mode else name
+        indent = "    " if grid_uses_symbolic_shapes else ""
         self.writeline(
-            "launchKernel({}, {}, {}, {}, {}, {}, {}, {});".format(
+            "{}launchKernel({}, {}, {}, {}, {}, {}, {}, {});".format(
+                indent,
                 kernel_var_name,
                 f"{grid_name}.grid_x",
                 f"{grid_name}.grid_y",
