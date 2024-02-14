@@ -972,7 +972,7 @@ class ReduceLROnPlateau(LRScheduler):
             - 2nd epoch: If this epoch performs worse than the baseline, num_bad_epochs increases by 1.
             Since ``num_bad_epochs = 1 > patience = 0``, the learning rate will be reduced at the end of this epoch
             and num_bad_epochs resets to 0.
-            - 3rd epoch onwards: The learning rate is reduced. If the epoch continues to perform worse than the baseline,
+            - 3rd epoch onwards: If the epoch continues to perform worse than the baseline,
             num_bad_epochs increases by 1. As ``num_bad_epochs = 1 > patience = 0``, the learning rate is reduced
             and num_bad_epochs resets to 0 after each epoch.
             Default: 10.
