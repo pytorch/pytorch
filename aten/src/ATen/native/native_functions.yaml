@@ -6048,7 +6048,6 @@
     CPU, MPS: roll
     CUDA: roll_cuda
   autogen: roll.out
-  tags: core
 
 # default int[] value [0,1] should not add space after comma, since codegen parser uses ', ' to split args
 
