@@ -403,6 +403,9 @@ def analyze_kernel_mutations(functions, fn_name, num_args):
         visited.add(arg)
 
         if isinstance(arg, Param):
+            if arg.idx >= num_args:
+                # This is an argument defined in the kernel, not passed in
+                continue
             mutated[arg.idx] = True
         elif isinstance(arg, Intermediate) and not arg.fake():
             for op in ops[arg]:
@@ -436,7 +439,9 @@ def identify_mutated_tensors(kernel, kwargs):
         # The cache for analyze kernel mutations is mainly used for cycle
         # detection, so each top level invocation needs a clean cache
         analyze_kernel_mutations.reset()
-        mutations = analyze_kernel_mutations(functions, kernel_name, len(kwargs))
+        mutations = analyze_kernel_mutations(
+            functions, kernel_name, len(ordered_tensor_names)
+        )
 
         return [
             ordered_tensor_names[i] for i, mutated in enumerate(mutations) if mutated
