@@ -601,6 +601,11 @@ struct TORCH_API IValue final {
   c10::SymInt toSymInt() &&;
   c10::SymInt toSymInt() const&;
 
+  const c10::SymNodeImpl* toSymNodeImplUnowned() const {
+    AT_ASSERT(isSymInt() || isSymFloat() || isSymBool());
+    return static_cast<c10::SymNodeImpl*>(payload.u.as_intrusive_ptr);
+  }
+
   IValue(const c10::SymFloat& i) {
     if (i.is_symbolic()) {
       tag = Tag::SymFloat;

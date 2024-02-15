@@ -19,6 +19,7 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/core/impl/PyInterpreter.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
@@ -1516,6 +1517,7 @@ PyObject* initModule() {
   c10::initLogging();
   c10::set_terminate_handler();
   at::internal::lazy_init_num_threads();
+  c10::impl::set_global_pyinterpreter(getPyInterpreter());
 
   C10_LOG_API_USAGE_ONCE("torch.python.import");
 

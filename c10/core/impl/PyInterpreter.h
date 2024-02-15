@@ -236,4 +236,10 @@ enum class PyInterpreterStatus {
   TAGGED_BY_OTHER,
 };
 
+// We expect this to be clobbered in the multipy case, whether the PyInterpreter
+// matches should be validated when we dispatch to a concrete interpreter.
+C10_API void set_global_pyinterpreter(c10::impl::PyInterpreter* interp);
+
+C10_API c10::impl::PyInterpreter* get_global_pyinterpreter();
+
 } // namespace c10::impl

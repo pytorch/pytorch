@@ -166,15 +166,33 @@ class TORCH_API NestedIntSymNodeImpl : public SymNodeImpl {
   c10::SymNode mul(const c10::SymNode& other) override;
 
   c10::optional<int64_t> nested_int() override {
+    TORCH_CHECK(
+        type_ == NestedTensorVariant::PYTHON,
+        "shape returned from strided layout NestedTensor does not support this "
+        "operation");
     return val_;
   }
 
   c10::optional<int64_t> nested_int_coeff() override {
+    TORCH_INTERNAL_ASSERT(type_ == NestedTensorVariant::PYTHON);
     return coeff_;
+  }
+
+  // If we would like to have nested_int_vec() as a virtual method, it must
+  // be defined on SymNodeImpl, which exists in c10 only. This means we cannot
+  // return normal Tensor. The workaround here is to return a pointer instead.
+  // Instead of using this method directly, please use get_nested_int_vec, if
+  // you need a regular Tensor.
+  c10::TensorImpl* nested_int_vec() const override {
+    return vec_.unsafeGetTensorImpl();
   }
 
   bool is_symbolic() override {
     return false;
+  }
+
+  c10::DispatchKeySet key_set() const override {
+    return key_set_;
   }
 
 #define DEFINE_BINARY_NOT_SUPPORTED(name)                           \
