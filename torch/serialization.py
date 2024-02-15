@@ -1370,7 +1370,9 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall
 
     def load_tensor(dtype, numel, key, location):
         name = f'data/{key}'
-        if overall_storage is not None:
+        if torch._guards.detect_fake_mode(None) is not None:
+            storage = torch.UntypedStorage(numel, device='meta')
+        elif overall_storage is not None:
             storage_offset = zip_file.get_record_offset(name)
             storage = overall_storage[storage_offset:storage_offset + numel]
         else:
