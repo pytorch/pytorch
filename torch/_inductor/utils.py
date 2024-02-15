@@ -646,7 +646,6 @@ try:
     ]
 except ImportError:
     attrs_descriptor_available = False
-    ids_of_folded_args_available = False
 
 # Define `instance_descriptor` function with clear conditional handling
 if attrs_descriptor_available:
