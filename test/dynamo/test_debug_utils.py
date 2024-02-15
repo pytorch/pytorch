@@ -1,9 +1,15 @@
 # Owner(s): ["module: dynamo"]
 
+import unittest
+
 import torch
 from functorch import make_fx
 from torch._dynamo import debug_utils
+from torch._dynamo.debug_utils import aot_graph_input_parser
 from torch._dynamo.test_case import TestCase
+from torch.testing._internal.inductor_utils import HAS_CUDA
+
+requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 
 class TestDebugUtils(TestCase):
@@ -48,6 +54,100 @@ def forward(self, x_1):
     return (convert_element_type, _to_copy, full, empty)
     """,  # NOQA: B950
         )
+
+    @requires_cuda
+    def test_aot_graph_parser(self):
+        from torch import device
+
+        f32 = torch.float32
+        i64 = torch.int64
+        i32 = torch.int32
+
+        def forward(
+            self,
+            primals_1: "f32[1001, 6]",
+            primals_2: "f32[1001]",
+            primals_3: "f32[1001, 64]",
+            primals_4: "f32[4190]",
+            primals_5: "f32[4190]",
+            primals_6: "f32[1739, 4190]",
+            primals_48: "f32[6144, 4191]",
+        ):
+            _tensor_constant0: "i64[4190]" = self._tensor_constant0
+            lift_fresh_copy: "i64[4190]" = torch.ops.aten.lift_fresh_copy.default(
+                _tensor_constant0
+            )
+            _tensor_constant0 = None
+            index: "f32[6144, 4190]" = torch.ops.aten.index.Tensor(
+                primals_48, [None, lift_fresh_copy]
+            )
+            lift_fresh_copy = None
+
+            _tensor_constant1: "i64[6]" = self._tensor_constant1
+            lift_fresh_copy_1: "i64[6]" = torch.ops.aten.lift_fresh_copy.default(
+                _tensor_constant1
+            )
+            _tensor_constant1 = None
+            index_1: "f32[6144, 6]" = torch.ops.aten.index.Tensor(
+                primals_48, [None, lift_fresh_copy_1]
+            )
+            primals_48 = lift_fresh_copy_1 = None
+            permute: "f32[6, 1001]" = torch.ops.aten.permute.default(primals_1, [1, 0])
+            primals_1 = None
+            addmm: "f32[6144, 1001]" = torch.ops.aten.addmm.default(
+                primals_2, index_1, permute
+            )
+            primals_2 = permute = None
+            amax: "f32[6144, 1]" = torch.ops.aten.amax.default(addmm, [-1], True)
+            sub: "f32[6144, 1001]" = torch.ops.aten.sub.Tensor(addmm, amax)
+            exp: "f32[6144, 1001]" = torch.ops.aten.exp.default(sub)
+            sub = None
+            sum_1: "f32[6144, 1]" = torch.ops.aten.sum.dim_IntList(exp, [-1], True)
+            div: "f32[6144, 1001]" = torch.ops.aten.div.Tensor(exp, sum_1)
+            exp = None
+
+            full_default: "i32[6144, 1001]" = torch.ops.aten.full.default(
+                [6144, 1001],
+                1,
+                dtype=torch.int32,
+                layout=torch.strided,
+                device=device(type="cuda", index=0),
+                pin_memory=False,
+            )
+
+            iota: "i32[1001]" = torch.ops.prims.iota.default(
+                1001,
+                start=0,
+                step=1,
+                dtype=torch.int32,
+                device=device(type="cuda"),
+                requires_grad=False,
+            )
+
+            mul: "i32[6144, 1001]" = torch.ops.aten.mul.Tensor(full_default, iota)
+            full_default = iota = None
+
+            iota_1: "i32[6144]" = torch.ops.prims.iota.default(
+                6144,
+                start=0,
+                step=1001,
+                dtype=torch.int32,
+                device=device(type="cuda", index=0),
+                requires_grad=False,
+            )
+            view: "i32[6150144]" = torch.ops.aten.reshape.default(mul, [-1])
+            mul = None
+            view_1: "f32[6150144]" = torch.ops.aten.reshape.default(div, [-1])
+            div = None
+            _embedding_bag = torch.ops.aten._embedding_bag.default(
+                primals_3, view, iota_1, False, 0, False, view_1
+            )
+
+            return _embedding_bag
+
+        kwargs = aot_graph_input_parser(forward, device="cuda")
+        # runs successfully
+        forward(**kwargs)
 
 
 if __name__ == "__main__":
