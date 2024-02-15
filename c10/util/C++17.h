@@ -73,8 +73,6 @@ make_unique_base(Args&&... args) {
   return std::unique_ptr<Base>(new Child(std::forward<Args>(args)...));
 }
 
-#if defined(__cpp_lib_logical_traits) && !(defined(_MSC_VER) && _MSC_VER < 1920)
-
 template <class... B>
 using conjunction = std::conjunction<B...>;
 template <class... B>
@@ -84,54 +82,8 @@ using bool_constant = std::bool_constant<B>;
 template <class B>
 using negation = std::negation<B>;
 
-#else
-
-// Implementation taken from http://en.cppreference.com/w/cpp/types/conjunction
-template <class...>
-struct conjunction : std::true_type {};
-template <class B1>
-struct conjunction<B1> : B1 {};
-template <class B1, class... Bn>
-struct conjunction<B1, Bn...>
-    : std::conditional_t<bool(B1::value), conjunction<Bn...>, B1> {};
-
-// Implementation taken from http://en.cppreference.com/w/cpp/types/disjunction
-template <class...>
-struct disjunction : std::false_type {};
-template <class B1>
-struct disjunction<B1> : B1 {};
-template <class B1, class... Bn>
-struct disjunction<B1, Bn...>
-    : std::conditional_t<bool(B1::value), B1, disjunction<Bn...>> {};
-
-// Implementation taken from
-// http://en.cppreference.com/w/cpp/types/integral_constant
-template <bool B>
-using bool_constant = std::integral_constant<bool, B>;
-
-// Implementation taken from http://en.cppreference.com/w/cpp/types/negation
-template <class B>
-struct negation : bool_constant<!bool(B::value)> {};
-
-#endif
-
-#ifdef __cpp_lib_void_t
-
 template <class T>
 using void_t = std::void_t<T>;
-
-#else
-
-// Implementation taken from http://en.cppreference.com/w/cpp/types/void_t
-// (it takes CWG1558 into account and also works for older compilers)
-template <typename... Ts>
-struct make_void {
-  typedef void type;
-};
-template <typename... Ts>
-using void_t = typename make_void<Ts...>::type;
-
-#endif
 
 #if defined(USE_ROCM)
 // rocm doesn't like the C10_HOST_DEVICE
@@ -216,21 +168,12 @@ struct _identity final {
 
 template <class Func, class Enable = void>
 struct function_takes_identity_argument : std::false_type {};
-#if defined(_MSC_VER)
-// For some weird reason, MSVC shows a compiler error when using guts::void_t
-// instead of std::void_t. But we're only building on MSVC versions that have
-// std::void_t, so let's just use that one.
+
 template <class Func>
 struct function_takes_identity_argument<
     Func,
     std::void_t<decltype(std::declval<Func>()(_identity()))>> : std::true_type {
 };
-#else
-template <class Func>
-struct function_takes_identity_argument<
-    Func,
-    void_t<decltype(std::declval<Func>()(_identity()))>> : std::true_type {};
-#endif
 } // namespace detail
 
 } // namespace guts

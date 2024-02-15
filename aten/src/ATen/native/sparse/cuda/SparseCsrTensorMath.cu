@@ -45,8 +45,7 @@
 #include <thrust/for_each.h>
 #include <thrust/sequence.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -109,9 +108,7 @@ void convert_indices_from_csr_to_coo_cuda(const Tensor& indices, const Tensor& c
   int64_t batch_ndim = crow_indices.dim() - 1;
   if (batch_ndim > 0) {
     auto batch_indices = indices.narrow(0, 0, batch_ndim);
-    batch_indices.copy_(batch_indices.new_ones(crow_indices.sizes().slice(0, batch_ndim))
-                        .nonzero()
-                        .transpose(0, 1)
+    batch_indices.copy_(at::sparse::full_coo_indices(crow_indices.sizes().slice(0, batch_ndim), indices.options())
                         .repeat_interleave(nnz, 1));
   }
 
@@ -739,5 +736,4 @@ Tensor _sparse_csr_prod_cuda(const Tensor& input, IntArrayRef dims_to_reduce, bo
   return result;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -72,7 +72,7 @@ c10::SymNode NestedIntSymNodeImpl::mul(const c10::SymNode& other) {
   }
   c10::optional<int64_t> c = other->constant_int();
   TORCH_CHECK(c.has_value());
-  return SymNode(c10::make_intrusive<NestedIntSymNodeImpl>(val_, coeff_ * *c, vec_, sum_vec_, type_));
+  return SymNode(c10::make_intrusive<NestedIntSymNodeImpl>(val_, coeff_ * *c, vec_, type_));
 }
 
 // TODO: it would be nice to have a version of this that does not bump the

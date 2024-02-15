@@ -164,7 +164,7 @@ We highly recommend installing an [Anaconda](https://www.anaconda.com/download) 
 
 If you want to compile with CUDA support, [select a supported version of CUDA from our support matrix](https://pytorch.org/get-started/locally/), then install the following:
 - [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads)
-- [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v7 or above
+- [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v8.5 or above
 - [Compiler](https://gist.github.com/ax3l/9489132) compatible with CUDA
 
 Note: You could refer to the [cuDNN Support Matrix](https://docs.nvidia.com/deeplearning/cudnn/pdf/cuDNN-Support-Matrix.pdf) for cuDNN versions with the various supported CUDA, CUDA driver and NVIDIA hardware
@@ -194,7 +194,7 @@ pip install -r requirements.txt
 **On Linux**
 
 ```bash
-conda install mkl mkl-include
+conda install intel::mkl-static intel::mkl-include
 # CUDA only: Add LAPACK support for the GPU if needed
 conda install -c pytorch magma-cuda110  # or the magma-cuda* that matches your CUDA version from https://anaconda.org/pytorch/repo
 
@@ -207,7 +207,7 @@ make triton
 
 ```bash
 # Add this package on intel x86 processor machines only
-conda install mkl mkl-include
+conda install intel::mkl-static intel::mkl-include
 # Add these packages if torch.distributed is needed
 conda install pkg-config libuv
 ```
@@ -215,7 +215,7 @@ conda install pkg-config libuv
 **On Windows**
 
 ```bash
-conda install mkl mkl-include
+conda install intel::mkl-static intel::mkl-include
 # Add these packages if torch.distributed is needed.
 # Distributed package support on Windows is a prototype feature and is subject to changes.
 conda install -c conda-forge libuv=1.39

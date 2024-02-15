@@ -26,11 +26,11 @@ void _fused_adamw_cuda_impl_(
   std::vector<std::vector<at::Tensor>> tensor_lists{
       params.vec(), grads.vec(), exp_avgs.vec(), exp_avg_sqs.vec()};
 
-  float* grad_scale_ptr =
+  const float* grad_scale_ptr =
       grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;
-  float* found_inf_ptr =
+  const float* found_inf_ptr =
       found_inf.has_value() ? found_inf->data_ptr<float>() : nullptr;
-  float* lr_ptr = nullptr;
+  const float* lr_ptr = nullptr;
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf,
@@ -41,7 +41,7 @@ void _fused_adamw_cuda_impl_(
         multi_tensor_apply_for_fused_optimizer<4>(
             tensor_lists,
             state_steps,
-            FusedAdamMathFunctor<scalar_t, 4>(),
+            FusedAdamMathFunctor<scalar_t, 4, ADAM_MODE::ADAMW, false>(),
             lr_ptr, // unused
             lr,
             beta1,
@@ -49,10 +49,8 @@ void _fused_adamw_cuda_impl_(
             weight_decay,
             eps,
             maximize,
-            /* amsgrad */ false,
             grad_scale_ptr,
-            found_inf_ptr,
-            ADAM_MODE::ADAMW);
+            found_inf_ptr);
       });
 }
 
@@ -74,11 +72,11 @@ void _fused_adamw_cuda_impl_(
   std::vector<std::vector<at::Tensor>> tensor_lists{
       params.vec(), grads.vec(), exp_avgs.vec(), exp_avg_sqs.vec()};
 
-  float* grad_scale_ptr =
+  const float* grad_scale_ptr =
       grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;
-  float* found_inf_ptr =
+  const float* found_inf_ptr =
       found_inf.has_value() ? found_inf->data_ptr<float>() : nullptr;
-  float* lr_ptr = lr.data_ptr<float>();
+  const float* lr_ptr = lr.data_ptr<float>();
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf,
@@ -89,7 +87,7 @@ void _fused_adamw_cuda_impl_(
         multi_tensor_apply_for_fused_optimizer<4>(
             tensor_lists,
             state_steps,
-            FusedAdamMathFunctor<scalar_t, 4>(),
+            FusedAdamMathFunctor<scalar_t, 4, ADAM_MODE::ADAMW, false>(),
             lr_ptr,
             1.0, // unused
             beta1,
@@ -97,10 +95,8 @@ void _fused_adamw_cuda_impl_(
             weight_decay,
             eps,
             maximize,
-            /* amsgrad */ false,
             grad_scale_ptr,
-            found_inf_ptr,
-            ADAM_MODE::ADAMW);
+            found_inf_ptr);
       });
 }
 

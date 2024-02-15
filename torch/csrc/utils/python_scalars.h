@@ -36,7 +36,8 @@ inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
       *(uint32_t*)data = unpackIntegral<uint32_t>(obj, "uint32");
       break;
     case at::kUInt64:
-      *(uint64_t*)data = unpackIntegral<uint64_t>(obj, "uint64");
+      // NB: This doesn't allow implicit conversion of float to int
+      *(uint64_t*)data = THPUtils_unpackUInt64(obj);
       break;
     case at::kChar:
       *(int8_t*)data = unpackIntegral<int8_t>(obj, "int8");
@@ -100,7 +101,7 @@ inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
   }
 }
 
-inline PyObject* load_scalar(void* data, at::ScalarType scalarType) {
+inline PyObject* load_scalar(const void* data, at::ScalarType scalarType) {
   switch (scalarType) {
     case at::kByte:
       return THPUtils_packInt64(*(uint8_t*)data);
@@ -126,11 +127,11 @@ inline PyObject* load_scalar(void* data, at::ScalarType scalarType) {
     case at::kDouble:
       return PyFloat_FromDouble(*(double*)data);
     case at::kComplexHalf: {
-      auto data_ = reinterpret_cast<c10::complex<at::Half>*>(data);
+      auto data_ = reinterpret_cast<const c10::complex<at::Half>*>(data);
       return PyComplex_FromDoubles(data_->real(), data_->imag());
     }
     case at::kComplexFloat: {
-      auto data_ = reinterpret_cast<c10::complex<float>*>(data);
+      auto data_ = reinterpret_cast<const c10::complex<float>*>(data);
       return PyComplex_FromDoubles(data_->real(), data_->imag());
     }
     case at::kComplexDouble:
@@ -151,8 +152,8 @@ inline PyObject* load_scalar(void* data, at::ScalarType scalarType) {
       return PyFloat_FromDouble(at::convert<double, at::Float8_e5m2fnuz>(
           *(at::Float8_e5m2fnuz*)data));
     case at::kFloat8_e4m3fnuz:
-      return PyFloat_FromDouble(at::convert<double, at::Float8_e5m2fnuz>(
-          *(at::Float8_e5m2fnuz*)data));
+      return PyFloat_FromDouble(at::convert<double, at::Float8_e4m3fnuz>(
+          *(at::Float8_e4m3fnuz*)data));
     default:
       throw std::runtime_error("invalid type");
   }

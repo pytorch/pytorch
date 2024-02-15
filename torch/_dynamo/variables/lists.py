@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import collections
 import functools
 import inspect
@@ -408,6 +410,11 @@ class TupleVariable(BaseListVariable):
     ) -> "VariableTracker":
         return super().call_method(tx, name, args, kwargs)
 
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        if self.python_type() is not tuple:
+            return super().call_hasattr(tx, name)
+        return variables.ConstantVariable.create(hasattr((), name))
+
 
 class SizeVariable(TupleVariable):
     """torch.Size(...)"""
@@ -548,6 +555,10 @@ class NamedTupleVariable(TupleVariable):
 
     def as_python_constant(self):
         return self.python_type()(*[x.as_python_constant() for x in self.items])
+
+    def as_proxy(self):
+        assert self.python_type() is not SizeVariable
+        return self.python_type()(*self._as_proxy())
 
     def reconstruct(self, codegen):
         create_fn = getattr(self.tuple_cls, "_make", self.tuple_cls)

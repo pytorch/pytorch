@@ -955,7 +955,7 @@ class TestSymbolicTracing(TestCase):
         import torch.library
         from torch.library import Library
 
-        foo = Library("foo", "DEF")
+        foo = Library("foo", "DEF")  # noqa: TOR901
         foo.define("foo(Tensor self) -> Tensor")
 
         # Operator where meta and cpu disagree on strides
@@ -1019,6 +1019,44 @@ def forward(self, x_1, y_1):
     sym_size_int_1 = torch.ops.aten.sym_size.int(y_1, 0);  y_1 = None
     return (sym_size_int, sym_size_int_1)""")
 
+    def test_deduped_shape(self):
+        def f(s0, s1, x, y):
+            return torch.functional.broadcast_shapes(x.size(), y.size()[0]), torch.empty(x.shape[0])
+
+        x = torch.empty(3, 1)
+        y = torch.empty(5)
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        shape_env = ShapeEnv()
+
+        with FakeTensorMode(shape_env=shape_env, static_shapes=False) as fake_mode:
+            x = fake_mode.from_tensor(x)
+            y = fake_mode.from_tensor(y)
+            r = str(make_fx(f, tracing_mode="real")(x.shape[0], y.shape[0], x, y).code).strip()
+            self.assertExpectedInline(r, """\
+def forward(self, s0_1, s1_1, x_1, y_1):
+    empty = torch.ops.aten.empty.memory_format([s0_1], device = device(type='cpu'), pin_memory = False)
+    return ((s0_1, s1_1), empty)""")
+
+    def test_non_deduped_shape(self):
+        def f(x, y):
+            return torch.functional.broadcast_shapes(x.size(), y.size()[0]), torch.empty(x.shape[0])
+
+        x = torch.empty(3, 1)
+        y = torch.empty(5)
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        shape_env = ShapeEnv()
+
+        with FakeTensorMode(shape_env=shape_env, static_shapes=False) as fake_mode:
+            x = fake_mode.from_tensor(x)
+            y = fake_mode.from_tensor(y)
+            r = str(make_fx(f, tracing_mode="real")(x, y).code).strip()
+            self.assertExpectedInline(r, """\
+def forward(self, x_1, y_1):
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0);  x_1 = None
+    empty = torch.ops.aten.empty.memory_format([sym_size_int], device = device(type='cpu'), pin_memory = False)
+    sym_size_int_1 = torch.ops.aten.sym_size.int(y_1, 0);  y_1 = None
+    return ((sym_size_int, sym_size_int_1), empty)""")
+
     def test_unary(self):
         def f(x):
             assert x.shape[0] < 20
@@ -1066,6 +1104,23 @@ def forward(self, y_1, x_1):
     repeat_interleave = torch.ops.aten.repeat_interleave.Tensor(x_1);  x_1 = None
     index_select = torch.ops.aten.index_select.default(y_1, 1, repeat_interleave);  y_1 = repeat_interleave = None
     return index_select""")
+
+    def test_cumsum_unbacked(self):
+        def f(x):
+            y = x.item()
+            z = torch.randn((3, y, 3))
+            return z.cumsum(0)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.tensor([5])).code).strip()
+        self.assertExpectedInline(
+            r, """\
+def forward(self, x_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
+    randn = torch.ops.aten.randn.default([3, _local_scalar_dense, 3], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    cumsum = torch.ops.aten.cumsum.default(randn, 0);  randn = None
+    return cumsum"""  # noqa: B950
+        )
+
 
     def test_repeat_interleave_unbacked_output_size(self):
         def f(x, y):
@@ -1560,6 +1615,18 @@ def forward(self, a_1):
         f(a)
         make_fx(f, tracing_mode="symbolic")(a)
 
+    def test_fake_tensor_as_size(self):
+        def f(x):
+            r = torch.zeros([x])
+            return r
+
+        fx_g = make_fx(f, tracing_mode="symbolic")(torch.tensor(4))
+        self.assertExpectedInline(fx_g.code.strip(), """\
+def forward(self, x_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
+    zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    return zeros""")  # noqa: B950
+
     def test_expand(self):
         def f(a):
             b = torch.mul(a, a)
@@ -1814,7 +1881,6 @@ symbolic_tensor_failures = {
     xfail('histc', ''),  # Could not run 'aten::histc' with arguments from the 'Meta' backend. This could be because...
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
-    xfail('isin', ''),  # aten.isin.Tensor_Tensor - couldn't find symbolic meta function/decomposition
     xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -1825,7 +1891,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.fractional_max_pool3d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('nn.functional.interpolate', 'linear'),  # aten.upsample_linear1d.vec - couldn't find symbolic meta function/dec...
     xfail('nn.functional.interpolate', 'trilinear'),  # aten.upsample_trilinear3d.vec - couldn't find symbolic meta functi...
-    xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta function/deco...
     xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
@@ -1865,12 +1930,7 @@ symbolic_tensor_segfaults = {
 symbolic_tensor_failures.update(symbolic_tensor_segfaults)
 
 outplace_symbolic_tensor_failures = {
-    xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
-
     xfail('linalg.norm', ''),
-    xfail('round', 'decimals_0'),  # Cannot call numel() on tensor with symbolic sizes/strides
-    xfail('round', 'decimals_3'),  # Cannot call numel() on tensor with symbolic sizes/strides
-    xfail('round', 'decimals_neg_3'),  # Cannot call numel() on tensor with symbolic sizes/strides
 }
 
 inplace_symbolic_tensor_failures = {
@@ -1894,7 +1954,6 @@ out_symbolic_tensor_failures = {
     xfail('fft.ifft2', ''),
     xfail('fft.ifftn', ''),
     xfail('gather', ''),
-    xfail('i0', ''),
     xfail('linalg.cholesky', ''),
     xfail('linalg.cholesky_ex', ''),
     xfail('linalg.det', ''),
@@ -1922,10 +1981,6 @@ out_symbolic_tensor_failures = {
     xfail('nn.functional.avg_pool2d', ''),
     xfail('nn.functional.linear', ''),
     xfail('qr', ''),
-    xfail('round', ''),
-    xfail('round', 'decimals_0'),
-    xfail('round', 'decimals_3'),
-    xfail('round', 'decimals_neg_3'),
     xfail('scatter_add', ''),
     xfail('scatter', ''),
     xfail('sort', ''),

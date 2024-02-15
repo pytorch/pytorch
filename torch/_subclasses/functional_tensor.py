@@ -211,7 +211,8 @@ class FunctionalTensor(torch.Tensor):
 
 
 class FunctionalTensorMode(TorchDispatchMode):
-    def __init__(self, pre_dispatch=False):
+    def __init__(self, pre_dispatch=False, export=False):
+        self.export = export
         self.is_on_stack = False
         self.enter_stack = []
         # Indicates to our torch_dispatch dispatching infra that
@@ -260,6 +261,10 @@ class FunctionalTensorMode(TorchDispatchMode):
             return NotImplemented
 
         def _can_decompose(func):
+            # See https://github.com/pytorch/pytorch/pull/115258#issuecomment-1900755832
+            # We never decompose dropout in export
+            if self.export and func == torch.ops.aten.dropout.default:
+                return False
             # TODO (tmanlaibaatar)
             # Eventually, we don't want to decompose any aten op at all
             # but there is a safety and coverage gap that we need to close
@@ -377,6 +382,9 @@ class FunctionalTensorMode(TorchDispatchMode):
                         *args_unwrapped,
                         **kwargs_unwrapped,
                     )
+                    # We don't allow any mutation on result of dropout
+                    if self.export and func == torch.ops.aten.dropout.default:
+                        torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
                     outs_wrapped = pytree.tree_map_only(
                         torch.Tensor, wrap, outs_unwrapped
                     )

@@ -241,6 +241,18 @@ class MetaConverter:
             t, src, symbolic_context=symbolic_context
         ) -> Tuple[Tuple[int, ...], Tuple[int, ...], int]:
             if shape_env is not None:
+                def metafy_fn(t, src) -> torch.Tensor:
+                    _symbolic_context = None
+                    if symbolic_context is not None:
+                        _symbolic_context = symbolic_context.tensor_to_inner_context[t]
+                    return self.meta_tensor(
+                        t,
+                        shape_env,
+                        callback,
+                        source=src,
+                        symbolic_context=_symbolic_context
+                    )
+
                 fake_mode = torch._subclasses.fake_tensor.maybe_get_fake_mode(t)
                 if fake_mode is not None and fake_mode.shape_env is shape_env:
                     # Don't reallocate the sizes; the shape envs are the same,
@@ -251,6 +263,7 @@ class MetaConverter:
                         t,
                         src,
                         symbolic_context=symbolic_context,
+                        metafy_fn=metafy_fn,
                     )
             else:
                 assert symbolic_context is None
@@ -523,7 +536,8 @@ class MetaConverter:
                                         if symbolic_context is None
                                         else symbolic_context.inner_contexts[attr]
                                     ),
-                                )
+                                ),
+                                orig_t=inner_t,
                             ),
                             outer_size=sizes,
                             outer_stride=strides,
