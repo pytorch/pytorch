@@ -68,13 +68,26 @@ if torch._C._has_mkldnn:
             _users=1,
         )
 
-    def _unary_fusion_pattern(unary_fusion, call_fn, users, is_bf16):
-        # only insert to_dtype if is_bf16 is True
+    def _to_fp16(input_call):
+        return CallFunction(
+            prims.convert_element_type.default,
+            input_call,
+            KeywordArg("to_fp16"),
+            _users=1,
+        )
+
+    def _unary_fusion_pattern(unary_fusion, call_fn, users, lowp_dtype):
+        # only insert to_dtype if lowp_dtype is True
         computation_call = (
-            _to_float(call_fn(), users=users) if is_bf16 else call_fn(users=users)
+            _to_float(call_fn(), users=users) if lowp_dtype else call_fn(users=users)
         )
         out = unary_fusion(computation_call)
-        return _to_bf16(out) if is_bf16 else out
+        if lowp_dtype == torch.bfloat16:
+            return _to_bf16(out)
+        elif lowp_dtype == torch.float16:
+            return _to_fp16(out)
+        else:
+            return out
 
     def _gelu_fusion_1(computation_call):
         return CallFunction(
@@ -194,11 +207,11 @@ if torch._C._has_mkldnn:
 
         return fn
 
-    def _is_valid_computation_unary_fusion(computation_op, is_bf16=False):
+    def _is_valid_computation_unary_fusion(computation_op, lowp_dtype=None):
         def fn(match):
             matched = _is_single_computation_op(computation_op)(match)
             computation_node = filter_nodes(match.nodes, computation_op)[0]
-            if is_bf16:
+            if lowp_dtype:
                 conversion_dtype_nodes = filter_nodes(
                     match.nodes, prims.convert_element_type.default
                 )
@@ -207,23 +220,21 @@ if torch._C._has_mkldnn:
                 # fusion pattern is always in the form of computation_op + to_float32 + unary_op + to_bfloat16
                 if computation_node == conversion_dtype_nodes[0].args[0]:
                     to_float = conversion_dtype_nodes[0].args[1]
-                    to_bf16 = conversion_dtype_nodes[1].args[1]
+                    to_lp = conversion_dtype_nodes[1].args[1]
                 else:
                     to_float = conversion_dtype_nodes[1].args[1]
-                    to_bf16 = conversion_dtype_nodes[0].args[1]
-                matched = (
-                    matched and to_float == torch.float and to_bf16 == torch.bfloat16
-                )
+                    to_lp = conversion_dtype_nodes[0].args[1]
+                matched = matched and to_float == torch.float and to_lp == lowp_dtype
             return matched
 
         return fn
 
     def _register_unary_fusion_lowering(
-        pattern, unary_attr, computation_op, is_bf16=False
+        pattern, unary_attr, computation_op, lowp_dtype=None
     ):
         @register_lowering_pattern(
             pattern,
-            extra_check=_is_valid_computation_unary_fusion(computation_op, is_bf16),
+            extra_check=_is_valid_computation_unary_fusion(computation_op, lowp_dtype),
         )
         def fn(match, *args, **kwargs):
             computation_args = list(args)[:-3] + [
@@ -235,7 +246,7 @@ if torch._C._has_mkldnn:
 
         return fn
 
-    def _register_leaky_relu_fusion_lowering(pattern, computation_op, is_bf16=False):
+    def _register_leaky_relu_fusion_lowering(pattern, computation_op, lowp_dtype=None):
         @register_lowering_pattern(
             pattern, extra_check=_is_single_computation_op(computation_op)
         )
@@ -245,10 +256,14 @@ if torch._C._has_mkldnn:
                 matched = False
             else:  # inp is a Number
                 matched = True
-            if is_bf16:
+            if lowp_dtype:
                 dtype1 = kwargs.get("to_float")
-                dtype2 = kwargs.get("to_bf16")
-                matched = matched and dtype1 == torch.float and dtype2 == torch.bfloat16
+                dtype2 = (
+                    kwargs.get("to_bf16")
+                    if lowp_dtype == torch.bfloat16
+                    else kwargs.get("to_fp16")
+                )
+                matched = matched and dtype1 == torch.float and dtype2 == lowp_dtype
             computation_args = list(args)
             if matched:
                 computation_args = computation_args[:-3] + [
@@ -260,22 +275,20 @@ if torch._C._has_mkldnn:
             else:
                 # computation_args += ["none", [], ""]
                 out = L[computation_op](*computation_args)
-                if is_bf16:
+                if lowp_dtype:
                     out = L[prims.convert_element_type.default](out, dtype=torch.float)
                 out = L[aten.where](
                     L[aten.gt](out, 0),
                     out,
                     L[aten.mul](out, negative_slope),
                 )
-                if is_bf16:
-                    out = L[prims.convert_element_type.default](
-                        out, dtype=torch.bfloat16
-                    )
+                if lowp_dtype:
+                    out = L[prims.convert_element_type.default](out, dtype=dtype2)  # type: ignore[possibly-undefined]
                 return out
 
         return fn
 
-    def _register_hardtanh_fusion_lowering(pattern, computation_op, is_bf16=False):
+    def _register_hardtanh_fusion_lowering(pattern, computation_op, lowp_dtype=None):
         @register_lowering_pattern(
             pattern, extra_check=_is_single_computation_op(computation_op)
         )
@@ -289,10 +302,14 @@ if torch._C._has_mkldnn:
             else:  # inp is a Number
                 assert max_value is not None
                 matched = min_value <= max_value
-            if is_bf16:
+            if lowp_dtype:
                 dtype1 = kwargs.get("to_float")
-                dtype2 = kwargs.get("to_bf16")
-                matched = matched and dtype1 == torch.float and dtype2 == torch.bfloat16
+                dtype2 = (
+                    kwargs.get("to_bf16")
+                    if lowp_dtype == torch.bfloat16
+                    else kwargs.get("to_fp16")
+                )
+                matched = matched and dtype1 == torch.float and dtype2 == lowp_dtype
             computation_args = list(args)
             if matched:
                 computation_args = computation_args[:-3] + [
@@ -303,13 +320,11 @@ if torch._C._has_mkldnn:
                 return L[computation_op](*computation_args)
             else:
                 out = L[computation_op](*computation_args)
-                if is_bf16:
+                if lowp_dtype:
                     out = L[prims.convert_element_type.default](out, dtype=torch.float)
                 out = L[aten.clamp_max](L[aten.clamp_min](out, min_value), max_value)
-                if is_bf16:
-                    out = L[prims.convert_element_type.default](
-                        out, dtype=torch.bfloat16
-                    )
+                if lowp_dtype:
+                    out = L[prims.convert_element_type.default](out, dtype=dtype2)  # type: ignore[possibly-undefined]
                 return out
 
         return fn
@@ -325,15 +340,16 @@ if torch._C._has_mkldnn:
         binary_nodes = filter_nodes(match.nodes, fn)
         if len(binary_nodes) < 1:
             return False
+
+        def get_meta_value(argument: torch.fx.node.Argument):
+            # Only torch.fx.Node is expected to have meta.
+            if isinstance(argument, torch.fx.Node):
+                return argument.meta.get("val", None)
+            return None
+
         if any(
-            not (
-                hasattr(n.args[0], "meta")
-                and isinstance(n.args[0].meta.get("val", None), torch.Tensor)
-            )
-            or not (
-                hasattr(n.args[1], "meta")
-                and isinstance(n.args[1].meta.get("val", None), torch.Tensor)
-            )
+            not isinstance(get_meta_value(n.args[0]), torch.Tensor)
+            or not isinstance(get_meta_value(n.args[1]), torch.Tensor)
             for n in binary_nodes
         ):
             return False
@@ -345,9 +361,9 @@ if torch._C._has_mkldnn:
         ):
             return False
         if any(
-            n.args[0].meta["val"].size() != n.args[1].meta["val"].size()
-            or n.args[0].meta["val"].device != n.args[1].meta["val"].device
-            or n.args[0].meta["val"].dtype != n.args[1].meta["val"].dtype
+            get_meta_value(n.args[0]).size() != get_meta_value(n.args[1]).size()
+            or get_meta_value(n.args[0]).device != get_meta_value(n.args[1]).device
+            or get_meta_value(n.args[0]).dtype != get_meta_value(n.args[1]).dtype
             for n in binary_nodes
         ):
             return False
@@ -420,15 +436,19 @@ if torch._C._has_mkldnn:
                 _compute_index = 1 if (_other_index == 0) else 0
                 return _binary_node.args[_compute_index]
 
-            if any(
-                len(
-                    _get_remaining_users(
-                        n.args[other_index], _get_compute_node(n, other_index)
+            def _other_input_not_inplaceable(_binary_node, _other_index):
+                _compute_node = _get_compute_node(_binary_node, _other_index)
+                return (
+                    len(
+                        _get_remaining_users(
+                            _binary_node.args[_other_index], _compute_node
+                        )
                     )
+                    > 1
+                    or _binary_node.args[_other_index] == _compute_node.args[0]
                 )
-                > 1
-                for n in binary_nodes
-            ):
+
+            if any(_other_input_not_inplaceable(n, other_index) for n in binary_nodes):
                 return False
             if any(
                 n.args[other_index].op in ["placeholder", "output"]
@@ -469,6 +489,17 @@ if torch._C._has_mkldnn:
 
         return fn
 
+    def _can_be_inplace(_other):
+        if isinstance(_other.data, ir.View):
+            return _can_be_inplace(_other.data)
+        else:
+            return not (
+                isinstance(_other.data, ir.ReinterpretView)
+                or isinstance(
+                    _other.get_layout(), (ir.MutationLayout, ir.AliasedLayout)
+                )
+            )
+
     def _register_binary_unary_maybe_inplace_fusion_lowering(
         pattern,
         computation_op,
@@ -502,11 +533,7 @@ if torch._C._has_mkldnn:
                     computation_args += [1.0, None, [], None]
             # Make sure the other is not an alias or mutation(fx side doesn't has such info).
             other.realize()
-            can_be_inplace = not (
-                isinstance(other.data, ir.ReinterpretView)
-                or isinstance(other.get_layout(), (ir.MutationLayout, ir.AliasedLayout))
-            )
-            if not can_be_inplace:
+            if not _can_be_inplace(other):
                 return L[outplace_fusion_op](*computation_args)
             return L[inplace_fusion_op](*computation_args)
 
@@ -527,30 +554,30 @@ if torch._C._has_mkldnn:
     def _register_unary_fusion():
         computation_call_fns = [_conv_call, _linear_call, _conv_transpose_call]
 
-        def _unary_fusion_patterns(is_bf16):
+        def _unary_fusion_patterns(lowp_dtype):
             replacement_unary_fusion_patterns = {
                 UnaryAttr("gelu", algorithm_attr="tanh"): [
-                    _unary_fusion_pattern(_gelu_fusion_2, call_fn, 4, is_bf16)
+                    _unary_fusion_pattern(_gelu_fusion_2, call_fn, 4, lowp_dtype)
                     for call_fn in computation_call_fns
                 ],
                 UnaryAttr("gelu", algorithm_attr="none"): [
-                    _unary_fusion_pattern(_gelu_fusion_1, call_fn, 2, is_bf16)
+                    _unary_fusion_pattern(_gelu_fusion_1, call_fn, 2, lowp_dtype)
                     for call_fn in computation_call_fns
                 ],
                 UnaryAttr("hardswish"): [
-                    _unary_fusion_pattern(_hardswish_fusion, call_fn, 2, is_bf16)
+                    _unary_fusion_pattern(_hardswish_fusion, call_fn, 2, lowp_dtype)
                     for call_fn in computation_call_fns
                 ],
                 UnaryAttr("hardsigmoid"): [
-                    _unary_fusion_pattern(_hardsigmoid_fusion, call_fn, 1, is_bf16)
+                    _unary_fusion_pattern(_hardsigmoid_fusion, call_fn, 1, lowp_dtype)
                     for call_fn in computation_call_fns
                 ],
                 UnaryAttr("swish"): [
-                    _unary_fusion_pattern(_silu_fusion, call_fn, 2, is_bf16)
+                    _unary_fusion_pattern(_silu_fusion, call_fn, 2, lowp_dtype)
                     for call_fn in computation_call_fns
                 ],
             }
-            if not is_bf16:
+            if not lowp_dtype:
                 call_user1 = [call_fn(users=1) for call_fn in computation_call_fns]
                 replacement_unary_fusion_patterns.update(
                     {
@@ -568,30 +595,32 @@ if torch._C._has_mkldnn:
 
             return replacement_unary_fusion_patterns
 
-        for is_bf16 in [True, False]:
-            replace_patterns = _unary_fusion_patterns(is_bf16)
+        for lowp_dtype in [torch.bfloat16, torch.float16, None]:
+            replace_patterns = _unary_fusion_patterns(lowp_dtype)
             for unary_attr, patterns in replace_patterns.items():
                 _register_unary_fusion_lowering(
-                    patterns[0], unary_attr, computation_ops[0], is_bf16
+                    patterns[0], unary_attr, computation_ops[0], lowp_dtype
                 )
                 _register_unary_fusion_lowering(
-                    patterns[1], unary_attr, computation_ops[1], is_bf16
+                    patterns[1], unary_attr, computation_ops[1], lowp_dtype
                 )
                 _register_unary_fusion_lowering(
-                    patterns[2], unary_attr, computation_ops[2], is_bf16
+                    patterns[2], unary_attr, computation_ops[2], lowp_dtype
                 )
             _leaky_relu_patterns = [
-                _unary_fusion_pattern(_leaky_relu_fusion, call_fn, 3, is_bf16)
+                _unary_fusion_pattern(_leaky_relu_fusion, call_fn, 3, lowp_dtype)
                 for call_fn in computation_call_fns
             ]
             for pattern, computation_op in zip(_leaky_relu_patterns, computation_ops):
-                _register_leaky_relu_fusion_lowering(pattern, computation_op, is_bf16)
+                _register_leaky_relu_fusion_lowering(
+                    pattern, computation_op, lowp_dtype
+                )
             hardtanh_patterns = [
-                _unary_fusion_pattern(_hardtanh_fusion, call_fn, 1, is_bf16)
+                _unary_fusion_pattern(_hardtanh_fusion, call_fn, 1, lowp_dtype)
                 for call_fn in computation_call_fns
             ]
             for pattern, computation_op in zip(hardtanh_patterns, computation_ops):
-                _register_hardtanh_fusion_lowering(pattern, computation_op, is_bf16)
+                _register_hardtanh_fusion_lowering(pattern, computation_op, lowp_dtype)
 
     def _register_inplace_fusion():
         binary_ops = [aten.add, ops.add]
@@ -816,6 +845,12 @@ if torch._C._has_mkldnn:
             for POS_ARG in POS_ARGS
         ):
             return False
+        if any(
+            lstm_node.args[POS_ARG].meta.get("val").dtype == torch.float16
+            and not mkldnn._is_mkldnn_fp16_supported()
+            for POS_ARG in POS_ARGS
+        ):
+            return False
 
         return True
 
@@ -843,6 +878,12 @@ if torch._C._has_mkldnn:
             or weight_meta_value.dtype == torch.bfloat16
         ):
             if not mkldnn._is_mkldnn_bf16_supported():
+                return False
+        if (
+            input_meta_value.dtype == torch.float16
+            or weight_meta_value.dtype == torch.float16
+        ):
+            if not mkldnn._is_mkldnn_fp16_supported():
                 return False
         is_transposed = conv_node.args[-3]
         if is_transposed:
@@ -878,11 +919,14 @@ if torch._C._has_mkldnn:
         if input_meta_value is None or weight_meta_value is None:
             return False
         batch_size = input_meta_value.shape[0]
-        is_bf16_weight = weight_meta_value.dtype == torch.bfloat16
+        is_lp_weight = weight_meta_value.dtype in (
+            torch.bfloat16,
+            torch.float16,
+        )
         # on x86, for fp32, mkl should be enabled and batch_size should not be a free symbol.
         # on aarch64, use mkldnn op for fp32 as well if acl is enabled
         if (
-            not is_bf16_weight
+            not is_lp_weight
             and not mkldnn._is_mkldnn_acl_supported()
             and ((not torch._C.has_mkl) or has_free_symbols(batch_size))
         ):
@@ -909,6 +953,12 @@ if torch._C._has_mkldnn:
             or weight_meta_value.dtype == torch.bfloat16
         ):
             if not mkldnn._is_mkldnn_bf16_supported():
+                return False
+        if (
+            input_meta_value.dtype == torch.float16
+            or weight_meta_value.dtype == torch.float16
+        ):
+            if not mkldnn._is_mkldnn_fp16_supported():
                 return False
         return True
 
@@ -1055,12 +1105,15 @@ if torch._C._has_mkldnn:
                     "call_function", aten.permute.default, (weight, (1, 0))
                 )
                 weight_dtype = weight.meta.get("val").dtype
-                is_bf16_weight = weight_dtype == torch.bfloat16
+                is_lp_weight = weight_dtype in (
+                    torch.bfloat16,
+                    torch.float16,
+                )
                 batch_size = input.meta.get("val").shape[0]
                 if has_free_symbols(batch_size):
                     assert (
-                        is_bf16_weight or mkldnn._is_mkldnn_acl_supported()
-                    ), f"only bf16 weight prepacking supports dynamic shape inputs but got {weight_dtype}"
+                        is_lp_weight or mkldnn._is_mkldnn_acl_supported()
+                    ), f"only bf16/fp16 weight prepacking supports dynamic shape inputs but got {weight_dtype}"
                 # For bfloat16 dynamic shape path, using input size hint to pack weight for a better performance.
                 packed_weight_inputs = (
                     transpose_weight_node,
@@ -1070,7 +1123,7 @@ if torch._C._has_mkldnn:
                 )
                 packed_weight_op = (
                     mkldnn._reorder_linear_weight
-                    if (is_bf16_weight or mkldnn._is_mkldnn_acl_supported())
+                    if (is_lp_weight or mkldnn._is_mkldnn_acl_supported())
                     else torch.ops.mkl._mkl_reorder_linear_weight
                 )
                 packed_weight_node = graph.create_node(
@@ -1078,7 +1131,7 @@ if torch._C._has_mkldnn:
                 )
 
                 packed_linear_inputs: Tuple[Any, ...] = (input, packed_weight_node)
-                if is_bf16_weight or mkldnn._is_mkldnn_acl_supported():
+                if is_lp_weight or mkldnn._is_mkldnn_acl_supported():
                     packed_linear_inputs += (bias, "none", [], "")
                     packed_linear_op = mkldnn._linear_pointwise.default
                 else:

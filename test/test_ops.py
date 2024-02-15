@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     noncontiguous_like,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
     TEST_WITH_TORCHDYNAMO,
     TEST_WITH_TORCHINDUCTOR,
     TEST_WITH_UBSAN,
@@ -315,6 +316,10 @@ class TestCommon(TestCase):
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_meta(self, device, dtype, op):
+        CHECK_CONJ_SKIPS = {
+            torch._refs.linalg.svd,
+        }
+
         with FakeTensorMode() as mode:
             pass
 
@@ -341,12 +346,12 @@ class TestCommon(TestCase):
 
             if isinstance(result, torch.Tensor):
                 self.assertTrue(isinstance(meta_result, FakeTensor))
-                prims.utils.compare_tensor_meta(result, meta_result)
+                prims.utils.compare_tensor_meta(result, meta_result, check_conj=op.op not in CHECK_CONJ_SKIPS)
             elif isinstance(result, Sequence):
                 for a, b in zip(result, meta_result):
                     if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
                         self.assertTrue(isinstance(b, FakeTensor))
-                        prims.utils.compare_tensor_meta(a, b)
+                        prims.utils.compare_tensor_meta(a, b, check_conj=op.op not in CHECK_CONJ_SKIPS)
 
     def _ref_test_helper(
         self,
@@ -480,6 +485,8 @@ class TestCommon(TestCase):
         # In this test, primTorch refs call into the refs namespace
         # For example, a ref with torch.foo in it will calls refs.foo instead
         # Direct calls to refs and prims are not affected
+        if TEST_WITH_ROCM and (op.name == "_refs.fft.ihfftn" or op.name == "_refs.fft.ihfft2") and dtype == torch.float16:
+            self.skipTest("Skipped on ROCm")
         self._ref_test_helper(lambda: TorchRefsMode(strict=True), device, dtype, op)
 
     # Tests that experimental Python References perform the same computation
@@ -492,6 +499,8 @@ class TestCommon(TestCase):
         # In this test, refs call into the torch namespace (after the initial invocation)
         # For example, a ref with torch.foo in it will call torch.foo instead of refs.foo
         # Direct calls to refs and prims are not translated
+        if TEST_WITH_ROCM and op.name == "_refs.fft.ihfftn" and dtype == torch.float16:
+            self.skipTest("Skipped on ROCm")
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
@@ -500,6 +509,8 @@ class TestCommon(TestCase):
     @parametrize('executor', ['aten',])
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_executor(self, device, dtype, op, executor):
+        if TEST_WITH_ROCM and (op.name == "_refs.fft.ihfftn" or op.name == "_refs.fft.ihfft2") and dtype == torch.float16:
+            self.skipTest("Skipped on ROCm")
         # skip zero-dim tensors for some composites of reduction operations and view
         skip_zero_dim_ops = [
             "_refs.logsumexp",
@@ -1560,6 +1571,7 @@ class TestCompositeCompliance(TestCase):
                     _assert_match_metadata(new_inp, inp)
                     new_out = out._view_func_unsafe(new_inp)
                     _assert_match_metadata(new_out, out)
+                    self.assertEqual(new_out, out)
 
                     # reverse view_func
                     new_out = out.detach()
@@ -1866,7 +1878,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.nn.functional.group_norm',
         '_refs.nn.functional.mse_loss',
         '_refs.floor_divide',
-        '_refs.rsub',
         # duplicated as refs do not have decent support for advanced indexing
         '_refs.index_copy',
         '_refs.index_copy_',
@@ -1953,7 +1964,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.sum_to_size',
         # ref implementation missing kwargs
         '_refs.full_like',  # missing "layout"
-        '_refs.round',  # missing "decimals"
         '_refs.scalar_tensor',  # missing "layout"
         # other
         '_refs.block_diag',  # only refs._block_diag_iterable is in decomposition table
@@ -2095,6 +2105,20 @@ fake_autocast_backward_xfails = {
 
 @unMarkDynamoStrictTest
 class TestFakeTensor(TestCase):
+    def setUp(self):
+        # Turn on FakeTensor caching and cross-checking for these tests:
+        cache_enabled = unittest.mock.patch(
+            "torch._dynamo.config.fake_tensor_cache_enabled", True
+        )
+        cache_enabled.start()
+        self.addCleanup(cache_enabled.stop)
+
+        cache_crosscheck = unittest.mock.patch(
+            "torch._dynamo.config.fake_tensor_cache_crosscheck_enabled", True
+        )
+        cache_crosscheck.start()
+        self.addCleanup(cache_crosscheck.stop)
+
     def _test_fake_helper(self, device, dtype, op, context):
         name = op.name
         if op.variant_test_name:

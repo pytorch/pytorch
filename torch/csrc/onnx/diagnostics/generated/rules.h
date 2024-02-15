@@ -8,9 +8,7 @@
  * Diagnostic rules for PyTorch ONNX export.
  */
 
-namespace torch {
-namespace onnx {
-namespace diagnostics {
+namespace torch::onnx::diagnostics {
 
 enum class Rule : uint32_t {
   /**
@@ -102,6 +100,4 @@ static constexpr const char* const kPyRuleNames[] = {
     "find_operator_overloads_in_onnx_registry",
 };
 
-} // namespace diagnostics
-} // namespace onnx
-} // namespace torch
+} // namespace torch::onnx::diagnostics

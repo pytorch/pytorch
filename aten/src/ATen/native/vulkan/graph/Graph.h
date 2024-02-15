@@ -6,9 +6,9 @@
 
 #include <ATen/native/vulkan/api/Context.h>
 #include <ATen/native/vulkan/api/Tensor.h>
+#include <ATen/native/vulkan/api/Types.h>
 
 #include <ATen/native/vulkan/graph/Config.h>
-#include <ATen/native/vulkan/graph/Exception.h>
 #include <ATen/native/vulkan/graph/Value.h>
 
 namespace at {
@@ -16,6 +16,12 @@ namespace native {
 namespace vulkan {
 
 using ValueRef = int32_t;
+
+struct IOValueRef {
+  ValueRef value;
+  ValueRef staging;
+};
+
 class ComputeGraph;
 
 /*
@@ -41,6 +47,21 @@ class OpNode {
   virtual void encode_execute(ComputeGraph* graph) const {}
 };
 
+struct SharedObject {
+  friend class ComputeGraph;
+
+  explicit SharedObject() = default;
+
+  VkMemoryRequirements aggregate_memory_requirements;
+  VmaAllocationCreateInfo aggregate_create_info;
+  std::vector<ValueRef> users;
+  api::MemoryAllocation allocation;
+
+  void add_user(ComputeGraph* const graph, const ValueRef idx);
+  void allocate(ComputeGraph* const graph);
+  void bind_users(ComputeGraph* const graph);
+};
+
 /*
  * This is the core data structure used to execute Vulkan models in graph mode.
  * As opposed to ATen/eager mode where a command buffer is encoded every
@@ -61,6 +82,7 @@ class ComputeGraph final {
  private:
   GraphConfig config_;
   std::unique_ptr<api::Context> context_;
+  std::vector<SharedObject> shared_objects_;
   std::vector<Value> values_;
 
   std::vector<std::unique_ptr<OpNode>> prepack_nodes_;
@@ -93,24 +115,24 @@ class ComputeGraph final {
     return values_[idx];
   }
 
-  inline IntArrayRef get_val_sizes(ValueRef idx) {
+  inline const std::vector<int64_t>& get_val_sizes(ValueRef idx) {
     Value& val = get_val(idx);
     if (val.isTensor()) {
       return val.toTensor().sizes();
     } else if (val.isTensorRef()) {
       return val.toTensorRef().sizes;
     }
-    VKGRAPH_THROW("Could not get sizes of value with type ", val.type());
+    VK_THROW("Could not get sizes of value with type ", val.type());
   }
 
-  inline c10::ScalarType get_val_dtype(ValueRef idx) {
+  inline api::ScalarType get_val_dtype(ValueRef idx) {
     Value& val = get_val(idx);
     if (val.isTensor()) {
       return val.toTensor().dtype();
     } else if (val.isTensorRef()) {
       return val.toTensorRef().dtype;
     }
-    VKGRAPH_THROW("Could not get dtype of value with type ", val.type());
+    VK_THROW("Could not get dtype of value with type ", val.type());
   }
 
   inline std::vector<std::unique_ptr<OpNode>>& prepack_nodes() {
@@ -125,15 +147,32 @@ class ComputeGraph final {
   // Graph Building
   //
 
-  ValueRef add_tensor(const IntArrayRef sizes, const c10::ScalarType dtype);
+  ValueRef add_tensor(
+      const std::vector<int64_t>& sizes,
+      const api::ScalarType dtype = api::ScalarType::Float,
+      const int64_t shared_object_idx = -1);
   ValueRef add_tensorref(
-      const IntArrayRef sizes,
-      const c10::ScalarType dtype,
+      const std::vector<int64_t>& sizes,
+      const api::ScalarType dtype,
       const void* const data);
-  ValueRef add_staging(const c10::ScalarType dtype, const size_t numel);
+  ValueRef add_staging(const api::ScalarType dtype, const size_t numel);
 
   ValueRef set_input_tensor(const ValueRef idx, const bool use_staging = true);
   ValueRef set_output_tensor(const ValueRef idx, const bool use_staging = true);
+
+  /*
+   * Convenience function to add an input tensor along with its staging buffer
+   */
+  inline IOValueRef add_input_tensor(
+      const std::vector<int64_t>& sizes,
+      const api::ScalarType dtype,
+      const int64_t shared_object_idx = -1) {
+    ValueRef t = add_tensor(sizes, dtype, shared_object_idx);
+    ValueRef staging = set_input_tensor(t);
+    return {t, staging};
+  }
+
+  SharedObject& get_shared_object(const int64_t idx);
 
   //
   // Input/Output

@@ -4,10 +4,12 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/api/Common.h>
+#include <ATen/native/vulkan/api/vk_api.h>
+
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
-#include <c10/util/flat_hash_map.h>
+
+#include <unordered_map>
 
 namespace at {
 namespace native {
@@ -41,7 +43,7 @@ class DescriptorSet final {
   VkDevice device_;
   VkDescriptorSet handle_;
   ShaderLayout::Signature shader_layout_signature_;
-  c10::SmallVector<ResourceBinding, 6u> bindings_;
+  std::vector<ResourceBinding> bindings_;
 
  public:
   DescriptorSet& bind(const uint32_t, const VulkanBuffer&);
@@ -114,7 +116,7 @@ class DescriptorPool final {
   DescriptorPoolConfig config_;
   // New Descriptors
   std::mutex mutex_;
-  ska::flat_hash_map<VkDescriptorSetLayout, DescriptorSetPile> piles_;
+  std::unordered_map<VkDescriptorSetLayout, DescriptorSetPile> piles_;
 
  public:
   DescriptorSet get_descriptor_set(

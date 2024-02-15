@@ -53,6 +53,9 @@ class TORCH_API PrefixStore : public Store {
 
   c10::intrusive_ptr<Store> getUnderlyingStore();
 
+  // Recursively to fetch the store before layers of wrapping with PrefixStore.
+  c10::intrusive_ptr<Store> getUnderlyingNonPrefixStore();
+
  protected:
   std::string prefix_;
   c10::intrusive_ptr<Store> store_;

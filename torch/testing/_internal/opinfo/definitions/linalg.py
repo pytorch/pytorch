@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import itertools
 import random
 import unittest
