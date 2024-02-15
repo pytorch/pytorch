@@ -287,8 +287,12 @@ bool usable(
 
 static Tensor reshape_to_2d(const Tensor& input_arg) {
   TORCH_CHECK(
-      input_arg.dim() >= 2,
-      "Vulkan Linear op only supports input tensor with dim >= 2");
+      input_arg.dim() >= 1,
+      "Vulkan Linear op only supports input tensor with dim >= 1");
+
+  if (input_arg.dim() == 1) {
+    return input_arg.unsqueeze(0);
+  }
   const IntArrayRef input_sizes = input_arg.sizes();
   const auto d =
       c10::multiply_integers(input_sizes.cbegin(), input_sizes.end() - 1);

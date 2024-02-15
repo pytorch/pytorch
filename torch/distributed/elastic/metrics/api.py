@@ -126,7 +126,7 @@ def prof(fn=None, group: str = "torchelastic"):
                 put_metric(f"{key}.failure", 1, group)
                 raise
             finally:
-                put_metric(f"{key}.duration.ms", get_elapsed_time_ms(start), group)
+                put_metric(f"{key}.duration.ms", get_elapsed_time_ms(start), group)  # type: ignore[possibly-undefined]
             return result
 
         return wrapper
@@ -164,7 +164,7 @@ def profile(group=None):
                 publish_metric(
                     group,
                     f"{func.__name__}.duration.ms",
-                    get_elapsed_time_ms(start_time),
+                    get_elapsed_time_ms(start_time),  # type: ignore[possibly-undefined]
                 )
             return result
 

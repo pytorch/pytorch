@@ -105,9 +105,7 @@ def createResolutionCallbackFromEnv(lookup_base):
 
     def lookupInModule(qualified_name, module):
         if "." in qualified_name:
-            parts = qualified_name.split(".")
-            base = parts[0]
-            remaining_pieces = ".".join(parts[1:])
+            base, remaining_pieces = qualified_name.split(".", maxsplit=1)
             module_value = getattr(module, base)
             return lookupInModule(remaining_pieces, module_value)
         else:

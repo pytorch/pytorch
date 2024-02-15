@@ -37,9 +37,10 @@ class TestExportTorchbind(TestCase):
         with enable_torchbind_tracing():
             exported_program = export(f, args, kwargs, strict=strict)
         reversed_kwargs = {key: kwargs[key] for key in reversed(kwargs)}
-        self.assertEqual(exported_program(*args, **kwargs), f(*args, **kwargs))
+        self.assertEqual(exported_program.module()(*args, **kwargs), f(*args, **kwargs))
         self.assertEqual(
-            exported_program(*args, **reversed_kwargs), f(*args, **reversed_kwargs)
+            exported_program.module()(*args, **reversed_kwargs),
+            f(*args, **reversed_kwargs),
         )
 
     def test_none(self):
