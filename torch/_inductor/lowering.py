@@ -1066,14 +1066,6 @@ def pointwise_cat(inputs, dim=0):
     )
 
 
-def _permute_to_axis_zero(x, axis):
-    new_axis_list = list(range(len(x.get_size())))
-    new_axis_list[axis] = 0
-    new_axis_list[0] = axis
-    y = permute(x, tuple(new_axis_list))
-    return y, new_axis_list
-
-
 @register_lowering(quantized_decomposed.quantize_per_channel, type_promotion_kind=None)
 def quantized_decomposed_quantize_per_channel(
     input: TensorBox,
@@ -1096,22 +1088,29 @@ def quantized_decomposed_quantize_per_channel(
         input.get_size()
     ), f"Expecting axis to be < {len(input.get_size())}"
 
-    input, permute_axis_list = _permute_to_axis_zero(input, axis)
-    original_input_size = input.get_size()
-    input = view(input, (original_input_size[0], -1))
-    res = maximum(
-        quant_min,
-        minimum(
-            quant_max,
-            add(
-                round(mul(input, unsqueeze(div(1.0, scales), 1))),
-                unsqueeze(zero_points, 1),
-            ),
-        ),
+    input_loader = input.make_loader()
+    scales_loader = scales.make_loader()
+    zero_points_loader = zero_points.make_loader()
+
+    def inner_fn(idx):
+        channel_idx = (idx[axis],)
+
+        input = input_loader(idx)
+        scale = scales_loader(channel_idx)
+        zero_point = zero_points_loader(channel_idx)
+        qmin, qmax = _create_constants(quant_min, quant_max, dtype=torch.float32)
+
+        inv_scale = ops.reciprocal(scale)
+        val = ops.round(input * inv_scale) + zero_point
+        clamped = ops.maximum(qmin, ops.minimum(qmax, val))
+        return ops.to_dtype(clamped, dtype)
+
+    return Pointwise.create(
+        device=input.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=input.get_size(),
     )
-    res = view(res, original_input_size)
-    out = permute(res, tuple(permute_axis_list))
-    return to_dtype(out, dtype)
 
 
 @register_lowering(
@@ -1135,16 +1134,26 @@ def quantized_decomposed_dequantize_per_channel(
         input.get_size()
     ), f"Expecting axis to be < {len(input.get_size())}"
 
-    input, permute_axis_list = _permute_to_axis_zero(input, axis)
-    original_input_size = input.get_size()
-    input = view(input, (original_input_size[0], -1))
-    res = mul(
-        sub(to_dtype(input, torch.float32), unsqueeze(zero_points, 1)),
-        unsqueeze(scales, 1),
+    input_loader = input.make_loader()
+    scales_loader = scales.make_loader()
+    zero_points_loader = zero_points.make_loader()
+
+    def inner_fn(idx):
+        channel_idx = (idx[axis],)
+
+        input = input_loader(idx)
+        scale = scales_loader(channel_idx)
+        zero_point = zero_points_loader(channel_idx)
+
+        val = ops.sub(ops.to_dtype(input, torch.float32), zero_point) * scale
+        return val
+
+    return Pointwise.create(
+        device=input.get_device(),
+        dtype=torch.float32,
+        inner_fn=inner_fn,
+        ranges=input.get_size(),
     )
-    res = view(res, original_input_size)
-    out = permute(res, tuple(permute_axis_list))
-    return out
 
 
 @register_lowering(aten.cat)
