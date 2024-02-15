@@ -5,9 +5,6 @@ import torch
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
-funcol = torch.ops.c10d_functional
-
-
 class CommDebugMode(TorchDispatchMode):
     """
     ``CommDebugMode`` is a context manager that counts the number of
@@ -30,15 +27,19 @@ class CommDebugMode(TorchDispatchMode):
 
     def __init__(self):
         self.comm_counts: Dict[Any, int] = defaultdict(int)
-        self.comm_registry = {
-            funcol.all_gather_into_tensor,
-            funcol.all_gather_into_tensor_coalesced,
-            funcol.all_reduce,
-            funcol.all_to_all_single,
-            funcol.broadcast,
-            funcol.reduce_scatter_tensor,
-            funcol.reduce_scatter_tensor_coalesced,
-        }
+        self.comm_registry = set()
+        for ns in [torch.ops.c10d_functional, torch.ops._c10d_functional]:
+            self.comm_registry.update(
+                [
+                    ns.all_gather_into_tensor,
+                    ns.all_gather_into_tensor_coalesced,
+                    ns.all_reduce,
+                    ns.all_to_all_single,
+                    ns.broadcast,
+                    ns.reduce_scatter_tensor,
+                    ns.reduce_scatter_tensor_coalesced,
+                ]
+            )
 
     def get_total_counts(self) -> int:
         return sum(self.comm_counts.values())

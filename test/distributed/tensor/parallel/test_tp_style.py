@@ -15,23 +15,32 @@ from torch.distributed.tensor.parallel.style import (
     PrepareModuleOutput,
     RowwiseParallel,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    run_tests,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
-    with_comms,
     NUM_DEVICES,
+    run_with_both_funcol_impls_with_arg,
+    with_comms,
 )
 
 
-c10d_functional = torch.ops.c10d_functional
-
+@instantiate_parametrized_tests
 class TensorParallelStyleTest(DTensorTestBase):
     @property
     def world_size(self):
         return NUM_DEVICES
 
     @with_comms
-    def test_colwise_parallel_style(self):
+    @run_with_both_funcol_impls_with_arg
+    def test_colwise_parallel_style(self, use_native_funcol):
+        c10d_functional = (
+            torch.ops._c10d_functional
+            if use_native_funcol
+            else torch.ops.c10d_functional
+        )
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
         comm_mode = CommDebugMode()
@@ -49,6 +58,7 @@ class TensorParallelStyleTest(DTensorTestBase):
 
             out.sum().backward()
             # allreduce in bwd
+            print(comm_mode.get_comm_counts())
             self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_reduce], 1)
             self.assertEqual(comm_mode.get_total_counts(), 1)
 
@@ -68,7 +78,13 @@ class TensorParallelStyleTest(DTensorTestBase):
             self.assertEqual(comm_mode.get_total_counts(), 2)
 
     @with_comms
-    def test_colwise_parallel_embedding(self):
+    @run_with_both_funcol_impls_with_arg
+    def test_colwise_parallel_embedding(self, use_native_funcol):
+        c10d_functional = (
+            torch.ops._c10d_functional
+            if use_native_funcol
+            else torch.ops.c10d_functional
+        )
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
         comm_mode = CommDebugMode()
@@ -89,7 +105,13 @@ class TensorParallelStyleTest(DTensorTestBase):
             self.assertEqual(comm_mode.get_total_counts(), 0)
 
     @with_comms
-    def test_rowwise_parallel_style(self):
+    @run_with_both_funcol_impls_with_arg
+    def test_rowwise_parallel_style(self, use_native_funcol):
+        c10d_functional = (
+            torch.ops._c10d_functional
+            if use_native_funcol
+            else torch.ops.c10d_functional
+        )
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
         comm_mode = CommDebugMode()
@@ -126,7 +148,13 @@ class TensorParallelStyleTest(DTensorTestBase):
             self.assertEqual(comm_mode.get_total_counts(), 2)
 
     @with_comms
-    def test_rowwise_parallel_embedding(self):
+    @run_with_both_funcol_impls_with_arg
+    def test_rowwise_parallel_embedding(self, use_native_funcol):
+        c10d_functional = (
+            torch.ops._c10d_functional
+            if use_native_funcol
+            else torch.ops.c10d_functional
+        )
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
         comm_mode = CommDebugMode()
@@ -148,7 +176,13 @@ class TensorParallelStyleTest(DTensorTestBase):
 
 
     @with_comms
-    def test_prepare_module_input(self):
+    @run_with_both_funcol_impls_with_arg
+    def test_prepare_module_input(self, use_native_funcol):
+        c10d_functional = (
+            torch.ops._c10d_functional
+            if use_native_funcol
+            else torch.ops.c10d_functional
+        )
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
         tensor = torch.ones(2, 16, device=self.device_type)
@@ -162,7 +196,13 @@ class TensorParallelStyleTest(DTensorTestBase):
 
 
     @with_comms
-    def test_prepare_module_input_multiple_inputs(self):
+    @run_with_both_funcol_impls_with_arg
+    def test_prepare_module_input_multiple_inputs(self, use_native_funcol):
+        c10d_functional = (
+            torch.ops._c10d_functional
+            if use_native_funcol
+            else torch.ops.c10d_functional
+        )
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
         class TestModule(torch.nn.Module):
@@ -199,7 +239,13 @@ class TensorParallelStyleTest(DTensorTestBase):
         self.assertEqual(output.shape, (self.world_size * 2, 8 // self.world_size))
 
     @with_comms
-    def test_prepare_module_output(self):
+    @run_with_both_funcol_impls_with_arg
+    def test_prepare_module_output(self, use_native_funcol):
+        c10d_functional = (
+            torch.ops._c10d_functional
+            if use_native_funcol
+            else torch.ops.c10d_functional
+        )
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
         tensor = torch.ones(8, 16, device=self.device_type)

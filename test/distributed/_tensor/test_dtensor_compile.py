@@ -10,7 +10,6 @@ import torch
 import torch._dynamo
 import torch._dynamo.testing
 import torch.distributed as dist
-import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
 from torch._C import FileCheck
 from torch._inductor.utils import run_and_get_triton_code
@@ -43,6 +42,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
+    run_with_both_funcol_impls,
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -81,6 +81,7 @@ aot_eager_graph = aot_autograd(
 )
 
 
+@instantiate_parametrized_tests
 class TestDTensorCompile(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super().setUp()
@@ -101,6 +102,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
     def world_size(self) -> int:
         return 2
 
+    @run_with_both_funcol_impls
     def test_placement_compile(self):
         def fn(x):
             a = 0
@@ -127,6 +129,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             compiled_out = compiled_fn(x)
             self.assertEqual(opt_fn, compiled_out)
 
+    @run_with_both_funcol_impls
     def test_device_mesh_compile(self):
         def fn(x):
             # test size()
@@ -147,6 +150,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         compiled_out = compiled_fn(mesh)
         self.assertEqual(opt_fn, compiled_out)
 
+    @run_with_both_funcol_impls
     def test_fakify_dtensor(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -161,6 +165,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
+    @run_with_both_funcol_impls
     def test_dynamo_dtensor(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -175,6 +180,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
+    @run_with_both_funcol_impls
     def test_dynamo_dtensor_from_local(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -218,6 +224,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, ref)
         self.assertEqual(cnt.frame_count, 2)
 
+    @run_with_both_funcol_impls
     def test_dynamo_dtensor_from_local_redistribute(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -254,6 +261,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
+    @run_with_both_funcol_impls
     def test_tp_compile_comm_reordering(self):
         class FakeAttention(nn.Module):
             def __init__(self):
@@ -326,6 +334,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             .run(code)
 
 
+@instantiate_parametrized_tests
 class TestDTensorCompileE2E(DTensorTestBase):
     @property
     def world_size(self):
@@ -333,11 +342,8 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
     @with_comms
     @parametrize("is_seq_parallel", [True, False])
-    @parametrize("use_native_funcol", [True, False])
-    def test_tp_compile_fullgraph(self, is_seq_parallel, use_native_funcol):
-        if use_native_funcol:
-            funcol.enable_native_funcol()
-
+    @run_with_both_funcol_impls
+    def test_tp_compile_fullgraph(self, is_seq_parallel):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         model = SimpleModel(self.device_type)
@@ -397,11 +403,8 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @parametrize("use_native_funcol", [True, False])
-    def test_2d_fsdp_tp_compile(self, use_native_funcol):
-        if use_native_funcol:
-            funcol.enable_native_funcol()
-
+    @run_with_both_funcol_impls
+    def test_2d_fsdp_tp_compile(self):
         data_parallel_size = 2
         model = SimpleModel(self.device_type)
         model_copy = copy.deepcopy(model)
@@ -452,11 +455,8 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @parametrize("use_native_funcol", [True, False])
-    def test_2d_fsdp_tp_ac_compile(self, use_native_funcol):
-        if use_native_funcol:
-            funcol.enable_native_funcol()
-
+    @run_with_both_funcol_impls
+    def test_2d_fsdp_tp_ac_compile(self):
         dp_degree = 2
         tp_degree = self.world_size // dp_degree
         model = SimpleModel(self.device_type)
@@ -507,11 +507,8 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @parametrize("use_native_funcol", [True, False])
-    def test_compile_dtensor_redistribute_backward(self, use_native_funcol):
-        if use_native_funcol:
-            funcol.enable_native_funcol()
-
+    @run_with_both_funcol_impls
+    def test_compile_dtensor_redistribute_backward(self):
         mesh = DeviceMesh(device_type="cuda", mesh=torch.arange(self.world_size))
 
         def fn(x, y):
@@ -539,26 +536,6 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
         self.assertEqual(x_ref.grad, x.grad)
         self.assertEqual(y_ref.grad, y.grad)
-
-
-class TestDTensorCompileWithNativeFunCol(TestDTensorCompile):
-    def setUp(self) -> None:
-        self._prev_native_funcol_enabled = funcol.native_funcol_enabled()
-        funcol.enable_native_funcol()
-        super().setUp()
-
-    def tearDown(self) -> None:
-        super().tearDown()
-        if not self._prev_native_funcol_enabled:
-            funcol.disable_native_funcol()
-
-    def test_tp_compile_comm_reordering(self):
-        # Bypass this test for now. The native funcols have different
-        # IRs, so the reordering pass needs to be reworked.
-        pass
-
-
-instantiate_parametrized_tests(TestDTensorCompileE2E)
 
 
 if __name__ == "__main__":
