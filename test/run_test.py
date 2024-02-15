@@ -1563,6 +1563,25 @@ def run_tests(
             pool.terminate()
 
     try:
+        for test in selected_tests_serial:
+            options_clone = copy.deepcopy(options)
+            if can_run_in_pytest(test):
+                options_clone.pytest = True
+            failure = run_test_module(test, test_directory, options_clone)
+            test_failed = handle_error_messages(failure)
+            if (
+                test_failed
+                and not options.continue_through_error
+                and not RERUN_DISABLED_TESTS
+            ):
+                raise RuntimeError(
+                    failure.message
+                    + "\n\nTip: You can keep running tests even on failure by "
+                    "passing --keep-going to run_test.py.\n"
+                    "If running on CI, add the 'keep-going' label to "
+                    "your PR and rerun your jobs."
+                )
+
         os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
         for test in selected_tests_parallel:
             options_clone = copy.deepcopy(options)
@@ -1576,32 +1595,6 @@ def run_tests(
         pool.close()
         pool.join()
         del os.environ["NUM_PARALLEL_PROCS"]
-
-        if (
-            not options.continue_through_error
-            and not RERUN_DISABLED_TESTS
-            and len(failures) != 0
-        ):
-            raise RuntimeError(
-                "\n".join(x.message for x in failures)
-                + "\n\nTip: You can keep running tests even on failure by "
-                "passing --keep-going to run_test.py.\n"
-                "If running on CI, add the 'keep-going' label to "
-                "your PR and rerun your jobs."
-            )
-
-        for test in selected_tests_serial:
-            options_clone = copy.deepcopy(options)
-            if can_run_in_pytest(test):
-                options_clone.pytest = True
-            failure = run_test_module(test, test_directory, options_clone)
-            test_failed = handle_error_messages(failure)
-            if (
-                test_failed
-                and not options.continue_through_error
-                and not RERUN_DISABLED_TESTS
-            ):
-                raise RuntimeError(failure.message)
 
     finally:
         pool.terminate()
@@ -1684,13 +1677,13 @@ def main():
 
         def __str__(self):
             s = f"Name: {self.name}\n"
-            s += "  Parallel tests:\n"
-            s += "".join(
-                f"    {test}\n" for test in self.sharded_tests if not must_serial(test)
-            )
             s += "  Serial tests:\n"
             s += "".join(
                 f"    {test}\n" for test in self.sharded_tests if must_serial(test)
+            )
+            s += "  Parallel tests:\n"
+            s += "".join(
+                f"    {test}\n" for test in self.sharded_tests if not must_serial(test)
             )
             return s.strip()
 
