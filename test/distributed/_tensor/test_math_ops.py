@@ -223,17 +223,11 @@ class DistMathOpsTest(DTensorTestBase):
         # for op in [torch.add, torch.sub, torch.mul, torch.div]:
         for op in [torch.add, torch.sub, torch.mul, torch.div]:
             expect_rs = op(global_tensor, 2)
-            actual_double_shard_rs = op(double_shard_tensor, 2).redistribute(
-                mesh, [Replicate(), Replicate()]
-            )
-            actual_double_shard_local_rs = actual_double_shard_rs.to_local()
-            self.assertEqual(actual_double_shard_local_rs, expect_rs)
+            double_shard_full_tensor = op(double_shard_tensor, 2).full_tensor()
+            self.assertEqual(double_shard_full_tensor, expect_rs)
 
-            actual_fully_shard_rs = op(fully_shard_tensor, 2).redistribute(
-                mesh, [Replicate(), Replicate()]
-            )
-            actual_fully_shard_local_rs = actual_fully_shard_rs.to_local()
-            self.assertEqual(actual_fully_shard_local_rs, expect_rs)
+            fully_shard_full_tensor = op(fully_shard_tensor, 2).full_tensor()
+            self.assertEqual(fully_shard_full_tensor, expect_rs)
 
     @with_comms
     def test_layer_norm_fwd(self):
