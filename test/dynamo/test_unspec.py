@@ -425,6 +425,36 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         compl_fn = torch.compile(fn, dynamic=True, backend="eager", fullgraph=True)
         self.assertEqual(compl_fn(inputs, op_inputs_dict), fn(inputs, op_inputs_dict))
 
+    def test_symbol_guard_limit_before_specialize(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.optimize(cnts, dynamic=True)
+        def fn(x):
+            torch._check(x.size(0) != 3)
+            torch._check(x.size(0) != 4)
+            torch._check(x.size(0) != 5)
+            torch._check(x.size(0) != 6)
+            return x + 2
+
+        # Control test
+        fn(torch.randn(12))
+        fn(torch.randn(13))
+        fn(torch.randn(14))
+
+        self.assertExpectedInline(cnts.frame_count, """1""")
+        cnts.frame_count = 0
+
+        torch._dynamo.reset()
+
+        with torch.fx.experimental._config.patch(
+            symbol_guard_limit_before_specialize=3
+        ):
+            fn(torch.randn(12))
+            fn(torch.randn(13))
+            fn(torch.randn(14))
+
+            self.assertExpectedInline(cnts.frame_count, """3""")
+
     def test_defaults(self):
         def g(x, i=8):
             comptime.assert_static(i)
@@ -464,6 +494,15 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
         self.assertExpectedInline(cnts.frame_count, """2""")
         self.assertExpectedInline(cnts.op_count, """3""")
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_split_aot_autograd(self):
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(x, i):
+            y, z = i.tolist()
+            return torch.split(x, [y, z])
+
+        print(f(torch.randn(10, requires_grad=True), torch.tensor([7, 3])))
 
 
 if __name__ == "__main__":

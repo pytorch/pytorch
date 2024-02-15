@@ -7113,8 +7113,7 @@ Tensor values_backward(const Tensor& grad, const Tensor& self) {
           self.options(),
           /*is_coalesced=*/true);
     } else if (at::sparse_csr::is_sparse_compressed(self)) {
-      Tensor compressed_indices, plain_indices;
-      std::tie(compressed_indices, plain_indices) =
+      auto [compressed_indices, plain_indices] =
           at::sparse_csr::getCompressedPlainIndices(self);
       return at::_sparse_compressed_tensor_unsafe_symint(
           compressed_indices,
