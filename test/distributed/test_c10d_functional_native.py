@@ -20,15 +20,12 @@ from torch.distributed._functional_collectives import (
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_nccl,
+    run_with_native_funcol,
     skip_if_lt_x_gpu,
 )
-
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     run_tests,
     TestCase,
-)
-from torch.testing._internal.distributed._tensor.common_dtensor import (
-    run_with_native_funcol,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._triton import has_triton

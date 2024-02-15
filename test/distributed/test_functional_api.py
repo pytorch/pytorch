@@ -25,20 +25,17 @@ if not dist.is_available():
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     MultiThreadedTestCase,
-    requires_nccl,
     TEST_SKIPS,
+    requires_nccl,
+    run_with_both_funcol_impls,
+    run_with_both_funcol_impls_with_arg,
+    run_with_legacy_funcol,
 )
-
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TestCase,
-)
-from torch.testing._internal.distributed._tensor.common_dtensor import (
-    run_with_legacy_funcol,
-    run_with_both_funcol_impls,
-    run_with_both_funcol_impls_with_arg,
 )
 
 
