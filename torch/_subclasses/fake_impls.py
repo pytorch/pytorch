@@ -246,7 +246,7 @@ def _sparse_coo_tensor_with_dims_and_tensors(fake_mode, func, *args, **kwargs):
 @register_op_impl(
     lambda func: torch.Tag.dynamic_output_shape in func.tags
     and func
-    not in [aten.index.Tensor, aten.nonzero.default, aten.repeat_interleave.Tensor]
+    not in [aten.index.Tensor, aten.nonzero.default, aten.repeat_interleave.Tensor, aten._unique2.default]
 )
 def dyn_shape(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
@@ -328,6 +328,24 @@ def nonzero(fake_mode, func, arg):
         arg._nonzero_memo_vc = arg._version
 
     return arg.new_empty((arg.nonzero_memo, arg.dim()), dtype=torch.int64)
+
+@register_op_impl(torch.ops.aten._unique2.default)
+def unique(fake_mode, func, arg, **kwargs):
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        # Without symints/symfloats, cannot handle this
+        raise DynamicOutputShapeException(func)
+    
+    uni_cnt = fake_mode.shape_env.create_unbacked_symint()
+    # Avoid importing sympy at a module level
+    from torch.fx.experimental.symbolic_shapes import (
+        _constrain_range_for_size
+    )
+    _constrain_range_for_size(uni_cnt, min=1, max=arg.numel())
+    return arg.new_empty(uni_cnt), arg.new_empty(arg.size(), dtype=torch.int64), arg.new_empty(uni_cnt, dtype=torch.int64)
+
 
 
 @register_op_impl(torch.ops.aten.masked_select.default)
