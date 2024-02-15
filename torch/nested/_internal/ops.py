@@ -95,9 +95,18 @@ def check_schema(schema_str: str, func, *args, **kwargs) -> None:
                 )
             continue
 
-        if not arg_type_check_fns[normalized_arg_type](args[i]):
+        _check_fn = arg_type_check_fns[normalized_arg_type]
+
+        def check_fn(x, is_optional=is_optional):
+            if is_optional:
+                return x is None or _check_fn(x)
+            else:
+                return _check_fn(x)
+
+        if not check_fn(args[i]):
             type_to_desc = {
                 "t": "tensor",
+                "t?": "optional tensor",
                 "jt": "contiguous jagged layout NestedTensor",
                 "jt_all": "jagged layout NestedTensor",
                 "any": "<any type>",
@@ -126,43 +135,8 @@ def raggedness_matches(nt, size):
     end = nt._ragged_idx + 1
     nt_ragged = nt._size[:end]
     size_ragged = size[:end]
-
-    def are_equal(a, b):
-        a_is_sym = isinstance(a, torch.SymInt)
-        b_is_sym = isinstance(b, torch.SymInt)
-        if not a_is_sym and not b_is_sym:
-            return a == b or a == -1 or b == -1
-
-        # one is a SymInt
-        if a_is_sym != b_is_sym:
-            # assume this is fine
-            return True
-
-        # at this point, both are SymInts
-        from torch.fx.experimental.symbolic_shapes import is_singleton
-
-        # no singletons
-        a_is_singleton = is_singleton(a)
-        b_is_singleton = is_singleton(b)
-        if not a_is_singleton and not b_is_singleton:
-            return a == b
-
-        # one is a singleton
-        if a_is_singleton != b_is_singleton:
-            return False
-
-        def get_singleton_int(x):
-            # assumes we're given a symbolic or non-symbolic singleton
-            return (
-                x.node.hint.node.singleton_int()
-                if x.node.is_symbolic()
-                else x.node.singleton_int()
-            )
-
-        return get_singleton_int(a) == get_singleton_int(b)
-
     return len(nt_ragged) == len(size_ragged) and (
-        all(are_equal(ns, s) for ns, s in zip(nt_ragged, size_ragged))
+        all(ns == s or s == -1 for ns, s in zip(nt_ragged, size_ragged))
     )
 
 
@@ -1034,7 +1008,13 @@ def embedding_default(func, *args, **kwargs):
     )
 
 
-@register_jagged_func(torch.ops.aten.values.default, "self: jt")
+@register_jagged_func(
+    [
+        torch.ops.aten.values.default,
+        torch.ops.aten._nested_get_values.default,
+    ],
+    "self: jt_all",
+)
 def values_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -1048,24 +1028,10 @@ def values_default(func, *args, **kwargs):
 
 
 @register_jagged_func(
-    torch.ops.aten._nested_view_from_values_offsets.default,
-    "values: t, offsets: t, dummy: jt_all",
+    torch.ops.aten._nested_view_from_jagged.default,
+    "values: t, offsets: t, dummy: jt_all, lengths: t?, ragged_idx: any?",
 )
-def _nested_view_from_values_offsets_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-
-    values, offsets = new_kwargs["input"], new_kwargs["offsets"]
-
-    return NestedTensor(values, offsets)
-
-
-@register_jagged_func(
-    torch.ops.aten._nested_view_from_values_offsets_lengths.default,
-    "values: t, offsets: t, lengths: t, dummy: jt_all",
-)
-def _nested_view_from_values_offsets_lengths_default(func, *args, **kwargs):
+def _nested_view_from_jagged_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
@@ -1075,18 +1041,9 @@ def _nested_view_from_values_offsets_lengths_default(func, *args, **kwargs):
         new_kwargs["offsets"],
         new_kwargs["lengths"],
     )
+    ragged_idx = new_kwargs["ragged_idx"]
 
-    return NestedTensor(values, offsets, lengths=lengths)
-
-
-@register_jagged_func(torch.ops.aten._nested_get_values.default, "self: jt_all")
-def _nested_get_values(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-
-    inp = new_kwargs.pop("input")
-    return inp._values.detach()
+    return NestedTensor(values, offsets, lengths=lengths, _ragged_idx=ragged_idx)
 
 
 @register_jagged_func(torch.ops.aten._nested_get_offsets.default, "self: jt_all")
@@ -1106,7 +1063,14 @@ def _nested_get_lengths(func, *args, **kwargs):
     )
 
     inp = new_kwargs.pop("input")
-    # if inp._lengths is None:
-    #     raise RuntimeError("no lengths metadata set for given nested tensor")
-
     return inp._lengths
+
+
+@register_jagged_func(torch.ops.aten._nested_get_ragged_idx.default, "self: jt_all")
+def _nested_get_ragged_idx(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    return inp._ragged_idx
