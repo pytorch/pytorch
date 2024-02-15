@@ -1431,15 +1431,12 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                             res = sympy_interp(
                                 PythonReferenceAnalysis, symbol_to_proxy, ra.expr
                             ).node
-                            res2 = self.graph.call_function(
-                                torch.ops.aten.scalar_tensor.default, (res,)
-                            )
                             self.graph.call_function(
-                                torch.ops.aten._assert_async.msg,
+                                torch.ops.aten._assert_scalar.default,
                                 # TODO: use ra.msg here, but it's pretty
                                 # useless right now
                                 (
-                                    res2,
+                                    res,
                                     f"Deferred runtime assertion failed {ra.expr}",
                                 ),
                             )
