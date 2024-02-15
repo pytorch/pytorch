@@ -152,13 +152,13 @@ static struct PyGetSetDef THCPStream_properties[] = {
 
 // NOLINTNEXTLINE(*-c-arrays*, *-global-variables)
 static PyMethodDef THCPStream_methods[] = {
-    {(char*)"query", THCPStream_query, METH_NOARGS, nullptr},
-    {(char*)"synchronize", THCPStream_synchronize, METH_NOARGS, nullptr},
-    {(char*)"priority_range",
+    {"query", THCPStream_query, METH_NOARGS, nullptr},
+    {"synchronize", THCPStream_synchronize, METH_NOARGS, nullptr},
+    {"priority_range",
      THCPStream_priority_range,
      METH_STATIC | METH_NOARGS,
      nullptr},
-    {(char*)"__eq__", THCPStream_eq, METH_O, nullptr},
+    {"__eq__", THCPStream_eq, METH_O, nullptr},
     {nullptr}};
 
 PyTypeObject THCPStreamType = {
