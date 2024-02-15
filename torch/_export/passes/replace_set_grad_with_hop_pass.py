@@ -96,6 +96,7 @@ def _replace_with_hop(node: torch.fx.Node):
                 raise NotImplementedError(
                     "Cannot replace a call_module with a hop if it has no output. This module will gets DCEed."
                 )
+        sub_graph.erase_node(set_grad_node)
 
 
 def _remove_set_grad_and_inline(node: torch.fx.Node):
