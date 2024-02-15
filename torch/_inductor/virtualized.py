@@ -731,6 +731,7 @@ class KernelFormatterHandler:
                 # replace line with a new variable name
                 varname = f"tmp{next(self.var_counter)}"
                 self.output.writeline(f"{varname} = {line}")
+                return varname
 
             return pytree.tree_map(write, line)
 
