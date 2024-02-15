@@ -1,5 +1,4 @@
 import logging
-import os
 import warnings
 import weakref
 from typing import cast, Dict, List, Optional

@@ -1036,7 +1036,7 @@ class MultiThreadedTestCase(TestCase):
             self.exception_queue.put((rank, sys.exc_info()))
             ProcessLocalGroup.exception_handle(ex)  # trigger _terminate event and awaken worker threads
         finally:
-            c10d.destroy_process_group()
+            # c10d.destroy_process_group()
             self.perThreadTearDown()
 
 
