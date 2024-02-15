@@ -55,14 +55,13 @@ class TORCH_API NestedIntSymNodeImpl : public SymNodeImpl {
       int64_t val,
       int64_t coeff,
       at::Tensor vec,
-      int64_t sum_vec,
       NestedTensorVariant type)
-      : val_(val), coeff_(coeff), vec_(std::move(vec)), sum_vec_(sum_vec), type_(type) {
+      : val_(val), coeff_(coeff), vec_(std::move(vec)), type_(type) {
     // See NOTE [ NestedTensorVariant ]
     if (type == NestedTensorVariant::PYTHON) {
       key_set_ = py_nested_int_ks;
     } else if (type == NestedTensorVariant::CPP) {
-      TORCH_INTERNAL_ASSERT(val == -1 && coeff == -1 && sum_vec == -1);
+      TORCH_INTERNAL_ASSERT(val == -1 && coeff == -1);
       // NB: Since we possibly don't have python instead of relying on torch
       //     dispatch, we dispatch to the NestedTensor kernel directly.
       // NB: we can potentially add the AutogradNestedTensor key
@@ -115,11 +114,11 @@ class TORCH_API NestedIntSymNodeImpl : public SymNodeImpl {
   }
 
   std::string str() override {
-    if (coeff_ == 1) {
-      return "j" + std::to_string(val_);
-    }
     if (type_ == NestedTensorVariant::CPP) {
       return "jx";
+    }
+    if (coeff_ == 1) {
+      return "j" + std::to_string(val_);
     }
     return std::to_string(coeff_) + "*j" + std::to_string(val_);
   }
@@ -188,11 +187,6 @@ class TORCH_API NestedIntSymNodeImpl : public SymNodeImpl {
     return vec_.unsafeGetTensorImpl();
   }
 
-  int64_t nested_int_sum_vec() const override {
-    TORCH_INTERNAL_ASSERT(type_ == NestedTensorVariant::PYTHON);
-    return sum_vec_;
-  }
-
   bool is_symbolic() override {
     return false;
   }
@@ -234,11 +228,24 @@ class TORCH_API NestedIntSymNodeImpl : public SymNodeImpl {
 #undef DEFINE_NOT_SUPPORTED
 
  private:
+  // Why do we need to store val in additional to vec?
+  // It is not possible in eq to simply check whether the two vecs are the
+  // same because each nested int may be associated multiple vec, e.g. two
+  // NestedTensor with same raggedness but on different devices would have two
+  // different offsets tensors on different devices, but we'd still want their
+  // nested ints to compare equal, and we would do that by mapping both vec
+  // to the same val.
   int64_t val_;
   int64_t coeff_;
+  // Vec is a 1D tensor either representing offsets or lengths of a NestedTensor
+  // It should not be mutated
   at::Tensor vec_;
-  int64_t sum_vec_;
+  // See NOTE [ NestedTensorVariant ]
   NestedTensorVariant type_;
+  // Depending on the NestedTensorVariant we may want to either dispatch to
+  // Python or NestedTensor kernels. We dispatch to the Python kernel in the
+  // case the nested int corresponds to a NT python because we'd like for
+  // infra modes to be able to trace underneath.
   c10::DispatchKeySet key_set_;
 };
 

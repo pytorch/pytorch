@@ -1,9 +1,10 @@
 import inspect
 from collections import defaultdict
-from typing import Dict, Tuple
+from typing import Any, Dict, Tuple, Union
 
 import torch
 from torch._dynamo.source import (
+    AttrSource,
     GetItemSource,
     LocalSource,
     TensorProperty,
@@ -14,6 +15,7 @@ from torch._export.passes.add_runtime_assertions_for_constraints_pass import Inp
 from torch._guards import Source
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
+from torch.export.graph_signature import CustomObjArgument
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
@@ -21,14 +23,49 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
     StatelessSymbolicContext,
 )
+from torch.utils._pytree import (
+    GetAttrKey,
+    KeyPath,
+    MappingKey,
+    SequenceKey,
+    tree_map_with_path,
+)
 
 
-def fakify(mode, t, t_constraints, source, sources):
+def key_path_to_source(kp: KeyPath) -> Source:
     """
-    Make a fake tensor, given a fake mode, a tensor, constraints indexed
-    by tensor ids, the source for the tensor, and an accumulator mapping
-    tensor dimensions to their sources.
+    Given a key path, return the source for the key path.
     """
+    source: Source = LocalSource("args")
+    for k in kp:
+        if isinstance(k, SequenceKey):
+            source = GetItemSource(source, k.idx)
+        elif isinstance(k, MappingKey):
+            source = GetItemSource(source, k.key)
+        elif isinstance(k, GetAttrKey):
+            source = AttrSource(source, k.name)
+        else:
+            raise ValueError(f"Unknown KeyEntry {k}")
+
+    return source
+
+
+def _is_constant_argument(t):
+    return t is None or isinstance(t, (int, float, bool))
+
+
+def fakify(
+    mode: FakeTensorMode,
+    kp: KeyPath,
+    t: Any,
+    t_constraints: Dict[int, Dict[int, Constraint]],
+    sources: Dict[Tuple[int, int], Source],
+):
+    source = key_path_to_source(kp)
+    if _is_constant_argument(t) or isinstance(t, torch.ScriptObject):
+        return t
+    if not isinstance(t, torch.Tensor):
+        raise ValueError("Only tensors allowed as input")
     n_dims = len(t.shape)
     symbolic_context = StatelessSymbolicContext(
         dynamic_sizes=[DimDynamic.STATIC] * n_dims,
@@ -47,27 +84,17 @@ def fakify(mode, t, t_constraints, source, sources):
     return fake
 
 
-def fake_tree(mode, arg, t_constraints, source, sources):
-    """
-    Call fakify while recursively mapping on lists and dictionaries. Using pytree map
-    would be ideal here, but we are also building sources as we recurse.
-    """
-    if isinstance(arg, (tuple, list)):
-        return [
-            fake_tree(mode, arg, t_constraints, GetItemSource(source, i), sources)
-            for i, arg in enumerate(arg)
-        ]
-    elif isinstance(arg, dict):
-        return {
-            k: fake_tree(mode, arg, t_constraints, GetItemSource(source, k), sources)
-            for k, arg in arg.items()
-        }
-    # TODO(avik): data classes
-    else:
-        return fakify(mode, arg, t_constraints, source, sources)
+def make_fake_params_buffers(
+    fake_mode: FakeTensorMode,
+    params_buffers: Dict[str, torch.Tensor],
+) -> Dict[str, Union[torch.Tensor, torch.nn.Parameter]]:
+    faked_params_buffers = {}
+    for key, value in params_buffers.items():
+        faked_params_buffers[key] = fake_mode.from_tensor(value, static_shapes=True)
+    return faked_params_buffers
 
 
-def make_fake_inputs(nn_module, args, constraints):
+def make_fake_inputs(nn_module, args, kwargs, constraints):
     """
     Given an nn module, example inputs, and constraints, return a new fake mode,
     fake inputs created in that mode whose dynamic shape dimensions are constrained
@@ -86,15 +113,24 @@ def make_fake_inputs(nn_module, args, constraints):
         "co_filename": code.co_filename,
         "co_firstlineno": code.co_firstlineno,
     }
-    with FakeTensorMode(
-        shape_env=ShapeEnv(tracked_fakes=[], co_fields=co_fields)
-    ) as fake_mode:
+
+    fake_mode = FakeTensorMode(
+        shape_env=ShapeEnv(tracked_fakes=[], co_fields=co_fields),
+        allow_non_fake_inputs=True,
+    )
+    if fake_mode.shape_env is None or fake_mode.shape_env.tracked_fakes is None:
+        raise ValueError(
+            "Detected fake_mode does not have a shape_env with tracked fakes. "
+            "If you constructed the module under a FakeTensorMode, "
+            "please initialize it like: FakeTensorMode(shape_env=ShapeEnv(tracked_fakes=[]))"
+        )
+
+    with fake_mode:
         original_signature = inspect.signature(nn_module.forward)
-        params = original_signature.parameters
         sources: Dict[Tuple[int, int], Source] = {}
-        fake_args = tuple(
-            fake_tree(fake_mode, arg, t_constraints, LocalSource(x), sources)
-            for x, arg in zip(params, args)
+        fake_args, fake_kwargs = tree_map_with_path(
+            lambda kp, val: fakify(fake_mode, kp, val, t_constraints, sources),
+            (args, kwargs),
         )
         src_equalities = []
         for constraint in constraints:
@@ -104,7 +140,7 @@ def make_fake_inputs(nn_module, args, constraints):
                     sources[(constraint.shared.t_id, constraint.shared.dim)],
                 )
                 src_equalities.append(src_equality)
-        return fake_mode, fake_args, src_equalities, original_signature
+        return fake_mode, fake_args, fake_kwargs, src_equalities, original_signature
 
 
 def make_constraints(fake_mode, src_equalities, original_signature, gm):
@@ -150,6 +186,10 @@ def make_constraints(fake_mode, src_equalities, original_signature, gm):
     input_dims = defaultdict(list)
     for node in gm.graph.nodes:
         if node.op != "placeholder":
+            continue
+        if _is_constant_argument(node.meta["val"]) or isinstance(
+            node.meta["val"], CustomObjArgument
+        ):
             continue
         for i, d in enumerate(node.meta["val"].shape):
             if isinstance(d, torch.SymInt):

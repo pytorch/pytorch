@@ -210,7 +210,7 @@ bool LTCTensorImpl::is_contiguous_custom(c10::MemoryFormat _unused) const {
     return tensor_->CurrentTensorData()->is_contiguous();
   }
   // Only check that the storage is already contiguous.
-  CHECK(is_contiguous_) << "Non-contiguous storage for lazy tensor";
+  TORCH_CHECK(is_contiguous_, "Non-contiguous storage for lazy tensor");
   // TODO: I don't think logic is right, we should check the requested memory
   // format before returning true
   return true;

@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import faulthandler
 import logging
 import multiprocessing

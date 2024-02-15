@@ -103,16 +103,9 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   }
 
   c10::TensorImpl* nested_int_vec() const override {
-    py::gil_scoped_acquire acquire;
-    return getPyObj()
-        .attr("nested_int_vec")()
-        .cast<at::Tensor>()
-        .unsafeGetTensorImpl();
-  }
-
-  int64_t nested_int_sum_vec() const override {
-    py::gil_scoped_acquire acquire;
-    return getPyObj().attr("nested_int_sum_vec")().cast<int64_t>();
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "We don't expect to call this nested_int_vec on PythonSymNodeImpl in C++");
   }
 
   bool has_hint() override {
@@ -143,6 +136,11 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   bool expect_size(const char* file, int64_t line) override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("expect_size")(file, line).cast<bool>();
+  }
+
+  bool guard_size_oblivious(const char* file, int64_t line) override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("guard_size_oblivious")(file, line).cast<bool>();
   }
 
   int64_t int_() override {

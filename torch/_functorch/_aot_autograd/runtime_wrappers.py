@@ -90,7 +90,14 @@ def create_runtime_wrapper(
             # It's possible to get an inference graph with inputs that require grad,
             # in which case we want to make sure autograd is disabled
             # (since e.g., inductor will generate aten.addmm.out calls which autograd will complain on)
-            with torch.no_grad():
+            if torch.is_grad_enabled():
+                with torch.no_grad():
+                    all_outs = call_func_at_runtime_with_args(
+                        compiled_fn,
+                        args,
+                        disable_amp=disable_amp,
+                    )
+            else:
                 all_outs = call_func_at_runtime_with_args(
                     compiled_fn,
                     args,

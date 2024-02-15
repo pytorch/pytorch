@@ -50,7 +50,7 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
         if (C10_UNLIKELY(interp)) {
           (*interp)->trace_gpu_event_deletion(reinterpret_cast<uintptr_t>(event_));
         }
-        cudaEventDestroy(event_);
+        AT_CUDA_CHECK(cudaEventDestroy(event_));
       }
     } catch (...) { /* No throw */ }
   }

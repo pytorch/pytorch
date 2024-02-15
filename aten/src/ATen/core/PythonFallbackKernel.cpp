@@ -93,6 +93,9 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
     } else if (ivalue.isSymIntList()) {
       for (const auto& nv : ivalue.toListRef()) {
         // IValues tagged SymInt are guaranteed to be heap_allocated
+        // NestedInts tagged with Python key are either python_symnode holding
+        // a NestedInt as hint or a NestedInt created from Python, i.e. its
+        // NestedTensorVariant is PYTHON.
         if (nv.isSymInt() && nv.toSymNodeImplUnowned()->key_set().has(c10::DispatchKey::Python)) {
           (*c10::impl::get_global_pyinterpreter())->dispatch(op, stack);
           return;

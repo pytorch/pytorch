@@ -80,7 +80,7 @@ def _addmm_like_strategy(
         assert strtg.input_specs is not None
         mat1_spec = strtg.input_specs[0]
         mat2_spec = strtg.input_specs[1]
-        out_spec = strtg.out_spec
+        out_spec = strtg.output_spec
 
         # self arg's spec should follow the output of mm, but need
         # to consider broadcast for the self arg

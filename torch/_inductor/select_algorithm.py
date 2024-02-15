@@ -3,9 +3,11 @@ import functools
 import inspect
 import itertools
 import logging
+import operator
 import sys
 import textwrap
 import time
+from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
 
 from typing import Any, Callable, Dict, List, Optional, Type, Union
@@ -24,7 +26,14 @@ from .codegen.common import ChoiceCaller, IndentedBuffer, KernelTemplate
 from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
-from .utils import do_bench, Placeholder, sympy_dot, sympy_product, unique
+from .utils import (
+    do_bench,
+    get_dtype_size,
+    Placeholder,
+    sympy_dot,
+    sympy_product,
+    unique,
+)
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -109,6 +118,21 @@ class TritonTemplateKernel(TritonKernel):
     def need_numel_args(self):
         return False
 
+    def estimate_kernel_num_bytes(self):
+        """
+        Estimate the total number of bytes this kernel takes.
+        For in/out nodes, sizes are counted twice: once for reading and
+        once for writing.
+        """
+        ninplace_args = len(unique(self.args.inplace_buffers.values()))
+        num_bytes = []
+        for i, inp in enumerate(itertools.chain(self.input_nodes, (self.output_node,))):
+            size = V.graph.sizevars.size_hints(inp.get_size())
+            numel = functools.reduce(operator.mul, size)
+            dtype_size = get_dtype_size(inp.get_dtype())
+            num_bytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
+        return sum(num_bytes)
+
     def jit_line(self):
         if self.use_jit:
             return "@triton.jit"
@@ -122,7 +146,12 @@ class TritonTemplateKernel(TritonKernel):
         }
         triton_meta["configs"] = [config_of(signature)]
 
-        inductor_meta = {"kernel_name": str(Placeholder.DESCRIPTIVE_NAME)}
+        inductor_meta = {
+            "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
+        }
+        if config.profile_bandwidth or config.benchmark_kernel:
+            num_gb = self.estimate_kernel_num_bytes() / 1e9
+            inductor_meta["kernel_num_gb"] = num_gb
         return textwrap.dedent(
             f"""
             @template(
@@ -329,6 +358,7 @@ class TritonTemplateKernel(TritonKernel):
         dense_indexing=False,
         copy_shape=None,
         override_mask=None,
+        block_ptr=False,
     ):
         """
         Override the default indexing to use our custom mask and force
@@ -339,6 +369,7 @@ class TritonTemplateKernel(TritonKernel):
             dense_indexing=False,
             copy_shape=self.template_mask,
             override_mask=self.template_mask,
+            block_ptr=block_ptr,
         )
 
     def initialize_range_tree(self, pid_cache):
@@ -714,6 +745,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # arg, the function will be called instead of
         # generating a random torch.Tensor for benchmarking.
         input_gen_fns: Optional[Dict[int, Callable[[ir.Buffer], torch.Tensor]]] = None,
+        precompilation_timeout_seconds: int = 60 * 60,
     ):
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
@@ -735,7 +767,55 @@ class AlgorithmSelectorCache(PersistentCache):
         def make_benchmark_fn():
             return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
 
+        def precompile(choices):
+            if (
+                precompilation_timeout_seconds is None
+                or precompilation_timeout_seconds <= 0
+            ):
+                return
+            num_workers = min(
+                config.compile_threads,
+                torch.get_num_threads(),
+                len(choices),
+            )
+            if num_workers <= 0:
+                return
+            log.info(
+                "Multithreaded precompilation for %d choices using %d worker threads",
+                len(choices),
+                num_workers,
+            )
+            with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                futures = executor.map(
+                    lambda c: c.precompile(),
+                    [c for c in choices if hasattr(c, "precompile")],
+                    timeout=precompilation_timeout_seconds,
+                )
+                try:
+                    iterator = iter(futures)
+                    while True:
+                        try:
+                            next(iterator)
+                        except CUDACompileError:
+                            log.error(  # noqa: G201
+                                "CUDA Compilation error", exc_info=True
+                            )
+                except TimeoutError:
+                    log.warning(
+                        f"Precompilation timed out after {precompilation_timeout_seconds} seconds."  # noqa: G004
+                    )
+                except StopIteration:
+                    pass
+                executor.shutdown(wait=True)
+
         def autotune(choices):
+            try:
+                precompile(choices)
+            except TimeoutError:
+                log.warning(
+                    "Precompilation phase took longer than timeout allowed. Continuing"
+                )
+                pass
             return make_benchmark_fn()(choices)
 
         if config.autotune_in_subproc:
@@ -981,7 +1061,7 @@ class AlgorithmSelectorCache(PersistentCache):
         )
 
 
-_ALGORITHM_SELECTOR_CACHE = None
+_ALGORITHM_SELECTOR_CACHE: Optional[AlgorithmSelectorCache] = None
 
 
 def autotune_select_algorithm(*args, **kwargs):

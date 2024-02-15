@@ -16,8 +16,12 @@ api::ShaderInfo get_shader(const OpType type) {
       return VK_KERNEL(mul);
     case OpType::DIV:
       return VK_KERNEL(div);
+    case OpType::FLOOR_DIV:
+      return VK_KERNEL(floor_divide);
+    case OpType::POW:
+      return VK_KERNEL(pow);
   }
-  TORCH_INTERNAL_ASSERT(false, "Invalid OpType");
+  VK_THROW("Invalid OpType");
 }
 
 struct Params final {

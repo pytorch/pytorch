@@ -2,8 +2,7 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/core/impl/PyInterpreter.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   std::string name() const override {
@@ -137,5 +136,5 @@ c10::impl::PyInterpreter* get_global_pyinterpreter() {
   return _global_pyinterpreter;
 }
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl
+

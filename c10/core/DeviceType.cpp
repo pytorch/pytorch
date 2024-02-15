@@ -148,4 +148,8 @@ void register_privateuse1_backend(const std::string& backend_name) {
   privateuse1_backend_name_set.store(true, std::memory_order_relaxed);
 }
 
+bool is_privateuse1_backend_registered() {
+  return privateuse1_backend_name_set.load(std::memory_order_acquire);
+}
+
 } // namespace c10
