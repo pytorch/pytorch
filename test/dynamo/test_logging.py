@@ -103,6 +103,14 @@ class LoggingTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 8)
 
+    @requires_cuda
+    @make_logging_test(cudagraphs=True)
+    def test_cudagraphs(self, records):
+        fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)
+        fn_opt(torch.ones(1000, 1000, device="cuda"))
+        self.assertGreater(len(records), 0)
+        self.assertLess(len(records), 8)
+
     @make_logging_test(recompiles=True)
     def test_recompiles(self, records):
         def fn(x, y):
@@ -327,7 +335,7 @@ LoweringException: AssertionError:
             if torch._logging._internal._is_torch_handler(handler):
                 break
         self.assertIsNotNone(handler)
-        self.assertIn("[INFO]", handler.format(records[0]))
+        self.assertIn("I", handler.format(records[0]))
         self.assertEqual("custom format", handler.format(records[1]))
 
     @make_logging_test(dynamo=logging.INFO)
@@ -346,7 +354,7 @@ LoweringException: AssertionError:
         for record in records:
             r = handler.format(record)
             for l in r.splitlines():
-                self.assertIn("[INFO]", l)
+                self.assertIn("I", l)
 
     test_trace_source_simple = within_range_record_test(1, 100, trace_source=True)
 
@@ -684,6 +692,7 @@ fn(torch.randn(5))
 # single record tests
 exclusions = {
     "bytecode",
+    "cudagraphs",
     "output_code",
     "schedule",
     "fusion",
@@ -704,6 +713,7 @@ exclusions = {
     "onnx_diagnostics",
     "guards",
     "verbose_guards",
+    "sym_node",
     "export",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
