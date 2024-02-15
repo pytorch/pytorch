@@ -25,7 +25,7 @@ def maybe_dupe_op(x):
 
 
 aten = torch.ops.aten
-lib = torch.library.Library("custom", "DEF")
+lib = torch.library.Library("custom", "DEF")  # noqa: TOR901
 lib.define("maybe_dupe_op(Tensor a) -> (Tensor, Tensor)")
 lib.impl("maybe_dupe_op", maybe_dupe_op, "CPU")
 lib.impl("maybe_dupe_op", maybe_dupe_op, "Meta")
@@ -686,6 +686,27 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         aot_fn = torch._dynamo.optimize("aot_eager")(fn)
         actual_output = aot_fn()
         self.assertEqual(ref_output, actual_output)
+
+    def test_grad_inputs_alias_inputs(self):
+        class Test(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.save_for_backward(x)
+                return y
+
+            @staticmethod
+            def backward(ctx, grad):
+                (x,) = ctx.saved_tensors
+                return x, grad
+
+        def fn(x, y):
+            return Test.apply(x, y)
+
+        x = torch.ones(1, requires_grad=True)
+        y = torch.ones(1, requires_grad=True)
+        compiled_fn = torch.compile(fn, backend="aot_eager")
+        out = compiled_fn(x, y)
+        out.sum().backward()
 
     @expectedFailureDynamic  # https://github.com/pytorch/pytorch/issues/103539
     @torch._dynamo.config.patch(automatic_dynamic_shapes=False)

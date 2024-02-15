@@ -6,13 +6,12 @@
 #include <c10/util/irange.h>
 #include <cuda_runtime.h>
 
-#include <algorithm>
-#include <iostream>
 #include <memory>
-#include <sstream>
-#include <stdexcept>
 #include <string>
+#ifdef TORCH_USE_CUDA_DSA
+#include <chrono>
 #include <thread>
+#endif
 
 #define C10_CUDA_CHECK_WO_DSA(EXPR)                                 \
   do {                                                              \
@@ -26,8 +25,7 @@
         false);                                                     \
   } while (0)
 
-namespace c10 {
-namespace cuda {
+namespace c10::cuda {
 
 namespace {
 
@@ -36,7 +34,7 @@ namespace {
 /// We need our own implementation of this function to prevent
 /// an infinite initialization loop for CUDAKernelLaunchRegistry
 int dsa_get_device_id() {
-  int device = -1;
+  c10::DeviceIndex device = -1;
   C10_CUDA_CHECK_WO_DSA(c10::cuda::GetDevice(&device));
   return device;
 }
@@ -343,5 +341,4 @@ bool CUDAKernelLaunchRegistry::has_failed() const {
   return false;
 }
 
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda
