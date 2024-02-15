@@ -805,6 +805,26 @@ class TensorVariable(VariableTracker):
                 return tensor
 
             from .builder import wrap_fx_proxy
+            # TODO: figure out if this is necessary
+            if name =='to_local':
+                # to_local is used by DTensor.
+                # it takes in a Placement argument that is not proxyable in the dynamo graph,
+                # so we hide it here (they are assumed constant and we guard on them)
+                args_as_value = [x.as_python_constant() for x in args]
+                kwargs_as_value = {k: v.as_python_constant() for k, v in kwargs.items()}
+
+                def fn_with_prim_types(x):
+                    return getattr(x, name)(*args_as_value, **kwargs_as_value)
+
+                fn_with_prim_types.__name__ = "prim_to_local"
+                return wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        fn_with_prim_types,
+                        *proxy_args_kwargs([self], {}),
+                    ),
+                )
 
             return wrap_fx_proxy(
                 tx,

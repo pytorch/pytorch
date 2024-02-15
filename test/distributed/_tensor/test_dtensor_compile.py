@@ -235,6 +235,40 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, ref)
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_dynamo_to_local_kwargs(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x):
+            return dt.to_local(grad_placements=[Shard(0)]) + 2
+
+        fn_opt = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x = torch.ones(4)
+        dt = DTensor.from_local(x, mesh, [Replicate()], run_check=False)
+
+        out_ref = fn(dt)
+        out_test = fn_opt(dt)
+        self.assertEqual(out_ref, out_test)
+
+    def test_dynamo_to_local_kwargs_forward_hook(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fw_hook(module, inp, out):
+            return out.to_local(grad_placements=[Shard(0)]) + 2
+
+        mod = torch.nn.Linear(4, 4)
+        mod.register_forward_hook(fw_hook)
+
+        mod = torch.nn.Linear(4, 4)
+        mod.register_forward_hook(fw_hook)
+        opt_mod = torch.compile(mod, backend="aot_eager", fullgraph=True)
+
+        x = torch.ones(4, 4)
+        dt = DTensor.from_local(x, mesh, [Replicate()], run_check=False)
+
+        out_ref = mod(dt)
+        out_test = opt_mod(dt)
+        self.assertEqual(out_ref, out_test)
+
     def test_dynamo_dtensor_from_local_redistribute(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
