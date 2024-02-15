@@ -556,7 +556,7 @@ class FakeTensorTest(TestCase):
             x = torch.rand([10, 10])
             self.assertRaises(DynamicOutputShapeException, lambda: torch.nonzero(x))
             self.assertRaises(DynamicOutputShapeException, lambda: torch.unique(x))
-        
+
         # unique()
         shape_env = ShapeEnv()
         with FakeTensorMode(shape_env=shape_env):
@@ -566,7 +566,7 @@ class FakeTensorTest(TestCase):
             self.assertEqual(shape_env.var_to_range.get(y.shape[0].node.expr).lower, 1)
             self.assertEqual(shape_env.var_to_range.get(y.shape[0].node.expr).upper, 100)
 
-       
+
 
     def test_tolist(self):
         shape_env = ShapeEnv()
