@@ -7,8 +7,9 @@ import operator
 import types
 from typing import Dict, List
 
-from ..bytecode_transformation import create_call_method
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+from ..bytecode_transformation import create_call_method
 
 try:
     import numpy as np
