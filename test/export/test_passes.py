@@ -26,7 +26,7 @@ from torch.export import export, WrapperModule
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo, IS_WINDOWS
+from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo
 from torch.utils import _pytree as pytree
 
 
@@ -276,7 +276,6 @@ class TestPasses(TestCase):
         new_inp = torch.tensor([1, 1, 1, 1])
         self.assertEqual(mod(new_inp), ep.module()(new_inp))
 
-    @unittest.skipIf(IS_WINDOWS, "Windows not supported")
     def test_runtime_assert_inline_constraints_for_cond(self) -> None:
         class M(torch.nn.Module):
             def __init__(self):

@@ -830,12 +830,6 @@ aten::int_repr.out
 aten::is_coalesced
 aten::is_pinned
 aten::is_set_to
-aten::isin.Scalar_Tensor
-aten::isin.Scalar_Tensor_out
-aten::isin.Tensor_Scalar
-aten::isin.Tensor_Scalar_out
-aten::isin.Tensor_Tensor
-aten::isin.Tensor_Tensor_out
 aten::kaiser_window
 aten::kaiser_window.beta
 aten::kaiser_window.beta_out
